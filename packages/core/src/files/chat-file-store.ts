@@ -33,16 +33,16 @@ import { Ids, isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
 
 /**
- * The files kept whole in a chat, which its bots read, and people too
+ * The files kept whole in a chat, which its bots read, and members too
  * when a chat serves them: every `file` but those bots write in
  * versions, which `files.ts` keeps. Their only writer, and their reader but
  * for the files messages show, which `store/file-parts.ts` reads. A file
  * goes when its chat does.
  *
- * A file is a tool's result, kept with `write`, a person's upload, kept with
+ * A file is a tool's result, kept with `write`, a member's attachment, kept with
  * `upload`, or a bot's attachment to its reply, kept with `withReplyFile`. An
- * upload stays unsent, and unreadable, until it is attached to a message; one
- * never attached is removed by `removeUnsentUploads`.
+ * attachment stays unsent, and unreadable, until it is attached to a message; one
+ * never attached is removed by `removeUnsentAttachments`.
  */
 export interface Interface {
 	/**
@@ -53,15 +53,15 @@ export interface Interface {
 	readonly write: <E>(file: {
 		chatId: string;
 		/** The call whose result `content` is. */
-		toolCallId?: string;
+		toolCallId: string;
 		content: BlobStore.Content<E>;
 	}) => Effect.Effect<FileDescription, E | FileTooLarge | BlobStore.Failure>;
 	/**
 	 * Keeps `content` as a file `uploaderId` uploaded to the chat, unsent
 	 * until it is attached to a message. Fails as `write` does, with
-	 * `FileTooLarge` past `maxSize` bytes, and with `TooManyUnsentUploads`,
+	 * `FileTooLarge` past `maxSize` bytes, and with `TooManyUnsentAttachments`,
 	 * keeping nothing, when the uploader already has `maxUnsent` unsent
-	 * uploads in the chat. Uploads at the same moment may each pass that
+	 * attachments in the chat. Uploads at the same moment may each pass that
 	 * check, so it bounds them only roughly.
 	 */
 	readonly upload: <E>(file: {
@@ -71,11 +71,14 @@ export interface Interface {
 		maxSize: number;
 		maxUnsent: number;
 		content: BlobStore.Content<E>;
-	}) => Effect.Effect<Upload, E | FileTooLarge | TooManyUnsentUploads | BlobStore.Failure>;
+	}) => Effect.Effect<
+		UnsentAttachment,
+		E | FileTooLarge | TooManyUnsentAttachments | BlobStore.Failure
+	>;
 	/**
 	 * The file. Fails with `FileNotFound` when no file in the chat has that
 	 * id, including when `fileId` is not an id at all, and for an unsent
-	 * upload. The stream fails with `FileNotFound` if the chat is deleted
+	 * attachment. The stream fails with `FileNotFound` if the chat is deleted
 	 * while it is read.
 	 */
 	readonly read: (file: {
@@ -91,17 +94,17 @@ export interface Interface {
 		fileId: string;
 	}) => Effect.Effect<StoredFile, FileNotFound | BlobStore.Failure>;
 	/**
-	 * Attaches the uploads `fileIds` to `messageId` in the order listed, and
+	 * Attaches the unsent attachments `fileIds` to `messageId` in the order listed, and
 	 * returns them in that order. Each must be one of `uploaderId`'s unsent
-	 * uploads in the chat; when any is not, including one removed for
-	 * waiting too long, fails with `UploadsNotFound` and attaches none.
+	 * attachments in the chat; when any is not, including one removed for
+	 * waiting too long, fails with `UnsentAttachmentsNotFound` and attaches none.
 	 */
 	readonly attach: (input: {
 		chatId: string;
 		messageId: string;
 		uploaderId: string;
 		fileIds: readonly string[];
-	}) => Effect.Effect<readonly AttachedFileRow[], UploadsNotFound>;
+	}) => Effect.Effect<readonly AttachedFileRow[], UnsentAttachmentsNotFound>;
 	/** The files in the chat kept as tool calls' results: each call's file id, by the call's id. */
 	readonly resultFiles: (chatId: string) => Effect.Effect<ReadonlyMap<string, string>>;
 	/**
@@ -138,21 +141,21 @@ export interface Interface {
 		messageId: string;
 	}) => Effect.Effect<void>;
 	/**
-	 * Removes `fileId` when it is one of `uploaderId`'s unsent uploads in the
+	 * Removes `fileId` when it is one of `uploaderId`'s unsent attachments in the
 	 * chat, such as one taken off a message before it was sent. Anything
 	 * else, a file already gone included, is left as it is.
 	 */
-	readonly removeUnsentUpload: (file: {
+	readonly removeUnsentAttachment: (file: {
 		chatId: string;
 		uploaderId: string;
 		fileId: string;
 	}) => Effect.Effect<void>;
 	/**
-	 * Removes every upload still unsent `unsentFor` after it was uploaded, and
+	 * Removes every attachment still unsent `unsentFor` after it was uploaded, and
 	 * returns how many. A blob that cannot be removed is left to go with its
 	 * chat's folder.
 	 */
-	readonly removeUnsentUploads: (unsentFor: Duration.Duration) => Effect.Effect<number>;
+	readonly removeUnsentAttachments: (unsentFor: Duration.Duration) => Effect.Effect<number>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -253,15 +256,22 @@ export const make = Effect.gen(function* () {
 						db
 							.select({ unsent: count() })
 							.from(file)
-							.where(and(eq(file.chatId, chatId), eq(file.uploaderId, uploaderId), unsentUpload)),
+							.where(
+								and(eq(file.chatId, chatId), eq(file.uploaderId, uploaderId), unsentAttachment),
+							),
 					);
-					if (unsent >= maxUnsent) return yield* new TooManyUnsentUploads({ maxUnsent });
-					const kept = yield* keep(chatId, content, { kind: "upload", uploaderId, name }, maxSize);
+					if (unsent >= maxUnsent) return yield* new TooManyUnsentAttachments({ maxUnsent });
+					const kept = yield* keep(
+						chatId,
+						content,
+						{ kind: "attachment", uploaderId, name },
+						maxSize,
+					);
 					return { ...kept, name };
 				}),
 			),
 		read: ({ chatId, fileId }) =>
-			operation("read", readWhere(chatId, fileId, sql`not ${unsentUpload}`)),
+			operation("read", readWhere(chatId, fileId, sql`not ${unsentAttachment}`)),
 		readMessageFile: ({ chatId, fileId }) =>
 			operation("readMessageFile", readWhere(chatId, fileId, isNotNull(file.messageId))),
 		attach: ({ chatId, messageId, uploaderId, fileIds }) =>
@@ -272,7 +282,7 @@ export const make = Effect.gen(function* () {
 						const wanted = [...new Set(fileIds)];
 						// The ids come from the client, and Postgres rejects a uuid
 						// comparison against anything that is not one.
-						if (!wanted.every(isUuid)) return yield* new UploadsNotFound();
+						if (!wanted.every(isUuid)) return yield* new UnsentAttachmentsNotFound();
 						const listedPosition = sql`case ${file.id} ${sql.join(
 							wanted.map((id, position) => sql`when ${id}::uuid then ${position}::integer`),
 							sql` `,
@@ -286,7 +296,7 @@ export const make = Effect.gen(function* () {
 										inArray(file.id, wanted),
 										eq(file.chatId, chatId),
 										eq(file.uploaderId, uploaderId),
-										unsentUpload,
+										unsentAttachment,
 									),
 								)
 								.returning({
@@ -297,7 +307,7 @@ export const make = Effect.gen(function* () {
 								}),
 						);
 						// Failing rolls back the ones that were found.
-						if (attached.length !== wanted.length) return yield* new UploadsNotFound();
+						if (attached.length !== wanted.length) return yield* new UnsentAttachmentsNotFound();
 						const listed = new Map(attached.map((one) => [one.id, one]));
 						return wanted.flatMap((id) => listed.get(id) ?? []);
 					}),
@@ -390,9 +400,9 @@ export const make = Effect.gen(function* () {
 					);
 				}),
 			),
-		removeUnsentUpload: ({ chatId, uploaderId, fileId }) =>
+		removeUnsentAttachment: ({ chatId, uploaderId, fileId }) =>
 			operation(
-				"removeUnsentUpload",
+				"removeUnsentAttachment",
 				Effect.gen(function* () {
 					// The id comes from the uploader's client, and Postgres rejects a
 					// uuid comparison against anything that is not one.
@@ -405,7 +415,7 @@ export const make = Effect.gen(function* () {
 									eq(file.id, fileId),
 									eq(file.chatId, chatId),
 									eq(file.uploaderId, uploaderId),
-									unsentUpload,
+									unsentAttachment,
 								),
 							)
 							.returning({ id: file.id }),
@@ -413,9 +423,9 @@ export const make = Effect.gen(function* () {
 					if (removed.length > 0) yield* removeBlob(chatId, fileId);
 				}),
 			),
-		removeUnsentUploads: (unsentFor) =>
+		removeUnsentAttachments: (unsentFor) =>
 			operation(
-				"removeUnsentUploads",
+				"removeUnsentAttachments",
 				Effect.gen(function* () {
 					// Measured on the database's clock, which stamped `created_at`.
 					const removed = yield* query((db) =>
@@ -423,7 +433,7 @@ export const make = Effect.gen(function* () {
 							.delete(file)
 							.where(
 								and(
-									unsentUpload,
+									unsentAttachment,
 									lt(
 										file.createdAt,
 										sql`now() - make_interval(secs => ${Duration.toSeconds(unsentFor)})`,
@@ -459,9 +469,9 @@ interface FileDescription {
 	size: number;
 }
 
-/** A file being read: its description, its name when it is an upload, and its bytes. */
+/** A file being read: its description, its name when it is an attachment, and its bytes. */
 export interface StoredFile extends FileDescription {
-	/** An upload's name; a tool result has none. */
+	/** An attachment's name; a tool result has none. */
 	name: string | undefined;
 	stream: Stream.Stream<Uint8Array, FileNotFound | BlobStore.Failure>;
 }
@@ -479,8 +489,8 @@ interface StoredReplyFile extends FileDescription {
 	readonly name: string;
 }
 
-/** A file a person uploaded, with the name it had on their computer. */
-export interface Upload extends FileDescription {
+/** A file a member uploaded and has not sent yet, with the name it had on their computer. */
+export interface UnsentAttachment extends FileDescription {
 	name: string;
 }
 
@@ -490,13 +500,13 @@ export interface Upload extends FileDescription {
  */
 const keptInChat = notInArray(file.kind, [...WRITTEN_FILE_KINDS]);
 
-/** An upload not yet attached to a message, which only its uploader knows of. */
-const unsentUpload = sql`(${file.kind} = 'upload' and ${file.messageId} is null)`;
+/** An attachment whose message is not sent yet, which only its uploader knows of. */
+const unsentAttachment = sql`(${file.kind} = 'attachment' and ${file.messageId} is null)`;
 
 /** Which kind of file a row is, with the columns that kind sets. */
 type FileSource =
-	| { kind: "tool_result"; toolCallId: string | undefined }
-	| { kind: "upload"; uploaderId: string; name: string }
+	| { kind: "tool_result"; toolCallId: string }
+	| { kind: "attachment"; uploaderId: string; name: string }
 	| { kind: "bot_attachment"; name: string; messageId: string; position: number };
 
 export class FileNotFound
@@ -511,27 +521,27 @@ export class FileNotFound
 }
 
 /**
- * A file to send is not one of the author's unsent uploads, such as one cleared
+ * A file to send is not one of the author's unsent attachments, such as one cleared
  * for waiting too long. A domain error, so a client can tell it apart by its
  * tag rather than its wording.
  */
-export class UploadsNotFound
-	extends Schema.TaggedError<UploadsNotFound>()("UploadsNotFound", {})
+export class UnsentAttachmentsNotFound
+	extends Schema.TaggedError<UnsentAttachmentsNotFound>()("UnsentAttachmentsNotFound", {})
 	implements DomainError
 {
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return "A file to send is not one of the author's unsent uploads";
+		return "A file to send is not one of the author's unsent attachments";
 	}
 	get userMessage() {
 		return userText`A file to send is no longer there. Remove it and attach it again`;
 	}
 }
 
-export class TooManyUnsentUploads
-	extends Data.TaggedError("TooManyUnsentUploads")<{
-		/** How many unsent uploads one person may have in a chat. */
+export class TooManyUnsentAttachments
+	extends Data.TaggedError("TooManyUnsentAttachments")<{
+		/** How many unsent attachments one member may have in a chat. */
 		maxUnsent: number;
 	}>
 	implements UserFacing
@@ -549,7 +559,7 @@ export class FileTooLarge
 	implements UserFacing
 {
 	get userMessage() {
-		const { amount, unit } = sizeForPeople(this.maxSize);
+		const { amount, unit } = sizeForMembers(this.maxSize);
 		return userText`The file is larger than ${amount} ${unit}, the most that can be kept`;
 	}
 }
@@ -560,8 +570,8 @@ export class TooManyReplyFiles extends Data.TaggedError("TooManyReplyFiles") imp
 	}
 }
 
-/** `bytes` as people read a file's size, such as 30 MB or 512 KB. */
-function sizeForPeople(bytes: number): { amount: number; unit: "MB" | "KB" } {
+/** `bytes` as members read a file's size, such as 30 MB or 512 KB. */
+function sizeForMembers(bytes: number): { amount: number; unit: "MB" | "KB" } {
 	const mebibytes = bytes / (1024 * 1024);
 	return mebibytes >= 1
 		? { amount: Math.floor(mebibytes), unit: "MB" }
@@ -569,9 +579,8 @@ function sizeForPeople(bytes: number): { amount: number; unit: "MB" | "KB" } {
 }
 
 /**
- * Under the chat's folder, `chats/<chatId>` (the name stored
- * blobs keep), which the `chat_blob_deletion` trigger queues for
- * deletion with the chat.
+ * Under the chat's folder, `chats/<chatId>`, which the
+ * `chat_blob_deletion` trigger queues for deletion with the chat.
  */
 function fileKey(chatId: string, fileId: string): BlobStore.Key {
 	return BlobStore.key("chats", chatId, "files", fileId);

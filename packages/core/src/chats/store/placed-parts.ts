@@ -1,7 +1,6 @@
-import type { CollaborationPart, FilePart, ToolCallPart } from "@sugabots/contracts";
+import type { FilePart, ToolCallPart } from "@sugabots/contracts";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
-import { loadCollaborationParts } from "./collaboration-parts.ts";
 import { loadFileParts } from "./file-parts.ts";
 import { loadToolCallParts } from "./tool-calls.ts";
 
@@ -11,7 +10,6 @@ import { loadToolCallParts } from "./tool-calls.ts";
  * files attached to it, which follow its text.
  */
 export interface PlacedPartsOf {
-	collaborations?: readonly CollaborationPart[];
 	toolCalls?: readonly ToolCallPart[];
 	files?: readonly FilePart[];
 }
@@ -21,11 +19,9 @@ export const loadPlacedParts = Effect.fn("PlacedParts.loadPlacedParts")(function
 	db: Executor,
 	messageIds: readonly string[],
 ) {
-	const collaborations = yield* loadCollaborationParts(db, messageIds);
 	const toolCalls = yield* loadToolCallParts(db, messageIds);
 	const files = yield* loadFileParts(db, messageIds);
 	return (messageId: string): PlacedPartsOf => ({
-		collaborations: collaborations.get(messageId),
 		toolCalls: toolCalls.get(messageId),
 		files: files.get(messageId),
 	});

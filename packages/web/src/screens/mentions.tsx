@@ -5,11 +5,11 @@ import {
 	type ChatKind,
 	GROUP_MENTION_HANDLES,
 	type GroupMentionHandle,
+	type MemberParticipant,
 	type MessageAuthor,
 	mentionedHandles,
-	notifiesPeople,
+	notifiesMembers,
 	type Participant,
-	type PersonParticipant,
 	splitAroundMentions,
 } from "@sugabots/contracts";
 import { cn } from "cn";
@@ -32,16 +32,16 @@ import { MentionCard } from "./MentionCard.tsx";
 
 /**
  * Everyone a mention in the chat can name: those in it, then the project's bots
- * and the people who reach the project who are not.
+ * and the members who reach the project who are not.
  */
 export function mentionableIn(
-	details: Pick<ChatDetails, "participants" | "projectBots" | "peopleReachingProject">,
+	details: Pick<ChatDetails, "participants" | "projectBots" | "membersReachingProject">,
 ): Participant[] {
 	const joined = new Set(details.participants.map(({ id }) => id));
 	return [
 		...details.participants,
 		...details.projectBots.filter(({ id }) => !joined.has(id)),
-		...details.peopleReachingProject.filter(({ id }) => !joined.has(id)),
+		...details.membersReachingProject.filter(({ id }) => !joined.has(id)),
 	];
 }
 
@@ -52,56 +52,56 @@ export function botsNamed(draft: string, projectBots: readonly BotParticipant[])
 	);
 }
 
-/** `@here` or `@channel`, which a person writes in a chat to notify the people who reach its project. */
+/** `@here` or `@channel`, which a member writes in a chat to notify the members who reach its project. */
 export interface GroupMention {
 	kind: "group";
 	handle: GroupMentionHandle;
 	/**
-	 * The people it would notify: those who reach the project but its writer, never a bot.
+	 * The members it would notify: those who reach the project but its writer, never a bot.
 	 * Each one's own notification settings can still hold theirs back.
 	 */
-	notifies: readonly PersonParticipant[];
+	notifies: readonly MemberParticipant[];
 }
 
-/** Whom a mention can name: a person or a bot, or with `@here` or `@channel`, everyone. */
+/** Whom a mention can name: a member or a bot, or with `@here` or `@channel`, everyone. */
 export type MentionTarget = Participant | GroupMention;
 
-/** Who writes a message, as far as `@here` and `@channel` care: a person, by id, or not a person. */
-type Writer = { kind: "person"; id: string } | { kind: Exclude<MessageAuthor["kind"], "person"> };
+/** Who writes a message, as far as `@here` and `@channel` care: a member, by id, or not a member. */
+type Writer = { kind: "member"; id: string } | { kind: Exclude<MessageAuthor["kind"], "member"> };
 
 /**
  * `@here` and `@channel` as `writer` can use them in a chat of kind
- * `chatKind`, each notifying `peopleReachingProject` but the writer.
+ * `chatKind`, each notifying `membersReachingProject` but the writer.
  * None where they would notify nobody, so they stay text: written by a bot or
  * an automation, in a chat that notifies nobody, or in a project
  * nobody else reaches.
  */
 export function groupMentionsBy(
 	writer: Writer,
-	peopleReachingProject: readonly PersonParticipant[],
+	membersReachingProject: readonly MemberParticipant[],
 	chatKind: ChatKind,
 ): GroupMention[] {
-	if (writer.kind !== "person" || !notifiesPeople(chatKind)) return [];
-	const notifies = peopleReachingProject.filter((person) => person.id !== writer.id);
+	if (writer.kind !== "member" || !notifiesMembers(chatKind)) return [];
+	const notifies = membersReachingProject.filter((member) => member.id !== writer.id);
 	if (notifies.length === 0) return [];
 	return GROUP_MENTION_HANDLES.map((handle) => ({ kind: "group", handle, notifies }));
 }
 
 /**
  * Whom `signedIn`'s composer offers to mention in a chat of kind
- * `chatKind`: everyone `mentionableIn` gives but the signed-in person, then
+ * `chatKind`: everyone `mentionableIn` gives but the current user, then
  * `@here` and `@channel` where they would notify anyone.
  */
 export function composerMentionable(
-	details: Pick<ChatDetails, "participants" | "projectBots" | "peopleReachingProject">,
+	details: Pick<ChatDetails, "participants" | "projectBots" | "membersReachingProject">,
 	signedIn: { id: string },
 	chatKind: ChatKind,
 ): MentionTarget[] {
 	return [
 		...mentionableIn(details).filter((candidate) => candidate.id !== signedIn.id),
 		...groupMentionsBy(
-			{ kind: "person", id: signedIn.id },
-			details.peopleReachingProject,
+			{ kind: "member", id: signedIn.id },
+			details.membersReachingProject,
 			chatKind,
 		),
 	];
@@ -109,7 +109,7 @@ export function composerMentionable(
 
 /**
  * Whom the handle `handle`, as a mention writes it, names among `mentionable`.
- * A person whose handle is that of `@here` or `@channel` is mentioned with everyone else.
+ * A member whose handle is that of `@here` or `@channel` is mentioned with everyone else.
  */
 export function targetWithHandle(
 	mentionable: readonly MentionTarget[],
@@ -129,7 +129,7 @@ export function mentionTargetKey(target: MentionTarget): string {
 
 /**
  * A mention as a chip that stands off the words around it: a bot by its face
- * and name, a person or everyone by the handle. Sent messages and the composer
+ * and name, a member or everyone by the handle. Sent messages and the composer
  * both draw it, so a mention looks the same before and after it is sent, and
  * both open its `MentionCard` from it.
  */
@@ -143,7 +143,7 @@ export function MentionChip({
 	/** Shown after the name, inside the chip, such as a × that removes it. */
 	after?: ReactNode;
 } & ComponentProps<"span">) {
-	// A bot's in its own colour, a person's on a light wash that sits on any surface.
+	// A bot's in its own colour, a member's on a light wash that sits on any surface.
 	const bot = target.kind === "bot" ? target : undefined;
 	return (
 		<span
@@ -197,7 +197,7 @@ export const MENTION_TAG = "mention";
  * context rather than the renderer's props because Streamdown redraws only when
  * its text changes: someone who becomes mentionable after a reply is drawn is
  * still marked in it. `@here` and `@channel` are among them only in a
- * person's message, the one kind that notifies anyone; see `groupMentionsBy`.
+ * member's message, the one kind that notifies anyone; see `groupMentionsBy`.
  */
 export const MentionableContext = createContext<readonly MentionTarget[]>([]);
 

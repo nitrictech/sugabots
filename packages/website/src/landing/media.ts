@@ -40,9 +40,9 @@ export const screenshots: readonly [Screenshot, ...Screenshot[]] = [
 	{
 		title: "Projects",
 		description:
-			"Each piece of work gets a project, where people and bots share its chats, and reply and react the same way.",
+			"Each piece of work gets a project, where members and bots share its chats, and reply and react the same way.",
 		image: "/screenshots/project-chat.webp",
-		shows: "A project's chat with two people and a bot",
+		shows: "A project's chat with two members and a bot",
 	},
 	{
 		title: "Automations",
@@ -59,7 +59,7 @@ export const screenshots: readonly [Screenshot, ...Screenshot[]] = [
 	{
 		title: "Files",
 		description:
-			"What people upload and bots make is kept in the project, ready to open and review.",
+			"What members upload and bots make is kept in the project, ready to open and review.",
 		image: "/screenshots/files.webp",
 		shows: "The files viewer",
 	},

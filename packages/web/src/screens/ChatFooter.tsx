@@ -1,4 +1,4 @@
-import type { ChatDetails, MessageReplyTo, SignedInPerson } from "@sugabots/contracts";
+import type { ChatDetails, CurrentUser, MessageReplyTo } from "@sugabots/contracts";
 import { type Dispatch, type SetStateAction, useMemo } from "react";
 import type { ChatLocation } from "@/lib/chats.ts";
 import type { ComposerAttachments } from "@/lib/composer-attachments.ts";
@@ -42,7 +42,7 @@ export function ChatFooter({
 	/** Where the chat is: one of a project's chats, or one of a bot's. */
 	chatLocation: ChatLocation;
 	details: ChatDetails;
-	signedIn: SignedInPerson;
+	signedIn: CurrentUser;
 	/** Whom the composer says a message goes to while the draft names nobody. */
 	chatName: string;
 	draft: string;
@@ -121,8 +121,8 @@ function composerLabel({
 	automation: boolean;
 	chatName: string;
 }): string {
-	if (audience.peopleOnly && audience.mentions.length > 0) {
-		return `Message ${listNames(audience.mentions.map((person) => person.name))}`;
+	if (audience.membersOnly && audience.mentions.length > 0) {
+		return `Message ${listNames(audience.mentions.map((member) => member.name))}`;
 	}
 	const { floor } = audience;
 	if (automation && floor.kind === "lead")

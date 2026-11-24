@@ -25,8 +25,6 @@ export const validateFileSearch = (search: Record<string, unknown>): FileSearch 
 		: {};
 
 export interface ChatSearch {
-	/** A nested chat, a collaboration or automation run, open beside the chat. */
-	nestedChat?: string;
 	/** A file open large beside the chat. */
 	file?: string;
 	/** An earlier version of `file` to show; the current one when absent. */
@@ -40,14 +38,13 @@ export interface ChatSearch {
 	automations?: string;
 	/** A message to jump to in the chat, such as the mention a notification is about. */
 	message?: string;
-	/** An automation run or collaboration shown as the page itself, in place of the chat. */
+	/** An automation run shown as the page itself, in place of the chat. */
 	nestedChatPage?: string;
 }
 
 export const validateChatSearch = (search: Record<string, unknown>): ChatSearch => {
 	const { file } = idParam(search, "file");
 	return {
-		...idParam(search, "nestedChat"),
 		...idParam(search, "message"),
 		...idParam(search, "nestedChatPage"),
 		...(file

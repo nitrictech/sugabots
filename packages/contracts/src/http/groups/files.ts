@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
-import { fileSummarySchema, fileVersionSummarySchema, writtenFileSchema } from "../../files.ts";
+import { listedFileSchema, listedFileVersionSchema, writtenFileSchema } from "../../files.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
@@ -17,7 +17,7 @@ export class FilesApi extends HttpApiGroup.make("files")
 		/** The files uploaded or made in the project's chats. */
 		HttpApiEndpoint.get("listInProject", "/projects/:projectId/files", {
 			params: { projectId: uuidSchema },
-			success: Schema.Array(fileSummarySchema),
+			success: Schema.Array(listedFileSchema),
 			error: refused,
 		}),
 		/** A file a bot wrote, at its current version. */
@@ -28,7 +28,7 @@ export class FilesApi extends HttpApiGroup.make("files")
 		}),
 		HttpApiEndpoint.get("versions", `${root}/:fileId/versions`, {
 			params: file,
-			success: Schema.Array(fileVersionSummarySchema),
+			success: Schema.Array(listedFileVersionSchema),
 			error: refused,
 		}),
 		HttpApiEndpoint.get("getVersion", `${root}/:fileId/versions/:version`, {

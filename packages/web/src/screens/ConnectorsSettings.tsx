@@ -239,13 +239,17 @@ function botConnectorsLine(connectors: readonly Connector[]): ReactNode {
 /** How many of a bot's connectors its row shows the marks of. */
 const MARKS_SHOWN = 4;
 
-/** What a connector's line says under its name: what it needs, or what its tools are set to. */
+/**
+ * What a connector's line says under its name: what it needs, or what its
+ * tools are set to and who it signs in as.
+ */
 function lineFor(connector: Connector): string {
 	if (connector.signInExpired)
 		return "Sign-in expired. Bots can't use it until someone signs in again";
 	if (!connector.signedIn) return "Not signed in yet";
 	if (connector.status === "error") return connector.lastTestError ?? "The last check failed";
-	return accessSummaryText(connector.toolCounts) ?? "No actions found yet";
+	const access = accessSummaryText(connector.toolCounts) ?? "No actions found yet";
+	return connector.signedInAs ? `${access} · Signed in as ${connector.signedInAs.name}` : access;
 }
 
 function ConnectorRow({

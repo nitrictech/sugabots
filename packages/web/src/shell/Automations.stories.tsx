@@ -1,5 +1,5 @@
 import type { Automation, AutomationUpdate, ProjectChatList, Run } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import { testMember } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -10,7 +10,7 @@ import {
 	StoryApp,
 	storyChatDetails,
 	storyChatFor,
-	storyPerson,
+	storyMember,
 	storyWorkspace,
 } from "@/story-app.tsx";
 
@@ -46,8 +46,7 @@ function posted(id: string, author: "bot" | "you", text: string, at: string, res
 		message: {
 			id: `0199a3a0-0000-7000-8000-0000000006${id}`,
 			chatId: outbound.feed,
-			author: author === "bot" ? bot : testPerson({ id: storyPerson.id, name: storyPerson.name }),
-			kind: "text",
+			author: author === "bot" ? bot : testMember({ id: storyMember.id, name: storyMember.name }),
 			status: "complete",
 			parts: [{ type: "text", text }],
 			content: text,

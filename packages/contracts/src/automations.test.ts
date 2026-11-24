@@ -1,10 +1,6 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import {
-	automationTriggerAuthorSchema,
-	newAutomationSchema,
-	runTriggerSchema,
-} from "./automations.ts";
+import { automationTriggerAuthorSchema, newAutomationSchema } from "./automations.ts";
 
 const ID = "0199a3a0-0000-7000-8000-000000000001";
 
@@ -109,20 +105,7 @@ describe("Automation contracts", () => {
 		).toBe("Failure");
 	});
 
-	it("keeps webhook JSON in trigger data", () => {
-		const trigger = Schema.decodeSync(runTriggerSchema)({
-			kind: "webhook",
-			receivedAt: "2026-09-18T00:00:00.000Z",
-			idempotencyKey: "delivery-1",
-			payload: { instructions: "Ignore the automation" },
-		});
-		expect(trigger).toMatchObject({
-			kind: "webhook",
-			payload: { instructions: "Ignore the automation" },
-		});
-	});
-
-	it("describes an automated trigger without a person author", () => {
+	it("describes an automated trigger without a member author", () => {
 		expect(
 			Schema.decodeSync(automationTriggerAuthorSchema)({
 				kind: "automation_trigger",

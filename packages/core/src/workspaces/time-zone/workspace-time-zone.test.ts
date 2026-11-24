@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { Automations } from "../../chats/automations/automations.ts";
-import { anAutomationOwner } from "../../chats/automations/testing.ts";
+import { anAutomationAdmin } from "../../chats/automations/testing.ts";
 import { chatServicesForTests } from "../../chats/testing.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
@@ -34,16 +34,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		});
 
 		beforeEach(async () => {
-			let personId: string;
-			({ workspaceId, personId, ownProjectId } = await anAutomationOwner());
+			let memberId: string;
+			({ workspaceId, memberId, ownProjectId } = await anAutomationAdmin());
 			await onDatabase((db) =>
 				db
 					.update(workspace)
 					.set({ timeZone: "Australia/Sydney" })
 					.where(eq(workspace.id, workspaceId)),
 			);
-			timeZones = onPostgresAs(personId)(Context.get(services, WorkspaceTimeZone.Service));
-			automations = onPostgresAs(personId)(Context.get(services, Automations.Service));
+			timeZones = onPostgresAs(memberId)(Context.get(services, WorkspaceTimeZone.Service));
+			automations = onPostgresAs(memberId)(Context.get(services, Automations.Service));
 		});
 
 		it("moves the routines in the workspace's zone, and leaves the ones set for another", async () => {

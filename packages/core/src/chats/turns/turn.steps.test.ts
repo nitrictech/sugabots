@@ -33,8 +33,6 @@ import {
 } from "../tools/assistant/tool.ts";
 import { AUTOMATION_TOOLS } from "../tools/automations/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
-import { Collaborations } from "../tools/collaborate/collaborations.ts";
-import { COLLABORATE_TOOL } from "../tools/collaborate/tool.ts";
 import { ComputerTools } from "../tools/computer.ts";
 import { ConnectorTools } from "../tools/connectors.ts";
 import { FILE_TOOLS } from "../tools/files/tool.ts";
@@ -89,7 +87,6 @@ const prepared: PreparedTurn = {
 			eyes: "pill",
 			shape: "circle",
 		},
-		kind: "text",
 		status: "writing",
 		parts: [],
 		content: "",
@@ -102,14 +99,13 @@ const prepared: PreparedTurn = {
 			title: "Check the release",
 			kind: "project_chat",
 			botId: run.request.botId,
-			parentChatId: null,
 		},
 		bot: {
 			id: run.request.botId,
 			name: "Host Bot",
 			handle: "host-bot",
 			model: "claude-sonnet-4-20250514",
-			prompt: "",
+			instructions: "",
 			disabledTools: [],
 			usesComputer: false,
 			naturalBrowsing: false,
@@ -130,7 +126,7 @@ const prepared: PreparedTurn = {
 		workspaceTimeZone: "UTC",
 		askerId: null,
 		startedFor: null,
-		collaborators: [],
+		botsToAsk: [],
 		participants: [],
 		messages: [],
 	},
@@ -139,8 +135,8 @@ const prepared: PreparedTurn = {
 /** Where the prepared turn's outcome is recorded. */
 const replyTurn = replyTurnOf(prepared);
 
-/** A reply draft with no collaborations or tool calls, which is most replies in these cases. */
-const reply = (content: string) => ({ content, collaborations: [], toolCalls: [] });
+/** A reply draft with no tool calls, which is most replies in these cases. */
+const reply = (content: string) => ({ content, toolCalls: [] });
 
 describe("runSegment", () => {
 	it("completes the reply with where the compaction it read kept history from", async () => {
@@ -151,7 +147,7 @@ describe("runSegment", () => {
 				...prepared,
 				context: {
 					...prepared.context,
-					compaction: { summary: "Earlier work.", historyStartsAt: keptFrom, keptFrom },
+					compaction: { condensed: "Earlier work.", historyStartsAt: keptFrom, keptFrom },
 				},
 			}),
 		);
@@ -162,7 +158,6 @@ describe("runSegment", () => {
 				turns,
 				model: scriptedModel("Done"),
 				events: eventBus(),
-				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 			}),
 		);
@@ -206,7 +201,6 @@ describe("runSegment", () => {
 				turns,
 				model,
 				events: eventBus(),
-				collaborations: collaborations(),
 				toolCalls: calls,
 				connectorTools: {
 					forTurn: () =>
@@ -234,14 +228,14 @@ describe("runSegment", () => {
 				},
 				approvals: {
 					responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
-					beginExecution: ({ atOffset }) =>
+					beginExecution: () =>
 						calls.open({
 							chatId: prepared.context.chat.id,
 							messageId: prepared.responseMessage.id,
 							turnId: prepared.turnId,
 							tool: "wiki__wipe",
 							input: {},
-							atOffset,
+							atOffset: "Clearing. ".length,
 							writeOrDelete: true,
 						}),
 				},
@@ -278,7 +272,7 @@ describe("runSegment", () => {
 			...prepared,
 			context: {
 				...prepared.context,
-				bot: { ...prepared.context.bot, model: "new-model", prompt: "new prompt" },
+				bot: { ...prepared.context.bot, model: "new-model", instructions: "new instructions" },
 			},
 			checkpoint: {
 				messages: [],
@@ -305,7 +299,6 @@ describe("runSegment", () => {
 				turns,
 				model,
 				events: eventBus(),
-				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 				approvals: {
 					responsesForTurn: () => Effect.succeed({ role: "tool", content: [] }),
@@ -321,7 +314,7 @@ describe("runSegment", () => {
 		});
 	});
 
-	it("gives a Personal Assistant answering its person its guide, and asks them before it acts, with no instructions of its own nor tools for its automations", async () => {
+	it("gives a Personal Assistant answering its member its guide, and asks them before it acts, with no instructions of its own nor tools for its automations", async () => {
 		const { execution, turns } = fakes();
 		const connectorTool = (name: string, writeOrDelete: boolean) => ({
 			tool: tool({
@@ -340,14 +333,14 @@ describe("runSegment", () => {
 			connectorRevision: 1,
 			remoteToolName: name,
 		});
-		const personId = "0199a3a0-0000-7000-8000-0000000000aa";
+		const memberId = "0199a3a0-0000-7000-8000-0000000000aa";
 		vi.mocked(execution.prepare).mockReturnValue(
 			Effect.succeed({
 				...prepared,
 				context: {
 					...prepared.context,
-					bot: { ...prepared.context.bot, assistantOf: personId },
-					askerId: personId,
+					bot: { ...prepared.context.bot, assistantOf: memberId },
+					askerId: memberId,
 				},
 			}),
 		);
@@ -363,7 +356,6 @@ describe("runSegment", () => {
 				turns,
 				model,
 				events: eventBus(),
-				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 				connectorTools: {
 					forTurn: () =>
@@ -392,7 +384,6 @@ describe("runSegment", () => {
 				ADD_BOT_TO_PROJECT_TOOL,
 				PIN_BOT_TOOL,
 				START_CHAT_TOOL,
-				COLLABORATE_TOOL,
 			]),
 		);
 		expect(offered).not.toContain(SAVE_INSTRUCTIONS_TOOL);
@@ -402,10 +393,6 @@ describe("runSegment", () => {
 			| undefined;
 		expect(approvals?.[CREATE_PROJECT_TOOL]?.({ name: "Launch" })).toBe("user-approval");
 		expect(approvals?.[START_CHAT_TOOL]?.({ title: "Report", brief: "Write it." })).toBe(
-			"user-approval",
-		);
-		// The bot it asks acts with its own connectors, so its person allows that too.
-		expect(approvals?.[COLLABORATE_TOOL]?.({ to: "Researcher", brief: "Find it." })).toBe(
 			"user-approval",
 		);
 		expect(approvals?.[WORKSPACE_GUIDE_TOOL]).toBeUndefined();
@@ -447,7 +434,6 @@ describe("runSegment", () => {
 				turns,
 				model,
 				events: eventBus(),
-				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 				connectorTools: {
 					forTurn: () =>
@@ -474,10 +460,9 @@ describe("runSegment", () => {
 			SEARCH_HISTORY_TOOL,
 			READ_CHAT_FILE_TOOL,
 			...AUTOMATION_TOOLS,
-			// No person asked this turn, so it is offered no start_chat.
+			// No member asked this turn, so it is offered no start_chat.
 			MARK_RESOLVED_TOOL,
 			SAVE_INSTRUCTIONS_TOOL,
-			"collaborate",
 		]);
 		const approvals = received?.toolApproval as
 			| Record<string, (input: unknown) => unknown>
@@ -489,7 +474,7 @@ describe("runSegment", () => {
 		const turnNote = received?.messages.at(-1)?.content;
 		expect(turnNote).toContain("wiki__lookup");
 		expect(turnNote).not.toContain("drive__lookup");
-		expect(turnNote).toContain("- sugabots (2 tools): read_docs, workspace_access");
+		expect(turnNote).toContain("- sugabots (2 tools): read_docs, workspace_role");
 	});
 
 	it("refuses a request for a host the workspace blocked at once, asking nobody", async () => {
@@ -521,7 +506,6 @@ describe("runSegment", () => {
 				turns,
 				model,
 				events: eventBus(),
-				collaborations: collaborations(),
 				toolCalls: calls,
 				computerTools: {
 					forTurn: () =>
@@ -530,7 +514,7 @@ describe("runSegment", () => {
 							requests: { [HOST_REQUEST_TOOL]: request },
 							usable: true,
 							note: undefined,
-							workspace: undefined,
+							atPlace: undefined,
 							signsIn: false,
 						}),
 				},
@@ -589,7 +573,6 @@ describe("runSegment", () => {
 				turns,
 				model,
 				events: eventBus(),
-				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 				builtInTools: {
 					forWorkspace: () =>
@@ -608,7 +591,7 @@ describe("runSegment", () => {
 		{ disabledTools: [], called: true },
 		{ disabledTools: ["automations"], called: false },
 	])(
-		"sets up an automation for the person the turn answers unless automations are off ($disabledTools)",
+		"sets up an automation for the member the turn answers unless automations are off ($disabledTools)",
 		async ({ disabledTools, called }) => {
 			const { execution, turns } = fakes();
 			const askerId = "0199a3a0-0000-7000-8000-0000000000f1";
@@ -649,7 +632,6 @@ describe("runSegment", () => {
 					turns,
 					model,
 					events: eventBus(),
-					collaborations: collaborations(),
 					toolCalls: toolCalls(),
 					automations: { create },
 				}),
@@ -679,7 +661,6 @@ describe("runSegment", () => {
 					turns,
 					model: unusedModel(),
 					events: eventBus(),
-					collaborations: collaborations(),
 					toolCalls: toolCalls(),
 				}),
 			),
@@ -707,7 +688,6 @@ describe("runSegment", () => {
 				turns,
 				model: scriptedModel(""),
 				events: eventBus(),
-				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 			}),
 		);
@@ -732,7 +712,6 @@ describe("runSegment", () => {
 				turns,
 				model: unusedModel(),
 				events: eventBus(),
-				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 			}),
 		);
@@ -751,7 +730,6 @@ describe("runSegment", () => {
 					turns,
 					model: Models.fromStream(() => Effect.sync(() => streamed(delayedChunks()))),
 					events: eventBus(),
-					collaborations: collaborations(),
 					toolCalls: toolCalls(),
 				}),
 			);
@@ -778,7 +756,6 @@ describe("runSegment", () => {
 						Effect.map(Effect.abortSignal, (signal) => streamed(chunksUntilAborted(signal))),
 					),
 					events,
-					collaborations: collaborations(),
 					toolCalls: toolCalls(),
 				}),
 			);
@@ -809,13 +786,12 @@ describe("runSegment", () => {
 						Effect.map(Effect.abortSignal, (signal) => streamed(chunksUntilAborted(signal))),
 					),
 					events: liveEventBus(),
-					collaborations: collaborations(),
 					toolCalls: toolCalls(),
 				}),
 			);
 
 			await vi.advanceTimersByTimeAsync(0);
-			vi.mocked(turns.isCancellationRequested).mockReturnValue(Effect.succeed(true));
+			vi.mocked(turns.isInterruptRequested).mockReturnValue(Effect.succeed(true));
 			await vi.advanceTimersByTimeAsync(15_000);
 			await segment;
 			expect(turns.cancel).toHaveBeenCalledWith(replyTurn, reply("partial"));
@@ -836,7 +812,7 @@ function fakes() {
 		complete: vi.fn(() => Effect.void),
 		fail: vi.fn(() => Effect.succeed(true)),
 		cancel: vi.fn(() => Effect.void),
-		isCancellationRequested: vi.fn(() => Effect.succeed(false)),
+		isInterruptRequested: vi.fn(() => Effect.succeed(false)),
 		abandon: vi.fn(() => Effect.undefined),
 		replyFiles: vi.fn(() => Effect.succeed([])),
 		markActed: vi.fn(() => Effect.void),
@@ -854,13 +830,12 @@ interface Given {
 		| "complete"
 		| "fail"
 		| "cancel"
-		| "isCancellationRequested"
+		| "isInterruptRequested"
 		| "abandon"
 		| "replyFiles"
 		| "markActed"
 	>;
 	toolCalls: Pick<ToolCallStore.Interface, "open" | "close">;
-	collaborations: Partial<Collaborations.Interface>;
 	approvals?: ApprovedToolCalls.Interface;
 	model: Models.Interface;
 	events: EventBus.Interface;
@@ -886,7 +861,6 @@ function segmentWith(given: Given) {
 				unimplemented(TurnExecution.Service, given.execution),
 				unimplemented(TurnStore.Service, given.turns),
 				unimplemented(ToolCallStore.Service, given.toolCalls),
-				unimplemented(Collaborations.Service, given.collaborations),
 				unimplemented(BotAdministration.Service, {}),
 				unimplemented(ChatFileStore.Service, { resultFiles: () => Effect.succeed(new Map()) }),
 				unimplemented(Files.Authoring, {}),
@@ -917,7 +891,7 @@ function segmentWith(given: Given) {
 }
 
 /**
- * A segment whose model asks a person to approve one call to a write/delete
+ * A segment whose model asks a member to approve one call to a write/delete
  * connector tool, `wiki__wipe`, which runs `execute`.
  */
 function segmentAskingApproval(
@@ -947,7 +921,6 @@ function segmentAskingApproval(
 			),
 		),
 		events: eventBus(),
-		collaborations: collaborations(),
 		toolCalls: toolCalls(),
 		connectorTools: {
 			forTurn: () =>
@@ -996,7 +969,7 @@ function toolCalls(): Given["toolCalls"] {
 		output: null,
 		status: "running" as const,
 		error: null,
-		writeOrDelete: false,
+		approval: null,
 		atOffset,
 		startedAt: "2026-09-14T00:00:00.000Z",
 		finishedAt: null,
@@ -1007,11 +980,6 @@ function toolCalls(): Given["toolCalls"] {
 		),
 		close: vi.fn(() => Effect.undefined),
 	};
-}
-
-/** No case here collaborates, so it has no collaborations to offer; reaching one dies. */
-function collaborations(): Given["collaborations"] {
-	return {};
 }
 
 function eventBus(): EventBus.Interface {
@@ -1029,13 +997,16 @@ function liveEventBus(): EventBus.Interface {
 }
 
 function requestCancellation(events: EventBus.Interface) {
-	return events.publish(
-		chatStream(run.request.chatId),
-		streamEvent("turn.cancel_requested", {
-			chatId: run.request.chatId,
-			turnId: prepared.turnId,
-		}),
-	);
+	return events.publishCommitted([
+		{
+			stream: chatStream(run.request.chatId),
+			seq: 1,
+			event: streamEvent("turn.interrupt_requested", {
+				chatId: run.request.chatId,
+				turnId: prepared.turnId,
+			}),
+		},
+	]);
 }
 
 async function* delayedChunks(): AsyncIterable<string> {

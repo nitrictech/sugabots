@@ -42,8 +42,6 @@ type Body = { text: string; html?: string } | { html: string; text?: string };
 export type Message = Body & {
 	from: Address;
 	to: readonly [Address, ...Address[]];
-	cc?: readonly Address[];
-	bcc?: readonly Address[];
 	replyTo?: Address;
 	subject: string;
 };
@@ -61,7 +59,7 @@ export class InvalidConfig extends Data.TaggedError("InvalidEmailConfig")<{
  * Parses `Name <address>` or a bare `address`, the forms mail clients show, or
  * returns `undefined` for anything else.
  */
-export function parseAddress(value: string): Address | undefined {
+function parseAddress(value: string): Address | undefined {
 	const named = /^\s*"?([^"<]*?)"?\s*<([^<>\s@]+@[^<>\s@]+)>\s*$/.exec(value);
 	if (named?.[2]) return named[1] ? { email: named[2], name: named[1] } : { email: named[2] };
 	const bare = value.trim();
@@ -69,7 +67,7 @@ export function parseAddress(value: string): Address | undefined {
 }
 
 /**
- * `EMAIL_TRANSACTIONAL_FROM`, the sender of mail a person's own action triggers.
+ * `EMAIL_TRANSACTIONAL_FROM`, the sender of mail a member's own action triggers.
  * Required in production, where providers send only from verified addresses.
  */
 export const transactionalSender = Effect.gen(function* () {

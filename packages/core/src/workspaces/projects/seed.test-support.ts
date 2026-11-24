@@ -3,7 +3,7 @@ import type { Executor } from "../../database/database.ts";
 import { bot, project, projectBot } from "../../database/schema.ts";
 
 /**
- * A project people made, as fixtures write it straight into the database, with
+ * A project members made, as fixtures write it straight into the database, with
  * its lead bot: `leadBotId`, a public bot of the workspace, or a new public bot
  * without a model made for it. Either way the lead is added to the project's
  * bots, as every project's lead is one of them.

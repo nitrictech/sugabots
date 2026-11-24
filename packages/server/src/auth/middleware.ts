@@ -1,6 +1,6 @@
 import {
 	API_BASE_PATH,
-	CurrentPerson,
+	CurrentUserOfRequest,
 	Forbidden,
 	Session,
 	Unauthorized,
@@ -11,12 +11,6 @@ import { Effect, Layer } from "effect";
 import { Cookies, HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { failureResponse } from "../http/errors.ts";
 import { Authentication } from "./authentication.ts";
-
-/**
- * Bearer authentication for native and script clients, or a Better Auth cookie
- * session for browsers. An explicit Authorization header never falls back to a
- * cookie if malformed or expired.
- */
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -41,8 +35,7 @@ export function requireCookieOrigin(trustedOrigins: readonly string[]) {
 			if (
 				SAFE_METHODS.has(request.method) ||
 				exempt.some((prefix) => request.url.startsWith(prefix)) ||
-				!headers.cookie ||
-				bearerToken(headers.authorization)
+				!headers.cookie
 			) {
 				return yield* effect;
 			}
@@ -57,7 +50,7 @@ export function requireCookieOrigin(trustedOrigins: readonly string[]) {
 		});
 }
 
-/** The `Session` middleware, asking `Authentication` who holds the request's credentials. */
+/** The `Session` middleware, asking `Authentication` whose session cookie the request carries. */
 export const sessionLayer = Layer.effect(
 	Session,
 	Effect.map(
@@ -66,17 +59,7 @@ export const sessionLayer = Layer.effect(
 			(httpEffect) =>
 				Effect.gen(function* () {
 					const request = yield* HttpServerRequest.HttpServerRequest;
-					const authorization = request.headers.authorization;
-					let headers = new Headers(request.headers);
-					if (authorization !== undefined) {
-						const token = bearerToken(authorization);
-						if (!token) {
-							return yield* new Unauthorized({ message: userText`Invalid Authorization header` });
-						}
-						headers = new Headers({ authorization: `Bearer ${token}` });
-					}
-
-					const holder = yield* identify(headers);
+					const holder = yield* identify(new Headers(request.headers));
 					if (!holder) {
 						return yield* new Unauthorized({ message: userText`Invalid or expired session` });
 					}
@@ -85,25 +68,17 @@ export const sessionLayer = Layer.effect(
 							Effect.succeed(HttpServerResponse.mergeCookies(response, holder.refreshedCookies)),
 						);
 					}
-					return yield* Effect.provideService(httpEffect, CurrentPerson, holder.person);
+					return yield* Effect.provideService(httpEffect, CurrentUserOfRequest, holder.member);
 				}),
 	),
 );
 
 /**
- * Runs a handler's work as the person the request's session belongs to, the
- * actor core authorizes, for an endpoint behind `Session`.
+ * Runs a handler's work as the member the request's session belongs to, the
+ * principal core authorizes, for an endpoint behind `Session`.
  */
-export const asSignedInPerson = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-	Effect.flatMap(CurrentPerson, (person) =>
-		// `Session` put the person there only once `identify` accepted the credentials.
-		effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(person.id))),
+export const asCurrentUser = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+	Effect.flatMap(CurrentUserOfRequest, (member) =>
+		// `Session` put the member there only once `identify` accepted the credentials.
+		effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(member.id))),
 	);
-
-function bearerToken(header: string | undefined): string | undefined {
-	const [scheme, ...rest] = header?.trim().split(/\s+/) ?? [];
-	if (scheme?.toLowerCase() !== "bearer") {
-		return undefined;
-	}
-	return rest.join(" ") || undefined;
-}

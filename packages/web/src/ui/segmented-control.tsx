@@ -38,7 +38,7 @@ export function SegmentedControl<Value extends string>({
 				<label
 					key={option.value}
 					className={cn(
-						"cursor-pointer rounded-md has-disabled:cursor-default px-2.75 py-1.25 font-medium text-xs transition-colors has-checked:bg-person-avatar has-checked:text-foreground",
+						"cursor-pointer rounded-md has-disabled:cursor-default px-2.75 py-1.25 font-medium text-xs transition-colors has-checked:bg-member-avatar has-checked:text-foreground",
 						"text-muted-foreground has-focus-visible:shadow-(--ring-shadow)",
 					)}
 				>

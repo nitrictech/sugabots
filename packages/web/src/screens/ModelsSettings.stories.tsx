@@ -79,6 +79,7 @@ function provider(
 		customHeaders: [],
 		lastTestError: null,
 		connectedBy: null,
+		signedInAs: null,
 		createdAt: "2026-09-11T00:00:00.000Z",
 		models,
 		...over,
@@ -145,6 +146,12 @@ const chatgptSignedIn: ModelProvider = {
 	active: true,
 	status: "connected",
 	signedIn: true,
+	signedInAs: {
+		id: "0199a3a0-0000-7000-8000-0000000000c2",
+		name: "Theo Hart",
+		email: "theo@example.com",
+		image: null,
+	},
 	models: [model("gpt-5.5", "GPT-5.5", true, ["tools", "vision", "thinking"])],
 };
 const supergrok = provider(6, "supergrok", "SuperGrok", [], {
@@ -229,7 +236,7 @@ function Preview({
 			permissions: {
 				createProjects: true,
 				manageProviders: true,
-				managePeople: true,
+				manageMembers: true,
 				chooseSystemModel: true,
 				manageUsage: true,
 			},
@@ -583,7 +590,7 @@ export const LocalServer = meta.story({
 	},
 });
 
-/** ChatGPT is signed in to rather than given a key, after a warning that a plan is one person's. */
+/** ChatGPT is signed in to rather than given a key, after a warning that a plan is one member's. */
 export const ChatgptSignIn = meta.story({
 	render: () => <ProviderSettings providerId={chatgpt.id} />,
 	beforeEach({ msw }) {
@@ -602,7 +609,7 @@ export const ChatgptSignIn = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await expect(await canvas.findByText("Not signed in")).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "Sign in with ChatGPT" }));
-		const warning = await screen.findByRole("dialog", { name: "Single-person servers only" });
+		const warning = await screen.findByRole("dialog", { name: "Single-member servers only" });
 		await expect(within(warning).getByRole("link", { name: "OpenAI's terms" })).toHaveAttribute(
 			"href",
 			"https://openai.com/policies/terms-of-use/#registration-and-access",
@@ -636,8 +643,8 @@ export const SupergrokSignIn = meta.story({
 	},
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "Sign in with xAI" }));
-		const warning = await screen.findByRole("dialog", { name: "Single-person servers only" });
-		await expect(within(warning).getByText(/A SuperGrok plan is for one person/)).toBeVisible();
+		const warning = await screen.findByRole("dialog", { name: "Single-member servers only" });
+		await expect(within(warning).getByText(/A SuperGrok plan is for one member/)).toBeVisible();
 		await expect(within(warning).getByRole("link", { name: "xAI's terms" })).toHaveAttribute(
 			"href",
 			"https://x.ai/legal/terms-of-service",
@@ -653,7 +660,7 @@ export const ChatgptSignedIn = meta.story({
 	parameters: { providers: [chatgptSignedIn] },
 	render: () => <ProviderSettings providerId={chatgptSignedIn.id} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("Signed in")).toBeInTheDocument();
+		await expect(await canvas.findByText("Signed in as Theo Hart")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
 		await expect(canvas.queryByText("API key")).toBeNull();
 	},
@@ -724,7 +731,7 @@ const chatgptAdded = fn(async (_provider: ModelProvider) => {});
 
 /**
  * ChatGPT is in every workspace from the start, so choosing it goes on to its
- * page, where the person signs in, rather than switching it on without one.
+ * page, where the member signs in, rather than switching it on without one.
  */
 export const AddChatgpt = meta.story({
 	render: () => <AddProviderPreview onAdded={chatgptAdded} />,

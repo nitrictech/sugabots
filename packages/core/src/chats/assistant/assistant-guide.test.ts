@@ -5,16 +5,16 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { noComputers } from "../../computers/testing.ts";
 import {
 	automation,
-	chatRead,
+	member,
 	membership,
 	message,
 	modelProvider,
-	person,
 	pinnedBot,
 	project,
 	projectBot,
 	projectMember,
 	providerModel,
+	readCursor,
 	workspace,
 } from "../../database/schema.ts";
 import {
@@ -31,18 +31,18 @@ import { seedChat } from "../seed.test-support.ts";
 import { AssistantGuide } from "./assistant-guide.ts";
 
 /**
- * A Personal Assistant's view of its person's workspace, and what it does
- * there for them, against real SQL: it reads and acts only as the person.
+ * A Personal Assistant's view of its member's workspace, and what it does
+ * there for them, against real SQL: it reads and acts only as the member.
  */
 describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () => {
 	let guide: Promised<AssistantGuide.Interface>;
-	let botsAs: (personId: string) => Promised<BotAdministration.Interface>;
+	let botsAs: (memberId: string) => Promised<BotAdministration.Interface>;
 
 	let workspaceId: string;
 	let workspaceSlug: string;
 	let samId: string;
 	let adaId: string;
-	const sam = () => ({ personId: samId, workspaceId, workspaceSlug });
+	const sam = () => ({ memberId: samId, workspaceId, workspaceSlug });
 
 	beforeAll(async () => {
 		guide = await servedOnPostgres(
@@ -69,7 +69,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		);
 		const [ada, samRow] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values([
 					{ name: "Ada", email: `ada-${stamp}@example.com` },
 					{ name: "Sam", email: `sam-${stamp}@example.com` },
@@ -83,8 +83,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		samId = samRow.id;
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId, personId: adaId, role: "editor" },
-				{ workspaceId, personId: samId, role: "editor" },
+				{ workspaceId, memberId: adaId, role: "editor" },
+				{ workspaceId, memberId: samId, role: "editor" },
 			]),
 		);
 		const [provider] = await onDatabase((db) =>
@@ -111,15 +111,15 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		);
 	});
 
-	const aBot = (creatorId: string, name: string, visibility: "public" | "private" = "public") =>
+	const aBot = (creatorId: string, name: string, visibility: "public" | "personal" = "public") =>
 		botsAs(creatorId).create({
 			workspace: workspaceId,
 			bot: { name, model: "test-model", visibility },
 		});
 
-	it("shows the person the bots they reach, and nothing of others' private ones", async () => {
+	it("shows the member the bots they reach, and nothing of others' personal ones", async () => {
 		await aBot(adaId, "Writer");
-		await aBot(adaId, "Diary", "private");
+		await aBot(adaId, "Diary", "personal");
 
 		const seen = await guide.guide(sam());
 
@@ -138,7 +138,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		});
 	});
 
-	it("lists automations failing now, though the person has read their failed runs", async () => {
+	it("lists automations failing now, though the member has read their failed runs", async () => {
 		const writer = await aBot(adaId, "Writer");
 		const [launch, hidden] = await onDatabase((db) =>
 			db
@@ -157,7 +157,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		);
 		if (!launch || !hidden) throw new Error("fixture");
 		await onDatabase((db) =>
-			db.insert(projectMember).values({ workspaceId, projectId: launch.id, personId: samId }),
+			db.insert(projectMember).values({ workspaceId, projectId: launch.id, memberId: samId }),
 		);
 		const anAutomation = async (
 			projectId: string,
@@ -204,7 +204,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 							kind: "manual",
 							requestId,
 							requestedAt: finishedAt.toISOString(),
-							requestedByPersonId: samId,
+							requestedByMemberId: samId,
 						},
 						automationName: name,
 						instructions: "Report",
@@ -218,9 +218,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 			// Sam has read every run, and the feed they are posted to.
 			const readThrough = new Date(Date.now() + 1000);
 			await onDatabase((db) =>
-				db.insert(chatRead).values([
-					{ chatId: feed.id, personId: samId, readThrough },
-					{ chatId: run.id, personId: samId, readThrough },
+				db.insert(readCursor).values([
+					{ chatId: feed.id, memberId: samId, readThrough },
+					{ chatId: run.id, memberId: samId, readThrough },
 				]),
 			);
 		};
@@ -260,10 +260,10 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		expect(seen.waitingOnYou.failingAutomations).toHaveLength(3);
 	});
 
-	it("makes a project for the person, led by a public bot, adds another to it, and refuses a private one", async () => {
+	it("makes a project for the member, led by a public bot, adds another to it, and refuses a personal one", async () => {
 		const writer = await aBot(samId, "Writer");
 		const editor = await aBot(samId, "Editor");
-		await aBot(samId, "Diary", "private");
+		await aBot(samId, "Diary", "personal");
 
 		await expect(
 			guide.createProject(sam(), { name: "Launch", lead: "@diary" }),
@@ -298,7 +298,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		).rejects.toMatchObject({ _tag: "NothingNamed" });
 	});
 
-	it("lists the person's unread mentions however many newer unread messages there are", async () => {
+	it("lists the member's unread mentions however many newer unread messages there are", async () => {
 		const writer = await aBot(adaId, "Writer");
 		const chat = await onDatabase((db) =>
 			seedChat(db, {
@@ -311,8 +311,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		);
 		const said = (content: string, createdAt: Date) => ({
 			chatId: chat.id,
-			authorPersonId: adaId,
-			kind: "text" as const,
+			authorMemberId: adaId,
 			status: "complete" as const,
 			parts: [{ type: "text" as const, text: content }],
 			content,
@@ -339,7 +338,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 
 	it("does for a viewer only what the viewer may do themselves", async () => {
 		await onDatabase((db) =>
-			db.update(membership).set({ role: "viewer" }).where(eq(membership.personId, samId)),
+			db.update(membership).set({ role: "viewer" }).where(eq(membership.memberId, samId)),
 		);
 
 		await aBot(adaId, "Writer");
@@ -363,20 +362,20 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		).rejects.toMatchObject({ _tag: "NothingNamed" });
 	});
 
-	it("pins and unpins a bot for the person only", async () => {
+	it("pins and unpins a bot for the member only", async () => {
 		const writer = await aBot(adaId, "Writer");
 
 		await guide.pinBot(sam(), { bot: "writer", pinned: true });
 		const pinsOf = () =>
 			onDatabase((db) =>
 				db
-					.select({ personId: pinnedBot.personId })
+					.select({ memberId: pinnedBot.memberId })
 					.from(pinnedBot)
 					.where(eq(pinnedBot.botId, writer.id)),
 			);
-		expect((await pinsOf()).map(({ personId }) => personId).sort()).toEqual([adaId, samId].sort());
+		expect((await pinsOf()).map(({ memberId }) => memberId).sort()).toEqual([adaId, samId].sort());
 
 		await guide.pinBot(sam(), { bot: "writer", pinned: false });
-		expect(await pinsOf()).toEqual([{ personId: adaId }]);
+		expect(await pinsOf()).toEqual([{ memberId: adaId }]);
 	});
 });

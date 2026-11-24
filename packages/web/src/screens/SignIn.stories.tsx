@@ -102,7 +102,7 @@ export const FromAReferralLink = meta.story({
 								email: "rowan@example.com",
 							},
 						})
-					: HttpResponse.json({ code: "SIGN_UP_CLOSED", message: "Closed" }, { status: 403 });
+					: HttpResponse.json({ message: "Closed" }, { status: 403 });
 			}),
 		);
 	},

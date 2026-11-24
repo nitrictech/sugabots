@@ -1,29 +1,28 @@
 import type {
 	BotColor,
+	MemberParticipant,
 	Message,
 	MessagePart,
 	MessageReaction,
 	MessageReplyTo,
 	Participant,
-	PersonParticipant,
 } from "@sugabots/contracts";
 import { handleFromName, messageStatusSchema, quotedPreview } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { and, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Schema } from "effect";
 import type * as schema from "../../database/schema.ts";
-import { bot, message, person, projectBot } from "../../database/schema.ts";
-import { toCollaborationPart } from "./collaboration-parts.ts";
+import { bot, member, message, projectBot } from "../../database/schema.ts";
 import { type AttachedFileRow, fileColumns, toFilePart } from "./file-parts.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
 import { toToolCallPart } from "./tool-calls.ts";
 
-/** The columns to select, left-joined from `person` and `bot`. */
+/** The columns to select, left-joined from `member` and `bot`. */
 export const participantColumns = {
-	personId: person.id,
-	personName: person.name,
-	personEmail: person.email,
-	personImage: person.image,
+	memberId: member.id,
+	memberName: member.name,
+	memberEmail: member.email,
+	memberImage: member.image,
 	botId: bot.id,
 	botName: bot.name,
 	botHandle: bot.handle,
@@ -33,10 +32,10 @@ export const participantColumns = {
 };
 
 export interface ParticipantRow {
-	personId: string | null;
-	personName: string | null;
-	personEmail: string | null;
-	personImage: string | null;
+	memberId: string | null;
+	memberName: string | null;
+	memberEmail: string | null;
+	memberImage: string | null;
 	botId: string | null;
 	botName: string | null;
 	botHandle: string | null;
@@ -46,12 +45,12 @@ export interface ParticipantRow {
 }
 
 export function toParticipant(row: ParticipantRow): Participant {
-	if (row.personId && row.personName && row.personEmail) {
-		return toPerson({
-			id: row.personId,
-			name: row.personName,
-			email: row.personEmail,
-			image: row.personImage,
+	if (row.memberId && row.memberName && row.memberEmail) {
+		return toMember({
+			id: row.memberId,
+			name: row.memberName,
+			email: row.memberEmail,
+			image: row.memberImage,
 		});
 	}
 	if (
@@ -75,13 +74,13 @@ export function toParticipant(row: ParticipantRow): Participant {
 	throw new Error("Participant has no identity");
 }
 
-/** A person as a message author, for rows where the author is known to be a person. */
-export function personAuthor(person: PersonIdentity): ParticipantRow {
-	return authorRow(person, null);
+/** A member as a message author, for rows where the author is known to be a member. */
+export function memberAuthor(member: MemberIdentity): ParticipantRow {
+	return authorRow(member, null);
 }
 
 /**
- * The API shape of a message row. `placed` are the collaborations and tool calls
+ * The API shape of a message row. `placed` are the tool calls
  * made in this message, from `loadPlacedParts`; a stored reference with no row
  * behind it is dropped rather than shown half-formed. `error` is shown only on
  * a failed reply.
@@ -90,17 +89,14 @@ export function toMessage(
 	row: schema.MessageRow,
 	author: ParticipantRow,
 	placed: PlacedPartsOf = {},
-	/** What people are told of why the turn behind a failed reply failed. */
+	/** What members are told of why the turn behind a failed reply failed. */
 	error?: UserText | null,
 ): Message {
 	const parts = row.parts.flatMap((part): MessagePart[] => {
 		if (part.type === "text" || part.type === "written_file") {
 			return [part];
 		}
-		const made =
-			part.type === "collaboration"
-				? placed.collaborations?.find((candidate) => candidate.id === part.collaborationId)
-				: placed.toolCalls?.find((candidate) => candidate.id === part.toolCallId);
+		const made = placed.toolCalls?.find((candidate) => candidate.id === part.toolCallId);
 		return made ? [made] : [];
 	});
 	// Files are attached to the message rather than placed in its text, so they follow it.
@@ -109,7 +105,6 @@ export function toMessage(
 		id: row.id,
 		chatId: row.chatId,
 		author: row.automationTrigger ?? toParticipant(author),
-		kind: row.kind,
 		status: Schema.decodeSync(messageStatusSchema)(row.status),
 		parts,
 		content: row.content,
@@ -118,30 +113,30 @@ export function toMessage(
 	};
 }
 
-/** A person's columns, for a relational query that names who wrote or joined. */
-export const personColumns = {
+/** A member's columns, for a relational query that names who wrote or joined. */
+export const memberColumns = {
 	columns: { id: true, name: true, email: true, image: true },
 } as const;
 
-/** A person as one JSON value, with the columns of {@link personColumns}, for a SQL select over `person`. */
-export const personJson = sql<PersonIdentity>`json_build_object('id', ${person.id}, 'name', ${person.name}, 'email', ${person.email}, 'image', ${person.image})`;
+/** A member as one JSON value, with the columns of {@link memberColumns}, for a SQL select over `member`. */
+export const memberJson = sql<MemberIdentity>`json_build_object('id', ${member.id}, 'name', ${member.name}, 'email', ${member.email}, 'image', ${member.image})`;
 
 /**
- * A person's id, name, email and image, for a select that names who did
- * something. Which person the query joins, and whether one who has left the
+ * A member's id, name, email and image, for a select that names who did
+ * something. Which member the query joins, and whether one who has left the
  * workspace is shown, is the query's to decide.
  */
-export const namedPersonColumns = {
-	id: person.id,
-	name: person.name,
-	email: person.email,
-	image: person.image,
+export const namedMemberColumns = {
+	id: member.id,
+	name: member.name,
+	email: member.email,
+	image: member.image,
 };
 
-/** A person read with {@link personColumns}, as the API shows them. */
-export function toPerson(row: PersonIdentity): PersonParticipant {
+/** A member read with {@link memberColumns}, as the API shows them. */
+export function toMember(row: MemberIdentity): MemberParticipant {
 	return {
-		kind: "person",
+		kind: "member",
 		id: row.id,
 		name: row.name,
 		email: row.email,
@@ -158,13 +153,13 @@ export const botColumns = {
 /** The columns and relations a relational query reads of a message a reply quotes. */
 export const quotedMessageColumns = {
 	columns: { id: true, content: true, parts: true, automationTrigger: true },
-	with: { authorPerson: personColumns, authorBot: botColumns },
+	with: { authorMember: memberColumns, authorBot: botColumns },
 } as const;
 
 /** A message read with {@link quotedMessageColumns}. */
 interface QuotedMessage
 	extends Pick<schema.MessageRow, "id" | "content" | "parts" | "automationTrigger"> {
-	authorPerson: PersonIdentity | null;
+	authorMember: MemberIdentity | null;
 	authorBot: BotIdentity | null;
 }
 
@@ -173,7 +168,7 @@ export function toReplyTo(quoted: QuotedMessage): MessageReplyTo {
 	return {
 		id: quoted.id,
 		author:
-			quoted.automationTrigger ?? toParticipant(authorRow(quoted.authorPerson, quoted.authorBot)),
+			quoted.automationTrigger ?? toParticipant(authorRow(quoted.authorMember, quoted.authorBot)),
 		preview: quotedPreview(quoted),
 	};
 }
@@ -188,53 +183,52 @@ export const reactionColumns = {
 	columns: { emoji: true, createdAt: true },
 	orderBy: { createdAt: "asc", id: "asc" },
 	with: {
-		person: { columns: { id: true, name: true } },
+		member: { columns: { id: true, name: true } },
 		bot: { columns: { id: true, name: true } },
 	},
 } as const;
 
-/** A reaction read with {@link reactionColumns}: a person's or a bot's. */
+/** A reaction read with {@link reactionColumns}: a member's or a bot's. */
 interface ReactionRow {
 	emoji: string;
 	createdAt: Date;
-	person: { id: string; name: string } | null;
+	member: { id: string; name: string } | null;
 	bot: { id: string; name: string } | null;
 }
 
 /**
  * Reactions, earliest first, grouped by emoji in the order each was first
- * used, people's and bots' apart.
+ * used, members' and bots' apart.
  */
 export function toReactions(rows: readonly ReactionRow[]): MessageReaction[] {
-	type Reactor = MessageReaction["people"][number];
-	const byEmoji = new Map<string, { people: Reactor[]; bots: Reactor[] }>();
+	type Reactor = MessageReaction["members"][number];
+	const byEmoji = new Map<string, { members: Reactor[]; bots: Reactor[] }>();
 	for (const row of rows) {
-		const reactor = row.person ?? row.bot;
+		const reactor = row.member ?? row.bot;
 		if (!reactor) continue;
-		const reaction = byEmoji.get(row.emoji) ?? { people: [], bots: [] };
+		const reaction = byEmoji.get(row.emoji) ?? { members: [], bots: [] };
 		byEmoji.set(row.emoji, reaction);
-		(row.person ? reaction.people : reaction.bots).push({
+		(row.member ? reaction.members : reaction.bots).push({
 			id: reactor.id,
 			name: reactor.name,
 			at: row.createdAt.toISOString(),
 		});
 	}
-	return [...byEmoji].map(([emoji, { people, bots }]) => ({
+	return [...byEmoji].map(([emoji, { members, bots }]) => ({
 		emoji,
-		people,
+		members,
 		...(bots.length > 0 ? { bots } : {}),
 	}));
 }
 
 /** The relations a relational query follows to read a message as the API shows it. */
 export const messageRelations = {
-	authorPerson: personColumns,
+	authorMember: memberColumns,
 	authorBot: botColumns,
 	toolCalls: {
 		orderBy: { startedAt: "asc", id: "asc" },
 		with: { decidedBy: { columns: { name: true } } },
 	},
-	collaborations: { with: { collaborator: { columns: { name: true } } } },
 	files: { columns: fileColumns, orderBy: { position: "asc" } },
 	automationRun: {
 		columns: { id: true, chatId: true, automationId: true, automationName: true },
@@ -243,16 +237,15 @@ export const messageRelations = {
 	reactions: reactionColumns,
 } as const;
 
-/** Who a person is, as read with {@link personColumns}. */
-export type PersonIdentity = { id: string; name: string; email: string; image: string | null };
+/** Who a member is, as read with {@link memberColumns}. */
+export type MemberIdentity = { id: string; name: string; email: string; image: string | null };
 type BotIdentity = Pick<schema.BotRow, "id" | "name" | "handle" | "color" | "eyes" | "shape">;
 
 /** A message row read with `messageRelations`. */
 interface MessageWithRelations extends schema.MessageRow {
-	authorPerson: PersonIdentity | null;
+	authorMember: MemberIdentity | null;
 	authorBot: BotIdentity | null;
 	toolCalls: Array<schema.ToolCallRow & { decidedBy: { name: string } | null }>;
-	collaborations: Array<schema.CollaborationRow & { collaborator: { name: string } }>;
 	files: AttachedFileRow[];
 	automationRun: Pick<schema.RunRow, "id" | "chatId" | "automationId" | "automationName"> | null;
 	replyTo: QuotedMessage | null;
@@ -267,12 +260,9 @@ export function messageFromRelations(
 ): Message {
 	const shown = toMessage(
 		stored,
-		authorRow(stored.authorPerson, stored.authorBot),
+		authorRow(stored.authorMember, stored.authorBot),
 		{
 			toolCalls: stored.toolCalls.map((call) => toToolCallPart(call, call.decidedBy?.name)),
-			collaborations: stored.collaborations.map((made) =>
-				toCollaborationPart(made, made.collaborator.name),
-			),
 			files: stored.files.map(toFilePart),
 		},
 		turn?.error,
@@ -281,31 +271,37 @@ export function messageFromRelations(
 	return {
 		...shown,
 		...(turn?.finishedAt ? { finishedAt: turn.finishedAt.toISOString() } : {}),
-		...(run
-			? {
-					automationResultOf: {
-						runId: run.id,
-						chatId: run.chatId,
-						automationId: run.automationId,
-						automationName: run.automationName,
-					},
-				}
-			: {}),
+		...(run ? { automationResultOf: automationResultOf(run) } : {}),
 		...(stored.replyTo ? { replyTo: toReplyTo(stored.replyTo) } : {}),
 		...(stored.reactions.length > 0 ? { reactions: toReactions(stored.reactions) } : {}),
 	};
 }
 
+/** The run `run` as the result posted from it links to it. */
+export function automationResultOf(run: {
+	id: string;
+	chatId: string;
+	automationId: string;
+	automationName: string;
+}): NonNullable<Message["automationResultOf"]> {
+	return {
+		runId: run.id,
+		chatId: run.chatId,
+		automationId: run.automationId,
+		automationName: run.automationName,
+	};
+}
+
 /** Whoever a relational query found, as the row `toParticipant` reads. */
 export function authorRow(
-	person: PersonIdentity | null,
+	member: MemberIdentity | null,
 	author: BotIdentity | null,
 ): ParticipantRow {
 	return {
-		personId: person?.id ?? null,
-		personName: person?.name ?? null,
-		personEmail: person?.email ?? null,
-		personImage: person?.image ?? null,
+		memberId: member?.id ?? null,
+		memberName: member?.name ?? null,
+		memberEmail: member?.email ?? null,
+		memberImage: member?.image ?? null,
 		botId: author?.id ?? null,
 		botName: author?.name ?? null,
 		botHandle: author?.handle ?? null,
@@ -327,23 +323,23 @@ const RECENT_ACTIVITY_WINDOW = sql`interval '7 days'`;
  */
 export const recentParticipantsOf = (chatId: SQLWrapper) => sql<ParticipantRow[]>`(
 	select coalesce(json_agg(json_build_object(
-		'personId', recent.person_id, 'personName', recent.person_name, 'personEmail', recent.person_email,
-		'personImage', recent.person_image,
+		'memberId', recent.member_id, 'memberName', recent.member_name, 'memberEmail', recent.member_email,
+		'memberImage', recent.member_image,
 		'botId', recent.bot_id, 'botName', recent.bot_name, 'botHandle', recent.bot_handle,
 		'botColor', recent.bot_color, 'botEyes', recent.bot_eyes,
 		'botShape', recent.bot_shape
 	) order by recent.last_active_at desc), '[]'::json)
 	from (
-		select ${person.id} as person_id, ${person.name} as person_name, ${person.email} as person_email,
-			${person.image} as person_image,
+		select ${member.id} as member_id, ${member.name} as member_name, ${member.email} as member_email,
+			${member.image} as member_image,
 			${bot.id} as bot_id, ${bot.name} as bot_name, ${bot.handle} as bot_handle,
 			${bot.color} as bot_color, ${bot.eyes} as bot_eyes, ${bot.shape} as bot_shape,
 			max(${message.createdAt}) as last_active_at
 		from ${message}
-		left join ${person} on ${person.id} = ${message.authorPersonId}
+		left join ${member} on ${member.id} = ${message.authorMemberId}
 		left join ${bot} on ${bot.id} = ${message.authorBotId}
 		where ${message.chatId} = ${chatId}
-			and (${message.authorPersonId} is not null or ${message.authorBotId} is not null)
+			and (${message.authorMemberId} is not null or ${message.authorBotId} is not null)
 			and ${message.createdAt} >= least(
 				coalesce((
 					select latest.created_at from ${message} as latest
@@ -365,7 +361,7 @@ export const inProject = (projectId: SQLWrapper | string) =>
 	);
 
 /**
- * The condition on `bot` that selects bots people make: not a system bot,
+ * The condition on `bot` that selects bots members make: not a system bot,
  * such as Compaction, and not anybody's Personal Assistant.
  */
-export const madeByPeople = and(isNull(bot.systemBotKey), isNull(bot.assistantOf)) as SQL;
+export const madeByMembers = and(isNull(bot.systemBotKey), isNull(bot.assistantOf)) as SQL;

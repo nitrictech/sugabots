@@ -71,7 +71,7 @@ export function chatFileUrl(chatId: string, fileId: string): string {
 
 /**
  * Removes an upload that will not be sent, so it stops counting toward the
- * files a person can have waiting. Nothing waits on it, and a failure is left
+ * files a member can have waiting. Nothing waits on it, and a failure is left
  * alone: the API clears unsent uploads by itself after a day.
  */
 export function removeChatFile(chatId: string, fileId: string): void {

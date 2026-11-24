@@ -27,8 +27,8 @@ const parked: ToolCallState = {
 
 const allowed: ToolCallState = { ...parked, approvalStatus: "allowed", decidedById: sam };
 
-const decide = (decision: "allow_once" | "deny", personId: string) =>
-	ToolCallEvent.Decide({ decision: { decision, personId } });
+const decide = (decision: "allow_once" | "deny", memberId: string) =>
+	ToolCallEvent.Decide({ decision: { decision, memberId } });
 
 describe("closing a call", () => {
 	it("records what the tool returned, or how it failed", () => {

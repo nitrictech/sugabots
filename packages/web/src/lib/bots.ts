@@ -20,8 +20,8 @@ import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
  * One query for the whole roster, which the sidebar lists and every bot route
  * resolves its handle out of.
  *
- * The API scopes it: every public bot, your own private ones and your
- * Personal Assistant; an administrator also sees others' private bots listed.
+ * The API scopes it: every public bot, your own personal ones and your
+ * Personal Assistant; an administrator also sees others' personal bots listed.
  */
 export function useBots(): {
 	bots: readonly Bot[] | undefined;
@@ -54,14 +54,14 @@ export function botsQuery(workspaceId: string | undefined) {
 }
 
 /**
- * The handle every Personal Assistant shares, each person's own; the
+ * The handle every Personal Assistant shares, each member's own; the
  * workspace's other bots' handles are unique.
  */
 const ASSISTANT_HANDLE = "personal-assistant";
 
 /**
  * The bot an address names by its handle. `personal-assistant` names the
- * person's own Personal Assistant, never someone else's.
+ * member's own Personal Assistant, never someone else's.
  */
 export function findBot(bots: readonly Bot[] | undefined, handle: string): Bot | undefined {
 	if (handle === ASSISTANT_HANDLE) return bots?.find((one) => one.assistant);
@@ -84,13 +84,13 @@ export function useBot(botId: string | null | undefined): Bot | undefined {
 	return botId ? bots?.find((one) => one.id === botId) : undefined;
 }
 
-/** The person's own Personal Assistant, once the roster has it. */
+/** The member's own Personal Assistant, once the roster has it. */
 export function useAssistant(): Bot | undefined {
 	return useBots().bots?.find((one) => one.assistant);
 }
 
 /**
- * Makes sure the person has a Personal Assistant, made on `model` when one is
+ * Makes sure the member has a Personal Assistant, made on `model` when one is
  * given, and puts it in the roster.
  */
 export function useEnsureAssistant() {
@@ -109,13 +109,13 @@ export function useEnsureAssistant() {
 	});
 }
 
-/** The mutations that make the person's Personal Assistant in `workspaceId`. */
+/** The mutations that make the member's Personal Assistant in `workspaceId`. */
 function ensureAssistantKey(workspaceId: string | undefined) {
 	return ["ensure-assistant", workspaceId];
 }
 
 /**
- * Makes the person's Personal Assistant, once for each workspace, when its
+ * Makes the member's Personal Assistant, once for each workspace, when its
  * roster has loaded without one. For the workspace's shell alone, so a page
  * however it is reached has one made, and only one request asks;
  * `useEnsuringAssistantFailed` tells a page how it went.
@@ -134,7 +134,7 @@ export function useEnsuredAssistant(): void {
 	}, [missing, workspaceId, mutate]);
 }
 
-/** Whether making the person's Personal Assistant in the workspace last failed. */
+/** Whether making the member's Personal Assistant in the workspace last failed. */
 export function useEnsuringAssistantFailed(): boolean {
 	const workspaceId = useWorkspace().workspace?.id;
 	const statuses = useMutationState({
@@ -144,7 +144,7 @@ export function useEnsuringAssistantFailed(): boolean {
 	return statuses.at(-1) === "error";
 }
 
-/** Pins a bot to the person's sidebar, or unpins it. */
+/** Pins a bot to the member's sidebar, or unpins it. */
 export function usePinBot() {
 	const invalidate = useInvalidateBots();
 	return useMutation({
@@ -235,9 +235,9 @@ export function useUpdateBot(botId: string) {
 		},
 		onSuccess: (bot, input) => {
 			// Whoever reaches the bot reaches its default project, and making a bot
-			// public or private changes who that is.
+			// public or personal changes who that is.
 			if (input.visibility !== undefined) {
-				void queries.invalidateQueries({ queryKey: ["project-people", bot.defaultProjectId] });
+				void queries.invalidateQueries({ queryKey: ["project-members", bot.defaultProjectId] });
 			}
 		},
 		// Not awaited: the save's outcome should not wait on the roster refetch.
@@ -267,7 +267,7 @@ function useInvalidateBots(): () => Promise<void> {
 			// A bot's chats list shows it.
 			queries.invalidateQueries({ queryKey: projectChatsKey(workspaceId) }),
 			// So do the bots lists of the projects it is in, which the list of
-			// projects counts. A bot made private or deleted leaves every project.
+			// projects counts. A bot made personal or deleted leaves every project.
 			queries.invalidateQueries({ queryKey: ["project-bots"] }),
 			queries.invalidateQueries({ queryKey: projectsQuery(workspaceId).queryKey }),
 		]);

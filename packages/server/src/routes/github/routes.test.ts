@@ -8,7 +8,12 @@ import type { RepositoryActivity } from "@sugabots/core/providers/connectors/git
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
+import {
+	createTestApp,
+	identifiedBy,
+	sessionTokenIn,
+	signedInWith,
+} from "../../http/app.test-support.ts";
 
 const CONNECTOR_ID = "0199a3a0-0000-7000-8000-000000000001";
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000002";
@@ -116,7 +121,7 @@ const setupApp = (gitHubApps: Partial<GitHubApps.Interface>) =>
 	createTestApp(
 		Layer.mergeAll(
 			identifiedBy(async (headers) =>
-				headers.get("authorization") === "Bearer good-token"
+				sessionTokenIn(headers) === "good-token"
 					? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 					: null,
 			),
@@ -124,7 +129,7 @@ const setupApp = (gitHubApps: Partial<GitHubApps.Interface>) =>
 		),
 	);
 
-const signedIn = { headers: { authorization: "Bearer good-token" } };
+const signedIn = { headers: signedInWith("good-token") };
 
 describe("Setting up a bot's GitHub App", () => {
 	it("sends the browser on to GitHub's next page", async () => {

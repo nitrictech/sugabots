@@ -2,10 +2,10 @@ import type {
 	Automation,
 	ChatContext,
 	Connector,
+	CurrentUser,
 	Participant,
-	SignedInPerson,
 } from "@sugabots/contracts";
-import { automationTriggers, testPerson } from "@sugabots/contracts/testing";
+import { automationTriggers, testMember } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, fn, waitFor, within } from "storybook/test";
@@ -16,20 +16,20 @@ import { DetailsPanel } from "./DetailsPanel.tsx";
 
 const WORKSPACE = growthDesk.workspaceId;
 
-const signedIn: SignedInPerson = {
+const signedIn: CurrentUser = {
 	id: "0199a3a0-0000-7000-8000-000000000501",
 	name: "Rowan Ellis",
 	email: "rowan@example.com",
 	image: null,
-} as SignedInPerson;
+} as CurrentUser;
 
-const people: Participant[] = [
+const members: Participant[] = [
 	["Jay Young", "0199a3a0-0000-7000-8000-000000000502"],
 	["Rowan Ellis", signedIn.id],
 	["Mara Kent", "0199a3a0-0000-7000-8000-000000000503"],
 	["Sam Park", "0199a3a0-0000-7000-8000-000000000504"],
 	["Alex Lee", "0199a3a0-0000-7000-8000-000000000505"],
-].map(([name, id]) => testPerson({ id: id as string, name: name as string }));
+].map(([name, id]) => testMember({ id: id as string, name: name as string }));
 
 const chatId = "0199a3a0-0000-7000-8000-000000000510";
 
@@ -87,6 +87,7 @@ function connector(id: string, name: string, url: string): Connector {
 		toolCounts: { allow: 1, ask: 0, off: 0 },
 		lastTestError: null,
 		connectedBy: null,
+		signedInAs: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
 }
@@ -106,7 +107,7 @@ const meta = preview.meta({
 		bot: growthDesk,
 		chatId,
 		contents: {
-			participants: people,
+			participants: members,
 			files: [
 				{
 					type: "file" as const,

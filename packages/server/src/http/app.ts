@@ -69,7 +69,7 @@ const betterAuthRoutes = Layer.effectDiscard(
  *
  * The routes take their services from the layer's context: the operations and
  * views in `HttpServices`, and the database, server settings, sessions and event
- * bus in `ApiInfrastructure`. Each operation authorizes the person the
+ * bus in `ApiInfrastructure`. Each operation authorizes the member the
  * request's session belongs to, so no middleware decides access.
  * `createTestApp` in `app.test-support.ts` drives the same routes with fakes.
  */
@@ -152,12 +152,10 @@ function toWebRequest(request: HttpServerRequest.HttpServerRequest): Effect.Effe
 function everyRequest(origins: readonly string[], contentOrigin: string | undefined) {
 	const cors = HttpMiddleware.cors({
 		allowedOrigins: origins,
-		allowedHeaders: ["authorization", "content-type", "idempotency-key", "last-event-id"],
+		allowedHeaders: ["content-type", "idempotency-key", "last-event-id"],
 		credentials: true,
 	});
 	const cookieOrigin = requireCookieOrigin(origins);
-	// Browser requests carry an HttpOnly session cookie. Bearer clients may also
-	// send Authorization, but the token issuance header is not exposed to pages.
 	const contentHostOnlyPages = onlyPagesOnContentHost(contentOrigin);
 	return (effect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
 		contentHostOnlyPages(

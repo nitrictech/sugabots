@@ -19,18 +19,18 @@ export const makeConnectorEvents = Effect.gen(function* () {
 				"accept",
 				Effect.gen(function* () {
 					const receivedAt = DateTime.formatIso(yield* DateTime.now);
-					const automations = yield* listening({
+					const triggers = yield* triggersFor({
 						workspaceId,
 						connectorId,
 						repository: activity.repository,
 						event: activity.event,
 					});
-					const accepted = yield* Effect.forEach(automations, (listener) =>
+					const accepted = yield* Effect.forEach(triggers, (trigger) =>
 						acceptTrigger({
 							workspaceId,
-							projectId: listener.projectId,
-							automationId: listener.automationId,
-							triggerId: listener.triggerId,
+							projectId: trigger.projectId,
+							automationId: trigger.automationId,
+							triggerId: trigger.triggerId,
 							// A retry of the delivery lands on the run the first started.
 							triggerIdentity: deliveryId,
 							trigger: {
@@ -61,7 +61,7 @@ export const makeConnectorEvents = Effect.gen(function* () {
  * through `connectorId`, while the connector still has the repository and
  * belongs to the automation's project.
  */
-const listening = (on: {
+const triggersFor = (on: {
 	workspaceId: string;
 	connectorId: string;
 	repository: string;

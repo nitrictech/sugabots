@@ -1,10 +1,10 @@
 import { UserText, userText } from "@sugabots/errors";
-import { eq } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { eq, like } from "drizzle-orm";
+import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { BlobStore } from "../../blob-store/blob-store.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
-import { bot, turn } from "../../database/schema.ts";
+import { blob, bot, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
@@ -28,12 +28,12 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	});
 	const turns = onPostgres(Context.get(services, TurnStore.Service));
 	const calls = onPostgres(Context.get(services, ToolCallStore.Service));
-	const chatsAs = (personId: string) =>
-		onPostgresAs(personId)(Context.get(services, Chats.Service));
+	const chatsAs = (memberId: string) =>
+		onPostgresAs(memberId)(Context.get(services, Chats.Service));
 	const execution = onPostgres({
 		prepare: Context.get(services, TurnExecution.Service).prepare,
 	});
-	const emptyReply = { content: "", collaborations: [], toolCalls: [] };
+	const emptyReply = { content: "", toolCalls: [] };
 	const providerDown = userText`The model provider could not answer.`;
 	let chatId: string;
 	let prepared: PreparedTurn;
@@ -63,17 +63,12 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		messages: [{ role: "assistant", content: "I need approval." }],
 		approvals: [],
 		modelInput: { model: "test", system: "test", messages: [{ role: "user", content: "Go" }] },
-		reply: { content: "Waiting.", collaborations: [], toolCalls: [] },
+		reply: { content: "Waiting.", toolCalls: [] },
 		modelRequests: 1,
 	});
 
 	it("runs a failed turn again, starting its reply over, while no change stands in the way", async () => {
-		const blobsInChat = () =>
-			runOnPostgres(
-				Effect.flatMap(BlobStore.Service, (store) =>
-					store.list(BlobStore.key("chats", prepared.context.chat.id)),
-				),
-			);
+		const blobsInChat = () => blobKeysUnder(BlobStore.key("chats", prepared.context.chat.id));
 		const shared = await turns.attachFile(replyTurnOf(prepared), {
 			name: "chart.png",
 			contentType: "image/png",
@@ -101,7 +96,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		// The reply starts over without the file its last run shared, blob and all.
 		expect(await turns.replyFiles(replyTurnOf(second))).toEqual([]);
 		expect(await blobsInChat()).toEqual([]);
-		// Running again could act again, so the turn stops here for a person.
+		// Running again could act again, so the turn stops here for a member.
 		await turns.markActed(second.turnId);
 		expect(
 			await turns.fail(replyTurnOf(second), emptyReply, {
@@ -134,13 +129,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			}),
 		).rejects.toBeInstanceOf(TurnStore.ReplyEnded);
 		expect(await turns.replyFiles(replyTurnOf(prepared))).toEqual([]);
-		expect(
-			await runOnPostgres(
-				Effect.flatMap(BlobStore.Service, (store) =>
-					store.list(BlobStore.key("chats", prepared.context.chat.id)),
-				),
-			),
-		).toEqual([]);
+		expect(await blobKeysUnder(BlobStore.key("chats", prepared.context.chat.id))).toEqual([]);
 	});
 
 	it("gives up on a turn that keeps stopping before it gets anywhere", async () => {
@@ -193,7 +182,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 
 	it("ends a turn somebody asked to stop instead of opening it again after a crash", async () => {
 		await onDatabase((db) =>
-			db.update(turn).set({ cancelRequested: true }).where(eq(turn.id, prepared.turnId)),
+			db.update(turn).set({ interruptRequested: true }).where(eq(turn.id, prepared.turnId)),
 		);
 
 		expect(await execution.prepare(prepared.run)).toMatchObject({
@@ -218,6 +207,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			tool: "web_fetch",
 			input: { url: "https://example.com" },
 			atOffset: 0,
+			writeOrDelete: false,
 		});
 		delivered = [];
 		const stopped = userText`The reply stopped unexpectedly.`;
@@ -248,7 +238,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 
 		expect(await storedTurn()).toMatchObject({ status: "cancelled", checkpoint: null });
 		expect(deliveredEvents()).toContainEqual(
-			expect.objectContaining({ type: "turn.completed", status: "cancelled" }),
+			expect.objectContaining({ type: "message.completed", status: "cancelled" }),
 		);
 	});
 
@@ -286,3 +276,14 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		});
 	});
 });
+
+/** The keys of the blobs stored under `prefix`, read from the store's table. */
+async function blobKeysUnder(prefix: BlobStore.Key) {
+	const rows = await onDatabase((db) =>
+		db
+			.select({ key: blob.key })
+			.from(blob)
+			.where(like(blob.key, `${prefix}/%`)),
+	);
+	return rows.map(({ key }) => key);
+}

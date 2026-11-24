@@ -22,7 +22,7 @@ import { SettingsRowAlert } from "@/ui/settings-page.tsx";
 import { ProviderFieldRow, valueText } from "./provider-field-row.tsx";
 
 /**
- * A subscription provider's credential, in place of a key: the person signs
+ * A subscription provider's credential, in place of a key: the member signs
  * in on the service's site by entering a code shown here, as with Codex CLI's
  * or Grok Build's headless sign-in, while the page asks the server whether they
  * have finished.
@@ -93,7 +93,13 @@ export function ProviderSignInRow({
 						)
 					}
 				>
-					<span className={valueText}>{provider.signedIn ? "Signed in" : "Not signed in"}</span>
+					<span className={valueText}>
+						{provider.signedIn
+							? provider.signedInAs
+								? `Signed in as ${provider.signedInAs.name}`
+								: "Signed in"
+							: "Not signed in"}
+					</span>
 				</ProviderFieldRow>
 			)}
 			{shownError && <SettingsRowAlert>{shownError}</SettingsRowAlert>}
@@ -120,7 +126,7 @@ const ACCOUNT_SHARING_TERMS: Record<SignInServiceId, { owner: string; url: strin
 };
 
 /**
- * Said before anyone signs in: a subscription is one person's, and every bot
+ * Said before anyone signs in: a subscription is one member's, and every bot
  * in the workspace would run on it.
  */
 function SingleUserWarning({
@@ -142,12 +148,12 @@ function SingleUserWarning({
 				onContinue();
 			}}
 		>
-			<DialogFormHeader title="Single-person servers only" />
+			<DialogFormHeader title="Single-member servers only" />
 			<DialogFormBody>
 				<DialogDescription className="m-0 flex gap-2.5 text-xs text-muted-foreground">
 					<TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
 					<span>
-						A {plan} plan is for one person. Only connect yours if nobody else uses this Sugabots
+						A {plan} plan is for one member. Only connect yours if nobody else uses this Sugabots
 						install. See{" "}
 						<a href={terms.url} target="_blank" rel="noreferrer" className="text-link">
 							{terms.owner}'s terms
@@ -161,7 +167,7 @@ function SingleUserWarning({
 	);
 }
 
-/** The code to enter, shown until the person has entered it, the code expires, or they give up. */
+/** The code to enter, shown until the member has entered it, the code expires, or they give up. */
 function SignInCode({
 	providerId,
 	service,

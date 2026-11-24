@@ -23,7 +23,7 @@ export function useCompleteWorkspaceSetup() {
 }
 
 /**
- * Listing the models of the provider workspace setup just added, so the person can
+ * Listing the models of the provider workspace setup just added, so the member can
  * choose one. Adding a server you run, which needs no key, lists none by
  * itself. Resolves once the workspace's providers include the list.
  */
@@ -39,7 +39,7 @@ export function useListFirstProviderModels(): (providerId: string) => Promise<vo
 
 /**
  * The second half of workspace setup's model step: switching `model` on for the
- * workspace and running the person's Personal Assistant on it, made now if
+ * workspace and running the member's Personal Assistant on it, made now if
  * it is missing. Sugabots manages the assistant, so it moves onto `model`
  * only while it has no model the workspace offers.
  */

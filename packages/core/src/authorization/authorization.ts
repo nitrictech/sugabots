@@ -52,7 +52,7 @@ export interface Interface {
 	/**
 	 * `projectId` names a project, and the action is one the actor may take in
 	 * it. A project they don't reach is hidden, unless the action is one they
-	 * may take anyway, as an administrator manages a private bot's computer.
+	 * may take anyway, as an administrator manages a personal bot's computer.
 	 */
 	readonly project: (
 		projectId: string,
@@ -61,7 +61,7 @@ export interface Interface {
 	/**
 	 * `botId` names a bot, and the action is one the actor may take on it.
 	 * A bot they don't reach is hidden, unless the action is one they may take
-	 * anyway, as an administrator changes a private bot.
+	 * anyway, as an administrator changes a personal bot.
 	 */
 	readonly bot: (
 		botId: string,
@@ -80,8 +80,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"workspace",
 				Effect.gen(function* () {
-					const { personId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => workspaceStandingFor(db, workspaceRef, personId));
+					const { memberId } = yield* CurrentActor.Service;
+					const standing = yield* query((db) => workspaceStandingFor(db, workspaceRef, memberId));
 					if (!standing) return yield* new ResourceHidden({ resource: "workspace" });
 					if (!mayInWorkspace(standing.actor, permission)) {
 						return yield* new ActionForbidden({ permission });
@@ -94,9 +94,13 @@ export const make = Effect.gen(function* () {
 			operation(
 				"project",
 				Effect.gen(function* () {
-					const { personId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => projectStandingFor(db, projectId, personId));
-					return yield* decideInProject(standing, permission, "project");
+					const { memberId } = yield* CurrentActor.Service;
+					const standing = yield* query((db) => projectStandingFor(db, projectId, memberId));
+					if (standing?.may(permission)) return standing;
+					// Hidden for a project they can't reach; only once they reach it
+					// does being unable to act become forbidden.
+					yield* requireReach(standing, "project");
+					return yield* new ActionForbidden({ permission });
 				}),
 			),
 
@@ -104,8 +108,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"projectFound",
 				Effect.gen(function* () {
-					const { personId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => projectStandingFor(db, projectId, personId));
+					const { memberId } = yield* CurrentActor.Service;
+					const standing = yield* query((db) => projectStandingFor(db, projectId, memberId));
 					if (!standing?.actor.workspaceRole)
 						return yield* new ResourceHidden({ resource: "project" });
 					return standing;
@@ -116,8 +120,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"bot",
 				Effect.gen(function* () {
-					const { personId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => botStandingFor(db, botId, personId));
+					const { memberId } = yield* CurrentActor.Service;
+					const standing = yield* query((db) => botStandingFor(db, botId, memberId));
 					if (!standing) return yield* new ResourceHidden({ resource: "bot" });
 					if (standing.may(permission)) return standing;
 					return yield* standing.may("bot.read")
@@ -129,19 +133,3 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
-
-/**
- * The standing when the actor may take the action. Otherwise hidden, for a
- * project the actor cannot reach (see `requireReach`); only once they reach it
- * does being unable to act become forbidden.
- */
-function decideInProject<Standing extends ProjectStanding>(
-	standing: Standing | undefined,
-	permission: ProjectPermission,
-	resource: "project",
-): Effect.Effect<Standing, AuthorizationDenied> {
-	if (standing?.may(permission)) return Effect.succeed(standing);
-	return requireReach(standing, resource).pipe(
-		Effect.flatMap(() => Effect.fail(new ActionForbidden({ permission }))),
-	);
-}

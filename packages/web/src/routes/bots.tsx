@@ -31,7 +31,7 @@ import { shellRoute } from "./workspace.tsx";
 
 const NewChatPage = lazyNamed(() => import("@/screens/NewChatPage.tsx"), "NewChatPage");
 
-/** Every bot the person reaches, pinning them to the sidebar, and making another. */
+/** Every bot the member reaches, pinning them to the sidebar, and making another. */
 export const botsRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/bots",
@@ -64,7 +64,7 @@ function BotRoute() {
 	);
 	if (isPending) return <Panes>{null}</Panes>;
 	if (!bot) return <OwnerNotFound kind="bot" error={error} />;
-	// Someone else's private bot, which an administrator sees listed: it exists, and its settings,
+	// Someone else's personal bot, which an administrator sees listed: it exists, and its settings,
 	// connectors and automations are theirs to manage, though its chats and what its
 	// automations posted are not.
 	const managing =
@@ -96,7 +96,7 @@ function BotRoute() {
 						</>
 					}
 				>
-					This is someone else's private bot, so its chats are theirs alone.
+					This is someone else's personal bot, so its chats are theirs alone.
 				</EmptyState>
 			</Panes>
 		);

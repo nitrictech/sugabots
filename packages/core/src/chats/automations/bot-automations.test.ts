@@ -7,8 +7,8 @@ import { EventStore } from "../../database/events/store.ts";
 import {
 	automation,
 	bot as botTable,
+	member,
 	membership,
-	person,
 	project,
 	projectMember,
 	workspace,
@@ -19,11 +19,11 @@ import { chatServicesForTests } from "../testing.ts";
 import { TriggerSetInSettings } from "./automation.ts";
 import { Automations } from "./automations.ts";
 import { BotAutomations } from "./bot-automations.ts";
-import { anAutomationOwner } from "./testing.ts";
+import { anAutomationAdmin } from "./testing.ts";
 
 /**
  * A bot reading and changing the automations of the project it works in, its
- * own in its own chats, for the person it answers, against Postgres.
+ * own in its own chats, for the member it answers, against Postgres.
  */
 describe.skipIf(!process.env.DATABASE_URL)(
 	"a bot's automation tools, against Postgres",
@@ -38,7 +38,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		let projectId: string;
 		let botId: string;
 		let ownProjectId: string;
-		let personId: string;
+		let memberId: string;
 
 		const standup = {
 			name: "Morning standup",
@@ -51,7 +51,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		});
 
 		beforeEach(async () => {
-			({ workspaceId, projectId, botId, personId, ownProjectId } = await anAutomationOwner());
+			({ workspaceId, projectId, botId, memberId, ownProjectId } = await anAutomationAdmin());
 			await onDatabase((db) =>
 				db
 					.update(workspace)
@@ -64,23 +64,23 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		async function anEditor() {
 			const [editor] = await onDatabase((db) =>
 				db
-					.insert(person)
+					.insert(member)
 					.values({ name: "Project member", email: `editor-${crypto.randomUUID()}@example.com` })
 					.returning(),
 			);
 			if (!editor) throw new Error("Could not create the editor");
 			await onDatabase((db) =>
-				db.insert(membership).values({ workspaceId, personId: editor.id, role: "editor" }),
+				db.insert(membership).values({ workspaceId, memberId: editor.id, role: "editor" }),
 			);
 			await onDatabase((db) =>
-				db.insert(projectMember).values({ workspaceId, projectId, personId: editor.id }),
+				db.insert(projectMember).values({ workspaceId, projectId, memberId: editor.id }),
 			);
 			return editor.id;
 		}
 
 		it("sets up a routine in the workspace's timezone, made by the bot at the asker's request", async () => {
 			const made = await bots.create(
-				{ botId, projectId: ownProjectId, askerId: personId },
+				{ botId, projectId: ownProjectId, askerId: memberId },
 				standup,
 			);
 
@@ -107,17 +107,17 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			const [stored] = await onDatabase((db) =>
 				db.select().from(automation).where(eq(automation.id, made.id)),
 			);
-			expect(stored).toMatchObject({ createdById: personId, createdByBotId: botId });
+			expect(stored).toMatchObject({ createdById: memberId, createdByBotId: botId });
 		});
 
 		it("lists and changes the bot's automations, keeping the routine in the workspace's timezone", async () => {
 			const made = await bots.create(
-				{ botId, projectId: ownProjectId, askerId: personId },
+				{ botId, projectId: ownProjectId, askerId: memberId },
 				standup,
 			);
 
 			const changed = await bots.update(
-				{ botId, projectId: ownProjectId, askerId: personId },
+				{ botId, projectId: ownProjectId, askerId: memberId },
 				made.id,
 				{
 					routineExpression: "0 10 * * 1-5",
@@ -135,13 +135,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				],
 				paused: true,
 			});
-			expect(await bots.list({ botId, projectId: ownProjectId, askerId: personId })).toEqual([
+			expect(await bots.list({ botId, projectId: ownProjectId, askerId: memberId })).toEqual([
 				changed,
 			]);
 		});
 
 		it("changes nothing when the new routine is refused", async () => {
-			const bot = { botId, projectId: ownProjectId, askerId: personId };
+			const bot = { botId, projectId: ownProjectId, askerId: memberId };
 			const made = await bots.create(bot, standup);
 
 			await expect(
@@ -155,12 +155,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		});
 
 		it("changes a webhook automation's other settings but leaves its trigger to settings", async () => {
-			const automations = onPostgresAs(personId)(Context.get(services, Automations.Service));
+			const automations = onPostgresAs(memberId)(Context.get(services, Automations.Service));
 			const webhookAutomation = await automations.create(
 				{ projectId: ownProjectId },
 				{ name: "Sentry issues", instructions: "Look into it.", triggers: [{ kind: "webhook" }] },
 			);
-			const bot = { botId, projectId: ownProjectId, askerId: personId };
+			const bot = { botId, projectId: ownProjectId, askerId: memberId };
 
 			await expect(
 				bots.update(bot, webhookAutomation.automation.id, { routineExpression: "0 9 * * *" }),
@@ -174,12 +174,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		});
 
 		it("gives a routine to an automation nothing starts yet", async () => {
-			const automations = onPostgresAs(personId)(Context.get(services, Automations.Service));
+			const automations = onPostgresAs(memberId)(Context.get(services, Automations.Service));
 			const manual = await automations.create(
 				{ projectId: ownProjectId },
 				{ name: "Weekly summary", instructions: "Sum up the week.", triggers: [] },
 			);
-			const bot = { botId, projectId: ownProjectId, askerId: personId };
+			const bot = { botId, projectId: ownProjectId, askerId: memberId };
 
 			expect(
 				await bots.update(bot, manual.automation.id, { routineExpression: "0 17 * * 5" }),
@@ -197,21 +197,21 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
 		it("leaves a routine to settings once the automation has another routine or trigger", async () => {
 			const made = await bots.create(
-				{ botId, projectId: ownProjectId, askerId: personId },
+				{ botId, projectId: ownProjectId, askerId: memberId },
 				standup,
 			);
-			const automations = onPostgresAs(personId)(Context.get(services, Automations.Service));
+			const automations = onPostgresAs(memberId)(Context.get(services, Automations.Service));
 			await automations.addTrigger(
 				{ projectId: ownProjectId, automationId: made.id },
 				{ kind: "webhook" },
 			);
 
 			await expect(
-				bots.update({ botId, projectId: ownProjectId, askerId: personId }, made.id, {
+				bots.update({ botId, projectId: ownProjectId, askerId: memberId }, made.id, {
 					routineExpression: "0 10 * * 1-5",
 				}),
 			).rejects.toThrow(TriggerSetInSettings);
-			expect(await bots.list({ botId, projectId: ownProjectId, askerId: personId })).toEqual([
+			expect(await bots.list({ botId, projectId: ownProjectId, askerId: memberId })).toEqual([
 				expect.objectContaining({
 					when: [
 						expect.objectContaining({ schedule: { repeat: "cron", expression: "0 9 * * 1-5" } }),
@@ -221,7 +221,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			]);
 		});
 
-		it("refuses when no person asked, as in an automation's run", async () => {
+		it("refuses when no member asked, as in an automation's run", async () => {
 			await expect(
 				bots.create({ botId, projectId: ownProjectId, askerId: null }, standup),
 			).rejects.toThrow(CurrentActor.NobodyAsked);
@@ -232,7 +232,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
 		it("lets an editor see the bot's automations but not have it set one up or change one", async () => {
 			const made = await bots.create(
-				{ botId, projectId: ownProjectId, askerId: personId },
+				{ botId, projectId: ownProjectId, askerId: memberId },
 				standup,
 			);
 			const editor = await anEditor();
@@ -246,11 +246,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			).rejects.toThrow(BotAutomations.MayNotManageAutomations);
 		});
 
-		it("manages the automations of a project people made while working in one of its chats", async () => {
+		it("manages the automations of a project members made while working in one of its chats", async () => {
 			await onDatabase((db) =>
 				db.update(project).set({ leadBotId: botId }).where(eq(project.id, projectId)),
 			);
-			const inProject = { botId, projectId, askerId: personId };
+			const inProject = { botId, projectId, askerId: memberId };
 
 			const made = await bots.create(inProject, standup);
 
@@ -262,7 +262,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				new RegExp(`/projects/automation-[^/]+/automations/${made.id}$`),
 			);
 			expect(await bots.list(inProject)).toEqual([made]);
-			expect(await bots.list({ botId, projectId: ownProjectId, askerId: personId })).toEqual([]);
+			expect(await bots.list({ botId, projectId: ownProjectId, askerId: memberId })).toEqual([]);
 		});
 	},
 );

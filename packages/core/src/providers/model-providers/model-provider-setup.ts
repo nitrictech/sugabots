@@ -10,6 +10,7 @@ import type {
 	ProviderModelUpdate,
 	ProviderSignInOutcome,
 	ProviderSignInStarted,
+	ProviderTestResult,
 	WorkspaceModelsResponse,
 } from "@sugabots/contracts";
 import {
@@ -19,9 +20,9 @@ import {
 	type SignInServiceId,
 	signInServiceNames,
 } from "@sugabots/contracts";
-import { type UserText, userText } from "@sugabots/errors";
+import { userText } from "@sugabots/errors";
 import { Clock, Context, Data, DateTime, Effect, Layer, Schema } from "effect";
-import type { AuthorizationDenied } from "../../authorization/access.ts";
+import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { serviceOperations } from "../../database/database.ts";
@@ -86,9 +87,9 @@ export interface Interface {
 	 * A new key sends the provider back through discovery, and switching it on
 	 * tests it first; either way it is on only once it has answered. A new
 	 * address does the same, and without a new key also takes away the key,
-	 * headers and sign-in it held. Switching it off, removing its key or moving
-	 * it fails with `ModelInUse` rather than stop offering a model the workspace
-	 * depends on.
+	 * headers and sign-in it held. A new key takes the place of a subscription
+	 * sign-in. Switching it off, removing its key or moving it fails with
+	 * `ModelInUse` rather than stop offering a model the workspace depends on.
 	 */
 	readonly update: (
 		input: InProvider & { changes: ModelProviderUpdate },
@@ -112,11 +113,11 @@ export interface Interface {
 	readonly test: (
 		input: InProvider,
 	) => Effect.Effect<
-		TestOutcome,
+		ProviderTestResult,
 		AuthorizationDenied | ModelProviderNotFound,
 		CurrentActor.Service
 	>;
-	/** Asks the provider's sign-in service for a code the person enters to sign it in. */
+	/** Asks the provider's sign-in service for a code the member enters to sign it in. */
 	readonly startSignIn: (
 		input: InProvider,
 	) => Effect.Effect<
@@ -125,7 +126,7 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Asks whether the person has entered the code of `attempt`, from
+	 * Asks whether the member has entered the code of `attempt`, from
 	 * `startSignIn`; once they have, the provider is signed in and its
 	 * models are discovered.
 	 */
@@ -165,13 +166,6 @@ export interface Interface {
 		| ModelProviderNotFound
 		| ProviderModelsRequireCredential
 		| ProviderModelAlreadyConfigured,
-		CurrentActor.Service
-	>;
-	readonly setModelsEnabled: (
-		input: InProvider & { modelIds: string[]; enabled: boolean },
-	) => Effect.Effect<
-		number,
-		AuthorizationDenied | ModelProviderNotFound | ProviderModelsRequireCredential | ModelInUse,
 		CurrentActor.Service
 	>;
 	readonly updateModel: (
@@ -308,7 +302,7 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						if (yield* providers.isEnabled(workspaceId, from)) return 0;
 						yield* providers.requireEnabled(workspaceId, to);
-						return yield* bots.movePersonFacingBotsToModel(workspaceId, from, to);
+						return yield* bots.moveMemberFacingBotsToModel(workspaceId, from, to);
 					}),
 				);
 				return moved.reduce((total, count) => total + count, 0);
@@ -381,7 +375,12 @@ export const make = Effect.gen(function* () {
 		signedInById: string,
 	) =>
 		Effect.gen(function* () {
-			yield* providers.saveOAuthTokens(workspaceId, providerId, { tokens, signedInById });
+			const saved = yield* providers.saveOAuthTokens(workspaceId, providerId, {
+				tokens,
+				signedInById,
+			});
+			// They left the workspace, or were removed from it, while signing in.
+			if (!saved) return yield* new ResourceHidden({ resource: "workspace" });
 			yield* discoverModelsQuietly(workspaceId, providerId, true);
 			yield* adoptFirstModel(workspaceId);
 			return yield* requireProvider(workspaceId, providerId);
@@ -412,7 +411,7 @@ export const make = Effect.gen(function* () {
 							("builtIn" in provider ? providerBuiltIn(provider.builtIn).baseUrl : ""),
 					);
 					const created = yield* providers.create(workspaceId, {
-						createdById: actor.personId,
+						createdById: actor.memberId,
 						provider,
 					});
 					if (created.apiKeyEncrypted !== null) {
@@ -450,7 +449,7 @@ export const make = Effect.gen(function* () {
 							missing: missingCredential(current.builtIn),
 						});
 					}
-					const write = providers.update(workspaceId, providerId, changes, actor.personId);
+					const write = providers.update(workspaceId, providerId, changes, actor.memberId);
 					// Switching it off, taking its key away and moving it all stop it
 					// answering. A new key or address does only until it is tried, just below.
 					const takesAway = changes.active === false || changes.apiKey === null || moved;
@@ -531,7 +530,7 @@ export const make = Effect.gen(function* () {
 					if (!tokens) return { status: "pending" as const };
 					return {
 						status: "signed_in" as const,
-						provider: yield* saveSignIn(workspaceId, providerId, tokens, actor.personId),
+						provider: yield* saveSignIn(workspaceId, providerId, tokens, actor.memberId),
 					};
 				}),
 			),
@@ -576,21 +575,6 @@ export const make = Effect.gen(function* () {
 						return yield* new ProviderModelAlreadyConfigured();
 					}
 					return yield* requireProvider(workspaceId, providerId);
-				}),
-			),
-
-		setModelsEnabled: ({ workspace, providerId, modelIds, enabled }) =>
-			operation(
-				"setModelsEnabled",
-				Effect.gen(function* () {
-					const workspaceId = yield* managed(workspace);
-					yield* requireConnectedProvider(workspaceId, providerId);
-					const updated = yield* keepingHeldModelsOffered(
-						workspaceId,
-						providers.setModelEnabled(workspaceId, providerId, modelIds, enabled),
-					);
-					yield* adoptFirstModel(workspaceId);
-					return updated;
 				}),
 			),
 
@@ -650,7 +634,7 @@ export const make = Effect.gen(function* () {
 						workspaceId,
 						{ moves: moveBots, newBotsTo, systemBotsTo },
 						Effect.filterOrFail(
-							providers.update(workspaceId, providerId, { active: false }, actor.personId),
+							providers.update(workspaceId, providerId, { active: false }, actor.memberId),
 							(updated) => updated !== undefined,
 							() => new ModelProviderNotFound(),
 						),
@@ -685,12 +669,6 @@ const SignInAttempt = Schema.Struct({
 	expiresAt: Schema.Number,
 });
 type SignInAttempt = typeof SignInAttempt.Type;
-
-interface TestOutcome {
-	reachable: boolean;
-	latencyMs: number;
-	error?: UserText;
-}
 
 export class ModelProviderNotFound
 	extends Data.TaggedError("ModelProviderNotFound")

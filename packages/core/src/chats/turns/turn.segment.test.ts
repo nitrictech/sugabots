@@ -46,8 +46,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			delivered.push(...events);
 		},
 	});
-	const chatsAs = (personId: string) =>
-		onPostgresAs(personId)(Context.get(services, Chats.Service));
+	const chatsAs = (memberId: string) =>
+		onPostgresAs(memberId)(Context.get(services, Chats.Service));
 	const execution = onPostgres({
 		prepare: Context.get(services, TurnExecution.Service).prepare,
 	});
@@ -61,7 +61,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 	});
 	let chatId: string;
 	let connectorId: string;
-	let hostId: string;
+	let botId: string;
 	let adminId: string;
 	let prepared: PreparedTurn;
 
@@ -71,7 +71,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 	// Each case's turn is already prepared, so the segment opens it again for its own run.
 	beforeEach(async () => {
-		({ chatId, connectorId, hostId, adminId } = await aChatAwaitingReply(chatsAs));
+		({ chatId, connectorId, botId, adminId } = await aChatAwaitingReply(chatsAs));
 		const [run] = await runOnPostgres(runningTurns(chatId));
 		if (!run) throw new Error("no turn running");
 		prepared = await prepareRunnable(execution, run);
@@ -231,11 +231,11 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		expect(deliveredEvents()).toContainEqual(expect.objectContaining({ type: "message.failed" }));
 	});
 
-	describe("an optional turn, on a message in the bot's chat that mentions only people", () => {
+	describe("an optional turn, on a message in the bot's chat that mentions only members", () => {
 		/** Starts another of the bot's chats with `content`, and prepares the turn it asks for. */
 		const optionalTurnOn = async (content: string) => {
 			const started = await startBotChat(chatsAs(adminId), {
-				botId: hostId,
+				botId,
 				messageId: crypto.randomUUID(),
 				content,
 			});
@@ -260,20 +260,18 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			const reactions = await onDatabase((db) =>
 				db.select().from(messageReaction).where(eq(messageReaction.messageId, read.id)),
 			);
-			expect(reactions).toEqual([
-				expect.objectContaining({ botId: hostId, personId: null, emoji: "👀" }),
-			]);
+			expect(reactions).toEqual([expect.objectContaining({ botId, memberId: null, emoji: "👀" })]);
 			expect(deliveredEvents()).toEqual(
 				expect.arrayContaining([
-					expect.objectContaining({ type: "turn.completed", status: "done" }),
+					expect.objectContaining({ type: "turn.completed" }),
 					expect.objectContaining({
 						type: "message.reactions_changed",
 						messageId: read.id,
 						reactions: [
 							{
 								emoji: "👀",
-								people: [],
-								bots: [expect.objectContaining({ id: hostId })],
+								members: [],
+								bots: [expect.objectContaining({ id: botId })],
 							},
 						],
 					}),
@@ -496,16 +494,16 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 	describe("saving its own instructions", () => {
 		beforeEach(async () => {
 			await onDatabase((db) =>
-				db.update(bot).set({ prompt: INTERVIEW_PROMPT }).where(eq(bot.id, hostId)),
+				db.update(bot).set({ instructions: INTERVIEW_PROMPT }).where(eq(bot.id, botId)),
 			);
 		});
 
 		const storedBot = async () => {
 			const [row] = await onDatabase((db) =>
 				db
-					.select({ prompt: bot.prompt, description: bot.description })
+					.select({ instructions: bot.instructions, description: bot.description })
 					.from(bot)
-					.where(eq(bot.id, hostId)),
+					.where(eq(bot.id, botId)),
 			);
 			return row;
 		};
@@ -528,11 +526,11 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 				),
 			);
 
-		it("saves its instructions as the person it answers, and links to them", async () => {
+		it("saves its instructions as the member it answers, and links to them", async () => {
 			await segmentWith(savingInstructions());
 
 			expect(await storedBot()).toEqual({
-				prompt: "You triage support tickets.",
+				instructions: "You triage support tickets.",
 				description: "Sorts support tickets by urgency.",
 			});
 			const [place] = await onDatabase((db) =>
@@ -540,7 +538,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 					.select({ workspace: workspace.slug, handle: bot.handle })
 					.from(bot)
 					.innerJoin(workspace, eq(workspace.id, bot.workspaceId))
-					.where(eq(bot.id, hostId)),
+					.where(eq(bot.id, botId)),
 			);
 			const settingsUrl = `http://sugabots.test/${place?.workspace}/bots/${place?.handle}/settings`;
 			expect(await storedReply()).toMatchObject({
@@ -548,7 +546,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			});
 		});
 
-		it("refuses a person who may not edit the bot", async () => {
+		it("refuses a member who may not edit the bot", async () => {
 			await onDatabase((db) =>
 				db
 					.update(membership)
@@ -558,7 +556,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 			await segmentWith(savingInstructions());
 
-			expect(await storedBot()).toMatchObject({ prompt: INTERVIEW_PROMPT });
+			expect(await storedBot()).toMatchObject({ instructions: INTERVIEW_PROMPT });
 			expect(await storedReply()).toMatchObject({
 				content: expect.stringContaining('"refused"'),
 			});
@@ -566,13 +564,16 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 		it("saves new instructions straight away once the bot is set up", async () => {
 			await onDatabase((db) =>
-				db.update(bot).set({ prompt: "You answer billing questions." }).where(eq(bot.id, hostId)),
+				db
+					.update(bot)
+					.set({ instructions: "You answer billing questions." })
+					.where(eq(bot.id, botId)),
 			);
 
 			await segmentWith(savingInstructions());
 
 			expect(await storedBot()).toEqual({
-				prompt: "You triage support tickets.",
+				instructions: "You triage support tickets.",
 				description: "Sorts support tickets by urgency.",
 			});
 		});

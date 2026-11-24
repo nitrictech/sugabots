@@ -5,10 +5,11 @@ import {
 	builtInConnectorFor,
 	builtInConnectors,
 	type ConnectorAccess,
+	type ConnectorTool,
 	connectorToolKey,
 	connectorToolWritesOrDeletes,
 } from "@sugabots/contracts";
-import type { JSONSchema7, Tool } from "ai";
+import { asSchema, type JSONSchema7, type Tool } from "ai";
 import { Clock, Context, Duration, Effect, Layer } from "effect";
 import { type Database, effectRunner } from "../../database/database.ts";
 import type { ChatFileStore } from "../../files/chat-file-store.ts";
@@ -30,7 +31,7 @@ import {
 	type EgressHttpClients,
 } from "../../providers/network/egress.ts";
 import { offerAugmentationTools } from "./augmentations.ts";
-import type { Workspace } from "./github/push-tool.ts";
+import type { ComputerAtPlace } from "./computer/tools.ts";
 import { gitHubNote, gitHubTools } from "./github/tools.ts";
 import { httpTools } from "./http/tools.ts";
 import type { UploadSide } from "./signed-upload/tool.ts";
@@ -52,9 +53,9 @@ import type { UploadSide } from "./signed-upload/tool.ts";
  *
  * A server that cannot be reached is left out of the turn, with a line in the
  * log, rather than the turn failing: the bot can still answer with what it
- * has, and the connector's own test is where the owner learns why. One whose
+ * has, and the connector's own test is where someone who manages it learns why. One whose
  * sign-in was refused is left out too, but named apart, since it stays out of
- * every turn until a person signs in again.
+ * every turn until a member signs in again.
  *
  * A GitHub connector's tools are Sugabots' own (see `github/tools.ts`), with
  * no server to reach; they are offered the same way, keyed by its handle. So
@@ -70,11 +71,58 @@ export interface OfferedTool {
 	inputSchema: JSONSchema7;
 	/** Whether a call may change something at the other end. */
 	writeOrDelete: boolean;
-	/** Whether each call runs, waits for a person to allow it, or is refused. */
+	/** Whether each call runs, waits for a member to allow it, or is refused. */
 	access: ConnectorAccess;
 	connectorId: string;
 	connectorRevision: number;
 	remoteToolName: string;
+}
+
+/** The connector a tool is offered for, with what somebody chose for its tools. */
+type OfferingConnector = Pick<
+	ConnectorTarget,
+	"connectorId" | "handle" | "toolAccess" | "configurationRevision"
+>;
+
+/**
+ * `tool`, offered as `connector`'s tool `described`, under the key the model
+ * calls it by. Its description and schema are the tool's own unless given.
+ */
+export function offeredTool(
+	connector: OfferingConnector,
+	described: Pick<ConnectorTool, "name" | "readOnly" | "destructive"> & {
+		defaultAccess?: ConnectorAccess;
+	},
+	tool: Tool,
+	given: { description: string; inputSchema: JSONSchema7 } = {
+		description: typeof tool.description === "string" ? tool.description : "",
+		inputSchema: jsonSchemaOf(described.name, tool),
+	},
+): [string, OfferedTool] {
+	return [
+		connectorToolKey(connector.handle, described.name),
+		{
+			tool,
+			handle: connector.handle,
+			description: given.description,
+			inputSchema: given.inputSchema,
+			writeOrDelete: connectorToolWritesOrDeletes(described),
+			access: toolAccessOf(connector.toolAccess, described),
+			connectorId: connector.connectorId,
+			connectorRevision: connector.configurationRevision,
+			remoteToolName: described.name,
+		},
+	];
+}
+
+/**
+ * `tool`'s input schema as JSON Schema. Throws for a schema still being made,
+ * which the turn's catalog can't list or search.
+ */
+export function jsonSchemaOf(name: string, tool: Tool): JSONSchema7 {
+	const inputSchema = asSchema(tool.inputSchema).jsonSchema;
+	if ("then" in inputSchema) throw new Error(`The ${name} tool's input schema isn't ready`);
+	return inputSchema;
 }
 
 export interface ConnectorToolSet {
@@ -99,7 +147,7 @@ export interface ConnectorToolSet {
 /** A connector left out of a turn until someone signs in again. */
 export interface ExpiredConnector {
 	handle: string;
-	/** The project whose Connectors page it is signed in again from: a bot's default project, or one people made. */
+	/** The project whose Connectors page it is signed in again from: a bot's default project, or one members made. */
 	projectId: string;
 }
 
@@ -127,7 +175,7 @@ interface TurnSide {
 	/** The chat's files, which a connector's upload tool sends from. */
 	readonly files: Pick<ChatFileStore.Interface, "read">;
 	/** The computer of the project the turn works in, while the turn may use it. */
-	readonly workspace: Workspace | undefined;
+	readonly computer: ComputerAtPlace | undefined;
 	/** Whether the computer's provider signs its requests in, outside it. */
 	readonly computerSignsIn: boolean;
 }
@@ -283,7 +331,7 @@ export function from({
 				const uploadSide: UploadSide = {
 					chatId: turn.chatId,
 					files: turn.files,
-					computer: turn.workspace,
+					computer: turn.computer,
 					upload: httpClients,
 					run: effectRunner({
 						runPromiseExit: Effect.runPromiseExitWith(yield* Effect.context<Database>()),
@@ -431,25 +479,20 @@ function buildOfferedTools(
 	listing: ServerListing,
 	openSession: (target: ConnectorTarget) => Promise<ServerSession>,
 ): Record<string, OfferedTool> {
-	const tools: Record<string, OfferedTool> = {};
-	for (const { described, inputSchema, tool } of listing.tools) {
-		tools[connectorToolKey(target.handle, described.name)] = {
-			tool: {
-				...tool,
-				execute: async (input, options) =>
-					(await openSession(target)).run(listing, described.name, input, options),
-			},
-			handle: target.handle,
-			description: described.description ?? "",
-			inputSchema,
-			writeOrDelete: connectorToolWritesOrDeletes(described),
-			access: toolAccessOf(target.toolAccess, described),
-			connectorId: target.connectorId,
-			connectorRevision: target.configurationRevision,
-			remoteToolName: described.name,
-		};
-	}
-	return tools;
+	return Object.fromEntries(
+		listing.tools.map(({ described, inputSchema, tool }) =>
+			offeredTool(
+				target,
+				described,
+				{
+					...tool,
+					execute: async (input, options) =>
+						(await openSession(target)).run(listing, described.name, input, options),
+				},
+				{ description: described.description ?? "", inputSchema },
+			),
+		),
+	);
 }
 
 const nothingOffered: ConnectorToolSet = {

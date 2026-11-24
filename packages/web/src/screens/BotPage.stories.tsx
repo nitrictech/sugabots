@@ -1,9 +1,9 @@
-import type { ChatDetails, Message, WrittenFileSummary } from "@sugabots/contracts";
-import { listedChat, type TestConnector, testPerson } from "@sugabots/contracts/testing";
+import type { ListedWrittenFile, Message } from "@sugabots/contracts";
+import { listedChat, type TestConnector, testMember } from "@sugabots/contracts/testing";
 import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, linearHandler, revenue, storyBots } from "@/shell/story-fixtures.ts";
+import { growthDesk, revenue, storyBots } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	chatPath,
@@ -11,7 +11,7 @@ import {
 	StoryApp,
 	storyChatDetails,
 	storyChatFor,
-	storyPerson,
+	storyMember,
 	storyProjectChatDetails,
 	storyProjectChatFor,
 	storyWorkspace,
@@ -30,7 +30,7 @@ function said(id: string, by: "you" | "bot", text: string, at: string): Message 
 		chatId: chat,
 		author:
 			by === "you"
-				? testPerson({ id: storyPerson.id, name: storyPerson.name })
+				? testMember({ id: storyMember.id, name: storyMember.name })
 				: {
 						kind: "bot",
 						id: growthDesk.id,
@@ -40,7 +40,6 @@ function said(id: string, by: "you" | "bot", text: string, at: string): Message 
 						eyes: growthDesk.eyes,
 						shape: growthDesk.shape,
 					},
-		kind: "text",
 		status: "complete",
 		parts: [{ type: "text", text }],
 		content: text,
@@ -125,6 +124,7 @@ function expiredConnector(n: number, name: string, url: string): TestConnector {
 			email: "sam.rivera@example.com",
 			image: null,
 		},
+		signedInAs: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
 }
@@ -253,7 +253,7 @@ export const ProjectOpensNewestChat = meta.story({
 	},
 });
 
-/** The project's people, writing to each other: a chat with no bot in it, addressed to the project. */
+/** The project's members, writing to each other: a chat with no bot in it, addressed to the project. */
 const projectChat: Message[] = [
 	{
 		...said(
@@ -267,7 +267,7 @@ const projectChat: Message[] = [
 	{
 		...said("22", "you", "Drinks on Friday?", "2026-09-18T06:13:00.000Z"),
 		chatId: storyProjectChatFor(revenue).id,
-		author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000012", name: "Jay Young" }),
+		author: testMember({ id: "0199a3a0-0000-7000-8000-000000000012", name: "Jay Young" }),
 	},
 ];
 
@@ -667,25 +667,25 @@ function reactionHandlers(
 		onTakenBack = () => {},
 	}: { addAnswered?: Promise<void>; onTakenBack?: () => void } = {},
 ) {
-	const you = { id: storyPerson.id, name: storyPerson.name, at: "2026-09-18T06:09:00.000Z" };
+	const you = { id: storyMember.id, name: storyMember.name, at: "2026-09-18T06:09:00.000Z" };
 	const change = (messageId: string, emoji: string, reacting: boolean) => {
 		const index = chat.findIndex(({ id }) => id === messageId);
 		const message = chat[index];
 		if (!message) return HttpResponse.json([]);
 		const others = (message.reactions ?? []).map((reaction) =>
 			reaction.emoji === emoji
-				? { ...reaction, people: reaction.people.filter(({ id }) => id !== you.id) }
+				? { ...reaction, members: reaction.members.filter(({ id }) => id !== you.id) }
 				: reaction,
 		);
 		const reactions = reacting
 			? others.some((reaction) => reaction.emoji === emoji)
 				? others.map((reaction) =>
 						reaction.emoji === emoji
-							? { ...reaction, people: [...reaction.people, you] }
+							? { ...reaction, members: [...reaction.members, you] }
 							: reaction,
 					)
-				: [...others, { emoji, people: [you] }]
-			: others.filter((reaction) => reaction.people.length > 0);
+				: [...others, { emoji, members: [you] }]
+			: others.filter((reaction) => reaction.members.length > 0);
 		chat[index] = { ...message, reactions: reactions.length > 0 ? reactions : undefined };
 		return HttpResponse.json(reactions);
 	};
@@ -725,7 +725,7 @@ export const ChangeYourMindQuickly = meta.story({
 	beforeEach({ msw }) {
 		const chat = saidInChat.map((message) =>
 			/Want me to draft replies/.test(message.content)
-				? { ...message, reactions: [{ emoji: "👍", people: [jay] }] }
+				? { ...message, reactions: [{ emoji: "👍", members: [jay] }] }
 				: { ...message },
 		);
 		const added = Promise.withResolvers<void>();
@@ -758,7 +758,7 @@ export const ChangeYourMindQuickly = meta.story({
 
 		const askedId = asked.getAttribute("data-message-id");
 		await expect(chat.find(({ id }) => id === askedId)?.reactions).toEqual([
-			{ emoji: "👍", people: [jay] },
+			{ emoji: "👍", members: [jay] },
 		]);
 		const thumbs = await within(asked).findByRole("button", {
 			name: "👍 1: Jay Park reacted with 👍",
@@ -810,140 +810,6 @@ export const DetailsOnATablet = meta.story({
 });
 
 const API = import.meta.env.VITE_API_URL as string;
-const collaborationId = "0199a3a0-0000-7000-8000-000000000591";
-
-const asker = {
-	kind: "bot" as const,
-	id: growthDesk.id,
-	name: growthDesk.name,
-	handle: growthDesk.handle,
-	color: growthDesk.color,
-	eyes: growthDesk.eyes,
-	shape: growthDesk.shape,
-};
-const asked = {
-	kind: "bot" as const,
-	id: linearHandler.id,
-	name: linearHandler.name,
-	handle: linearHandler.handle,
-	color: linearHandler.color,
-	eyes: linearHandler.eyes,
-	shape: linearHandler.shape,
-};
-
-/** Growth Desk asks Linear Handler, and its line in the chat opens the collaboration. */
-const withCollaboration: Message[] = [
-	said(
-		"11",
-		"you",
-		"Checkout is timing out for some customers. Can you look?",
-		"2026-09-18T06:02:00.000Z",
-	),
-	{
-		...said("12", "bot", "Asking Linear Handler to check Sentry.", "2026-09-18T06:03:00.000Z"),
-		parts: [
-			{ type: "text", text: "Asking Linear Handler to check Sentry." },
-			{
-				type: "collaboration",
-				id: "0199a3a0-0000-7000-8000-000000000592",
-				botId: linearHandler.id,
-				botName: linearHandler.name,
-				chatId: collaborationId,
-				brief: "Check Sentry and open an issue if nothing is tracked",
-				status: "answered",
-				answer: "41 events in 24h, all hitting the 30s gateway limit. I opened LIN-482.",
-				atOffset: 38,
-			},
-		],
-	},
-];
-
-function collabMessage(id: string, author: typeof asker, text: string, at: string): Message {
-	return {
-		id: `0199a3a0-0000-7000-8000-0000000005${id}`,
-		chatId: collaborationId,
-		author,
-		kind: "text",
-		status: "complete",
-		parts: [{ type: "text", text }],
-		content: text,
-		createdAt: at,
-	};
-}
-
-const collaboration: ChatDetails = {
-	chat: {
-		id: collaborationId,
-		workspaceId: growthDesk.workspaceId,
-		projectId: null,
-		botId: linearHandler.id,
-		rootChatId: storyChatFor(growthDesk).id,
-		kind: "collaboration",
-		title: "Check Sentry and open an issue if nothing is tracked",
-		status: "done",
-		parentChatId: storyChatFor(growthDesk).id,
-		resolvedAt: null,
-		createdAt: "2026-09-18T06:03:00.000Z",
-		updatedAt: "2026-09-18T06:05:00.000Z",
-	},
-	capabilities: { approveToolCalls: true },
-	automationRun: null,
-	participants: [asked, asker],
-	projectBots: [asker, asked],
-	peopleReachingProject: [],
-	olderMessagesCursor: null,
-	queuedSince: null,
-	reads: [],
-	messages: [
-		collabMessage(
-			"93",
-			asker,
-			"Rowan is seeing checkout timeouts. Check Sentry and open an issue if nothing's tracked?",
-			"2026-09-18T06:03:00.000Z",
-		),
-		collabMessage(
-			"94",
-			asked,
-			"41 events in 24h, all hitting the 30s gateway limit. Nothing was open, so I opened LIN-482.",
-			"2026-09-18T06:05:00.000Z",
-		),
-	],
-};
-
-const collaborationHandlers = [
-	http.get(`${API}/chats/${collaborationId}`, () => HttpResponse.json(collaboration)),
-	...appHandlers({ messages: { [growthDesk.id]: withCollaboration } }),
-];
-
-/** A collaboration opened from its line: the sidebar with the two bots' chat, the chat's own on the right. */
-export const Collaboration = meta.story({
-	beforeEach({ msw }) {
-		msw.use(...collaborationHandlers);
-	},
-	render: () => <StoryApp path={`${chatPath(growthDesk)}?nestedChat=${collaborationId}`} />,
-	play: async ({ canvas }) => {
-		const panel = await canvas.findByRole("complementary", {
-			name: collaboration.chat.title,
-		});
-		await expect(
-			within(panel).getByText(`${growthDesk.name} and ${linearHandler.name}`),
-		).toBeInTheDocument();
-	},
-});
-
-/** The same on a phone: a sheet risen over the dimmed chat. */
-export const CollaborationOnAPhone = meta.story({
-	globals: { viewport: { value: "iphone12", isRotated: false } },
-	beforeEach({ msw }) {
-		msw.use(...collaborationHandlers);
-	},
-	render: () => <StoryApp path={`${chatPath(growthDesk)}?nestedChat=${collaborationId}`} />,
-	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("complementary", { name: collaboration.chat.title }),
-		).toBeInTheDocument();
-	},
-});
 
 /** Growth Desk with the computer on, in a workspace that has computers. */
 const computerHandlers = (messages: Message[]) => [
@@ -970,7 +836,7 @@ const browsing: Message = {
 			output: null,
 			status: "running",
 			error: null,
-			writeOrDelete: false,
+			approval: null,
 			atOffset: 0,
 			startedAt: "2026-09-18T06:20:01.000Z",
 			finishedAt: null,
@@ -1009,7 +875,7 @@ export const NoComputer = meta.story({
 
 /**
  * While the bot is browsing, its screen shows live in the reply. Opening the screen shows the desktop beside the chat, watched
- * until the person takes over.
+ * until the member takes over.
  */
 export const ComputerInUse = meta.story({
 	beforeEach({ msw }) {
@@ -1029,10 +895,10 @@ export const ComputerInUse = meta.story({
 	},
 });
 
-const pricing: WrittenFileSummary = {
+const pricing: ListedWrittenFile = {
 	id: "0199a3a0-0000-7000-8000-0000000005f1",
 	chatId: storyChatFor(growthDesk).id,
-	kind: "document",
+	kind: "markdown",
 	title: "Competitor pricing",
 	version: 1,
 	createdBy: { botId: growthDesk.id, name: growthDesk.name },
@@ -1067,7 +933,7 @@ const madePricing: Message = {
 			},
 			status: "completed",
 			error: null,
-			writeOrDelete: true,
+			approval: null,
 			atOffset: 0,
 			startedAt: "2026-09-18T06:07:30.000Z",
 			finishedAt: "2026-09-18T06:08:00.000Z",
@@ -1206,7 +1072,7 @@ export const SendRefusedFileGone = meta.story({
 						_tag: "BadRequest",
 						message: "A file to send is no longer there. Remove it and attach it again",
 						error: {
-							_tag: "UploadsNotFound",
+							_tag: "UnsentAttachmentsNotFound",
 							userMessage: "A file to send is no longer there. Remove it and attach it again",
 							isRetryable: false,
 						},

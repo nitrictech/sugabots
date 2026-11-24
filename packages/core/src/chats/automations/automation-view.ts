@@ -3,14 +3,12 @@ import {
 	type ListedAutomationDefinition,
 	type RunPageQuery,
 } from "@sugabots/contracts";
-import { userText } from "@sugabots/errors";
 import { and, asc, desc, eq, isNull, type SQL, sql } from "drizzle-orm";
-import { Data, Effect } from "effect";
+import { Effect } from "effect";
 import { Authorization } from "../../authorization/authorization.ts";
 import { type Executor, query, serviceOperations } from "../../database/database.ts";
 import { automation, automationRun, placedChat } from "../../database/schema.ts";
-import type { UserFacing } from "../../user-message.ts";
-import { decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
+import { earlierThan, encodeCursor, parseCursor } from "../cursor.ts";
 import { toAutomation, triggersOf } from "./automation.ts";
 import type { Automations } from "./automations.ts";
 import { latestRunOf, listStatusColumns, resultPosted, toListStatus, toRun } from "./execution.ts";
@@ -26,14 +24,14 @@ export const makeView = Effect.gen(function* () {
 				"list",
 				Effect.gen(function* () {
 					const standing = yield* authorization.project(projectId, "automation.read");
-					const { project: owner } = standing;
+					const { project } = standing;
 					const owned = and(
-						eq(automation.workspaceId, owner.workspaceId),
-						eq(automation.projectId, owner.id),
+						eq(automation.workspaceId, project.workspaceId),
+						eq(automation.projectId, project.id),
 						isNull(automation.deletedAt),
 					);
-					// Somebody who manages a bot they don't reach, as an administrator does a
-					// private bot, reads how its automations are set up but not how they ran.
+					// Somebody who manages a bot they don't reach, as an admin does a
+					// personal bot, reads how its automations are set up but not how they ran.
 					if (!standing.may("automation.history.read")) {
 						const definitions = yield* query((db) =>
 							db
@@ -60,11 +58,8 @@ export const makeView = Effect.gen(function* () {
 			operation(
 				"listProjectRuns",
 				Effect.gen(function* () {
-					const { project: owner } = yield* authorization.project(
-						projectId,
-						"automation.history.read",
-					);
-					return yield* runsPage(eq(automation.projectId, owner.id), page);
+					const { project } = yield* authorization.project(projectId, "automation.history.read");
+					return yield* runsPage(eq(automation.projectId, project.id), page);
 				}),
 			),
 	} satisfies ViewMethods;
@@ -92,7 +87,7 @@ type ViewMethods = Pick<Automations.Interface, "list" | "listProjectRuns">;
  */
 const runsPage = (which: SQL, page: RunPageQuery) =>
 	Effect.gen(function* () {
-		const before = page.cursor ? yield* executionCursor(page.cursor) : undefined;
+		const before = page.cursor ? yield* parseCursor(page.cursor) : undefined;
 		const rows = yield* query((db) =>
 			db
 				.select({
@@ -125,14 +120,3 @@ const runsPage = (which: SQL, page: RunPageQuery) =>
 					: null,
 		};
 	});
-
-export class InvalidRunCursor extends Data.TaggedError("InvalidRunCursor") implements UserFacing {
-	get userMessage() {
-		return userText`That automation run cursor is invalid`;
-	}
-}
-
-const executionCursor = (cursor: string) => {
-	const point = decodeCursor(cursor);
-	return point ? Effect.succeed(point) : Effect.fail(new InvalidRunCursor());
-};

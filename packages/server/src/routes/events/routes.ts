@@ -1,7 +1,7 @@
 import { type EventStream, type StreamEvent, streamEvent } from "@sugabots/contracts";
-import { CurrentPerson, NotFound } from "@sugabots/contracts/http";
+import { CurrentUserOfRequest, NotFound } from "@sugabots/contracts/http";
 import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { toPerson } from "@sugabots/core/chats/store/participants";
+import { toMember } from "@sugabots/core/chats/store/participants";
 import { Audience } from "@sugabots/core/database/events/audience";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { userText } from "@sugabots/errors";
@@ -18,7 +18,7 @@ import {
 } from "effect";
 import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSignedInPerson } from "../../auth/middleware.ts";
+import { asCurrentUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { StreamAccess } from "./access.ts";
 
@@ -38,8 +38,8 @@ const PING = Duration.seconds(15);
 
 /**
  * The server hangs up after this and the client reconnects with
- * `Last-Event-ID`, missing nothing. Bounds connectors leaked by clients that
- * went away without the socket noticing.
+ * `Last-Event-ID`, missing nothing. Bounds the streams held open by clients
+ * that went away without the socket noticing.
  */
 const MAX_AGE = Duration.minutes(30);
 
@@ -85,12 +85,6 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 				if (!stream) {
 					return yield* new NotFound({ message: userText`No such stream` });
 				}
-				if (request.method === "HEAD") {
-					return HttpServerResponse.empty({
-						status: 200,
-						headers: { ...STREAM_HEADERS, "content-type": STREAM_CONTENT_TYPE },
-					});
-				}
 				return yield* streamEvents({
 					bus,
 					stream,
@@ -102,7 +96,7 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 					),
 					mayHear: (audience) => access.hears(audience),
 				});
-			}).pipe(asSignedInPerson);
+			}).pipe(asCurrentUser);
 
 		return handlers
 			.handle("workspace", ({ params, request }) =>
@@ -118,13 +112,13 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 					if (!stream) {
 						return yield* new NotFound({ message: userText`No such chat` });
 					}
-					const signedIn = yield* CurrentPerson;
-					const typing = streamEvent("person.typing", {
+					const signedIn = yield* CurrentUserOfRequest;
+					const typing = streamEvent("member.typing", {
 						chatId: params.chatId,
-						person: toPerson(signedIn),
+						member: toMember(signedIn),
 					});
 					yield* Effect.promise(() => bus.publish(stream, typing));
-				}).pipe(asSignedInPerson),
+				}).pipe(asCurrentUser),
 			);
 	}),
 );
@@ -158,12 +152,12 @@ const streamEvents = Effect.fnUntraced(function* ({
 	timing: Timing;
 	/**
 	 * Re-asked before an event once `recheck` has passed since it last said
-	 * yes, as the actor the stream was opened for. It is the only thing that
+	 * yes, as the principal the stream was opened for. It is the only thing that
 	 * notices access being revoked mid-stream, which is why it is required.
 	 */
 	stillAuthorized: Effect.Effect<boolean, never, CurrentActor.Service>;
 	/**
-	 * Whether the actor may hear an event meant only for `audience` (see
+	 * Whether the principal may hear an event meant only for `audience` (see
 	 * `Audience`). One they may not is skipped, not the end of the stream.
 	 */
 	mayHear: (audience: Audience.Group) => Effect.Effect<boolean, never, CurrentActor.Service>;
@@ -269,7 +263,7 @@ const streamEvents = Effect.fnUntraced(function* ({
 /**
  * `Last-Event-ID` is whatever the client sent, including nothing at all. Only a
  * positive integer is a resume point; anything else starts a fresh stream,
- * which is the same thing a first connector gets.
+ * which is the same thing a first connection to the stream gets.
  */
 function resumeFrom(header: string | undefined): number | undefined {
 	if (!header) {

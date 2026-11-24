@@ -9,8 +9,13 @@ import { ProjectAdministration } from "@sugabots/core/workspaces/projects/projec
 import { ProjectStore } from "@sugabots/core/workspaces/projects/project-store";
 import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import type { PersonResolver } from "../../http/app.test-support.ts";
-import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
+import type { MemberResolver } from "../../http/app.test-support.ts";
+import {
+	createTestApp,
+	identifiedBy,
+	sessionTokenIn,
+	signedInWith,
+} from "../../http/app.test-support.ts";
 
 /**
  * The project routes, over doubles of `ProjectAdministration`, so what is under
@@ -34,20 +39,20 @@ const outsider = {
 	image: null,
 };
 
-const people = {
+const members = {
 	"admin-token": admin,
 	"outsider-token": outsider,
 };
 
-const resolvePerson: PersonResolver = async (headers) => {
-	const token = headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
-	const signedIn = people[token as keyof typeof people];
+const resolveMember: MemberResolver = async (headers) => {
+	const token = sessionTokenIn(headers) ?? "";
+	const signedIn = members[token as keyof typeof members];
 	return signedIn ?? null;
 };
 
 const BOT = "0199a3a0-0000-7000-8000-0000000000b1";
 
-const projectFor = (personId: string, isMember = true): Project => ({
+const projectFor = (memberId: string, isMember = true): Project => ({
 	id: PROJECT,
 	workspaceId: WORKSPACE,
 	name: "Suga-Team",
@@ -58,7 +63,7 @@ const projectFor = (personId: string, isMember = true): Project => ({
 	leadBotId: BOT,
 	isMember,
 	permissions: projectPermissions(
-		{ personId, workspaceRole: "admin" },
+		{ memberId, workspaceRole: "admin" },
 		{ isMember, defaultOf: null, isPublic: true },
 	),
 	createdAt: "2026-09-09T00:00:00.000Z",
@@ -68,7 +73,7 @@ const projectFor = (personId: string, isMember = true): Project => ({
 const app = (projects: Partial<ProjectAdministration.Interface>) =>
 	createTestApp(
 		Layer.merge(
-			identifiedBy(resolvePerson),
+			identifiedBy(resolveMember),
 			unimplemented(ProjectAdministration.Service, projects),
 		),
 	);
@@ -76,7 +81,7 @@ const app = (projects: Partial<ProjectAdministration.Interface>) =>
 const as = (token: string, init: RequestInit = {}) => ({
 	...init,
 	headers: {
-		authorization: `Bearer ${token}`,
+		...signedInWith(token),
 		"content-type": "application/json",
 		...init.headers,
 	},
@@ -90,18 +95,18 @@ const errorTag = async (response: Response) =>
 	Schema.decodeUnknownSync(failure)(await response.json())._tag;
 
 describe("GET /workspaces/:workspace/projects", () => {
-	it("lists the projects as the person the session belongs to sees them", async () => {
+	it("lists the projects as the member the session belongs to sees them", async () => {
 		let asked: unknown;
 		const response = await app({
 			list: (input) =>
-				Effect.map(CurrentActor.Service, ({ personId }) => {
-					asked = { ...input, personId };
-					return [projectFor(personId)];
+				Effect.map(CurrentActor.Service, ({ memberId }) => {
+					asked = { ...input, memberId };
+					return [projectFor(memberId)];
 				}),
 		}).request(`/workspaces/${WORKSPACE}/projects`, as("admin-token"));
 
 		expect(response.status).toBe(200);
-		expect(asked).toEqual({ workspace: WORKSPACE, personId: admin.id });
+		expect(asked).toEqual({ workspace: WORKSPACE, memberId: admin.id });
 		expect(Schema.decodeUnknownSync(Schema.Array(projectSchema))(await response.json())).toEqual([
 			projectFor(admin.id),
 		]);
@@ -239,7 +244,7 @@ describe("project membership", () => {
 	it("reports somebody outside the workspace as a bad request", async () => {
 		const response = await app({
 			addMember: () => Effect.fail(new ProjectAdministration.NotInWorkspace()),
-		}).request(`/projects/${PROJECT}/members`, as("admin-token", json({ personId: outsider.id })));
+		}).request(`/projects/${PROJECT}/members`, as("admin-token", json({ memberId: outsider.id })));
 
 		expect(response.status).toBe(400);
 	});
@@ -263,31 +268,31 @@ describe("project membership", () => {
 		expect(response.status).toBe(400);
 	});
 
-	it("takes the person the session belongs to out of the project", async () => {
+	it("takes the member the session belongs to out of the project", async () => {
 		let asked: unknown;
 		const response = await app({
 			leave: (input) =>
-				Effect.map(CurrentActor.Service, ({ personId }) => {
-					asked = { ...input, personId };
+				Effect.map(CurrentActor.Service, ({ memberId }) => {
+					asked = { ...input, memberId };
 				}),
 		}).request(`/projects/${PROJECT}/membership`, as("admin-token", { method: "DELETE" }));
 
 		expect(response.status).toBe(204);
-		expect(asked).toEqual({ projectId: PROJECT, personId: admin.id });
+		expect(asked).toEqual({ projectId: PROJECT, memberId: admin.id });
 	});
 
-	it("puts the person the session belongs to in a public project", async () => {
+	it("puts the member the session belongs to in a public project", async () => {
 		let asked: unknown;
 		const response = await app({
 			join: (input) =>
-				Effect.map(CurrentActor.Service, ({ personId }) => {
-					asked = { ...input, personId };
-					return projectFor(personId);
+				Effect.map(CurrentActor.Service, ({ memberId }) => {
+					asked = { ...input, memberId };
+					return projectFor(memberId);
 				}),
 		}).request(`/projects/${PROJECT}/membership`, as("admin-token", { method: "PUT" }));
 
 		expect(response.status).toBe(200);
-		expect(asked).toEqual({ projectId: PROJECT, personId: admin.id });
+		expect(asked).toEqual({ projectId: PROJECT, memberId: admin.id });
 		expect(Schema.decodeUnknownSync(projectSchema)(await response.json()).isMember).toBe(true);
 	});
 });
@@ -317,7 +322,7 @@ describe("a project's bots", () => {
 		]);
 	});
 
-	it("reports adding a private bot as a bad request", async () => {
+	it("reports adding a personal bot as a bad request", async () => {
 		const response = await app({
 			addBot: () => Effect.fail(new ProjectStore.BotNotPublic()),
 		}).request(`/projects/${PROJECT}/bots`, as("admin-token", json({ botId: BOT })));

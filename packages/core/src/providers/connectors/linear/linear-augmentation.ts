@@ -11,7 +11,7 @@ export const linearAugmentation = {
 			readOnly: false,
 			destructive: false,
 			// Linear's prepare step, which asks, is where a file is decided on; the
-			// upload only fills the place it reserved. A person asked again would
+			// upload only fills the place it reserved. A member asked again would
 			// rarely answer within the minute the URL lasts.
 			defaultAccess: "allow",
 		},

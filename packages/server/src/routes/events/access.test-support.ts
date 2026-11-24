@@ -1,4 +1,4 @@
-import { chatStream, personStream, workspaceStream } from "@sugabots/contracts";
+import { chatStream, memberStream, workspaceStream } from "@sugabots/contracts";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Effect } from "effect";
 import type { StreamAccess } from "./access.ts";
@@ -15,6 +15,6 @@ export const closedStreamAccess: StreamAccess.Interface = {
 export const openStreamAccess: StreamAccess.Interface = {
 	workspace: (workspaceId) => Effect.succeed(workspaceStream(workspaceId)),
 	chat: (chatId) => Effect.succeed(chatStream(chatId)),
-	me: () => Effect.map(CurrentActor.Service, ({ personId }) => personStream(personId)),
+	me: () => Effect.map(CurrentActor.Service, ({ memberId }) => memberStream(memberId)),
 	hears: () => Effect.succeed(true),
 };

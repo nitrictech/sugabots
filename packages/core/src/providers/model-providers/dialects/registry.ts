@@ -1,7 +1,7 @@
 import type { Modality, ModelCost } from "@opencode-ai/models";
 import { generatedAt, providers } from "@opencode-ai/models/snapshot";
 import type { BuiltInProviderId, ProviderModelCapability } from "@sugabots/contracts";
-import type { DiscoveredModel, ProviderIdentity } from "./dialect.ts";
+import { capabilitiesFrom, type DiscoveredModel, type ProviderIdentity } from "./dialect.ts";
 
 /**
  * What is known about a model whose provider does not say.
@@ -12,9 +12,6 @@ import type { DiscoveredModel, ProviderIdentity } from "./dialect.ts";
  * OpenCode reads, through the snapshot its package ships: the API never calls
  * out for it, and a dependency bump is what brings in new models. A provider
  * that does report something about a model is always believed over it.
- *
- * Not our built-in providers: this is models.dev's list of
- * models.
  */
 
 /** The part of models.dev the registry reads; the package's `ProviderMap` is one. */
@@ -138,24 +135,15 @@ export function registryFrom(source: RegistrySource, version: string): ModelRegi
  * named for it, and the picker relies on the capability to leave them out.
  */
 function capabilitiesOf(modelId: string, known: RegistryModel): ProviderModelCapability[] {
-	const capabilities: ProviderModelCapability[] = [];
-	const input = known.modalities?.input ?? [];
-	const output = known.modalities?.output ?? [];
-	if (known.tool_call) capabilities.push("tools");
-	if (known.reasoning) capabilities.push("thinking");
-	if (input.includes("image")) capabilities.push("vision");
-	if (input.includes("audio")) capabilities.push("audio");
-	if (output.includes("image")) capabilities.push("images");
+	const capabilities = capabilitiesFrom({
+		tools: known.tool_call === true,
+		thinking: known.reasoning === true,
+		inputs: known.modalities?.input ?? [],
+		outputs: known.modalities?.output ?? [],
+	});
 	if (/embed/.test(bare(modelId))) capabilities.push("embeddings");
 	return capabilities;
 }
-
-/** Fills nothing in, for a test about something else. */
-export const emptyRegistry: ModelRegistry = {
-	complete: (model) => model,
-	cost: () => undefined,
-	version: "empty",
-};
 
 /** The registry over the models.dev snapshot shipped with the installed package. */
 export const modelsDev: ModelRegistry = registryFrom(providers, `models.dev@${generatedAt}`);

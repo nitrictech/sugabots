@@ -4,7 +4,7 @@ import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
 /**
- * How much a person is notified about, as Slack offers it:
+ * How much a member is notified about, as Slack offers it:
  * `all`: every message somebody else finishes in a chat they reach,
  * and approvals they may decide.
  * `mentions`: messages that mention them, a bot's answers to them, messages in
@@ -21,7 +21,7 @@ const timeOfDaySchema = Schema.String.check(
 );
 
 /**
- * The hours of each day a person is not notified, in their time zone. `from`
+ * The hours of each day a member is not notified, in their time zone. `from`
  * after `to` spans midnight.
  */
 const quietHoursSchema = Schema.Struct({
@@ -32,13 +32,13 @@ const quietHoursSchema = Schema.Struct({
 
 export type QuietHours = typeof quietHoursSchema.Type;
 
-/** Which of a person's automations' runs they hear the end of: failed ones, every one, or none. */
+/** Which of a member's automations' runs they hear the end of: failed ones, every one, or none. */
 const automationRunNotificationsSchema = Schema.Literals(["failures", "all", "none"]);
 
 export type AutomationRunNotifications = typeof automationRunNotificationsSchema.Type;
 
 /**
- * What a person hears of besides messages, at any level but `nothing`: a
+ * What a member hears of besides messages, at any level but `nothing`: a
  * bot's reply to them that failed, and the runs of automations they made or
  * started.
  */
@@ -47,7 +47,7 @@ const otherNotificationsFields = {
 	automationRuns: automationRunNotificationsSchema,
 };
 
-/** Where a person chooses in place of the level above: a project, or a bot. */
+/** Where a member chooses in place of the level above: a project, or a bot. */
 export const notificationPlaceKindSchema = Schema.Literals(["project", "bot"]);
 
 export type NotificationPlaceKind = typeof notificationPlaceKindSchema.Type;
@@ -60,7 +60,7 @@ export const notificationLevelChoiceSchema = Schema.Struct({
 /** Mutes a project or bot until `until`, whatever its level, or with null, or a time passed, ends its mute. */
 export const notificationMuteSchema = Schema.Struct({ until: Schema.NullOr(isoTimestampSchema) });
 
-/** What the person is notified about, and when not. */
+/** What the member is notified about, and when not. */
 export const notificationSettingsSchema = Schema.Struct({
 	level: notificationLevelSchema,
 	/** No notifications until then; null when not paused. */
@@ -94,7 +94,7 @@ export type NotificationPreferences = typeof notificationPreferencesSchema.Type;
 
 /**
  * Which chat a browser tab shows while it has focus, which the server
- * passes to the person's other tabs, so none of them notifies them of what
+ * passes to the member's other tabs, so none of them notifies them of what
  * they are looking at. `clientId` tells one tab from another; a null
  * chat means the tab shows none, or lost focus.
  */
@@ -110,7 +110,7 @@ export type Presence = typeof presenceSchema.Type;
 /** How long a tab is taken to show a chat after it last said so, which it says again well within. */
 export const PRESENCE_LIFETIME_MS = 90_000;
 
-/** A notification as the browser shows it, sent to the person's open tabs. */
+/** A notification as the browser shows it, sent to the member's open tabs. */
 export const notificationContentSchema = Schema.Struct({
 	title: Schema.String,
 	body: Schema.String,

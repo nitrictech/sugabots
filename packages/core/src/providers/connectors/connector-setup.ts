@@ -284,7 +284,7 @@ export const make = Effect.gen(function* () {
 					const made = yield* connectors.create(
 						project.workspaceId,
 						project.id,
-						actor.personId,
+						actor.memberId,
 						connector,
 					);
 					const at = {
@@ -332,13 +332,7 @@ export const make = Effect.gen(function* () {
 					if (!updated) {
 						return yield* new ConnectorNotFound();
 					}
-					if (
-						changes.url !== undefined ||
-						changes.secret !== undefined ||
-						changes.secretHeader !== undefined
-					) {
-						yield* discoverQuietly(at);
-					}
+					if (ConnectorStore.changesReach(changes)) yield* discoverQuietly(at);
 					return yield* requireConnector(at);
 				}),
 			),
@@ -363,7 +357,7 @@ export const make = Effect.gen(function* () {
 					const { project, actor } = yield* authorization.project(projectId, "connector.manage");
 					const workspaceId = project.workspaceId;
 					yield* requireAllowedUrl(egress, server.url);
-					const made = yield* connectors.create(workspaceId, project.id, actor.personId, {
+					const made = yield* connectors.create(workspaceId, project.id, actor.memberId, {
 						...server,
 						auth: "oauth",
 					});
@@ -371,10 +365,10 @@ export const make = Effect.gen(function* () {
 						workspaceId,
 						connectorId: made.id,
 						serverUrl: made.url,
-						startedByPersonId: actor.personId,
+						startedByMemberId: actor.memberId,
 					}).pipe(Effect.tapError(() => connectors.remove(workspaceId, project.id, made.id)));
 					if ("authorized" in started) {
-						// Nothing to sign in to, so nothing the person asked for was made.
+						// Nothing to sign in to, so nothing the member asked for was made.
 						yield* connectors.remove(workspaceId, project.id, made.id);
 						return yield* new ConnectorNeededNoSignIn();
 					}
@@ -391,12 +385,12 @@ export const make = Effect.gen(function* () {
 					if (found.auth !== "oauth") {
 						return yield* new ConnectorDoesNotUseOAuth();
 					}
-					const { personId } = yield* CurrentActor.Service;
+					const { memberId } = yield* CurrentActor.Service;
 					const started = yield* startSignIn({
 						workspaceId: at.workspaceId,
 						connectorId: at.connectorId,
 						serverUrl: found.url,
-						startedByPersonId: personId,
+						startedByMemberId: memberId,
 					});
 					if ("authorized" in started) {
 						yield* discoverQuietly(at);
@@ -415,10 +409,10 @@ export const make = Effect.gen(function* () {
 					if (!owner) return { failure: "unknown_state" as const };
 					// Somebody else's browser bringing the callback would otherwise store
 					// the credential they signed in with on a connector they never chose.
-					const { personId } = yield* CurrentActor.Service;
-					if (owner.startedByPersonId !== personId) return { failure: "not_allowed" as const };
+					const { memberId } = yield* CurrentActor.Service;
+					if (owner.startedByMemberId !== memberId) return { failure: "not_allowed" as const };
 					// Asked again rather than carried over from the request that started
-					// the sign-in: authority can be withdrawn while the person is away at
+					// the sign-in: authority can be withdrawn while the member is away at
 					// the authorization server, and completing would store a credential
 					// they may no longer manage.
 					const allowed = yield* Effect.result(
@@ -437,10 +431,13 @@ export const make = Effect.gen(function* () {
 					const at = { ...project, connectorId: owner.connectorId };
 					const found = yield* requireConnector(at);
 					const finished = yield* Effect.result(
-						signIn.finish(owner.workspaceId, owner.connectorId, found.url, {
-							code: callback.code,
-							state: callback.state,
-						}),
+						signIn.finish(
+							owner.workspaceId,
+							owner.connectorId,
+							found.url,
+							{ code: callback.code, state: callback.state },
+							memberId,
+						),
 					);
 					if (finished._tag === "Failure") {
 						yield* Effect.logWarning("A connector's sign-in did not finish", finished.failure);

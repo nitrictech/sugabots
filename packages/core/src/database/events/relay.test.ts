@@ -1,5 +1,10 @@
 import { PgClient } from "@effect/sql-pg";
-import { type EventStream, streamEvent } from "@sugabots/contracts";
+import {
+	type DurableEventType,
+	type EventStream,
+	type StreamEvent,
+	streamEvent,
+} from "@sugabots/contracts";
 import { Effect, Layer, Queue } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -7,6 +12,7 @@ import { Ids } from "../../ids/ids.ts";
 import { unimplemented } from "../../testing.ts";
 import { closeDatabase, databaseForTests, runOnPostgres } from "../testing.ts";
 import { EventBus } from "./bus.ts";
+import { EventOutbox } from "./outbox.ts";
 import { NoticesNotHeard, postgresEventRelay } from "./relay.ts";
 import { EventStore } from "./store.ts";
 
@@ -59,6 +65,17 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 		});
 	}
 
+	/** Stores `event` through the outbox, which hands it to `bus` once committed. */
+	async function committedThrough(
+		bus: EventBus.Interface,
+		event: StreamEvent & { type: DurableEventType },
+	): Promise<void> {
+		const outbox = Effect.runSync(
+			EventOutbox.make.pipe(Effect.provideService(EventBus.Service, bus)),
+		);
+		await runOnPostgres(outbox.publish([{ stream, event }]));
+	}
+
 	/** Listening is set up in the background; a publish before it is up would be missed. */
 	async function listening(): Promise<void> {
 		await new Promise((resolve) => setTimeout(resolve, 200));
@@ -70,14 +87,11 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 		await listening();
 		const heardByReader = collect(reader, 1);
 		const heardByWriter = collect(writer, 1);
-		const seq = await store.append(stream, streamEvent("chat.changed", { chatId: "t" }));
+		await committedThrough(writer, streamEvent("chat.changed", { chatId: "t" }));
 
-		await writer.publishCommitted([
-			{ stream, seq, event: streamEvent("chat.changed", { chatId: "t" }) },
-		]);
-
-		expect(await heardByReader).toMatchObject([{ seq, event: { type: "chat.changed" } }]);
-		expect(await heardByWriter).toHaveLength(1);
+		const [written] = await heardByWriter;
+		expect(await heardByReader).toEqual([written]);
+		expect(written).toMatchObject({ seq: expect.any(Number), event: { type: "chat.changed" } });
 		// Nothing else arrives: the writer does not hear its own notice back.
 		await new Promise((resolve) => setTimeout(resolve, 200));
 	});
@@ -97,8 +111,9 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 			messageId: "m",
 			status: "complete",
 			content: "x".repeat(9_000),
+			finishedAt: "2026-11-23T10:00:00.000Z",
 		});
-		await writer.publish(stream, large);
+		await committedThrough(writer, large);
 
 		const deliveries = await heard;
 		expect(deliveries[0]).toEqual({ event: expect.objectContaining({ type: "message.delta" }) });

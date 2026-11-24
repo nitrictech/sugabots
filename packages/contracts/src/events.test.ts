@@ -3,23 +3,17 @@ import { describe, expect, it } from "vitest";
 import {
 	chatUpdateEventSchema,
 	EVENT_VERSION,
-	eventPayloadSchemas,
 	isDurableEventType,
 	streamEvent,
 	streamEventSchema,
 	workspaceUpdateEventSchema,
 } from "./events.ts";
-import { testPerson } from "./testing.ts";
+import { testMember } from "./testing.ts";
 
 describe("durability", () => {
 	it("persists state changes and not progress", () => {
 		expect(isDurableEventType("message.created")).toBe(true);
 		expect(isDurableEventType("message.delta")).toBe(false);
-	});
-
-	it("does not declare message-routed events", () => {
-		expect(isDurableEventType("chat.message_routed")).toBe(false);
-		expect("chat.message_routed" in eventPayloadSchemas).toBe(false);
 	});
 
 	it("treats a type it has never heard of as ephemeral", () => {
@@ -31,11 +25,11 @@ describe("durability", () => {
 
 describe("envelope", () => {
 	it("stamps the version and keeps the payload", () => {
-		const event = streamEvent("chat.created", { chatId: "c1" });
+		const event = streamEvent("chat.changed", { chatId: "c1" });
 
 		expect(event).toEqual({
 			v: EVENT_VERSION,
-			type: "chat.created",
+			type: "chat.changed",
 			chatId: "c1",
 		});
 	});
@@ -75,7 +69,6 @@ describe("envelope", () => {
 		"turn.completed",
 		"chat.changed",
 		"chat.notice",
-		"collaboration.updated",
 	])("recognizes the known chat update %s", (type) => {
 		const ids = {
 			chatId: "00000000-0000-4000-8000-000000000001",
@@ -90,6 +83,7 @@ describe("envelope", () => {
 				messageId: "m1",
 				content: "hi",
 				status: "complete",
+				finishedAt: "2026-11-23T10:00:00.000Z",
 			},
 			"message.failed": {
 				...ids,
@@ -98,23 +92,8 @@ describe("envelope", () => {
 			},
 			"tool_call.started": { ...ids, messageId: "m1", toolCall: toolCall("running") },
 			"tool_call.completed": { ...ids, messageId: "m1", toolCall: toolCall("completed") },
-			"turn.completed": { ...ids, status: "done" },
+			"turn.completed": ids,
 			"chat.notice": { ...ids, notice: "Ada has no model chosen, so it cannot reply." },
-			"collaboration.updated": {
-				...ids,
-				messageId: "00000000-0000-4000-8000-000000000004",
-				collaboration: {
-					type: "collaboration",
-					id: "00000000-0000-4000-8000-000000000006",
-					botId: ids.botId,
-					botName: "Helper",
-					chatId: "00000000-0000-4000-8000-000000000007",
-					brief: "Look into it",
-					status: "waiting",
-					answer: null,
-					atOffset: 0,
-				},
-			},
 		};
 
 		expect(
@@ -154,7 +133,6 @@ describe("envelope", () => {
 
 	it("keeps open empty payloads and workspace envelopes", () => {
 		const extras = { future: { value: 1 } };
-		expect(Schema.decodeSync(eventPayloadSchemas["bot.updated"])(extras)).toEqual(extras);
 		for (const payload of [
 			{ type: "reset" },
 			{ type: "chat.changed", chatId: "00000000-0000-4000-8000-000000000001" },
@@ -165,10 +143,10 @@ describe("envelope", () => {
 		}
 	});
 
-	it("accepts changes to a chat's items", () => {
+	it("accepts changes to a chat's nested chats", () => {
 		const event = {
 			v: EVENT_VERSION,
-			type: "chat.item_changed",
+			type: "chat.nested_chat_changed",
 			rootChatId: "00000000-0000-4000-8000-000000000001",
 			chatId: "00000000-0000-4000-8000-000000000002",
 		};
@@ -186,7 +164,7 @@ function toolCall(status: "running" | "completed") {
 		output: status === "completed" ? { title: "Example" } : null,
 		status,
 		error: null,
-		writeOrDelete: false,
+		approval: null,
 		atOffset: 0,
 		startedAt: "2026-09-14T00:00:00.000Z",
 		finishedAt: status === "completed" ? "2026-09-14T00:00:01.000Z" : null,
@@ -197,8 +175,7 @@ function message() {
 	return {
 		id: "00000000-0000-4000-8000-000000000004",
 		chatId: "00000000-0000-4000-8000-000000000001",
-		author: testPerson({ id: "00000000-0000-4000-8000-000000000005", name: "Sam" }),
-		kind: "text" as const,
+		author: testMember({ id: "00000000-0000-4000-8000-000000000005", name: "Sam" }),
 		status: "complete" as const,
 		parts: [{ type: "text" as const, text: "hi" }],
 		content: "hi",

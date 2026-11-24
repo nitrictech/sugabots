@@ -44,7 +44,7 @@ export const make = Effect.gen(function* () {
 	/** Rewrites each routine in `from` to run in `to`, from now. */
 	const moveRoutines = (workspaceId: string, from: string, to: TimeZone) =>
 		Effect.gen(function* () {
-			const schedules = yield* query((db) =>
+			const routines = yield* query((db) =>
 				db
 					.select({
 						trigger: automationTrigger,
@@ -58,7 +58,7 @@ export const make = Effect.gen(function* () {
 			);
 			const now = yield* DateTime.nowAsDate;
 			yield* Effect.forEach(
-				schedules,
+				routines,
 				({ trigger, projectId, state }) =>
 					Effect.gen(function* () {
 						if (trigger.settings.kind !== "routine") return;

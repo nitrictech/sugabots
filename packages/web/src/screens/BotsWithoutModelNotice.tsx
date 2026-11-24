@@ -45,7 +45,7 @@ export function BotsWithoutModelNotice({ bots }: { bots: readonly Bot[] }) {
 }
 
 /**
- * What gives `bot` a model, for the person reading. An ordinary bot's model is
+ * What gives `bot` a model, for the member reading. An ordinary bot's model is
  * chosen in its settings, by whoever may change it. A Personal Assistant's is
  * Sugabots' to set, so it has none only while the workspace has no model
  * switched on, which only somebody who manages its providers can change.

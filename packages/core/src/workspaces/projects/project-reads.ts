@@ -1,65 +1,65 @@
 import {
 	ADMINISTERING_WORKSPACE_ROLES,
-	type PersonParticipant,
+	type MemberParticipant,
 	type ProjectMember,
 } from "@sugabots/contracts";
 import { and, asc, count, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { peopleReachingProject } from "../../authorization/access.ts";
-import { personColumns, toPerson } from "../../chats/store/participants.ts";
+import { membersReachingProject } from "../../authorization/access.ts";
+import { memberColumns, toMember } from "../../chats/store/participants.ts";
 import { query } from "../../database/database.ts";
 import {
 	bot,
+	member,
 	membership,
-	person,
 	project,
 	projectBot,
 	projectMember,
 } from "../../database/schema.ts";
 
-/** The people in the project, by name. Administrators, who are in every one, can't be taken out. */
+/** The members in the project, by name. Administrators, who are in every one, can't be taken out. */
 export const projectMembers = (projectId: string) =>
 	query((db) =>
 		db
 			.select({
-				personId: person.id,
-				name: person.name,
-				email: person.email,
-				image: person.image,
+				memberId: member.id,
+				name: member.name,
+				email: member.email,
+				image: member.image,
 				removable: sql<boolean>`${not(inArray(membership.role, [...ADMINISTERING_WORKSPACE_ROLES]))}`,
 			})
 			.from(projectMember)
-			.innerJoin(person, eq(person.id, projectMember.personId))
+			.innerJoin(member, eq(member.id, projectMember.memberId))
 			.innerJoin(
 				membership,
 				and(
 					eq(membership.workspaceId, projectMember.workspaceId),
-					eq(membership.personId, projectMember.personId),
+					eq(membership.memberId, projectMember.memberId),
 				),
 			)
 			.where(eq(projectMember.projectId, projectId))
-			.orderBy(asc(person.name)),
+			.orderBy(asc(member.name)),
 	).pipe(Effect.map((rows): ProjectMember[] => rows));
 
-/** The people who reach the project (see `peopleReachingProject`), by name. */
-export const peopleReachingProjectNamed = (projectId: string) =>
+/** The members who reach the project (see `membersReachingProject`), by name. */
+export const membersReachingProjectNamed = (projectId: string) =>
 	query((db) =>
-		db.query.person.findMany({
-			...personColumns,
+		db.query.member.findMany({
+			...memberColumns,
 			where: {
-				RAW: (person) => sql`${person.id} in (${peopleReachingProject(sql`${projectId}`)})`,
+				RAW: (member) => sql`${member.id} in (${membersReachingProject(sql`${projectId}`)})`,
 			},
 			orderBy: { name: "asc" },
 		}),
-	).pipe(Effect.map((people): PersonParticipant[] => people.map(toPerson)));
+	).pipe(Effect.map((members): MemberParticipant[] => members.map(toMember)));
 
 /**
- * How many people and bots are in each of the projects `projectIds`, counted
+ * How many members and bots are in each of the projects `projectIds`, counted
  * as the project's members list and bots list would list them.
  */
 export const projectHeadcounts = (projectIds: readonly string[]) =>
 	Effect.gen(function* () {
-		const people = yield* query((db) =>
+		const members = yield* query((db) =>
 			db
 				.select({ projectId: projectMember.projectId, count: count() })
 				.from(projectMember)
@@ -67,7 +67,7 @@ export const projectHeadcounts = (projectIds: readonly string[]) =>
 					membership,
 					and(
 						eq(membership.workspaceId, projectMember.workspaceId),
-						eq(membership.personId, projectMember.personId),
+						eq(membership.memberId, projectMember.memberId),
 					),
 				)
 				.where(inArray(projectMember.projectId, [...projectIds]))
@@ -81,7 +81,7 @@ export const projectHeadcounts = (projectIds: readonly string[]) =>
 				.where(and(inArray(projectBot.projectId, [...projectIds]), isNull(bot.systemBotKey)))
 				.groupBy(projectBot.projectId),
 		);
-		const memberCounts = new Map(people.map((row) => [row.projectId, row.count]));
+		const memberCounts = new Map(members.map((row) => [row.projectId, row.count]));
 		const botCounts = new Map(bots.map((row) => [row.projectId, row.count]));
 		return (projectId: string) => ({
 			memberCount: memberCounts.get(projectId) ?? 0,

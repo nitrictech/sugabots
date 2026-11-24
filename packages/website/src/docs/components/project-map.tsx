@@ -10,20 +10,20 @@ import { riseIn } from "@/components/reveal";
 import { ChoiceChips } from "@/components/ui/choice-chips";
 
 const parts = {
-	people: {
-		label: "People",
+	members: {
+		label: "Members",
 		explanation:
-			"Everyone in the project sees its chats and files, and anyone in it but a viewer can invite more people. Anyone can find a public project and join it; a private one is invitation only.",
+			"Everyone in the project sees its chats and files, and anyone in it but a viewer can invite more members. Anyone can find a public project and join it; a private one is invitation only.",
 	},
 	bots: {
 		label: "Bots",
 		explanation:
-			"Public bots, added by the project's people. Its lead bot answers its chats; the others answer when mentioned, or when you reply to them, and any of them can ask another bot for help.",
+			"Public bots, added by the project's members. Its lead bot answers its chats; the others answer when mentioned, or when you reply to them, and any of them can ask another bot for help.",
 	},
 	chats: {
 		label: "Chats",
 		explanation:
-			"The project's chats, listed in its own sidebar, the most recently active first. The project is made of them: each is one chat about one piece of work, with all its people and bots.",
+			"The project's chats, listed in its own sidebar, the most recently active first. The project is made of them: each is one chat about one piece of work, with all its members and bots.",
 	},
 	files: {
 		label: "Files",
@@ -58,8 +58,8 @@ function Region({ part, picked, children }: { part: Part; picked: Part; children
 
 /** A project taken apart: pick a part to see what it is and how it fits. */
 export function ProjectMap() {
-	const [picked, setPicked] = useState<Part>("people");
-	const people = [cast.you, cast.mum, cast.dad, cast.sam];
+	const [picked, setPicked] = useState<Part>("members");
+	const members = [cast.you, cast.mum, cast.dad, cast.sam];
 	const bots = [cast.tripPlanner, cast.budgetKeeper];
 
 	return (
@@ -74,10 +74,10 @@ export function ProjectMap() {
 				</div>
 			</div>
 			<div className="grid gap-3 bg-muted/40 p-4 sm:grid-cols-2">
-				<Region part="people" picked={picked}>
+				<Region part="members" picked={picked}>
 					<div className="flex gap-2">
-						{people.map((person) => (
-							<ChatAvatar key={person.name} author={person} size="lg" />
+						{members.map((member) => (
+							<ChatAvatar key={member.name} author={member} size="lg" />
 						))}
 					</div>
 				</Region>
@@ -85,7 +85,7 @@ export function ProjectMap() {
 					<div className="flex flex-col gap-2">
 						{bots.map((bot) => (
 							<span key={bot.name} className="flex items-center gap-2 text-sm font-semibold">
-								<BotAvatar {...bot.look} />
+								<BotAvatar {...bot.avatar} />
 								{bot.name}
 							</span>
 						))}

@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { membership, person, workspace } from "../../../database/schema.ts";
+import { member, membership, workspace } from "../../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -22,7 +22,7 @@ import { withSignInAccess } from "./sign-in.ts";
 describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 	let store: Promised<ModelProviderStore.Interface>;
 	let workspaceId: string;
-	let personId: string;
+	let memberId: string;
 	let providerId: string;
 	let service: { clients: EgressHttpClients };
 
@@ -42,7 +42,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					]),
 				),
 			)
-		)(personId);
+		)(memberId);
 
 	const view = () => runOnPostgres(providerIn(workspaceId, providerId));
 
@@ -79,15 +79,15 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 		);
 		const [somebody] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
 				.returning(),
 		);
 		if (!made || !somebody) throw new Error("could not create the test workspace");
 		workspaceId = made.id;
-		personId = somebody.id;
+		memberId = somebody.id;
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, personId, role: "admin" }),
+			db.insert(membership).values({ workspaceId, memberId, role: "admin" }),
 		);
 		await store.seedBuiltInProviders(workspaceId);
 	});
@@ -147,7 +147,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			const signIn = await setup();
 			const started = await signIn.startSignIn({ workspace: workspaceId, providerId });
 			const other = await store.create(workspaceId, {
-				createdById: personId,
+				createdById: memberId,
 				provider: {
 					name: "Gateway",
 					baseUrl: "https://models.example/v1",
@@ -174,7 +174,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					expiresAt: Date.now() + 60_000,
 					accountId: "account-1",
 				},
-				signedInById: personId,
+				signedInById: memberId,
 			});
 			const access = await storedAccess();
 
@@ -194,7 +194,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					expiresAt: Date.now() + 60 * 60_000,
 					accountId: "account-1",
 				},
-				signedInById: personId,
+				signedInById: memberId,
 			});
 
 			const ready = await withAccess(await storedAccess());
@@ -212,7 +212,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			xai = fakeXai();
 			service = xai;
 			const added = await store.create(workspaceId, {
-				createdById: personId,
+				createdById: memberId,
 				provider: { builtIn: "supergrok" },
 			});
 			providerId = added.id;
@@ -254,7 +254,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			expect(xai.listingAuthorization).toBe("Bearer xai-access-1");
 		});
 
-		it("says so when the person declines the sign-in", async () => {
+		it("says so when the member declines the sign-in", async () => {
 			const signIn = await setup();
 			const started = await signIn.startSignIn({ workspace: workspaceId, providerId });
 
@@ -276,7 +276,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					expiresAt: Date.now() + 60_000,
 					accountId: null,
 				},
-				signedInById: personId,
+				signedInById: memberId,
 			});
 
 			const ready = await withAccess(await storedAccess());

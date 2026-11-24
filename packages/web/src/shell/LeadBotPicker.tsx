@@ -16,7 +16,7 @@ function useLeadableBots(): readonly Bot[] {
 }
 
 /**
- * Choosing a project's lead bot, which answers its chats unless people
+ * Choosing a project's lead bot, which answers its chats unless members
  * mention another: one of the workspace's public bots, added to the project
  * if it isn't in it yet.
  */

@@ -36,7 +36,7 @@ import {
  * take either, and read the project they are about through here.
  */
 
-/** A bot, shown as itself over its default project, or a project people made. */
+/** A bot, shown as itself over its default project, or a project members made. */
 export type ResourceOwner = { bot: Bot } | { project: Project };
 
 /** The project whose chats, files, computer, connectors and automations these are. */
@@ -49,7 +49,7 @@ export function ownerName(owner: ResourceOwner): string {
 	return "bot" in owner ? owner.bot.name : owner.project.name;
 }
 
-/** What the person may do with the owner's computer, connectors and automations, as the API resolved it. */
+/** What the member may do with the owner's computer, connectors and automations, as the API resolved it. */
 export function resourcePermissions(owner: ResourceOwner): ResourcePermissions {
 	return "bot" in owner ? owner.bot.permissions.resources : owner.project.permissions.resources;
 }

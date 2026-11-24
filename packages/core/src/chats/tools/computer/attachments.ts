@@ -11,9 +11,8 @@ import type { Ids } from "../../../ids/ids.ts";
  * so copying a file again leaves it as it is: the file in the chat never
  * changes, so a second copy could only undo their work.
  *
- * A bot keeps every copy in its own computer, so it can read in one of its
- * chats a copy made in another. Everyone who can see one of a bot's chats can
- * see them all, so this lets no person see more than they could.
+ * The copies go in each chat's folder on the project's computer, so a
+ * copy made in one chat is not where another chat's commands start.
  */
 
 /** Where the copies are kept, in the chat's folder. */
@@ -34,12 +33,12 @@ interface ChatFile {
 }
 
 /** Where `file` is copied, relative to the chat's folder, where commands start. */
-export function computerPathOf(file: ChatFile): string {
+function computerPathOf(file: ChatFile): string {
 	return `${ATTACHMENTS_FOLDER}/${file.id}/${safeFileName(file.name)}`;
 }
 
 /**
- * `name`, as a person's computer or a bot gave it, made safe as one file
+ * `name`, as a member's computer or a bot gave it, made safe as one file
  * name: no folders, nothing hidden or read as a command's option, no
  * characters that break a line or reorder what's shown, and short enough for
  * Linux, keeping its extension.

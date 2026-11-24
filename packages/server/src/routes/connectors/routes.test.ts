@@ -5,8 +5,13 @@ import { ConnectorSetup } from "@sugabots/core/providers/connectors/connector-se
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { PersonResolver } from "../../http/app.test-support.ts";
-import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
+import type { MemberResolver } from "../../http/app.test-support.ts";
+import {
+	createTestApp,
+	identifiedBy,
+	sessionTokenIn,
+	signedInWith,
+} from "../../http/app.test-support.ts";
 
 /**
  * The connector routes over doubles of `ConnectorSetup`: what each request
@@ -21,18 +26,18 @@ const CONNECTOR_ID = "0199a3a0-0000-7000-8000-000000000003";
 /** The bot's default project, which holds its connectors. */
 const PROJECT_ID = "0199a3a0-0000-7000-8000-000000000005";
 const root = `/projects/${PROJECT_ID}/connectors`;
-const headers = { authorization: "Bearer good-token", "content-type": "application/json" };
+const headers = { ...signedInWith("good-token"), "content-type": "application/json" };
 const ofProject = { workspaceId: WORKSPACE_ID, projectId: PROJECT_ID };
 
-const resolvePerson: PersonResolver = async (requestHeaders) =>
-	requestHeaders.get("authorization") === "Bearer good-token"
+const resolveMember: MemberResolver = async (requestHeaders) =>
+	sessionTokenIn(requestHeaders) === "good-token"
 		? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 		: null;
 
 /** What a double saw: its input, and who it was asked as. */
-const asked = <Input>(calls: Array<{ input: Input; personId: string }>, input: Input) =>
-	Effect.map(CurrentActor.Service, ({ personId }) => {
-		calls.push({ input, personId });
+const asked = <Input>(calls: Array<{ input: Input; memberId: string }>, input: Input) =>
+	Effect.map(CurrentActor.Service, ({ memberId }) => {
+		calls.push({ input, memberId });
 	});
 
 const wiki: Connector = {
@@ -53,17 +58,18 @@ const wiki: Connector = {
 	toolCounts: { allow: 0, ask: 0, off: 0 },
 	lastTestError: null,
 	connectedBy: null,
+	signedInAs: null,
 	createdAt: "2026-09-14T00:00:00.000Z",
 };
 
 const app = (connectors: Partial<ConnectorSetup.Interface>) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolvePerson), unimplemented(ConnectorSetup.Service, connectors)),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(ConnectorSetup.Service, connectors)),
 	);
 
 describe("a bot's connectors", () => {
-	it("adds a server as the person asking, for the bot it is posted to", async () => {
-		const calls: Array<{ input: unknown; personId: string }> = [];
+	it("adds a server as the member asking, for the bot it is posted to", async () => {
+		const calls: Array<{ input: unknown; memberId: string }> = [];
 		const response = await app({
 			create: (input) => Effect.as(asked(calls, input), wiki),
 		}).request(root, {
@@ -79,13 +85,13 @@ describe("a bot's connectors", () => {
 					projectId: PROJECT_ID,
 					connector: { name: "Wiki", url: "https://wiki.example.com/mcp" },
 				},
-				personId: USER_ID,
+				memberId: USER_ID,
 			},
 		]);
 	});
 
 	it("adds an HTTP endpoint as one", async () => {
-		const calls: Array<{ input: unknown; personId: string }> = [];
+		const calls: Array<{ input: unknown; memberId: string }> = [];
 		const endpoint = {
 			kind: "http",
 			name: "Alerts",
@@ -97,7 +103,7 @@ describe("a bot's connectors", () => {
 
 		expect(response.status).toBe(201);
 		expect(calls).toEqual([
-			{ input: { projectId: PROJECT_ID, connector: endpoint }, personId: USER_ID },
+			{ input: { projectId: PROJECT_ID, connector: endpoint }, memberId: USER_ID },
 		]);
 	});
 
@@ -154,7 +160,7 @@ describe("signing a connector in", () => {
 	});
 
 	it("finishes at the callback and sends the browser back to the project", async () => {
-		const calls: Array<{ input: unknown; personId: string }> = [];
+		const calls: Array<{ input: unknown; memberId: string }> = [];
 		const back = await app({
 			completeOAuth: (input) => Effect.as(asked(calls, input), { at: ofProject }),
 		}).request("/connectors/oauth/callback?code=the-code&state=s-1", { headers });
@@ -164,7 +170,7 @@ describe("signing a connector in", () => {
 			`http://localhost:5173/connectors/oauth/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}`,
 		);
 		expect(calls).toEqual([
-			{ input: { callback: { code: "the-code", state: "s-1" } }, personId: USER_ID },
+			{ input: { callback: { code: "the-code", state: "s-1" } }, memberId: USER_ID },
 		]);
 	});
 

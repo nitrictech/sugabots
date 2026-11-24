@@ -5,36 +5,36 @@ import {
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 
-export interface RoleAbility {
+interface RoleAbility {
 	label: string;
 	roles: readonly WorkspaceRole[];
 	/** When the answer depends on something, like which bots you made or which projects you're in. */
 	note?: string;
 }
 
-const EVERYONE: readonly WorkspaceRole[] = ["owner", "admin", "editor", "viewer"];
+const EVERYONE = WORKSPACE_ROLES;
 const ALL_BUT_VIEWERS: readonly WorkspaceRole[] = ["owner", "admin", "editor"];
 const ADMINISTRATORS: readonly WorkspaceRole[] = ["owner", "admin"];
 
-/** Editors change only the bots they made; administrators change every bot people made, but nobody's Personal Assistant. */
+/** Editors change only the bots they made; administrators change every bot members made, but nobody's Personal Assistant. */
 const BOTS_THEY_MADE =
-	"Editors, for bots they made; the owner and admins, for every bot people made, but not another person's Personal Assistant";
+	"Editors, for bots they made; the owner and admins, for every bot members made, but not another member's Personal Assistant";
 
 /** What each role may do, as packages/core/src/authorization/permissions.ts grants it. */
 export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Talk to bots and take part in their chats",
 		roles: EVERYONE,
-		note: "Public bots, and their own private ones",
+		note: "Public bots, and their own personal ones",
 	},
 	{
 		label: "Join public projects and take part",
 		roles: EVERYONE,
-		note: "The owner and admins are in every project people made",
+		note: "The owner and admins are in every project members made",
 	},
 	{
 		label:
-			"Change their Personal Assistant's name, look, connectors and automations, run its automations and answer their approvals",
+			"Change their Personal Assistant's name, avatar, connectors and automations, run its automations and answer their approvals",
 		roles: EVERYONE,
 	},
 	{ label: "Create bots", roles: ALL_BUT_VIEWERS },
@@ -46,10 +46,10 @@ export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Answer approvals from automation runs",
 		roles: ALL_BUT_VIEWERS,
-		note: "In chats they can see, of runs done by: editors, bots they made, in the bots' own chats and the projects they lead; the owner and admins, every bot people made, but not another person's Personal Assistant",
+		note: "In chats they can see, of runs done by: editors, bots they made, in the bots' own chats and the projects they lead; the owner and admins, every bot members made, but not another member's Personal Assistant",
 	},
 	{
-		label: "Run automations now",
+		label: "Start automation runs",
 		roles: ALL_BUT_VIEWERS,
 		note: "Projects they're in, and bots they can talk to",
 	},
@@ -65,21 +65,21 @@ export const roleAbilities: readonly RoleAbility[] = [
 	},
 	{ label: "Create projects", roles: ALL_BUT_VIEWERS },
 	{
-		label: "Invite and remove people, and add and remove bots, in a project",
+		label: "Invite and remove members, and add and remove bots, in a project",
 		roles: ALL_BUT_VIEWERS,
 		note: "Projects they're in",
 	},
 	{
 		label: "Leave a project",
 		roles: ["editor", "viewer"],
-		note: "The owner and admins stay in every project people made",
+		note: "The owner and admins stay in every project members made",
 	},
 	{
 		label:
 			"Rename and delete projects, manage their connectors, computers and automations, and delete their files",
 		roles: ADMINISTRATORS,
 	},
-	{ label: "See that private bots exist, but not their chats", roles: ADMINISTRATORS },
+	{ label: "See that personal bots exist, but not their chats", roles: ADMINISTRATORS },
 	{ label: "Connect models and web search", roles: ADMINISTRATORS },
 	{ label: "See what the workspace's models cost", roles: ADMINISTRATORS },
 	{ label: "Rename the workspace and set its time zone", roles: ADMINISTRATORS },

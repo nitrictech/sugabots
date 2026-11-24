@@ -1,6 +1,6 @@
 import { type Liveliness, livelinessLevels } from "@sugabots/avatars";
 import {
-	PERSON_NAME_MAX_LENGTH,
+	MEMBER_NAME_MAX_LENGTH,
 	WORKSPACE_NAME_MAX_LENGTH,
 	type WorkspaceRole,
 	workspaceRoleLabel,
@@ -28,7 +28,7 @@ import {
 } from "@/lib/workspace.ts";
 import type { WorkspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
@@ -49,7 +49,7 @@ import { ProviderSettings } from "./ProviderSettings.tsx";
 import { TimeZoneDialog } from "./TimeZoneDialog.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
-import { WorkspacePeopleSettings } from "./WorkspacePeopleSettings.tsx";
+import { WorkspaceMemberSettings } from "./WorkspaceMemberSettings.tsx";
 
 export function WorkspaceSettings({
 	section,
@@ -62,7 +62,7 @@ export function WorkspaceSettings({
 	selectedProviderId?: string;
 	/** Which model the Models page shows the choice of instead: new bots' or the system bots'. */
 	modelChoice?: "default" | "system";
-	/** The membership open on the People page. */
+	/** The membership open on the Members page. */
 	selectedMembershipId?: string;
 }) {
 	const { workspace, isPending } = useWorkspace();
@@ -96,13 +96,13 @@ export function WorkspaceSettings({
 					)}
 					{section === "account" && <AccountSettings />}
 					{section === "notifications" && <NotificationsSettings />}
-					{section === "people" && (
-						<WorkspacePeopleSettings
+					{section === "members" && (
+						<WorkspaceMemberSettings
 							workspaceId={workspace.id}
-							canManage={may.managePeople}
+							canManage={may.manageMembers}
 							canManageAdmins={may.manageAdmins}
 							canHandOverOwnership={may.handOverOwnership}
-							currentPersonId={session.person?.id}
+							currentUserId={session.member?.id}
 							selectedMembershipId={selectedMembershipId}
 						/>
 					)}
@@ -153,11 +153,11 @@ export function WorkspaceSettings({
 
 /** What General says the workspace holds, once both counts have loaded. */
 function workspaceSummary(
-	people: number | undefined,
+	members: number | undefined,
 	projects: number | undefined,
 ): string | undefined {
-	if (people === undefined || projects === undefined) return undefined;
-	return `Workspace with ${countOf(people, "person", "people")} and ${countOf(projects, "project", "projects")}`;
+	if (members === undefined || projects === undefined) return undefined;
+	return `Workspace with ${countOf(members, "member", "members")} and ${countOf(projects, "project", "projects")}`;
 }
 
 function GeneralSettings({
@@ -291,19 +291,19 @@ function AccountSettings() {
 	const updateName = useUpdateName();
 	const openedFromCard = !useMediaQuery(SETTINGS_BESIDE);
 	const backToAccount = useBackToHere("You");
-	const signedIn = session.person;
+	const signedIn = session.member;
 	if (!signedIn) return null;
 
 	return (
 		<SettingsPage
-			hero={<PersonAvatar person={signedIn} size={44} />}
+			hero={<MemberAvatar member={signedIn} size={44} />}
 			title={signedIn.name}
 			description={signedIn.email}
 		>
 			<SettingsGroup label="Account">
 				<SettingsNameRow
 					name={signedIn.name}
-					maxLength={PERSON_NAME_MAX_LENGTH}
+					maxLength={MEMBER_NAME_MAX_LENGTH}
 					savePending={updateName.isPending}
 					error={updateName.error ? failureMessage(updateName.error) : undefined}
 					onCommit={(name) => updateName.mutateAsync(name)}
@@ -351,7 +351,7 @@ function AccountSettings() {
 	);
 }
 
-/** The link that lets somebody new sign up, where the server signs people up by referral. */
+/** The link that lets somebody new sign up, where the server signs members up by referral. */
 function ReferralLinkSettings() {
 	const { data: link } = useReferralLink();
 	const reset = useResetReferralLink();
@@ -398,7 +398,7 @@ function ReferralLinkSettings() {
 	);
 }
 
-/** A link as people read it: `sugabots.app/join/…`, since every one starts with https://. */
+/** A link as members read it: `sugabots.app/join/…`, since every one starts with https://. */
 function withoutScheme(url: string): string {
 	return url.replace(/^https?:\/\//, "");
 }

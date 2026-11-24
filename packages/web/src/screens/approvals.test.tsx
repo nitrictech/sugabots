@@ -27,7 +27,6 @@ function call(id: string, approval: ToolCallPart["approval"]): ToolCallPart {
 		output: null,
 		status: approval?.status === "pending" ? "awaiting_approval" : "completed",
 		error: null,
-		writeOrDelete: true,
 		atOffset: 0,
 		startedAt: "2026-09-18T09:00:00.000Z",
 		finishedAt: null,
@@ -47,11 +46,13 @@ function request(id: string, approval: ToolCallPart["approval"]): ApprovalReques
 
 const waiting = request("0199a3a0-0000-7000-8000-0000000003c1", {
 	status: "pending",
+	approvers: "chat",
 	decidedByName: null,
 	decidedAt: null,
 });
 const decided = {
 	status: "allowed",
+	approvers: "chat",
 	decidedByName: "Mia Chen",
 	decidedAt: "2026-09-18T09:05:00.000Z",
 } as const;
@@ -105,32 +106,32 @@ describe("Approvals", () => {
 		expect(screen.getByText(/^Nothing waiting/)).toBeDefined();
 	});
 
-	it("opens a request raised in a collaboration at the asker's chat, not the collaborator's", async () => {
-		const collaboration = "0199a3a0-0000-7000-8000-0000000003d1";
-		const root = "0199a3a0-0000-7000-8000-0000000003d2";
+	it("opens a request raised in an automation's run at the automation's feed, naming the run", async () => {
+		const run = "0199a3a0-0000-7000-8000-0000000003d1";
+		const feed = "0199a3a0-0000-7000-8000-0000000003d2";
 		const inChat = {
 			...waiting,
 			projectId: null,
-			chatId: collaboration,
-			rootChatId: root,
+			chatId: run,
+			rootChatId: feed,
 		};
 		const inProject = {
 			...request("0199a3a0-0000-7000-8000-0000000003c3", waiting.call.approval),
-			chatId: collaboration,
-			rootChatId: root,
+			chatId: run,
+			rootChatId: feed,
 		};
 
 		serveApprovals({ waiting: [inChat], answered: [] });
 		mount(`/suga/approvals/${inChat.call.id}`);
 		expect((await screen.findByRole("link", { name: "Open chat" })).getAttribute("href")).toBe(
-			`/suga/chats/${root}?nestedChat=${collaboration}`,
+			`/suga/chats/${feed}?nestedChatPage=${run}`,
 		);
 		cleanup();
 
 		serveApprovals({ waiting: [inProject], answered: [] });
 		mount(`/suga/approvals/${inProject.call.id}`);
 		expect((await screen.findByRole("link", { name: "Open chat" })).getAttribute("href")).toBe(
-			`/suga/projects/${project.slug}/${root}?nestedChat=${collaboration}`,
+			`/suga/projects/${project.slug}/${feed}?nestedChatPage=${run}`,
 		);
 	});
 });

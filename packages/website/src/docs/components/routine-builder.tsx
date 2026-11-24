@@ -116,7 +116,7 @@ export function RoutineBuilder() {
 				</div>
 			</div>
 			<div className="flex items-center gap-3 px-5 py-4">
-				<BotAvatar size="lg" {...bot.look} />
+				<BotAvatar size="lg" {...bot.avatar} />
 				<div className="flex flex-col">
 					<span className="font-bold">Morning inbox sweep</span>
 					<span className="text-sm text-muted-foreground">

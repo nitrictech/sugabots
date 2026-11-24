@@ -2,9 +2,9 @@ import type {
 	BotParticipant,
 	ChatDetails,
 	ChatMessageItem,
+	CurrentUser,
 	Message,
 	Participant,
-	SignedInPerson,
 } from "@sugabots/contracts";
 import { Pause } from "lucide-react";
 import { Fragment } from "react";
@@ -37,7 +37,7 @@ export function ChatTimeline({
 	viewerWriting,
 	pointedOut,
 	previews,
-	onOpenNestedChat,
+	onOpenRun,
 	onOpenFile,
 	onOpenDesktop,
 	onReply,
@@ -48,8 +48,8 @@ export function ChatTimeline({
 	/** The bot whose chat it is, as the chat lists it; none in a project's chat. */
 	host: BotParticipant | undefined;
 	chatId: string;
-	signedIn: SignedInPerson;
-	/** Everyone here and the project's bots and people. */
+	signedIn: CurrentUser;
+	/** Everyone here and the project's bots and members. */
 	mentionable: Participant[];
 	/** The viewer's messages still on their way to the API. */
 	sending: ReadonlySet<string>;
@@ -59,7 +59,8 @@ export function ChatTimeline({
 	pointedOut: string | undefined;
 	/** Whether replies show what they made; off while something is open large beside the chat. */
 	previews: boolean;
-	onOpenNestedChat: (nestedChatId: string) => void;
+	/** Opens an automation's run, by its chat, from its row. */
+	onOpenRun: (runChatId: string) => void;
 	onOpenFile: (fileId: string) => void;
 	onOpenDesktop: () => void;
 	onReply: (message: Message) => void;
@@ -67,7 +68,7 @@ export function ChatTimeline({
 }) {
 	const authorLinkOf = useAuthorLinks("Chat");
 	const reactions = useReactions(signedIn);
-	const reacting = { personId: signedIn.id, onToggle: reactions.toggle, onAdd: reactions.add };
+	const reacting = { memberId: signedIn.id, onToggle: reactions.toggle, onAdd: reactions.add };
 	const automationFeed = details.chat.kind === "automation_feed";
 	const groups = chatGroupsOf(items, automationFeed);
 	const shownMessages = messagesIn(items);
@@ -84,16 +85,15 @@ export function ChatTimeline({
 						<ChatMessages
 							messages={group.messages}
 							participants={mentionable}
-							peopleReachingProject={details.peopleReachingProject}
+							membersReachingProject={details.membersReachingProject}
 							chatKind={details.chat.kind}
 							projectId={details.chat.projectId}
 							dividers={false}
-							onOpenNestedChat={onOpenNestedChat}
 							onOpenFile={onOpenFile}
 							onOpenDesktop={onOpenDesktop}
 							fileUrlOf={(fileId) => chatFileUrl(chatId, fileId)}
 							previews={previews}
-							approvalCapabilities={details.capabilities}
+							approvalPermissions={details.permissions}
 							queued={queued}
 							sending={sending}
 							answeringFace={answeringFace}
@@ -131,7 +131,7 @@ export function ChatTimeline({
 							mentionable={mentionable}
 						/>
 					) : (
-						<RunLine item={group.item} onOpenNestedChat={onOpenNestedChat} />
+						<RunLine item={group.item} onOpenRun={onOpenRun} />
 					)}
 				</Fragment>
 			))}
@@ -143,10 +143,10 @@ export function ChatTimeline({
 /** An automation run, as a row among the messages. */
 function RunLine({
 	item,
-	onOpenNestedChat,
+	onOpenRun,
 }: {
 	item: Extract<ChatMessageItem, { kind: "run" }>;
-	onOpenNestedChat: (nestedChatId: string) => void;
+	onOpenRun: (runChatId: string) => void;
 }) {
 	return (
 		<RunRow
@@ -154,7 +154,7 @@ function RunLine({
 			triggerKind={item.triggerKind}
 			state={workStateOf(item.state)}
 			at={item.createdAt}
-			onOpen={() => onOpenNestedChat(item.chatId)}
+			onOpen={() => onOpenRun(item.chatId)}
 		/>
 	);
 }

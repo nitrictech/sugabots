@@ -23,7 +23,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { person, project, workspace } from "../workspaces/sql.ts";
+import { member, project, workspace } from "../workspaces/sql.ts";
 
 interface EncryptedProviderHeader {
 	name: string;
@@ -50,11 +50,17 @@ export const modelProvider = pgTable(
 			.default([]),
 		/** The OAuth tokens of a subscription sign-in, sealed JSON; only a provider that signs in has them. */
 		oauthTokensEncrypted: text("oauth_tokens_encrypted"),
+		/**
+		 * Who made its subscription sign-in, whose plan it signs in as, so they
+		 * can't leave the workspace, or be removed from it, while it does; null
+		 * while it is signed out.
+		 */
+		signedInById: uuid("signed_in_by_id").references(() => member.id, { onDelete: "set null" }),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
 		/** Who connected it: who gave it its key, signed it in, or switched on one that takes neither. */
-		connectedById: uuid("connected_by_id").references(() => person.id, { onDelete: "set null" }),
-		createdById: uuid("created_by_id").references(() => person.id, { onDelete: "set null" }),
+		connectedById: uuid("connected_by_id").references(() => member.id, { onDelete: "set null" }),
+		createdById: uuid("created_by_id").references(() => member.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
@@ -130,7 +136,7 @@ export const searchProvider = pgTable(
 		apiKeyEncrypted: text("api_key_encrypted"),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
-		createdById: uuid("created_by_id").references(() => person.id, { onDelete: "set null" }),
+		createdById: uuid("created_by_id").references(() => member.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
@@ -181,6 +187,17 @@ export const connector = pgTable(
 		oauthEncrypted: text("oauth_encrypted"),
 		/** The `state` of a sign-in under way, so the callback can find its connector. */
 		oauthState: text("oauth_state"),
+		/**
+		 * Who finished the OAuth sign-in whose tokens it holds, which sign in as
+		 * them, so their leaving the workspace signs it out; null while it holds none.
+		 */
+		signedInById: uuid("signed_in_by_id").references(() => member.id, { onDelete: "set null" }),
+		/**
+		 * For GitHub, the member who installed its app on their own GitHub
+		 * account, so their leaving the workspace uninstalls it; null for an app
+		 * installed on an organization, which isn't theirs alone, or not installed.
+		 */
+		installedById: uuid("installed_by_id").references(() => member.id, { onDelete: "set null" }),
 		/** Incremented whenever the configured target or availability changes. */
 		configurationRevision: integer("configuration_revision").notNull().default(1),
 		/** The tools the server listed when last asked, as it described them; for GitHub, Sugabots' own. */
@@ -195,7 +212,7 @@ export const connector = pgTable(
 		toolAccess: jsonb("tool_access").$type<ToolAccess>().notNull().default({}),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
-		createdById: uuid("created_by_id").references(() => person.id, { onDelete: "set null" }),
+		createdById: uuid("created_by_id").references(() => member.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
@@ -231,15 +248,15 @@ export const connector = pgTable(
 
 type ConnectorSettings = GitHubConnectorSettings;
 
-/** A GitHub App's owner: an organization, or a person's own account. */
+/** A GitHub App's owner: an organization, or a member's own account. */
 export interface GitHubAppOwner {
 	readonly login: string;
 	readonly type: "Organization" | "User";
 }
 
 /**
- * A GitHub connector's own GitHub App, which a person made from Sugabots'
- * manifest under the account its bot works on, and the app's installation
+ * A GitHub connector's own GitHub App, which a member made from Sugabots'
+ * manifest under the account the project's bots work on, and the app's installation
  * there: both null until the app is installed.
  */
 export interface GitHubConnectorSettings {
@@ -250,7 +267,7 @@ export interface GitHubConnectorSettings {
 	/** Who owns the app on GitHub, whose settings change or delete it. */
 	readonly owner: GitHubAppOwner;
 	readonly installationId: number | null;
-	/** The login of the organization or person it is installed on. */
+	/** The login of the organization or member it is installed on. */
 	readonly account: string | null;
 	/**
 	 * The repositories its tools work on: bots in its project read them in the

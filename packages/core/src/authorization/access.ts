@@ -1,16 +1,6 @@
 import type { ToolApprovers, WorkspaceRole } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import {
-	and,
-	asc,
-	eq,
-	getColumns,
-	inArray,
-	isNull,
-	type SQL,
-	type SQLWrapper,
-	sql,
-} from "drizzle-orm";
+import { and, asc, eq, getColumns, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Data, Effect } from "effect";
 import type { Executor } from "../database/database.ts";
@@ -26,7 +16,6 @@ import {
 import { outerColumn } from "../database/sql.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
-import { defaultProjectIdOf } from "../workspaces/bots/bot.ts";
 import {
 	type Actor,
 	type BotFacts,
@@ -48,15 +37,13 @@ import {
  * decision. Standings are only built in this module, so a caller cannot pair
  * a project with somebody else's membership.
  *
- * **Reach** is a stored `project_member` row for a project people made;
+ * **Reach** is a stored `project_member` row for a project members made;
  * administrators are put in every one by the triggers described on
  * `projectMember`. A bot is reached by everyone in the workspace when it is
- * public, by its creator alone when it is private, and by its person alone when
+ * public, by its creator alone when it is personal, and by its member alone when
  * it is a Personal Assistant. A bot's default project, where its own chats
  * are, has no members: it is reached through its bot. An automation's feed
- * and its runs are reached as its project is. A collaboration is reached as the chat it was opened from,
- * whichever bot was asked, so asking a private bot shows its answer to the
- * people of that chat and nobody else. A system bot's chat is
+ * and its runs are reached as its project is. A system bot's chat is
  * reached by nobody.
  *
  * **Hidden** and **forbidden** are different refusals. A resource the caller
@@ -91,9 +78,7 @@ export interface BotStanding {
 
 /**
  * The caller's standing towards a chat they reach: their standing in
- * its project (a chat's, an automation's feed's or a run's). A
- * collaboration's standing is the one towards the chat it was opened
- * from, not towards the bot that was asked.
+ * its project (a chat's, an automation's feed's or a run's).
  */
 export interface ChatStanding {
 	chat: schema.PlacedChatRow;
@@ -114,7 +99,6 @@ export class ResourceHidden
 			| "chat"
 			| "automation"
 			| "message"
-			| "turn"
 			| "membership"
 			| "invitation"
 			| "file";
@@ -166,7 +150,7 @@ export function joinedStanding(row: schema.ProjectRow, actor: Actor): ProjectSta
 }
 
 /**
- * One person's standing towards one project, from facts already in hand:
+ * One member's standing towards one project, from facts already in hand:
  * `defaultOf` is the bot whose default project it is, and must be when it is one.
  */
 function projectStanding(
@@ -188,7 +172,7 @@ function botFactsOf(row: schema.BotRow): BotFacts {
 	return { visibility: row.visibility, createdById: row.createdById, assistantOf: row.assistantOf };
 }
 
-/** One person's standing towards one bot, from facts already in hand. */
+/** One member's standing towards one bot, from facts already in hand. */
 function botStanding(row: schema.BotRow, actor: Actor): BotStanding {
 	const facts = botFactsOf(row);
 	return { bot: row, actor, facts, may: (permission) => mayOnBot(actor, permission, facts) };
@@ -212,11 +196,11 @@ const standingColumns = {
 	defaultOfBot,
 };
 
-const membershipOf = (personId: string) =>
-	and(eq(membership.workspaceId, project.workspaceId), eq(membership.personId, personId));
+const membershipOf = (memberId: string) =>
+	and(eq(membership.workspaceId, project.workspaceId), eq(membership.memberId, memberId));
 
-const projectMembershipOf = (personId: string) =>
-	and(eq(projectMember.projectId, project.id), eq(projectMember.personId, personId));
+const projectMembershipOf = (memberId: string) =>
+	and(eq(projectMember.projectId, project.id), eq(projectMember.memberId, memberId));
 
 type StandingRow = {
 	project: schema.ProjectRow;
@@ -225,40 +209,40 @@ type StandingRow = {
 	defaultOfBot: schema.BotRow | null;
 };
 
-function standingFromRow(row: StandingRow, personId: string): ProjectStanding {
+function standingFromRow(row: StandingRow, memberId: string): ProjectStanding {
 	return projectStanding(
 		row.project,
-		{ personId, workspaceRole: row.role ?? undefined },
+		{ memberId, workspaceRole: row.role ?? undefined },
 		row.projectMemberId !== null,
 		row.defaultOfBot,
 	);
 }
 
-/** `personId`'s standing in each project `where` picks, whether or not they reach it. */
+/** `memberId`'s standing in each project `where` picks, whether or not they reach it. */
 const standingsWhere = Effect.fn("Access.standingsWhere")(function* (
 	db: Executor,
-	personId: string,
+	memberId: string,
 	where: SQL | undefined,
 ) {
 	const rows = yield* db
 		.select(standingColumns)
 		.from(project)
-		.leftJoin(membership, membershipOf(personId))
-		.leftJoin(projectMember, projectMembershipOf(personId))
+		.leftJoin(membership, membershipOf(memberId))
+		.leftJoin(projectMember, projectMembershipOf(memberId))
 		.leftJoin(defaultOfBot, defaultOfBotOfProject)
 		.where(where);
-	return rows.map((row) => standingFromRow(row, personId));
+	return rows.map((row) => standingFromRow(row, memberId));
 });
 
 /**
- * The workspace `workspaceRef` names, by its id or its slug, and `personId`'s
+ * The workspace `workspaceRef` names, by its id or its slug, and `memberId`'s
  * role in it. `undefined` when there is no such workspace or they are not in
  * it, which are answered alike.
  */
 export const workspaceStandingFor = Effect.fn("Access.workspaceStandingFor")(function* (
 	db: Executor,
 	workspaceRef: string,
-	personId: string,
+	memberId: string,
 ) {
 	// A uuid is compared as an id, and anything else as a slug, so a malformed
 	// id is never handed to Postgres as a uuid.
@@ -269,10 +253,10 @@ export const workspaceStandingFor = Effect.fn("Access.workspaceStandingFor")(fun
 		.select({ workspaceId: workspace.id, role: membership.role })
 		.from(membership)
 		.innerJoin(workspace, eq(workspace.id, membership.workspaceId))
-		.where(and(named, eq(membership.personId, personId)))
+		.where(and(named, eq(membership.memberId, memberId)))
 		.limit(1);
 	return row
-		? { workspaceId: row.workspaceId, actor: { personId, workspaceRole: row.role } }
+		? { workspaceId: row.workspaceId, actor: { memberId, workspaceRole: row.role } }
 		: undefined;
 });
 
@@ -286,35 +270,21 @@ export const workspaceStandingFor = Effect.fn("Access.workspaceStandingFor")(fun
 export const projectStandingFor = Effect.fn("Access.projectStandingFor")(function* (
 	db: Executor,
 	projectId: string,
-	personId: string,
+	memberId: string,
 ) {
 	if (!isUuid(projectId)) return undefined;
-	const [standing] = yield* standingsWhere(db, personId, eq(project.id, projectId));
+	const [standing] = yield* standingsWhere(db, memberId, eq(project.id, projectId));
 	return standing;
 });
 
 /**
- * `personId`'s standing in each of the projects `projectIds`, whether or not
- * they reach it, as `projectStandingFor` gives one, in one query.
- */
-export const projectStandingsOf = Effect.fn("Access.projectStandingsOf")(function* (
-	db: Executor,
-	projectIds: readonly string[],
-	personId: string,
-) {
-	const ids = projectIds.filter(isUuid);
-	if (ids.length === 0) return [];
-	return yield* standingsWhere(db, personId, inArray(project.id, ids));
-});
-
-/**
- * A bot and `personId`'s standing towards it, in one query. `undefined` when
+ * A bot and `memberId`'s standing towards it, in one query. `undefined` when
  * there is no such bot, or it is a system bot, which nobody addresses.
  */
 export const botStandingFor = Effect.fn("Access.botStandingFor")(function* (
 	db: Executor,
 	botId: string,
-	personId: string,
+	memberId: string,
 ) {
 	if (!isUuid(botId)) return undefined;
 	const [row] = yield* db
@@ -322,30 +292,24 @@ export const botStandingFor = Effect.fn("Access.botStandingFor")(function* (
 		.from(bot)
 		.leftJoin(
 			membership,
-			and(eq(membership.workspaceId, bot.workspaceId), eq(membership.personId, personId)),
+			and(eq(membership.workspaceId, bot.workspaceId), eq(membership.memberId, memberId)),
 		)
 		.where(and(eq(bot.id, botId), isNull(bot.systemBotKey)))
 		.limit(1);
-	return row ? botStanding(row.bot, { personId, workspaceRole: row.role ?? undefined }) : undefined;
+	return row ? botStanding(row.bot, { memberId, workspaceRole: row.role ?? undefined }) : undefined;
 });
 
 /**
- * A chat `personId` reaches, with their standing towards it, in one
+ * A chat `memberId` reaches, with their standing towards it, in one
  * query. `undefined` when there is no such chat or they do not reach
  * it, which are answered alike.
  */
 export const chatStandingFor = Effect.fn("Access.chatStandingFor")(function* (
 	db: Executor,
 	chatId: string,
-	personId: string,
+	memberId: string,
 ) {
 	if (!isUuid(chatId)) return undefined;
-	// A collaboration is reached through the chat it was opened from,
-	// so its project is that chat's.
-	const reachedThrough = alias(placedChat, "reached_through");
-	const reachProjectId = sql<
-		string | null
-	>`coalesce(${reachedThrough.projectId}, ${placedChat.projectId})`;
 	const [row] = yield* db
 		.select({
 			chat: getColumns(placedChat),
@@ -355,21 +319,17 @@ export const chatStandingFor = Effect.fn("Access.chatStandingFor")(function* (
 			projectMemberId: projectMember.id,
 		})
 		.from(placedChat)
-		.leftJoin(
-			reachedThrough,
-			and(eq(placedChat.kind, "collaboration"), eq(reachedThrough.id, placedChat.rootChatId)),
-		)
-		.leftJoin(project, eq(project.id, reachProjectId))
+		.leftJoin(project, eq(project.id, placedChat.projectId))
 		.leftJoin(defaultOfBot, defaultOfBotOfProject)
 		.leftJoin(
 			membership,
-			and(eq(membership.workspaceId, placedChat.workspaceId), eq(membership.personId, personId)),
+			and(eq(membership.workspaceId, placedChat.workspaceId), eq(membership.memberId, memberId)),
 		)
-		.leftJoin(projectMember, projectMembershipOf(personId))
+		.leftJoin(projectMember, projectMembershipOf(memberId))
 		.where(eq(placedChat.id, chatId))
 		.limit(1);
 	if (!row) return undefined;
-	const actor: Actor = { personId, workspaceRole: row.role ?? undefined };
+	const actor: Actor = { memberId, workspaceRole: row.role ?? undefined };
 	if (!row.project) return undefined;
 	const inProject: ChatStanding = {
 		chat: row.chat,
@@ -379,57 +339,36 @@ export const chatStandingFor = Effect.fn("Access.chatStandingFor")(function* (
 });
 
 /**
- * `personId`'s standing in the project whose computer a turn of `turnBotId` in
- * the chat `chatId` works on (see `computerProjectIdOf`), which
- * decides that turn's requests to change the computer. `undefined` when there
- * is no such chat or project.
- */
-export const computerProjectStandingFor = Effect.fn("Access.computerProjectStandingFor")(function* (
-	db: Executor,
-	chatId: string,
-	turnBotId: string,
-	personId: string,
-) {
-	if (!isUuid(chatId) || !isUuid(turnBotId)) return undefined;
-	const [row] = yield* db
-		.select({ projectId: computerProjectIdOf(placedChat, sql`${turnBotId}::uuid`) })
-		.from(placedChat)
-		.where(eq(placedChat.id, chatId))
-		.limit(1);
-	return row?.projectId ? yield* projectStandingFor(db, row.projectId, personId) : undefined;
-});
-
-/**
- * Every project in a workspace that `personId` reaches, bots' default projects
+ * Every project in a workspace that `memberId` reaches, bots' default projects
  * included, each with their standing in it, in one query.
  */
 export const projectStandingsFor = Effect.fn("Access.projectStandingsFor")(function* (
 	db: Executor,
 	workspaceId: string,
-	personId: string,
+	memberId: string,
 ) {
 	return yield* standingsWhere(
 		db,
-		personId,
-		and(eq(project.workspaceId, workspaceId), reachesProjectFor(project.id, personId)),
+		memberId,
+		and(eq(project.workspaceId, workspaceId), reachesProjectFor(project.id, memberId)),
 	);
 });
 
 /**
- * The projects of a workspace `personId` is in or could join, by name, each with
+ * The projects of a workspace `memberId` is in or could join, by name, each with
  * their standing in it, in one query: the public ones, and the private ones
  * they are in. Bots' default projects are never listed.
  */
 export const listedProjectStandingsFor = Effect.fn("Access.listedProjectStandingsFor")(function* (
 	db: Executor,
 	workspaceId: string,
-	personId: string,
+	memberId: string,
 ) {
 	const rows = yield* db
 		.select({ project, role: membership.role, projectMemberId: projectMember.id })
 		.from(project)
-		.leftJoin(membership, membershipOf(personId))
-		.leftJoin(projectMember, projectMembershipOf(personId))
+		.leftJoin(membership, membershipOf(memberId))
+		.leftJoin(projectMember, projectMembershipOf(memberId))
 		.where(
 			and(
 				eq(project.workspaceId, workspaceId),
@@ -438,70 +377,53 @@ export const listedProjectStandingsFor = Effect.fn("Access.listedProjectStanding
 			),
 		)
 		.orderBy(asc(project.name));
-	return rows.map((row) => standingFromRow({ ...row, defaultOfBot: null }, personId));
+	return rows.map((row) => standingFromRow({ ...row, defaultOfBot: null }, memberId));
 });
 
 /**
  * Whether the caller, who reaches the chat a tool call was raised in, may
  * decide it: the glossary's Approver. A request to change a computer is
- * decided by those who manage the computer's project, wherever it was
- * raised: `computerProject` is the caller's standing in the project whose
- * computer the asking turn used (see `computerProjectIdOf`), if they have
- * one. Any other call is decided by the chat's people, those holding
- * `approval.decide` in its project; for a collaboration that is the project
- * of the chat it was opened from, whichever bot asked.
+ * decided by those who manage the computer's project, the chat's, where the
+ * asking turn worked. Any other call is decided by those who reach the chat
+ * and hold `approval.decide` in its project, whichever bot asked: a helper's
+ * call as any other turn's in the chat.
  *
  * A call raised in an automation's run is decided only by those of them
  * who also manage `runBot`, the bot doing the run (`approval.automation.decide`
  * on it): administrators and the bot's creator, or for a Personal
- * Assistant its person alone. That bot is the default project's own bot for
+ * Assistant its member alone. That bot is the default project's own bot for
  * a bot's own automations, and the lead bot when the run started for a
  * project's. Viewers manage no bot, so decide no run's calls.
  *
  * A bot brings its own connectors into the projects it works in, and their
- * calls are decided there too: only a public bot is in a project people
+ * calls are decided there too: only a public bot is in a project members
  * made, and whoever decides there may use it.
  *
  * `chatProject` is the caller's standing in the chat's project; undefined
  * when they do not reach the chat. `runBot` is undefined outside a run.
  *
- * The Approvals page and the attention counts select the calls a person
+ * The Approvals page and the attention counts select the calls a member
  * may decide in SQL, from the projects and runs' bots this decides for (see
  * `approversIn` in `chats/chats/chat-view.ts`), so a new fact this rule
  * reads must be added to what they select.
  */
 export function mayDecideToolCall(
 	chatProject: ProjectStanding | undefined,
-	computerProject: ProjectStanding | undefined,
 	runBot: BotFacts | undefined,
 	approvers: ToolApprovers,
 ): boolean {
 	if (approvers === "computer-managers") {
-		return computerProject?.may("computer.request.decide") ?? false;
+		return chatProject?.may("computer.request.decide") ?? false;
 	}
 	if (!chatProject?.may("approval.decide")) return false;
 	return runBot === undefined || mayOnBot(chatProject.actor, "approval.automation.decide", runBot);
 }
 
 /**
- * SQL for the project whose computer a turn of `turnBotId` in the chat
- * `row` works on: the chat's project, or in a collaboration the bot's
- * own default project, as a turn's `projectId` is chosen.
- */
-export function computerProjectIdOf(
-	row: { kind: SQLWrapper; projectId: SQLWrapper },
-	turnBotId: SQLWrapper,
-): SQL<string | null> {
-	return sql<string | null>`case when ${row.kind} = 'collaboration'
-		then ${defaultProjectIdOf(turnBotId)}
-		else ${row.projectId} end`;
-}
-
-/**
- * SQL for "`personId` reaches the project `projectId` names", `personId` being an
+ * SQL for "`memberId` reaches the project `projectId` names", `memberId` being an
  * id or the column holding one: what `mayInProject(actor, "project.read", …)`
  * decides for one project, written again as a `where` clause. In a project
- * people made, a project member whose role reads projects; in a bot's default project,
+ * members made, a project member whose role reads projects; in a bot's default project,
  * whoever reaches the bot. The roles come from `rolesGrantedInProject`, but the
  * shape of the rule is repeated here, so a change to `mayInProject`'s shape
  * must be made here too.
@@ -512,59 +434,59 @@ export function computerProjectIdOf(
  */
 export function reachesProjectFor(
 	projectId: SQLWrapper,
-	personId: string | SQLWrapper,
+	memberId: string | SQLWrapper,
 ): SQL<boolean> {
 	return sql`exists (
 		select 1
 		from ${project} as reach_project
 		inner join ${membership} as reach_membership
 			on reach_membership.workspace_id = reach_project.workspace_id
-			and reach_membership.person_id = ${outerColumn(personId)}
+			and reach_membership.member_id = ${outerColumn(memberId)}
 		where reach_project.id = ${outerColumn(projectId)}
 			and case when reach_project.default_of_bot_id is null
 				then ${roleIsOneOf(ROLES_READING_PROJECTS)} and exists (
 					select 1
 					from ${projectMember} as reach_project_member
 					where reach_project_member.project_id = reach_project.id
-						and reach_project_member.person_id = ${outerColumn(personId)}
+						and reach_project_member.member_id = ${outerColumn(memberId)}
 				)
-				else ${reachesBotFor(sql`reach_project.default_of_bot_id`, personId)}
+				else ${reachesBotFor(sql`reach_project.default_of_bot_id`, memberId)}
 			end
 	)`;
 }
 
 /**
- * SQL selecting the ids of the people who reach the project `projectId`
- * names (see `reachesProjectFor`), one `person_id` column, for an `in (…)`: in a
- * project people made, its members; in a bot's default project, which has
- * none, the workspace's people who reach the bot.
+ * SQL selecting the ids of the members who reach the project `projectId`
+ * names (see `reachesProjectFor`), one `member_id` column, for an `in (…)`: in a
+ * project members made, its members; in a bot's default project, which has
+ * none, the workspace's members who reach the bot.
  */
-export function peopleReachingProject(projectId: SQLWrapper): SQL<string> {
-	return sql`select reaching_person.person_id
-		from ${membership} as reaching_person
+export function membersReachingProject(projectId: SQLWrapper): SQL<string> {
+	return sql`select reaching_member.member_id
+		from ${membership} as reaching_member
 		inner join ${project} as reached_project
-			on reached_project.workspace_id = reaching_person.workspace_id
+			on reached_project.workspace_id = reaching_member.workspace_id
 		where reached_project.id = ${outerColumn(projectId)}
-			and ${reachesProjectFor(sql`reached_project.id`, sql`reaching_person.person_id`)}`;
+			and ${reachesProjectFor(sql`reached_project.id`, sql`reaching_member.member_id`)}`;
 }
 
 /**
- * SQL for "`personId` reaches the bot `botId` names": what `reachesBot`
+ * SQL for "`memberId` reaches the bot `botId` names": what `reachesBot`
  * decides for one bot, written again as a `where` clause, so a change to it
  * must be made here too. System bots are reached by nobody.
  */
-export function reachesBotFor(botId: SQLWrapper, personId: string | SQLWrapper): SQL<boolean> {
+export function reachesBotFor(botId: SQLWrapper, memberId: string | SQLWrapper): SQL<boolean> {
 	return sql`exists (
 		select 1
 		from ${bot} as reach_bot
 		inner join ${membership} as reach_bot_membership
 			on reach_bot_membership.workspace_id = reach_bot.workspace_id
-			and reach_bot_membership.person_id = ${outerColumn(personId)}
+			and reach_bot_membership.member_id = ${outerColumn(memberId)}
 		where reach_bot.id = ${outerColumn(botId)}
 			and reach_bot.system_bot_key is null
 			and case
-				when reach_bot.assistant_of is not null then reach_bot.assistant_of = ${outerColumn(personId)}
-				when reach_bot.visibility = 'private' then reach_bot.created_by_id = ${outerColumn(personId)}
+				when reach_bot.assistant_of is not null then reach_bot.assistant_of = ${outerColumn(memberId)}
+				when reach_bot.visibility = 'personal' then reach_bot.created_by_id = ${outerColumn(memberId)}
 				else true
 			end
 	)`;
@@ -575,26 +497,17 @@ export function reachesBotFor(botId: SQLWrapper, personId: string | SQLWrapper):
  * somebody reaches it is decided from.
  */
 export interface ChatReachColumns {
-	kind: SQLWrapper;
-	rootChatId: SQLWrapper;
 	projectId: SQLWrapper;
 }
 
 /**
- * SQL for "`personId` reaches the chat `row`": the project rule for a
+ * SQL for "`memberId` reaches the chat `row`": the project rule for a
  * project's chat, an automation feed and a run, a bot's default project
- * included; the rule of the chat it was opened from for a
- * collaboration. A system bot's chat is in no project, so nobody
- * reaches it. Written as SQL for lists, as
- * `chatStandingFor` decides it for one chat.
+ * included. A system bot's chat is in no project, so nobody reaches it.
+ * Written as SQL for lists, as `chatStandingFor` decides it for one chat.
  */
-export function reachesChatFor(row: ChatReachColumns, personId: string | SQLWrapper): SQL<boolean> {
-	return sql`(case when ${row.kind} = 'collaboration' then exists (
-		select 1
-		from ${placedChat} as reach_opened_from
-		where reach_opened_from.id = ${outerColumn(row.rootChatId)}
-			and ${reachesProjectFor(sql`reach_opened_from.project_id`, personId)}
-	) else ${reachesProjectFor(row.projectId, personId)} end)`;
+export function reachesChatFor(row: ChatReachColumns, memberId: string | SQLWrapper): SQL<boolean> {
+	return reachesProjectFor(row.projectId, memberId);
 }
 
 /** Roles that reach a project once they have been added to it. */

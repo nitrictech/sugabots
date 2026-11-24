@@ -43,11 +43,9 @@ function inTurn(earlierOutputs: unknown[] = []) {
 	return { authoring, write: call(FILE_WRITE_TOOL), edit: call(FILE_EDIT_TOOL) };
 }
 
-const writeTool = () => inTurn();
-
 describe("file_write", () => {
 	it("creates a file without an id, and writes a new version of one with its id", async () => {
-		const { authoring, write } = writeTool();
+		const { authoring, write } = inTurn();
 
 		expect(await write({ kind: "html", title: "Pipeline", content: "<p>one</p>" })).toMatchObject({
 			status: "written",
@@ -75,7 +73,7 @@ describe("file_write", () => {
 		{ case: "an empty id", input: { fileId: "", baseVersion: 0 } },
 		{ case: "a placeholder id", input: { fileId: "new", baseVersion: 1 } },
 	])("creates a file given $case, as models that fill every field send", async ({ input }) => {
-		const { authoring, write } = writeTool();
+		const { authoring, write } = inTurn();
 
 		await write({ kind: "html", title: "Pipeline", content: "<p>one</p>", ...input });
 
@@ -87,7 +85,7 @@ describe("file_write", () => {
 		{ case: "a new file without a kind", input: { title: "T" } },
 		{ case: "a change without a version", input: { fileId: page.id } },
 	])("refuses $case, writing nothing", async ({ input }) => {
-		const { authoring, write } = writeTool();
+		const { authoring, write } = inTurn();
 
 		expect(await write({ ...input, content: "x" })).toMatchObject({ status: "refused" });
 		expect(authoring.create).not.toHaveBeenCalled();

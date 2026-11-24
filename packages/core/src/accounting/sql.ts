@@ -59,6 +59,11 @@ export const modelRequest = pgTable(
 			"model_request_purpose_valid",
 			sql`${table.purpose} in ('bot-turn', 'compaction', 'model-test')`,
 		),
+		// A bot's turn is charged to that bot; background work never is.
+		check(
+			"model_request_bot_valid",
+			sql`(${table.purpose} = 'bot-turn') = (${table.botId} is not null)`,
+		),
 		check(
 			"model_request_outcome_valid",
 			sql`${table.outcome} in ('started', 'completed', 'failed', 'aborted')`,

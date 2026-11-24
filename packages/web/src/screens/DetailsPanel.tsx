@@ -3,10 +3,10 @@ import type {
 	Bot,
 	ChatContext,
 	Connector,
+	CurrentUser,
 	FilePart,
 	Participant,
 	Project,
-	SignedInPerson,
 } from "@sugabots/contracts";
 import { connectorMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
@@ -162,7 +162,7 @@ export interface ChatContents {
 export function ProjectDetails({
 	project,
 	name,
-	people,
+	members,
 	bots,
 	toChange,
 	signedIn,
@@ -172,12 +172,12 @@ export function ProjectDetails({
 }: {
 	project: Project;
 	name: string;
-	/** How many people and bots are in the project. */
-	people: number;
+	/** How many members and bots are in the project. */
+	members: number;
 	bots: number;
 	/** The project's chat, for whoever may rename it. */
 	toChange?: ProjectChatToChange;
-	signedIn: SignedInPerson;
+	signedIn: CurrentUser;
 	contents: ChatContents;
 	/**
 	 * The project's computer, as its lead bot works on it in this chat, and
@@ -195,7 +195,7 @@ export function ProjectDetails({
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
 						<h3 className="m-0 truncate font-semibold text-foreground text-xl">{name}</h3>
 						<p className="m-0 truncate text-sm text-subtle-foreground">
-							{project.name} · {projectHeadcount({ people, bots })}
+							{project.name} · {projectHeadcount({ members, bots })}
 						</p>
 					</div>
 					{toChange && (
@@ -212,7 +212,7 @@ export function ProjectDetails({
 						</ProjectChatActions>
 					)}
 				</div>
-				<People participants={contents.participants} signedIn={signedIn} />
+				<Members participants={contents.participants} signedIn={signedIn} />
 				{computer && <Computer owner={{ project }} {...computer} />}
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 			</div>
@@ -220,17 +220,17 @@ export function ProjectDetails({
 	);
 }
 
-/** Everyone in the chat, each bot and each person, the viewer named as you. */
-function People({
+/** Everyone in the chat, each bot and each member, the viewer named as you. */
+function Members({
 	participants,
 	signedIn,
 }: {
 	participants: readonly Participant[];
-	signedIn: SignedInPerson;
+	signedIn: CurrentUser;
 }) {
 	if (participants.length === 0) return null;
 	return (
-		<PanelSection title="People">
+		<PanelSection title="Members">
 			<ul className="m-0 flex list-none flex-col p-0">
 				{participants.map((participant) => (
 					<ParticipantRow key={participant.id} participant={participant} signedIn={signedIn} />
@@ -279,7 +279,7 @@ function ParticipantRow({
 	signedIn,
 }: {
 	participant: Participant;
-	signedIn: SignedInPerson;
+	signedIn: CurrentUser;
 }) {
 	return (
 		<li className="flex h-7.5 items-center gap-2.5 max-md:h-11 max-md:gap-3">
@@ -291,7 +291,7 @@ function ParticipantRow({
 				{participant.id === signedIn.id && <span className="text-subtle-foreground"> (you)</span>}
 			</span>
 			<span className="text-subtle-foreground text-xs">
-				{participant.kind === "bot" ? "Bot" : "Person"}
+				{participant.kind === "bot" ? "Bot" : "Member"}
 			</span>
 		</li>
 	);

@@ -1,12 +1,13 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import type { ProviderModelCapability } from "@sugabots/contracts";
 import { projectLinks } from "@sugabots/contracts/project-links";
 import { wrapLanguageModel } from "ai";
 import { Effect, Schema, SchemaGetter } from "effect";
 import { recognizeAnthropicFailure } from "./anthropic.ts";
 import {
+	capabilitiesFrom,
 	dataListing,
 	discoveredModel,
+	lenientOptional,
 	type ProviderDialect,
 	type ProviderModelFields,
 } from "./dialect.ts";
@@ -28,7 +29,6 @@ const ANTHROPIC_MODELS = "anthropic/";
  * the rest cache by themselves or not at all.
  */
 export const openrouter: ProviderDialect = {
-	name: "OpenRouter",
 	// The public /models endpoint accepts invalid keys; /models/user requires authentication.
 	listingUrl: (root) => `${root}/models/user`,
 	authorization: openaiCompatible.authorization,
@@ -56,9 +56,7 @@ export const openrouter: ProviderDialect = {
 	listing: dataListing,
 	model: Schema.Struct({
 		id: Schema.String,
-		name: Schema.optional(Schema.String).pipe(
-			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
-		),
+		name: lenientOptional(Schema.String),
 		architecture: Schema.Struct({ input_modalities: names, output_modalities: names }).pipe(
 			Schema.withDecodingDefaultType(
 				Effect.succeed({ input_modalities: [], output_modalities: [] }),
@@ -68,24 +66,20 @@ export const openrouter: ProviderDialect = {
 			),
 		),
 		supported_parameters: names,
-		context_length: Schema.optional(Schema.Finite).pipe(
-			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
-		),
+		context_length: lenientOptional(Schema.Finite),
 	}).pipe(
 		Schema.decodeTo(discoveredModel, {
 			decode: SchemaGetter.transform((entry): ProviderModelFields => {
-				const { input_modalities: inputs, output_modalities: outputs } = entry.architecture;
 				const parameters = entry.supported_parameters;
-				const capabilities: ProviderModelCapability[] = [];
-				if (parameters.includes("tools")) capabilities.push("tools");
-				if (parameters.includes("reasoning")) capabilities.push("thinking");
-				if (inputs.includes("image")) capabilities.push("vision");
-				if (inputs.includes("audio")) capabilities.push("audio");
-				if (outputs.includes("image")) capabilities.push("images");
 				return {
 					modelId: entry.id,
 					displayName: entry.name,
-					capabilities,
+					capabilities: capabilitiesFrom({
+						tools: parameters.includes("tools"),
+						thinking: parameters.includes("reasoning"),
+						inputs: entry.architecture.input_modalities,
+						outputs: entry.architecture.output_modalities,
+					}),
 					contextLength: entry.context_length,
 				};
 			}),

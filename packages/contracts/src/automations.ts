@@ -1,7 +1,8 @@
 import { Effect, Schema } from "effect";
 import isISO8601 from "validator/lib/isISO8601.js";
 import { repositoryEventSchema, repositoryPathSchema } from "./github.ts";
-import { MAX_TIMEZONE_CHARACTERS } from "./time-zones.ts";
+import { anyJsonSchema } from "./json.ts";
+import { timeZoneSchema } from "./time-zones.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
@@ -37,11 +38,6 @@ const automationInstructionsSchema = Schema.Trim.check(
 const cronExpressionSchema = Schema.Trim.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_CRON_EXPRESSION_CHARACTERS),
-);
-
-const timezoneSchema = Schema.Trim.check(
-	Schema.isMinLength(1),
-	Schema.isMaxLength(MAX_TIMEZONE_CHARACTERS),
 );
 
 export const automationStateSchema = Schema.Literals(["enabled", "paused"]);
@@ -100,11 +96,11 @@ const webhookAuthSchema = Schema.Union([
 export type WebhookAuth = typeof webhookAuthSchema.Type;
 export type WebhookAuthKind = WebhookAuth["kind"];
 
-/** The delivery ID header selected for new generic webhooks in the editor. */
+/** The delivery ID header a new generic webhook reads unless it is given another. */
 export const DEFAULT_DELIVERY_ID_HEADER = "Idempotency-Key";
 
-/** A header name, null to disable deduplication, or absent to retain automatic detection. */
-const webhookDeliveryIdHeaderSchema = Schema.optional(Schema.NullOr(webhookHeaderSchema));
+/** The header holding a generic webhook's delivery ID, or null when every call runs. */
+const webhookDeliveryIdHeaderSchema = Schema.NullOr(webhookHeaderSchema);
 
 /**
  * A test of a webhook call's JSON body: the text at `path`, keys joined by
@@ -128,14 +124,14 @@ export type WebhookFilterTest = typeof webhookFilterTestSchema.Type;
 /**
  * What a webhook trigger requires of a call before it starts a run: every
  * test must pass. A call that fails one is answered but runs nothing.
- * None, as for a trigger made before filters, runs every call.
+ * With none, every call runs.
  */
 const webhookFilterSchema = Schema.Array(webhookFilterTestSchema).check(
 	Schema.isMaxLength(MAX_WEBHOOK_FILTER_TESTS),
 );
 
 /**
- * What marks the secrets made for each kind, so people can tell them apart.
+ * What marks the secrets made for each kind, so members can tell them apart.
  * Basic's password has none, and nor does a webhook source's, which the source makes.
  */
 export const WEBHOOK_SECRET_PREFIXES: Record<WebhookAuthKind, string> = {
@@ -200,8 +196,7 @@ const everySchema = (maximum: number) =>
  * When a routine runs, in its time zone: every `every` days, weeks
  * or months counted from `startsOn`, at each of `times`; on `days` of those
  * weeks, or on `dayOfMonth` of those months. A `cron` timetable is a cron
- * expression kept as it was written, for automations made before a routine's
- * timetable was picked this way.
+ * expression kept as it was written: a bot writes its routines that way.
  */
 const routineScheduleSchema = Schema.Union([
 	Schema.Struct({
@@ -256,7 +251,7 @@ const automationTriggerSchema = Schema.Union([
 		id: uuidSchema,
 		kind: Schema.Literal("routine"),
 		schedule: routineScheduleSchema,
-		timezone: timezoneSchema,
+		timezone: timeZoneSchema,
 		/** Null while the automation is paused. */
 		nextScheduledAt: Schema.NullOr(isoTimestampSchema),
 	}),
@@ -300,15 +295,15 @@ export type Automation = typeof automationSchema.Type;
  * token and a changed one keeps how it checks callers. A null `secret` leaves
  * it without one, so its address alone runs the automation. Without `secret`,
  * one is made when it first needs one or its auth kind changes, and is
- * returned then. Without `deliveryIdHeader`, a new trigger detects delivery
- * IDs automatically and an edited trigger keeps its current setting.
+ * returned then. Without `deliveryIdHeader`, a new trigger reads
+ * `DEFAULT_DELIVERY_ID_HEADER` and an edited trigger keeps its current one.
  * Without `filter`, a new trigger runs every call and an edited trigger
  * keeps its current filter; an empty array removes it.
  */
 const webhookTriggerInputSchema = Schema.Struct({
 	kind: Schema.Literal("webhook"),
 	auth: Schema.optional(webhookAuthSchema),
-	deliveryIdHeader: webhookDeliveryIdHeaderSchema,
+	deliveryIdHeader: Schema.optional(webhookDeliveryIdHeaderSchema),
 	filter: Schema.optional(webhookFilterSchema),
 	secret: Schema.optional(Schema.NullOr(webhookSecretSchema)),
 	schedule: Schema.optional(Schema.Never),
@@ -318,7 +313,7 @@ const webhookTriggerInputSchema = Schema.Struct({
 const routineInputSchema = Schema.Struct({
 	kind: Schema.Literal("routine"),
 	schedule: routineScheduleSchema,
-	timezone: timezoneSchema,
+	timezone: timeZoneSchema,
 });
 
 const gitHubTriggerInputSchema = Schema.Struct({
@@ -371,11 +366,7 @@ export type RunState = typeof runStateSchema.Type;
 export const runTriggerKindSchema = Schema.Literals(["routine", "webhook", "github", "manual"]);
 export type RunTriggerKind = typeof runTriggerKindSchema.Type;
 
-const jsonValueSchema = Schema.Unknown.check(
-	Schema.makeFilter(Schema.is(Schema.Json), { expected: "a JSON value" }),
-);
-
-export const runTriggerSchema = Schema.Union([
+const runTriggerSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("routine"),
 		scheduledAt: isoTimestampSchema,
@@ -390,7 +381,7 @@ export const runTriggerSchema = Schema.Union([
 				Schema.isMaxLength(MAX_IDEMPOTENCY_KEY_CHARACTERS),
 			),
 		),
-		payload: jsonValueSchema,
+		payload: anyJsonSchema,
 	}),
 	Schema.Struct({
 		kind: Schema.Literal("github"),
@@ -427,7 +418,7 @@ export const runTriggerSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("manual"),
 		requestedAt: isoTimestampSchema,
-		requestedByPersonId: uuidSchema,
+		requestedByMemberId: uuidSchema,
 		requestId: uuidSchema,
 	}),
 ]);
@@ -450,7 +441,7 @@ export const runSchema = Schema.Struct({
 	state: runStateSchema,
 	error: Schema.NullOr(Schema.String),
 	/**
-	 * Whether it posted a result for people to read. A run that completed
+	 * Whether it posted a result for members to read. A run that completed
 	 * without posting one had nothing to report.
 	 */
 	posted: Schema.Boolean,
@@ -494,7 +485,7 @@ export const listedAutomationDefinitionSchema = Schema.Struct({
 
 export type ListedAutomationDefinition = typeof listedAutomationDefinitionSchema.Type;
 
-export const runSummarySchema = Schema.Struct({
+export const listedRunSchema = Schema.Struct({
 	runId: uuidSchema,
 	automationId: uuidSchema,
 	automationName: automationNameSchema,
@@ -536,8 +527,6 @@ export const automationResultOfSchema = Schema.Struct({
 	automationId: uuidSchema,
 	automationName: automationNameSchema,
 });
-
-export type AutomationResultOf = typeof automationResultOfSchema.Type;
 
 export const manualAutomationRunSchema = Schema.Struct({ requestId: uuidSchema });
 

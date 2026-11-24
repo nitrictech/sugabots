@@ -9,7 +9,7 @@ import { CrumbSeparator } from "@/shell/BotCrumb.tsx";
 /**
  * Where a page sits on a phone: one of its tabs, titled large with no Back,
  * or a page of a project's or a bot's, such as its Files, which leads back
- * to the project or the bot, or, `under` its Settings as a project's People
+ * to the project or the bot, or, `under` its Settings as a project's Members
  * is, back to its Settings.
  */
 type PagePlace = { kind: "tab" } | { kind: "owner"; owner: ResourceOwner; under?: "settings" };

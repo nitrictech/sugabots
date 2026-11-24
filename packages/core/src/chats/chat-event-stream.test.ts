@@ -1,10 +1,5 @@
-import {
-	type CollaborationPart,
-	chatStream,
-	type ToolCallPart,
-	workspaceStream,
-} from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import { chatStream, type ToolCallPart, workspaceStream } from "@sugabots/contracts";
+import { testMember } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -20,7 +15,7 @@ import { ChatEvent } from "./events.ts";
  * workspace stream hears `chat.changed` naming the chat when its lists
  * may be out of date.
  */
-describe("the chat feed", () => {
+describe("the chat event stream", () => {
 	let published: PendingEvent[] = [];
 	const feed = ChatEventStream.handler({
 		publish: (pending) =>
@@ -52,6 +47,7 @@ describe("the chat feed", () => {
 					botId,
 					messageId: "m1",
 					content: "Done.",
+					finishedAt: new Date("2026-11-23T10:00:00Z"),
 					contextTokens: undefined,
 					contextCapacity: 128_000,
 					readKeptFrom: null,
@@ -66,11 +62,12 @@ describe("the chat feed", () => {
 					messageId: "m1",
 					content: "Done.",
 					status: "complete",
+					finishedAt: "2026-11-23T10:00:00.000Z",
 				}),
 			},
 			{
 				stream: chatStream(chatId),
-				event: expect.objectContaining({ type: "turn.completed", turnId, status: "done" }),
+				event: expect.objectContaining({ type: "turn.completed", chatId }),
 			},
 			{
 				stream: workspaceStream(workspaceId),
@@ -83,7 +80,7 @@ describe("the chat feed", () => {
 		{ willRetry: true, listsChange: false },
 		{ willRetry: false, listsChange: true },
 	])(
-		"fails the reply with what people are told (will retry: $willRetry)",
+		"fails the reply with what members are told (will retry: $willRetry)",
 		({ willRetry, listsChange }) => {
 			const userMessage = userText`The model could not be reached`;
 
@@ -106,7 +103,6 @@ describe("the chat feed", () => {
 						type: "message.failed",
 						chatId,
 						messageId: "m1",
-						turnId,
 						error: userMessage,
 					}),
 				},
@@ -122,19 +118,20 @@ describe("the chat feed", () => {
 		},
 	);
 
-	it("ends a cancelled or abandoned reply, so it stops showing as being written", () => {
-		expect(
-			sent(
-				ChatEvent.TurnCancelled({
-					chatId,
-					workspaceId,
-					turnId,
-					botId,
-					messageId: "m1",
-					content: "Half a thou",
-				}),
-			),
-		).toEqual([
+	it("ends a cancelled reply, so it stops showing as being written, naming the chat only to the workspace", () => {
+		const told = sent(
+			ChatEvent.TurnInterrupted({
+				chatId,
+				workspaceId,
+				turnId,
+				botId,
+				messageId: "m1",
+				content: "Half a thou",
+				finishedAt: new Date("2026-11-23T10:00:00Z"),
+			}),
+		);
+
+		expect(told).toEqual([
 			{
 				stream: chatStream(chatId),
 				event: expect.objectContaining({
@@ -142,35 +139,22 @@ describe("the chat feed", () => {
 					messageId: "m1",
 					content: "Half a thou",
 					status: "cancelled",
+					finishedAt: "2026-11-23T10:00:00.000Z",
 				}),
 			},
 			{
 				stream: chatStream(chatId),
-				event: expect.objectContaining({ type: "turn.completed", turnId, status: "cancelled" }),
+				event: expect.objectContaining({ type: "turn.completed", chatId }),
 			},
 			{
 				stream: workspaceStream(workspaceId),
 				event: expect.objectContaining({ type: "chat.changed", chatId }),
 			},
 		]);
-	});
-
-	it("names the chat on everything it tells the workspace, and on nothing else", () => {
-		const told = sent(
-			ChatEvent.TurnCancelled({
-				chatId,
-				workspaceId,
-				turnId,
-				botId,
-				messageId: "m1",
-				content: "",
-			}),
-		);
-
 		expect(told.map(({ stream, event }) => [stream, Audience.read(event).audience])).toEqual([
 			[chatStream(chatId), undefined],
 			[chatStream(chatId), undefined],
-			[workspaceStream(workspaceId), { kind: "chat", chatId }],
+			[workspaceStream(workspaceId), { chatId }],
 		]);
 	});
 
@@ -243,8 +227,7 @@ describe("the chat feed", () => {
 				message: {
 					id: "m1",
 					chatId,
-					author: testPerson({ id: "u1", name: "Sam" }),
-					kind: "text",
+					author: testMember({ id: "u1", name: "Sam" }),
 					status: "complete",
 					parts: [{ type: "text", text: "Hi" }],
 					content: "Hi",
@@ -265,60 +248,17 @@ describe("the chat feed", () => {
 		]);
 	});
 
-	it("shows an opened collaboration in the asking reply, and lists its chat", () => {
-		expect(
-			sent(
-				ChatEvent.CollaborationOpened({
-					parentChatId: chatId,
-					parentMessageId: "m1",
-					collaboration,
-					workspaceId,
-					collaboratorBotId: "a1",
-					briefMessageId: "m2",
-				}),
-			),
-		).toEqual([
+	it("tells the chat of a cancelled automation run, and the workspace, that it changed", () => {
+		expect(sent(ChatEvent.AutomationWorkCancelled({ workspaceId, chatId }))).toEqual([
 			{
 				stream: chatStream(chatId),
-				event: expect.objectContaining({
-					type: "collaboration.updated",
-					chatId,
-					messageId: "m1",
-					collaboration,
-				}),
+				event: expect.objectContaining({ type: "chat.changed", chatId }),
 			},
 			{
 				stream: workspaceStream(workspaceId),
-				event: expect.objectContaining({
-					type: "chat.changed",
-					chatId: collaboration.chatId,
-				}),
+				event: expect.objectContaining({ type: "chat.changed", chatId }),
 			},
 		]);
-	});
-
-	it("tells each chat a cancelled automation run touched, and the workspace, which chat changed", () => {
-		const childId = crypto.randomUUID();
-
-		expect(
-			sent(
-				ChatEvent.AutomationWorkCancelled({
-					workspaceId,
-					chatIds: [chatId, childId],
-				}),
-			),
-		).toEqual(
-			[chatId, childId].flatMap((id) => [
-				{
-					stream: chatStream(id),
-					event: expect.objectContaining({ type: "chat.changed", chatId: id }),
-				},
-				{
-					stream: workspaceStream(workspaceId),
-					event: expect.objectContaining({ type: "chat.changed", chatId: id }),
-				},
-			]),
-		);
 	});
 });
 
@@ -329,22 +269,14 @@ const toolCall: ToolCallPart = {
 	input: { url: "https://example.com" },
 	output: null,
 	status: "running",
-	approval: { status: "allowed", decidedByName: "Ada", decidedAt: new Date().toISOString() },
+	approval: {
+		status: "allowed",
+		approvers: "chat",
+		decidedByName: "Ada",
+		decidedAt: new Date().toISOString(),
+	},
 	error: null,
-	writeOrDelete: false,
 	atOffset: 4,
 	startedAt: new Date().toISOString(),
 	finishedAt: null,
-};
-
-const collaboration: CollaborationPart = {
-	type: "collaboration",
-	id: crypto.randomUUID(),
-	botId: crypto.randomUUID(),
-	botName: "Helper",
-	chatId: crypto.randomUUID(),
-	brief: "Look",
-	status: "waiting",
-	answer: null,
-	atOffset: 4,
 };

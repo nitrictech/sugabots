@@ -33,7 +33,7 @@ import { toolAccessOf } from "./tool-access.ts";
  * not look at what bots may do with the tools: a connector whose tools are
  * all off can still be tested.
  *
- * What a person chooses for a tool is not a change of configuration: it
+ * What a member chooses for a tool is not a change of configuration: it
  * leaves `configurationRevision`, and the approvals made under it, alone.
  * An approved call to a tool turned off since is refused when it would run.
  *
@@ -44,7 +44,7 @@ export interface Interface {
 	readonly create: (
 		workspaceId: string,
 		projectId: string,
-		personId: string,
+		memberId: string,
 		input: NewConnector,
 	) => Effect.Effect<ConnectorRow, ConnectorNameTaken>;
 	/**
@@ -54,7 +54,7 @@ export interface Interface {
 	readonly createGitHub: (
 		workspaceId: string,
 		projectId: string,
-		personId: string,
+		memberId: string,
 		input: {
 			id: string;
 			app: Pick<GitHubConnectorSettings, "appId" | "slug" | "owner">;
@@ -63,13 +63,23 @@ export interface Interface {
 	) => Effect.Effect<ConnectorRow, ConnectorNameTaken>;
 	/**
 	 * Records the account the connector's app was installed on, or installed
-	 * on again; answers whether the connector is still there.
+	 * on again, and `installedById`, the member who installed it there when the
+	 * account is their own; answers whether the connector is still there.
 	 */
 	readonly installed: (
 		workspaceId: string,
 		connectorId: string,
-		installation: { installationId: number; account: string },
+		installation: { installationId: number; account: string; installedById: string | null },
 	) => Effect.Effect<boolean>;
+	/**
+	 * Forgets the installations of the workspace's GitHub apps that
+	 * `memberId` installed on their own GitHub account, so each project must
+	 * install its app again, and answers what each was, to uninstall it at GitHub.
+	 */
+	readonly forgetGitHubInstallationsBy: (
+		workspaceId: string,
+		memberId: string,
+	) => Effect.Effect<readonly ForgottenInstallation[]>;
 	/**
 	 * Changes a GitHub connector's repositories to what `change` makes of
 	 * them, with the connector locked meanwhile, so two changes made at once
@@ -124,12 +134,24 @@ export interface Interface {
 		workspaceId: string,
 		connectorId: string,
 	) => Effect.Effect<OAuthRecord | undefined>;
-	/** Seals the record; its `state` is also kept in the clear so a callback can find the row. */
+	/**
+	 * Seals the record; its `state` is also kept in the clear so a callback can
+	 * find the row. `signedInById` comes with the tokens a sign-in has just been
+	 * issued, as the member who finished it; tokens without it are refreshed
+	 * ones of the sign-in already there, and a record without any is signed out.
+	 */
 	readonly saveOauthRecord: (
 		workspaceId: string,
 		connectorId: string,
 		record: OAuthRecord,
+		signedInById?: string,
 	) => Effect.Effect<void>;
+	/**
+	 * Takes away the OAuth record of every connector in the workspace whose
+	 * tokens `memberId` signed in for, so each must be signed in again. A
+	 * secret someone entered stays.
+	 */
+	readonly signOutSignedInBy: (workspaceId: string, memberId: string) => Effect.Effect<void>;
 	/**
 	 * The connector a sign-in callback belongs to, by the `state` it carries,
 	 * and who started that sign-in, if anybody did.
@@ -139,7 +161,7 @@ export interface Interface {
 				workspaceId: string;
 				projectId: string;
 				connectorId: string;
-				startedByPersonId: string | undefined;
+				startedByMemberId: string | undefined;
 		  }
 		| undefined
 	>;
@@ -172,7 +194,7 @@ export const make = Effect.gen(function* () {
 	};
 
 	return Service.of({
-		create: (workspaceId, projectId, personId, input) =>
+		create: (workspaceId, projectId, memberId, input) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
@@ -192,7 +214,7 @@ export const make = Effect.gen(function* () {
 								.values({
 									workspaceId,
 									projectId,
-									createdById: personId,
+									createdById: memberId,
 									handle: handleFromName(values.name),
 									...values,
 								})
@@ -206,7 +228,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		createGitHub: (workspaceId, projectId, personId, input) =>
+		createGitHub: (workspaceId, projectId, memberId, input) =>
 			operation(
 				"createGitHub",
 				Effect.gen(function* () {
@@ -219,12 +241,12 @@ export const make = Effect.gen(function* () {
 								.values({
 									workspaceId,
 									projectId,
-									createdById: personId,
+									createdById: memberId,
 									kind: "github",
 									name,
 									handle: handleFromName(name),
 									id: input.id,
-									url: `https://github.com/apps/${input.app.slug}`,
+									url: gitHubAppUrl(input.app.slug),
 									settings: {
 										kind: "github",
 										...input.app,
@@ -245,7 +267,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		installed: (workspaceId, connectorId, { installationId, account }) =>
+		installed: (workspaceId, connectorId, { installationId, account, installedById }) =>
 			operation(
 				"installed",
 				Effect.map(
@@ -256,6 +278,7 @@ export const make = Effect.gen(function* () {
 								url: `https://github.com/${account}`,
 								// Merged in SQL, so the app's own settings are kept as they are.
 								settings: sql`${connector.settings} || ${JSON.stringify({ installationId, account })}::jsonb`,
+								installedById,
 								configurationRevision: sql`${connector.configurationRevision} + 1`,
 							})
 							.where(
@@ -324,10 +347,7 @@ export const make = Effect.gen(function* () {
 							eq(connector.workspaceId, workspaceId),
 							eq(connector.projectId, projectId),
 						);
-						const connectorChanged =
-							changes.url !== undefined ||
-							changes.secretHeader !== undefined ||
-							changes.secret !== undefined;
+						const connectorChanged = changesReach(changes);
 						const configurationChanged = changes.name !== undefined || connectorChanged;
 						const choosesAccess = changes.access !== undefined || changes.toolAccess !== undefined;
 						let chosen: ToolAccess | undefined;
@@ -370,6 +390,7 @@ export const make = Effect.gen(function* () {
 										// by, the old address's authorization server.
 										oauthEncrypted: moved ? null : undefined,
 										oauthState: moved ? null : undefined,
+										signedInById: moved ? null : undefined,
 										toolAccess: chosen
 											? sql`${connector.toolAccess} || ${JSON.stringify(chosen)}::jsonb`
 											: undefined,
@@ -488,7 +509,7 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.map(([row]) => row && decryptOauthRecord(row, cipher))),
 			),
 
-		saveOauthRecord: (workspaceId, connectorId, record) =>
+		saveOauthRecord: (workspaceId, connectorId, record, signedInById) =>
 			operation(
 				"saveOauthRecord",
 				query((db) =>
@@ -497,11 +518,80 @@ export const make = Effect.gen(function* () {
 						.set({
 							oauthEncrypted: cipher.encrypt(JSON.stringify(record)),
 							oauthState: record.state || null,
+							signedInById: record.tokens === undefined ? null : signedInById,
 							configurationRevision: record.state
 								? sql`${connector.configurationRevision} + 1`
 								: undefined,
 						})
 						.where(and(eq(connector.id, connectorId), eq(connector.workspaceId, workspaceId))),
+				),
+			),
+
+		signOutSignedInBy: (workspaceId, memberId) =>
+			operation(
+				"signOutSignedInBy",
+				query((db) =>
+					db
+						.update(connector)
+						.set({
+							oauthEncrypted: null,
+							oauthState: null,
+							signedInById: null,
+							configurationRevision: sql`${connector.configurationRevision} + 1`,
+						})
+						.where(
+							and(eq(connector.workspaceId, workspaceId), eq(connector.signedInById, memberId)),
+						),
+				),
+			),
+
+		forgetGitHubInstallationsBy: (workspaceId, memberId) =>
+			operation(
+				"forgetGitHubInstallationsBy",
+				transaction(
+					Effect.gen(function* () {
+						const installed = yield* query((db) =>
+							db
+								.select({
+									id: connector.id,
+									settings: connector.settings,
+									appCredentialEncrypted: connector.appCredentialEncrypted,
+								})
+								.from(connector)
+								.where(
+									and(
+										eq(connector.workspaceId, workspaceId),
+										eq(connector.kind, "github"),
+										eq(connector.installedById, memberId),
+									),
+								)
+								.for("update"),
+						);
+						const forgotten: ForgottenInstallation[] = [];
+						for (const { id, settings, appCredentialEncrypted } of installed) {
+							// For the types: a GitHub connector always holds its app's credential, and
+							// one that records who installed it is installed.
+							if (settings?.installationId == null || appCredentialEncrypted === null) continue;
+							yield* query((db) =>
+								db
+									.update(connector)
+									.set({
+										url: gitHubAppUrl(settings.slug),
+										settings: { ...settings, installationId: null, account: null },
+										installedById: null,
+										configurationRevision: sql`${connector.configurationRevision} + 1`,
+									})
+									.where(eq(connector.id, id)),
+							);
+							forgotten.push({
+								connectorId: id,
+								appId: settings.appId,
+								appCredentialEncrypted,
+								installationId: settings.installationId,
+							});
+						}
+						return forgotten;
+					}),
 				),
 			),
 
@@ -517,7 +607,7 @@ export const make = Effect.gen(function* () {
 								workspaceId: row.workspaceId,
 								projectId: row.projectId,
 								connectorId: row.id,
-								startedByPersonId: decryptOauthRecord(row, cipher)?.startedByPersonId,
+								startedByMemberId: decryptOauthRecord(row, cipher)?.startedByMemberId,
 							},
 					),
 				),
@@ -526,6 +616,17 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
+
+/**
+ * A GitHub app's installation as it was when it was forgotten: enough to
+ * uninstall it at GitHub, signed with the app's own key.
+ */
+export interface ForgottenInstallation {
+	readonly connectorId: string;
+	readonly appId: number;
+	readonly appCredentialEncrypted: string;
+	readonly installationId: number;
+}
 
 /** A project's connectors as a turn sees them. */
 interface ProjectTargets {
@@ -563,6 +664,11 @@ export class UnknownConnectorTool
 	get userMessage() {
 		return userText`The connector no longer lists some of those tools. Check the connector to refresh them.`;
 	}
+}
+
+/** A GitHub connector's address until its app is installed on an account: the app's own page. */
+function gitHubAppUrl(slug: string) {
+	return `https://github.com/apps/${slug}`;
 }
 
 /** The names of the tools the server listed when last asked, leaving their descriptions in the database. */
@@ -641,4 +747,14 @@ function decryptOauthRecord(
 	return row.oauthEncrypted
 		? (JSON.parse(cipher.decrypt(row.oauthEncrypted)) as OAuthRecord)
 		: undefined;
+}
+
+/**
+ * Whether `changes` change how the connector is reached: its address or the
+ * secret sent there, which a test or the tools it listed no longer speak for.
+ */
+export function changesReach(changes: Pick<ConnectorUpdate, "url" | "secret" | "secretHeader">) {
+	return (
+		changes.url !== undefined || changes.secret !== undefined || changes.secretHeader !== undefined
+	);
 }

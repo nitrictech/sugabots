@@ -8,7 +8,7 @@ import type {
 	WrittenFile,
 	WrittenFilePart,
 } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import { testMember } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ComponentProps, useEffect, useState } from "react";
@@ -30,12 +30,12 @@ const host: Extract<Participant, { kind: "bot" }> = {
 	shape: "circle",
 };
 
-const person = testPerson({
+const member = testMember({
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Sam Rivera",
 });
 
-const jay = testPerson({
+const jay = testMember({
 	id: "0199a3a0-0000-7000-8000-000000000003",
 	name: "Jay Park",
 });
@@ -45,7 +45,6 @@ function message(id: string, author: Message["author"], content: string): Messag
 		id,
 		chatId: "0199a3a0-0000-7000-8000-00000000000a",
 		author,
-		kind: "text",
 		status: "complete",
 		parts: [{ type: "text", text: content }],
 		content,
@@ -67,7 +66,7 @@ function toolCall(id: string, tool: string): ToolCallPart {
 		output: { ok: true },
 		status: "completed",
 		error: null,
-		writeOrDelete: false,
+		approval: null,
 		atOffset: 0,
 		startedAt: "2026-09-22T04:30:00.000Z",
 		finishedAt: "2026-09-22T04:30:01.200Z",
@@ -84,10 +83,9 @@ const meta = preview.meta({
 	component: ChatMessages,
 	args: {
 		typing: { host, isRunning: false },
-		participants: [host, person],
-		peopleReachingProject: [person, jay],
+		participants: [host, member],
+		membersReachingProject: [member, jay],
 		chatKind: "project_chat",
-		onOpenNestedChat: fn(),
 		fileUrlOf,
 	},
 	decorators: [
@@ -144,7 +142,7 @@ const pictures = new Map(
 const askedWithFiles: Message = {
 	...message(
 		"0199a3a0-0000-7000-8000-000000000310",
-		person,
+		member,
 		"Here's Acme's request and both pricing pages. Can you check the numbers?",
 	),
 	parts: [
@@ -156,19 +154,19 @@ const askedWithFiles: Message = {
 	],
 };
 const sentFilesOnly: Message = {
-	...message("0199a3a0-0000-7000-8000-000000000311", person, ""),
+	...message("0199a3a0-0000-7000-8000-000000000311", member, ""),
 	parts: [filesOnly],
 	createdAt: "2026-09-22T04:32:00.000Z",
 };
 /** The pictures where they are drawn, and every other file where it would be served. */
 const servedAt = (fileId: string) => pictures.get(fileId) ?? fileUrlOf(fileId);
 const stillSending: Message = {
-	...message("0199a3a0-0000-7000-8000-000000000312", person, "Numbers attached"),
+	...message("0199a3a0-0000-7000-8000-000000000312", member, "Numbers attached"),
 	parts: [{ type: "text", text: "Numbers attached" }, ...attachedFiles.slice(2)],
 };
 
 /**
- * Files a person attached: under the words of a message with text, and on
+ * Files a member attached: under the words of a message with text, and on
  * their own in a message that has nothing else. Images open full size; the
  * PDF and the sheet download.
  */
@@ -207,7 +205,7 @@ export const FilesWhileSending = meta.story({
 const tractionReport: WrittenFile = {
 	id: "0199a3a0-0000-7000-8000-000000000a15",
 	chatId: PROJECT,
-	kind: "document",
+	kind: "markdown",
 	title: "Weekly traction",
 	version: 4,
 	createdBy: { botId: host.id, name: host.name },
@@ -294,7 +292,7 @@ export const TimeOnHover = meta.story({
 	args: {
 		messages: [
 			{
-				...message("0199a3a0-0000-7000-8000-000000000106", person, "Is the release still on?"),
+				...message("0199a3a0-0000-7000-8000-000000000106", member, "Is the release still on?"),
 				createdAt: "2025-08-05T05:46:46.000Z",
 			},
 		],
@@ -303,7 +301,7 @@ export const TimeOnHover = meta.story({
 
 const watchedMessages = [
 	message("0199a3a0-0000-7000-8000-000000000300", host, "Overnight outbound is queued."),
-	message("0199a3a0-0000-7000-8000-000000000301", person, "Can you check the overnight queue?"),
+	message("0199a3a0-0000-7000-8000-000000000301", member, "Can you check the overnight queue?"),
 	message("0199a3a0-0000-7000-8000-000000000302", host, "Done: 38 leads queued, six replied."),
 ];
 
@@ -326,7 +324,7 @@ export const WatchedWhileWriting = meta.story({
 
 const typingMessages = [
 	message("0199a3a0-0000-7000-8000-000000000310", host, "Outbound is queued for tonight."),
-	message("0199a3a0-0000-7000-8000-000000000311", person, "Can you check the overnight queue?"),
+	message("0199a3a0-0000-7000-8000-000000000311", member, "Can you check the overnight queue?"),
 	{
 		...message("0199a3a0-0000-7000-8000-000000000312", host, ""),
 		status: "writing" as const,
@@ -351,7 +349,7 @@ export const ThinkingWhileTyping = meta.story({
 
 /**
  * Runs groups one author's messages under one face and name: a bot's over its
- * words, a person's in their first bubble. Follow-ups show their time beside
+ * words, a member's in their first bubble. Follow-ups show their time beside
  * their actions, on hover.
  */
 export const Runs = meta.story({
@@ -374,12 +372,12 @@ export const Runs = meta.story({
 			),
 			message(
 				"0199a3a0-0000-7000-8000-000000000204",
-				person,
+				member,
 				"Also, billing timeouts are back on checkout.",
 			),
 			message(
 				"0199a3a0-0000-7000-8000-000000000205",
-				person,
+				member,
 				"Can you check Sentry and get it tracked if nothing's open?",
 			),
 		],
@@ -400,7 +398,7 @@ function minuteOfQueue(position: number): string {
 const writingMessages = [
 	message(
 		"0199a3a0-0000-7000-8000-000000000221",
-		person,
+		member,
 		"Billing timeouts are back on checkout. Can you check Sentry?",
 	),
 	{
@@ -414,20 +412,20 @@ const writingMessages = [
 		"The Stripe webhook is failing too, might be the same thing.",
 	),
 	message("0199a3a0-0000-7000-8000-000000000224", jay, "Started around 9 this morning."),
-	message("0199a3a0-0000-7000-8000-000000000225", person, "Track both if nothing's open."),
+	message("0199a3a0-0000-7000-8000-000000000225", member, "Track both if nothing's open."),
 ].map((written, position) => ({ ...written, createdAt: minuteOfQueue(position) }));
 /** Jay's first message, sent while the reply was being written, asked for the turn that waits. */
 const queuedSince = minuteOfQueue(2);
 
 /**
  * Messages sent while the bot is still writing a reply wait for its next one,
- * which answers them together. Each person's run says so once, so nobody
+ * which answers them together. Each member's run says so once, so nobody
  * wonders whether theirs was dropped.
  */
 export const QueuedBehindAReply = meta.story({
 	tags: ["ai-generated"],
 	args: {
-		participants: [host, person, jay],
+		participants: [host, member, jay],
 		messages: writingMessages,
 		queued: queuedBehindReply(writingMessages, queuedSince),
 	},
@@ -437,7 +435,7 @@ export const QueuedBehindAReply = meta.story({
 		// The question the reply is answering is not waiting on anything.
 		const sams = canvas.getAllByRole("article", { name: /^Sam Rivera, / });
 		await expect(sams.filter((bubble) => !bubble.ariaLabel?.endsWith("queued"))).toHaveLength(1);
-		// Once for each person's run, under its last message.
+		// Once for each member's run, under its last message.
 		await expect(canvas.getAllByText("Queued")).toHaveLength(2);
 	},
 });
@@ -482,7 +480,7 @@ function HandingOff(props: ComponentProps<typeof ChatMessages>) {
 /** The bot takes the queued messages up: their notes go as it starts its next reply. */
 export const QueueHandOff = meta.story({
 	tags: ["ai-generated"],
-	args: { participants: [host, person, jay], messages: [] },
+	args: { participants: [host, member, jay], messages: [] },
 	render: (args) => <HandingOff {...args} />,
 });
 
@@ -496,7 +494,7 @@ export const ANewDay = meta.story({
 				"Drafted both. They're in your outbox.",
 			),
 			{
-				...message("0199a3a0-0000-7000-8000-000000000212", person, "Did either of them reply?"),
+				...message("0199a3a0-0000-7000-8000-000000000212", member, "Did either of them reply?"),
 				createdAt: "2026-09-23T09:12:00.000Z",
 			},
 		],
@@ -517,7 +515,7 @@ const other: Extract<Participant, { kind: "bot" }> = {
 	shape: "circle",
 };
 
-/** InTheSidebar is a collaboration as its sidebar shows it: the same messages, a little smaller. */
+/** InTheSidebar is a nested chat as its sidebar shows it: the same messages, a little smaller. */
 export const InTheSidebar = meta.story({
 	args: {
 		compact: true,
@@ -553,7 +551,7 @@ export const InTheSidebar = meta.story({
 });
 
 /**
- * Failures in a collaboration's sidebar: a note under each message says why it
+ * Failures in a nested chat's sidebar: a note under each message says why it
  * stopped.
  */
 export const FailedInTheSidebar = meta.story({
@@ -598,7 +596,7 @@ export const WideCodeBlock = meta.story({
 	},
 	args: {
 		messages: [
-			message("0199a3a0-0000-7000-8000-000000000101", person, "Why is the deploy failing?"),
+			message("0199a3a0-0000-7000-8000-000000000101", member, "Why is the deploy failing?"),
 			message(
 				"0199a3a0-0000-7000-8000-000000000102",
 				host,
@@ -733,13 +731,13 @@ export const WideTableArriving = meta.story({
 		messages: [
 			message(
 				"0199a3a0-0000-7000-8000-000000000109",
-				person,
+				member,
 				"How is checkout doing in each region?",
 			),
 			message("0199a3a0-0000-7000-8000-000000000110", host, wideTableAnswer),
 		],
 	},
-	// As wide as the collaboration panel, too narrow for the table, which scrolls inside the message.
+	// As wide as the nested chat's panel, too narrow for the table, which scrolls inside the message.
 	render: (args) => (
 		<div className="w-140">
 			<LastReplyLandsWhileWatched {...args} />
@@ -777,7 +775,7 @@ export const UnbreakableWords = meta.story({
 			),
 			message(
 				"0199a3a0-0000-7000-8000-000000000104",
-				person,
+				member,
 				"Thanks — https://storage.example.com/traces/sugabots/2026-09-22/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/trace.json is the one I was missing.",
 			),
 		],
@@ -796,7 +794,7 @@ export const NarratedBetweenToolCalls = meta.story({
 		messages: [
 			message(
 				"0199a3a0-0000-7000-8000-000000000106",
-				person,
+				member,
 				"What's in the current cycle for Internal Bots?",
 			),
 			reply("0199a3a0-0000-7000-8000-000000000107", [
@@ -844,7 +842,7 @@ function ArrivingReply(props: ComponentProps<typeof ChatMessages>) {
 		<ChatMessages
 			{...props}
 			messages={[
-				message("0199a3a0-0000-7000-8000-000000000108", person, "What's in the current cycle?"),
+				message("0199a3a0-0000-7000-8000-000000000108", member, "What's in the current cycle?"),
 				landed ? answer : { ...answer, status: "writing", parts: [], content: "" },
 			]}
 		/>
@@ -858,8 +856,8 @@ export const AReplyArriving = meta.story({
 });
 
 /**
- * A mention names someone in their own colours: a bot on its tint, a person on
- * a neutral chip, in your bubbles, other people's and a bot's markdown alike.
+ * A mention names someone in their own colours: a bot on its tint, a member on
+ * a neutral chip, in your bubbles, other members' and a bot's markdown alike.
  * Linear Handler has not joined; it is named from the project's bots. A handle in
  * code and one that names nobody stay plain text, and an email address is a
  * link rather than a mention.
@@ -867,11 +865,11 @@ export const AReplyArriving = meta.story({
 export const Mentions = meta.story({
 	tags: ["ai-generated"],
 	args: {
-		participants: [host, person, jay, other],
+		participants: [host, member, jay, other],
 		messages: [
 			message(
 				"0199a3a0-0000-7000-8000-000000000401",
-				person,
+				member,
 				"@linear-handler is checkout on the board? cc @jay-park",
 			),
 			message(
@@ -887,7 +885,7 @@ export const Mentions = meta.story({
 		],
 	},
 	play: async ({ canvas }) => {
-		// A bot is named by its face and name, a person by their handle.
+		// A bot is named by its face and name, a member by their handle.
 		await expect(canvas.getAllByText("Linear Handler", { selector: "span" })).toHaveLength(2);
 		await expect(canvas.getByText("@sam-rivera", { selector: "span" })).toBeInTheDocument();
 		await expect(canvas.getByText("@issue-triager", { selector: "code" })).toBeInTheDocument();
@@ -906,7 +904,7 @@ export const Mentions = meta.story({
 export const Links = meta.story({
 	tags: ["ai-generated"],
 	args: {
-		participants: [host, person],
+		participants: [host, member],
 		messages: [
 			message(
 				"0199a3a0-0000-7000-8000-000000000501",
@@ -942,7 +940,7 @@ export const Links = meta.story({
 export const ImagesInAReply = meta.story({
 	tags: ["ai-generated"],
 	args: {
-		participants: [host, person],
+		participants: [host, member],
 		messages: [
 			message(
 				"0199a3a0-0000-7000-8000-000000000502",
@@ -970,7 +968,7 @@ export const ImagesInAReply = meta.story({
 export const UnclosedMarkupInAReply = meta.story({
 	tags: ["ai-generated"],
 	args: {
-		participants: [host, person],
+		participants: [host, member],
 		messages: [
 			message(
 				"0199a3a0-0000-7000-8000-000000000510",
@@ -990,18 +988,18 @@ export const UnclosedMarkupInAReply = meta.story({
 });
 
 /**
- * A person's message is markdown too, as a bot's is, but keeps each line they
+ * A member's message is markdown too, as a bot's is, but keeps each line they
  * typed, and a single `~` is only a tilde. HTML in it is shown as the text it
  * is, and an image as a link to it, so it doesn't load for everyone who reads.
  */
 export const PeoplesMarkdown = meta.story({
 	tags: ["ai-generated"],
 	args: {
-		participants: [host, person],
+		participants: [host, member],
 		messages: [
 			message(
 				"0199a3a0-0000-7000-8000-000000000511",
-				person,
+				member,
 				[
 					"**Deploy checklist** for `checkout-api`:",
 					"- bump the version",
@@ -1047,7 +1045,7 @@ export const PeoplesMarkdown = meta.story({
 });
 
 /**
- * A link in a person's message that shows its address, as a bare URL does,
+ * A link in a member's message that shows its address, as a bare URL does,
  * opens without asking, accented letters and all. One whose text says
  * something else asks first, showing where it really goes, as every link off
  * the app in a bot's reply does. An `@` in an address is not a mention. Only
@@ -1057,11 +1055,11 @@ export const PeoplesMarkdown = meta.story({
 export const PeoplesLinks = meta.story({
 	tags: ["ai-generated"],
 	args: {
-		participants: [host, person],
+		participants: [host, member],
 		messages: [
 			message(
 				"0199a3a0-0000-7000-8000-000000000512",
-				person,
+				member,
 				"The notes are at https://example.com/café-notes and the setup is in [the docs](https://example.com/setup). Mine are at https://medium.com/@sam-rivera/notes. Old ones are [in automations](/automations) and <vscode://file/notes.md>.",
 			),
 		],
@@ -1101,9 +1099,9 @@ export const PeoplesLinks = meta.story({
 	},
 });
 
-/** The rest of the project, so `@here` has more people to notify than its card lists. */
+/** The rest of the project, so `@here` has more members to notify than its card lists. */
 const projectMembers = ["Ana Lopez", "Ben Ito", "Cleo Hart", "Dev Rao", "Eli Moss", "Fay Chen"].map(
-	(name, index) => testPerson({ id: `0199a3a0-0000-7000-8000-0000000004${10 + index}`, name }),
+	(name, index) => testMember({ id: `0199a3a0-0000-7000-8000-0000000004${10 + index}`, name }),
 );
 
 /** The workspace the bots below are in, whose roster holds what each does. */
@@ -1120,15 +1118,15 @@ const closePanel = fn();
 
 /**
  * Clicking a mention, or pressing Enter or Space on it, opens a card: a
- * person's face, name, role and handle; a bot's, with what it does; and for
+ * member's face, name, role and handle; a bot's, with what it does; and for
  * `@here`, who it notifies, leaving out its writer and every bot. Escape
  * closes the card and leaves the panel the chat is in open, and so
  * does a click outside it.
  */
 export const MentionCards = meta.story({
 	args: {
-		participants: [host, person, jay, ...projectMembers],
-		peopleReachingProject: [person, jay, ...projectMembers],
+		participants: [host, member, jay, ...projectMembers],
+		membersReachingProject: [member, jay, ...projectMembers],
 		messages: [
 			message(
 				"0199a3a0-0000-7000-8000-000000000420",
@@ -1149,7 +1147,7 @@ export const MentionCards = meta.story({
 						{
 							id: "0199a3a0-0000-7000-8000-000000000430",
 							role: "admin",
-							person: { id: person.id, email: person.email, name: person.name, image: null },
+							member: { id: member.id, email: member.email, name: member.name, image: null },
 							joinedAt: "2026-09-01T00:00:00.000Z",
 						},
 					],
@@ -1230,7 +1228,7 @@ export const MentionCards = meta.story({
 /** JumpedTo is the message a chat was opened at, from a notification, pointed out for a moment. */
 export const JumpedTo = meta.story({
 	args: {
-		participants: [host, person, jay],
+		participants: [host, member, jay],
 		messages: [
 			message("0199a3a0-0000-7000-8000-000000000b11", host, "The release branch is green."),
 			message("0199a3a0-0000-7000-8000-000000000b12", jay, "@sam-rivera can you sign it off?"),
@@ -1253,12 +1251,12 @@ const releaseNotes = message(
  */
 export const Replies = meta.story({
 	args: {
-		participants: [host, person, jay],
+		participants: [host, member, jay],
 		onJumpToMessage: fn(),
 		messages: [
 			releaseNotes,
 			{
-				...message("0199a3a0-0000-7000-8000-000000000c12", person, "Add the pricing page fix too"),
+				...message("0199a3a0-0000-7000-8000-000000000c12", member, "Add the pricing page fix too"),
 				replyTo: {
 					id: releaseNotes.id,
 					author: host,
@@ -1267,7 +1265,7 @@ export const Replies = meta.story({
 				},
 			},
 			{
-				...message("0199a3a0-0000-7000-8000-000000000c13", person, "And thank Jay for the filters"),
+				...message("0199a3a0-0000-7000-8000-000000000c13", member, "And thank Jay for the filters"),
 				replyTo: {
 					id: "0199a3a0-0000-7000-8000-000000000c01",
 					author: jay,
@@ -1301,20 +1299,20 @@ export const ReplyFromToolbar = meta.story({
 	},
 });
 
-function reacted(emoji: string, ...people: { id: string; name: string }[]): MessageReaction {
+function reacted(emoji: string, ...members: { id: string; name: string }[]): MessageReaction {
 	return {
 		emoji,
-		people: people.map(({ id, name }) => ({ id, name, at: "2026-09-22T04:31:00.000Z" })),
+		members: members.map(({ id, name }) => ({ id, name, at: "2026-09-22T04:31:00.000Z" })),
 	};
 }
 
 const reactedTo: Message = {
 	...releaseNotes,
-	reactions: [reacted("👍", person, jay), reacted("🎉", jay), reacted("👀", jay)],
+	reactions: [reacted("👍", member, jay), reacted("🎉", jay), reacted("👀", jay)],
 };
 
 /** Sam Rivera reading, reacting to messages. */
-const samReacting = { personId: person.id, onToggle: fn(), onAdd: fn() };
+const samReacting = { memberId: member.id, onToggle: fn(), onAdd: fn() };
 
 /**
  * Reactions sit under a message's words, each emoji with how many reacted
@@ -1323,7 +1321,7 @@ const samReacting = { personId: person.id, onToggle: fn(), onAdd: fn() };
  */
 export const Reactions = meta.story({
 	args: {
-		participants: [host, person, jay],
+		participants: [host, member, jay],
 		reacting: samReacting,
 		messages: [reactedTo],
 	},
@@ -1339,9 +1337,9 @@ export const Reactions = meta.story({
 	},
 });
 
-/** Where the person cannot react, as in a bots' collaboration, reactions are only shown. */
+/** Where the member cannot react, as in an automation's run, reactions are only shown. */
 export const ReactionsOnlyShown = meta.story({
-	args: { participants: [host, person, jay], messages: [reactedTo] },
+	args: { participants: [host, member, jay], messages: [reactedTo] },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("list", { name: "Reactions" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: /^👍/ })).toBeNull();
@@ -1391,7 +1389,7 @@ export const StillSending = meta.story({
 		reacting: samReacting,
 		messages: [
 			releaseNotes,
-			message("0199a3a0-0000-7000-8000-000000000c21", person, "Ship it after lunch"),
+			message("0199a3a0-0000-7000-8000-000000000c21", member, "Ship it after lunch"),
 		],
 		sending: new Set(["0199a3a0-0000-7000-8000-000000000c21"]),
 	},
@@ -1452,7 +1450,6 @@ function asked(id: string, tool: string, approval: ToolCallPart["approval"]): Me
 		{
 			...toolCall(`${id.slice(0, -1)}9`, tool),
 			input: { title: "Checkout requests time out" },
-			writeOrDelete: true,
 			status: approval?.status === "denied" ? "failed" : "completed",
 			approval,
 		},
@@ -1468,11 +1465,13 @@ export const AnsweredApprovals = meta.story({
 		messages: [
 			asked("0199a3a0-0000-7000-8000-000000000b21", "linear__create_issue", {
 				status: "allowed",
+				approvers: "chat",
 				decidedByName: "Sam Rivera",
 				decidedAt: "2026-09-22T04:31:00.000Z",
 			}),
 			asked("0199a3a0-0000-7000-8000-000000000b31", "linear__update_issue", {
 				status: "denied",
+				approvers: "chat",
 				decidedByName: "Jay Park",
 				decidedAt: "2026-09-22T04:32:00.000Z",
 			}),

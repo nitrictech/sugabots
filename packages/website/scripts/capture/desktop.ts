@@ -157,7 +157,7 @@ async function openSite(container: string) {
 }
 
 /**
- * Maximizes the browser's window, as a person would. It opens at Chromium's
+ * Maximizes the browser's window, as a member would. It opens at Chromium's
  * default size inside a frame of its own drawing, whose shadow the viewer
  * shows as a black border; a maximized window has none.
  */

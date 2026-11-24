@@ -3,10 +3,10 @@ import {
 	type ChatRead,
 	chatUpdateEventSchema,
 	isAttached,
+	type MemberParticipant,
 	type Message,
 	type MessagePart,
 	messagePartsFor,
-	type PersonParticipant,
 	type PlacedPart,
 	placedParts,
 	type StreamEvent,
@@ -61,18 +61,18 @@ export function useChatNotices(chatId: string | undefined): readonly ChatNotice[
 
 const noticesKey = (chatId: string) => ["chat-notices", chatId] as const;
 
-/** How often a person still typing says so again. */
+/** How often a member still typing says so again. */
 const TYPING_SIGNAL_INTERVAL_MS = 3_000;
 
 /**
- * How long a person is shown typing after they last said so. Long enough for
+ * How long a member is shown typing after they last said so. Long enough for
  * the next signal to arrive late without them flickering out.
  */
 const TYPING_SHOWN_FOR_MS = 2 * TYPING_SIGNAL_INTERVAL_MS;
 
-/** A person the chat's events said is typing, and until when they are shown. */
-interface TypingPerson {
-	person: PersonParticipant;
+/** A member the chat's events said is typing, and until when they are shown. */
+interface TypingMember {
+	member: MemberParticipant;
 	/** Epoch milliseconds. */
 	shownUntil: number;
 }
@@ -80,7 +80,7 @@ interface TypingPerson {
 const typingKey = (chatId: string) => ["chat-typing", chatId] as const;
 
 /**
- * Tells the chat's other watchers the signed-in person is typing when `draft` changes
+ * Tells the chat's other watchers the current user is typing when `draft` changes
  * to text, at most once per `TYPING_SIGNAL_INTERVAL_MS`. A draft kept from an
  * earlier visit is not typing until it is edited. An emptied draft, as after
  * sending, lets the next keystroke say so straight away.
@@ -106,23 +106,23 @@ export function useTypingSignal(chatId: string | undefined, draft: string): void
 }
 
 /**
- * The people typing in the chat, other than `personId`, in the order they
+ * The members typing in the chat, other than `memberId`, in the order they
  * started. Each drops out once their signals stop or their message arrives.
  */
-export function usePeopleTyping(
+export function useMembersTyping(
 	chatId: string | undefined,
-	personId: string,
-): readonly PersonParticipant[] {
+	memberId: string,
+): readonly MemberParticipant[] {
 	const typing =
 		useQuery({
 			queryKey: typingKey(chatId ?? ""),
-			queryFn: (): TypingPerson[] => [],
+			queryFn: (): TypingMember[] => [],
 			enabled: chatId !== undefined,
 			staleTime: Number.POSITIVE_INFINITY,
 		}).data ?? [];
 	const [now, setNow] = useState(Date.now);
 	const shown = typing.filter(
-		({ person, shownUntil }) => person.id !== personId && shownUntil > now,
+		({ member, shownUntil }) => member.id !== memberId && shownUntil > now,
 	);
 	const nextExpiry = Math.min(...shown.map(({ shownUntil }) => shownUntil));
 
@@ -132,17 +132,17 @@ export function usePeopleTyping(
 		return () => clearTimeout(timer);
 	}, [nextExpiry]);
 
-	return shown.map(({ person }) => person);
+	return shown.map(({ member }) => member);
 }
 
-/** `typing` with `person` shown for another `TYPING_SHOWN_FOR_MS`, and without anyone expired. */
-function withPersonTyping(typing: TypingPerson[], person: PersonParticipant): TypingPerson[] {
+/** `typing` with `member` shown for another `TYPING_SHOWN_FOR_MS`, and without anyone expired. */
+function withMemberTyping(typing: TypingMember[], member: MemberParticipant): TypingMember[] {
 	const now = Date.now();
 	const shownUntil = now + TYPING_SHOWN_FOR_MS;
 	const current = typing.filter((entry) => entry.shownUntil > now);
-	return current.some((entry) => entry.person.id === person.id)
-		? current.map((entry) => (entry.person.id === person.id ? { person, shownUntil } : entry))
-		: [...current, { person, shownUntil }];
+	return current.some((entry) => entry.member.id === member.id)
+		? current.map((entry) => (entry.member.id === member.id ? { member, shownUntil } : entry))
+		: [...current, { member, shownUntil }];
 }
 
 export function useWorkspaceEvents(): void {
@@ -209,10 +209,10 @@ async function applyChatEvent(
 		queries.setQueryData<ChatNotice[]>(noticesKey(chatId), (notices = []) => [...notices, notice]);
 		return;
 	}
-	if (update.type === "person.typing") {
-		const { person } = update;
-		queries.setQueryData<TypingPerson[]>(typingKey(chatId), (typing = []) =>
-			withPersonTyping(typing, person),
+	if (update.type === "member.typing") {
+		const { member } = update;
+		queries.setQueryData<TypingMember[]>(typingKey(chatId), (typing = []) =>
+			withMemberTyping(typing, member),
 		);
 		return;
 	}
@@ -221,9 +221,9 @@ async function applyChatEvent(
 		queries.setQueryData<ChatNotice[]>(noticesKey(chatId), []);
 		// And whoever wrote it has stopped typing it.
 		const { author } = update.message;
-		if (author.kind === "person") {
-			queries.setQueryData<TypingPerson[]>(typingKey(chatId), (typing) =>
-				typing?.filter((entry) => entry.person.id !== author.id),
+		if (author.kind === "member") {
+			queries.setQueryData<TypingMember[]>(typingKey(chatId), (typing) =>
+				typing?.filter((entry) => entry.member.id !== author.id),
 			);
 		}
 	}
@@ -256,9 +256,9 @@ async function applyChatEvent(
 		return;
 	}
 	if (update.type === "chat.read") {
-		const { person, readThrough, readAt } = update;
+		const { member, readThrough, readAt } = update;
 		queries.setQueryData<ChatDetails>(["chat", chatId], (details) =>
-			details ? wichat(details, { person, readThrough, readAt }) : details,
+			details ? wichat(details, { member, readThrough, readAt }) : details,
 		);
 		return;
 	}
@@ -282,18 +282,8 @@ async function applyChatEvent(
 			offset < message.content.length ? message : withContent(message, `${message.content}${text}`);
 	} else if (update.type === "message.completed") {
 		messageId = update.messageId;
-		const { content, status } = update;
-		// The event does not say when the turn ended; it ended as it arrived, near enough.
-		const finishedAt = new Date().toISOString();
-		applyMessage = (message) => ({
-			...withContent(message, content),
-			status,
-			finishedAt: message.finishedAt ?? finishedAt,
-		});
-	} else if (update.type === "collaboration.updated") {
-		messageId = update.messageId;
-		const { collaboration } = update;
-		applyMessage = (message) => withPlacedPart(message, collaboration);
+		const { content, status, finishedAt } = update;
+		applyMessage = (message) => ({ ...withContent(message, content), status, finishedAt });
 	} else if (
 		update.type === "tool_call.started" ||
 		update.type === "tool_call.completed" ||
@@ -331,7 +321,7 @@ async function applyWorkspaceEvent(
 	}
 	const update = parsed.success;
 	switch (update.type) {
-		case "chat.item_changed":
+		case "chat.nested_chat_changed":
 			await Promise.all([
 				queries.invalidateQueries({
 					queryKey: ["chat-messages", update.rootChatId],
@@ -379,15 +369,15 @@ function updateChatMessage(
 	};
 }
 
-/** The message with new text, keeping every collaboration and tool call where it was made. */
+/** The message with new text, keeping every tool call where it was made. */
 function withContent(message: Message, content: string): Message {
 	return { ...message, content, parts: rebuiltParts(message, content, placedParts(message)) };
 }
 
 /**
- * The message with one collaboration or tool call added or brought up to date.
- * An update keeps the part's place: parts made at the same offset, like
- * parallel collaborations, stay in the order they were made.
+ * The message with one tool call added or brought up to date. An update keeps
+ * the call's place: calls made at the same offset stay in the order they were
+ * made.
  */
 function withPlacedPart(message: Message, part: PlacedPart): Message {
 	const placed = placedParts(message);
@@ -409,12 +399,12 @@ function partsWithoutFiles(message: Message): MessagePart[] {
 	return message.parts.filter((part) => part.type !== "file");
 }
 
-/** `details` with `read` in place of what it had of the same person, unless it had them further on. */
+/** `details` with `read` in place of what it had of the same member, unless it had them further on. */
 function wichat(details: ChatDetails, read: ChatRead): ChatDetails {
-	const previous = details.reads.find(({ person }) => person.id === read.person.id);
+	const previous = details.reads.find(({ member }) => member.id === read.member.id);
 	if (previous && Date.parse(previous.readThrough) >= Date.parse(read.readThrough)) return details;
 	return {
 		...details,
-		reads: [...details.reads.filter(({ person }) => person.id !== read.person.id), read],
+		reads: [...details.reads.filter(({ member }) => member.id !== read.member.id), read],
 	};
 }

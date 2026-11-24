@@ -27,20 +27,24 @@ export interface Interface {
 	readonly clients: Effect.Effect<OAuthProviders>;
 	/**
 	 * Starts signing a connector in to the server at `serverUrl`, or finds it
-	 * already is. Only `startedByPersonId` may finish the sign-in.
+	 * already is. Only `startedByMemberId` may finish the sign-in.
 	 */
 	readonly begin: (input: {
 		workspaceId: string;
 		connectorId: string;
 		serverUrl: string;
-		startedByPersonId: string;
+		startedByMemberId: string;
 	}) => Effect.Effect<OAuthSignIn, SignInFailed>;
-	/** Exchanges the `code` the browser brought back for tokens, kept on the connector's row. */
+	/**
+	 * Exchanges the `code` the browser brought back for tokens, kept on the
+	 * connector's row as `finishedByMemberId`'s sign-in.
+	 */
 	readonly finish: (
 		workspaceId: string,
 		connectorId: string,
 		serverUrl: string,
 		callback: { code: string; state: string },
+		finishedByMemberId: string,
 	) => Effect.Effect<void, SignInFailed>;
 }
 
@@ -58,19 +62,19 @@ export const make = Effect.gen(function* () {
 		context: Context.Context<never>,
 		workspaceId: string,
 		connectorId: string,
-		startedByPersonId?: string,
+		signIn?: { startedByMemberId: string } | { finishedByMemberId: string },
 	) =>
 		storedOAuthProvider(
 			{
 				load: () =>
 					Effect.runPromiseWith(context)(connectors.oauthRecord(workspaceId, connectorId)),
-				save: (record) =>
+				save: (record, signedInById) =>
 					Effect.runPromiseWith(context)(
-						connectors.saveOauthRecord(workspaceId, connectorId, record),
+						connectors.saveOauthRecord(workspaceId, connectorId, record, signedInById),
 					),
 				now: () => Effect.runPromiseWith(context)(DateTime.nowAsDate),
 			},
-			{ redirectUrl, clientName: "Sugabots", startedByPersonId },
+			{ redirectUrl, clientName: "Sugabots", ...signIn },
 		);
 
 	const clients = Effect.map(
@@ -83,12 +87,12 @@ export const make = Effect.gen(function* () {
 	return Service.of({
 		clients,
 
-		begin: ({ workspaceId, connectorId, serverUrl, startedByPersonId }) =>
+		begin: ({ workspaceId, connectorId, serverUrl, startedByMemberId }) =>
 			Effect.flatMap(Effect.context<never>(), (context) =>
 				Effect.tryPromise({
 					try: () =>
 						beginAuthorization(
-							providerFor(context, workspaceId, connectorId, startedByPersonId),
+							providerFor(context, workspaceId, connectorId, { startedByMemberId }),
 							serverUrl,
 							egress.oauth,
 						),
@@ -96,12 +100,12 @@ export const make = Effect.gen(function* () {
 				}),
 			).pipe(Effect.withSpan("ConnectorSignIn.begin")),
 
-		finish: (workspaceId, connectorId, serverUrl, { code, state }) =>
-			Effect.flatMap(clients, (providers) =>
+		finish: (workspaceId, connectorId, serverUrl, { code, state }, finishedByMemberId) =>
+			Effect.flatMap(Effect.context<never>(), (context) =>
 				Effect.tryPromise({
 					try: () =>
 						finishAuthorization(
-							providers.for(workspaceId, connectorId),
+							providerFor(context, workspaceId, connectorId, { finishedByMemberId }),
 							serverUrl,
 							code,
 							state,

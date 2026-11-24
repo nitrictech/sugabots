@@ -21,19 +21,19 @@ abstract class Authenticated<Tag extends string> {
 	}
 }
 
-/** A person signed in, through the HTTP API or the event stream. */
-class PersonSession extends Authenticated<"PersonSession"> {
-	readonly person: string;
+/** A member signed in, through the HTTP API or the event stream. */
+class MemberSession extends Authenticated<"MemberSession"> {
+	readonly member: string;
 
-	constructor(fields: { readonly person: string }) {
-		super("PersonSession");
-		this.person = fields.person;
+	constructor(fields: { readonly member: string }) {
+		super("MemberSession");
+		this.member = fields.member;
 		Object.freeze(this);
 	}
 }
 
 /**
- * A bot in a turn, acting for its asker: the person who wrote the message the
+ * A bot in a turn, acting for its asker: the member who wrote the message the
  * turn answers. It has only the permissions both the asker and the bot have.
  */
 class BotForAsker extends Authenticated<"BotForAsker"> {
@@ -55,8 +55,8 @@ class BotForAsker extends Authenticated<"BotForAsker"> {
 }
 
 /**
- * A bot in an automation's run, which answers no person. `bot` is the
- * project's lead bot, or the helper in a collaboration the run asked for.
+ * A bot in an automation's run, which answers no member. `bot` is the
+ * project's lead bot, or a bot it asked for help in the run's chat.
  */
 class AutomationRun extends Authenticated<"AutomationRun"> {
 	readonly workspace: string;
@@ -97,16 +97,16 @@ class WebhookCall extends Authenticated<"WebhookCall"> {
 	}
 }
 
-export type { AutomationRun, BotForAsker, PersonSession, WebhookCall };
+export type { AutomationRun, BotForAsker, MemberSession, WebhookCall };
 
-export type Principal = PersonSession | BotForAsker | AutomationRun | WebhookCall;
+export type Principal = MemberSession | BotForAsker | AutomationRun | WebhookCall;
 
 /**
  * Builds principals once an entrypoint has authenticated the caller. Only
  * `core/src/authentication/` may call these.
  */
 export const authenticated = {
-	personSession: (fields: { readonly person: string }) => new PersonSession(fields),
+	memberSession: (fields: { readonly member: string }) => new MemberSession(fields),
 	botForAsker: (fields: Omit<BotForAsker, "_tag">) => new BotForAsker(fields),
 	automationRun: (fields: Omit<AutomationRun, "_tag">) => new AutomationRun(fields),
 	webhookCall: (fields: { readonly source: WebhookSource }) => new WebhookCall(fields),

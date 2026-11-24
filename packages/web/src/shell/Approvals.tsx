@@ -14,7 +14,7 @@ import { ListTime, Page } from "@/shell/Page.tsx";
 const ANSWERED_SHOWN = 10;
 
 /**
- * Approvals: every request waiting on the person across the workspace, each
+ * Approvals: every request waiting on the member across the workspace, each
  * answered where it stands, then the latest answered, each of which opens in
  * full.
  */
@@ -120,7 +120,7 @@ function approvalLink(request: ApprovalRequest) {
 }
 
 /**
- * A request waiting on the person, as a card: what the bot would do, which
+ * A request waiting on the member, as a card: what the bot would do, which
  * bot, in which project and when, the request itself, and Allow and Deny, with a
  * way to the chat it was asked in.
  */

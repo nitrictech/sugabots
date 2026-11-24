@@ -19,14 +19,20 @@ export const resendLostCancels = Effect.gen(function* () {
 	const signals = yield* TurnSignals.Service;
 	const stranded = yield* query((db) =>
 		db
-			.selectDistinct({ owner: lane.executionId })
+			.selectDistinct({ executionId: lane.executionId })
 			.from(turn)
-			.innerJoin(lane, and(eq(lane.executionId, turn.owner), ne(lane.state, "idle")))
-			.where(and(eq(turn.cancelRequested, true), inArray(turn.status, ["waiting", "cancelled"]))),
+			.innerJoin(lane, and(eq(lane.executionId, turn.executionId), ne(lane.state, "idle")))
+			.where(
+				and(eq(turn.interruptRequested, true), inArray(turn.status, ["waiting", "cancelled"])),
+			),
 	);
-	yield* Effect.forEach(stranded, ({ owner }) => (owner ? signals.cancel(owner) : Effect.void), {
-		discard: true,
-	});
+	yield* Effect.forEach(
+		stranded,
+		({ executionId }) => (executionId ? signals.cancel(executionId) : Effect.void),
+		{
+			discard: true,
+		},
+	);
 });
 
 /** Runs `resendLostCancels` every minute for as long as the layer's scope is open. */

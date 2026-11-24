@@ -4,7 +4,7 @@ import { Models } from "../../providers/models/models.ts";
 import { Turns } from "../turns/turns.ts";
 import { type CompactionRequest, CompactionSteps } from "./compaction.workflow.ts";
 import { Compactions, type PreparedCompaction } from "./compactions.ts";
-import { compactionPrompt, MAX_COMPACTION_SUMMARY_CHARACTERS } from "./prompt.ts";
+import { compactionPrompt, MAX_CONDENSED_CHARACTERS } from "./prompt.ts";
 
 /** Long: the Compaction bot reads much of the chat. */
 const COMPACTION_TIMEOUT = Duration.minutes(5);
@@ -27,7 +27,7 @@ export const compactionStepsLayer = Layer.effect(
  * turn and not retried: the chat's next reply past the compaction line
  * asks again.
  */
-export const compact = (
+const compact = (
 	request: CompactionRequest,
 	model: Models.Interface,
 ): Effect.Effect<void, never, Compactions.Service | Turns.Service | Database> =>
@@ -45,14 +45,14 @@ export const compact = (
 			},
 			(turnId) =>
 				Effect.gen(function* () {
-					const [summary, contextTokens] = yield* generate(prepared, turnId, model);
-					yield* compactions.complete(prepared, summary);
+					const [condensed, contextTokens] = yield* generate(prepared, turnId, model);
+					yield* compactions.complete(prepared, condensed);
 					return { value: undefined, contextTokens };
 				}),
 		);
 	});
 
-/** The model's summary, within the time and length limits. */
+/** The model's condensed account, within the time and length limits. */
 const generate = (
 	prepared: PreparedCompaction,
 	turnId: string,
@@ -70,20 +70,17 @@ const generate = (
 				chatId: prepared.chatId,
 				turnId,
 			},
-			maxCharacters: MAX_COMPACTION_SUMMARY_CHARACTERS,
+			maxCharacters: MAX_CONDENSED_CHARACTERS,
 			timeout: COMPACTION_TIMEOUT,
 		});
-		const summary = answer.text.trim();
-		if (!summary) {
+		const condensed = answer.text.trim();
+		if (!condensed) {
 			return yield* new Models.UnusableAnswer({ reason: "Compaction returned no text" });
 		}
-		return [summary, answer.contextTokens] as const;
+		return [condensed, answer.contextTokens] as const;
 	}).pipe(
 		// Each attempt gets its own time limit.
 		Models.retryUnusable,
 	);
 
-/**
- * Why a compaction failed.
- */
 type CompactionFailure = Models.RequestFailure | Models.AnswerTimedOut | Models.UnusableAnswer;

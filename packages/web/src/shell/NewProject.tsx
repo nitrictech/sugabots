@@ -26,7 +26,7 @@ import { SettingsControlRow, SettingsFieldRow, SettingsGroup } from "@/ui/settin
 /**
  * Making a project: a name, what it's for, its lead bot, whether anyone may
  * join it, and a colour, under the project as the sidebar will show it. Its
- * people and other bots come after.
+ * members and other bots come after.
  */
 export function NewProjectDialog({
 	onCreated,
@@ -77,7 +77,7 @@ export function NewProjectDialog({
 						className="size-16 rounded-2xl text-2xl"
 					/>
 				</div>
-				<SettingsGroup note="The lead bot answers the project's chats unless people mention another. You can add people and bots next.">
+				<SettingsGroup note="The lead bot answers the project's chats unless members mention another. You can add members and bots next.">
 					<SettingsFieldRow
 						label="Name"
 						value={name}

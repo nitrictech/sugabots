@@ -1,12 +1,12 @@
 import { Schema } from "effect";
 
 /**
- * What a person may do in a workspace.
+ * What a member may do in a workspace.
  *
- * - `owner` is the one person who holds the workspace: an administrator who
+ * - `owner` is the one member who holds the workspace: an administrator who
  *   also decides who else administers it, and who alone can hand it on.
  *   Every workspace has exactly one, from the moment its creator makes it.
- * - `admin` administers the workspace, its people, its providers, every
+ * - `admin` administers the workspace, its members, its providers, every
  *   project and every bot.
  * - `editor` makes bots and projects, and uses the public bots and the
  *   projects they are in.
@@ -26,7 +26,7 @@ export const workspaceRoleSchema = Schema.Literals(WORKSPACE_ROLES);
 
 /**
  * The roles somebody can be invited with or given. Owner is not one: it
- * changes hands only by the owner transferring it, so there is always one.
+ * changes hands only when the owner hands it over, so there is always one.
  */
 export const ASSIGNABLE_WORKSPACE_ROLES = ["admin", "editor", "viewer"] as const;
 
@@ -35,7 +35,7 @@ export const assignableWorkspaceRoleSchema = Schema.Literals(ASSIGNABLE_WORKSPAC
 export type AssignableWorkspaceRole = typeof assignableWorkspaceRoleSchema.Type;
 
 /**
- * The roles that administer the workspace. Each is in every project people
+ * The roles that administer the workspace. Each is in every project members
  * made, put there by database triggers, and can neither leave one nor be taken
  * out. A bot's default project has no members: it is reached through its bot.
  */
@@ -76,13 +76,13 @@ const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
  * the sentences that become lies, and they should be one edit away from them.
  *
  * Deliberately say what the role does rather than everything it cannot: an
- * Editor does not change other people's bots, and a Viewer may still take
+ * Editor does not change other members' bots, and a Viewer may still take
  * part in a chat.
  */
 const WORKSPACE_ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
 	owner: "Administers the workspace, decides who else does, and can hand it on.",
 	admin:
-		"Administers the workspace, its providers, every project people made and every bot but others' Personal Assistants.",
+		"Administers the workspace, its providers, every project members made and every bot but others' Personal Assistants.",
 	editor: "Makes bots and projects, and works with the public bots.",
 	viewer: "Reads and takes part in projects and with public bots.",
 };
@@ -115,15 +115,15 @@ export const workspacePermissionsSchema = Schema.Struct({
 	updateWorkspace: Schema.Boolean,
 	/** Configure the model and search providers the workspace runs on. */
 	manageProviders: Schema.Boolean,
-	/** Invite, remove and set the access of the people in the workspace. */
-	managePeople: Schema.Boolean,
+	/** Invite, remove and set the access of the members in the workspace. */
+	manageMembers: Schema.Boolean,
 	/** Choose the model Compaction runs on. */
 	chooseSystemModel: Schema.Boolean,
 	/** See what the workspace's models cost, and limit it. */
 	manageUsage: Schema.Boolean,
 	/** Make somebody an administrator or stop them being one, and remove an administrator. */
 	manageAdmins: Schema.Boolean,
-	/** Hand the workspace to another person in it, who becomes its owner. */
+	/** Hand the workspace to another member in it, who becomes its owner. */
 	handOverOwnership: Schema.Boolean,
 	/** Delete the workspace and everything in it. */
 	deleteWorkspace: Schema.Boolean,

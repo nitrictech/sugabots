@@ -31,7 +31,7 @@ import { LiveDot } from "@/ui/live-dot.tsx";
  * where the browser `bot` drives is shown. Opening it starts the desktop, and
  * the computer if it was paused, so the first connection can take a few
  * seconds; it comes over a WebSocket the API relays from the computer. The
- * person watches until they take over, if the owner's permissions let them use the desktop, and can
+ * member watches until they take over, if the owner's permissions let them use the desktop, and can
  * hand control back. Without a computer, because the workspace has none set
  * up or the bot does not use one, it says so and where to change that.
  */
@@ -219,7 +219,7 @@ function ComputerScreen({ chatId, bot, mayUse }: { chatId: string; bot: Bot; may
 }
 
 /**
- * The bot's screen in the reply that is using it, watch-only, so people see
+ * The bot's screen in the reply that is using it, watch-only, so members see
  * the browser at work without leaving the chat. Clicking it opens the desktop
  * beside the chat.
  */
@@ -260,7 +260,7 @@ export function LiveDesktopCard({
 type Standing = "connecting" | "connected" | "ended" | "idle";
 
 /**
- * How long the desktop stays connected while neither the person nor the bot
+ * How long the desktop stays connected while neither the member nor the bot
  * uses it. A connection holds the computer awake, so a forgotten tab would keep
  * it running for as long as the tab stays open.
  */
@@ -271,9 +271,9 @@ const DESKTOP_JPEG_QUALITY = 4;
 const INPUT_EVENTS = ["pointerdown", "pointermove", "wheel", "keydown"] as const;
 
 /**
- * The desktop, scaled to fit and, unless `viewOnly`, taking the person's
+ * The desktop, scaled to fit and, unless `viewOnly`, taking the member's
  * mouse and keys, for as long as it's mounted and in use: it lets go after {@link IDLE_TIMEOUT_MINUTES}
- * without input from the person or a browser call from the bot.
+ * without input from the member or a browser call from the bot.
  */
 export function DesktopScreen({
 	chatId,
@@ -326,7 +326,7 @@ export function DesktopScreen({
 		// Captured before noVNC's own handlers, which stop keys from bubbling.
 		for (const event of INPUT_EVENTS) element.addEventListener(event, used, { capture: true });
 		// noVNC sends the paste shortcut to the desktop as keys, which pastes the
-		// desktop's own clipboard, not the person's. Kept from noVNC, the
+		// desktop's own clipboard, not the member's. Kept from noVNC, the
 		// shortcut pastes in this page instead, and the text goes to the
 		// desktop's clipboard and is pasted there with Ctrl+V, the shortcut its
 		// Linux apps know, Command on a Mac included.
@@ -356,9 +356,9 @@ export function DesktopScreen({
 			pressControlWith(viewer, copyKey.keysym, copyKey.code);
 		};
 		// What the desktop copies arrives from the network, outside any gesture
-		// of the person's, and most browsers only let a page write the clipboard
+		// of the member's, and most browsers only let a page write the clipboard
 		// shortly after one. Usually the copy shortcut just pressed counts; when
-		// it doesn't, the text waits for the person's next click or key.
+		// it doesn't, the text waits for the member's next click or key.
 		let copied: string | undefined;
 		const copyOut = () => {
 			if (copied === undefined) return;
@@ -401,7 +401,7 @@ export function DesktopScreen({
 			setStanding("idle");
 			idleViewer.disconnect();
 		}, IDLE_CHECK_INTERVAL_MS);
-		// Loaded only when somebody watches: noVNC is large, and most people never do.
+		// Loaded only when somebody watches: noVNC is large, and most members never do.
 		void import("@novnc/novnc").then(({ default: RFBClient }) => {
 			if (unmounted) return;
 			const opened = new RFBClient(element, desktopUrl(chatId, botId));
@@ -566,7 +566,7 @@ const COPY_KEYS = [
 	{ code: "KeyX", keysym: XK_X },
 ] as const;
 
-/** The person's input a browser counts as a gesture, letting the page write the clipboard. */
+/** The member's input a browser counts as a gesture, letting the page write the clipboard. */
 const GESTURE_EVENTS = ["pointerdown", "keydown"] as const;
 
 const IS_MAC = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");

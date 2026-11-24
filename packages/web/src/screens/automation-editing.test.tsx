@@ -324,7 +324,7 @@ describe("a bot's automations", () => {
 		await waitFor(() => expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(""));
 	});
 
-	it("lets a person make an automation for their Personal Assistant", async () => {
+	it("lets a member make an automation for their Personal Assistant", async () => {
 		mount(`/suga/bots/${personalAssistant.handle}/automations/new`);
 
 		expect(await screen.findByLabelText("Name")).toBeDefined();
@@ -346,6 +346,7 @@ describe("a bot's automations", () => {
 	it("makes a webhook with the secret typed for it, which its page shows", async () => {
 		const webhook = withTrigger(morningBrief, {
 			kind: "webhook",
+			deliveryIdHeader: null,
 			auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
 		});
 		client.api.automations.create.mockReturnValue(
@@ -444,6 +445,7 @@ describe("a bot's automations", () => {
 	it("saves a webhook's auth as it changes, and says what a caller sends", async () => {
 		const webhook = withTrigger(morningBrief, {
 			kind: "webhook",
+			deliveryIdHeader: null,
 			auth: { kind: "api_key", header: "X-API-Key" },
 		});
 		client.api.automations.updateTrigger.mockReturnValue(
@@ -471,14 +473,6 @@ describe("a bot's automations", () => {
 				payload: { kind: "webhook", auth: { kind: "basic", username: "sugabots" } },
 			}),
 		);
-	});
-
-	it("shows automatic detection without rewriting an existing webhook", async () => {
-		const webhook = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "bearer" } });
-		await openPanel(webhook);
-		await openTrigger(/^Webhook/);
-		expect(screen.getByRole("button", { name: "Delivery ID: Automatic detection" })).toBeDefined();
-		expect(client.api.automations.updateTrigger).not.toHaveBeenCalled();
 	});
 
 	it("saves the header a webhook's delivery id is read from, and none when it is cleared", async () => {
@@ -516,7 +510,11 @@ describe("a bot's automations", () => {
 	});
 
 	it("asks a known source for no delivery id header", async () => {
-		const webhook = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "github" } });
+		const webhook = withTrigger(morningBrief, {
+			kind: "webhook",
+			deliveryIdHeader: null,
+			auth: { kind: "github" },
+		});
 		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
 
@@ -528,12 +526,14 @@ describe("a bot's automations", () => {
 		const labelled = { path: "data.labels.name", oneOf: ["10x, bug"] };
 		let webhook = withTrigger(morningBrief, {
 			kind: "webhook",
+			deliveryIdHeader: null,
 			auth: { kind: "linear" },
 			filter: [{ path: "type", oneOf: ["Issue"] }],
 		});
 		client.api.automations.updateTrigger.mockImplementation(({ payload }) => {
 			webhook = withTrigger(morningBrief, {
 				kind: "webhook",
+				deliveryIdHeader: null,
 				auth: { kind: "linear" },
 				filter: "filter" in payload ? payload.filter : undefined,
 			});
@@ -613,6 +613,7 @@ describe("a bot's automations", () => {
 		const filter = [{ path: "type", oneOf: ["Issue"] }];
 		const webhook = withTrigger(morningBrief, {
 			kind: "webhook",
+			deliveryIdHeader: null,
 			auth: { kind: "linear" },
 			filter,
 		});
@@ -628,7 +629,9 @@ describe("a bot's automations", () => {
 			expect(client.api.automations.create).toHaveBeenCalledWith(
 				expect.objectContaining({
 					payload: expect.objectContaining({
-						triggers: [{ kind: "webhook", auth: { kind: "linear" }, filter }],
+						triggers: [
+							{ kind: "webhook", auth: { kind: "linear" }, deliveryIdHeader: null, filter },
+						],
 					}),
 				}),
 			),
@@ -638,6 +641,7 @@ describe("a bot's automations", () => {
 	it("leaves a webhook without a secret when its secret is cleared", async () => {
 		const webhook = withTrigger(morningBrief, {
 			kind: "webhook",
+			deliveryIdHeader: null,
 			auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
 		});
 		client.api.automations.rotateSecret.mockReturnValue(Effect.succeed({ secret: null }));
@@ -663,7 +667,11 @@ describe("a bot's automations", () => {
 	});
 
 	it("saves Slack's signing secret pasted over the one it had once the field is left", async () => {
-		const slack = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "slack" } });
+		const slack = withTrigger(morningBrief, {
+			kind: "webhook",
+			deliveryIdHeader: null,
+			auth: { kind: "slack" },
+		});
 		client.api.automations.rotateSecret.mockReturnValue(
 			Effect.succeed({ secret: "8f742231b10e8888abcd99yyyzzz85a5" }),
 		);
@@ -695,6 +703,7 @@ describe("a bot's automations", () => {
 	it("asks a generic webhook for a secret long enough to be hard to guess, and says so", async () => {
 		const webhook = withTrigger(morningBrief, {
 			kind: "webhook",
+			deliveryIdHeader: null,
 			auth: { kind: "api_key", header: "X-API-Key" },
 		});
 		await openPanel(webhook);
@@ -775,13 +784,7 @@ describe("a bot's automations", () => {
 	});
 
 	it("runs a paused automation now", async () => {
-		client.api.automations.run.mockReturnValue(
-			Effect.succeed({
-				runId: "0199a3a0-0000-7000-8000-0000000000e1",
-				chatId: "0199a3a0-0000-7000-8000-0000000000e2",
-				duplicate: false,
-			}),
-		);
+		client.api.automations.run.mockReturnValue(Effect.void);
 		await openPanel(churnReport);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Start a run" }));
@@ -906,7 +909,11 @@ describe("a bot's automations", () => {
 	});
 
 	it("says when a change or a new secret fails to save", async () => {
-		const webhook = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "bearer" } });
+		const webhook = withTrigger(morningBrief, {
+			kind: "webhook",
+			deliveryIdHeader: null,
+			auth: { kind: "bearer" },
+		});
 		client.api.automations.update.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: userText`Update unavailable` })),
 		);
@@ -953,10 +960,10 @@ describe("a bot's automations", () => {
 		);
 	});
 
-	it("lets an administrator manage the automations of another person's private bot, without its runs", async () => {
+	it("lets an administrator manage the automations of another member's personal bot, without its runs", async () => {
 		const theirs = {
 			...linear,
-			visibility: "private" as const,
+			visibility: "personal" as const,
 			permissions: {
 				...linear.permissions,
 				talk: false,

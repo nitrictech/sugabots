@@ -11,7 +11,7 @@ export const BOT_CACHES = [".cache", ".npm", ".bun/install/cache"] as const;
 
 type BotCache = (typeof BOT_CACHES)[number];
 
-/** Something in a computer's workspace that may be cleared, and why. */
+/** Something in a computer's work directory that may be cleared, and why. */
 type Clearable =
 	| {
 			readonly reason: "chat_deleted" | "automation_run_ended" | "chat_resolved";
@@ -29,7 +29,7 @@ export interface Clearing {
 }
 
 /** Ids of the chat folders and home folders in a computer. */
-interface WorkspaceFolders {
+interface WorkFolders {
 	readonly chatIds: readonly string[];
 	readonly botIds: readonly string[];
 }
@@ -41,7 +41,7 @@ interface WorkspaceFolders {
 export const MAX_FOLDERS_CLEARED_AT_ONCE = 1_000;
 
 /**
- * Removes folders in {@link clearingOrder} until the workspace is less than
+ * Removes folders in {@link clearingOrder} until the work directory's disk is less than
  * `belowShare` full. Only call it while no lease is held, or a running
  * command could lose its folder.
  */
@@ -51,7 +51,7 @@ export function freeDiskSpace(
 	belowShare: number,
 ): Effect.Effect<Clearing, Computers.Unavailable, Database> {
 	return Effect.gen(function* () {
-		const clearable = yield* clearingOrder(workspaceId, yield* workspaceFoldersIn(computer));
+		const clearable = yield* clearingOrder(workspaceId, yield* workFoldersIn(computer));
 		const order = clearable.slice(0, MAX_FOLDERS_CLEARED_AT_ONCE);
 		const clearing = yield* computer.exec(clearingScript(order, belowShare), CLEARING_OPTIONS);
 		const cleared = new Set(clearing.stdout.text.split("\n"));
@@ -68,9 +68,9 @@ export function freeDiskSpace(
  * chats, last because anything new reopens them. Chats go oldest
  * last turn first. A chat with an active turn is never cleared.
  */
-export function clearingOrder(
+function clearingOrder(
 	workspaceId: string,
-	folders: WorkspaceFolders,
+	folders: WorkFolders,
 ): Effect.Effect<readonly Clearable[], never, Database> {
 	return Effect.gen(function* () {
 		const chats = yield* clearableChats(workspaceId, folders.chatIds);
@@ -176,19 +176,18 @@ const STOP_REMOVING_AFTER_SECONDS = 90;
 
 const ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const CHAT_FOLDER = new RegExp(`^${Computers.CHATS_DIRECTORY}/(${ID})$`);
-const HOME_FOLDER = new RegExp(`^${Computers.BOTS_DIRECTORY}/(${ID})$`);
 
-function workspaceFoldersIn(computer: Computers.Computer) {
+function workFoldersIn(computer: Computers.Computer) {
 	return Effect.map(
 		computer.exec(
 			`find ${Computers.CHATS_DIRECTORY} ${Computers.BOTS_DIRECTORY} -mindepth 1 -maxdepth 1 -type d 2>/dev/null; exit 0`,
 			LISTING_OPTIONS,
 		),
-		(listing): WorkspaceFolders => {
+		(listing): WorkFolders => {
 			const paths = listing.stdout.text.split("\n");
 			return {
 				chatIds: paths.flatMap((path) => CHAT_FOLDER.exec(path)?.[1] ?? []),
-				botIds: paths.flatMap((path) => HOME_FOLDER.exec(path)?.[1] ?? []),
+				botIds: paths.flatMap((path) => Computers.HOME_FOLDER.exec(path)?.[1] ?? []),
 			};
 		},
 	);
@@ -199,11 +198,11 @@ function workspaceFoldersIn(computer: Computers.Computer) {
  * delete never leaves a half-deleted cache in place. The next clearing
  * empties it.
  */
-export const SET_ASIDE_DIRECTORY = `${Computers.WORKSPACE_DIRECTORY}/.sugabots-clearing`;
+export const SET_ASIDE_DIRECTORY = `${Computers.WORK_DIRECTORY}/.sugabots-clearing`;
 
 /**
  * Empties {@link SET_ASIDE_DIRECTORY}, then deletes each path while the
- * workspace is at least `belowShare` full, printing each one deleted.
+ * work directory's disk is at least `belowShare` full, printing each one deleted.
  * Missing paths are skipped, and one that can't be set aside is deleted in
  * place. Stops if `df` fails or after {@link STOP_REMOVING_AFTER_SECONDS}.
  */
@@ -214,7 +213,7 @@ function clearingScript(clearables: readonly Clearable[], belowShare: number) {
 		`set_aside=${SET_ASIDE_DIRECTORY}`,
 		`delete "$set_aside"`,
 		`mkdir -p -- "$set_aside" || set_aside=`,
-		`full() { df -B1 --output=used,avail ${Computers.WORKSPACE_DIRECTORY} | awk -v share=${belowShare} 'NR == 2 { full = $1 >= ($1 + $2) * share } END { exit !full }'; }`,
+		`full() { df -B1 --output=used,avail ${Computers.WORK_DIRECTORY} | awk -v share=${belowShare} 'NR == 2 { full = $1 >= ($1 + $2) * share } END { exit !full }'; }`,
 		"n=0",
 		[
 			`remove() { [ "$SECONDS" -lt ${STOP_REMOVING_AFTER_SECONDS} ] || exit 0; [ -e "$1" ] || return 0; full || exit 0; n=$((n + 1));`,

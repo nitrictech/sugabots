@@ -8,7 +8,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { ApprovalDemo, ChatDemo, HandoffDemo, ModelsDemo } from "@/landing/card-demos";
+import { ApprovalDemo, ChatDemo, CollaborationDemo, ModelsDemo } from "@/landing/card-demos";
 import { SectionHeading } from "@/landing/section-heading";
 import { siteColumn } from "@/layout";
 
@@ -36,7 +36,7 @@ const features: readonly [Feature, ...Feature[]] = [
 	{
 		title: "Every collaboration is visible.",
 		body: "When a bot needs help, it asks another bot on the team. Follow the whole exchange, including what it asked, what came back, and what happens next.",
-		Demo: HandoffDemo,
+		Demo: CollaborationDemo,
 		bar: "bg-landing-logo-red",
 	},
 	{

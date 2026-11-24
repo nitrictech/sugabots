@@ -6,7 +6,7 @@ import type { ChatLogPosition } from "./chat-log-position.ts";
 
 /**
  * The scrolling log of a chat's messages, in a centred column of reading
- * width, anchored to its foot, so a short chat sits just above the composer.
+ * width, anchored to its foot, so a short chat sits just above `footer`.
  * Above `children`, a way to load older messages while there are any, and
  * `intro` once there are none.
  */
@@ -16,6 +16,7 @@ export function ChatLog({
 	intro,
 	columnRef,
 	underHeader = false,
+	footer,
 	children,
 }: {
 	position: Pick<ChatLogPosition, "attachViewport" | "onScroll" | "settledAtLatest" | "loadOlder">;
@@ -32,23 +33,29 @@ export function ChatLog({
 	columnRef?: Ref<HTMLDivElement>;
 	/** Whether the header sits over the log from a tablet up, so the first message starts clear of it. */
 	underHeader?: boolean;
+	/**
+	 * What stays at the foot of the log, such as the composer, with no
+	 * background of its own: the messages scroll on under it.
+	 */
+	footer?: ReactNode;
 	children: ReactNode;
 }) {
 	return (
 		<div
 			ref={position.attachViewport}
-			role="log"
-			aria-label="Chat messages"
 			onScroll={position.onScroll}
 			className={cn(
-				"min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-3 pb-4 max-md:pt-safe-offset-16",
+				"flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pt-3 max-md:pt-safe-offset-16",
 				underHeader && "md:pt-16",
 			)}
 		>
 			<div
 				ref={columnRef}
+				role="log"
+				aria-label="Chat messages"
 				className={cn(
-					"mx-auto flex min-h-full w-full max-w-200 flex-col justify-end",
+					// Fills what the footer leaves, so a short chat needs no scrolling.
+					"mx-auto flex w-full max-w-200 shrink-0 grow flex-col justify-end pb-4",
 					!position.settledAtLatest && "max-md:invisible",
 				)}
 			>
@@ -71,6 +78,7 @@ export function ChatLog({
 				{messages.isSuccess && !messages.hasNextPage && intro}
 				{children}
 			</div>
+			{footer && <div className="sticky bottom-0 z-10 shrink-0">{footer}</div>}
 		</div>
 	);
 }

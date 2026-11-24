@@ -1,35 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { computerPathOf } from "./attachments.ts";
+import { safeFileName } from "./attachments.ts";
 
-const ID = "0199a3a0-0000-7000-8000-0000000000f1";
-const pathOf = (name: string) => computerPathOf({ id: ID, name });
-
-describe("where an attachment is copied in the computer", () => {
-	it("keeps an ordinary name as it is, in a folder of the file's own", () => {
-		expect(pathOf("Q3 report (final).pdf")).toBe(`attachments/${ID}/Q3 report (final).pdf`);
-		expect(pathOf("café menu.csv")).toBe(`attachments/${ID}/café menu.csv`);
+describe("the name an attachment is copied under in the computer", () => {
+	it("keeps an ordinary name as it is", () => {
+		expect(safeFileName("Q3 report (final).pdf")).toBe("Q3 report (final).pdf");
+		expect(safeFileName("café menu.csv")).toBe("café menu.csv");
 	});
 
-	it("keeps the name one file in its folder, however it was written", () => {
-		expect(pathOf("../../etc/passwd")).toBe(`attachments/${ID}/_.._etc_passwd`);
-		expect(pathOf("C:\\Users\\sam\\notes.txt")).toBe(`attachments/${ID}/C:_Users_sam_notes.txt`);
-		expect(pathOf("..")).toBe(`attachments/${ID}/file`);
+	it("keeps the name one file, however it was written", () => {
+		expect(safeFileName("../../etc/passwd")).toBe("_.._etc_passwd");
+		expect(safeFileName("C:\\Users\\sam\\notes.txt")).toBe("C:_Users_sam_notes.txt");
+		expect(safeFileName("..")).toBe("file");
 	});
 
 	it("never makes a hidden file, or one a command reads as an option", () => {
-		expect(pathOf(".env")).toBe(`attachments/${ID}/env`);
-		expect(pathOf("-rf")).toBe(`attachments/${ID}/rf`);
+		expect(safeFileName(".env")).toBe("env");
+		expect(safeFileName("-rf")).toBe("rf");
 	});
 
 	it("leaves out characters that break a line or reorder how the name shows", () => {
 		// A right-to-left override shows "invoice‮fdp.exe" as "invoiceexe.pdf".
-		expect(pathOf("invoice\u202Efdp.exe")).toBe(`attachments/${ID}/invoicefdp.exe`);
-		expect(pathOf("a\u007Fb.txt")).toBe(`attachments/${ID}/a_b.txt`);
+		expect(safeFileName("invoice\u202Efdp.exe")).toBe("invoicefdp.exe");
+		expect(safeFileName("a\u007Fb.txt")).toBe("a_b.txt");
 	});
 
 	it("cuts a long name to what Linux allows, in bytes, keeping its extension", () => {
 		const name = `${"é".repeat(300)}.pdf`;
-		const kept = pathOf(name).split("/").at(-1) ?? "";
+		const kept = safeFileName(name);
 
 		expect(Buffer.byteLength(kept)).toBeLessThanOrEqual(255);
 		expect(kept.endsWith("é.pdf")).toBe(true);

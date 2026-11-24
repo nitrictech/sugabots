@@ -16,7 +16,7 @@ export interface Interface {
 	/**
 	 * A new UUID v4, all random bits: for an id that names no row, such as a
 	 * process's, or one that must not be guessed, such as an invitation's,
-	 * which is also a link a person holds.
+	 * which is also a link a member holds.
 	 */
 	readonly random: Effect.Effect<string>;
 }

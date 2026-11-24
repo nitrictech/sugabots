@@ -73,7 +73,7 @@ describe("GitHub's events", () => {
 		});
 	});
 
-	it("tells which comment on a pull request's code it is, apart from one in its chat", () => {
+	it("tells which comment on a pull request's code it is, apart from one on the pull request as a whole", () => {
 		const activity = activityOf(
 			"pull_request_review_comment",
 			{
@@ -97,7 +97,7 @@ describe("GitHub's events", () => {
 		});
 	});
 
-	it("leaves out what the workspace's own app did, so an automation can't set itself off", () => {
+	it("leaves out what the project's own app did, so an automation can't set itself off", () => {
 		const activity = activityOf(
 			"push",
 			{

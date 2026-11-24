@@ -49,7 +49,7 @@ export function failureFromResponse(body: unknown, status: number): ApiFailure {
 	return failureForStatus(status, refusedBeforeTheApi(status));
 }
 
-/** What a refusal that never reached the API means, for the person who made the request. */
+/** What a refusal that never reached the API means, for the member who made the request. */
 function refusedBeforeTheApi(status: number): UserText {
 	// The API says when something is over its own limits, so a bare 413 is
 	// the web server in front of it, such as nginx at its 1 MB default.

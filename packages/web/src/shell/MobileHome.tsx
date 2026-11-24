@@ -49,7 +49,7 @@ function MobilePage({
 }
 
 /**
- * Home on a phone: the Personal Assistant, the projects the person is in and
+ * Home on a phone: the Personal Assistant, the projects the member is in and
  * the bots they pinned, each opening its chats.
  */
 export function MobileHome() {

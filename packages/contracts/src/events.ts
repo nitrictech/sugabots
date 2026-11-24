@@ -1,15 +1,15 @@
 import { Schema } from "effect";
 import {
 	chatReadSchema,
-	collaborationPartSchema,
 	filePartSchema,
+	memberParticipantSchema,
 	messageReactionsSchema,
 	messageSchema,
 	messageStatusSchema,
-	personParticipantSchema,
 	toolCallPartSchema,
 } from "./messages.ts";
 import { notificationContentSchema, presenceSchema } from "./notifications.ts";
+import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
 /**
@@ -37,7 +37,7 @@ const nothing = Schema.StructWithRest(Schema.Struct({}), [
  * is described: the TypeScript types below and the parsers clients use are
  * both derived from these.
  */
-export const eventPayloadSchemas = {
+const eventPayloadSchemas = {
 	"message.created": Schema.Struct({ chatId, message: messageSchema }),
 	/** `offset` is how much of the message came before this text, so a client can tell a duplicate from a gap. */
 	"message.delta": Schema.Struct({
@@ -51,13 +51,9 @@ export const eventPayloadSchemas = {
 		messageId,
 		content: Schema.String,
 		status: messageStatusSchema,
+		finishedAt: isoTimestampSchema,
 	}),
-	"message.failed": Schema.Struct({
-		chatId,
-		messageId,
-		turnId: uuidSchema,
-		error: Schema.String,
-	}),
+	"message.failed": Schema.Struct({ chatId, messageId, error: Schema.String }),
 	/** Somebody reacted to the message or took a reaction back; `reactions` is all it has now. */
 	"message.reactions_changed": Schema.Struct({
 		chatId,
@@ -73,62 +69,42 @@ export const eventPayloadSchemas = {
 		messageId,
 		files: Schema.Array(filePartSchema),
 	}),
-	/** A bot's reply called a built-in tool; the part is `running`. */
+	/** A bot's reply called a tool; the part is `running`. */
 	"tool_call.started": Schema.Struct({ chatId, messageId, toolCall: toolCallPartSchema }),
 	/** The tool returned or failed; the part carries its output or error. */
 	"tool_call.completed": Schema.Struct({ chatId, messageId, toolCall: toolCallPartSchema }),
 	"tool_call.updated": Schema.Struct({ chatId, messageId, toolCall: toolCallPartSchema }),
-	"turn.started": Schema.Struct({
-		chatId,
-		turnId: uuidSchema,
-		botId: uuidSchema,
-	}),
-	/** Somebody asked a running turn to stop; `turn.completed` follows once it has. */
-	"turn.cancel_requested": Schema.Struct({ chatId, turnId: uuidSchema }),
-	"turn.completed": Schema.Struct({
-		chatId,
-		turnId: uuidSchema,
-		status: Schema.Literals(["done", "cancelled"]),
-	}),
+	"turn.started": Schema.Struct({ chatId }),
+	/** A running turn was asked to stop, as its automation run ended; `turn.completed` follows once it has. The turn itself listens for it, so it is on the stream. */
+	"turn.interrupt_requested": Schema.Struct({ chatId, turnId: uuidSchema }),
+	"turn.completed": Schema.Struct({ chatId }),
 	/**
-	 * What people watching the chat should know that no message in it
+	 * What members watching the chat should know that no message in it
 	 * records, such as why a bot they asked did not reply. `notice` is
-	 * written for people; it is not kept in the chat's history.
+	 * written for members; it is not kept in the chat's history.
 	 */
 	"chat.notice": Schema.Struct({ chatId, notice: Schema.String }),
 	/**
-	 * `person` is writing in the chat's composer. Sent again every few
+	 * `member` is writing in the chat's composer. Sent again every few
 	 * seconds while they keep typing, and never to say they stopped: a
 	 * watcher stops showing them when these stop coming, or when their
 	 * message arrives.
 	 */
-	"person.typing": Schema.Struct({ chatId, person: personParticipantSchema }),
+	"member.typing": Schema.Struct({ chatId, member: memberParticipantSchema }),
 	/** Someone read further into the chat. A read never moves anyone back. */
 	"chat.read": Schema.Struct({ chatId, ...chatReadSchema.fields }),
-	"chat.created": Schema.Struct({ chatId }),
 	/**
 	 * Something about the chat no more specific event describes. On
 	 * the chat's stream it means refetch the chat; on
 	 * its workspace's, that what lists show of it may be out of date.
 	 */
 	"chat.changed": Schema.Struct({ chatId }),
-	/**
-	 * A chat opened beside `rootChatId` changed: an automation
-	 * run or collaboration in it.
-	 */
-	"chat.item_changed": Schema.Struct({ rootChatId: uuidSchema, chatId }),
-	/** Something to tell the person about, which their open tabs show. */
+	/** A chat nested under `rootChatId` changed: an automation run in it. */
+	"chat.nested_chat_changed": Schema.Struct({ rootChatId: uuidSchema, chatId }),
+	/** Something to tell the member about, which their open tabs show. */
 	notification: notificationContentSchema,
-	/** One of the person's tabs says what it is looking at, so their other tabs hold back notifications about it. */
+	/** One of the member's tabs says what it is looking at, so their other tabs hold back notifications about it. */
 	presence: presenceSchema,
-	/** A collaboration in `messageId` changed: opened, gave up waiting, answered, failed. */
-	"collaboration.updated": Schema.Struct({
-		chatId,
-		messageId,
-		collaboration: collaborationPartSchema,
-	}),
-	"bot.updated": nothing,
-	"project.updated": nothing,
 	/**
 	 * The one control event. Sent when the server cannot give the client a
 	 * continuous history: the resume point was pruned, the replay is too long
@@ -155,7 +131,7 @@ const RESET_EVENT_TYPE = "reset" satisfies KnownEventType;
  * recovered from the message row a running turn saves every second, not from
  * a replay.
  */
-export const durableEventTypeSchema = Schema.Literals([
+const durableEventTypeSchema = Schema.Literals([
 	"message.created",
 	"message.completed",
 	"message.failed",
@@ -165,19 +141,18 @@ export const durableEventTypeSchema = Schema.Literals([
 	"tool_call.completed",
 	"tool_call.updated",
 	"turn.started",
-	"turn.cancel_requested",
+	"turn.interrupt_requested",
 	"turn.completed",
 	"chat.notice",
 	"chat.read",
-	"chat.created",
 	"chat.changed",
-	"chat.item_changed",
-	"collaboration.updated",
-	"bot.updated",
-	"project.updated",
+	"chat.nested_chat_changed",
 ] satisfies KnownEventType[]);
 
 export type DurableEventType = typeof durableEventTypeSchema.Type;
+
+/** The known types sent to live subscribers only, never stored. */
+export type EphemeralEventType = Exclude<KnownEventType, DurableEventType>;
 
 /**
  * `string & {}` keeps the known types in autocomplete while still accepting an
@@ -265,26 +240,25 @@ export const chatUpdateEventSchema = Schema.Union([
 	withEnvelope("tool_call.completed", P["tool_call.completed"]),
 	withEnvelope("tool_call.updated", P["tool_call.updated"]),
 	withEnvelope("turn.started", P["turn.started"]),
-	withEnvelope("turn.cancel_requested", P["turn.cancel_requested"]),
+	withEnvelope("turn.interrupt_requested", P["turn.interrupt_requested"]),
 	withEnvelope("turn.completed", P["turn.completed"]),
 	withEnvelope("chat.changed", P["chat.changed"]),
 	withEnvelope("chat.notice", P["chat.notice"]),
 	withEnvelope("chat.read", P["chat.read"]),
-	withEnvelope("person.typing", P["person.typing"]),
-	withEnvelope("chat.item_changed", P["chat.item_changed"]),
-	withEnvelope("collaboration.updated", P["collaboration.updated"]),
+	withEnvelope("member.typing", P["member.typing"]),
+	withEnvelope("chat.nested_chat_changed", P["chat.nested_chat_changed"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
 
 /** Everything a workspace's stream can carry. */
 export const workspaceUpdateEventSchema = Schema.Union([
 	withEnvelope("chat.changed", P["chat.changed"]),
-	withEnvelope("chat.item_changed", P["chat.item_changed"]),
+	withEnvelope("chat.nested_chat_changed", P["chat.nested_chat_changed"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
 
-/** Everything a person's own stream can carry. */
-export const personUpdateEventSchema = Schema.Union([
+/** Everything a member's own stream can carry. */
+export const memberUpdateEventSchema = Schema.Union([
 	withEnvelope("notification", P.notification),
 	withEnvelope("presence", P.presence),
 	withEnvelope("reset", P.reset.schema),
@@ -293,15 +267,15 @@ export const personUpdateEventSchema = Schema.Union([
 /**
  * The name of an event stream, which a client subscribes to and the event
  * store keeps events under. There are three kinds: a
- * workspace, a chat, and a person, which only that person hears. A
+ * workspace, a chat, and a member, which only that member hears. A
  * chat's system bots work in chats of their own but publish on
  * the one they act on, so a client watching a chat holds one
- * connector.
+ * connection to the event stream.
  */
-export type EventStream = `workspace:${string}` | `chat:${string}` | `person:${string}`;
+export type EventStream = `workspace:${string}` | `chat:${string}` | `member:${string}`;
 
 export const workspaceStream = (workspaceId: string): EventStream => `workspace:${workspaceId}`;
 
 export const chatStream = (chatId: string): EventStream => `chat:${chatId}`;
 
-export const personStream = (personId: string): EventStream => `person:${personId}`;
+export const memberStream = (memberId: string): EventStream => `member:${memberId}`;

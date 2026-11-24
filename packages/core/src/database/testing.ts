@@ -35,7 +35,7 @@ import {
 
 /**
  * What the process provides every service once, as `index.ts` does: here the
- * test database, real ids, blobs kept in the database, and credentials sealed
+ * test database, real ids, blobs kept in the database, and secrets encrypted
  * under a fixed test key.
  */
 export const testInfrastructure = Layer.mergeAll(

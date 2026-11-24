@@ -29,7 +29,7 @@ const router = createAppRouter();
 function App() {
 	const session = useSessionFromApi();
 
-	if (session.person === undefined) {
+	if (session.member === undefined) {
 		return session.error ? (
 			<LoadFailure
 				title="Could not check your session"
@@ -41,7 +41,7 @@ function App() {
 		);
 	}
 
-	return <SessionRouter key={session.person?.id ?? "signed-out"} session={session} />;
+	return <SessionRouter key={session.member?.id ?? "signed-out"} session={session} />;
 }
 
 function SessionRouter({ session }: { session: Session }) {

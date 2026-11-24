@@ -10,7 +10,7 @@ import { Session } from "../middleware.ts";
  * model each runs on.
  *
  * Addressed by key rather than by id, because there is exactly one of each per
- * workspace. That is also what keeps this from being pointed at a bot people talk to,
+ * workspace. That is also what keeps this from being pointed at a bot members talk to,
  * which is configured in its own settings instead.
  *
  * Reading is open to the whole workspace: what is exposed is names and model

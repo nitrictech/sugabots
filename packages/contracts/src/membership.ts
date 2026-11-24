@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { signedInPersonSchema } from "./api.ts";
+import { currentUserSchema } from "./api.ts";
 import { emailSchema } from "./email.ts";
 import { slugSchema } from "./projects.ts";
 import { timeZoneSchema } from "./time-zones.ts";
@@ -57,14 +57,14 @@ export const workspaceTimeZoneChangeSchema = Schema.Struct({ timeZone: timeZoneS
 export const membershipSchema = Schema.Struct({
 	id: uuidSchema,
 	role: workspaceRoleSchema,
-	person: signedInPersonSchema,
+	member: currentUserSchema,
 	joinedAt: isoTimestampSchema,
 });
 export type Membership = typeof membershipSchema.Type;
 
 export const roleChangeSchema = Schema.Struct({ role: assignableWorkspaceRoleSchema });
 
-/** Who the owner hands the workspace over to: a person in it, by their membership's id. */
+/** Who the owner hands the workspace over to: a member in it, by their membership's id. */
 export const ownershipHandOverSchema = Schema.Struct({ membershipId: uuidSchema });
 
 /** How many days an invitation can be accepted for after it is sent or sent again. */
@@ -84,13 +84,13 @@ export type WorkspaceInvitation = typeof workspaceInvitationSchema.Type;
 export const newWorkspaceInvitationSchema = Schema.Struct({
 	email: emailSchema,
 	role: assignableWorkspaceRoleSchema,
-	/** Refreshes an invitation already outstanding to this address, and sends it again. */
+	/** Refreshes an invitation already pending for this address, and sends it again. */
 	resend: Schema.optional(Schema.Boolean),
 });
 export type NewWorkspaceInvitation = typeof newWorkspaceInvitationSchema.Type;
 
 /**
- * An invitation as the person it was sent to sees it: one still to accept, or
+ * An invitation as the member it was sent to sees it: one still to accept, or
  * one they have accepted already, whose link leads back into its workspace.
  */
 export const invitationPreviewSchema = Schema.Union([
@@ -98,7 +98,7 @@ export const invitationPreviewSchema = Schema.Union([
 		status: Schema.Literal("pending"),
 		workspaceName: Schema.String,
 		inviterName: Schema.String,
-		/** The role the person will have in the workspace once they accept. */
+		/** The role the member will have in the workspace once they accept. */
 		role: workspaceRoleSchema,
 	}),
 	Schema.Struct({ status: Schema.Literal("accepted"), workspaceId: uuidSchema }),

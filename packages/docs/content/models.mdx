@@ -15,7 +15,7 @@ These are built-in providers. Pick one and it fills in the server URL for you.
 
 <ProviderGrid />
 
-Every workspace starts with **Anthropic**, **OpenAI** and **Ollama** listed, plus
+Every workspace starts with **Anthropic**, **OpenAI**, **ChatGPT** and **Ollama** listed, plus
 any provider you picked during workspace setup. Paste a key to use a hosted provider. Local servers need a server URL, not a key.
 
 <Tip title="Anything else">
@@ -43,14 +43,14 @@ tools, so pick models that support them.
 
 ## Default model
 
-New bots start on the workspace's default model, shown under **Default → New
-bots use**. Each bot can move to another model in its own settings.
+New bots start on the workspace's default model, shown under **Defaults →
+Default for new bots**. Each bot can move to another model in its own settings.
 
-## Behind-the-scenes model
+## System model
 
 Sugabots also uses a model for its own work: compacting a long chat
 when the bot in it has no model of its own. An admin picks it under
-**Default → Compaction**. A fast, cheap model is best. [Usage](/docs/usage) shows what it costs,
+**Defaults → Compaction**. A fast, cheap model is best. [Usage](/docs/usage) shows what it costs,
 beside each bot.
 
 Both this and the default model start on the first model you switch on, which

@@ -2,7 +2,6 @@ import { Result, Schema, SchemaIssue } from "effect";
 import { describe, expect, it } from "vitest";
 import { connectorUpdateSchema, newConnectorSchema } from "./connectors.ts";
 import {
-	bulkProviderModelUpdateSchema,
 	effectiveCapabilities,
 	modelProviderUpdateSchema,
 	newCustomProviderSchema,
@@ -219,15 +218,6 @@ describe("provider models", () => {
 			).toThrow();
 		},
 	);
-
-	it("requires a nonempty UUID array for bulk updates", () => {
-		const decode = Schema.decodeUnknownSync(bulkProviderModelUpdateSchema);
-		expect(() => decode({ modelIds: [], enabled: true })).toThrow();
-		expect(() => decode({ modelIds: ["bad"], enabled: true })).toThrow();
-		expect(
-			decode({ modelIds: ["00000000-0000-0000-0000-000000000000"], enabled: false }).modelIds,
-		).toHaveLength(1);
-	});
 });
 
 describe("a provider's API key", () => {

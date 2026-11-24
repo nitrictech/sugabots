@@ -2,7 +2,6 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
 	acceptedAutomationWebhookSchema,
-	acceptedRunSchema,
 	automationCurrentSecretSchema,
 	automationSchema,
 	automationSecretReplacementSchema,
@@ -64,7 +63,7 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 	HttpApiEndpoint.post("run", "/projects/:projectId/automations/:automationId/run", {
 		params: automation,
 		payload: manualAutomationRunSchema,
-		success: acceptedRunSchema.pipe(HttpApiSchema.status(202)),
+		success: HttpApiSchema.Empty(202),
 		error: [Conflict, ...refused],
 	}).middleware(Session),
 	HttpApiEndpoint.post("addTrigger", "/projects/:projectId/automations/:automationId/triggers", {

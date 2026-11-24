@@ -72,8 +72,6 @@ export async function start(): Promise<Environment> {
 			`POSTGRES_DB=${POSTGRES_USER}`,
 			"-p",
 			`127.0.0.1:${databasePort}:5432`,
-			"-v",
-			`${join(REPO, "postgres/init")}:/docker-entrypoint-initdb.d:ro`,
 			POSTGRES_IMAGE,
 		]);
 		await waitFor(() => {

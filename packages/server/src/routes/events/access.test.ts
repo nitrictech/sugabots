@@ -1,15 +1,7 @@
 import { handleFromName } from "@sugabots/contracts";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { seedChat } from "@sugabots/core/chats/seed.test-support";
-import {
-	bot,
-	membership,
-	message,
-	person,
-	projectMember,
-	turn,
-	workspace,
-} from "@sugabots/core/database/schema";
+import { bot, member, membership, projectMember, workspace } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { seedProject } from "@sugabots/core/workspaces/projects/seed.test-support";
 import { onPostgresAs } from "@sugabots/core/workspaces/testing";
@@ -21,9 +13,9 @@ import { StreamAccess } from "./access.ts";
 
 /** Who may listen to what. The workspace half is a membership query, so it runs against Postgres. */
 
-/** The access with its answers run as `personId`, with nothing else to reach. */
-function asSomebody(access: StreamAccess.Interface, personId: string) {
-	const asThem = CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(personId));
+/** The access with its answers run as `memberId`, with nothing else to reach. */
+function asSomebody(access: StreamAccess.Interface, memberId: string) {
+	const asThem = CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(memberId));
 	return {
 		workspace: (id: string) => Effect.runPromise(access.workspace(id).pipe(asThem)),
 		chat: (id: string) => Effect.runPromise(access.chat(id).pipe(asThem)),
@@ -42,27 +34,27 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 
 	/**
 	 * A workspace with an editor in a project, an administrator the database has
-	 * put in it too, another person in the workspace outside the project, and one
-	 * person left outside the workspace.
+	 * put in it too, another member in the workspace outside the project, and one
+	 * member left outside the workspace.
 	 */
 	async function fixture() {
 		const suffix = crypto.randomUUID();
 
 		const [editor] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Editor", email: `editor-${suffix}@example.com` })
 				.returning(),
 		);
 		const [outsider] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Outsider", email: `outsider-${suffix}@example.com` })
 				.returning(),
 		);
 		const [administrator] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Admin", email: `admin-${suffix}@example.com` })
 				.returning(),
 		);
@@ -79,18 +71,18 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId: space.id, personId: editor.id },
-				{ workspaceId: space.id, personId: administrator.id, role: "admin" },
+				{ workspaceId: space.id, memberId: editor.id },
+				{ workspaceId: space.id, memberId: administrator.id, role: "admin" },
 			]),
 		);
 
-		// A chat with a public bot, one with a private bot the editor made, and
+		// A chat with a public bot, one with a personal bot the editor made, and
 		// a chat of a project the editor is in.
-		const [publicBot, privateBot] = await onDatabase((db) =>
+		const [publicBot, personalBot] = await onDatabase((db) =>
 			db
 				.insert(bot)
 				.values(
-					(["public", "private"] as const).map((visibility) => ({
+					(["public", "personal"] as const).map((visibility) => ({
 						workspaceId: space.id,
 						name: `Host ${visibility} ${suffix}`,
 						handle: handleFromName(`Host ${visibility} ${suffix}`),
@@ -111,13 +103,13 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 				createdById: editor.id,
 			}),
 		);
-		if (!publicBot || !privateBot || !room) {
+		if (!publicBot || !personalBot || !room) {
 			throw new Error("fixture did not insert");
 		}
 		await onDatabase((db) =>
 			db
 				.insert(projectMember)
-				.values({ workspaceId: space.id, projectId: room.id, personId: editor.id }),
+				.values({ workspaceId: space.id, projectId: room.id, memberId: editor.id }),
 		);
 		const chat = await onDatabase((db) =>
 			seedChat(db, {
@@ -128,12 +120,12 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 				startedById: editor.id,
 			}),
 		);
-		const privateChat = await onDatabase((db) =>
+		const personalBotChat = await onDatabase((db) =>
 			seedChat(db, {
 				workspaceId: space.id,
 				kind: "project_chat",
-				botId: privateBot.id,
-				title: "A private chat",
+				botId: personalBot.id,
+				title: "A personal bot's chat",
 				startedById: editor.id,
 			}),
 		);
@@ -148,103 +140,20 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		);
 		const [elsewhere] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Elsewhere", email: `elsewhere-${suffix}@example.com` })
 				.returning(),
 		);
 		if (!elsewhere) throw new Error("fixture did not insert");
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId: space.id, personId: elsewhere.id }),
+			db.insert(membership).values({ workspaceId: space.id, memberId: elsewhere.id }),
 		);
-		// A private bot of somebody outside the project, asked from it, and the
-		// public bot asked from the editor's private chat.
-		const [elsewhereBot] = await onDatabase((db) =>
-			db
-				.insert(bot)
-				.values({
-					workspaceId: space.id,
-					name: `Elsewhere's ${suffix}`,
-					handle: handleFromName(`Elsewhere's ${suffix}`),
-					visibility: "private",
-					color: "rose",
-					eyes: "pill",
-					model: "m",
-					createdById: elsewhere.id,
-				})
-				.returning(),
-		);
-		if (!elsewhereBot) throw new Error("fixture did not insert");
-		/** A collaboration `askingBotId`'s reply in `askedFrom` opened with `collaboratorBotId`. */
-		const askedFrom = async (
-			askedFromId: string,
-			askingBotId: string,
-			collaboratorBotId: string,
-			title: string,
-		) => {
-			const [reply] = await onDatabase((db) =>
-				db
-					.insert(message)
-					.values({
-						chatId: askedFromId,
-						authorBotId: askingBotId,
-						kind: "text",
-						status: "complete",
-						parts: [],
-						content: "Asking.",
-					})
-					.returning(),
-			);
-			if (!reply) throw new Error("fixture did not insert");
-			const [asking] = await onDatabase((db) =>
-				db
-					.insert(turn)
-					.values({
-						chatId: askedFromId,
-						botId: askingBotId,
-						triggerMessageId: reply.id,
-						status: "done",
-						model: "m",
-						startedAt: new Date(),
-					})
-					.returning(),
-			);
-			if (!asking) throw new Error("fixture did not insert");
-			return onDatabase((db) =>
-				seedChat(db, {
-					workspaceId: space.id,
-					kind: "collaboration",
-					title,
-					collaboration: {
-						parentChatId: askedFromId,
-						rootChatId: askedFromId,
-						parentMessageId: reply.id,
-						turnId: asking.id,
-						collaboratorBotId,
-						brief: title,
-						atOffset: 0,
-					},
-				}),
-			);
-		};
-		const askedFromProject = await askedFrom(
-			projectChat.id,
-			publicBot.id,
-			elsewhereBot.id,
-			"Asked from the project",
-		);
-		const askedFromPrivateChat = await askedFrom(
-			privateChat.id,
-			privateBot.id,
-			publicBot.id,
-			"Asked from a private chat",
-		);
-
 		// The real services, over the real database, since that is what the
 		// visibility joins are being checked against.
 		const streams = await runOnPostgres(Effect.provide(StreamAccess.Service, StreamAccess.layer));
 		return {
-			/** The streams `personId` is given. */
-			access: (personId: string) => onPostgresAs(personId)(streams),
+			/** The streams `memberId` is given. */
+			access: (memberId: string) => onPostgresAs(memberId)(streams),
 			editor,
 			administrator,
 			outsider,
@@ -252,10 +161,8 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 			space,
 			room,
 			chat,
-			privateChat,
+			personalBotChat,
 			projectChat,
-			askedFromProject,
-			askedFromPrivateChat,
 		};
 	}
 
@@ -316,15 +223,15 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access(outsider.id).hears(chatAudience(chat.id))).toBe(false);
 	});
 
-	it("lets only a private bot's creator hear about its chats, not an administrator", async () => {
-		const { access, editor, administrator, elsewhere, privateChat } = await fixture();
+	it("lets only a personal bot's creator hear about its chats, not an administrator", async () => {
+		const { access, editor, administrator, elsewhere, personalBotChat } = await fixture();
 
-		expect(await access(editor.id).hears(chatAudience(privateChat.id))).toBe(true);
-		expect(await access(administrator.id).hears(chatAudience(privateChat.id))).toBe(false);
-		expect(await access(elsewhere.id).hears(chatAudience(privateChat.id))).toBe(false);
+		expect(await access(editor.id).hears(chatAudience(personalBotChat.id))).toBe(true);
+		expect(await access(administrator.id).hears(chatAudience(personalBotChat.id))).toBe(false);
+		expect(await access(elsewhere.id).hears(chatAudience(personalBotChat.id))).toBe(false);
 	});
 
-	it("lets only the people in a project hear about its chats", async () => {
+	it("lets only the members in a project hear about its chats", async () => {
 		const { access, editor, administrator, elsewhere, space, projectChat } = await fixture();
 
 		expect(await access(editor.id).hears(chatAudience(projectChat.id))).toBe(true);
@@ -333,35 +240,13 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access(elsewhere.id).hears(chatAudience(projectChat.id))).toBe(false);
 	});
 
-	it("keeps a collaboration with the chat it was opened from, not the bot asked", async () => {
-		const { access, editor, elsewhere, askedFromPrivateChat } = await fixture();
-
-		expect(await access(editor.id).chat(askedFromPrivateChat.id)).toBe(
-			`chat:${askedFromPrivateChat.id}`,
-		);
-		expect(await access(editor.id).hears(chatAudience(askedFromPrivateChat.id))).toBe(true);
-		// Everyone reaches the public bot that was asked, but not the private chat.
-		expect(await access(elsewhere.id).chat(askedFromPrivateChat.id)).toBeUndefined();
-		expect(await access(elsewhere.id).hears(chatAudience(askedFromPrivateChat.id))).toBe(false);
-	});
-
-	it("shows the project a collaboration with a private bot opened from it", async () => {
-		const { access, editor, administrator, elsewhere, askedFromProject } = await fixture();
-
-		expect(await access(editor.id).chat(askedFromProject.id)).toBe(`chat:${askedFromProject.id}`);
-		expect(await access(administrator.id).hears(chatAudience(askedFromProject.id))).toBe(true);
-		// The private bot's creator is not in the project.
-		expect(await access(elsewhere.id).chat(askedFromProject.id)).toBeUndefined();
-		expect(await access(elsewhere.id).hears(chatAudience(askedFromProject.id))).toBe(false);
-	});
-
 	it("gives an administrator without a row in the project nothing, since reach is the row", async () => {
 		const { access, administrator, room, projectChat } = await fixture();
 		await onDatabase((db) =>
 			db
 				.delete(projectMember)
 				.where(
-					and(eq(projectMember.projectId, room.id), eq(projectMember.personId, administrator.id)),
+					and(eq(projectMember.projectId, room.id), eq(projectMember.memberId, administrator.id)),
 				),
 		);
 

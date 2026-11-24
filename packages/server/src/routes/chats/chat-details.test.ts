@@ -1,14 +1,19 @@
 import type { ChatDetails } from "@sugabots/contracts";
 import { chatContextSchema, chatDetailsSchema } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import { testMember } from "@sugabots/contracts/testing";
 import { ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ChatDetailsView } from "@sugabots/core/chats/chat-details-view";
 import { Reactions } from "@sugabots/core/chats/reactions/reactions";
 import { Effect, Layer, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { PersonResolver } from "../../http/app.test-support.ts";
-import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
+import type { MemberResolver } from "../../http/app.test-support.ts";
+import {
+	createTestApp,
+	identifiedBy,
+	sessionTokenIn,
+	signedInWith,
+} from "../../http/app.test-support.ts";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 const BOT = "0199a3a0-0000-7000-8000-000000000003";
@@ -16,14 +21,14 @@ const CHAT = "0199a3a0-0000-7000-8000-000000000004";
 const USER = "0199a3a0-0000-7000-8000-000000000005";
 const OUTSIDER = "0199a3a0-0000-7000-8000-000000000006";
 
-const people = {
+const members = {
 	"sam-token": { id: USER, name: "Sam", email: "sam@example.com", image: null },
 	"outsider-token": { id: OUTSIDER, name: "Kim", email: "kim@example.com", image: null },
 };
 
-const resolvePerson: PersonResolver = async (headers) => {
-	const token = headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
-	const signedIn = people[token as keyof typeof people];
+const resolveMember: MemberResolver = async (headers) => {
+	const token = sessionTokenIn(headers) ?? "";
+	const signedIn = members[token as keyof typeof members];
 	return signedIn ?? null;
 };
 
@@ -35,8 +40,7 @@ const chat = {
 	rootChatId: CHAT,
 	kind: "project_chat" as const,
 	title: "Check the release",
-	status: "running" as const,
-	parentChatId: null,
+	working: true,
 	resolvedAt: null,
 	createdAt: "2026-09-10T04:00:00.000Z",
 	updatedAt: "2026-09-10T04:00:00.000Z",
@@ -46,9 +50,9 @@ const details: ChatDetails = {
 	chat,
 	automationRun: null,
 	projectBots: [],
-	peopleReachingProject: [],
+	membersReachingProject: [],
 	participants: [
-		testPerson({ id: USER, name: "Sam" }),
+		testMember({ id: USER, name: "Sam" }),
 		{
 			kind: "bot",
 			id: BOT,
@@ -66,8 +70,7 @@ const details: ChatDetails = {
 		{
 			id: "0199a3a0-0000-7000-8000-000000000007",
 			chatId: CHAT,
-			author: testPerson({ id: USER, name: "Sam" }),
-			kind: "text",
+			author: testMember({ id: USER, name: "Sam" }),
 			status: "complete",
 			parts: [{ type: "text", text: "Check the release" }],
 			content: "Check the release",
@@ -81,8 +84,8 @@ const details: ChatDetails = {
  * everything from anybody else, so a case can tell who it was asked as.
  */
 const seenBy = <A>(chatId: string, seen: A) =>
-	Effect.flatMap(CurrentActor.Service, ({ personId }) =>
-		chatId === CHAT && personId === USER
+	Effect.flatMap(CurrentActor.Service, ({ memberId }) =>
+		chatId === CHAT && memberId === USER
 			? Effect.succeed(seen)
 			: Effect.fail(new ResourceHidden({ resource: "chat" })),
 	);
@@ -106,13 +109,13 @@ beforeEach(() => {
 const app = () =>
 	createTestApp(
 		Layer.mergeAll(
-			identifiedBy(resolvePerson),
+			identifiedBy(resolveMember),
 			Layer.succeed(ChatDetailsView.Service, view),
 			Layer.succeed(Reactions.Service, {
 				add: (messageId, emoji) => {
 					reacted.push({ change: "add", messageId, emoji });
 					return Effect.succeed([
-						{ emoji, people: [{ id: USER, name: "Sam", at: chat.createdAt }] },
+						{ emoji, members: [{ id: USER, name: "Sam", at: chat.createdAt }] },
 					]);
 				},
 				remove: (messageId, emoji) => {
@@ -125,7 +128,7 @@ const app = () =>
 
 const as = (token: string, init: RequestInit = {}) => ({
 	...init,
-	headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+	headers: { ...signedInWith(token), "content-type": "application/json" },
 });
 
 describe("chat routes", () => {
@@ -146,16 +149,6 @@ describe("chat routes", () => {
 
 		const hidden = await app().request(`/chats/${CHAT}/context`, as("outsider-token"));
 		expect(hidden.status).toBe(404);
-	});
-
-	it("answers HEAD without loading a full history page", async () => {
-		const get = await app().request(`/chats/${CHAT}`, as("sam-token"));
-		const head = await app().request(`/chats/${CHAT}`, as("sam-token", { method: "HEAD" }));
-
-		expect(head.status).toBe(get.status);
-		expect(head.headers.get("content-type")).toBe(get.headers.get("content-type"));
-		expect(head.body).toBeNull();
-		expect(requestedHistory).toEqual({ limit: 1 });
 	});
 
 	it("accepts a bounded history cursor and rejects limit boundaries", async () => {
@@ -181,7 +174,7 @@ describe("chat routes", () => {
 		);
 		expect(added.status).toBe(200);
 		expect(await added.json()).toEqual([
-			{ emoji: "👍🏽", people: [{ id: USER, name: "Sam", at: chat.createdAt }] },
+			{ emoji: "👍🏽", members: [{ id: USER, name: "Sam", at: chat.createdAt }] },
 		]);
 		const removed = await app().request(
 			`/messages/${message}/reactions/${thumbsUp}`,

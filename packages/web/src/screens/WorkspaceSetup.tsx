@@ -67,9 +67,9 @@ import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 
 /*
  * Setting up a workspace: name it, connect a model, make the first bot, invite
- * people, then meet the bot. Signing in comes before, on the sign-in page, which
+ * members, then meet the bot. Signing in comes before, on the sign-in page, which
  * is the welcome. The first bot is a public bot of its own, beside the
- * person's Personal Assistant, which the workspace already made.
+ * member's Personal Assistant, which the workspace already made.
  */
 
 type Step = "workspace" | "model" | "bot" | "invite" | "ready";
@@ -118,7 +118,7 @@ function WorkspaceSetupSteps({ session, workspace, onAddress, onCancel }: Worksp
 	// and the first bot they make here, a public one of the workspace's.
 	const assistant = bots?.find((bot) => bot.assistant);
 	const firstBot = bots?.find(
-		(bot) => !bot.assistant && bot.createdBy !== null && bot.createdBy.id === session.person?.id,
+		(bot) => !bot.assistant && bot.createdBy !== null && bot.createdBy.id === session.member?.id,
 	);
 	const assistantHasModel =
 		models.data?.models.some((model) => model.modelId === assistant?.model) ?? false;
@@ -170,7 +170,7 @@ function WorkspaceSetupSteps({ session, workspace, onAddress, onCancel }: Worksp
 			) : step === "workspace" ? (
 				<WorkspaceStep
 					workspace={workspace}
-					firstName={session.person?.name.split(" ")[0]}
+					firstName={session.member?.name.split(" ")[0]}
 					onAddress={onAddress}
 					onContinue={() => setChosen("model")}
 				/>
@@ -181,7 +181,7 @@ function WorkspaceSetupSteps({ session, workspace, onAddress, onCancel }: Worksp
 			) : step === "bot" ? (
 				<BotStep model={assistant.model} made={firstBot} onCreated={() => setChosen("invite")} />
 			) : step === "invite" ? (
-				<InvitePeopleStep workspaceId={workspace.id} onContinue={() => setChosen("ready")} />
+				<InviteMembersStep workspaceId={workspace.id} onContinue={() => setChosen("ready")} />
 			) : firstBot ? (
 				<ReadyStep workspace={workspace} bot={firstBot} />
 			) : (
@@ -316,7 +316,7 @@ function WorkspaceStep({
 	return (
 		<form onSubmit={submit} className="flex flex-col gap-5.5">
 			<AuthHeading title="Name your workspace">
-				It's just you for now. You can invite people later.
+				It's just you for now. You can invite members later.
 			</AuthHeading>
 			<input
 				aria-label="Workspace name"
@@ -638,7 +638,7 @@ function emailsIn(typed: string): string[] {
 	return typed.split(/[\s,;]+/).filter((one) => LOOKS_LIKE_EMAIL.test(one));
 }
 
-function InvitePeopleStep({
+function InviteMembersStep({
 	workspaceId,
 	onContinue,
 }: {
@@ -694,7 +694,7 @@ function InvitePeopleStep({
 	return (
 		<form onSubmit={submit} className="flex flex-col gap-5.5">
 			<AuthHeading title="Bring your friends">
-				Invite people to your workspace. You can add them to projects later.
+				Invite members to your workspace. You can add them to projects later.
 			</AuthHeading>
 			<div className="focus-ring-within flex min-h-13 flex-wrap items-center gap-1.5 rounded-2xl bg-list px-3 py-2.5">
 				{emails.map((email) => (
@@ -816,7 +816,7 @@ function ReadyStep({ workspace, bot }: { workspace: { id: string; slug: string }
 }
 
 /**
- * The workspace makes each person's Personal Assistant as they join, so this
+ * The workspace makes each member's Personal Assistant as they join, so this
  * is a recovery rather than a step: making it again, on the model just
  * connected.
  */

@@ -19,8 +19,8 @@ import { AutomationStore } from "./store.ts";
 
 /**
  * The automation work nobody asks for: the scheduler accepting routines' runs as they
- * fall due, and a run's workflow starting it. Neither acts for a person, so
- * this asks for no actor and is never handed to a route.
+ * fall due, and a run's workflow starting it. Neither acts for a member, so
+ * this asks for no principal and is never handed to a route.
  */
 export interface Interface {
 	/**
@@ -86,15 +86,15 @@ export const make = Effect.gen(function* () {
 				"startRun",
 				transaction(
 					Effect.gen(function* () {
-						const execution = yield* store.start(run.runId);
-						if (!execution) return;
+						const started = yield* store.start(run.runId);
+						if (!started) return;
 						const [triggerMessage] = yield* query((db) =>
 							db
 								.select({ id: message.id })
 								.from(message)
 								.where(
 									and(
-										eq(message.chatId, execution.chatId),
+										eq(message.chatId, started.chatId),
 										sql`${message.automationTrigger} is not null`,
 									),
 								)
@@ -106,8 +106,8 @@ export const make = Effect.gen(function* () {
 						// Asking again for a turn already asked for joins it, so a start
 						// repeated after a crash does not run the turn twice.
 						yield* turns.ask({
-							chatId: execution.chatId,
-							botId: execution.botId,
+							chatId: started.chatId,
+							botId: started.botId,
 							triggerMessageId: triggerMessage.id,
 							reason: "automation",
 						});

@@ -40,13 +40,15 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import { bot, invitation, membership, person, workspace } from "../../database/schema.ts";
+import { bot, invitation, member, membership, workspace } from "../../database/schema.ts";
 import { Email } from "../../email/email.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
+import { MemberSignIns } from "../../providers/member-sign-ins.ts";
 import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
 import { SearchProviderStore } from "../../providers/search-providers/search-provider-store.ts";
 import { ServerSettings } from "../../server-settings/server-settings.ts";
+import { invitationPath } from "../../server-settings/web-app-paths.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { BotStore } from "../bots/bot-store.ts";
 import { PersonalAssistants } from "../bots/personal-assistants.ts";
@@ -60,7 +62,7 @@ import { defaultProjectOf } from "../projects/project-reads.ts";
 export interface Interface {
 	/** In the order they joined them. */
 	readonly workspaces: Effect.Effect<readonly Workspace[], never, CurrentActor.Service>;
-	/** Owned by the person who created it. */
+	/** Owned by the member who created it. */
 	readonly create: (input: {
 		details: NewWorkspace;
 	}) => Effect.Effect<
@@ -69,7 +71,7 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Its projects, bots, chats and providers go with it, and its people
+	 * Its projects, bots, chats and providers go with it, and its members
 	 * lose it. What its models cost stays on the ledger. The owner's alone.
 	 * Its projects' computers are destroyed first, since their records go with
 	 * it: when a provider can't be reached, or a computer is made meanwhile,
@@ -105,8 +107,10 @@ export interface Interface {
 		input: InWorkspace & { membershipId: string; role: AssignableWorkspaceRole },
 	) => Effect.Effect<void, AuthorizationDenied | OwnerStays, CurrentActor.Service>;
 	/**
-	 * Their Personal Assistant, pins and project memberships go with them. Only the owner
-	 * removes an administrator, and nobody removes the owner.
+	 * Their Personal Assistant, pins and project memberships go with them, and so
+	 * does what signs in as them (see `MemberSignIns`). Only the owner removes an
+	 * administrator, and nobody removes the owner. Nobody is removed while a
+	 * model provider signs in with their subscription.
 	 */
 	readonly remove: (
 		input: InWorkspace & { membershipId: string },
@@ -114,23 +118,29 @@ export interface Interface {
 		void,
 		| AuthorizationDenied
 		| OwnerStays
+		| MemberSignIns.SubscriptionInUse
 		| Computers.Unavailable
 		| ProjectComputers.ComputerMadeMeanwhile,
 		CurrentActor.Service
 	>;
-	/** The owner stays until they have handed ownership over. */
+	/**
+	 * What signs in as them goes with them, as when they are removed. The owner
+	 * stays until they have handed ownership over, and anybody stays while a
+	 * model provider signs in with their subscription.
+	 */
 	readonly leave: (
 		input: InWorkspace,
 	) => Effect.Effect<
 		void,
 		| AuthorizationDenied
 		| OwnerStays
+		| MemberSignIns.SubscriptionInUse
 		| Computers.Unavailable
 		| ProjectComputers.ComputerMadeMeanwhile,
 		CurrentActor.Service
 	>;
 	/**
-	 * Makes the membership's person the workspace's owner, and the owner an administrator,
+	 * Makes the membership's member the workspace's owner, and the owner an administrator,
 	 * together. Handing it to the owner changes nothing.
 	 */
 	readonly handOverOwnership: (
@@ -151,7 +161,7 @@ export interface Interface {
 		input: ForInvitation,
 	) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
 	/**
-	 * For the person the invitation was sent to: one still to accept, or one
+	 * For the member the invitation was sent to: one still to accept, or one
 	 * they have accepted and whose workspace they are still in.
 	 */
 	readonly invitation: (
@@ -192,22 +202,26 @@ export const make = Effect.gen(function* () {
 	const personalAssistants = yield* PersonalAssistants.Service;
 	const bots = yield* BotStore.Service;
 	const projectComputers = yield* ProjectComputers.Service;
+	const memberSignIns = yield* MemberSignIns.Service;
 
 	/**
 	 * Removes the membership, which cascades to their Personal Assistant, pins
-	 * and project memberships. Their assistant's computer is destroyed first:
-	 * its record is the only way to find the machine, so when the provider
-	 * can't be reached, or a computer is made meanwhile, the membership stays, to
-	 * try again.
+	 * and project memberships, and forgets what signs in as them, unless a
+	 * model provider signs in with their subscription. That is checked first,
+	 * so a refusal leaves everything as it was. Their assistant's computer is
+	 * destroyed next: its record is the only way to find the machine, so when
+	 * the provider can't be reached, or a computer is made meanwhile, the
+	 * membership stays, to try again.
 	 */
-	const deleteMembership = (removed: { id: string; workspaceId: string; personId: string }) =>
+	const deleteMembership = (removed: { id: string; workspaceId: string; memberId: string }) =>
 		Effect.gen(function* () {
+			yield* memberSignIns.forget({ workspaceId: removed.workspaceId, memberId: removed.memberId });
 			const [assistant] = yield* query((db) =>
 				db
 					.select({ id: bot.id })
 					.from(bot)
 					.where(
-						and(eq(bot.workspaceId, removed.workspaceId), eq(bot.assistantOf, removed.personId)),
+						and(eq(bot.workspaceId, removed.workspaceId), eq(bot.assistantOf, removed.memberId)),
 					)
 					.limit(1),
 			);
@@ -250,18 +264,18 @@ export const make = Effect.gen(function* () {
 	 * default model, or on another the workspace offers while it does not offer
 	 * that one.
 	 */
-	const provisionJoining = (workspaceId: string, personId: string) =>
+	const provisionJoining = (workspaceId: string, memberId: string) =>
 		Effect.gen(function* () {
 			const { models, defaultModel } = yield* offeredModels(workspaceId);
 			// The default goes unoffered while a failed test has its provider off.
 			const model = models.some((offered) => offered.modelId === defaultModel)
 				? defaultModel
 				: models[0]?.modelId;
-			if (!model) return yield* personalAssistants.provision({ workspaceId, personId });
-			return yield* personalAssistants.provisionWithModel({ workspaceId, personId, model }).pipe(
+			if (!model) return yield* personalAssistants.provision({ workspaceId, memberId });
+			return yield* personalAssistants.provisionWithModel({ workspaceId, memberId, model }).pipe(
 				// Switched off since it was read: start on none, as while the workspace offers none.
 				Effect.catchTag("ModelNotEnabled", () =>
-					personalAssistants.provision({ workspaceId, personId }),
+					personalAssistants.provision({ workspaceId, memberId }),
 				),
 			);
 		});
@@ -277,15 +291,15 @@ export const make = Effect.gen(function* () {
 				db
 					.select({
 						workspaceName: workspace.name,
-						inviterName: person.name,
-						inviterEmail: person.email,
+						inviterName: member.name,
+						inviterEmail: member.email,
 					})
 					.from(workspace)
-					.innerJoin(person, eq(person.id, inviterId))
+					.innerJoin(member, eq(member.id, inviterId))
 					.where(eq(workspace.id, workspaceId)),
 			);
 			if (!details) return yield* Effect.die(new Error("The invitation's workspace is missing"));
-			const link = `${serverSettings.webAppUrl}/invitations/${encodeURIComponent(invitationId)}`;
+			const link = `${serverSettings.webAppUrl}${invitationPath(invitationId)}`;
 			yield* afterCommit(
 				Effect.orDie(
 					email.send({
@@ -302,13 +316,13 @@ export const make = Effect.gen(function* () {
 	return Service.of({
 		workspaces: operation(
 			"workspaces",
-			Effect.flatMap(CurrentActor.Service, ({ personId }) =>
+			Effect.flatMap(CurrentActor.Service, ({ memberId }) =>
 				query((db) =>
 					db
 						.select(workspaceColumns)
 						.from(membership)
 						.innerJoin(workspace, eq(workspace.id, membership.workspaceId))
-						.where(eq(membership.personId, personId))
+						.where(eq(membership.memberId, memberId))
 						.orderBy(asc(membership.createdAt)),
 				),
 			).pipe(Effect.map((rows) => rows.map(workspaceView))),
@@ -318,7 +332,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"create",
 				Effect.gen(function* () {
-					const { personId } = yield* CurrentActor.Service;
+					const { memberId } = yield* CurrentActor.Service;
 					yield* requireSlugUnlikeUuid(input.details.slug);
 					if (input.details.timeZone !== undefined) {
 						yield* requireTimeZoneKnownToPostgres(input.details.timeZone);
@@ -331,12 +345,12 @@ export const make = Effect.gen(function* () {
 							);
 							if (!created) return yield* Effect.die(new Error("The workspace was not created"));
 							yield* query((db) =>
-								db.insert(membership).values({ workspaceId: created.id, personId, role: "owner" }),
+								db.insert(membership).values({ workspaceId: created.id, memberId, role: "owner" }),
 							);
-							yield* bots.ensureSystemBots({ workspaceId: created.id, createdById: personId });
-							yield* searchProviders.provisionDefault(created.id, personId);
+							yield* bots.createSystemBots({ workspaceId: created.id, createdById: memberId });
+							yield* searchProviders.provisionDefault(created.id, memberId);
 							yield* modelProviders.seedBuiltInProviders(created.id);
-							yield* personalAssistants.provision({ workspaceId: created.id, personId });
+							yield* personalAssistants.provision({ workspaceId: created.id, memberId });
 							return workspaceView(created);
 						}),
 					);
@@ -407,16 +421,16 @@ export const make = Effect.gen(function* () {
 							.select({
 								id: membership.id,
 								role: membership.role,
-								person: {
-									id: person.id,
-									email: person.email,
-									name: person.name,
-									image: person.image,
+								member: {
+									id: member.id,
+									email: member.email,
+									name: member.name,
+									image: member.image,
 								},
 								joinedAt: membership.createdAt,
 							})
 							.from(membership)
-							.innerJoin(person, eq(person.id, membership.personId))
+							.innerJoin(member, eq(member.id, membership.memberId))
 							.where(eq(membership.workspaceId, standing.workspaceId))
 							.orderBy(asc(membership.createdAt)),
 					);
@@ -427,14 +441,14 @@ export const make = Effect.gen(function* () {
 		changeRole: (input) =>
 			operation(
 				"changeRole",
-				underMembershipLock(input.workspace, "workspace.people.manage", (standing) =>
+				underMembershipLock(input.workspace, "workspace.members.manage", (standing) =>
 					Effect.gen(function* () {
 						const target = yield* membershipIn(standing.workspaceId, input.membershipId);
 						if (target.role === "owner") return yield* new OwnerStays();
 						if (target.role === "admin" || input.role === "admin") {
 							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
 						}
-						// Promoting puts them in every project people made, by the
+						// Promoting puts them in every project members made, by the
 						// `administrator_projects` trigger; demoting leaves their projects as they are.
 						yield* query((db) =>
 							db.update(membership).set({ role: input.role }).where(eq(membership.id, target.id)),
@@ -446,7 +460,7 @@ export const make = Effect.gen(function* () {
 		remove: (input) =>
 			operation(
 				"remove",
-				underMembershipLock(input.workspace, "workspace.people.manage", (standing) =>
+				underMembershipLock(input.workspace, "workspace.members.manage", (standing) =>
 					Effect.gen(function* () {
 						const target = yield* membershipIn(standing.workspaceId, input.membershipId);
 						if (target.role === "owner") return yield* new OwnerStays();
@@ -463,7 +477,7 @@ export const make = Effect.gen(function* () {
 				"leave",
 				underMembershipLock(input.workspace, "workspace.read", (standing) =>
 					Effect.gen(function* () {
-						const { personId } = standing.actor;
+						const { memberId } = standing.actor;
 						const [own] = yield* query((db) =>
 							db
 								.select({ id: membership.id, role: membership.role })
@@ -471,13 +485,13 @@ export const make = Effect.gen(function* () {
 								.where(
 									and(
 										eq(membership.workspaceId, standing.workspaceId),
-										eq(membership.personId, personId),
+										eq(membership.memberId, memberId),
 									),
 								),
 						);
 						if (!own) return yield* new ResourceHidden({ resource: "workspace" });
 						if (own.role === "owner") return yield* new OwnerStays();
-						yield* deleteMembership({ id: own.id, workspaceId: standing.workspaceId, personId });
+						yield* deleteMembership({ id: own.id, workspaceId: standing.workspaceId, memberId });
 					}),
 				),
 			),
@@ -491,7 +505,7 @@ export const make = Effect.gen(function* () {
 						if (target.role === "owner") return;
 						// The owner steps down first: `membership_owner_idx` allows
 						// one owner, and would refuse the new one while the old one stands.
-						// The new owner joins every project people made by the
+						// The new owner joins every project members made by the
 						// `administrator_projects` trigger, as an admin would.
 						yield* query((db) =>
 							db
@@ -540,23 +554,23 @@ export const make = Effect.gen(function* () {
 		invite: (input) =>
 			operation(
 				"invite",
-				underMembershipLock(input.workspace, "workspace.people.manage", (standing) =>
+				underMembershipLock(input.workspace, "workspace.members.manage", (standing) =>
 					Effect.gen(function* () {
 						if (input.invitation.role === "admin") {
 							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
 						}
 						const workspaceId = standing.workspaceId;
-						const inviterId = standing.actor.personId;
+						const inviterId = standing.actor.memberId;
 						const address = input.invitation.email.toLowerCase();
 						const [existing] = yield* query((db) =>
 							db
 								.select({ id: membership.id })
 								.from(membership)
-								.innerJoin(person, eq(person.id, membership.personId))
+								.innerJoin(member, eq(member.id, membership.memberId))
 								.where(
 									and(
 										eq(membership.workspaceId, workspaceId),
-										eq(sql`lower(${person.email})`, address),
+										eq(sql`lower(${member.email})`, address),
 									),
 								),
 						);
@@ -631,7 +645,7 @@ export const make = Effect.gen(function* () {
 					// A workspace the actor is not in is hidden, so an invitation to it
 					// is answered exactly as one that does not exist.
 					yield* authorization
-						.workspace(pending.workspaceId, "workspace.people.manage")
+						.workspace(pending.workspaceId, "workspace.members.manage")
 						.pipe(Effect.catchTag("ResourceHidden", () => Effect.fail(hidden)));
 					yield* query((db) =>
 						db
@@ -646,8 +660,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"invitation",
 				Effect.gen(function* () {
-					const { personId } = yield* CurrentActor.Service;
-					const found = yield* invitationFor(personId, input.invitationId);
+					const { memberId } = yield* CurrentActor.Service;
+					const found = yield* invitationFor(memberId, input.invitationId);
 					if (found.status === "accepted") return found;
 					return {
 						status: "pending" as const,
@@ -663,8 +677,8 @@ export const make = Effect.gen(function* () {
 				"accept",
 				transaction(
 					Effect.gen(function* () {
-						const { personId } = yield* CurrentActor.Service;
-						const found = yield* invitationFor(personId, input.invitationId);
+						const { memberId } = yield* CurrentActor.Service;
+						const found = yield* invitationFor(memberId, input.invitationId);
 						if (found.status === "accepted") return { workspaceId: found.workspaceId };
 						if (accounts.requireEmailVerification && !found.inviteeVerified) {
 							return yield* new EmailUnverified();
@@ -675,7 +689,7 @@ export const make = Effect.gen(function* () {
 									.insert(membership)
 									.values({
 										workspaceId: found.workspaceId,
-										personId,
+										memberId,
 										role: found.role,
 									})
 									.onConflictDoNothing();
@@ -685,7 +699,7 @@ export const make = Effect.gen(function* () {
 									.where(eq(invitation.id, input.invitationId));
 							}),
 						);
-						yield* provisionJoining(found.workspaceId, personId);
+						yield* provisionJoining(found.workspaceId, memberId);
 						return { workspaceId: found.workspaceId };
 					}),
 				),
@@ -703,6 +717,7 @@ export const layer = layerNoDeps.pipe(
 		SearchProviderStore.layer,
 		ModelProviderStore.layer,
 		ProjectComputers.layer,
+		MemberSignIns.layer,
 	]),
 );
 
@@ -801,8 +816,8 @@ export function requireTimeZoneKnownToPostgres(timeZone: string) {
 
 /**
  * Serialises membership changes with each other and with deleting the
- * workspace, so a transfer of ownership cannot cross another change to the
- * same people. The lock lets rows that refer to the workspace still be added,
+ * workspace, so handing over ownership cannot cross another change to the
+ * same members. The lock lets rows that refer to the workspace still be added,
  * so its chats, runs, projects and bots aren't held up while a membership's
  * removal waits on their Personal Assistant's computer at its provider.
  */
@@ -823,7 +838,7 @@ function membershipIn(workspaceId: string, membershipId: string) {
 				.select({
 					id: membership.id,
 					role: membership.role,
-					personId: membership.personId,
+					memberId: membership.memberId,
 				})
 				.from(membership)
 				.where(and(eq(membership.id, membershipId), eq(membership.workspaceId, workspaceId))),
@@ -845,12 +860,12 @@ function requireWorkspacePermission(standing: WorkspaceStanding, permission: Wor
 
 /**
  * The invitation `invitationId`, locked for an enclosing transaction, when
- * `personId` is the person it was sent to: pending and unexpired, or accepted
+ * `memberId` is the member it was sent to: pending and unexpired, or accepted
  * while they are still in its workspace, so its link leads back in. Anything
  * else is hidden, so a link cannot be probed, and leaving a workspace ends
  * what its link can do.
  */
-function invitationFor(personId: string, invitationId: string) {
+function invitationFor(memberId: string, invitationId: string) {
 	return Effect.gen(function* () {
 		const now = yield* DateTime.nowAsDate;
 		const [found] = yield* query((db) =>
@@ -862,16 +877,16 @@ function invitationFor(personId: string, invitationId: string) {
 					email: invitation.email,
 					role: invitation.role,
 					workspaceName: workspace.name,
-					inviterName: person.name,
+					inviterName: member.name,
 				})
 				.from(invitation)
 				.innerJoin(workspace, eq(workspace.id, invitation.workspaceId))
-				.innerJoin(person, eq(person.id, invitation.inviterId))
+				.innerJoin(member, eq(member.id, invitation.inviterId))
 				.leftJoin(
 					membership,
 					and(
 						eq(membership.workspaceId, invitation.workspaceId),
-						eq(membership.personId, personId),
+						eq(membership.memberId, memberId),
 					),
 				)
 				.where(
@@ -890,9 +905,9 @@ function invitationFor(personId: string, invitationId: string) {
 		if (found.status === "accepted" && found.stillIn === null) return yield* hidden;
 		const [invitee] = yield* query((db) =>
 			db
-				.select({ email: person.email, emailVerified: person.emailVerified })
-				.from(person)
-				.where(eq(person.id, personId)),
+				.select({ email: member.email, emailVerified: member.emailVerified })
+				.from(member)
+				.where(eq(member.id, memberId)),
 		);
 		if (invitee?.email.toLowerCase() !== found.email) return yield* new NotTheInvitee();
 		if (found.status === "accepted") {

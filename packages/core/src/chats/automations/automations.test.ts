@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import type { AcceptedRun } from "@sugabots/contracts";
-import { MAX_AUTOMATION_TRIGGERS } from "@sugabots/contracts";
+import { DEFAULT_DELIVERY_ID_HEADER, MAX_AUTOMATION_TRIGGERS } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq, inArray } from "drizzle-orm";
 import { Context, Effect } from "effect";
@@ -17,9 +17,9 @@ import {
 	bot,
 	chat,
 	connector,
+	member,
 	membership,
 	message,
-	person,
 	placedChat,
 	projectMember,
 	toolCall,
@@ -60,14 +60,14 @@ import {
 import { AutomationRunner } from "./automation-runner.ts";
 import { Automations } from "./automations.ts";
 import { AutomationSettlement } from "./settlement.ts";
-import { anAutomationOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
+import { anAutomationAdmin, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
 import type { Delivery } from "./webhook-auth.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", async () => {
 	const services = await chatServicesForTests(EventBus.inProcess({ store: EventStore.inMemory() }));
-	const automationsAs = (personId: string) =>
-		onPostgresAs(personId)(Context.get(services, Automations.Service));
-	/** As the automations' owner, who administers their workspace. */
+	const automationsAs = (memberId: string) =>
+		onPostgresAs(memberId)(Context.get(services, Automations.Service));
+	/** As an admin of the automations' workspace. */
 	let automations: Promised<Automations.Interface>;
 	let view: Promised<Automations.Interface>;
 	const webhooks = onPostgres(Context.get(services, Automations.Webhooks));
@@ -93,10 +93,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 	let botId: string;
 	let ownProjectId: string;
 	let projectId: string;
-	let personId: string;
-	/** Makes the bot private, so only its creator reaches it. */
-	const makePrivate = (id: string) =>
-		onDatabase((db) => db.update(bot).set({ visibility: "private" }).where(eq(bot.id, id)));
+	let memberId: string;
+	/** Makes the bot personal, so only its creator reaches it. */
+	const makePersonal = (id: string) =>
+		onDatabase((db) => db.update(bot).set({ visibility: "personal" }).where(eq(bot.id, id)));
 	/** The automation's first trigger, addressed, and the secret this write made for it, if any. */
 	const firstTriggerOf = (defined: Automations.Defined) => {
 		const [trigger] = defined.automation.triggers;
@@ -152,9 +152,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, botId, personId, ownProjectId, projectId } = await anAutomationOwner());
-		automations = automationsAs(personId);
-		view = onPostgresAs(personId)(Context.get(services, Automations.Service));
+		({ workspaceId, botId, memberId, ownProjectId, projectId } = await anAutomationAdmin());
+		automations = automationsAs(memberId);
+		view = onPostgresAs(memberId)(Context.get(services, Automations.Service));
 	});
 
 	// A run's history holds its automation back from being deleted on its own, but
@@ -217,6 +217,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				id: expect.any(String),
 				kind: "webhook",
 				auth: { kind: "bearer" },
+				deliveryIdHeader: DEFAULT_DELIVERY_ID_HEADER,
 			},
 		]);
 		const { addressed, secret } = firstTriggerOf(webhook);
@@ -433,6 +434,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			id: expect.any(String),
 			kind: "webhook",
 			auth: { kind: "bearer" },
+			deliveryIdHeader: DEFAULT_DELIVERY_ID_HEADER,
 		});
 		expect(withWebhook.secrets).toEqual([
 			{ triggerId: webhook?.id, secret: expect.stringMatching(/^rtb_/) },
@@ -636,36 +638,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(runIdOf(again)).not.toBe(runIdOf(first));
 	});
 
-	it("keeps automatic deduplication when an existing webhook is edited", async () => {
-		const created = await automations.create(
-			{ projectId: ownProjectId },
-			{ name: "Old alerts", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
-		);
-		const { addressed, secret } = firstTriggerOf(created);
-		await onDatabase((db) =>
-			db
-				.update(automationTrigger)
-				.set({ settings: { kind: "webhook", auth: { kind: "bearer" } } })
-				.where(eq(automationTrigger.id, addressed.triggerId)),
-		);
-		await automations.updateTrigger(addressed, { kind: "webhook", auth: { kind: "bearer" } });
-		for (const [headers, payload] of [
-			[{ "idempotency-key": "order-1" }, {}],
-			[{ "svix-id": "message-1" }, {}],
-			[{ "x-shopify-webhook-id": "shopify-1" }, {}],
-			[{}, { event_id: "event-1" }],
-			[{}, { object: "event", id: "stripe-1" }],
-		] as const) {
-			const send = () =>
-				webhooks.accept({
-					triggerId: addressed.triggerId,
-					delivery: bearerDelivery(secret ?? "", payload, headers),
-				});
-			expect(await send()).toMatchObject({ run: { duplicate: false } });
-			expect(await send()).toMatchObject({ run: { duplicate: true } });
-		}
-	});
-
 	it("refuses a wrong webhook secret without waiting on the automation's other triggers", async () => {
 		const created = await automations.create(
 			{ projectId: ownProjectId },
@@ -694,7 +666,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		const rotation = holdTransaction(
 			Context.get(services, Automations.Service)
 				.rotateSecret(addressed)
-				.pipe(CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(personId))),
+				.pipe(CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(memberId))),
 		);
 		const secret = (await rotation.held) ?? "";
 
@@ -723,18 +695,18 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		);
 		const [editor, viewer] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values([
 					{ name: "Editor", email: `editor-${crypto.randomUUID()}@example.com` },
 					{ name: "Viewer", email: `viewer-${crypto.randomUUID()}@example.com` },
 				])
 				.returning(),
 		);
-		if (!editor || !viewer) throw new Error("Could not create the people");
+		if (!editor || !viewer) throw new Error("Could not create the members");
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId, personId: editor.id, role: "editor" },
-				{ workspaceId, personId: viewer.id, role: "viewer" },
+				{ workspaceId, memberId: editor.id, role: "editor" },
+				{ workspaceId, memberId: viewer.id, role: "viewer" },
 			]),
 		);
 		const automation = { projectId: ownProjectId, automationId: created.automation.id };
@@ -742,10 +714,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		await expect(
 			automationsAs(viewer.id).run({ ...automation, requestId: crypto.randomUUID() }),
 		).rejects.toThrow(ActionForbidden);
-		for (const personId of [editor.id, viewer.id]) {
-			await expect(automationsAs(personId).remove(automation)).rejects.toThrow(ActionForbidden);
+		for (const memberId of [editor.id, viewer.id]) {
+			await expect(automationsAs(memberId).remove(automation)).rejects.toThrow(ActionForbidden);
 			await expect(
-				automationsAs(personId).getSecret(firstTriggerOf(created).addressed),
+				automationsAs(memberId).getSecret(firstTriggerOf(created).addressed),
 			).rejects.toThrow(ActionForbidden);
 		}
 		expect(await runsOf(automation)).toEqual([]);
@@ -794,7 +766,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		);
 	});
 
-	it("accepts a manual trigger once and keeps instructions as an execution snapshot", async () => {
+	it("accepts a manual trigger once and keeps the instructions the run was given", async () => {
 		const created = await automations.create(
 			{ projectId: ownProjectId },
 			{
@@ -834,7 +806,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(execution?.instructions).toBe("Use the original instructions.");
 	});
 
-	it("bounds execution titles derived from maximum-length automation names", async () => {
+	it("bounds run titles made from maximum-length automation names", async () => {
 		const created = await automations.create(
 			{ projectId: ownProjectId },
 			{
@@ -1236,7 +1208,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 					cursor: "not-a-cursor",
 				},
 			),
-		).rejects.toThrow(Automations.InvalidRunCursor);
+		).rejects.toMatchObject({ _tag: "InvalidCursor" });
 	});
 
 	it("lists the runs of every automation of a project, removed ones' included, newest first", async () => {
@@ -1252,10 +1224,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			});
 			return { automationId: automation.id, runId };
 		};
-		const other = await anAutomationOwner();
+		const other = await anAutomationAdmin();
 		const first = await runOnce(automations, ownProjectId, "Kept");
 		const second = await runOnce(automations, ownProjectId, "Removed");
-		await runOnce(automationsAs(other.personId), other.ownProjectId, "Elsewhere");
+		await runOnce(automationsAs(other.memberId), other.ownProjectId, "Elsewhere");
 		await automations.remove({ projectId: ownProjectId, automationId: second.automationId });
 
 		const page = await view.listProjectRuns({ projectId: ownProjectId });
@@ -1265,17 +1237,17 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 	});
 
 	describe("who reaches an automation", () => {
-		/** A person with `role` in the workspace. */
+		/** A member with `role` in the workspace. */
 		const somebody = async (role: "admin" | "editor") => {
 			const [somebody] = await onDatabase((db) =>
 				db
-					.insert(person)
+					.insert(member)
 					.values({ name: role, email: `${role}-${crypto.randomUUID()}@example.com` })
 					.returning(),
 			);
-			if (!somebody) throw new Error("Could not create the person");
+			if (!somebody) throw new Error("Could not create the member");
 			await onDatabase((db) =>
-				db.insert(membership).values({ workspaceId, personId: somebody.id, role }),
+				db.insert(membership).values({ workspaceId, memberId: somebody.id, role }),
 			);
 			return somebody.id;
 		};
@@ -1288,8 +1260,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			await automations.run({ ...automation, requestId: crypto.randomUUID() });
 			return automation;
 		};
-		const viewAs = (personId: string) =>
-			onPostgresAs(personId)(Context.get(services, Automations.Service));
+		const viewAs = (memberId: string) =>
+			onPostgresAs(memberId)(Context.get(services, Automations.Service));
 
 		it("lets an administrator read an automation and its history on a bot they did not make", async () => {
 			await anAutomationWithARun();
@@ -1299,7 +1271,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			expect(await admin.list({ projectId: ownProjectId })).toHaveLength(1);
 		});
 
-		it("lists how each automation stands for those who read its runs, and not for an administrator of a private bot", async () => {
+		it("lists how each automation stands for those who read its runs, and not for an administrator of a personal bot", async () => {
 			const automation = await anAutomationWithARun();
 			const neverRun = await automations.create(
 				{ projectId: ownProjectId },
@@ -1333,16 +1305,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				statusOf(await view.list({ projectId: ownProjectId }), automation.automationId),
 			).toEqual(expect.objectContaining({ failing: false }));
 
-			await makePrivate(botId);
+			await makePersonal(botId);
 			const admin = viewAs(await somebody("admin"));
 			expect((await admin.list({ projectId: ownProjectId })).map((one) => "status" in one)).toEqual(
 				[false, false],
 			);
 		});
 
-		it("hides a private bot's automation and its history from an editor who did not make it", async () => {
+		it("hides a personal bot's automation and its history from an editor who did not make it", async () => {
 			await anAutomationWithARun();
-			await makePrivate(botId);
+			await makePersonal(botId);
 			const outsider = viewAs(await somebody("editor"));
 
 			await expect(outsider.listProjectRuns({ projectId: ownProjectId })).rejects.toThrow(
@@ -1366,8 +1338,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			const prepared = await prepareRunnable(execution, run);
 			const pending = await parkForApproval(prepared);
 			const decision = { toolCallId: pending.id, decision: "allow_once" as const };
-			const approvalsAs = (personId: string) =>
-				onPostgresAs(personId)(Context.get(services, Turns.Controls));
+			const approvalsAs = (memberId: string) =>
+				onPostgresAs(memberId)(Context.get(services, Turns.Controls));
 
 			await expect(approvalsAs(await somebody("editor")).decide(decision)).rejects.toBeInstanceOf(
 				Turns.ToolApprovalForbidden,
@@ -1379,7 +1351,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		});
 
 		it("lets the lead bot's creator and admins decide what a project's run asks, and no other editor or viewer", async () => {
-			// The lead bot is an editor's, and both editors are in the project people made.
+			// The lead bot is an editor's, and both editors are in the project members made.
 			const creator = await somebody("editor");
 			const otherEditor = await somebody("editor");
 			await onDatabase((db) =>
@@ -1388,7 +1360,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			await onDatabase((db) =>
 				db
 					.insert(projectMember)
-					.values([creator, otherEditor].map((id) => ({ workspaceId, projectId, personId: id }))),
+					.values([creator, otherEditor].map((id) => ({ workspaceId, projectId, memberId: id }))),
 			);
 			const created = await automations.create(
 				{ projectId },
@@ -1420,7 +1392,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				return {
 					waiting: (await view.approvals(workspaceId)).waiting.map(({ call }) => call.id),
 					counted: (await view.attention(workspaceId)).waitingApprovals,
-					mayDecideInChat: details.capabilities?.approveToolCalls,
+					mayDecideInChat: details.permissions?.approveToolCalls,
 					projectNeedsApproval: marks.projects[projectId]?.needsApproval ?? false,
 				};
 			};
@@ -1441,11 +1413,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 					db
 						.update(membership)
 						.set({ role })
-						.where(and(eq(membership.workspaceId, workspaceId), eq(membership.personId, id))),
+						.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, id))),
 				);
 
 			expect(await seenBy(creator)).toEqual(deciding);
-			expect(await seenBy(personId)).toEqual(deciding);
+			expect(await seenBy(memberId)).toEqual(deciding);
 			expect(await seenBy(otherEditor)).toEqual(notDeciding);
 			await expect(approvalsAs(otherEditor).decide(decision)).rejects.toBeInstanceOf(
 				Turns.ToolApprovalForbidden,
@@ -1487,7 +1459,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 			// Decides while the turn is still locked: a wait here would never end.
 			await expect(
-				onPostgresAs(personId)(Context.get(services, Turns.Controls)).decide({
+				onPostgresAs(memberId)(Context.get(services, Turns.Controls)).decide({
 					toolCallId: pending.id,
 					decision: "allow_once",
 				}),
@@ -1508,7 +1480,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 					handle: `linear-${crypto.randomUUID().slice(0, 8)}`,
 					url: "https://linear.example.com/mcp",
 					authKind: "header",
-					createdById: personId,
+					createdById: memberId,
 				})
 				.returning({ id: connector.id }),
 		);
@@ -1536,13 +1508,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 					{
 						approvalId: pending.approvalId,
 						tool: pending.tool,
-						connectorId: connected.id,
-						connectorRevision: 1,
-						remoteToolName: pending.binding.remoteToolName,
+						binding: pending.binding,
 					},
 				],
 				modelInput: { model: "test", system: "test", messages: [] },
-				reply: { content: "", collaborations: [], toolCalls: [{ id: pending.id, atOffset: 0 }] },
+				reply: { content: "", toolCalls: [{ id: pending.id, atOffset: 0 }] },
 				modelRequests: 1,
 			},
 			[pending],

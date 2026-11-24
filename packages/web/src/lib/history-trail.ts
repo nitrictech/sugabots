@@ -4,7 +4,7 @@ import type { AnyRouter, ParsedLocation, RouterHistory } from "@tanstack/react-r
  * The pages behind this one in the browser's history, as far as this app has
  * been to them. The browser does not say what is behind the current page, so
  * Back cannot otherwise tell whether going back would land where it means to:
- * the list a deleted thing was opened from, or the chat a run or collaboration covers.
+ * the list a deleted thing was opened from, or the chat a run covers.
  */
 
 /** A page in the trail: where it is, and what its address names. */

@@ -1,5 +1,5 @@
 import type { BotColor, BotEyes, BotShape, SystemBotKey } from "@sugabots/contracts";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { bot } from "../../database/schema.ts";
@@ -10,8 +10,8 @@ import { bot } from "../../database/schema.ts";
  * removes them.
  *
  * One is born without a model, since a new workspace offers none, and is given
- * the first model somebody switches on, which is the one they pick while
- * workspace setup. From then on it always has one: an administrator can change it
+ * the first model somebody switches on, which is the one they pick during
+ * workspace setup. From then on it always has one: an admin can change it
  * but not clear it, and the workspace cannot stop offering it until the bot
  * is moved to another. Compaction runs on the model of the bot it compacts
  * for, and on its own only for a bot with none.
@@ -28,7 +28,7 @@ export interface SystemBotDefinition {
 	color: BotColor;
 	eyes: BotEyes;
 	shape: BotShape;
-	prompt: string;
+	instructions: string;
 }
 
 export const SYSTEM_BOTS: readonly SystemBotDefinition[] = [
@@ -39,7 +39,7 @@ export const SYSTEM_BOTS: readonly SystemBotDefinition[] = [
 		color: "purple",
 		eyes: "square",
 		shape: "circle",
-		prompt: "Summarize what a bot needs to carry on the chat. Do not invent details.",
+		instructions: "Condense what a bot needs to carry on the chat. Do not invent details.",
 	},
 ];
 
@@ -55,23 +55,4 @@ export const findSystemBot = Effect.fn("SystemBots.findSystemBot")(function* (
 		.where(and(eq(bot.workspaceId, workspaceId), eq(bot.systemBotKey, key)))
 		.limit(1);
 	return row;
-});
-
-/**
- * The system bot and the model it runs on, or nothing when no model has been
- * chosen, which is what "set up" means for one. A caller cannot reach a system
- * bot and forget that it may not be set up: here `undefined` is the whole
- * answer, and what comes back names a model.
- */
-export const findRunnableSystemBot = Effect.fn("SystemBots.findRunnableSystemBot")(function* (
-	db: Executor,
-	workspaceId: string,
-	key: SystemBotKey,
-) {
-	const [row] = yield* db
-		.select({ id: bot.id, model: bot.model })
-		.from(bot)
-		.where(and(eq(bot.workspaceId, workspaceId), eq(bot.systemBotKey, key), isNotNull(bot.model)))
-		.limit(1);
-	return row?.model == null ? undefined : { id: row.id, model: row.model };
 });

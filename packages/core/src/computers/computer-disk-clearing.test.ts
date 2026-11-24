@@ -1,7 +1,7 @@
 import { COMPUTER_OPENSANDBOX_DEFAULT_SIZE, type RunState } from "@sugabots/contracts";
 import { Effect, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { anAutomationOwner } from "../chats/automations/testing.ts";
+import { anAutomationAdmin } from "../chats/automations/testing.ts";
 import { seedChat } from "../chats/seed.test-support.ts";
 import { automation, message, type TurnStatus, turn } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
@@ -9,7 +9,7 @@ import { Ids } from "../ids/ids.ts";
 import { defaultProjectOf } from "../workspaces/projects/project-reads.ts";
 import {
 	BOT_CACHES,
-	clearingOrder,
+	type Clearing,
 	freeDiskSpace,
 	MAX_FOLDERS_CLEARED_AT_ONCE,
 	SET_ASIDE_DIRECTORY,
@@ -27,17 +27,53 @@ const NEVER_FULL = 1;
 describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against Postgres", () => {
 	let workspaceId: string;
 	let botId: string;
-	let personId: string;
+	let memberId: string;
 
 	afterAll(async () => {
 		await closeDatabase();
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, botId, personId } = await anAutomationOwner());
+		({ workspaceId, botId, memberId } = await anAutomationAdmin());
 	});
 
 	const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+
+	/**
+	 * What clearing a computer holding the folders of `chatIds` and of the bots
+	 * `botIds` removes, in order, while its disk stays full.
+	 */
+	const clearedFrom = async (folders: {
+		chatIds: readonly string[];
+		botIds: readonly string[];
+	}): Promise<Clearing["cleared"]> => {
+		const output = (text: string): Computers.Execution => ({
+			exitCode: 0,
+			stdout: { text, truncated: false },
+			stderr: { text: "", truncated: false },
+		});
+		const computer = {
+			exec: (command: string) =>
+				Effect.succeed(
+					command.startsWith("find ")
+						? output(
+								[
+									...folders.chatIds.map((id) => `${Computers.CHATS_DIRECTORY}/${id}`),
+									...folders.botIds.map((id) => `${Computers.BOTS_DIRECTORY}/${id}`),
+								].join("\n"),
+							)
+						: // Every path the script removes, as its `remove` prints each one deleted.
+							output(
+								command
+									.split("\n")
+									.flatMap((line) => /^remove (.+)$/.exec(line)?.[1] ?? [])
+									.join("\n"),
+							),
+				),
+		} as unknown as Computers.Computer;
+		const clearing = await runOnPostgres(freeDiskSpace(computer, workspaceId, ALWAYS_FULL));
+		return clearing.cleared;
+	};
 
 	async function aTurn(chatId: string, startedAt: Date, status: TurnStatus = "done") {
 		const [trigger] = await onDatabase((db) =>
@@ -45,8 +81,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 				.insert(message)
 				.values({
 					chatId,
-					authorPersonId: personId,
-					kind: "text",
+					authorMemberId: memberId,
 					status: "complete",
 					parts: [],
 					content: "Go.",
@@ -83,35 +118,11 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 				botId,
 				title: "Chat",
 				resolvedAt: resolved ? lastTurnAt : null,
-				startedById: personId,
+				startedById: memberId,
 			}),
 		);
 		await aTurn(id, lastTurnAt, status);
 		return id;
-	}
-
-	/** A collaboration asked from `chatId`, the bot asking itself for help. */
-	async function aCollaboration(chatId: string, lastTurnAt: Date) {
-		// Asked long ago, so the chat's own latest turn still places it.
-		const asking = await aTurn(chatId, new Date(0));
-		const made = await onDatabase((db) =>
-			seedChat(db, {
-				workspaceId,
-				kind: "collaboration",
-				title: "Collaboration",
-				collaboration: {
-					parentChatId: chatId,
-					rootChatId: chatId,
-					parentMessageId: asking.messageId,
-					turnId: asking.turnId,
-					collaboratorBotId: botId,
-					brief: "Help.",
-					atOffset: 0,
-				},
-			}),
-		);
-		await aTurn(made.id, lastTurnAt);
-		return made.id;
 	}
 
 	/** An automation run in `state`, whose turn started at `startedAt`. */
@@ -145,7 +156,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 						kind: "manual",
 						requestId,
 						requestedAt: startedAt.toISOString(),
-						requestedByPersonId: personId,
+						requestedByMemberId: memberId,
 					},
 					automationName: "Checks",
 					instructions: "Check.",
@@ -166,14 +177,11 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 		const olderRun = await anAutomationRun("failed", at(90));
 		const newerResolved = await aChat(true, at(20));
 		const olderResolved = await aChat(true, at(120));
-		const helpWithNewerResolved = await aCollaboration(newerResolved, at(10));
 
-		const order = await runOnPostgres(
-			clearingOrder(workspaceId, {
-				chatIds: [helpWithNewerResolved, newerResolved, newerRun, olderResolved, deleted, olderRun],
-				botIds: [botId, deletedBot],
-			}),
-		);
+		const order = await clearedFrom({
+			chatIds: [newerResolved, newerRun, olderResolved, deleted, olderRun],
+			botIds: [botId, deletedBot],
+		});
 
 		expect(order).toEqual([
 			{ chatId: deleted, reason: "chat_deleted" },
@@ -183,7 +191,6 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 			...BOT_CACHES.map((cache) => ({ botId, cache, reason: "bot_cache" })),
 			{ chatId: olderResolved, reason: "chat_resolved" },
 			{ chatId: newerResolved, reason: "chat_resolved" },
-			{ chatId: helpWithNewerResolved, reason: "chat_resolved" },
 		]);
 	});
 
@@ -192,14 +199,9 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 		const running = await anAutomationRun("running", at(600));
 		const waitingForApproval = await aChat(true, at(600), "waiting");
 
-		expect(
-			await runOnPostgres(
-				clearingOrder(workspaceId, {
-					chatIds: [open, running, waitingForApproval],
-					botIds: [],
-				}),
-			),
-		).toEqual([]);
+		expect(await clearedFrom({ chatIds: [open, running, waitingForApproval], botIds: [] })).toEqual(
+			[],
+		);
 	});
 
 	/**

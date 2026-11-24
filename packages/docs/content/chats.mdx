@@ -3,9 +3,9 @@ title: Chats
 description: Chats in projects and with bots, who answers, and how bots ask each other for help.
 ---
 
-Chats happen in chats:
+There are two places to chat:
 
-- A [project](/docs/projects)'s **chats** are shared by all its people and
+- A [project](/docs/projects)'s **chats** are shared by all its members and
   bots. Each is about one piece of work.
 - A **bot's chats** are chats with that one bot. Open a bot and write
   in the box that says "Message Trip Planner" to start one. Every bot has its
@@ -13,8 +13,8 @@ Chats happen in chats:
   project's chats do. Whoever can talk to the bot can read and join its
   chats.
 
-People talk to each other in a project's chats: there are no chats
-between people alone.
+Members talk to each other in a project's chats: there are no chats
+between members alone.
 
 Anyone in a chat can mark it resolved once its work is finished: it moves
 to the Resolved list at the foot of the sidebar, and opens again when
@@ -27,7 +27,7 @@ chat:
 
 - **Mention bots** in the project, and every bot you mention answers, all at once.
 - **Reply to a bot's message**, and that bot answers.
-- **Mention only people**, and the lead bot reads it if it has a model. The
+- **Mention only members**, and the lead bot reads it if it has a model. The
   message is most likely for them, so it answers only if it can help, and
   otherwise reacts 👀 to show it read it. If the lead bot has no model, the
   message is posted without a bot reply.
@@ -39,38 +39,43 @@ who the message is for, not who's in charge. Try it:
 
 <WhoReplies />
 
-Mentions use a person's or bot's handle at the start of a word, like
+Mentions use a member's or bot's handle at the start of a word, like
 `@budget-keeper`. Email addresses don't count as mentions.
 
 `@here` and `@channel` mention everyone who can see the chat, and
-notify each of them as a mention does. They are for people: a message with
-`@here` or `@channel` is read by the lead bot as one that mentions only people,
+notify each of them as a mention does. They are for members: a message with
+`@here` or `@channel` is read by the lead bot as one that mentions only members,
 unless it names a bot too.
 A bot can't use them to notify anyone, and no bot can take `here` or `channel`
 as its handle.
 
 ## Bots asking bots
 
-When a bot needs help, it can ask **any other bot** in the workspace, public or
-private. It writes a short brief, the other bot works on it in a chat of its
-own, and the first bot carries on with the answer.
+When a bot needs help, it can ask **another of the project's bots** by
+mentioning it, as you would. The bot it asks answers right there in the chat,
+and once every bot it asked has answered, the first bot picks up again with
+what they said.
 
-<Chat title="Trip Planner with Budget Keeper">
-  <Say from="tripPlanner">Four seats at €176. Does that fit the Lisbon budget?</Say>
+<Chat title="Lisbon trip">
+  <Say from="tripPlanner">Four seats at €176. @budget-keeper, does that fit the Lisbon budget?</Say>
   <Say from="budgetKeeper">Pot has €924. That leaves €220 after flights. Fine by me, but the hotel needs to stay under €150 a night.</Say>
-  <Say from="tripPlanner">Thanks. I'll look for hotels under €150.</Say>
+  <Say from="tripPlanner">It fits. I'll look for hotels under €150 a night.</Say>
 </Chat>
 
-That exchange shows up under Trip Planner's message as a line,
-"Collaboration with Budget Keeper". Open it to read the whole thing.
+A bot asks for whoever it's answering: the bot it asks works with that
+member's access, and its tool calls are approved as any bot's in the chat
+are. In an automation's run, it works for the run, and the run ends once the
+bots it asked have answered.
 
 A few rules keep this from getting out of hand:
 
-- A bot can ask one other bot per turn, and never itself.
-- A bot that was asked can ask one more, but no deeper than that.
-- If an answer takes more than two minutes, the asking bot moves on, and picks
-  up again when the answer arrives.
-- After twelve bot replies in a row with no person in between, the bots pause.
+- A bot can ask only the project's other bots, never itself. In a bot's own
+  chats there's nobody else to ask, and in an automation feed a bot's
+  mentions bring in no other bot.
+- A bot that was asked can't pass the question on: its mentions bring in
+  nobody.
+- When the first bot picks up again, it can ask bots it hasn't asked yet, but
+  not the same ones again.
 
 ## Notifications
 
@@ -114,12 +119,12 @@ How it works:
 - **It happens in the background.** Nobody waits for it, and nothing shows in
   the chat.
 - **Recent messages stay whole.** The bot keeps rereading the latest messages
-  word for word. The ones before them become a summary of what was decided,
-  asked for and promised, what's still open, and key details like dates and
-  prices, along with who said each thing.
-- **The summary carries forward.** When the chat fills up again, the new summary
-  builds on the last one.
-- **The bot can look further back.** The summary can't hold everything. When the
+  word for word. The ones before them become a condensed account of what was
+  decided, asked for and promised, what's still open, and key details like
+  dates and prices, along with who said each thing.
+- **The condensed account carries forward.** When the chat fills up again, the
+  new one builds on the last.
+- **The bot can look further back.** The condensed account can't hold everything. When the
   bot needs a detail it doesn't have, it searches the earlier messages.
 
 To see how full a bot's short-term memory is, and when it was last compacted,

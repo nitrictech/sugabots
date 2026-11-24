@@ -7,11 +7,10 @@ const MAX_FILE_TITLE_CHARACTERS = 200;
 export const MAX_FILE_CONTENT_CHARACTERS = 500_000;
 
 /**
- * What a file a bot writes holds, which decides how it is shown: a
- * `document` is markdown, drawn as text; an `html` page runs in an isolated
- * frame.
+ * What a file a bot writes holds, which decides how it is shown:
+ * `markdown` is drawn as text; an `html` page runs in an isolated frame.
  */
-export const writtenFileKindSchema = Schema.Literals(["document", "html"]);
+export const writtenFileKindSchema = Schema.Literals(["markdown", "html"]);
 export type WrittenFileKind = typeof writtenFileKindSchema.Type;
 
 export const fileTitleSchema = Schema.Trim.check(
@@ -28,7 +27,7 @@ const fileAuthorSchema = Schema.NullOr(Schema.Struct({ botId: uuidSchema, name: 
 export type FileAuthor = typeof fileAuthorSchema.Type;
 
 /** A file a bot wrote with its file tools, kept in versions. */
-const writtenFileSummarySchema = Schema.Struct({
+const listedWrittenFileSchema = Schema.Struct({
 	id: uuidSchema,
 	/** The chat it was made in. */
 	chatId: uuidSchema,
@@ -40,49 +39,49 @@ const writtenFileSummarySchema = Schema.Struct({
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
 });
-export type WrittenFileSummary = typeof writtenFileSummarySchema.Type;
+export type ListedWrittenFile = typeof listedWrittenFileSchema.Type;
 
 /**
- * A file on a message: one a person uploaded and sent, or one a bot attached
- * to its reply. Its bytes are served at the chat's file address.
+ * A file on a message: an `attachment` a member sent, or a `bot_attachment`
+ * a bot attached to its reply. Its bytes are served at the chat's file address.
  */
-const messageFileSummarySchema = Schema.Struct({
+const listedMessageFileSchema = Schema.Struct({
 	id: uuidSchema,
 	/** The chat it was sent in. */
 	chatId: uuidSchema,
-	kind: Schema.Literals(["upload", "attachment"]),
+	kind: Schema.Literals(["attachment", "bot_attachment"]),
 	name: Schema.String,
 	contentType: Schema.String,
 	/** In bytes. */
 	size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	/** Who uploaded it, or the bot that attached it; `null` once they are gone. */
-	sentBy: Schema.NullOr(Schema.String),
+	/** The member who sent it, or the bot that attached it, by name; `null` once they are gone. */
+	author: Schema.NullOr(Schema.String),
 	createdAt: isoTimestampSchema,
 	/** When it was sent, which never changes after. */
 	updatedAt: isoTimestampSchema,
 });
-export type MessageFileSummary = typeof messageFileSummarySchema.Type;
+export type ListedMessageFile = typeof listedMessageFileSchema.Type;
 
 /** A file in a project's or a bot's Files: one a bot wrote, or one sent on a message. */
-export const fileSummarySchema = Schema.Union([writtenFileSummarySchema, messageFileSummarySchema]);
-export type FileSummary = typeof fileSummarySchema.Type;
+export const listedFileSchema = Schema.Union([listedWrittenFileSchema, listedMessageFileSchema]);
+export type ListedFile = typeof listedFileSchema.Type;
 
-export function isMessageFile(file: FileSummary): file is MessageFileSummary {
-	return file.kind === "upload" || file.kind === "attachment";
+export function isMessageFile(file: ListedFile): file is ListedMessageFile {
+	return file.kind === "attachment" || file.kind === "bot_attachment";
 }
 
-export const fileVersionSummarySchema = Schema.Struct({
+export const listedFileVersionSchema = Schema.Struct({
 	number: Schema.Int.check(Schema.isGreaterThan(0)),
 	author: fileAuthorSchema,
 	createdAt: isoTimestampSchema,
 });
-export type FileVersionSummary = typeof fileVersionSummarySchema.Type;
+export type ListedFileVersion = typeof listedFileVersionSchema.Type;
 
 /** A written file as of one version, with that version's content. */
 export const writtenFileSchema = Schema.Struct({
-	...writtenFileSummarySchema.fields,
+	...listedWrittenFileSchema.fields,
 	content: Schema.String,
-	shownVersion: fileVersionSummarySchema,
+	shownVersion: listedFileVersionSchema,
 });
 export type WrittenFile = typeof writtenFileSchema.Type;
 

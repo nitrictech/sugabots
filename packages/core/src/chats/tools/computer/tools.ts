@@ -19,6 +19,7 @@ import type { RunEffect } from "../../../database/database.ts";
 import type { ChatFileStore } from "../../../files/chat-file-store.ts";
 import type { Ids } from "../../../ids/ids.ts";
 import type { UserFacing } from "../../../user-message.ts";
+import { type Failed, failed } from "../failed.ts";
 import { HOST_REQUEST_TOOL } from "../host-request/tool.ts";
 import { MAX_IMAGE_BYTES, SHOWN_IMAGE_FORMATS, shownImageType, withImages } from "../images.ts";
 import { unreadableFileRefusal } from "../read-chat-file/tool.ts";
@@ -36,7 +37,7 @@ export const SHARE_FILE_TOOL = "share_file";
  * the server's memory on the way out.
  */
 export const MAX_SHARED_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_SHARED_FILE_MEGABYTES = MAX_SHARED_FILE_BYTES / (1024 * 1024);
+export const MAX_SHARED_FILE_MEGABYTES = MAX_SHARED_FILE_BYTES / (1024 * 1024);
 
 /** Attaches a file, read out of the computer, to the reply being written. */
 export type AttachToReply = (file: {
@@ -89,6 +90,11 @@ export interface TurnComputer {
 	readonly run: RunEffect<never>;
 }
 
+/** {@link TurnComputer}, with the bot's place in it, for tools that work from there. */
+export interface ComputerAtPlace extends TurnComputer {
+	readonly place: Place;
+}
+
 /**
  * The computer of the project the turn works in, opened once per turn. A failed opening is not kept, so
  * the next call tries again.
@@ -109,16 +115,10 @@ export function openOncePerTurn(open: () => Promise<ProjectComputers.Opened>): O
 	};
 }
 
-/** What the bot is told when a tool couldn't do its work. */
-interface Failed {
-	status: "failed";
-	error: UserText;
-}
-
 /**
  * Runs `work` in the computer of the project the turn works in, turning a refusal it can act on into a
  * result. The work is interrupted when `abortSignal`, the tool call's, aborts,
- * as it does when the turn is cancelled.
+ * as it does when the turn is interrupted.
  */
 export async function inComputer<A>(
 	computer: TurnComputer,
@@ -131,8 +131,7 @@ export async function inComputer<A>(
 	try {
 		opened = await computer.open();
 	} catch (cause) {
-		if (cause instanceof Computers.Unavailable)
-			return { status: "failed", error: cause.userMessage };
+		if (cause instanceof Computers.Unavailable) return failed(cause.userMessage);
 		throw cause;
 	}
 	const note = arrivalNote(opened.arrival);
@@ -140,13 +139,9 @@ export async function inComputer<A>(
 		work(opened.computer).pipe(
 			Effect.map((result) => ({ ...result, ...(note ? { note } : {}) })),
 			Effect.catchTags({
-				ComputerUnavailable: (failure) =>
-					Effect.succeed<Failed>({ status: "failed", error: failure.userMessage }),
+				ComputerUnavailable: (failure) => Effect.succeed(failed(failure.userMessage)),
 				ComputerFileFailed: (failure) =>
-					Effect.succeed<Failed>({
-						status: "failed",
-						error: userText`${failure.reason}: ${UserText.unchecked(failure.path)}`,
-					}),
+					Effect.succeed(failed(userText`${failure.reason}: ${UserText.unchecked(failure.path)}`)),
 			}),
 		),
 		{ signal: abortSignal },
@@ -183,7 +178,7 @@ const pathIn = (place: Place) =>
 
 export function runCommandTool(computer: TurnComputer, place: Place) {
 	return tool({
-		description: `Run a bash command on your computer, a Linux machine of your own. Commands start in this chat's folder, ${place.folder}: kept between your turns in the chat, so clone and build here. Your home folder, ${place.home} (also $HOME), is kept across all your chats: keep notes, settings and tools you want everywhere there. When the computer's disk runs short, the folders of finished chats, such as ended automation runs and chats marked resolved, are cleared, and so are the caches in your home (${BOT_CACHES.map((cache) => `~/${cache}`).join(", ")}): push anything that must outlast its chat, or keep it elsewhere in your home. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. Your turn waits on every command, and no one hears from you until it ends, so keep waits short: sleep or poll for a few seconds while something starts up, never minutes for a person or another system to respond. When something will only be ready later, say what you're waiting for and end your turn. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a chat needs one for something other than the browser, and the computer has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The computer, its browser included, reaches only the hosts the turn's note lists; to reach another the chat needs, call ${HOST_REQUEST_TOOL}.`,
+		description: `Run a bash command on your computer: the Linux machine of the project this chat is in, which its bots share. Commands start in this chat's folder, ${place.folder}: kept between your turns in the chat, so clone and build here. Your home folder, ${place.home} (also $HOME), is kept across all your chats in the project: keep notes, settings and tools you want everywhere there. When the computer's disk runs short, the folders of finished chats, such as ended automation runs and chats marked resolved, are cleared, and so are the caches in your home (${BOT_CACHES.map((cache) => `~/${cache}`).join(", ")}): push anything that must outlast its chat, or keep it elsewhere in your home. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. Your turn waits on every command, and no one hears from you until it ends, so keep waits short: sleep or poll for a few seconds while something starts up, never minutes for a member or another system to respond. When something will only be ready later, say what you're waiting for and end your turn. It can't ask a member anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a chat needs one for something other than the browser, and the computer has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done.`,
 		inputSchema: Schema.Struct({
 			command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).annotate({
 				description: "The bash command to run",
@@ -289,7 +284,7 @@ export function copyFileToComputerTool({
 	ids: Ids.Interface;
 }) {
 	return tool({
-		description: `Copy a file in this chat, such as one a person attached, into the chat's folder on your computer, to work on it with commands. Give the file's id, from the line that names it. Returns the copy's path, relative to the chat's folder. A file already copied is left as it is, with any changes made to it, and \`alreadyCopied\` says so; to start again from the file in the chat, remove the copy and copy the file again.`,
+		description: `Copy a file in this chat, such as one a member attached, into the chat's folder on your computer, to work on it with commands. Give the file's id, from the line that names it. Returns the copy's path, relative to the chat's folder. A file already copied is left as it is, with any changes made to it, and \`alreadyCopied\` says so; to start again from the file in the chat, remove the copy and copy the file again.`,
 		inputSchema: Schema.Struct({
 			file: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)).annotate({
 				description: "The file's id, from the line that names it",
@@ -331,26 +326,23 @@ function copyChatFile(
 }
 
 function refusedRead(failure: ChatFileStore.FileNotFound | BlobStore.Failure) {
-	return Effect.map(
-		unreadableFileRefusal(failure),
-		(error): Failed => ({ status: "failed", error }),
-	);
+	return Effect.map(unreadableFileRefusal(failure), failed);
 }
 
 /**
- * Shows people a file from the computer: it is attached to the bot's reply,
- * where people see it as soon as it is. One file at a time, since each is
+ * Shows members a file from the computer: it is attached to the bot's reply,
+ * where members see it as soon as it is. One file at a time, since each is
  * held whole on its way out.
  */
 export function shareFileTool(computer: TurnComputer, place: Place, attach: AttachToReply) {
 	const oneAtATime = Semaphore.makeUnsafe(1);
 	return tool({
-		description: `Share a file from your computer with the people in this chat, such as a chart, picture or spreadsheet you made: it is attached to your reply as soon as you call this, an image shown as a picture and anything else offered to download. Never paste a file's contents, base64 or a link to it into your reply instead. Files up to ${MAX_SHARED_FILE_MEGABYTES} MB, at most ${MAX_ATTACHMENTS_PER_MESSAGE} on one reply.`,
+		description: `Share a file from your computer with everyone in this chat, such as a chart, picture or spreadsheet you made: it is attached to your reply as soon as you call this, an image shown as a picture and anything else offered to download. Never paste a file's contents, base64 or a link to it into your reply instead. Files up to ${MAX_SHARED_FILE_MEGABYTES} MB, at most ${MAX_ATTACHMENTS_PER_MESSAGE} on one reply.`,
 		inputSchema: Schema.Struct({
 			path: pathIn(place),
 			name: Schema.optional(
 				attachmentNameSchema.annotate({
-					description: "The name people see, such as chart.png. The file's own name unless given.",
+					description: "The name members see, such as chart.png. The file's own name unless given.",
 				}),
 			),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
@@ -361,7 +353,7 @@ export function shareFileTool(computer: TurnComputer, place: Place, attach: Atta
 	});
 }
 
-/** What sharing a file tells the bot: the name people see it under, and its id. */
+/** What sharing a file tells the bot: the name members see it under, and its id. */
 interface Shared {
 	shared: string;
 	file: string;
@@ -375,16 +367,14 @@ function shareFrom(
 	name: string | undefined,
 	attach: AttachToReply,
 ): Effect.Effect<Shared | Failed, Computers.Unavailable | Computers.FileFailed> {
-	const tooLarge = (sizeBytes: number): Failed => ({
-		status: "failed",
-		error: userText`The file is ${Math.round(sizeBytes / 104_857.6) / 10} MB; files up to ${MAX_SHARED_FILE_MEGABYTES} MB can be shared.`,
-	});
 	return Effect.gen(function* () {
-		// Its size alone first, so a file too large is never read.
-		const { sizeBytes } = yield* computer.readFile(path, 0);
-		if (sizeBytes > MAX_SHARED_FILE_BYTES) return tooLarge(sizeBytes);
-		const read = yield* computer.readFile(path, MAX_SHARED_FILE_BYTES);
-		if (read.sizeBytes > MAX_SHARED_FILE_BYTES) return tooLarge(read.sizeBytes);
+		const read = yield* readSharableFile(
+			computer,
+			path,
+			(sizeBytes) =>
+				userText`The file is ${megabytes(sizeBytes)} MB; files up to ${MAX_SHARED_FILE_MEGABYTES} MB can be shared.`,
+		);
+		if ("status" in read) return read;
 		const shownName = safeFileName(name ?? posix.basename(path));
 		const contentType =
 			shownImageType(read.content) ?? (mediaTypeForName(shownName) || "application/octet-stream");
@@ -392,7 +382,7 @@ function shareFrom(
 			Effect.map((file): Shared | Failed => ({
 				shared: file.name,
 				file: file.id,
-				note: userText`People see it under your reply now; it needn't be described again.`,
+				note: userText`Members see it under your reply now; it needn't be described again.`,
 			})),
 			Effect.catchTags({
 				BlobStoreUnavailable: (failure) =>
@@ -400,17 +390,40 @@ function shareFrom(
 				BlobStoreRejected: (failure) =>
 					notKept(failure, userText`The workspace's file storage refused the file.`),
 			}),
-			Effect.catch((failure) =>
-				Effect.succeed<Failed>({ status: "failed", error: failure.userMessage }),
-			),
+			Effect.catch((failure) => Effect.succeed(failed(failure.userMessage))),
 		);
 	});
+}
+
+/**
+ * The whole of the file at `path`, read as the bots' user, or why not: one
+ * over {@link MAX_SHARED_FILE_BYTES} is refused with `tooLarge` of its size,
+ * and is never read.
+ */
+export function readSharableFile(
+	computer: Computers.Computer,
+	path: string,
+	tooLarge: (sizeBytes: number) => UserText,
+): Effect.Effect<{ content: Uint8Array } | Failed, Computers.Unavailable | Computers.FileFailed> {
+	return Effect.gen(function* () {
+		// Its size alone first, so a file too large is never read.
+		const { sizeBytes } = yield* computer.readFile(path, 0);
+		if (sizeBytes > MAX_SHARED_FILE_BYTES) return failed(tooLarge(sizeBytes));
+		const read = yield* computer.readFile(path, MAX_SHARED_FILE_BYTES);
+		if (read.sizeBytes > MAX_SHARED_FILE_BYTES) return failed(tooLarge(read.sizeBytes));
+		return { content: read.content };
+	});
+}
+
+/** `bytes` in megabytes, to one decimal place. */
+export function megabytes(bytes: number): number {
+	return Math.round(bytes / 104_857.6) / 10;
 }
 
 /** Logs why the file store couldn't keep a shared file, and tells the bot `error`. */
 function notKept(failure: BlobStore.Failure, error: UserText) {
 	return Effect.logWarning("Keeping a file a bot shared failed", failure).pipe(
-		Effect.as<Failed>({ status: "failed", error }),
+		Effect.as(failed(error)),
 	);
 }
 
@@ -439,7 +452,7 @@ export function writeFileTool(computer: TurnComputer, place: Place) {
  */
 export function diskNote(disk: ProjectComputers.MeasuredDisk | undefined): string | undefined {
 	if (!disk || computerDiskLevel(disk) === "normal") return undefined;
-	return `Your computer's disk was ${computerDiskPercent(disk)}% full when last measured: ${formatDiskSize(disk.usedBytes)} of ${formatDiskSize(disk.totalBytes)}. Once it fills, commands that write fail with "No space left on device". Before installing, cloning or building, remove what you no longer need, such as package caches in your home and clones and builds you've finished with. If a command fails for lack of space, don't try it again: tell the people in the chat that your computer's disk is full.`;
+	return `Your computer's disk was ${computerDiskPercent(disk)}% full when last measured: ${formatDiskSize(disk.usedBytes)} of ${formatDiskSize(disk.totalBytes)}. Once it fills, commands that write fail with "No space left on device". Before installing, cloning or building, remove what you no longer need, such as package caches in your home and clones and builds you've finished with. If a command fails for lack of space, don't try it again: tell the chat that your computer's disk is full.`;
 }
 
 /**

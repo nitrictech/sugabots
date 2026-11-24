@@ -1,25 +1,7 @@
 import { generateText } from "ai";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { capabilitiesNamed, discoveredModel } from "./dialect.ts";
 import { anthropic, dialectFor, ollama, openaiCompatible, openrouter } from "./index.ts";
-
-describe("capabilitiesNamed", () => {
-	const named = capabilitiesNamed({ tools: "tools", thinking: "thinking" });
-
-	it("translates the words it knows and drops the rest", () => {
-		expect(Schema.decodeSync(named)(["completion", "tools", "thinking", "hot"])).toEqual([
-			"tools",
-			"thinking",
-		]);
-	});
-
-	it("reads a missing or malformed list as no capabilities", () => {
-		expect(Schema.decodeSync(named)(undefined)).toEqual([]);
-		expect(Schema.decodeUnknownSync(named)("tools")).toEqual([]);
-		expect(Schema.decodeUnknownSync(named)([1, null])).toEqual([]);
-	});
-});
 
 describe("dialectFor", () => {
 	it("reads a built-in provider in the dialect it names", () => {
@@ -172,25 +154,7 @@ describe("ollama", () => {
 	});
 });
 
-describe("discovery decoding parity", () => {
-	it("normalizes nulls, trims names, and deduplicates capabilities into mutable outputs", () => {
-		const model = Schema.decodeSync(discoveredModel)({
-			modelId: "model",
-			displayName: " Model ",
-			contextLength: null,
-			capabilities: ["tools", "tools", "vision"],
-		});
-		expect(model).toEqual({
-			modelId: "model",
-			displayName: "Model",
-			contextLength: null,
-			capabilities: ["tools", "vision"],
-		});
-		model.displayName = null;
-		model.capabilities.push("thinking");
-		expect(model.capabilities).toEqual(["tools", "vision", "thinking"]);
-	});
-
+describe("discovery decoding", () => {
 	it("rejects numeric context lengths outside the contract", () => {
 		for (const context_length of [0, -1, 1.5, 10_000_001]) {
 			expect(

@@ -9,13 +9,12 @@ export const WEB_FETCH_TOOL = "web_fetch";
  * The `web_fetch` built-in tool: read one public web page.
  *
  * The outcome goes to the model as it is, refusals included, so the bot
- * can try another address or say what happened. The recording wrapper in
- * `tools/calls` writes the call down; this tool only fetches.
+ * can try another address or say what happened.
  */
 export function webFetchTool({ fetchPage }: { fetchPage: FetchPage }) {
 	return tool({
 		description:
-			"Read a public web page. Give it the full address of a page a person shared, one you know, or one from a search result, and you get the page's title and main content as Markdown to quote or summarise. Pages are fetched over HTTPS; it cannot sign in, run scripts, or reach private networks. When your reply relies on what a page says, name its URL.",
+			"Read a public web page. Give it the full address of a page a member shared, one you know, or one from a search result, and you get the page's title and main content as Markdown to quote or summarise. Pages are fetched over HTTPS; it cannot sign in, run scripts, or reach private networks. When your reply relies on what a page says, name its URL.",
 		inputSchema: Schema.Struct({
 			url: Schema.String.check(
 				Schema.isMinLength(1),

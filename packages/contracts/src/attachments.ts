@@ -3,18 +3,18 @@ import { uuidSchema } from "./uuid.ts";
 
 const BYTES_PER_MEGABYTE = 1024 * 1024;
 
-/** The largest file a person can attach to a message, in bytes. */
+/** The largest file a member can attach to a message, in bytes. */
 export const MAX_ATTACHMENT_BYTES = 30 * BYTES_PER_MEGABYTE;
 
-/** `MAX_ATTACHMENT_BYTES` in megabytes, as people are told it. */
+/** `MAX_ATTACHMENT_BYTES` in megabytes, as members are told it. */
 export const MAX_ATTACHMENT_MEGABYTES = MAX_ATTACHMENT_BYTES / BYTES_PER_MEGABYTE;
 
-/** The most files one message can carry, and so the most a person can have uploaded and not yet sent. */
+/** The most files one message can carry, and so the most a member can have uploaded and not yet sent. */
 export const MAX_ATTACHMENTS_PER_MESSAGE = 20;
 
 const MAX_ATTACHMENT_NAME_CHARACTERS = 255;
 
-/** A file's name as the person's computer had it, shown beside it and offered when it is downloaded. */
+/** A file's name as the member's computer had it, shown beside it and offered when it is downloaded. */
 export const attachmentNameSchema = Schema.Trim.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_ATTACHMENT_NAME_CHARACTERS),

@@ -4,6 +4,7 @@ import type {
 	BuiltInProviderId,
 	ModelProviderUpdate,
 	NewModelProvider,
+	ProviderApiFormat,
 	ProviderModel,
 	ProviderModelUpdate,
 } from "@sugabots/contracts";
@@ -21,6 +22,7 @@ import {
 } from "../../database/schema.ts";
 import { Secrets } from "../../secrets/secrets.ts";
 import type { UserFacing } from "../../user-message.ts";
+import { inWorkspaceUnderMembershipLock } from "../../workspaces/membership/member-reads.ts";
 import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
 import { OAuthTokens } from "./sign-in/sign-in.ts";
@@ -34,12 +36,12 @@ import { OAuthTokens } from "./sign-in/sign-in.ts";
  * configuration, through `recordTest`; `update` can only switch it off, and a
  * new key or a new address switches it off until it has been tried. A new
  * address also takes away the key, headers and sign-in the provider held,
- * other than a key or headers given with it.
+ * other than a key or headers given with it, and a new key takes the place of
+ * a subscription sign-in.
  */
 export interface Interface {
 	/**
-	 * Gives a workspace the starting providers it does not have yet, and brings
-	 * their starter models up to date with Sugabots' own. Safe to repeat.
+	 * Gives a new workspace the built-in providers and their starter models.
 	 */
 	readonly seedBuiltInProviders: (workspaceId: string) => Effect.Effect<void>;
 	readonly create: (
@@ -62,12 +64,16 @@ export interface Interface {
 	/**
 	 * Signs a subscription provider in, recording who did, or out with null. Like
 	 * a new key, it leaves the provider inactive and untested until it is tried.
+	 * Answers whether it was saved: a sign-in by someone no longer in the
+	 * workspace isn't, and leaves the provider as it was. The sign-in is
+	 * recorded under the workspace's membership lock, so removing its signer,
+	 * or their leaving, either sees it or comes first.
 	 */
 	readonly saveOAuthTokens: (
 		workspaceId: string,
 		providerId: string,
 		signIn: { tokens: OAuthTokens; signedInById: string } | null,
-	) => Effect.Effect<void>;
+	) => Effect.Effect<boolean>;
 	/**
 	 * Replaces a signed-in provider's tokens with what `renew` makes of them,
 	 * holding its row locked meanwhile: a refresh token is good for one use, so
@@ -131,7 +137,7 @@ export interface Interface {
 	) => Effect.Effect<ProviderAccess | undefined>;
 	/**
 	 * The provider that offers `modelId` while the workspace offers it, with the
-	 * names people know both by, and how to reach it if it has the key or
+	 * names members know both by, and how to reach it if it has the key or
 	 * sign-in it needs.
 	 */
 	readonly resolve: (
@@ -312,6 +318,7 @@ export const make = Effect.gen(function* () {
 						);
 						if (!current) return undefined;
 						const moved = changesAddress(changes.baseUrl, current.baseUrl);
+						const losesSignIn = moved || Boolean(changes.apiKey);
 						const configurationChanged =
 							changes.baseUrl !== undefined ||
 							changes.apiFormat !== undefined ||
@@ -329,7 +336,8 @@ export const make = Effect.gen(function* () {
 									name,
 									value: cipher.encrypt(value),
 								})) ?? (moved ? [] : undefined),
-							oauthTokensEncrypted: moved ? null : undefined,
+							oauthTokensEncrypted: losesSignIn ? null : undefined,
+							signedInById: losesSignIn ? null : undefined,
 							lastTestedAt: configurationChanged ? null : undefined,
 							lastTestError: configurationChanged ? null : undefined,
 						};
@@ -367,19 +375,35 @@ export const make = Effect.gen(function* () {
 		saveOAuthTokens: (workspaceId, providerId, signIn) =>
 			operation(
 				"saveOAuthTokens",
-				query((db) =>
-					db
-						.update(modelProvider)
-						.set({
-							active: false,
-							oauthTokensEncrypted: signIn ? cipher.encrypt(JSON.stringify(signIn.tokens)) : null,
-							connectedById: signIn?.signedInById,
-							lastTestedAt: null,
-							lastTestError: null,
-						})
-						.where(
-							and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId)),
-						),
+				transaction(
+					Effect.gen(function* () {
+						if (
+							signIn &&
+							!(yield* inWorkspaceUnderMembershipLock(workspaceId, signIn.signedInById))
+						) {
+							return false;
+						}
+						yield* query((db) =>
+							db
+								.update(modelProvider)
+								.set(
+									signIn
+										? {
+												active: false,
+												oauthTokensEncrypted: cipher.encrypt(JSON.stringify(signIn.tokens)),
+												signedInById: signIn.signedInById,
+												connectedById: signIn.signedInById,
+												lastTestedAt: null,
+												lastTestError: null,
+											}
+										: SIGNED_OUT,
+								)
+								.where(
+									and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId)),
+								),
+						);
+						return true;
+					}),
 				),
 			),
 
@@ -638,7 +662,7 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-/** The provider that offers a model, and the names people know both by. */
+/** The provider that offers a model, and the names members know both by. */
 export interface ResolvedModel {
 	/** Nothing while the provider lacks the key or sign-in its built-in provider needs. */
 	access: ProviderAccess | undefined;
@@ -651,7 +675,7 @@ export interface ProviderAccess {
 	providerId: string;
 	builtIn: BuiltInProviderId | null;
 	baseUrl: string;
-	apiFormat: "openai" | "anthropic";
+	apiFormat: ProviderApiFormat;
 	apiKey?: string;
 	headers: Record<string, string>;
 	/**
@@ -746,6 +770,15 @@ function providerValues(input: NewModelProvider, cipher: Secrets.Interface) {
 		})),
 	};
 }
+
+/** What signing a subscription provider out leaves: switched off and untested until it is signed in and tried again. */
+const SIGNED_OUT = {
+	active: false,
+	oauthTokensEncrypted: null,
+	signedInById: null,
+	lastTestedAt: null,
+	lastTestError: null,
+} satisfies Partial<ModelProviderRow>;
 
 /**
  * What an update by `changedById` writes to `connected_by_id`. A new key is

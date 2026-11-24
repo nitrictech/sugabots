@@ -1,5 +1,4 @@
 import {
-	type CollaborationPart,
 	type FilePart,
 	type Message,
 	type MessageReplyTo,
@@ -27,14 +26,13 @@ const DESCRIBED_OUTPUT_CHARACTERS = 500;
 const DESCRIBED_HISTORY_SEARCH_CHARACTERS = 4_000;
 
 /**
- * A message as prose, with each collaboration and tool call written where it
- * happened so the bot's own history says what it asked and what it was told.
+ * A message as prose, with each tool call written where it happened so the
+ * bot's own history says what it did and what came back.
  */
 export function messageTextWithPlacedParts(message: Message): string {
 	const text = message.parts
 		.map((part) => {
 			if (part.type === "text") return part.text;
-			if (part.type === "collaboration") return describeCollaboration(part);
 			if (part.type === "file") return describeAttachment(part, { usesComputer: false });
 			if (part.type === "written_file") return describeWrittenFile(part);
 			return describeToolCall(part);
@@ -100,7 +98,7 @@ export function describeWrittenFile(file: WrittenFilePart): string {
 	return `[Showed the ${file.kind} file "${file.title}" as written at version ${file.version}, file ${file.fileId}; ${FILE_READ_TOOL} reads its current version]`;
 }
 
-/** A file's size as people write it, such as 2.1 MB. */
+/** A file's size as members write it, such as 2.1 MB. */
 function sizeOf(bytes: number): string {
 	if (bytes < 1024) return `${bytes} bytes`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -122,19 +120,6 @@ function foundToolNames(output: unknown): string {
 
 function clipped(text: string, limit: number): string {
 	return text.length <= limit ? text : `${text.slice(0, limit)}… (${text.length} characters)`;
-}
-
-export function describeCollaboration(collaboration: CollaborationPart): string {
-	const asked = `[Platform collaboration record: asked ${collaboration.botName}: ${collaboration.brief}]`;
-	switch (collaboration.status) {
-		case "waiting":
-		case "pending":
-			return `${asked}\n[Platform collaboration record: ${collaboration.botName} has not answered yet]`;
-		case "answered":
-			return `${asked}\n[Platform collaboration record: ${collaboration.botName} answered: ${collaboration.answer ?? ""}]`;
-		case "failed":
-			return `${asked}\n[Platform collaboration record: ${collaboration.botName} could not answer]`;
-	}
 }
 
 /**

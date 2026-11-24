@@ -83,9 +83,9 @@ interface EnabledWebhook {
 	automationId: string;
 	auth: WebhookAuth;
 	/** Where a generic webhook's delivery id is, if anywhere. */
-	deliveryIdHeader: string | null | undefined;
+	deliveryIdHeader: string | null;
 	filter: readonly WebhookFilterTest[] | undefined;
-	/** Sealed with `Credentials`. */
+	/** Encrypted with `Secrets`, for this webhook's use. */
 	secret: string | null;
 }
 

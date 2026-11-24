@@ -4,11 +4,12 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { Config, Context, Data, Effect, Layer, Option, Redacted } from "effect";
 
 /**
- * Seals stored credentials: provider API keys, connector secrets and OAuth
- * tokens. A value sealed for a `purpose` opens only for that same purpose,
- * and one sealed without opens only without, so a value sealed for one use
- * can never be passed off as another's. An empty `purpose` is refused: the
- * cipher can't tell it from none.
+ * Encrypts what Sugabots stores as secrets: credentials for model, search and
+ * computer providers and connectors, GitHub app keys and tokens, webhook
+ * secrets and file page links. A value encrypted for a `purpose` decrypts only
+ * for that same purpose, and one encrypted without decrypts only without, so a
+ * value encrypted for one use can never be passed off as another's. An empty
+ * `purpose` is refused: the cipher can't tell it from none.
  */
 export interface Interface {
 	encrypt(value: string, purpose?: string): string;
@@ -69,7 +70,7 @@ function aes(key: Buffer): Interface {
 		decrypt(value, purpose) {
 			const [version, nonce, tag, ciphertext] = value.split(".");
 			if (version !== "v1" || !nonce || !tag || !ciphertext)
-				throw new Error("Unsupported encrypted provider credential");
+				throw new Error("Unsupported encrypted secret");
 			const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(nonce, "base64url"));
 			decipher.setAuthTag(Buffer.from(tag, "base64url"));
 			if (purpose !== undefined) decipher.setAAD(purposeBytes(purpose));
@@ -82,6 +83,6 @@ function aes(key: Buffer): Interface {
 }
 
 function purposeBytes(purpose: string) {
-	if (purpose === "") throw new Error("A sealing purpose must not be empty");
+	if (purpose === "") throw new Error("A secret's purpose must not be empty");
 	return Buffer.from(purpose, "utf8");
 }

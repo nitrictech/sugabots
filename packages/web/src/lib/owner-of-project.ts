@@ -5,7 +5,7 @@ import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 
 /**
  * Whose project `projectId` is, as its pages show it: the bot whose default
- * project it is, else the project itself while the person is in it, since
+ * project it is, else the project itself while the member is in it, since
  * only its members open a project's pages. Undefined for a project neither list
  * has, or not yet.
  */

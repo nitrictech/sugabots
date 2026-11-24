@@ -12,11 +12,11 @@ const [teamProject, salesProject] = projects as [
 	(typeof projects)[number],
 ];
 const at = "2026-09-18T08:00:00.000Z";
-/** A file Sales keeps, which the person may read. */
+/** A file Sales keeps, which the member may read. */
 const salesPlan: WrittenFile = {
 	id: "0199a3a0-0000-7000-8000-000000000f01",
 	chatId: "0199a3a0-0000-7000-8000-000000000f02",
-	kind: "document",
+	kind: "markdown",
 	title: "Sales plan",
 	version: 1,
 	createdBy: null,

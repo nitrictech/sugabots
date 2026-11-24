@@ -2,7 +2,7 @@ import { type Membership as ListedMembership, meSchema } from "@sugabots/contrac
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { noComputers } from "@sugabots/core/computers/testing";
-import { person } from "@sugabots/core/database/schema";
+import { member } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
@@ -99,13 +99,28 @@ async function appWith(
 
 type App = Awaited<ReturnType<typeof appWith>>;
 
+const SIGN_UP_CLOSED = new Accounts.SignUpClosed().userMessage;
+const REFERRAL_LINK_INVALID = new Accounts.ReferralLinkInvalid().userMessage;
+
+/**
+ * The session cookie a sign-up or sign-in set, as a later request sends it
+ * back, or `undefined` when it started no session. Only the session itself:
+ * better-auth's cached copy of it would outlive a change the test then makes.
+ */
+function sessionCookieOf(response: Response): string | undefined {
+	return response.headers
+		.getSetCookie()
+		.map((cookie) => cookie.split(";", 1)[0])
+		.find((cookie) => cookie?.startsWith("better-auth.session_token="));
+}
+
 function post(app: App, path: string, body: unknown, token?: string) {
 	return app.request(`${API_BASE_PATH}${path}`, {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
 			origin: ORIGIN,
-			...(token ? { authorization: `Bearer ${token}` } : {}),
+			...(token ? { cookie: token } : {}),
 		},
 		body: JSON.stringify(body),
 	});
@@ -138,18 +153,18 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		app = await appWith({ SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "false" }, sent);
 	});
 
-	/** Signs somebody up and returns the bearer token they were given. */
+	/** Signs somebody up and returns the session cookie they were given. */
 	async function signUp(name: string, email: string): Promise<string> {
 		const response = await signUpAt(app, name, email);
 
 		expect(response.status).toBe(200);
-		const token = response.headers.get("set-auth-token");
-		expect(token, "sign-up should issue a bearer token").toBeTruthy();
-		return token as string;
+		const cookie = sessionCookieOf(response);
+		expect(cookie, "sign-up should start a session").toBeTruthy();
+		return cookie as string;
 	}
 
 	function me(token: string) {
-		return app.request(`${API_BASE_PATH}/me`, { headers: { authorization: `Bearer ${token}` } });
+		return app.request(`${API_BASE_PATH}/me`, { headers: { cookie: token } });
 	}
 
 	async function verifyEmail(email: string): Promise<void> {
@@ -168,13 +183,13 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		expect(response.status).toBe(200);
 	}
 
-	it("takes a person from sign-up to a shared workspace", async () => {
+	it("takes a member from sign-up to a shared workspace", async () => {
 		const unique = crypto.randomUUID().slice(0, 8);
 		const adaEmail = `ada-${unique}@example.com`;
 		const bobEmail = `bob-${unique}@example.com`;
 
 		const ada = await signUp("Ada", adaEmail);
-		const identified = Schema.decodeUnknownSync(meSchema)(await (await me(ada)).json()).person;
+		const identified = Schema.decodeUnknownSync(meSchema)(await (await me(ada)).json()).member;
 		expect(identified.email).toBe(adaEmail);
 
 		const workspace = await workspaceMadeBy(app, ada, `nitric-${unique}`);
@@ -189,11 +204,11 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 
 		expect((await me(bob)).status).toBe(200);
 		const roster = await app.request(`${API_BASE_PATH}/workspaces/${workspace.id}/memberships`, {
-			headers: { authorization: `Bearer ${bob}` },
+			headers: { cookie: bob },
 		});
 		const memberships = (await roster.json()) as ListedMembership[];
 		expect(
-			memberships.map((membership) => [membership.person.email, membership.role]).sort(),
+			memberships.map((membership) => [membership.member.email, membership.role]).sort(),
 		).toEqual([
 			[adaEmail, "owner"],
 			[bobEmail, "editor"],
@@ -211,7 +226,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		});
 
 		expect(identified.status).toBe(200);
-		expect(Schema.decodeUnknownSync(meSchema)(await identified.json()).person.email).toBe(
+		expect(Schema.decodeUnknownSync(meSchema)(await identified.json()).member.email).toBe(
 			`cookie-${unique}@example.com`,
 		);
 	});
@@ -280,7 +295,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 	it("changes your name, trimmed, and refuses a blank one", async () => {
 		const token = await signUp("Ada", `rename-${crypto.randomUUID().slice(0, 8)}@example.com`);
 		const name = async () =>
-			Schema.decodeUnknownSync(meSchema)(await (await me(token)).json()).person.name;
+			Schema.decodeUnknownSync(meSchema)(await (await me(token)).json()).member.name;
 
 		expect((await post(app, "/auth/update-user", { name: "  Ada Lovelace " }, token)).status).toBe(
 			200,
@@ -309,7 +324,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({
-			person: expect.objectContaining({ name: "Boot Strap", email }),
+			member: expect.objectContaining({ name: "Boot Strap", email }),
 			workspaces: [],
 		});
 	});
@@ -336,7 +351,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a server whose sign-up mode is close
 	async function anIncumbent(unique: string): Promise<string> {
 		const response = await signUpAt(open, "Ada", `ada-${unique}@example.com`);
 		expect(response.status).toBe(200);
-		return response.headers.get("set-auth-token") as string;
+		return sessionCookieOf(response) as string;
 	}
 
 	it("refuses an address nobody invited", async () => {
@@ -346,13 +361,13 @@ describe.skipIf(!process.env.DATABASE_URL)("a server whose sign-up mode is close
 		const refused = await signUpAt(closed, "Eve", `eve-${unique}@example.com`);
 
 		expect(refused.status).toBe(403);
-		expect(await refused.json()).toMatchObject({ code: "SIGN_UP_CLOSED" });
+		expect(await refused.json()).toMatchObject({ message: SIGN_UP_CLOSED });
 		expect(
 			await onDatabase((db) =>
 				db
 					.select()
-					.from(person)
-					.where(eq(person.email, `eve-${unique}@example.com`)),
+					.from(member)
+					.where(eq(member.email, `eve-${unique}@example.com`)),
 			),
 		).toEqual([]);
 	});
@@ -369,7 +384,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a server whose sign-up mode is close
 	});
 });
 
-describe.skipIf(!process.env.DATABASE_URL)("a server that signs people up by referral", () => {
+describe.skipIf(!process.env.DATABASE_URL)("a server that signs members up by referral", () => {
 	const sent: Email.Message[] = [];
 	// The same database under both policies, so there is always somebody to
 	// refer from and the server is never empty.
@@ -382,17 +397,17 @@ describe.skipIf(!process.env.DATABASE_URL)("a server that signs people up by ref
 		]);
 	});
 
-	/** A person on the referral server, and the bearer token they were given. */
-	async function aPerson(unique: string): Promise<{ id: string; token: string }> {
+	/** A member on the referral server, and the session cookie they were given. */
+	async function aMember(unique: string): Promise<{ id: string; token: string }> {
 		const response = await signUpAt(open, "Ada", `ada-${unique}@example.com`);
 		expect(response.status).toBe(200);
 		const { user } = (await response.json()) as { user: { id: string } };
-		return { id: user.id, token: response.headers.get("set-auth-token") as string };
+		return { id: user.id, token: sessionCookieOf(response) as string };
 	}
 
 	async function referralLinkOf(app: App, token: string): Promise<string | null> {
 		const response = await app.request(`${API_BASE_PATH}/referral-link`, {
-			headers: { authorization: `Bearer ${token}` },
+			headers: { cookie: token },
 		});
 		expect(response.status).toBe(200);
 		return ((await response.json()) as { url: string | null }).url;
@@ -406,13 +421,13 @@ describe.skipIf(!process.env.DATABASE_URL)("a server that signs people up by ref
 
 	function referrerOf(email: string) {
 		return onDatabase((db) =>
-			db.select({ referredBy: person.referredBy }).from(person).where(eq(person.email, email)),
+			db.select({ referredBy: member.referredBy }).from(member).where(eq(member.email, email)),
 		);
 	}
 
-	it("admits somebody holding a person's link, and records who sent it", async () => {
+	it("admits somebody holding a member's link, and records who sent it", async () => {
 		const unique = crypto.randomUUID().slice(0, 8);
-		const ada = await aPerson(unique);
+		const ada = await aMember(unique);
 		const link = await referralLinkOf(referral, ada.token);
 		const bobEmail = `bob-${unique}@example.com`;
 
@@ -425,7 +440,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a server that signs people up by ref
 
 	it("refuses somebody with no link, or a code nobody holds", async () => {
 		const unique = crypto.randomUUID().slice(0, 8);
-		await aPerson(unique);
+		await aMember(unique);
 
 		const withoutLink = await signUpAt(referral, "Eve", `eve-${unique}@example.com`);
 		const forged = await signUpAt(referral, "Eve", `eve-${unique}@example.com`, {
@@ -433,15 +448,15 @@ describe.skipIf(!process.env.DATABASE_URL)("a server that signs people up by ref
 		});
 
 		expect(withoutLink.status).toBe(403);
-		expect(await withoutLink.json()).toMatchObject({ code: "SIGN_UP_CLOSED" });
+		expect(await withoutLink.json()).toMatchObject({ message: SIGN_UP_CLOSED });
 		expect(forged.status).toBe(403);
-		expect(await forged.json()).toMatchObject({ code: "REFERRAL_LINK_INVALID" });
+		expect(await forged.json()).toMatchObject({ message: REFERRAL_LINK_INVALID });
 		expect(await referrerOf(`eve-${unique}@example.com`)).toEqual([]);
 	});
 
-	it("stops a link working once its person resets it, and admits with the new one", async () => {
+	it("stops a link working once its member resets it, and admits with the new one", async () => {
 		const unique = crypto.randomUUID().slice(0, 8);
-		const ada = await aPerson(unique);
+		const ada = await aMember(unique);
 		const oldCode = codeIn(await referralLinkOf(referral, ada.token));
 
 		const reset = await post(referral, "/referral-link/reset", {}, ada.token);
@@ -453,7 +468,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a server that signs people up by ref
 			referralCode: oldCode,
 		});
 		expect(stale.status).toBe(403);
-		expect(await stale.json()).toMatchObject({ code: "REFERRAL_LINK_INVALID" });
+		expect(await stale.json()).toMatchObject({ message: REFERRAL_LINK_INVALID });
 		expect(
 			(await signUpAt(referral, "Bob", `bob-${unique}@example.com`, { referralCode: newCode }))
 				.status,
@@ -462,7 +477,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a server that signs people up by ref
 
 	it("does not let somebody signing up say who referred them", async () => {
 		const unique = crypto.randomUUID().slice(0, 8);
-		const ada = await aPerson(unique);
+		const ada = await aMember(unique);
 
 		const response = await signUpAt(open, "Eve", `eve-${unique}@example.com`, {
 			referredBy: ada.id,
@@ -473,7 +488,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a server that signs people up by ref
 	});
 
 	it("offers no link where sign-up is not by referral", async () => {
-		const ada = await aPerson(crypto.randomUUID().slice(0, 8));
+		const ada = await aMember(crypto.randomUUID().slice(0, 8));
 
 		expect(await referralLinkOf(open, ada.token)).toBeNull();
 		expect((await post(open, "/referral-link/reset", {}, ada.token)).status).toBe(404);
@@ -493,7 +508,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a server that requires email verific
 
 		const signedUp = await post(app, "/auth/sign-up/email", { name: "Vera", email, password });
 		expect(signedUp.status).toBe(200);
-		expect(signedUp.headers.get("set-auth-token")).toBeNull();
+		expect(sessionCookieOf(signedUp)).toBeUndefined();
 
 		const tooEarly = await post(app, "/auth/sign-in/email", { email, password });
 		expect(tooEarly.status).toBe(403);
@@ -510,6 +525,6 @@ describe.skipIf(!process.env.DATABASE_URL)("a server that requires email verific
 
 		const signedIn = await post(app, "/auth/sign-in/email", { email, password });
 		expect(signedIn.status).toBe(200);
-		expect(signedIn.headers.get("set-auth-token")).toBeTruthy();
+		expect(sessionCookieOf(signedIn)).toBeTruthy();
 	});
 });

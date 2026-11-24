@@ -1,8 +1,8 @@
-import { type ChatKind, messageAuthorName } from "@sugabots/contracts";
+import { messageAuthorName } from "@sugabots/contracts";
 import { and, asc, eq, gte } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
-import { bot, message, person, placedChat } from "../../database/schema.ts";
+import { bot, member, message, placedChat } from "../../database/schema.ts";
 import { messageTextWithPlacedParts } from "./message-text.ts";
 import {
 	participantColumns,
@@ -24,9 +24,6 @@ import { loadPlacedParts } from "./placed-parts.ts";
 interface SystemBotScope {
 	chatId: string;
 	workspaceId: string;
-	chatKind: ChatKind;
-	/** The bot the chat is with, as `placedChat` reads it. */
-	chatBotId: string | null;
 	chatTitle: string;
 	/** The model of the bot whose reply asked for this work, which reads the chat next. */
 	botModel: string | null;
@@ -35,7 +32,7 @@ interface SystemBotScope {
 /** One message of a transcript, as a system bot reads it. */
 export interface TranscriptEntry {
 	author: string;
-	kind: "person" | "bot";
+	kind: "member" | "bot";
 	content: string;
 }
 
@@ -51,8 +48,6 @@ export const loadSystemBotScope = Effect.fn("SystemBotChats.loadSystemBotScope")
 		.select({
 			chatId: placedChat.id,
 			workspaceId: placedChat.workspaceId,
-			chatKind: placedChat.kind,
-			chatBotId: placedChat.botId,
 			chatTitle: placedChat.title,
 			botModel: bot.model,
 		})
@@ -85,7 +80,7 @@ export const loadTranscript = Effect.fn("SystemBotChats.loadTranscript")(functio
 			...participantColumns,
 		})
 		.from(message)
-		.leftJoin(person, eq(person.id, message.authorPersonId))
+		.leftJoin(member, eq(member.id, message.authorMemberId))
 		.leftJoin(bot, eq(bot.id, message.authorBotId))
 		.where(
 			and(
@@ -119,7 +114,7 @@ export const loadTranscript = Effect.fn("SystemBotChats.loadTranscript")(functio
 		const entry: TranscriptEntry | undefined = content
 			? {
 					author: messageAuthorName(hydrated.author),
-					kind: hydrated.author.kind === "person" ? "person" : "bot",
+					kind: hydrated.author.kind === "member" ? "member" : "bot",
 					content,
 				}
 			: undefined;

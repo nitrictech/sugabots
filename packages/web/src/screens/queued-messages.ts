@@ -1,7 +1,7 @@
 import type { Message } from "@sugabots/contracts";
 
 /**
- * The ids of people's messages that wait for a bot's next reply: those
+ * The ids of members' messages that wait for a bot's next reply: those
  * posted since `queuedSince`, when a turn asked for while the bot was still
  * answering started waiting. That turn reads them all once it starts, so they
  * are answered together. The server decides what waits, so a message that
@@ -16,7 +16,7 @@ export function queuedBehindReply(
 	return new Set(
 		messages
 			.filter(
-				(message) => message.author.kind === "person" && Date.parse(message.createdAt) >= since,
+				(message) => message.author.kind === "member" && Date.parse(message.createdAt) >= since,
 			)
 			.map((message) => message.id),
 	);

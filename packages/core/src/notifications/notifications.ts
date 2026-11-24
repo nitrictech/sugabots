@@ -1,13 +1,13 @@
 export * as Notifications from "./notifications.ts";
 
 import {
+	memberStream,
 	messageAuthorName,
 	type NotificationLevel,
 	type NotificationPlaceKind,
 	type NotificationPreferences,
 	type NotificationSettings,
 	type Presence,
-	personStream,
 	streamEvent,
 } from "@sugabots/contracts";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
@@ -43,7 +43,7 @@ import {
 } from "./recipients.ts";
 
 /**
- * Browser notifications, as Slack's web app shows them: what each person
+ * Browser notifications, as Slack's web app shows them: what each member
  * chose to hear of, sent on their own event stream for their open tabs to
  * show. With no tab open, nothing reaches them. Their tabs also say there
  * which chat each is showing, so none notifies them of what they are
@@ -71,7 +71,7 @@ export interface Interface {
 	readonly sendTest: Effect.Effect<void, never, CurrentActor.Service>;
 	/** Tells the actor's other tabs what one of theirs is looking at. */
 	readonly reportPresence: (presence: Presence) => Effect.Effect<void, never, CurrentActor.Service>;
-	/** Notifies people of finished messages and of approvals waiting on them, once they commit. */
+	/** Notifies members of finished messages and of approvals waiting on them, once they commit. */
 	readonly handler: DomainEvents.Handler<ChatEvent>;
 }
 
@@ -94,9 +94,9 @@ export const make = Effect.gen(function* () {
 	const deliver = (addressed: readonly Addressed[]) =>
 		Effect.forEach(
 			addressed,
-			({ personId, notification }) =>
+			({ memberId, notification }) =>
 				Effect.promise(() =>
-					bus.publish(personStream(personId), streamEvent("notification", notification)),
+					bus.publish(memberStream(memberId), streamEvent("notification", notification)),
 				),
 			{ discard: true },
 		);
@@ -110,13 +110,13 @@ export const make = Effect.gen(function* () {
 			}
 		});
 
-	const settingsOf = (personId: string) =>
+	const settingsOf = (memberId: string) =>
 		Effect.gen(function* () {
 			const [own] = yield* query((db) =>
-				db.select().from(notificationSettings).where(eq(notificationSettings.personId, personId)),
+				db.select().from(notificationSettings).where(eq(notificationSettings.memberId, memberId)),
 			);
 			const overrides = yield* query((db) =>
-				db.select().from(notificationOverride).where(eq(notificationOverride.personId, personId)),
+				db.select().from(notificationOverride).where(eq(notificationOverride.memberId, memberId)),
 			);
 			const now = yield* DateTime.nowAsDate;
 			const levels = {
@@ -151,14 +151,14 @@ export const make = Effect.gen(function* () {
 	return Service.of({
 		settings: operation(
 			"settings",
-			Effect.flatMap(CurrentActor.Service, ({ personId }) => settingsOf(personId)),
+			Effect.flatMap(CurrentActor.Service, ({ memberId }) => settingsOf(memberId)),
 		),
 
 		updatePreferences: (preferences) =>
 			operation(
 				"updatePreferences",
 				Effect.gen(function* () {
-					const { personId } = yield* CurrentActor.Service;
+					const { memberId } = yield* CurrentActor.Service;
 					const values = {
 						level: preferences.level,
 						pausedUntil: preferences.pausedUntil
@@ -171,10 +171,10 @@ export const make = Effect.gen(function* () {
 					yield* query((db) =>
 						db
 							.insert(notificationSettings)
-							.values({ personId, ...values })
-							.onConflictDoUpdate({ target: notificationSettings.personId, set: values }),
+							.values({ memberId, ...values })
+							.onConflictDoUpdate({ target: notificationSettings.memberId, set: values }),
 					);
-					return yield* settingsOf(personId);
+					return yield* settingsOf(memberId);
 				}),
 			),
 
@@ -182,14 +182,14 @@ export const make = Effect.gen(function* () {
 			operation(
 				"setLevel",
 				Effect.gen(function* () {
-					const { personId } = yield* CurrentActor.Service;
-					const override = overrideOf(personId, place);
+					const { memberId } = yield* CurrentActor.Service;
+					const override = overrideOf(memberId, place);
 					// Clearing removes only the actor's own choice, so it needs no reach.
 					if (level === null) {
 						yield* query((db) => db.delete(notificationOverride).where(override.where));
 						return;
 					}
-					yield* requireReachOf(personId, place);
+					yield* requireReachOf(memberId, place);
 					yield* query((db) =>
 						db
 							.insert(notificationOverride)
@@ -203,8 +203,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"mute",
 				Effect.gen(function* () {
-					const { personId } = yield* CurrentActor.Service;
-					const override = overrideOf(personId, place);
+					const { memberId } = yield* CurrentActor.Service;
+					const override = overrideOf(memberId, place);
 					const now = yield* DateTime.nowAsDate;
 					if (until === null || until <= now) {
 						// A row that only held the mute has nothing left to say.
@@ -218,7 +218,7 @@ export const make = Effect.gen(function* () {
 						);
 						return;
 					}
-					yield* requireReachOf(personId, place);
+					yield* requireReachOf(memberId, place);
 					yield* query((db) =>
 						db
 							.insert(notificationOverride)
@@ -231,10 +231,10 @@ export const make = Effect.gen(function* () {
 		sendTest: operation(
 			"sendTest",
 			Effect.gen(function* () {
-				const { personId } = yield* CurrentActor.Service;
+				const { memberId } = yield* CurrentActor.Service;
 				yield* deliver([
 					{
-						personId,
+						memberId,
 						notification: {
 							title: "Notifications are on",
 							body: "This is how Sugabots will tell you when something needs you.",
@@ -250,9 +250,9 @@ export const make = Effect.gen(function* () {
 		reportPresence: (reported) =>
 			operation(
 				"reportPresence",
-				Effect.flatMap(CurrentActor.Service, ({ personId }) =>
+				Effect.flatMap(CurrentActor.Service, ({ memberId }) =>
 					Effect.promise(() =>
-						bus.publish(personStream(personId), streamEvent("presence", reported)),
+						bus.publish(memberStream(memberId), streamEvent("presence", reported)),
 					),
 				),
 			),
@@ -304,8 +304,8 @@ const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 					chatId: event.chatId,
 					messageId: event.message.id,
 					author:
-						author.kind === "person"
-							? { kind: "person", personId: author.id }
+						author.kind === "member"
+							? { kind: "member", memberId: author.id }
 							: author.kind === "bot"
 								? { kind: "bot", botId: author.id }
 								: { kind: "automation" },
@@ -318,7 +318,7 @@ const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 						part.type === "written_file" ? [part.title] : [],
 					),
 					repliesTo:
-						event.message.replyTo?.author.kind === "person"
+						event.message.replyTo?.author.kind === "member"
 							? event.message.replyTo.author.id
 							: null,
 					resultOf: event.message.automationResultOf ?? null,
@@ -337,29 +337,29 @@ const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 	}
 });
 
-/** A project or a bot, where a person chooses in place of the level above. */
+/** A project or a bot, where a member chooses in place of the level above. */
 export interface Place {
 	kind: NotificationPlaceKind;
 	id: string;
 }
 
-/** The person's override row for `place`: how to find it, make it, and update it in place. */
-function overrideOf(personId: string, place: Place) {
+/** The member's override row for `place`: how to find it, make it, and update it in place. */
+function overrideOf(memberId: string, place: Place) {
 	const column =
 		place.kind === "project" ? notificationOverride.projectId : notificationOverride.botId;
 	return {
-		where: and(eq(notificationOverride.personId, personId), eq(column, place.id)),
+		where: and(eq(notificationOverride.memberId, memberId), eq(column, place.id)),
 		row:
-			place.kind === "project" ? { personId, projectId: place.id } : { personId, botId: place.id },
-		conflict: { target: [notificationOverride.personId, column], targetWhere: isNotNull(column) },
+			place.kind === "project" ? { memberId, projectId: place.id } : { memberId, botId: place.id },
+		conflict: { target: [notificationOverride.memberId, column], targetWhere: isNotNull(column) },
 	};
 }
 
-const requireReachOf = (personId: string, place: Place) =>
+const requireReachOf = (memberId: string, place: Place) =>
 	place.kind === "project"
-		? query((db) => projectStandingFor(db, place.id, personId)).pipe(
+		? query((db) => projectStandingFor(db, place.id, memberId)).pipe(
 				Effect.flatMap((standing) => requireReach(standing, "project")),
 			)
-		: query((db) => botStandingFor(db, place.id, personId)).pipe(
+		: query((db) => botStandingFor(db, place.id, memberId)).pipe(
 				Effect.flatMap((standing) => requireReach(standing, "bot")),
 			);

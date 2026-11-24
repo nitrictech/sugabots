@@ -1,11 +1,17 @@
 import { ResourceHidden } from "@sugabots/core/authorization/access";
 import { ChatView } from "@sugabots/core/chats/chats/chat-view";
 import { Chats } from "@sugabots/core/chats/chats/chats";
+import { InvalidCursor } from "@sugabots/core/chats/cursor";
 import { FloorControl } from "@sugabots/core/chats/floor/floor-control";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
-import { createTestApp, identifiedBy, type PersonResolver } from "../../http/app.test-support.ts";
+import {
+	createTestApp,
+	identifiedBy,
+	type MemberResolver,
+	signedInWith,
+} from "../../http/app.test-support.ts";
 
 /**
  * How the chat routes answer what `Chats` and `ChatView` refuse, over doubles
@@ -17,7 +23,7 @@ const MESSAGE = "0199a3a0-0000-7000-8000-000000000501";
 const PROJECT = "0199a3a0-0000-7000-8000-000000000601";
 const UPLOAD = "0199a3a0-0000-7000-8000-000000000701";
 
-const resolvePerson: PersonResolver = async () => ({
+const resolveMember: MemberResolver = async () => ({
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Sam",
 	email: "sam@example.com",
@@ -27,7 +33,7 @@ const resolvePerson: PersonResolver = async () => ({
 const app = (chats: Partial<Chats.Interface>, view: Partial<ChatView.Interface> = {}) =>
 	createTestApp(
 		Layer.mergeAll(
-			identifiedBy(resolvePerson),
+			identifiedBy(resolveMember),
 			unimplemented(Chats.Service, chats),
 			unimplemented(ChatView.Service, view),
 		),
@@ -35,7 +41,7 @@ const app = (chats: Partial<Chats.Interface>, view: Partial<ChatView.Interface> 
 
 const signedIn = (init: RequestInit = {}) => ({
 	...init,
-	headers: { authorization: "Bearer sam", "content-type": "application/json" },
+	headers: { ...signedInWith("sam"), "content-type": "application/json" },
 });
 
 const startChat = (body: object = {}) =>
@@ -54,7 +60,7 @@ describe("starting a chat in a project", () => {
 		expect(asked).toEqual({ projectId: PROJECT, messageId: MESSAGE, content: "Hi" });
 	});
 
-	it("is a conflict when a bot given the floor has no model, and not found in a project the person cannot see", async () => {
+	it("is a conflict when a bot given the floor has no model, and not found in a project the member cannot see", async () => {
 		const refusing = (failure: FloorControl.BotHasNoModel | ResourceHidden) =>
 			app({ startProjectChat: () => Effect.fail(failure) }).request(
 				`/projects/${PROJECT}/chats`,
@@ -66,7 +72,7 @@ describe("starting a chat in a project", () => {
 	});
 });
 
-describe("a chat the person cannot see", () => {
+describe("a chat the member cannot see", () => {
 	it("is not found, whatever is asked of it", async () => {
 		const hidden = Effect.fail(new ResourceHidden({ resource: "chat" }));
 		const routes = app({ setResolved: () => hidden }, { messages: () => hidden });
@@ -80,10 +86,10 @@ describe("a chat the person cannot see", () => {
 
 describe("a page of a chat", () => {
 	it("is a bad request with a cursor that is not one", async () => {
-		const response = await app(
-			{},
-			{ messages: () => Effect.fail(new ChatView.InvalidPageCursor()) },
-		).request(`/chats/${CHAT}/messages?cursor=nonsense`, signedIn());
+		const response = await app({}, { messages: () => Effect.fail(new InvalidCursor()) }).request(
+			`/chats/${CHAT}/messages?cursor=nonsense`,
+			signedIn(),
+		);
 
 		expect(response.status).toBe(400);
 	});

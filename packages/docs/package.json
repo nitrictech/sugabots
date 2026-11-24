@@ -6,6 +6,7 @@
 	"type": "module",
 	"exports": {
 		".": "./src/pages.ts",
+		"./markdown": "./src/markdown.ts",
 		"./roles": "./src/roles.ts"
 	},
 	"scripts": {

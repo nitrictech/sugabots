@@ -1,4 +1,4 @@
-import type { ChatDetails, PersonParticipant } from "@sugabots/contracts";
+import type { ChatDetails, MemberParticipant } from "@sugabots/contracts";
 import type { ChatLocation } from "@/lib/chats.ts";
 import { OwnerPageCrumb, ProjectCrumb } from "@/shell/BotCrumb.tsx";
 import {
@@ -84,8 +84,8 @@ export function ChatKindHeader({
 			overChat={overChat}
 			title={details?.chat.title}
 			resolved={resolved}
-			people={details?.participants.filter(
-				(participant): participant is PersonParticipant => participant.kind === "person",
+			members={details?.participants.filter(
+				(participant): participant is MemberParticipant => participant.kind === "member",
 			)}
 			chatId={chatId}
 			onOpenDesktop={onOpenDesktop}

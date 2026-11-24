@@ -9,7 +9,7 @@ import { ChatFileStore } from "@sugabots/core/files/chat-file-store";
 import { userText } from "@sugabots/errors";
 import { Effect, Stream } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSignedInPerson } from "../../auth/middleware.ts";
+import { asCurrentUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 import { fileResponse } from "./file-response.ts";
@@ -23,16 +23,16 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 		const reactions = yield* Reactions.Service;
 		return handlers
 			.handle("projectChats", ({ params }) =>
-				view.chats(params.projectId).pipe(asSignedInPerson, asHttpError(chatErrors)),
+				view.chats(params.projectId).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("attention", ({ params }) =>
-				view.attention(params.workspace).pipe(asSignedInPerson, asHttpError(chatErrors)),
+				view.attention(params.workspace).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("attentionMarks", ({ params }) =>
-				view.attentionMarks(params.workspace).pipe(asSignedInPerson, asHttpError(chatErrors)),
+				view.attentionMarks(params.workspace).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("approvals", ({ params }) =>
-				view.approvals(params.workspace).pipe(asSignedInPerson, asHttpError(chatErrors)),
+				view.approvals(params.workspace).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("startProjectChat", ({ params, payload }) =>
 				chats
@@ -41,42 +41,42 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 						messageId: payload.id,
 						content: payload.message,
 					})
-					.pipe(asSignedInPerson, asHttpError(chatErrors)),
+					.pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("startInterview", ({ params }) =>
-				chats.startInterview(params.botId).pipe(asSignedInPerson, asHttpError(chatErrors)),
+				chats.startInterview(params.botId).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("openAutomationFeed", ({ params }) =>
 				chats
 					.openAutomationFeed({ workspace: params.workspace, automationId: params.automationId })
-					.pipe(asSignedInPerson, asHttpError(chatErrors)),
+					.pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("renameChat", ({ params, payload }) =>
 				chats
 					.renameChat({ chatId: params.chatId, name: payload.name })
-					.pipe(asSignedInPerson, asHttpError(chatErrors)),
+					.pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("markResolved", ({ params }) =>
 				chats
 					.setResolved({ chatId: params.chatId, resolved: true })
-					.pipe(asSignedInPerson, asHttpError(chatErrors)),
+					.pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("reopen", ({ params }) =>
 				chats
 					.setResolved({ chatId: params.chatId, resolved: false })
-					.pipe(asSignedInPerson, asHttpError(chatErrors)),
+					.pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("messages", ({ params, query }) =>
-				view.messages(params.chatId, query).pipe(asSignedInPerson, asHttpError(chatErrors)),
+				view.messages(params.chatId, query).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("history", ({ params, query }) =>
-				view.history(params.chatId, query).pipe(asSignedInPerson, asHttpError(chatErrors)),
+				view.history(params.chatId, query).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("markRead", ({ params }) =>
-				chats.markRead(params.chatId).pipe(asSignedInPerson, asHttpError(chatErrors)),
+				chats.markRead(params.chatId).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("markNestedChatRead", ({ params }) =>
-				chats.markNestedChatRead(params.chatId).pipe(asSignedInPerson, asHttpError(chatErrors)),
+				chats.markNestedChatRead(params.chatId).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("send", ({ params, payload }) =>
 				chats
@@ -87,7 +87,7 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 						attachments: payload.attachments,
 						replyTo: payload.replyTo,
 					})
-					.pipe(asSignedInPerson, asHttpError(chatErrors)),
+					.pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handleRaw("uploadFile", ({ params, query, request }) =>
 				// Raw, so the file streams into the blob store rather than being read
@@ -107,12 +107,12 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 							),
 						),
 					});
-				}).pipe(Effect.catchTags(storeOutagesAsDefects), asSignedInPerson, asHttpError(fileErrors)),
+				}).pipe(Effect.catchTags(storeOutagesAsDefects), asCurrentUser, asHttpError(fileErrors)),
 			)
 			.handle("removeFile", ({ params }) =>
 				files
-					.removeUpload({ chatId: params.chatId, fileId: params.fileId })
-					.pipe(asSignedInPerson, asHttpError(refusals)),
+					.removeUnsentAttachment({ chatId: params.chatId, fileId: params.fileId })
+					.pipe(asCurrentUser, asHttpError(refusals)),
 			)
 			.handle("file", ({ params }) =>
 				files
@@ -120,27 +120,23 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 					.pipe(
 						Effect.map(fileResponse),
 						Effect.catchTags(storeOutagesAsDefects),
-						asSignedInPerson,
+						asCurrentUser,
 						asHttpError(fileErrors),
 					),
 			)
-			.handle("get", ({ params, query, request }) =>
-				details
-					.get(params.chatId, request.method === "HEAD" ? { ...query, limit: 1 } : query)
-					.pipe(asSignedInPerson, asHttpError(chatErrors)),
+			.handle("get", ({ params, query }) =>
+				details.get(params.chatId, query).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("context", ({ params }) =>
-				details.context(params.chatId).pipe(asSignedInPerson, asHttpError(chatErrors)),
+				details.context(params.chatId).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("react", ({ params }) =>
-				reactions
-					.add(params.messageId, params.emoji)
-					.pipe(asSignedInPerson, asHttpError(chatErrors)),
+				reactions.add(params.messageId, params.emoji).pipe(asCurrentUser, asHttpError(chatErrors)),
 			)
 			.handle("unreact", ({ params }) =>
 				reactions
 					.remove(params.messageId, params.emoji)
-					.pipe(asSignedInPerson, asHttpError(chatErrors)),
+					.pipe(asCurrentUser, asHttpError(chatErrors)),
 			);
 	}),
 );
@@ -156,13 +152,12 @@ const storeOutagesAsDefects = {
 
 const chatErrors = {
 	...refusals,
-	HostUnavailable: BadRequest,
+	BotUnavailable: BadRequest,
 	MessageIdConflict: Conflict,
 	ReplyTargetNotFound: BadRequest,
 	BotHasNoModel: Conflict,
-	InvalidPageCursor: BadRequest,
-	UploadsNotFound: BadRequest,
-	InvalidChatHistoryCursor: BadRequest,
+	InvalidCursor: BadRequest,
+	UnsentAttachmentsNotFound: BadRequest,
 	MessageNotFinished: Conflict,
 	TooManyReactionEmoji: Conflict,
 };
@@ -170,6 +165,6 @@ const chatErrors = {
 const fileErrors = {
 	...refusals,
 	FileTooLarge: PayloadTooLarge,
-	TooManyUnsentUploads: Conflict,
+	TooManyUnsentAttachments: Conflict,
 	ChatFileNotFound: NotFound,
 };

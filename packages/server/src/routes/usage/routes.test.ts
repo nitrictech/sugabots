@@ -4,8 +4,8 @@ import { ActionForbidden } from "@sugabots/core/authorization/access";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { PersonResolver } from "../../http/app.test-support.ts";
-import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
+import type { MemberResolver } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy, signedInWith } from "../../http/app.test-support.ts";
 
 /**
  * The usage route, over a double of `Usage`. What a month adds up to is
@@ -14,7 +14,7 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 
-const resolvePerson: PersonResolver = async () => ({
+const resolveMember: MemberResolver = async () => ({
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Ada",
 	email: "ada@example.com",
@@ -23,9 +23,9 @@ const resolvePerson: PersonResolver = async () => ({
 
 const usageOf = (month: Usage.Interface["month"], query: string) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolvePerson), unimplemented(Usage.Service, { month })),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(Usage.Service, { month })),
 	).request(`/workspaces/${WORKSPACE}/usage?${query}`, {
-		headers: { authorization: "Bearer admin-token" },
+		headers: signedInWith("admin-token"),
 	});
 
 const september: WorkspaceUsage = {

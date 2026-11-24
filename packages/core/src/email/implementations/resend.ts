@@ -27,8 +27,6 @@ function resendBody(message: Email.Message) {
 	return {
 		from: formatAddress(message.from),
 		to: message.to.map(formatAddress),
-		cc: message.cc?.map(formatAddress),
-		bcc: message.bcc?.map(formatAddress),
 		reply_to: message.replyTo && formatAddress(message.replyTo),
 		subject: message.subject,
 		text: message.text,

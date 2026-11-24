@@ -6,12 +6,12 @@ import type { WorkspacePermissions } from "@sugabots/contracts";
  * project's, are among its own pages, beside its chats.
  *
  * `needs` names a workspace permission the API resolves, so a section
- * disappears for the same reason its routes refuse: the person does not hold
+ * disappears for the same reason its routes refuse: the member does not hold
  * that permission.
  */
 export const workspaceSettingSections = [
 	{ id: "general", label: "General", path: "/settings" },
-	{ id: "people", label: "People", path: "/settings/people" },
+	{ id: "members", label: "Members", path: "/settings/members" },
 	{ id: "providers", label: "Models", path: "/settings/providers", needs: "manageProviders" },
 	{ id: "computers", label: "Computers", path: "/settings/computers", needs: "manageProviders" },
 	{ id: "search", label: "Web search", path: "/settings/search", needs: "manageProviders" },

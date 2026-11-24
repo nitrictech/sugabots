@@ -116,7 +116,7 @@ export const COMPUTER_NETWORK_MODE_DEFAULT: ComputerNetworkMode = "open";
 
 /**
  * An image's name as `docker pull` takes it, such as
- * `ghcr.io/nitrictech/sugabots-sandbox:edge`. This only catches what people
+ * `ghcr.io/nitrictech/sugabots-sandbox:edge`. This only catches what members
  * paste by mistake, a whole command or a web address, rather than every rule
  * of Docker's.
  */
@@ -131,48 +131,36 @@ const imageSchema = Schema.Trim.check(
 	}),
 );
 
-function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
-	return Schema.Union([
-		Schema.Struct({
-			builtIn: Schema.Literal("opensandbox"),
-			serverUrl: Schema.optional(providerUrlSchema),
-			image: Schema.optional(image),
-			/** The most each computer may use. */
-			cpuCount: Schema.optional(computerCpuCountSchema),
-			memoryGiB: Schema.optional(computerMemoryGiBSchema),
-			/** Left out, {@link COMPUTER_NETWORK_MODE_DEFAULT}. */
-			networkMode: Schema.optional(computerNetworkModeSchema),
-		}),
-		Schema.Struct({
-			builtIn: Schema.Literal("e2b"),
-			/** E2B Embed's API and its address for reaching computers; both left out for E2B Cloud. */
-			apiUrl: Schema.optional(providerUrlSchema),
-			sandboxUrl: Schema.optional(providerUrlSchema),
-			template: Schema.optional(nameSchema),
-			/** What the template is built with, so every computer made from it has. */
-			cpuCount: Schema.optional(computerCpuCountSchema),
-			memoryGiB: Schema.optional(computerMemoryGiBSchema),
-			/** Left out, {@link COMPUTER_NETWORK_MODE_DEFAULT}. Open, the workspace's blocks don't apply. */
-			networkMode: Schema.optional(computerNetworkModeSchema),
-		}),
-	]);
-}
-
 /**
  * A provider's settings, by built-in provider, as they are saved. A provider may be
  * saved before it has every address it needs; it can't be enabled until it
  * has. An image, template or size left out follows the default, so a new
  * default reaches every provider not set to something else.
  */
-export const computerProviderSettingsSchema = providerSettingsWithImageSchema(imageSchema);
-
-/**
- * Settings as they are read back. An image saved before images' names were
- * checked is shown as it is, so the page that would correct it still loads.
- * Its JSON is that of {@link computerProviderSettingsSchema}, so the API
- * document names it the same.
- */
-const savedComputerProviderSettingsSchema = providerSettingsWithImageSchema(nameSchema).annotate({
+export const computerProviderSettingsSchema = Schema.Union([
+	Schema.Struct({
+		builtIn: Schema.Literal("opensandbox"),
+		serverUrl: Schema.optional(providerUrlSchema),
+		image: Schema.optional(imageSchema),
+		/** The most each computer may use. */
+		cpuCount: Schema.optional(computerCpuCountSchema),
+		memoryGiB: Schema.optional(computerMemoryGiBSchema),
+		/** Left out, {@link COMPUTER_NETWORK_MODE_DEFAULT}. */
+		networkMode: Schema.optional(computerNetworkModeSchema),
+	}),
+	Schema.Struct({
+		builtIn: Schema.Literal("e2b"),
+		/** E2B Embed's API and its address for reaching computers; both left out for E2B Cloud. */
+		apiUrl: Schema.optional(providerUrlSchema),
+		sandboxUrl: Schema.optional(providerUrlSchema),
+		template: Schema.optional(nameSchema),
+		/** What the template is built with, so every computer made from it has. */
+		cpuCount: Schema.optional(computerCpuCountSchema),
+		memoryGiB: Schema.optional(computerMemoryGiBSchema),
+		/** Left out, {@link COMPUTER_NETWORK_MODE_DEFAULT}. Open, the workspace's blocks don't apply. */
+		networkMode: Schema.optional(computerNetworkModeSchema),
+	}),
+]).annotate({
 	identifier: "ComputerProviderSettings",
 });
 
@@ -183,7 +171,7 @@ export const computerProviderSchema = Schema.Struct({
 	workspaceId: uuidSchema,
 	builtIn: builtInComputerProviderIdSchema,
 	name: Schema.String,
-	settings: savedComputerProviderSettingsSchema,
+	settings: computerProviderSettingsSchema,
 	/** Whether this provider makes the workspace's computers. At most one is. */
 	enabled: Schema.Boolean,
 	status: providerStatusSchema,
@@ -222,14 +210,6 @@ export type ComputerProviderUpdate = typeof computerProviderUpdateSchema.Type;
  * enabled computer provider with everything it needs.
  */
 export const computerAccessSchema = Schema.Struct({ enabled: Schema.Boolean });
-
-export const computerProviderTestResultSchema = Schema.Struct({
-	reachable: Schema.Boolean,
-	latencyMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	error: Schema.optional(Schema.String),
-});
-
-export type ComputerProviderTestResult = typeof computerProviderTestResultSchema.Type;
 
 const byteCountSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
@@ -271,7 +251,7 @@ export function computerDiskShare(disk: Pick<ComputerDisk, "usedBytes" | "totalB
 	return disk.totalBytes === 0 ? 1 : Math.min(disk.usedBytes / disk.totalBytes, 1);
 }
 
-/** The share of its disk a computer's files use, as a whole percent, as people are shown it. */
+/** The share of its disk a computer's files use, as a whole percent, as members are shown it. */
 export function computerDiskPercent(disk: Pick<ComputerDisk, "usedBytes" | "totalBytes">) {
 	return Math.round(computerDiskShare(disk) * 100);
 }
@@ -287,7 +267,7 @@ export function computerDiskLevel(disk: Pick<ComputerDisk, "usedBytes" | "totalB
 const BYTE_UNITS = ["bytes", "KB", "MB", "GB", "TB"] as const;
 const BYTES_PER_KB = 1024;
 
-/** A size on disk as people read one, in units of 1024: `512 KB`, `18.4 GB`. */
+/** A size on disk as members read one, in units of 1024: `512 KB`, `18.4 GB`. */
 export function formatDiskSize(bytes: number) {
 	const exponent = Math.min(
 		Math.max(Math.floor(Math.log(Math.max(bytes, 1)) / Math.log(BYTES_PER_KB)), 0),
@@ -311,7 +291,7 @@ const projectComputerStateSchema = Schema.Union([
 		createdAt: isoTimestampSchema,
 		lastUsedAt: isoTimestampSchema,
 		turnsUsing: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-		peopleWatching: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+		membersWatching: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 		/** Whether the workspace's enabled provider would make it from another image, or is another provider. */
 		upgradeAvailable: Schema.Boolean,
 		/** Null until it has been measured. */

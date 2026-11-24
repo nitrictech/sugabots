@@ -1,4 +1,4 @@
-import { DESCRIPTION_MAX_LENGTH, PROMPT_MAX_LENGTH } from "@sugabots/contracts";
+import { DESCRIPTION_MAX_LENGTH, INSTRUCTIONS_MAX_LENGTH } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
 import { asAsker } from "../../../authorization/current-actor.ts";
@@ -10,22 +10,22 @@ export const SAVE_INSTRUCTIONS_TOOL = "save_instructions";
 type SaveInstructionsResult =
 	| {
 			saved: true;
-			/** The bot's settings page, where people read and change what was saved. */
+			/** The bot's settings page, where members read and change what was saved. */
 			settingsUrl: string;
 	  }
 	| { refused: string };
 
 const NOBODY_ASKED =
-	"Your instructions are saved only in answer to a person, so nothing was saved.";
+	"Your instructions are saved only in answer to a member, so nothing was saved.";
 
 const MAY_NOT_EDIT =
-	"The person you're answering may not change your settings, so nothing was saved. Someone who can edit you can save them.";
+	"The member you're answering may not change your settings, so nothing was saved. Someone who can edit you can save them.";
 
 /**
  * The `save_instructions` tool: a bot replaces its own instructions and
  * description, which other bots choose whom to ask by: when it sets itself
  * up in its interview, or when someone asks it to change how it works. It
- * saves as the person it is answering, with their permission to edit the
+ * saves as the member it is answering, with their permission to edit the
  * bot, so it is offered on every turn and refused for anyone who could not
  * make the same change in settings.
  */
@@ -37,7 +37,7 @@ export function saveInstructionsTool({
 	run,
 }: {
 	botId: string;
-	/** The person whose message the turn answers, or none. */
+	/** The member whose message the turn answers, or none. */
 	askerId: string | null;
 	bots: Pick<BotAdministration.Interface, "update">;
 	/** The bot's settings page, which shows what it saved. */
@@ -46,11 +46,11 @@ export function saveInstructionsTool({
 }) {
 	return tool({
 		description:
-			"Replace your instructions and description, passing the whole text. Call it when setting yourself up, when someone asks you to change how you work, or when their reply shows you set yourself up for the wrong kind of work: then set yourself up again for the work they meant, and do that work yourself. Not for remembering things about a person. Returns your settings page, where people read and change them.",
+			"Replace your instructions and description, passing the whole text. Call it when setting yourself up, when someone asks you to change how you work, or when their reply shows you set yourself up for the wrong kind of work: then set yourself up again for the work they meant, and do that work yourself. Not for remembering things about a member. Returns your settings page, where members read and change them.",
 		inputSchema: Schema.Struct({
 			instructions: Schema.String.check(
 				Schema.isMinLength(1),
-				Schema.isMaxLength(PROMPT_MAX_LENGTH),
+				Schema.isMaxLength(INSTRUCTIONS_MAX_LENGTH),
 			).annotate({
 				description: "Your instructions in Markdown, addressed to yourself.",
 			}),
@@ -64,10 +64,7 @@ export function saveInstructionsTool({
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 		execute: async ({ instructions, description }): Promise<SaveInstructionsResult> => {
 			return run(
-				asAsker(
-					askerId,
-					bots.update({ botId, changes: { prompt: instructions, description } }),
-				).pipe(
+				asAsker(askerId, bots.update({ botId, changes: { instructions, description } })).pipe(
 					Effect.as<SaveInstructionsResult>({ saved: true, settingsUrl }),
 					Effect.catchTags({
 						NobodyAsked: () => Effect.succeed<SaveInstructionsResult>({ refused: NOBODY_ASKED }),

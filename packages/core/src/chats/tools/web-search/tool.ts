@@ -4,7 +4,7 @@ import {
 	MAX_SEARCH_RESULTS,
 	type SearchOutcome,
 	type SearchRequest,
-} from "../../../providers/search-providers/backends.ts";
+} from "../../../providers/search-providers/provider-search.ts";
 
 export const WEB_SEARCH_TOOL = "web_search";
 const MAX_QUERY_LENGTH = 400;
@@ -24,7 +24,7 @@ export function webSearchTool({
 }) {
 	return tool({
 		description:
-			"Search the web. Returns titles, addresses and short snippets for a query; use web_fetch to read any result in full. Good for finding a page you do not have the address of, and for anything recent. When your reply relies on a result, name its URL. A failed search gives the web search settings page, which only workspace admins can change; link it when telling the person how to fix it.",
+			"Search the web. Returns titles, addresses and short snippets for a query; use web_fetch to read any result in full. Good for finding a page you do not have the address of, and for anything recent. When your reply relies on a result, name its URL. A failed search gives the web search settings page, which only workspace admins can change; link it when telling the member how to fix it.",
 		inputSchema: Schema.Struct({
 			query: Schema.String.check(
 				Schema.makeFilter(

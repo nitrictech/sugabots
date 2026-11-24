@@ -1,7 +1,7 @@
 import { HttpResponse, http } from "msw";
 import { expect, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, StoryApp, storyPerson, storyWorkspace } from "../story-app.tsx";
+import { appHandlers, StoryApp, storyMember, storyWorkspace } from "../story-app.tsx";
 
 /*
  * Settings as the app shows them: the grouped sections down the left, the open
@@ -59,7 +59,7 @@ export const Account = meta.story({
 	render: () => <StoryApp path={`${settings}/account`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: storyPerson.name }),
+			await canvas.findByRole("heading", { name: storyMember.name }),
 		).toBeInTheDocument();
 		const nav = canvas.getByRole("navigation", { name: "Settings" });
 		await expect(
@@ -67,7 +67,7 @@ export const Account = meta.story({
 				name: "General",
 			}),
 		).toHaveAttribute("aria-current", "page");
-		await expect(canvas.getByRole("textbox", { name: "Name" })).toHaveValue(storyPerson.name);
+		await expect(canvas.getByRole("textbox", { name: "Name" })).toHaveValue(storyMember.name);
 		await expect(canvas.getByRole("group", { name: "Theme" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
 	},
@@ -102,7 +102,7 @@ export const AsAnEditor = meta.story({
 	render: () => <StoryApp path={settings} />,
 	play: async ({ canvas }) => {
 		const nav = await canvas.findByRole("navigation", { name: "Settings" });
-		await expect(await within(nav).findByRole("link", { name: /^People/ })).toBeInTheDocument();
+		await expect(await within(nav).findByRole("link", { name: /^Members/ })).toBeInTheDocument();
 		await expect(within(nav).queryByRole("link", { name: "Models" })).toBeNull();
 	},
 });
@@ -134,10 +134,10 @@ export const PhoneList = meta.story({
 /** On a phone, a section opens full screen, with the way back to the You tab's Settings. */
 export const PhoneSection = meta.story({
 	globals: PHONE,
-	render: () => <StoryApp path={`${settings}/people`} />,
+	render: () => <StoryApp path={`${settings}/members`} />,
 	play: async ({ canvas }) => {
 		const page = await canvas.findByRole("main");
 		await expect(await within(page).findByRole("link", { name: "Settings" })).toBeInTheDocument();
-		await expect(await within(page).findByRole("heading", { name: "People" })).toBeInTheDocument();
+		await expect(await within(page).findByRole("heading", { name: "Members" })).toBeInTheDocument();
 	},
 });

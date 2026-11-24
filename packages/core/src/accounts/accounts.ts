@@ -6,8 +6,9 @@ import { and, eq, gt } from "drizzle-orm";
 import { Config, Context, Data, DateTime, Effect, Layer } from "effect";
 import { CurrentActor } from "../authorization/current-actor.ts";
 import { Database, query } from "../database/database.ts";
-import { invitation, person } from "../database/schema.ts";
+import { invitation, member } from "../database/schema.ts";
 import { ServerSettings } from "../server-settings/server-settings.ts";
+import { referralPath } from "../server-settings/web-app-paths.ts";
 import type { UserFacing } from "../user-message.ts";
 
 /** Who may have an account here. */
@@ -21,7 +22,7 @@ export interface Interface {
 	) => Effect.Effect<Admission, SignUpClosed | ReferralLinkInvalid>;
 	/** Whether an account must prove its address before it gets a session or joins a workspace. */
 	readonly requireEmailVerification: boolean;
-	/** The link the actor can send people to let them sign up, or `undefined` when sign-up is not by referral. */
+	/** The link the actor can send members to let them sign up, or `undefined` when sign-up is not by referral. */
 	readonly referralLink: Effect.Effect<string | undefined, never, CurrentActor.Service>;
 	/** Stops the actor's referral link working, and returns the one that replaces it. */
 	readonly resetReferralLink: Effect.Effect<string, ReferralsOff, CurrentActor.Service>;
@@ -56,12 +57,12 @@ export const make = Effect.gen(function* () {
 			}).pipe(Effect.provideService(Database, database)),
 		requireEmailVerification,
 		referralLink: referrals
-			? Effect.flatMap(CurrentActor.Service, ({ personId }) => referrals.linkFor(personId)).pipe(
+			? Effect.flatMap(CurrentActor.Service, ({ memberId }) => referrals.linkFor(memberId)).pipe(
 					Effect.provideService(Database, database),
 				)
 			: Effect.undefined,
 		resetReferralLink: referrals
-			? Effect.flatMap(CurrentActor.Service, ({ personId }) => referrals.reset(personId)).pipe(
+			? Effect.flatMap(CurrentActor.Service, ({ memberId }) => referrals.reset(memberId)).pipe(
 					Effect.provideService(Database, database),
 				)
 			: Effect.fail(new ReferralsOff()),
@@ -71,9 +72,9 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(Service, make);
 
 /**
- * `closed`: nobody signs themselves up. People arrive by invitation to a workspace, except
+ * `closed`: nobody signs themselves up. Members arrive by invitation to a workspace, except
  * the server's first account.
- * `referral`: those, and anybody holding a person's referral link.
+ * `referral`: those, and anybody holding a member's referral link.
  * `open`: anybody.
  */
 const SIGNUP_MODES = ["closed", "referral", "open"] as const;
@@ -87,7 +88,7 @@ interface Applicant {
 }
 
 interface Admission {
-	/** The person whose referral link let the applicant in. */
+	/** The member whose referral link let the applicant in. */
 	referredBy?: string;
 }
 
@@ -108,7 +109,7 @@ export class ReferralLinkInvalid
 
 export class ReferralsOff extends Data.TaggedError("ReferralsOff") implements UserFacing {
 	get userMessage() {
-		return userText`This server does not sign people up by referral.`;
+		return userText`This server does not sign members up by referral.`;
 	}
 }
 
@@ -117,7 +118,7 @@ export class ReferralsOff extends Data.TaggedError("ReferralsOff") implements Us
  * Unlocked: two simultaneous first sign-ups would both get in, which is harmless.
  */
 const isEmpty = Effect.map(
-	query((db) => db.select({ id: person.id }).from(person).limit(1)),
+	query((db) => db.select({ id: member.id }).from(member).limit(1)),
 	([existing]) => existing === undefined,
 );
 
@@ -138,9 +139,6 @@ const hasPendingInvitation = (email: string) =>
 		).pipe(Effect.map(([pending]) => pending !== undefined)),
 	);
 
-/** Where a referral link opens the web app. */
-const REFERRAL_LINK_PATH = "/join";
-
 /** Crockford's base32, lowercased: no i, l, o or u, so a code read aloud or retyped survives. */
 const REFERRAL_CODE_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
 
@@ -148,50 +146,50 @@ const REFERRAL_CODE_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
 const REFERRAL_CODE_LENGTH = 13;
 
 /**
- * Referral links: a random code kept on the person's row, made the first time
+ * Referral links: a random code kept on the member's row, made the first time
  * they ask for their link. Resetting replaces it, so the old one finds nobody.
  */
 function referralLinks(webAppUrl: string) {
-	const linkTo = (code: string) => `${webAppUrl}${REFERRAL_LINK_PATH}/${code}`;
+	const linkTo = (code: string) => `${webAppUrl}${referralPath(code)}`;
 
-	const replaceCode = (personId: string) =>
+	const replaceCode = (memberId: string) =>
 		query((db) =>
 			db
-				.update(person)
+				.update(member)
 				.set({ referralCode: newReferralCode() })
-				.where(eq(person.id, personId))
-				.returning({ code: person.referralCode }),
+				.where(eq(member.id, memberId))
+				.returning({ code: member.referralCode }),
 		).pipe(
 			Effect.flatMap(([referrer]) =>
-				// Links are asked for by signed-in people, so a missing row is a defect rather than a refusal.
+				// Links are asked for by signed-in members, so a missing row is a defect rather than a refusal.
 				referrer?.code
 					? Effect.succeed(linkTo(referrer.code))
-					: Effect.die(new Error(`No person ${personId}`)),
+					: Effect.die(new Error(`No member ${memberId}`)),
 			),
 		);
 
 	return {
-		linkFor: (personId: string) =>
+		linkFor: (memberId: string) =>
 			query((db) =>
-				db.select({ code: person.referralCode }).from(person).where(eq(person.id, personId)),
+				db.select({ code: member.referralCode }).from(member).where(eq(member.id, memberId)),
 			).pipe(
 				Effect.flatMap(([referrer]) =>
-					referrer?.code ? Effect.succeed(linkTo(referrer.code)) : replaceCode(personId),
+					referrer?.code ? Effect.succeed(linkTo(referrer.code)) : replaceCode(memberId),
 				),
 			),
 
 		reset: replaceCode,
 
-		/** The person whose link carries `code`, while they still have an account and have not reset it since. */
+		/** The member whose link carries `code`, while they still have an account and have not reset it since. */
 		referrerOf: (code: string) =>
 			// Longer than any code, such as a link pasted with a character after it.
 			code.length > REFERRAL_CODE_LENGTH
 				? Effect.fail(new ReferralLinkInvalid())
 				: query((db) =>
 						db
-							.select({ id: person.id })
-							.from(person)
-							.where(eq(person.referralCode, code.toLowerCase())),
+							.select({ id: member.id })
+							.from(member)
+							.where(eq(member.referralCode, code.toLowerCase())),
 					).pipe(
 						Effect.flatMap(([referrer]) =>
 							referrer ? Effect.succeed(referrer.id) : Effect.fail(new ReferralLinkInvalid()),

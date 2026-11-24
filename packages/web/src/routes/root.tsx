@@ -9,7 +9,7 @@ import { EmptyState } from "@/ui/empty-state.tsx";
  * until the next navigation: components read the session with `useSession()`.
  */
 export interface RouterContext {
-	person: Session["person"];
+	member: Session["member"];
 	/** The session's query cache, which loaders prime for the page they lead to. */
 	queries: QueryClient;
 }
@@ -35,7 +35,7 @@ export function requireSignedIn({
 	context: RouterContext;
 	location: ParsedLocation;
 }): void {
-	if (context.person === null) {
+	if (context.member === null) {
 		throw redirect({
 			to: "/sign-in",
 			search: location.href === "/" ? {} : { returnTo: location.href },

@@ -2,7 +2,7 @@ import { detectMediaType } from "@ai-sdk/provider-utils";
 
 /**
  * Images the tools show the model: a screenshot, an image in the computer, or
- * one a person attached to the chat.
+ * one a member attached to the chat.
  */
 
 /** An image a tool's result carries for the model to look at. */

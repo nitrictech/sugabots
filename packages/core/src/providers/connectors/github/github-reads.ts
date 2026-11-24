@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect";
 import type { EgressHttpClient } from "../../network/egress.ts";
-import { call, decoded, GitHubRequestFailed, getPage, redirectOf } from "./github.ts";
+import { call, decoded, GitHubRequestFailed, getPage, PAGE_SIZE, redirectOf } from "./github.ts";
 
 /**
  * What bots read of a repository's issues, pull requests and checks, as
@@ -10,8 +10,6 @@ import { call, decoded, GitHubRequestFailed, getPage, redirectOf } from "./githu
 
 /** At most this many of a list are read at once. */
 const LIST_SIZE = 30;
-/** GitHub's largest page. */
-const PAGE_SIZE = 100;
 /** At most this many pages of an issue's or pull request's comments, or of a repository's labels, are read. */
 const MAX_PAGES = 5;
 /** The most of a job's log a bot is given: its end, where a failure is. */

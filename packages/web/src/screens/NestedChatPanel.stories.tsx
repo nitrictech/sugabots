@@ -1,14 +1,14 @@
-import type { ChatDetails, ListedAutomationDefinition, Message } from "@sugabots/contracts";
+import type { ChatDetails, ListedAutomationDefinition } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { expect, fn, within } from "storybook/test";
+import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, linearHandler, revenue } from "@/shell/story-fixtures.ts";
 import { NestedChatPanel } from "./NestedChatPanel.tsx";
 
 const CHAT = "0199a3a0-0000-7000-8000-000000000401";
-const COLLABORATION = "0199a3a0-0000-7000-8000-000000000402";
-const asker = {
+const RUN = "0199a3a0-0000-7000-8000-000000000403";
+const runBot = {
 	kind: "bot" as const,
 	id: growthDesk.id,
 	name: growthDesk.name,
@@ -17,103 +17,30 @@ const asker = {
 	eyes: growthDesk.eyes,
 	shape: growthDesk.shape,
 };
-const answerer = {
-	kind: "bot" as const,
-	id: linearHandler.id,
-	name: linearHandler.name,
-	handle: linearHandler.handle,
-	color: linearHandler.color,
-	eyes: linearHandler.eyes,
-	shape: linearHandler.shape,
-};
-
-function message(
-	id: string,
-	author: typeof asker,
-	text: string,
-	before: Message["parts"] = [],
-): Message {
-	return {
-		id: `0199a3a0-0000-7000-8000-00000000041${id}`,
-		chatId: COLLABORATION,
-		author,
-		kind: "text",
-		status: "complete",
-		parts: [...before, { type: "text", text }],
-		content: text,
-		createdAt: "2026-09-18T06:04:00.000Z",
-	};
-}
-
-const collaboration: ChatDetails = {
-	chat: {
-		id: COLLABORATION,
-		workspaceId: revenue.workspaceId,
-		projectId: revenue.id,
-		botId: linearHandler.id,
-		rootChatId: CHAT,
-		kind: "collaboration",
-		title: "Checkout timeouts",
-		status: "running",
-		parentChatId: null,
-		resolvedAt: null,
-		createdAt: "2026-09-18T06:04:00.000Z",
-		updatedAt: "2026-09-18T06:05:00.000Z",
-	},
-	capabilities: { approveToolCalls: true },
-	automationRun: null,
-	participants: [answerer, asker],
-	projectBots: [asker, answerer],
-	peopleReachingProject: [],
-	olderMessagesCursor: null,
-	queuedSince: null,
-	reads: [],
-	messages: [
-		message(
-			"1",
-			asker,
-			"Rowan is seeing checkout timeouts. Check Sentry and open an issue if nothing's tracked?",
-		),
-		message(
-			"2",
-			answerer,
-			"41 events in 24h, all hitting the 30s gateway limit. Nothing open in Linear.",
-			[
-				{
-					type: "tool_call",
-					id: "0199a3a0-0000-7000-8000-000000000420",
-					tool: "linear__create_issue",
-					input: { title: "Checkout requests time out" },
-					output: null,
-					status: "awaiting_approval",
-					error: null,
-					writeOrDelete: true,
-					atOffset: 0,
-					startedAt: "2026-09-18T06:05:00.000Z",
-					finishedAt: null,
-					approval: { status: "pending", decidedByName: null, decidedAt: null },
-				},
-			],
-		),
-	],
-};
-
-const RUN = "0199a3a0-0000-7000-8000-000000000403";
 
 /** An automation run a webhook started, which posted its result in the chat. */
 function automationRun(failed: boolean): ChatDetails {
 	return {
-		...collaboration,
 		chat: {
-			...collaboration.chat,
 			id: RUN,
+			workspaceId: revenue.workspaceId,
+			projectId: revenue.id,
 			botId: growthDesk.id,
+			rootChatId: CHAT,
 			kind: "run",
 			title: "Overnight outbound",
-			status: "done",
+			working: false,
+			resolvedAt: null,
+			createdAt: "2026-09-18T06:00:00.000Z",
+			updatedAt: "2026-09-18T06:02:00.000Z",
 		},
-		participants: [asker],
-		projectBots: [asker],
+		permissions: { approveToolCalls: true, approveComputerRequests: true },
+		participants: [runBot],
+		projectBots: [runBot],
+		membersReachingProject: [],
+		olderMessagesCursor: null,
+		queuedSince: null,
+		reads: [],
 		automationRun: {
 			id: "0199a3a0-0000-7000-8000-000000000404",
 			automationId: "0199a3a0-0000-7000-8000-000000000405",
@@ -138,17 +65,31 @@ function automationRun(failed: boolean): ChatDetails {
 		},
 		messages: failed
 			? []
-			: [message("5", asker, "Queued 38 leads. Six have replied; drafts are in the outbox.")],
+			: [
+					{
+						id: "0199a3a0-0000-7000-8000-000000000415",
+						chatId: RUN,
+						author: runBot,
+						status: "complete",
+						parts: [
+							{
+								type: "text",
+								text: "Queued 38 leads. Six have replied; drafts are in the outbox.",
+							},
+						],
+						content: "Queued 38 leads. Six have replied; drafts are in the outbox.",
+						createdAt: "2026-09-18T06:02:00.000Z",
+					},
+				],
 	};
 }
 
-function Preview({ children, run }: { children: React.ReactNode; run?: ChatDetails }) {
+function Preview({ children, run }: { children: React.ReactNode; run: ChatDetails }) {
 	const [queryClient] = useState(() => {
 		const client = new QueryClient({
 			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
 		});
-		client.setQueryData(["chat", COLLABORATION], collaboration);
-		if (run?.automationRun) {
+		if (run.automationRun) {
 			client.setQueryData(["chat", RUN], run);
 			// The run is its automation's latest, so a failure may be retried.
 			const latest = run.automationRun;
@@ -207,43 +148,14 @@ const meta = preview.meta({
 	parameters: { layout: "fullscreen" },
 	args: {
 		chatId: CHAT,
-		chatBotId: growthDesk.id,
-		nestedChatId: COLLABORATION,
-		history: [],
-		frame: { kind: "beside" as const, onClose: fn() },
-		onOpenNestedChat: fn(),
-	},
-	render: (args) => (
-		<Preview>
-			<div className="relative flex h-screen justify-end bg-background">
-				<NestedChatPanel {...args} />
-			</div>
-		</Preview>
-	),
-});
-
-/**
- * A collaboration waiting on an approval. Beside the chat on a wide screen,
- * answered on its card; on a phone a sheet whose card opens the request full
- * screen to answer it.
- */
-export const WaitingOnApproval = meta.story({
-	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "Collaboration" })).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: /^Allow/ })).toBeInTheDocument();
+		nestedChatId: RUN,
+		back: { to: "bot" as const, bot: growthDesk },
+		trailing: null,
 	},
 });
-
-/** Where a run opens: as a page of its own, never beside a chat. */
-const RUN_PAGE = {
-	kind: "page" as const,
-	back: { to: "bot" as const, bot: growthDesk },
-	trailing: null,
-};
 
 /** An automation run a webhook started: its name, what it posted, and the payload behind the braces. */
 export const AutomationRun = meta.story({
-	args: { nestedChatId: RUN, frame: RUN_PAGE },
 	render: (args) => (
 		<Preview run={automationRun(false)}>
 			<div className="relative flex h-screen justify-end bg-background">
@@ -266,7 +178,6 @@ export const AutomationRun = meta.story({
  * and, as the automation's latest run, offers to run it again.
  */
 export const FailedAutomationRun = meta.story({
-	args: { nestedChatId: RUN, frame: RUN_PAGE },
 	render: (args) => (
 		<Preview run={automationRun(true)}>
 			<div className="relative flex h-screen justify-end bg-background">

@@ -9,8 +9,8 @@ import { recordingIds, removeWorkVolumes } from "../../../computers/testing.ts";
 import {
 	bot as botTable,
 	chatParticipant,
+	member,
 	membership,
-	person,
 	workspace,
 } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
@@ -78,9 +78,9 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 				.values({ name: `Viewer ${suffix}`, slug: `viewer-${suffix}` })
 				.returning(),
 		);
-		const people = await onDatabase((db) =>
+		const members = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values([
 					{ name: "Sam", email: `viewer-sam-${suffix}@example.com` },
 					{ name: "Kim", email: `viewer-kim-${suffix}@example.com` },
@@ -88,7 +88,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 				])
 				.returning(),
 		);
-		const [owner, outsider, watcher] = people;
+		const [owner, outsider, watcher] = members;
 		if (!space || !owner || !outsider || !watcher) throw new Error("fixture");
 		workspaceId = space.id;
 		ownerId = owner.id;
@@ -97,8 +97,8 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		await onDatabase((db) =>
 			db.insert(membership).values([
 				// The outsider is in no workspace.
-				{ workspaceId, personId: ownerId, role: "admin" },
-				{ workspaceId, personId: watcherId, role: "viewer" },
+				{ workspaceId, memberId: ownerId, role: "admin" },
+				{ workspaceId, memberId: watcherId, role: "viewer" },
 			]),
 		);
 		const botIn = (name: string, usesComputer: boolean): typeof botTable.$inferInsert => ({
@@ -143,7 +143,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 					settings: {
 						builtIn: "opensandbox",
 						serverUrl: env.OPENSANDBOX_URL,
-						image: "sugabots-sandbox:dev",
+						image: "sugabots-computer:dev",
 					},
 					enabled: true,
 					apiKey: env.OPENSANDBOX_API_KEY,
@@ -178,11 +178,11 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		removeWorkVolumes(idsHandedOut);
 	}, SLOW);
 
-	const openAs = (personId: string, of = botId) =>
+	const openAs = (memberId: string, of = botId) =>
 		runOnPostgres(
 			Effect.exit(
 				Scope.provide(scope)(viewer.open({ chatId, botId: of })).pipe(
-					CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(personId)),
+					CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(memberId)),
 				),
 			),
 		);
@@ -196,13 +196,13 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
 			openedFirst = exit.value.endpoint.url;
 
-			expect(await logsIn(exit.value)).toBe(true);
+			expect(await signsIn(exit.value)).toBe(true);
 		},
 		SLOW,
 	);
 
 	it(
-		"gives the bot's browser the desktop a person opened, and shows it to them",
+		"gives the bot's browser the desktop a member opened, and shows it to them",
 		async () => {
 			const navigate = tools.browser_navigate?.execute as (
 				input: object,
@@ -214,7 +214,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
 
 			expect(exit.value.endpoint.url).toBe(openedFirst);
-			expect(await logsIn(exit.value)).toBe(true);
+			expect(await signsIn(exit.value)).toBe(true);
 		},
 		SLOW,
 	);
@@ -226,7 +226,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
 
 			expect(exit.value.endpoint.url).not.toBe(openedFirst);
-			expect(await logsIn(exit.value)).toBe(true);
+			expect(await signsIn(exit.value)).toBe(true);
 		},
 		SLOW,
 	);
@@ -237,7 +237,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			const exit = await openAs(ownerId);
 			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
 
-			expect(await logsIn({ ...exit.value, password: "guessed!" })).toBe(false);
+			expect(await signsIn({ ...exit.value, password: "guessed!" })).toBe(false);
 		},
 		SLOW,
 	);
@@ -267,13 +267,12 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 
 /**
  * Whether a viewer with the desktop's password gets in: RFB 3.8's start
- * (RFC 6143, 7.1), as the relay goes through it. x11vnc wants an Origin, as
- * a browser sends, before it takes a WebSocket.
+ * (RFC 6143, 7.1), as the relay goes through it.
  */
-async function logsIn({ endpoint, password }: DesktopViewer.OpenDesktop): Promise<boolean> {
+async function signsIn({ endpoint, password }: DesktopViewer.OpenDesktop): Promise<boolean> {
 	const socket = new WebSocket(endpoint.url.replace(/^http/, "ws"), {
 		protocols: ["binary"],
-		headers: { ...endpoint.headers, origin: "http://localhost" },
+		headers: endpoint.headers,
 	} as unknown as string[]);
 	socket.binaryType = "arraybuffer";
 	let buffered = new Uint8Array(0);

@@ -13,7 +13,6 @@ import {
 	bot,
 	chat,
 	chatParticipant,
-	chatRead,
 	connector,
 	file,
 	fileVersion,
@@ -24,6 +23,7 @@ import {
 	placedChat,
 	projectBot,
 	projectChat,
+	readCursor,
 	type StoredMessagePart,
 	toolCall,
 	turn,
@@ -37,7 +37,7 @@ import { Effect } from "effect";
 
 /**
  * The showcase's chats, written straight into the tables the app reads
- * them from, so the screenshots need no model, no second login and no waiting.
+ * them from, so the screenshots need no model, no second sign-in and no waiting.
  * Nothing is announced: the app shows them when it next loads.
  *
  * Each project's chat and bot's chat gets only the scripted messages it does not have
@@ -46,9 +46,9 @@ import { Effect } from "effect";
  */
 
 /** Who the chats name, by the keys `seed.ts` gives them. */
-interface Cast<Person extends string> {
+interface Cast<Member extends string> {
 	workspaceId: string;
-	people: Record<Person, string>;
+	members: Record<Member, string>;
 	/** By the seed's key for each project. */
 	projectIds: Record<string, string>;
 	/** By name. */
@@ -66,19 +66,10 @@ interface Clock {
 	day?: "previous weekday" | "previous monday";
 }
 
-type Speaker<Person extends string> = { person: Person } | { bot: string };
+type Speaker<Member extends string> = { member: Member } | { bot: string };
 
-type ScriptedPart<Person extends string> =
+type ScriptedPart<Member extends string> =
 	| { text: string }
-	| {
-			collaboration: {
-				with: string;
-				title: string;
-				brief: string;
-				answer: string;
-				answeredAt: Clock;
-			};
-	  }
 	| {
 			toolCall: {
 				/** The bot's connector it went through; without one, a tool built into every bot. */
@@ -90,45 +81,45 @@ type ScriptedPart<Person extends string> =
 				/** A call that only reads, so it ran without anyone being asked. */
 				readOnly?: boolean;
 				/** Who allowed it, and when; without it (and not `readOnly`), the call is still waiting for someone to. */
-				allowed?: { by: Person; at: Clock };
+				allowed?: { by: Member; at: Clock };
 			};
 	  }
 	| { file: { kind: WrittenFileKind; title: string; content: string } };
 
-interface ScriptedMessage<Person extends string> {
+interface ScriptedMessage<Member extends string> {
 	/** How a later message quotes this one. */
 	key?: string;
 	at: Clock;
-	from: Speaker<Person>;
-	parts: readonly ScriptedPart<Person>[];
+	from: Speaker<Member>;
+	parts: readonly ScriptedPart<Member>[];
 	replyTo?: string;
-	reactions?: readonly { emoji: string; by: readonly Person[] }[];
+	reactions?: readonly { emoji: string; by: readonly Member[] }[];
 }
 
 /**
  * A bot's chat: somebody's chat with that one bot. The first message
  * is theirs, and names the chat as the app would.
  */
-export interface BotChatScene<Person extends string> {
+export interface BotChatScene<Member extends string> {
 	bot: string;
 	messages: readonly [
-		ScriptedMessage<Person> & { from: { person: Person } },
-		...ScriptedMessage<Person>[],
+		ScriptedMessage<Member> & { from: { member: Member } },
+		...ScriptedMessage<Member>[],
 	];
 }
 
 /**
- * What was said in one of a project's chats: its people, and the project's
- * bots answering when they are mentioned. The first message is a person's, who
+ * What was said in one of a project's chats: its members, and the project's
+ * bots answering when they are mentioned. The first message is a member's, who
  * started the chat.
  */
-export interface ProjectChatScene<Person extends string> {
+export interface ProjectChatScene<Member extends string> {
 	project: string;
 	/** What the chat is called. */
 	chat: string;
 	messages: readonly [
-		ScriptedMessage<Person> & { from: { person: Person } },
-		...ScriptedMessage<Person>[],
+		ScriptedMessage<Member> & { from: { member: Member } },
+		...ScriptedMessage<Member>[],
 	];
 }
 
@@ -143,7 +134,7 @@ export interface AutomationRun {
 	finishedAt: Clock;
 	/** What the run posted; with `failed`, what it got as far as saying. */
 	result: string;
-	/** Why the run failed, as its people are told; without it, the run finished. */
+	/** Why the run failed, as its members are told; without it, the run finished. */
 	failed?: UserText;
 }
 
@@ -233,11 +224,11 @@ export const ensureConnectors = (input: {
 		{ discard: true },
 	);
 
-export const ensureChats = <Person extends string>(
-	cast: Cast<Person>,
+export const ensureChats = <Member extends string>(
+	cast: Cast<Member>,
 	written: {
-		projectChats: readonly ProjectChatScene<Person>[];
-		botChats: readonly BotChatScene<Person>[];
+		projectChats: readonly ProjectChatScene<Member>[];
+		botChats: readonly BotChatScene<Member>[];
 		runs: readonly AutomationRun[];
 	},
 ) =>
@@ -248,10 +239,12 @@ export const ensureChats = <Person extends string>(
 			if (yield* writeAutomationRun(cast, day, run)) count += 1;
 		}
 		for (const scene of written.projectChats) {
-			if (yield* writeProjectChatScene(cast, day, scene)) count += 1;
+			const found = yield* projectChatOf(cast, day, scene);
+			if (yield* writeScene(cast, day, found, scene.messages)) count += 1;
 		}
 		for (const scene of written.botChats) {
-			if (yield* writeBotChatScene(cast, day, scene)) count += 1;
+			const found = yield* botChatOf(cast, day, scene);
+			if (yield* writeScene(cast, day, found, scene.messages)) count += 1;
 		}
 		yield* markEverythingRead(cast);
 		return count;
@@ -261,10 +254,10 @@ export const ensureChats = <Person extends string>(
  * The bot's chat `scene` tells, made if it is not there yet: one with its bot and
  * the title its first message gives it.
  */
-const botChatOf = <Person extends string>(
-	cast: Cast<Person>,
+const botChatOf = <Member extends string>(
+	cast: Cast<Member>,
 	day: Date,
-	scene: BotChatScene<Person>,
+	scene: BotChatScene<Member>,
 ) =>
 	Effect.gen(function* () {
 		const botId = idOf(cast.botIds, scene.bot);
@@ -283,7 +276,7 @@ const botChatOf = <Person extends string>(
 				),
 		);
 		if (existing) return existing.chat;
-		const startedById = cast.people[first.from.person];
+		const startedById = cast.members[first.from.member];
 		const at = timeOn(day, first.at);
 		const { id } = yield* query((db) =>
 			seedChat(db, {
@@ -297,7 +290,7 @@ const botChatOf = <Person extends string>(
 		);
 		yield* query((db) =>
 			db.insert(chatParticipant).values([
-				{ chatId: id, personId: startedById, createdAt: at },
+				{ chatId: id, memberId: startedById, createdAt: at },
 				{ chatId: id, botId, createdAt: at },
 			]),
 		);
@@ -309,10 +302,10 @@ const botChatOf = <Person extends string>(
  * project, by its name, started by whoever wrote first in it, who
  * joins it with their first message.
  */
-const projectChatOf = <Person extends string>(
-	cast: Cast<Person>,
+const projectChatOf = <Member extends string>(
+	cast: Cast<Member>,
 	day: Date,
-	scene: ProjectChatScene<Person>,
+	scene: ProjectChatScene<Member>,
 ) =>
 	Effect.gen(function* () {
 		const projectId = projectIdOf(cast.projectIds, scene.project);
@@ -325,7 +318,7 @@ const projectChatOf = <Person extends string>(
 		);
 		if (existing) return existing.chat;
 		const [first] = scene.messages;
-		const startedById = cast.people[first.from.person];
+		const startedById = cast.members[first.from.member];
 		const at = timeOn(day, first.at);
 		const { id } = yield* query((db) =>
 			seedChat(db, {
@@ -367,49 +360,30 @@ const automationFeedOf = (
 		return yield* placedById(id);
 	});
 
-/** Writes into the bot's chat the scene's messages it does not have yet. */
-const writeBotChatScene = <Person extends string>(
-	cast: Cast<Person>,
+/** Writes into a scene's chat the scene's messages it does not have yet. */
+const writeScene = <Member extends string>(
+	cast: Cast<Member>,
 	day: Date,
-	scene: BotChatScene<Person>,
+	inChat: PlacedChatRow,
+	messages: readonly ScriptedMessage<Member>[],
 ) =>
 	Effect.gen(function* () {
-		const found = yield* botChatOf(cast, day, scene);
-		const wrote = yield* writeMessages(cast, day, {
-			inChat: found,
-			messages: scene.messages,
-		});
-		if (wrote) yield* touch(found.id);
-		return wrote;
-	});
-
-/** Writes into its project's chat the scene's messages it does not have yet. */
-const writeProjectChatScene = <Person extends string>(
-	cast: Cast<Person>,
-	day: Date,
-	scene: ProjectChatScene<Person>,
-) =>
-	Effect.gen(function* () {
-		const found = yield* projectChatOf(cast, day, scene);
-		const wrote = yield* writeMessages(cast, day, {
-			inChat: found,
-			messages: scene.messages,
-		});
-		if (wrote) yield* touch(found.id);
+		const wrote = yield* writeMessages(cast, day, { inChat, messages });
+		if (wrote) yield* touch(inChat.id);
 		return wrote;
 	});
 
 /**
  * Writes the scripted messages into the chat, each bot reply answering the
- * person's message before it, leaving out those it already has: a person's or a
+ * member's message before it, leaving out those it already has: a member's or a
  * bot's with the same words. Says whether it wrote any.
  */
-const writeMessages = <Person extends string>(
-	cast: Cast<Person>,
+const writeMessages = <Member extends string>(
+	cast: Cast<Member>,
 	day: Date,
 	input: {
 		inChat: PlacedChatRow;
-		messages: readonly ScriptedMessage<Person>[];
+		messages: readonly ScriptedMessage<Member>[];
 	},
 ) =>
 	Effect.gen(function* () {
@@ -419,67 +393,66 @@ const writeMessages = <Person extends string>(
 				.select({
 					id: message.id,
 					content: message.content,
-					authorPersonId: message.authorPersonId,
+					authorMemberId: message.authorMemberId,
 				})
 				.from(message)
 				.where(eq(message.chatId, chatId)),
 		);
 		const saidAlready = new Map(
-			said.map((row) => [`${row.authorPersonId ? "person" : "bot"}:${row.content}`, row.id]),
+			said.map((row) => [`${row.authorMemberId ? "member" : "bot"}:${row.content}`, row.id]),
 		);
 		const keyed = new Map<string, string>();
-		let lastPersonMessage: string | undefined;
+		let lastMemberMessage: string | undefined;
 		let wrote = false;
 		for (const scripted of input.messages) {
-			const byPerson = "person" in scripted.from;
-			const already = saidAlready.get(`${byPerson ? "person" : "bot"}:${textOf(scripted.parts)}`);
+			const byMember = "member" in scripted.from;
+			const already = saidAlready.get(`${byMember ? "member" : "bot"}:${textOf(scripted.parts)}`);
 			if (already) {
 				if (scripted.key) keyed.set(scripted.key, already);
-				if (byPerson) lastPersonMessage = already;
+				if (byMember) lastMemberMessage = already;
 				continue;
 			}
 			wrote = true;
 			const at = timeOn(day, scripted.at);
 			const replyToMessageId = scripted.replyTo ? keyed.get(scripted.replyTo) : undefined;
 			const messageId =
-				"person" in scripted.from
-					? yield* writePersonMessage({
+				"member" in scripted.from
+					? yield* writeMemberMessage({
 							chatId,
-							personId: cast.people[scripted.from.person],
+							memberId: cast.members[scripted.from.member],
 							text: textOf(scripted.parts),
 							at,
 							replyToMessageId,
 						})
 					: yield* writeBotReply(cast, day, {
 							chatId,
-							rootChatId: input.inChat.rootChatId ?? chatId,
 							bot: scripted.from.bot,
-							triggerMessageId: lastPersonMessage,
+							triggerMessageId: lastMemberMessage,
 							parts: scripted.parts,
 							at,
 							replyToMessageId,
 						});
-			if ("person" in scripted.from) lastPersonMessage = messageId;
+			if ("member" in scripted.from) lastMemberMessage = messageId;
 			if (scripted.key) keyed.set(scripted.key, messageId);
 			yield* writeReactions(cast, messageId, at, scripted.reactions);
 		}
 		return wrote;
 	});
 
-const writeReactions = <Person extends string>(
-	cast: Cast<Person>,
+const writeReactions = <Member extends string>(
+	cast: Cast<Member>,
 	messageId: string,
 	at: Date,
-	reactions: ScriptedMessage<Person>["reactions"],
+	reactions: ScriptedMessage<Member>["reactions"],
 ) =>
 	Effect.forEach(
 		reactions ?? [],
 		(reaction) =>
 			query((db) =>
 				db.insert(messageReaction).values(
-					reaction.by.map((person) => ({
+					reaction.by.map((member) => ({
 						messageId,
-						personId: cast.people[person],
+						memberId: cast.members[member],
 						emoji: reaction.emoji,
 						createdAt: new Date(at.getTime() + REACTION_DELAY_MILLISECONDS),
 					})),
@@ -494,9 +467,9 @@ const REPLY_MILLISECONDS = 20_000;
 /** How much longer a scripted reply takes for each tool call it makes, and how far apart they start. */
 const CALL_MILLISECONDS = 6_000;
 
-const writePersonMessage = (input: {
+const writeMemberMessage = (input: {
 	chatId: string;
-	personId: string;
+	memberId: string;
 	text: string;
 	at: Date;
 	replyToMessageId: string | undefined;
@@ -505,7 +478,7 @@ const writePersonMessage = (input: {
 		yield* query((db) =>
 			db
 				.insert(chatParticipant)
-				.values({ chatId: input.chatId, personId: input.personId, createdAt: input.at })
+				.values({ chatId: input.chatId, memberId: input.memberId, createdAt: input.at })
 				.onConflictDoNothing(),
 		);
 		const id = randomUUID();
@@ -513,8 +486,7 @@ const writePersonMessage = (input: {
 			db.insert(message).values({
 				id,
 				chatId: input.chatId,
-				authorPersonId: input.personId,
-				kind: "text",
+				authorMemberId: input.memberId,
 				status: "complete",
 				parts: [{ type: "text", text: input.text }],
 				content: input.text,
@@ -527,17 +499,16 @@ const writePersonMessage = (input: {
 
 /**
  * A bot's reply as its turn left it: the turn, the message, and the
- * collaborations and tool calls placed in it.
+ * tool calls placed in it.
  */
-const writeBotReply = <Person extends string>(
-	cast: Cast<Person>,
+const writeBotReply = <Member extends string>(
+	cast: Cast<Member>,
 	day: Date,
 	input: {
 		chatId: string;
-		rootChatId: string;
 		bot: string;
 		triggerMessageId: string | undefined;
-		parts: readonly ScriptedPart<Person>[];
+		parts: readonly ScriptedPart<Member>[];
 		at: Date;
 		replyToMessageId?: string | undefined;
 	},
@@ -570,7 +541,6 @@ const writeBotReply = <Person extends string>(
 				id: messageId,
 				chatId: input.chatId,
 				authorBotId: botId,
-				kind: "text",
 				status: waiting ? "writing" : "complete",
 				parts: stored,
 				content,
@@ -581,19 +551,7 @@ const writeBotReply = <Person extends string>(
 		);
 		let callsStarted = 0;
 		for (const { id, atOffset, part } of placed) {
-			if ("collaboration" in part) {
-				yield* writeCollaboration(cast, day, {
-					id,
-					parentChatId: input.chatId,
-					parentMessageId: messageId,
-					rootChatId: input.rootChatId,
-					askingBot: input.bot,
-					turnId,
-					atOffset,
-					asked: input.at,
-					...part.collaboration,
-				});
-			} else if ("file" in part) {
+			if ("file" in part) {
 				yield* writeFile(cast, {
 					id,
 					chatId: input.chatId,
@@ -622,8 +580,8 @@ const writeBotReply = <Person extends string>(
 
 /**
  * A turn of `bot`'s, started by `triggerMessageId`: finished at `at`, or
- * waiting since then for a call to be approved. A waiting turn names an
- * owner, as a real one does, though no workflow runs it: `stage.ts`
+ * waiting since then for a call to be approved. A waiting turn names a
+ * workflow execution, as a real one does, though no workflow runs it: `stage.ts`
  * plays what happens once the call is allowed.
  */
 const writeTurn = (
@@ -648,7 +606,7 @@ const writeTurn = (
 				botId: idOf(cast.botIds, input.bot),
 				triggerMessageId: input.triggerMessageId,
 				status: input.waiting ? "waiting" : "done",
-				owner: input.waiting ? STAGED_TURN_OWNER : null,
+				executionId: input.waiting ? STAGED_EXECUTION_ID : null,
 				model: cast.botModels.get(input.bot) ?? "",
 				reason: "default",
 				startedAt,
@@ -659,101 +617,15 @@ const writeTurn = (
 		return id;
 	});
 
-/** The owner a staged waiting turn names, in place of a workflow execution's. */
-export const STAGED_TURN_OWNER = "showcase-stage";
-
-/** The bots' own chat under the reply: the brief, the collaborator's answer, and the row tying them to the reply. */
-const writeCollaboration = (
-	cast: Cast<string>,
-	day: Date,
-	input: {
-		id: string;
-		parentChatId: string;
-		parentMessageId: string;
-		rootChatId: string;
-		askingBot: string;
-		turnId: string;
-		atOffset: number;
-		asked: Date;
-		with: string;
-		title: string;
-		brief: string;
-		answer: string;
-		answeredAt: Clock;
-	},
-) =>
-	Effect.gen(function* () {
-		const askingId = idOf(cast.botIds, input.askingBot);
-		const collaboratorId = idOf(cast.botIds, input.with);
-		const answeredAt = timeOn(day, input.answeredAt);
-		const child = yield* query((db) =>
-			seedChat(db, {
-				workspaceId: cast.workspaceId,
-				kind: "collaboration",
-				title: input.title,
-				createdAt: input.asked,
-				updatedAt: answeredAt,
-				collaboration: {
-					id: input.id,
-					parentChatId: input.parentChatId,
-					rootChatId: input.rootChatId,
-					parentMessageId: input.parentMessageId,
-					turnId: input.turnId,
-					collaboratorBotId: collaboratorId,
-					brief: input.brief,
-					status: "answered",
-					answer: input.answer,
-					atOffset: input.atOffset,
-					createdAt: input.asked,
-					updatedAt: answeredAt,
-				},
-			}),
-		);
-		yield* query((db) =>
-			db.insert(chatParticipant).values([
-				{ chatId: child.id, botId: askingId },
-				{ chatId: child.id, botId: collaboratorId },
-			]),
-		);
-		const briefId = randomUUID();
-		yield* query((db) =>
-			db.insert(message).values({
-				id: briefId,
-				chatId: child.id,
-				authorBotId: askingId,
-				kind: "text",
-				status: "complete",
-				parts: [{ type: "text", text: input.brief }],
-				content: input.brief,
-				createdAt: input.asked,
-			}),
-		);
-		const answerTurn = yield* writeTurn(cast, {
-			chatId: child.id,
-			bot: input.with,
-			triggerMessageId: briefId,
-			at: answeredAt,
-		});
-		yield* query((db) =>
-			db.insert(message).values({
-				chatId: child.id,
-				authorBotId: collaboratorId,
-				kind: "text",
-				status: "complete",
-				parts: [{ type: "text", text: input.answer }],
-				content: input.answer,
-				turnId: answerTurn,
-				createdAt: answeredAt,
-			}),
-		);
-	});
+/** The workflow execution a staged waiting turn names, though none runs it. */
+export const STAGED_EXECUTION_ID = "showcase-stage";
 
 /** How long a scripted call that only reads takes to run. */
 const READ_CALL_MILLISECONDS = 1_400;
 
 /**
  * A tool call in a bot's reply: one that only read and ran straight away, or a
- * connector's call that waited for a person, who allowed it, and then ran.
+ * connector's call that waited for a member, who allowed it, and then ran.
  * Without a connector it is a tool built into every bot.
  */
 const writeToolCall = (
@@ -806,7 +678,7 @@ const writeToolCall = (
 			: input.allowed && allowedAt
 				? {
 						approvalStatus: "allowed" as const,
-						decidedById: (cast.people as Record<string, string>)[input.allowed.by] ?? null,
+						decidedById: (cast.members as Record<string, string>)[input.allowed.by] ?? null,
 						decidedAt: allowedAt,
 						output: input.output ?? null,
 						status: "completed" as const,
@@ -997,7 +869,6 @@ const writeAutomationRun = (cast: Cast<string>, day: Date, run: AutomationRun) =
 					automationName: defined.name,
 					triggerKind: "routine",
 				},
-				kind: "text",
 				status: "complete",
 				parts: [{ type: "text", text: defined.instructions }],
 				content: defined.instructions,
@@ -1026,7 +897,6 @@ const writeAutomationRun = (cast: Cast<string>, day: Date, run: AutomationRun) =
 				db.insert(message).values({
 					...post,
 					authorBotId: botId,
-					kind: "text",
 					status: run.failed ? "failed" : "complete",
 					parts: [{ type: "text", text: run.result }],
 					content: run.result,
@@ -1058,38 +928,38 @@ const markEverythingRead = (cast: Cast<string>) =>
 		const now = new Date();
 		const rows = yield* query((db) =>
 			db
-				.select({ chatId: placedChat.id, personId: membership.personId })
+				.select({ chatId: placedChat.id, memberId: membership.memberId })
 				.from(placedChat)
 				.innerJoin(membership, eq(membership.workspaceId, placedChat.workspaceId))
 				.where(
 					and(
 						eq(placedChat.workspaceId, cast.workspaceId),
-						reachesChatFor(placedChat, membership.personId),
+						reachesChatFor(placedChat, membership.memberId),
 					),
 				),
 		);
 		if (rows.length === 0) return;
 		yield* query((db) =>
 			db
-				.insert(chatRead)
+				.insert(readCursor)
 				.values(rows.map((row) => ({ ...row, readThrough: now })))
 				.onConflictDoUpdate({
-					target: [chatRead.personId, chatRead.chatId],
+					target: [readCursor.memberId, readCursor.chatId],
 					set: { readThrough: now },
 				}),
 		);
 	});
 
-type PlacedPart<Person extends string> = Exclude<ScriptedPart<Person>, { text: string }>;
+type PlacedPart<Member extends string> = Exclude<ScriptedPart<Member>, { text: string }>;
 
 /**
  * A reply's parts as they are stored: its text, and an id for each
- * collaboration and tool call with how much text came before it. Its content
+ * tool call with how much text came before it. Its content
  * is the text parts run together, as the app requires.
  */
-function placeParts<Person extends string>(parts: readonly ScriptedPart<Person>[]) {
+function placeParts<Member extends string>(parts: readonly ScriptedPart<Member>[]) {
 	const stored: StoredMessagePart[] = [];
-	const placed: { id: string; atOffset: number; part: PlacedPart<Person> }[] = [];
+	const placed: { id: string; atOffset: number; part: PlacedPart<Member> }[] = [];
 	let content = "";
 	for (const part of parts) {
 		if ("text" in part) {
@@ -1098,17 +968,14 @@ function placeParts<Person extends string>(parts: readonly ScriptedPart<Person>[
 			continue;
 		}
 		const id = randomUUID();
-		stored.push(
-			"collaboration" in part
-				? { type: "collaboration", collaborationId: id }
-				: { type: "tool_call", toolCallId: id },
-		);
+		stored.push({ type: "tool_call", toolCallId: id });
 		placed.push({ id, atOffset: content.length, part });
 	}
 	return { stored, content, placed };
 }
 
-function textOf(parts: readonly ScriptedPart<string>[]): string {
+/** The text of a message's parts, run together, as its content is. */
+export function textOf(parts: readonly (ScriptedPart<string> | StoredMessagePart)[]): string {
 	return parts.flatMap((part) => ("text" in part ? [part.text] : [])).join("");
 }
 
@@ -1125,7 +992,7 @@ function projectIdOf(projectIds: Record<string, string>, project: string): strin
 }
 
 /** The chat `id`, as the scenes read it back. */
-const placedById = (id: string) =>
+export const placedById = (id: string) =>
 	Effect.flatMap(
 		query((db) => db.select().from(placedChat).where(eq(placedChat.id, id)).limit(1)),
 		([found]) => (found ? Effect.succeed(found) : Effect.die(new Error(`Chat ${id} is not there`))),

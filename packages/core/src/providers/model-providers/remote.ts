@@ -1,7 +1,8 @@
-import { MAX_PROVIDER_MODELS } from "@sugabots/contracts";
-import { type DomainError, type UserText, userText } from "@sugabots/errors";
-import { Clock, Effect, ErrorReporter, Schema } from "effect";
+import { MAX_PROVIDER_MODELS, type ProviderTestResult } from "@sugabots/contracts";
+import { type DomainError, userText } from "@sugabots/errors";
+import { Effect, ErrorReporter, Schema } from "effect";
 import { type EgressHttpClients, EgressRefused } from "../network/egress.ts";
+import { timedTest } from "../tested-configuration.ts";
 import {
 	type DiscoveredModel,
 	dialectFor,
@@ -191,28 +192,27 @@ export function testProvider(
 	workspaceId: string,
 	providerId: string,
 	httpClients: EgressHttpClients,
-): Effect.Effect<{ reachable: boolean; latencyMs: number; error?: UserText }> {
-	const attempt = Effect.gen(function* () {
-		const started = yield* Clock.currentTimeMillis;
-		const access = yield* requireAccess(providers, workspaceId, providerId);
+): Effect.Effect<ProviderTestResult> {
+	const attempt = timedTest(
+		Effect.gen(function* () {
+			const access = yield* requireAccess(providers, workspaceId, providerId);
+			const outcome = yield* requestModels(providers, workspaceId, access, httpClients).pipe(
+				Effect.tapError(logFailure),
+				Effect.result,
+			);
+			const error = outcome._tag === "Failure" ? outcome.failure.userMessage : undefined;
 
-		const outcome = yield* requestModels(providers, workspaceId, access, httpClients).pipe(
-			Effect.tapError(logFailure),
-			Effect.result,
-		);
-		const error = outcome._tag === "Failure" ? outcome.failure.userMessage : undefined;
-
-		// A test is recorded either way, and only recorded: switching the provider
-		// on or off is the person's to do.
-		yield* providers.recordTest(
-			workspaceId,
-			providerId,
-			access.configurationUpdatedAt,
-			error === undefined ? { activateOnSuccess: false } : { error },
-		);
-		const latencyMs = (yield* Clock.currentTimeMillis) - started;
-		return { reachable: error === undefined, latencyMs, error };
-	});
+			// A test is recorded either way, and only recorded: switching the provider
+			// on or off is the member's to do.
+			yield* providers.recordTest(
+				workspaceId,
+				providerId,
+				access.configurationUpdatedAt,
+				error === undefined ? { activateOnSuccess: false } : { error },
+			);
+			return { error };
+		}),
+	);
 
 	// Missing provider access is the one failure with nothing to record against.
 	return attempt.pipe(

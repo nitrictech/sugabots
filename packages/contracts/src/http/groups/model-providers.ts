@@ -1,13 +1,11 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
-	bulkProviderModelUpdateSchema,
 	defaultModelUpdateSchema,
 	modelProviderSchema,
 	modelProviderUpdateSchema,
 	newModelProviderSchema,
 	newProviderModelSchema,
-	providerFetchResultSchema,
 	providerModelSwitchOffSchema,
 	providerModelUpdateSchema,
 	providerSignInCompletionSchema,
@@ -26,16 +24,6 @@ const root = "/workspaces/:workspace/model-providers";
 const workspace = { workspace: workspaceIdOrSlugSchema };
 const provider = { workspace: workspaceIdOrSlugSchema, providerId: uuidSchema };
 const model = { ...provider, modelId: uuidSchema };
-
-/** How many bots a switch-off moved. */
-const movedCountSchema = Schema.Struct({
-	moved: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-});
-
-/** How many models a change reached. */
-const updatedCountSchema = Schema.Struct({
-	updated: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-});
 
 export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 	.add(
@@ -74,7 +62,7 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 		HttpApiEndpoint.post("switchOff", `${root}/:providerId/switch-off`, {
 			params: provider,
 			payload: providerSwitchOffSchema,
-			success: movedCountSchema,
+			success: HttpApiSchema.Empty(204),
 			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.post("test", `${root}/:providerId/test`, {
@@ -100,7 +88,7 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 		}),
 		HttpApiEndpoint.post("discoverModels", `${root}/:providerId/discover-models`, {
 			params: provider,
-			success: providerFetchResultSchema,
+			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),
 		HttpApiEndpoint.post("addModel", `${root}/:providerId/models`, {
@@ -109,22 +97,16 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 			success: modelProviderSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
 		}),
-		HttpApiEndpoint.patch("setModelsEnabled", `${root}/:providerId/models`, {
-			params: provider,
-			payload: bulkProviderModelUpdateSchema,
-			success: updatedCountSchema,
-			error: [BadRequest, Conflict, ...refused],
-		}),
 		HttpApiEndpoint.patch("updateModel", `${root}/:providerId/models/:modelId`, {
 			params: model,
 			payload: providerModelUpdateSchema,
-			success: updatedCountSchema,
+			success: HttpApiSchema.Empty(204),
 			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.post("switchOffModel", `${root}/:providerId/models/:modelId/switch-off`, {
 			params: model,
 			payload: providerModelSwitchOffSchema,
-			success: movedCountSchema,
+			success: HttpApiSchema.Empty(204),
 			error: [BadRequest, Conflict, ...refused],
 		}),
 	)

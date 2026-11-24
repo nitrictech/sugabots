@@ -1,10 +1,4 @@
-import type {
-	ChatDetails,
-	ChatHistoryEntry,
-	FilePart,
-	Message,
-	SignedInPerson,
-} from "@sugabots/contracts";
+import type { ChatDetails, CurrentUser, FilePart, Message } from "@sugabots/contracts";
 import { useLocation } from "@tanstack/react-router";
 import { chatFileUrl } from "@/lib/chat-files.ts";
 import { type ChatLocation, placeBot } from "@/lib/chats.ts";
@@ -16,15 +10,12 @@ import type { ChatPlace } from "./ChatHeader.tsx";
 import { DesktopStage } from "./DesktopViewer.tsx";
 import { type ChatContents, DetailsPanel, ProjectDetails } from "./DetailsPanel.tsx";
 import { FileStage } from "./Files.tsx";
-import { NestedChatPanel } from "./NestedChatPanel.tsx";
-import { opensBeside } from "./nested-chat-opening.ts";
 import type { ProjectChatToChange } from "./ProjectChatMenu.tsx";
 import type { Staged, StagedChange } from "./staged.ts";
 
 /**
- * What is open beside a chat, one at a time: what is staged large, else the
- * collaboration open, else, on the chat's own page, its Details while they
- * are open.
+ * What is open beside a chat, one at a time: what is staged large, else, on
+ * the chat's own page, its Details while they are open.
  */
 export function ChatBeside({
 	chatLocation: owner,
@@ -34,11 +25,6 @@ export function ChatBeside({
 	place,
 	staged,
 	onStagedChange,
-	nestedChatId,
-	entries,
-	onNestedChatChange,
-	onOpenNestedChat,
-	onOpenFile,
 	onOpenAutomations,
 	shownMessages,
 	projectChatName,
@@ -47,17 +33,10 @@ export function ChatBeside({
 	chatLocation: ChatLocation;
 	details: ChatDetails;
 	chatId: string;
-	signedIn: SignedInPerson;
+	signedIn: CurrentUser;
 	place: ChatPlace;
 	staged: Staged | undefined;
 	onStagedChange: StagedChange;
-	/** The collaboration or automation's run the chat's address names, if any. */
-	nestedChatId: string | undefined;
-	/** The collaborations and automations' runs the chat has opened. */
-	entries: ChatHistoryEntry[];
-	onNestedChatChange: (nestedChatId: string | undefined) => void;
-	onOpenNestedChat: (nestedChatId: string) => void;
-	onOpenFile: (fileId: string) => void;
 	onOpenAutomations: (view?: AutomationsView) => void;
 	/** The messages loaded so far, whose files Details lists. */
 	shownMessages: readonly Message[];
@@ -106,20 +85,6 @@ export function ChatBeside({
 			/>
 		);
 	}
-	if (nestedChatId && opensBeside(nestedChatId, entries)) {
-		return (
-			<NestedChatPanel
-				chatId={chatId}
-				chatBotId={bot?.id}
-				nestedChatId={nestedChatId}
-				entry={entries.find((entry) => entry.chatId === nestedChatId)}
-				history={entries}
-				frame={{ kind: "beside", onClose: () => onNestedChatChange(undefined) }}
-				onOpenNestedChat={onOpenNestedChat}
-				onOpenFile={onOpenFile}
-			/>
-		);
-	}
 	if (place.kind !== "own" || !place.detailsOpen) return null;
 	const closeDetails = () => place.onDetailsChange(false);
 	const contents: ChatContents = {
@@ -145,7 +110,7 @@ export function ChatBeside({
 			<ProjectDetails
 				project={owner.project}
 				name={projectChatName}
-				people={details.peopleReachingProject.length}
+				members={details.membersReachingProject.length}
 				bots={details.projectBots.length}
 				toChange={projectChatToChange}
 				signedIn={signedIn}

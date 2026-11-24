@@ -109,17 +109,15 @@ describe("the turn workflow", () => {
 		expect(abandon).not.toHaveBeenCalled();
 
 		// The second approval is decided first; the first still waits.
-		const second = { decision: "deny", personId: "sam" } as const;
+		const second = { decision: "deny", memberId: "sam" } as const;
 		await runtime.runPromise(
-			signals.decide({ owner: executionId, approvalId: "second", decision: second }),
+			signals.decide({ executionId, approvalId: "second", decision: second }),
 		);
 		await untilSuspended(executionId);
 		expect(release).not.toHaveBeenCalled();
 
-		const first = { decision: "allow_once", personId: "alex" } as const;
-		await runtime.runPromise(
-			signals.decide({ owner: executionId, approvalId: "first", decision: first }),
-		);
+		const first = { decision: "allow_once", memberId: "alex" } as const;
+		await runtime.runPromise(signals.decide({ executionId, approvalId: "first", decision: first }));
 
 		await vi.waitFor(() =>
 			expect(release).toHaveBeenCalledWith({ key: turnLane(asked), executionId }),

@@ -45,7 +45,7 @@ export const Empty = meta.story({
 	play: async () => {
 		const dialog = await screen.findByRole("dialog", { name: "New project" });
 		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
-		await expect(within(dialog).getByText(/You can add people and bots next/)).toBeInTheDocument();
+		await expect(within(dialog).getByText(/You can add members and bots next/)).toBeInTheDocument();
 	},
 });
 

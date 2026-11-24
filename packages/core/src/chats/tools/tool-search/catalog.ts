@@ -26,7 +26,7 @@ export const BUILT_IN_HANDLE = "sugabots";
  */
 export function buildCatalog(
 	tools: Readonly<Record<string, OfferedTool>>,
-	builtIn: Readonly<Record<string, Tool>> = {},
+	builtIn: Readonly<Record<string, Tool>>,
 ): CatalogEntry[] {
 	const own = Object.entries(builtIn).map(([key, found]) => builtInEntry(key, found));
 	const connectors = Object.entries(tools)

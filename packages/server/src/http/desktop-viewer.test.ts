@@ -13,15 +13,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	createTestApp,
 	identifiedBy,
-	type PersonResolver,
+	type MemberResolver,
 	testRoutes,
 	WEB_ORIGIN,
 } from "./app.test-support.ts";
 
 /**
  * The desktop viewer's WebSocket, served on real ports: the API relays the
- * person's socket to the desktop's, here a stand-in that logs a viewer in as
- * x11vnc does, with VNC authentication, then echoes what it is sent.
+ * member's socket to the desktop's, here a stand-in that signs a viewer in as
+ * Xvnc does, with VNC authentication, then echoes what it is sent.
  */
 const signedIn = {
 	id: "0199a3a0-0000-7000-8000-0000000000ff",
@@ -29,7 +29,7 @@ const signedIn = {
 	name: "Sam",
 	image: null,
 };
-const resolvePerson: PersonResolver = async (headers) =>
+const resolveMember: MemberResolver = async (headers) =>
 	headers.get("cookie") === "session=good" ? signedIn : null;
 const PATH =
 	"/api/chats/0199a3a0-0000-7000-8000-000000000001/bots/0199a3a0-0000-7000-8000-000000000002/desktop";
@@ -39,7 +39,7 @@ const CHALLENGE = Uint8Array.from({ length: 16 }, (_, index) => index * 7);
 
 const scope = Effect.runSync(Scope.make());
 let apiPort: number;
-/** Whether the person the next desktop is opened for loses access to it at once. */
+/** Whether the member the next desktop is opened for loses access to it at once. */
 let losesAccess = false;
 
 /** Serves `routes` on an ephemeral port until the tests end, and answers the port. */
@@ -102,7 +102,7 @@ beforeAll(async () => {
 	apiPort = await served(
 		testRoutes(
 			Layer.mergeAll(
-				identifiedBy(resolvePerson),
+				identifiedBy(resolveMember),
 				Layer.succeed(DesktopViewer.Service, {
 					open: () =>
 						Effect.succeed({
@@ -119,7 +119,7 @@ beforeAll(async () => {
 afterAll(() => Effect.runPromise(Scope.close(scope, Exit.void)));
 
 describe("the desktop viewer's WebSocket", () => {
-	it("logs a signed-in person in to the desktop without its password, then relays both ways", async () => {
+	it("logs a current user in to the desktop without its password, then relays both ways", async () => {
 		const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${PATH}`, {
 			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
 		} as unknown as string[]);
@@ -148,7 +148,7 @@ describe("the desktop viewer's WebSocket", () => {
 		]);
 	});
 
-	it("closes the socket once the person may no longer see the desktop", async () => {
+	it("closes the socket once the member may no longer see the desktop", async () => {
 		losesAccess = true;
 		try {
 			const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${PATH}`, {
@@ -165,7 +165,7 @@ describe("the desktop viewer's WebSocket", () => {
 	});
 
 	it("refuses a page on another origin, cookie or not", async () => {
-		const response = await createTestApp(identifiedBy(resolvePerson)).fetch(
+		const response = await createTestApp(identifiedBy(resolveMember)).fetch(
 			new Request(`http://localhost:3000${PATH}`, {
 				headers: { origin: "https://elsewhere.example", cookie: "session=good" },
 			}),
@@ -175,7 +175,7 @@ describe("the desktop viewer's WebSocket", () => {
 	});
 
 	it("refuses somebody who isn't signed in", async () => {
-		const response = await createTestApp(identifiedBy(resolvePerson)).fetch(
+		const response = await createTestApp(identifiedBy(resolveMember)).fetch(
 			new Request(`http://localhost:3000${PATH}`, { headers: { origin: WEB_ORIGIN } }),
 		);
 

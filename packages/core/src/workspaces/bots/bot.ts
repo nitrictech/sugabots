@@ -1,21 +1,21 @@
-import type { Bot, NamedPerson } from "@sugabots/contracts";
+import type { Bot, NamedMember } from "@sugabots/contracts";
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { type Actor, botPermissions } from "../../authorization/permissions.ts";
-import { personJson } from "../../chats/store/participants.ts";
+import { memberJson } from "../../chats/store/participants.ts";
 import type * as schema from "../../database/schema.ts";
-import { membership, person, pinnedBot, project } from "../../database/schema.ts";
+import { member, membership, pinnedBot, project } from "../../database/schema.ts";
 import { outerColumn } from "../../database/sql.ts";
 
 /**
- * A bot row that is a bot people talk to: anything but a system bot, which
+ * A bot row that is a bot members talk to: anything but a system bot, which
  * works behind the scenes and is shaped as a `SystemBot` instead. The row
  * type cannot say so, so the API's shape is reached through
- * {@link personFacingBotRow} rather than by asserting it.
+ * {@link memberFacingBotRow} rather than by asserting it.
  */
-export type PersonFacingBotRow = schema.BotRow & { systemBotKey: null };
+export type MemberFacingBotRow = schema.BotRow & { systemBotKey: null };
 
-/** The row when it is a bot people talk to, or nothing when it is a system bot. */
-export function personFacingBotRow(row: schema.BotRow): PersonFacingBotRow | undefined {
+/** The row when it is a bot members talk to, or nothing when it is a system bot. */
+export function memberFacingBotRow(row: schema.BotRow): MemberFacingBotRow | undefined {
 	return row.systemBotKey === null ? { ...row, systemBotKey: null } : undefined;
 }
 
@@ -29,21 +29,21 @@ export function defaultProjectIdOf(botId: SQLWrapper): SQL<string> {
 	return sql<string>`(select owned.id from ${project} as owned where owned.default_of_bot_id = ${outerColumn(botId)})`;
 }
 
-/** SQL for whether the person `personId` pinned the bot `botId` names, to select beside it for {@link toBot}. */
-export function pinnedBy(botId: SQLWrapper, personId: string): SQL<boolean> {
-	return sql<boolean>`exists (select 1 from ${pinnedBot} where ${pinnedBot.botId} = ${botId} and ${pinnedBot.personId} = ${personId})`;
+/** SQL for whether the member `memberId` pinned the bot `botId` names, to select beside it for {@link toBot}. */
+export function pinnedBy(botId: SQLWrapper, memberId: string): SQL<boolean> {
+	return sql<boolean>`exists (select 1 from ${pinnedBot} where ${pinnedBot.botId} = ${botId} and ${pinnedBot.memberId} = ${memberId})`;
 }
 
 /**
- * SQL for the person who added the bot whose `createdById` and `workspaceId`
+ * SQL for the member who added the bot whose `createdById` and `workspaceId`
  * columns are given, by name, to select beside it for {@link toBot}: null when
  * nobody did, or they are no longer in the workspace.
  */
 export function creatorOf(bot: {
 	createdById: SQLWrapper;
 	workspaceId: SQLWrapper;
-}): SQL<NamedPerson | null> {
-	return sql<NamedPerson | null>`(select ${personJson} from ${membership} inner join ${person} on ${person.id} = ${membership.personId} where ${membership.workspaceId} = ${bot.workspaceId} and ${membership.personId} = ${bot.createdById})`;
+}): SQL<NamedMember | null> {
+	return sql<NamedMember | null>`(select ${memberJson} from ${membership} inner join ${member} on ${member.id} = ${membership.memberId} where ${membership.workspaceId} = ${bot.workspaceId} and ${membership.memberId} = ${bot.createdById})`;
 }
 
 /**
@@ -53,7 +53,7 @@ export function creatorOf(bot: {
  * automations; `createdBy` is {@link creatorOf} its `createdById`.
  */
 export function toBot(
-	row: PersonFacingBotRow & { defaultProjectId: string; createdBy: NamedPerson | null },
+	row: MemberFacingBotRow & { defaultProjectId: string; createdBy: NamedMember | null },
 	viewer: { actor: Actor; pinned: boolean },
 ): Bot {
 	return {
@@ -66,7 +66,7 @@ export function toBot(
 		eyes: row.eyes,
 		shape: row.shape,
 		model: row.model,
-		prompt: row.prompt,
+		instructions: row.instructions,
 		disabledTools: row.disabledTools,
 		usesComputer: row.usesComputer,
 		naturalBrowsing: row.naturalBrowsing,

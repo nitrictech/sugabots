@@ -8,23 +8,23 @@ import { ChatEvent } from "../events.ts";
  * The only writer of `compaction`: what each chat's bots read in
  * place of its older messages, written by the Compaction bot.
  */
-export interface Records {
+export interface CompactionStore {
 	/**
-	 * Replaces the chat's compaction, so its bots read `summary` and then
+	 * Replaces the chat's compaction, so its bots read `condensed` and then
 	 * every message from `keptFrom` on, and announces it in the chat's workspace.
 	 */
 	readonly save: (compaction: {
 		workspaceId: string;
 		chatId: string;
-		summary: string;
+		condensed: string;
 		historyStartsAt: Date;
 		keptFrom: Date;
 	}) => Effect.Effect<void>;
 }
 
 /** The table's writes, which its module builds for itself. */
-export const makeRecords = Effect.gen(function* () {
-	const operation = yield* serviceOperations<Records>("Compactions");
+export const makeCompactionStore = Effect.gen(function* () {
+	const operation = yield* serviceOperations<CompactionStore>("Compactions");
 	const { emit } = yield* ChatEvents.Service;
 	return {
 		save: (compaction) =>
@@ -34,7 +34,7 @@ export const makeRecords = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const updatedAt = yield* DateTime.nowAsDate;
 						const written = {
-							summary: compaction.summary,
+							condensed: compaction.condensed,
 							historyStartsAt: compaction.historyStartsAt,
 							keptFrom: compaction.keptFrom,
 						};
@@ -56,5 +56,5 @@ export const makeRecords = Effect.gen(function* () {
 					}),
 				),
 			),
-	} satisfies Records;
+	} satisfies CompactionStore;
 });

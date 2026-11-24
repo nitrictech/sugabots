@@ -281,7 +281,7 @@ export function bearerAuthorization(token: string): string {
 export const browser = { go: (url: string) => window.location.assign(url) };
 
 /**
- * Why a connector's sign-in did not finish, in words for the person, from
+ * Why a connector's sign-in did not finish, in words for the member, from
  * the code the API put in the address. Anybody can write an address, so a
  * code the API does not send gets the general sentence instead of being shown.
  */

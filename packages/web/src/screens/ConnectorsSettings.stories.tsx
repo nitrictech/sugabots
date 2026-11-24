@@ -52,6 +52,7 @@ function connector(
 			email: "rowan@example.com",
 			image: null,
 		},
+		signedInAs: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 		...over,
 	};
@@ -221,7 +222,7 @@ export const AddingAnApp = meta.story({
 	},
 });
 
-/** GitHub chosen: the project gets an app of its own, made on GitHub for the organization named or the person. */
+/** GitHub chosen: the project gets an app of its own, made on GitHub for the organization named or the member. */
 export const AddingGitHub = meta.story({
 	play: async ({ canvas }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "Add connector" }));
@@ -302,7 +303,7 @@ export const Editor = meta.story({
 					permissions: {
 						...project.permissions,
 						rename: false,
-						managePeople: false,
+						manageMembers: false,
 						resources: {
 							...project.permissions.resources,
 							manageConnectors: false,

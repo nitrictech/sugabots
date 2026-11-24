@@ -12,8 +12,9 @@ import { isUuid } from "../../ids/ids.ts";
 import { ChatStore } from "../store/store.ts";
 
 /**
- * People reacting to messages with emoji. Whoever sees a message's chat may
- * react to it, and take their own reactions back. Bots never react.
+ * Members reacting to messages with emoji. Whoever sees a message's chat may
+ * react to it, and take their own reactions back. A bot reacts only with 👀,
+ * when it reads a message and stays silent (see `TurnStore.staySilent`).
  */
 export interface Interface {
 	/**
@@ -55,8 +56,8 @@ export const make = Effect.gen(function* () {
 			);
 			if (!found) return yield* new ResourceHidden({ resource: "message" });
 			yield* visibility.chatStanding(found.chatId);
-			const { personId } = yield* CurrentActor.Service;
-			return { chatId: found.chatId, messageId, personId, emoji };
+			const { memberId } = yield* CurrentActor.Service;
+			return { chatId: found.chatId, messageId, memberId, emoji };
 		});
 
 	return Service.of({

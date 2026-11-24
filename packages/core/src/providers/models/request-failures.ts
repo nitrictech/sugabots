@@ -7,9 +7,10 @@ import {
 	TypeValidationError,
 } from "ai";
 import { Duration, ErrorReporter, Schema } from "effect";
+import { causesOf } from "../causes.ts";
 import { EgressRefused } from "../network/egress.ts";
 
-/** Who a model request went to, as people see them in the Models settings. */
+/** Who a model request went to, as members see them in the Models settings. */
 export interface RequestContext {
 	readonly provider: DisplayName;
 	readonly model: DisplayName;
@@ -493,7 +494,7 @@ function classifyStatus(
 	return new ProviderRejectedRequest(fields);
 }
 
-/** A wait as people read it, rounded up: "10 seconds", "1 minute", "2 minutes". */
+/** A wait as members read it, rounded up: "10 seconds", "1 minute", "2 minutes". */
 function describeWait(wait: Duration.Duration): UserText {
 	const seconds = Math.ceil(Duration.toSeconds(wait));
 	if (seconds < 60) return seconds === 1 ? userText`1 second` : userText`${seconds} seconds`;
@@ -511,16 +512,9 @@ function parseRetryAfter(
 	return Number.isFinite(seconds) && seconds > 0 ? Duration.seconds(seconds) : undefined;
 }
 
-/** How many causes deep the classifier looks, so a cycle can't run forever. */
-const MAX_CAUSE_DEPTH = 5;
-
 /** The first of `error` and the errors it was caused by that `matches`. */
 function findInChain<T>(error: unknown, matches: (link: unknown) => link is T): T | undefined {
-	for (let link = error, depth = 0; link !== undefined && depth < MAX_CAUSE_DEPTH; depth++) {
-		if (matches(link)) return link;
-		link = link instanceof Error ? link.cause : undefined;
-	}
-	return undefined;
+	return causesOf(error).find(matches);
 }
 
 /** Whether `link` carries a socket or undici error code, such as `ECONNREFUSED`. */

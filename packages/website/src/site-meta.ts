@@ -8,7 +8,7 @@ export const siteMeta = {
 	headline,
 	title: `Sugabots | ${headline}`,
 	description:
-		"A place where people and bots work together. Give each team its own bots, on the models you choose. Open source and self-hosted.",
+		"A place where members and bots work together. Give each team its own bots, on the models you choose. Open source and self-hosted.",
 	/** Written by scripts/generate-og-image.tsx. */
 	ogImagePath: "/og.png",
 } as const;

@@ -2,7 +2,7 @@ import { handleFromName } from "@sugabots/contracts";
 import { and, eq, ne } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { query } from "../../database/database.ts";
-import { automationRun, bot, membership, person, workspace } from "../../database/schema.ts";
+import { automationRun, bot, member, membership, workspace } from "../../database/schema.ts";
 import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { lane } from "../../workflows/sql.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
@@ -39,12 +39,12 @@ export const releaseRun = (run: AutomationRun) =>
 	);
 
 /**
- * A person administering a new workspace with a project, which has no bots
+ * A member administering a new workspace with a project, which has no bots
  * yet, and a bot whose default project (`ownProjectId`) holds its own
  * automations; and the queued runs other cases left cancelled, so an
  * automation's next run is the one a case asks for.
  */
-export async function anAutomationOwner() {
+export async function anAutomationAdmin() {
 	await onDatabase((db) =>
 		db
 			.update(automationRun)
@@ -54,21 +54,21 @@ export async function anAutomationOwner() {
 	const suffix = crypto.randomUUID();
 	const [somebody] = await onDatabase((db) =>
 		db
-			.insert(person)
-			.values({ name: "Automation owner", email: `automation-${suffix}@example.com` })
+			.insert(member)
+			.values({ name: "Automation admin", email: `automation-${suffix}@example.com` })
 			.returning(),
 	);
-	const [space] = await onDatabase((db) =>
+	const [created] = await onDatabase((db) =>
 		db
 			.insert(workspace)
 			.values({ name: "Automation workspace", slug: `automation-${suffix}` })
 			.returning(),
 	);
-	if (!somebody || !space) throw new Error("Could not create automation test identity");
-	const personId = somebody.id;
-	const workspaceId = space.id;
-	await onDatabase((db) => db.insert(membership).values({ workspaceId, personId, role: "admin" }));
-	const [owner] = await onDatabase((db) =>
+	if (!somebody || !created) throw new Error("Could not create automation test identity");
+	const memberId = somebody.id;
+	const workspaceId = created.id;
+	await onDatabase((db) => db.insert(membership).values({ workspaceId, memberId, role: "admin" }));
+	const [automationBot] = await onDatabase((db) =>
 		db
 			.insert(bot)
 			.values({
@@ -78,27 +78,27 @@ export async function anAutomationOwner() {
 				color: "green",
 				eyes: "pill",
 				model: "test/model",
-				createdById: personId,
+				createdById: memberId,
 			})
 			.returning(),
 	);
-	if (!owner) throw new Error("Could not create automation test bot");
-	const room = await onDatabase((db) =>
+	if (!automationBot) throw new Error("Could not create automation test bot");
+	const project = await onDatabase((db) =>
 		seedProject(db, {
 			workspaceId,
 			name: "Automation project",
 			slug: `automation-${suffix}`,
-			createdById: personId,
-			leadBotId: owner.id,
+			createdById: memberId,
+			leadBotId: automationBot.id,
 		}),
 	);
-	const projectId = room.id;
+	const projectId = project.id;
 	return {
-		personId,
+		memberId,
 		workspaceId,
 		projectId,
-		botId: owner.id,
-		ownProjectId: await runOnPostgres(defaultProjectOf(owner.id)),
+		botId: automationBot.id,
+		ownProjectId: await runOnPostgres(defaultProjectOf(automationBot.id)),
 	};
 }
 

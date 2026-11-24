@@ -2,11 +2,11 @@ import type { ConnectorTool } from "@sugabots/contracts";
 
 /**
  * A GitHub connector's tools, which are Sugabots' own: every GitHub
- * connector has this version's, so people choose what bots may do with
+ * connector has this version's, so members choose what bots may do with
  * each, and new ones reach connectors made before them. Those that change
- * something wait for a person until someone chooses otherwise.
+ * something wait for a member until someone chooses otherwise.
  */
-export const GITHUB_CONNECTOR_TOOLS: readonly ConnectorTool[] = [
+export const GITHUB_CONNECTOR_TOOLS = [
 	{
 		name: "push_branch",
 		description: "Push a commit from a checkout in the computer to a branch under sugabots/.",
@@ -53,7 +53,7 @@ export const GITHUB_CONNECTOR_TOOLS: readonly ConnectorTool[] = [
 	},
 	{
 		name: "reply_to_code_comment",
-		description: "Reply in the chat of a comment on a pull request's code.",
+		description: "Reply in the review thread of a comment on a pull request's code.",
 		readOnly: false,
 		destructive: false,
 	},
@@ -142,4 +142,6 @@ export const GITHUB_CONNECTOR_TOOLS: readonly ConnectorTool[] = [
 		readOnly: true,
 		destructive: false,
 	},
-];
+] as const satisfies readonly ConnectorTool[];
+
+export type GitHubToolName = (typeof GITHUB_CONNECTOR_TOOLS)[number]["name"];

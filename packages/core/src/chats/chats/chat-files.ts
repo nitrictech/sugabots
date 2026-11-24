@@ -11,16 +11,16 @@ import { serviceOperations } from "../../database/database.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 
 /**
- * Files people attach to messages in a chat, kept in its chat.
+ * Files members attach to messages in a chat, kept in its chat.
  * Anyone who can see the chat can upload to it, and read what was attached there.
  */
 export interface Interface {
 	/**
-	 * Keeps `stream` as an upload the actor can attach to a message they send
+	 * Keeps `stream` as an unsent attachment the actor can put on a message they send
 	 * to the chat, as `type`, or, when that is missing or says only that it is
 	 * bytes, as the type its name suggests. Fails with `FileTooLarge` past
 	 * `MAX_ATTACHMENT_BYTES`, or below it past what the chat keeps, and with
-	 * `TooManyUnsentUploads` once the actor has a message's worth unsent.
+	 * `TooManyUnsentAttachments` once the actor has a message's worth unsent.
 	 */
 	readonly upload: <E>(input: {
 		chatId: string;
@@ -28,25 +28,25 @@ export interface Interface {
 		type: string | undefined;
 		stream: Stream.Stream<Uint8Array, E>;
 	}) => Effect.Effect<
-		ChatFileStore.Upload,
+		ChatFileStore.UnsentAttachment,
 		| E
 		| ResourceHidden
 		| ChatFileStore.FileTooLarge
-		| ChatFileStore.TooManyUnsentUploads
+		| ChatFileStore.TooManyUnsentAttachments
 		| BlobStore.Failure,
 		CurrentActor.Service
 	>;
 	/**
-	 * Removes one of the actor's uploads to the chat before it is sent, such as
+	 * Removes one of the actor's unsent attachments to the chat, such as
 	 * one taken off the message they are writing. Anything else is left as it is.
 	 */
-	readonly removeUpload: (input: {
+	readonly removeUnsentAttachment: (input: {
 		chatId: string;
 		fileId: string;
 	}) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 	/**
 	 * A file attached to a message in the chat. Any other file in its chat,
-	 * such as an upload not yet sent or a tool call's result, is not found.
+	 * such as an unsent attachment or a tool call's result, is not found.
 	 */
 	readonly read: (input: {
 		chatId: string;
@@ -71,10 +71,10 @@ export const make = Effect.gen(function* () {
 				"upload",
 				Effect.gen(function* () {
 					const chat = yield* visibility.chat(chatId);
-					const { personId } = yield* CurrentActor.Service;
+					const { memberId } = yield* CurrentActor.Service;
 					return yield* files.upload({
 						chatId: chat.id,
-						uploaderId: personId,
+						uploaderId: memberId,
 						name,
 						maxSize: MAX_ATTACHMENT_BYTES,
 						maxUnsent: MAX_ATTACHMENTS_PER_MESSAGE,
@@ -82,15 +82,15 @@ export const make = Effect.gen(function* () {
 					});
 				}),
 			),
-		removeUpload: ({ chatId, fileId }) =>
+		removeUnsentAttachment: ({ chatId, fileId }) =>
 			operation(
-				"removeUpload",
+				"removeUnsentAttachment",
 				Effect.gen(function* () {
 					const chat = yield* visibility.chat(chatId);
-					const { personId } = yield* CurrentActor.Service;
-					yield* files.removeUnsentUpload({
+					const { memberId } = yield* CurrentActor.Service;
+					yield* files.removeUnsentAttachment({
 						chatId: chat.id,
-						uploaderId: personId,
+						uploaderId: memberId,
 						fileId,
 					});
 				}),

@@ -8,7 +8,7 @@ import {
 	builtInToolCatalog,
 	connectorMarkFor,
 	DESCRIPTION_MAX_LENGTH,
-	PROMPT_MAX_LENGTH,
+	INSTRUCTIONS_MAX_LENGTH,
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, useRouter } from "@tanstack/react-router";
@@ -33,7 +33,7 @@ import { BotCrumb } from "@/shell/BotCrumb.tsx";
 import { type Avatar, AvatarStep, type Part } from "@/shell/NewBot.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
@@ -88,7 +88,7 @@ function BotSettings({ bot }: { bot: Bot }) {
 	const save: Save = update.mutateAsync;
 	const savePending = update.isPending;
 	const may = bot.permissions;
-	// A Personal Assistant's prompt, model and tools are ours: its person changes its name and avatar, connectors and automations.
+	// A Personal Assistant's instructions, model and tools are ours: its member changes its name and avatar, connectors and automations.
 	const fixed = bot.assistant;
 	const workspaceName = useWorkspace().workspace?.name ?? "the workspace";
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -362,7 +362,7 @@ function AddedByRow({ bot }: { bot: Bot }) {
 			sub={when}
 			trailing={
 				<span className="flex min-w-0 items-center gap-2">
-					{adder && <PersonAvatar person={adder} size={20} />}
+					{adder && <MemberAvatar member={adder} size={20} />}
 					<SettingsValue>{adder?.name ?? "With the workspace"}</SettingsValue>
 				</span>
 			}
@@ -435,10 +435,14 @@ function Instructions({
 	save: Save;
 	savePending: boolean;
 }) {
-	const { draft, fieldProps } = useCommittedDraft(bot.prompt, (prompt) => save({ prompt }), {
-		allowEmpty: true,
-		pending: savePending,
-	});
+	const { draft, fieldProps } = useCommittedDraft(
+		bot.instructions,
+		(instructions) => save({ instructions }),
+		{
+			allowEmpty: true,
+			pending: savePending,
+		},
+	);
 
 	return (
 		<SettingsGroup
@@ -447,14 +451,14 @@ function Instructions({
 			className="p-1"
 			note={
 				editable
-					? `Write it like a note to a new teammate: what it's for, how to sound, and what to never do. ${characterCount(draft.length, PROMPT_MAX_LENGTH)}.${savePending ? " Saving…" : ""}`
+					? `Write it like a note to a new teammate: what it's for, how to sound, and what to never do. ${characterCount(draft.length, INSTRUCTIONS_MAX_LENGTH)}.${savePending ? " Saving…" : ""}`
 					: undefined
 			}
 		>
 			<InstructionsField
 				{...fieldProps}
 				readOnly={!editable}
-				maxLength={PROMPT_MAX_LENGTH}
+				maxLength={INSTRUCTIONS_MAX_LENGTH}
 				placeholder="No instructions yet."
 				className="min-h-75"
 			/>
@@ -634,7 +638,7 @@ function BuiltInTools({
 			{bot.usesComputer && !computersOff && (
 				<ToolRow
 					label="Natural browsing"
-					sub="Show a cursor, scroll smoothly and type at a typing pace, so people watching can follow along. Slower."
+					sub="Show a cursor, scroll smoothly and type at a typing pace, so members watching can follow along. Slower."
 					on={bot.naturalBrowsing}
 					canChange={canChange}
 					onChange={(next) => save({ naturalBrowsing: next }).catch(() => {})}
@@ -721,30 +725,30 @@ function VisibilityRow({
 	save: Save;
 }) {
 	const isPublic = bot.visibility === "public";
-	const viewerId = useSession().person?.id;
+	const viewerId = useSession().member?.id;
 	const mine = bot.createdBy !== null && bot.createdBy.id === viewerId;
 	return (
 		<SettingsRow
 			label="Public"
 			sub={
 				isPublic
-					? "Everyone in the workspace can see it, talk to it and add it to projects. Making it private takes it out of its projects"
+					? "Everyone in the workspace can see it, talk to it and add it to projects. Making it personal takes it out of its projects"
 					: mine
 						? "Only you can see it and talk to it"
-						: "Only the person who made it can see it and talk to it"
+						: "Only the member who made it can see it and talk to it"
 			}
 			trailing={
 				editable ? (
 					<Toggle
 						checked={isPublic}
 						disabled={savePending}
-						label={isPublic ? "Make private" : "Make public"}
+						label={isPublic ? "Make personal" : "Make public"}
 						onChange={(on) => {
-							void save({ visibility: on ? "public" : "private" }).catch(() => {});
+							void save({ visibility: on ? "public" : "personal" }).catch(() => {});
 						}}
 					/>
 				) : (
-					<SettingsValue>{isPublic ? "Public" : "Private"}</SettingsValue>
+					<SettingsValue>{isPublic ? "Public" : "Personal"}</SettingsValue>
 				)
 			}
 		/>

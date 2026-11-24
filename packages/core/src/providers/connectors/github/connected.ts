@@ -1,6 +1,6 @@
 import { type DomainError, userText } from "@sugabots/errors";
 import { Effect, ErrorReporter, Schema } from "effect";
-import type { Computers } from "../../../computers/computers.ts";
+import type { ComputerSignIn } from "../../../computers/computer-sign-in.ts";
 import type { ConnectorRow, GitHubConnectorSettings } from "../../../database/schema.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
 import * as GitHub from "./github.ts";
@@ -38,7 +38,7 @@ export class Connected {
 	) {
 		this.connector = connector;
 		this.app = app;
-		this.botLogin = `${settings.slug}[bot]`;
+		this.botLogin = GitHub.appLogin(settings.slug);
 		this.repositories = settings.repositories.map((one) => one.path);
 		this.ids = new Map(settings.repositories.map((one) => [one.path, one.id]));
 		this.http = clients.api;
@@ -88,7 +88,7 @@ export class Connected {
 				repositoryIds: [...this.ids.values()],
 				permissions: { contents: "read", metadata: "read" },
 			}),
-			(token): ComputerSignIn => ({
+			(token): ComputerSignIn.SignedIn => ({
 				credentials: [
 					{
 						host: new URL(GitHub.WEB_URL).host,
@@ -198,7 +198,7 @@ export class Connected {
 	/**
 	 * A token for `repository` alone with `permissions`, or
 	 * {@link PermissionNotGranted} when the installation hasn't been granted
-	 * them, as for an app made before they were asked for.
+	 * them.
 	 */
 	private tokenFor(repository: string, permissions: GitHub.Permissions) {
 		return Effect.suspend(() =>
@@ -350,8 +350,9 @@ export class Connected {
 	}
 
 	/**
-	 * Replies in the chat of a comment on pull request `number`'s code,
-	 * which may itself be a reply: GitHub takes replies only to a chat's first.
+	 * Replies in the review thread of a comment on pull request `number`'s
+	 * code, which may itself be a reply: GitHub takes replies only to the
+	 * first comment of a review thread.
 	 */
 	replyToCodeComment(request: {
 		repository: string;
@@ -362,14 +363,14 @@ export class Connected {
 		const { http } = this;
 		return Effect.flatMap(this.tokenFor(request.repository, { pull_requests: "write" }), (token) =>
 			Effect.gen(function* () {
-				const { chatId } = yield* GitHub.findComment(http, token, {
+				const { reviewThreadId } = yield* GitHub.findComment(http, token, {
 					repository: request.repository,
 					kind: "code_comment",
 					commentId: request.commentId,
 				});
 				return yield* GitHub.replyToCodeComment(http, token, {
 					...request,
-					commentId: chatId,
+					commentId: reviewThreadId,
 				});
 			}),
 		);
@@ -388,12 +389,6 @@ export class Connected {
 	) {
 		return Effect.flatMap(this.readToken(), (token) => read(this.http, token));
 	}
-}
-
-/** What the computer of the project the turn works in is signed in to GitHub with, and when it must be replaced. */
-interface ComputerSignIn {
-	readonly credentials: readonly Computers.Credential[];
-	readonly expiresAt: GitHub.AccessToken["expiresAt"];
 }
 
 /** A pull request that isn't from a bot's branch, which bots may comment on but not change. */
@@ -486,9 +481,9 @@ function describedPermissions(permissions: GitHub.Permissions): string {
 }
 
 /**
- * The connector's installation hasn't been granted what a tool needs, as
- * for an app made before Sugabots asked for it: its owner adds it in the
- * app's settings on GitHub, then the account it is installed on accepts it.
+ * The connector's installation hasn't been granted what a tool needs: the
+ * app's owner on GitHub adds it in the app's settings there, then the account
+ * it is installed on accepts it.
  */
 class PermissionNotGranted
 	extends Schema.TaggedError<PermissionNotGranted>()("GitHubPermissionNotGranted", {

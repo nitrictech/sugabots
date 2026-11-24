@@ -5,8 +5,8 @@ import {
 	bot,
 	computer,
 	computerProvider,
+	member,
 	membership,
-	person,
 	project,
 	workspace,
 } from "../database/schema.ts";
@@ -19,11 +19,11 @@ import type { Computers } from "./computers.ts";
 import { ProjectComputerSetup } from "./project-computer-setup.ts";
 
 /**
- * Which projects' computers' disks a person is shown, against Postgres: the
+ * Which projects' computers' disks a member is shown, against Postgres: the
  * scoping is SQL a fake can't check. Skips without a migrated database.
  */
 describe.skipIf(!process.env.DATABASE_URL)("projects' computers' disks, against Postgres", () => {
-	let setupAs: (personId: string) => Promised<ProjectComputerSetup.Interface>;
+	let setupAs: (memberId: string) => Promised<ProjectComputerSetup.Interface>;
 
 	beforeAll(async () => {
 		setupAs = await servedOnPostgresAs(
@@ -41,7 +41,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects' computers' disks, against 
 		await closeDatabase();
 	});
 
-	it("leaves out the computers of another person's private bots, even for a workspace admin", async () => {
+	it("leaves out the computers of another member's personal bots, even for a workspace admin", async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const [space] = await onDatabase((db) =>
 			db
@@ -51,7 +51,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects' computers' disks, against 
 		);
 		const [ada, sam] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values([
 					{ name: "Ada", email: `ada-disks-${stamp}@example.com` },
 					{ name: "Sam", email: `sam-disks-${stamp}@example.com` },
@@ -62,8 +62,8 @@ describe.skipIf(!process.env.DATABASE_URL)("projects' computers' disks, against 
 		const workspaceId = space.id;
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId, personId: ada.id, role: "admin" },
-				{ workspaceId, personId: sam.id, role: "editor" },
+				{ workspaceId, memberId: ada.id, role: "admin" },
+				{ workspaceId, memberId: sam.id, role: "editor" },
 			]),
 		);
 		const [provider] = await onDatabase((db) =>
@@ -83,8 +83,8 @@ describe.skipIf(!process.env.DATABASE_URL)("projects' computers' disks, against 
 				.values(
 					[
 						{ visibility: "public" as const, createdById: ada.id },
-						{ visibility: "private" as const, createdById: ada.id },
-						{ visibility: "private" as const, createdById: sam.id },
+						{ visibility: "personal" as const, createdById: ada.id },
+						{ visibility: "personal" as const, createdById: sam.id },
 					].map((placement, index) => ({
 						...placement,
 						workspaceId,

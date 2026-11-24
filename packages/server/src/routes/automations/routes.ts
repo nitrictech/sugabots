@@ -4,9 +4,10 @@ import { userText } from "@sugabots/errors";
 import { Effect, Schema } from "effect";
 import type { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSignedInPerson } from "../../auth/middleware.ts";
+import { asCurrentUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
+import { isJson } from "../../http/validation.ts";
 
 export const automationRoutes = HttpApiBuilder.group(ServerApi, "automations", (handlers) =>
 	Effect.gen(function* () {
@@ -44,49 +45,49 @@ export const automationRoutes = HttpApiBuilder.group(ServerApi, "automations", (
 		return (
 			handlers
 				.handle("list", ({ params }) =>
-					automations.list(params).pipe(asSignedInPerson, asHttpError(automationErrors)),
+					automations.list(params).pipe(asCurrentUser, asHttpError(automationErrors)),
 				)
 				.handle("create", ({ params, payload }) =>
-					automations.create(params, payload).pipe(asSignedInPerson, asHttpError(automationErrors)),
+					automations.create(params, payload).pipe(asCurrentUser, asHttpError(automationErrors)),
 				)
 				.handle("update", ({ params, payload }) =>
-					automations.update(params, payload).pipe(asSignedInPerson, asHttpError(automationErrors)),
+					automations.update(params, payload).pipe(asCurrentUser, asHttpError(automationErrors)),
 				)
 				.handle("remove", ({ params }) =>
-					automations.remove(params).pipe(asSignedInPerson, asHttpError(automationErrors)),
+					automations.remove(params).pipe(asCurrentUser, asHttpError(automationErrors)),
 				)
 				.handle("run", ({ params, payload }) =>
 					automations
 						.run({ ...params, requestId: payload.requestId })
-						.pipe(asSignedInPerson, asHttpError(automationErrors)),
+						.pipe(asCurrentUser, asHttpError(automationErrors), Effect.asVoid),
 				)
 				.handle("addTrigger", ({ params, payload }) =>
 					automations
 						.addTrigger(params, payload)
-						.pipe(asSignedInPerson, asHttpError(automationErrors)),
+						.pipe(asCurrentUser, asHttpError(automationErrors)),
 				)
 				.handle("updateTrigger", ({ params, payload }) =>
 					automations
 						.updateTrigger(params, payload)
-						.pipe(asSignedInPerson, asHttpError(automationErrors)),
+						.pipe(asCurrentUser, asHttpError(automationErrors)),
 				)
 				.handle("removeTrigger", ({ params }) =>
-					automations.removeTrigger(params).pipe(asSignedInPerson, asHttpError(automationErrors)),
+					automations.removeTrigger(params).pipe(asCurrentUser, asHttpError(automationErrors)),
 				)
 				.handle("getSecret", ({ params }) =>
-					automations.getSecret(params).pipe(asSignedInPerson, asHttpError(automationErrors)),
+					automations.getSecret(params).pipe(asCurrentUser, asHttpError(automationErrors)),
 				)
 				.handle("rotateSecret", ({ params, payload }) =>
 					automations.rotateSecret(params, payload.secret).pipe(
 						Effect.map((secret) => ({ secret })),
-						asSignedInPerson,
+						asCurrentUser,
 						asHttpError(automationErrors),
 					),
 				)
 				.handle("projectRuns", ({ params, query }) =>
 					automations
 						.listProjectRuns(params, query)
-						.pipe(asSignedInPerson, asHttpError(automationErrors)),
+						.pipe(asCurrentUser, asHttpError(automationErrors)),
 				)
 				// Raw, so a body that is not JSON is refused with the reason rather
 				// than the generic unsupported-content-type answer.
@@ -95,14 +96,9 @@ export const automationRoutes = HttpApiBuilder.group(ServerApi, "automations", (
 	}),
 );
 
-function isJson(contentType: string | undefined): boolean {
-	const mediaType = contentType?.split(";", 1)[0]?.trim().toLowerCase();
-	return mediaType === "application/json" || mediaType?.endsWith("+json") === true;
-}
-
 const automationErrors = {
 	...refusals,
-	InvalidRunCursor: BadRequest,
+	InvalidCursor: BadRequest,
 	InvalidRoutineSchedule: BadRequest,
 	AutomationDeliveryIdTooLong: BadRequest,
 	AutomationNameTaken: Conflict,

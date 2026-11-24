@@ -4,7 +4,12 @@ import { ChatFileStore } from "@sugabots/core/files/chat-file-store";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
-import { createTestApp, identifiedBy, type PersonResolver } from "../../http/app.test-support.ts";
+import {
+	createTestApp,
+	identifiedBy,
+	type MemberResolver,
+	signedInWith,
+} from "../../http/app.test-support.ts";
 
 /**
  * The routes that upload a chat's files and serve them back, over doubles of
@@ -14,7 +19,7 @@ import { createTestApp, identifiedBy, type PersonResolver } from "../../http/app
 const CHAT = "0199a3a0-0000-7000-8000-000000000401";
 const FILE = "0199a3a0-0000-7000-8000-000000000501";
 
-const resolvePerson: PersonResolver = async () => ({
+const resolveMember: MemberResolver = async () => ({
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Sam",
 	email: "sam@example.com",
@@ -22,9 +27,9 @@ const resolvePerson: PersonResolver = async () => ({
 });
 
 const app = (files: Partial<ChatFiles.Interface>) =>
-	createTestApp(Layer.merge(identifiedBy(resolvePerson), unimplemented(ChatFiles.Service, files)));
+	createTestApp(Layer.merge(identifiedBy(resolveMember), unimplemented(ChatFiles.Service, files)));
 
-const signedIn = { authorization: "Bearer sam" };
+const signedIn = signedInWith("sam");
 
 /** A `read` that finds one file, with `bytes` as its content. */
 const serving = (file: { name: string; contentType: string; bytes: Uint8Array }) =>
@@ -124,10 +129,10 @@ describe("uploading a chat file", () => {
 });
 
 describe("removing an unsent upload", () => {
-	it("removes it for the person asking, answering with no content", async () => {
+	it("removes it for the member asking, answering with no content", async () => {
 		let removed: unknown;
 		const response = await app({
-			removeUpload: (input) => {
+			removeUnsentAttachment: (input) => {
 				removed = input;
 				return Effect.void;
 			},

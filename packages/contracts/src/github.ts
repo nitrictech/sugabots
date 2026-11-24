@@ -23,7 +23,7 @@ const gitHubSetupFailureSchema = Schema.Literals([
 	"expired",
 	/** GitHub refused or couldn't be reached. */
 	"github",
-	/** The person declined on GitHub's page. */
+	/** The member declined on GitHub's page. */
 	"cancelled",
 ]);
 
@@ -31,7 +31,7 @@ export type GitHubSetupFailure = typeof gitHubSetupFailureSchema.Type;
 
 /**
  * A GitHub organization's login, for an app the organization owns; left out
- * for one the person owns.
+ * for one the member owns.
  */
 export const newGitHubAppSchema = Schema.Struct({
 	organization: Schema.optional(

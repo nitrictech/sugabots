@@ -1,6 +1,6 @@
 import type { Bot } from "@sugabots/contracts";
 import { InternalServerError } from "@sugabots/contracts/http";
-import { testPerson } from "@sugabots/contracts/testing";
+import { testMember } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -14,7 +14,7 @@ import { Effect } from "effect";
 import { type ReactNode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { findBot, useUpdateBot } from "@/lib/bots.ts";
-import { usePeopleReachingProject, useProjectBots } from "@/lib/projects.ts";
+import { useMembersReachingProject, useProjectBots } from "@/lib/projects.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import {
 	bots,
@@ -42,7 +42,7 @@ describe("findBot", () => {
 		assistant: false,
 	};
 
-	it("finds the person's own Personal Assistant by the handle every assistant shares", () => {
+	it("finds the member's own Personal Assistant by the handle every assistant shares", () => {
 		expect(findBot([someoneElses, ...bots, personalAssistant], "personal-assistant")).toBe(
 			personalAssistant,
 		);
@@ -53,33 +53,33 @@ describe("findBot", () => {
 	});
 });
 
-describe("making a bot private", () => {
+describe("making a bot personal", () => {
 	it("asks again who reaches the bot's default project", async () => {
-		const reachers = [sam, juno].map(({ id, name }) => testPerson({ id, name }));
-		client.api.projects.listPeople.mockReturnValue(Effect.succeed(reachers));
+		const reachers = [sam, juno].map(({ id, name }) => testMember({ id, name }));
+		client.api.projects.listMembersReaching.mockReturnValue(Effect.succeed(reachers));
 		client.api.bots.update.mockReturnValue(
-			Effect.succeed({ ...triager, visibility: "private" as const }),
+			Effect.succeed({ ...triager, visibility: "personal" as const }),
 		);
 		const { result } = renderHook(
 			() => ({
-				people: usePeopleReachingProject(triager.defaultProjectId),
+				members: useMembersReachingProject(triager.defaultProjectId),
 				update: useUpdateBot(triager.id),
 			}),
 			{ wrapper: InRoute },
 		);
-		await waitFor(() => expect(result.current.people.isSuccess).toBe(true));
-		client.api.projects.listPeople.mockReturnValue(Effect.succeed(reachers.slice(0, 1)));
+		await waitFor(() => expect(result.current.members.isSuccess).toBe(true));
+		client.api.projects.listMembersReaching.mockReturnValue(Effect.succeed(reachers.slice(0, 1)));
 
-		await act(() => result.current.update.mutateAsync({ visibility: "private" }));
+		await act(() => result.current.update.mutateAsync({ visibility: "personal" }));
 
-		await waitFor(() => expect(result.current.people.data).toEqual(reachers.slice(0, 1)));
+		await waitFor(() => expect(result.current.members.data).toEqual(reachers.slice(0, 1)));
 	});
 
 	it("takes it off the bots lists of the projects it was in", async () => {
 		const [project] = projects;
 		client.api.projects.listBots.mockReturnValue(Effect.succeed([triager, linear]));
 		client.api.bots.update.mockReturnValue(
-			Effect.succeed({ ...triager, visibility: "private" as const }),
+			Effect.succeed({ ...triager, visibility: "personal" as const }),
 		);
 		const { result } = renderHook(
 			() => ({
@@ -91,7 +91,7 @@ describe("making a bot private", () => {
 		await waitFor(() => expect(result.current.projectBots.isSuccess).toBe(true));
 		client.api.projects.listBots.mockReturnValue(Effect.succeed([linear]));
 
-		await act(() => result.current.update.mutateAsync({ visibility: "private" }));
+		await act(() => result.current.update.mutateAsync({ visibility: "personal" }));
 
 		await waitFor(() => expect(result.current.projectBots.data).toEqual([linear]));
 	});

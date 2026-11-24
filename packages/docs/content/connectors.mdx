@@ -6,7 +6,7 @@ description: Connect services like Linear and Notion to a bot or a project, so i
 A connector links a [project](/docs/projects) to a service through the
 [Model Context Protocol](https://modelcontextprotocol.io) (MCP). Once it's
 connected, the project's bots can use the service's tools, with the
-[approval](/docs/tools-and-approvals#tools-from-connectors) you choose. A
+[tool access](/docs/tools-and-approvals#tools-from-connectors) you choose. A
 connector can also be an [HTTP endpoint](#http-endpoints): a web API bots
 send requests to, or the project's own [GitHub app](#github).
 
@@ -20,12 +20,12 @@ A bot working in a project's chat uses the project's connectors and its
 own. When both have a connector with the same name, the project's is the one
 it uses. In its own chats, a bot uses just its own. When a bot
 [asks another for help](/docs/chats#bots-asking-bots), the other bot
-works with its own connectors.
+answers in the same chat, with the project's connectors and its own.
 
 ## Who manages them
 
 Whoever may change a project adds and manages its connectors, signs them in
-and chooses their tools' approvals: in a project people made, the owner and
+and chooses their tools' access: in a project members made, the owner and
 admins. Everyone in the project can see which connectors it has.
 
 A bot's own connectors are managed by its creator, the owner and admins, and
@@ -65,8 +65,8 @@ Choose **Something else**, then **Connect by URL**, and fill in:
   - **Sign in**: the server's own sign-in, which you complete next.
   - **Header**: a secret sent exactly as typed, in the header you name.
 
-Once Sugabots has found a connector's tools, each one starts at an
-[approval](/docs/tools-and-approvals#tools-from-connectors) that suits it, and
+Once Sugabots has found a connector's tools, each one starts at the
+[tool access](/docs/tools-and-approvals#tools-from-connectors) that suits it, and
 you can change it from the connector's settings.
 
 ## HTTP endpoints
@@ -93,7 +93,7 @@ to another address.
 
 The tools start with `get` on **Allow**, `delete` on **Off**, and the others on
 **Ask**. Set `post` to **Allow** for bots that should send without waiting for
-a person, such as from an [automation](/docs/automations).
+a member, such as from an [automation](/docs/automations).
 
 **Test connector** checks the address against the
 [network settings](/docs/configuration#network) again. It sends nothing to the

@@ -1,29 +1,29 @@
 import type { Participant } from "@sugabots/contracts";
 import type { HistoryState } from "@tanstack/react-router";
-import { botSettingsLink, personSettingsLink } from "@/lib/links.ts";
+import { botSettingsLink, memberSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useMemberships, useWorkspace } from "@/lib/workspace.ts";
 
-/** A message's author who has a page: a person or a bot. */
+/** A message's author who has a page: a member or a bot. */
 export type PagedAuthor = Exclude<Participant, { kind: "automation_trigger" }>;
 
 /**
  * Where an author's name leads, to spread into a `Link`, with its route
  * forgotten: a `Link` takes one route's options, not either of two, and
- * `botSettingsLink` and `personSettingsLink` have already checked each.
+ * `botSettingsLink` and `memberSettingsLink` have already checked each.
  */
 export interface AuthorLink {
 	from: "/$workspace";
 	to: string;
 	params: Readonly<Record<string, string>>;
-	/** For a person's page, which returns to the chat on Back. */
+	/** For a member's page, which returns to the chat on Back. */
 	state?: (state: HistoryState) => HistoryState;
 }
 
 /**
- * Where an author's name in a chat leads: a person's page among the
- * workspace's people, whose Back returns to it under `backLabel`, or a bot's
- * settings. Undefined until the memberships are loaded, and for a person who has
+ * Where an author's name in a chat leads: a member's page among the
+ * workspace's members, whose Back returns to it under `backLabel`, or a bot's
+ * settings. Undefined until the memberships are loaded, and for a member who has
  * left the workspace.
  */
 export function useAuthorLinks(backLabel: string): (author: PagedAuthor) => AuthorLink | undefined {
@@ -32,8 +32,8 @@ export function useAuthorLinks(backLabel: string): (author: PagedAuthor) => Auth
 	const backHere = useBackToHere(backLabel);
 	return (author) => {
 		if (author.kind === "bot") return botSettingsLink(author);
-		const membership = memberships.data?.find((one) => one.person.id === author.id);
+		const membership = memberships.data?.find((one) => one.member.id === author.id);
 		if (!membership) return undefined;
-		return { ...personSettingsLink(membership), state: backHere };
+		return { ...memberSettingsLink(membership), state: backHere };
 	};
 }

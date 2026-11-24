@@ -1,8 +1,8 @@
 import type { Participant } from "@sugabots/contracts";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 
-/** Somebody in a chat as their face: a bot's in its look, a person's picture or initials. */
+/** Somebody in a chat as their face: a bot's in its look, a member's picture or initials. */
 export function ParticipantAvatar({
 	participant,
 	size,
@@ -18,6 +18,6 @@ export function ParticipantAvatar({
 			size={size}
 		/>
 	) : (
-		<PersonAvatar person={participant} size={size} />
+		<MemberAvatar member={participant} size={size} />
 	);
 }

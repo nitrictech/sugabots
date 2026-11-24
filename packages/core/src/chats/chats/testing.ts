@@ -3,7 +3,7 @@ import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import type { Chats } from "./chats.ts";
 
 /**
- * Starts a chat with the bot `botId` from its first message, as people do:
+ * Starts a chat with the bot `botId` from its first message, as members do:
  * in the bot's default project.
  */
 export async function startBotChat(

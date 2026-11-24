@@ -5,9 +5,8 @@ import {
 	MAX_SEARCH_RESULTS,
 	type SearchOutcome,
 	type SearchRequest,
-} from "../../providers/search-providers/backends.ts";
+} from "../../providers/search-providers/provider-search.ts";
 import { automationTools } from "./automations/tool.ts";
-import { collaborateTool } from "./collaborate/tool.ts";
 import { fileTools } from "./files/tool.ts";
 import { webFetchTool } from "./web-fetch/tool.ts";
 import { webSearchTool } from "./web-search/tool.ts";
@@ -18,15 +17,6 @@ function unexpectedExecution(): never {
 
 const SETTINGS_PAGE = "https://sugabots.example/acme/settings/search";
 const fetchTool = webFetchTool({ fetchPage: unexpectedExecution });
-const collaborate = collaborateTool({
-	from: { chatId: "chat", botId: "bot", turnId: "turn", messageId: "message" },
-	collaborations: { open: unexpectedExecution, collectAnswer: unexpectedExecution },
-	bus: { subscribe: unexpectedExecution },
-	run: unexpectedExecution,
-	replyLength: unexpectedExecution,
-	noteCollaboration: unexpectedExecution,
-	signal: new AbortController().signal,
-});
 
 describe("native Effect tool schemas through the AI SDK", () => {
 	it.each([
@@ -34,11 +24,6 @@ describe("native Effect tool schemas through the AI SDK", () => {
 			schema: fetchTool.inputSchema,
 			valid: { url: "https://example.com" },
 			invalid: { url: "" },
-		},
-		{
-			schema: collaborate.inputSchema,
-			valid: { to: "Helper", brief: "Look" },
-			invalid: { to: "Helper", brief: "" },
 		},
 	])("validates tool input without executing it ($valid)", async ({ schema, valid, invalid }) => {
 		const sdkSchema = asSchema<unknown>(schema);
@@ -53,22 +38,9 @@ describe("native Effect tool schemas through the AI SDK", () => {
 					type: "string",
 					minLength: 1,
 					maxLength: 2_048,
-					description: "The full http or https address of the page",
 				},
 			},
 			required: ["url"],
-		});
-		expect(await asSchema(collaborate.inputSchema).jsonSchema).toMatchObject({
-			properties: {
-				to: { type: "string", description: "The other bot's name, exactly as listed" },
-				brief: {
-					type: "string",
-					minLength: 1,
-					maxLength: 20_000,
-					description: "What you need from them, with all the context they need",
-				},
-			},
-			required: ["to", "brief"],
 		});
 	});
 
@@ -116,14 +88,12 @@ describe("native Effect tool schemas through the AI SDK", () => {
 							type: "string",
 							minLength: 1,
 							maxLength: 400,
-							description: "What to search for, as you would type it",
 						},
 						count: {
 							type: "integer",
 							minimum: 1,
 							maximum: MAX_SEARCH_RESULTS,
 							default: 5,
-							description: "How many results to return",
 						},
 					},
 					required: ["query"],
@@ -158,7 +128,7 @@ describe("native Effect tool schemas through the AI SDK", () => {
 		),
 		...Object.entries(
 			automationTools({
-				bot: { botId: "bot", projectId: "project", askerId: "person" },
+				bot: { botId: "bot", projectId: "project", askerId: "member" },
 				timeZone: "UTC",
 				automations: {
 					list: unexpectedExecution,

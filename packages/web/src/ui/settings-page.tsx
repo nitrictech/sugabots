@@ -68,7 +68,7 @@ export function SettingsPage({
 	 * for a page opened from one beside it, such as a provider from Models.
 	 */
 	backOnWide?: boolean;
-	/** A control beside the title, such as Invite people. */
+	/** A control beside the title, such as Invite members. */
 	headerAction?: ReactNode;
 	children: ReactNode;
 }) {
@@ -136,7 +136,7 @@ export function SettingsPage({
 export const SETTINGS_CARD =
 	"overflow-hidden rounded-xl border border-settings-card-border bg-settings-card";
 
-/** The outlined + beside a page's title that adds to it: Invite people, New bot. */
+/** The outlined + beside a page's title that adds to it: Invite members, New bot. */
 export function SettingsAddButton({
 	children,
 	onClick,
@@ -186,7 +186,7 @@ export function SettingsGroup({
 	description?: ReactNode;
 	/** A line after the rows: what follows from them. */
 	note?: ReactNode;
-	/** A control at the right of the label, such as Invite people. */
+	/** A control at the right of the label, such as Invite members. */
 	action?: ReactNode;
 	/** 3 under a page's title; 2 where the groups sit straight under the screen's heading. */
 	headingLevel?: 2 | 3;

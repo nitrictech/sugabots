@@ -15,7 +15,7 @@ const meta = preview.meta({
 	args: { onOpenChange: fn() },
 	render: (args) => (
 		<DropdownMenu {...args}>
-			<DropdownMenuTrigger render={<Button variant="secondary">Add people</Button>} />
+			<DropdownMenuTrigger render={<Button variant="secondary">Add members</Button>} />
 			<DropdownMenuContent className="min-w-52">
 				<DropdownMenuItem>Jay Young</DropdownMenuItem>
 				<DropdownMenuItem>Mara Kent</DropdownMenuItem>
@@ -29,7 +29,7 @@ const meta = preview.meta({
 /** Closed: only its trigger. */
 export const Closed = meta.story({
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("button", { name: "Add people" })).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Add members" })).toBeInTheDocument();
 		await expect(screen.queryByRole("menu")).toBeNull();
 	},
 });
@@ -37,7 +37,7 @@ export const Closed = meta.story({
 /** Open: items, one disabled, and a destructive item in red. */
 export const Open = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Add people" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Add members" }));
 		const menu = await screen.findByRole("menu");
 		await expect(menu).toBeInTheDocument();
 		await expect(screen.getByRole("menuitem", { name: "Remove everyone" })).toBeInTheDocument();

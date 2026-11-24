@@ -16,12 +16,12 @@ import {
  * ones it refuses.
  */
 
-const owner = "workflow-execution-1";
+const executionId = "workflow-execution-1";
 const providerDown = userText`The model provider could not answer.`;
 
 const facts = {
-	owner,
-	cancelRequested: false,
+	executionId,
+	interruptRequested: false,
 	runs: 1,
 	checkpointed: false,
 	writeOrDeleteStarted: false,
@@ -38,7 +38,7 @@ function failedTurn(overrides: Partial<typeof facts> = {}): TurnState {
 }
 
 const reopen = (state: TurnState, uncertainWriteOrDelete = false) =>
-	transition(state, TurnEvent.Reopen({ owner, uncertainWriteOrDelete }));
+	transition(state, TurnEvent.Reopen({ executionId, uncertainWriteOrDelete }));
 
 describe("reopening a turn for another run", () => {
 	it("starts the reply again for a turn that failed", () => {
@@ -59,7 +59,7 @@ describe("reopening a turn for another run", () => {
 
 	it("refuses to resume a suspended turn for another workflow", () => {
 		expect(
-			reopen(turn({ status: "waiting", checkpointed: true, owner: "another-execution" })),
+			reopen(turn({ status: "waiting", checkpointed: true, executionId: "another-execution" })),
 		).toMatchObject({ _tag: "Refused" });
 	});
 
@@ -69,9 +69,9 @@ describe("reopening a turn for another run", () => {
 	});
 
 	it("ends as cancelled a turn somebody asked to stop", () => {
-		expect(reopen(turn({ cancelRequested: true }))).toEqual({
+		expect(reopen(turn({ interruptRequested: true }))).toEqual({
 			_tag: "Next",
-			state: turn({ status: "cancelled", cancelRequested: true }),
+			state: turn({ status: "cancelled", interruptRequested: true }),
 			followUp: FollowUp.End({ userMessage: TURN_CANCELLED }),
 		});
 	});
@@ -117,7 +117,9 @@ describe("suspending for approvals", () => {
 	});
 
 	it("refuses a turn somebody asked to stop, or one no longer running", () => {
-		expect(transition(turn({ cancelRequested: true }), TurnEvent.Suspend())._tag).toBe("Refused");
+		expect(transition(turn({ interruptRequested: true }), TurnEvent.Suspend())._tag).toBe(
+			"Refused",
+		);
 		expect(transition(failedTurn(), TurnEvent.Suspend())._tag).toBe("Refused");
 	});
 });
@@ -174,7 +176,7 @@ describe("cancelling", () => {
 			transition(turn({ status: "waiting", checkpointed: true }), TurnEvent.CancelWaiting()),
 		).toEqual({
 			_tag: "Next",
-			state: turn({ status: "cancelled", cancelRequested: true }),
+			state: turn({ status: "cancelled", interruptRequested: true }),
 			followUp: FollowUp.End({ userMessage: TURN_CANCELLED }),
 		});
 		expect(transition(turn(), TurnEvent.CancelWaiting())._tag).toBe("Refused");
@@ -183,12 +185,12 @@ describe("cancelling", () => {
 	it("cancels a waiting turn when its automation run ends, and only asks a running one to stop", () => {
 		expect(transition(turn({ status: "waiting" }), TurnEvent.AutomationEnded())).toEqual({
 			_tag: "Next",
-			state: turn({ status: "cancelled", cancelRequested: true }),
+			state: turn({ status: "cancelled", interruptRequested: true }),
 			followUp: FollowUp.End({ userMessage: RUN_ENDED }),
 		});
 		expect(transition(turn(), TurnEvent.AutomationEnded())).toEqual({
 			_tag: "Next",
-			state: turn({ cancelRequested: true }),
+			state: turn({ interruptRequested: true }),
 			followUp: FollowUp.AnnounceCancelRequest(),
 		});
 	});

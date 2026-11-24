@@ -1,13 +1,13 @@
 import { PgClient } from "@effect/sql-pg";
 import { Config, Duration, Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { DurableDeferred } from "effect/unstable/workflow";
+import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
 import { describe, expect, it } from "vitest";
 import { conformance, Go, goToken, Suspending, start } from "./conformance.ts";
 import { WorkflowEngines } from "./engine.ts";
 
 describe("the memory engine", () => {
-	conformance({ engine: () => WorkflowEngines.memory, durable: false });
+	conformance({ engine: () => WorkflowEngine.layerMemory, durable: false });
 });
 
 // Each test starts the engine, which sets up its tables and takes its locks,
@@ -23,7 +23,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 	},
 	() => {
 		const singleRunner = () =>
-			WorkflowEngines.singleRunner.pipe(
+			WorkflowEngines.singleRunnerWith({ hostLockWait: Duration.seconds(30) }).pipe(
 				Layer.provide(PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") })),
 			);
 

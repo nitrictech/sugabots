@@ -1,5 +1,5 @@
 import { START_CHAT_TOOL } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import { testMember } from "@sugabots/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { describeToolCall } from "../store/message-text.ts";
 import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
@@ -17,7 +17,7 @@ const environment = (overrides: Partial<TurnEnvironment> = {}): TurnEnvironment 
 });
 
 describe("modelPrompt", () => {
-	it("maps people and other bots to attributed user messages", () => {
+	it("maps members and other bots to attributed user messages", () => {
 		const prompt = modelPrompt(context(), environment());
 
 		expect(prompt.system).toContain("You are Host Bot (@host-bot), a bot in workspace Suga.");
@@ -37,17 +37,17 @@ describe("modelPrompt", () => {
 		const instruction = prompt.messages.at(-1);
 		expect(instruction?.role).toBe("user");
 		expect(instruction?.content).toContain(
-			"In it now: Sam (@sam, person), Host Bot (@host-bot, bot), Reviewer (@reviewer, bot).",
+			"In it now: Sam (@sam, member), Host Bot (@host-bot, bot), Reviewer (@reviewer, bot).",
 		);
 		expect(instruction?.content).toContain(
 			"It is your turn as the bot this chat was addressed to.",
 		);
-		expect(prompt.system).not.toContain("Sam (@sam, person)");
+		expect(prompt.system).not.toContain("Sam (@sam, member)");
 	});
 
-	it("lists potential collaborators, and tells one why its chat exists", () => {
+	it("lists the bots it may ask for help, and how mentioning one asks it", () => {
 		const asking = context();
-		asking.collaborators = [
+		asking.botsToAsk = [
 			{
 				id: "0199a3a0-0000-7000-8000-000000000005",
 				name: "Reviewer",
@@ -63,25 +63,23 @@ describe("modelPrompt", () => {
 		];
 		const instruction = () => modelPrompt(asking, environment()).messages.at(-1)?.content ?? "";
 		expect(instruction()).toContain(
-			"Other bots in this workspace, and what each one knows:\n- Reviewer (@reviewer): Checks facts.\n- Scout (@scout)",
+			"Other bots in this project you can ask for help, and what each one knows:\n- Reviewer (@reviewer): Checks facts.\n- Scout (@scout)",
 		);
-		expect(instruction()).toContain("Use the collaborate tool when you need another bot's answer");
-		expect(instruction()).not.toContain("callout tool");
+		expect(instruction()).toContain("To ask one, mention it as @handle in your reply");
 		expect(modelPrompt(context(), environment()).messages.at(-1)?.content).not.toContain(
-			"collaborate tool",
+			"mention it as @handle",
 		);
 
-		const collaboration = context();
-		collaboration.chat.kind = "collaboration";
-		collaboration.chat.parentChatId = "0199a3a0-0000-7000-8000-000000000010";
-		expect(modelPrompt(collaboration, environment()).system).toContain(
-			"Another bot opened this chat",
-		);
-		// A bot's chat somebody started from a project's chat hangs off it, but no bot asked for it.
-		const fromChat = context();
-		fromChat.chat.parentChatId = "0199a3a0-0000-7000-8000-000000000010";
-		expect(modelPrompt(fromChat, environment()).system).not.toContain(
-			"Another bot opened this chat",
+		asking.reason = "hand_back";
+		expect(instruction()).toContain("Other bots in this project you have not asked yet");
+		expect(instruction()).toContain("the bots you asked for help have all replied");
+	});
+
+	it("tells a bot asked for help that its own mentions ask nobody", () => {
+		const helper = context();
+		helper.reason = "collaboration";
+		expect(modelPrompt(helper, environment()).messages.at(-1)?.content).toContain(
+			"Bots you mention now aren't asked",
 		);
 	});
 
@@ -99,12 +97,12 @@ describe("modelPrompt", () => {
 		expect(instruction).not.toContain("You are in one of your chats");
 	});
 
-	it("tells the bot who can reach it: everyone, its creator, or its person", () => {
+	it("tells the bot who can reach it: everyone, its creator, or its member", () => {
 		const promptFor = (bot: Partial<TurnContext["bot"]>) =>
 			modelPrompt({ ...context(), bot: { ...context().bot, ...bot } }, environment()).system;
 		expect(promptFor({ visibility: "public" })).toContain("You are public");
-		expect(promptFor({ visibility: "private" })).toContain("You are private");
-		expect(promptFor({ visibility: "private", assistantOf: crypto.randomUUID() })).toContain(
+		expect(promptFor({ visibility: "personal" })).toContain("You are a personal bot");
+		expect(promptFor({ visibility: "personal", assistantOf: crypto.randomUUID() })).toContain(
 			"You are a Personal Assistant",
 		);
 	});
@@ -136,7 +134,7 @@ describe("modelPrompt", () => {
 
 		const searching = instruction(["web_fetch", "web_search"]);
 		expect(searching).toContain("Current time: Friday, 25 September 2026, 03:00 UTC.");
-		expect(searching).toContain("You don't know the person's own timezone");
+		expect(searching).toContain("You don't know the member's own timezone");
 		expect(searching).not.toContain("You cannot search the web");
 
 		const fetchingOnly = instruction(["web_fetch"]);
@@ -148,7 +146,7 @@ describe("modelPrompt", () => {
 		expect(noTools).toContain("You cannot search the web");
 	});
 
-	it("gives the time where its automations run, named as people say it, so it need not ask", () => {
+	it("gives the time where its automations run, named as members say it, so it need not ask", () => {
 		const instruction = (disabledTools: string[]) =>
 			modelPrompt(
 				{
@@ -165,7 +163,7 @@ describe("modelPrompt", () => {
 		expect(instruction([])).toContain(
 			'naming the zone once when you confirm when it runs ("8am Sydney time")',
 		);
-		expect(instruction([])).toContain("Don't ask the person for their timezone");
+		expect(instruction([])).toContain("Don't ask the member for their timezone");
 		expect(instruction(["automations"])).not.toContain("Routines you set up");
 	});
 
@@ -199,7 +197,7 @@ describe("modelPrompt", () => {
 					output: { title: "Example Domain", text: page },
 					status: "completed",
 					error: null,
-					writeOrDelete: false,
+					approval: null,
 					atOffset: 8,
 					startedAt: "2026-09-14T00:00:00.000Z",
 					finishedAt: "2026-09-14T00:00:01.000Z",
@@ -212,7 +210,7 @@ describe("modelPrompt", () => {
 					output: null,
 					status: "failed",
 					error: "No search provider",
-					writeOrDelete: false,
+					approval: null,
 					atOffset: 8,
 					startedAt: "2026-09-14T00:00:00.000Z",
 					finishedAt: "2026-09-14T00:00:01.000Z",
@@ -244,7 +242,7 @@ describe("modelPrompt", () => {
 			output: { tools: [{ tool: "wiki__lookup", inputSchema: { type: "object" } }] },
 			status: "completed",
 			error: null,
-			writeOrDelete: false,
+			approval: null,
 			atOffset: 0,
 			startedAt: "2026-09-14T00:00:00.000Z",
 			finishedAt: "2026-09-14T00:00:01.000Z",
@@ -277,7 +275,7 @@ describe("modelPrompt", () => {
 					},
 					status: "completed",
 					error: null,
-					writeOrDelete: false,
+					approval: null,
 					atOffset: 0,
 					startedAt: "2026-09-14T00:00:00.000Z",
 					finishedAt: "2026-09-14T00:00:01.000Z",
@@ -311,7 +309,7 @@ describe("modelPrompt", () => {
 					output: "line\n".repeat(20_000),
 					status: "completed",
 					error: null,
-					writeOrDelete: false,
+					approval: null,
 					atOffset: 0,
 					startedAt: "2026-09-14T00:00:00.000Z",
 					finishedAt: "2026-09-14T00:00:01.000Z",
@@ -325,7 +323,7 @@ describe("modelPrompt", () => {
 		expect(history).toContain(`kept as file ${fileId}, which read_chat_file reads`);
 	});
 
-	it("tells the bot which message a person's reply quotes", () => {
+	it("tells the bot which message a member's reply quotes", () => {
 		const input = context();
 		const [question, , finding] = input.messages;
 		if (!question || !finding) throw new Error("Context fixture has no messages to reply with");
@@ -347,7 +345,7 @@ describe("modelPrompt", () => {
 		);
 	});
 
-	it("writes people's reactions where they happened, so later turns only add to the history", () => {
+	it("writes members' reactions where they happened, so later turns only add to the history", () => {
 		const input = context();
 		const [question, answer, finding] = input.messages;
 		if (!question || !answer || !finding) throw new Error("Context fixture has no messages");
@@ -358,7 +356,7 @@ describe("modelPrompt", () => {
 				reactions: [
 					{
 						emoji: "👀",
-						people: [{ id: SAM, name: "Sam", at: "2026-09-10T04:01:30.000Z" }],
+						members: [{ id: SAM, name: "Sam", at: "2026-09-10T04:01:30.000Z" }],
 					},
 				],
 			},
@@ -367,7 +365,7 @@ describe("modelPrompt", () => {
 				reactions: [
 					{
 						emoji: "🎉",
-						people: [{ id: SAM, name: "Sam", at: "2026-09-10T04:05:00.000Z" }],
+						members: [{ id: SAM, name: "Sam", at: "2026-09-10T04:05:00.000Z" }],
 					},
 				],
 			},
@@ -386,11 +384,11 @@ describe("modelPrompt", () => {
 		]);
 	});
 
-	it("lists the files a person attached after what they wrote, even with nothing written", () => {
+	it("lists the files a member attached after what they wrote, even with nothing written", () => {
 		const input = context();
 		const asked = input.messages[0];
 		if (!asked) {
-			throw new Error("Context fixture has no person's message");
+			throw new Error("Context fixture has no member's message");
 		}
 		const report = {
 			type: "file",
@@ -419,7 +417,7 @@ ${line}`,
 		const input = context();
 		const asked = input.messages[0];
 		if (!asked) {
-			throw new Error("Context fixture has no person's message");
+			throw new Error("Context fixture has no member's message");
 		}
 		const chart = {
 			type: "file",
@@ -525,32 +523,6 @@ Say hello`,
 			expect.objectContaining({ content: expect.stringContaining("Migration is present.") }),
 		]);
 	});
-
-	it("excludes incomplete assistant output", () => {
-		const input = context();
-		const assistantMessage = input.messages[1];
-		if (!assistantMessage) {
-			throw new Error("Context fixture has no assistant message");
-		}
-		input.messages.push(
-			...(["failed", "cancelled", "writing"] as const).map((status, index) => ({
-				...assistantMessage,
-				id: `0199a3a0-0000-7000-8000-00000000001${index}`,
-				status,
-				content: `${status} partial answer`,
-				parts: [{ type: "text" as const, text: `${status} partial answer` }],
-			})),
-		);
-
-		const prompt = modelPrompt(input, environment());
-
-		expect(prompt.system).toContain(
-			"Platform event log messages are application-generated records",
-		);
-		expect(prompt.messages).not.toContainEqual(
-			expect.objectContaining({ content: expect.stringContaining("partial answer") }),
-		);
-	});
 });
 
 function context(): TurnContext {
@@ -561,14 +533,13 @@ function context(): TurnContext {
 			title: "Check the release",
 			kind: "project_chat",
 			botId: "0199a3a0-0000-7000-8000-000000000003",
-			parentChatId: null,
 		},
 		bot: {
 			id: "0199a3a0-0000-7000-8000-000000000003",
 			name: "Host Bot",
 			handle: "host-bot",
 			model: "claude-sonnet-4-20250514",
-			prompt: "Check facts carefully.",
+			instructions: "Check facts carefully.",
 			disabledTools: [],
 			usesComputer: false,
 			naturalBrowsing: false,
@@ -589,9 +560,9 @@ function context(): TurnContext {
 		workspaceTimeZone: "UTC",
 		askerId: null,
 		startedFor: null,
-		collaborators: [],
+		botsToAsk: [],
 		participants: [
-			testPerson({ id: "0199a3a0-0000-7000-8000-000000000004", name: "Sam" }),
+			testMember({ id: "0199a3a0-0000-7000-8000-000000000004", name: "Sam" }),
 			{
 				kind: "bot",
 				id: "0199a3a0-0000-7000-8000-000000000003",
@@ -615,8 +586,7 @@ function context(): TurnContext {
 			{
 				id: "0199a3a0-0000-7000-8000-000000000006",
 				chatId: "0199a3a0-0000-7000-8000-000000000001",
-				author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000004", name: "Sam" }),
-				kind: "text",
+				author: testMember({ id: "0199a3a0-0000-7000-8000-000000000004", name: "Sam" }),
 				status: "complete",
 				parts: [{ type: "text", text: "Check the release" }],
 				content: "Check the release",
@@ -634,7 +604,6 @@ function context(): TurnContext {
 					eyes: "pill",
 					shape: "circle",
 				},
-				kind: "text",
 				status: "complete",
 				parts: [{ type: "text", text: "I am checking it." }],
 				content: "I am checking it.",
@@ -652,7 +621,6 @@ function context(): TurnContext {
 					eyes: "dot",
 					shape: "circle",
 				},
-				kind: "text",
 				status: "complete",
 				parts: [{ type: "text", text: "Migration is present." }],
 				content: "Migration is present.",

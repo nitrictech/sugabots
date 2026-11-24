@@ -21,9 +21,8 @@ describe("chat contracts", () => {
 
 	const historyEntry = {
 		chatId: ID,
-		parentChatId: null,
-		kind: "collaboration",
-		title: "Summary",
+		kind: "run",
+		title: "Overnight review",
 		participants: [],
 		status: "completed",
 		automationRun: null,
@@ -32,13 +31,16 @@ describe("chat contracts", () => {
 	const decodeHistory = (entry: object) =>
 		Schema.decodeUnknownResult(chatHistoryPageSchema)({ items: [entry], nextCursor: null })._tag;
 
-	it("accepts a collaboration in the history", () => {
+	it("accepts an automation run in the history", () => {
 		expect(decodeHistory(historyEntry)).toBe("Success");
 	});
 
-	it.each(["project_chat", "system_chat"])("keeps %s chats out of the history", (kind) => {
-		expect(decodeHistory({ ...historyEntry, kind })).toBe("Failure");
-	});
+	it.each(["project_chat", "system_chat", "collaboration"])(
+		"keeps %s chats out of the history",
+		(kind) => {
+			expect(decodeHistory({ ...historyEntry, kind })).toBe("Failure");
+		},
+	);
 
 	it("accepts an automation run in the Chat timeline", () => {
 		expect(

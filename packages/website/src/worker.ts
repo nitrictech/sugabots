@@ -29,7 +29,7 @@ export default {
 	async fetch(request: Request, env: Env) {
 		const { pathname } = new URL(request.url);
 		if (pathname === DISCORD_PATH || pathname === `${DISCORD_PATH}/`) {
-			// Temporary, so browsers don't keep sending people to a replaced invite.
+			// Temporary, so browsers don't keep sending members to a replaced invite.
 			return Response.redirect(DISCORD_INVITE, 302);
 		}
 		// Files such as images, scripts and `llms.txt` are served as they are.

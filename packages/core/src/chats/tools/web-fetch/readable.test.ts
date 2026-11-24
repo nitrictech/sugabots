@@ -38,7 +38,7 @@ describe("readablePage", () => {
 					<li><h3><a href="/nitrictech/sugapack">sugapack</a></h3><p>A remote buildkit frontend that wraps railpack.</p><span>Go</span></li>
 				</ul>
 			</main>
-			<aside>People: 6</aside>
+			<aside>Members: 6</aside>
 			<footer>© GitHub</footer>
 		</body></html>`;
 
@@ -50,7 +50,7 @@ describe("readablePage", () => {
 		expect(page.markdown).toContain("A multi-language framework for cloud applications.");
 		expect(page.markdown).not.toContain("[](");
 		expect(page.markdown).not.toContain("Explore");
-		expect(page.markdown).not.toContain("People: 6");
+		expect(page.markdown).not.toContain("Members: 6");
 		expect(page.markdown).not.toContain("© GitHub");
 	});
 

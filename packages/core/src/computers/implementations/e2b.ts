@@ -111,7 +111,7 @@ export const fromE2b = (access: Computers.E2bAccess, ids: Ids.Interface): Comput
 					Effect.tryPromise({
 						try: async () => {
 							await sandbox.commands.run(
-								`mkdir -p ${Computers.WORKSPACE_DIRECTORY} && chown ${BOT_USER}: ${Computers.WORKSPACE_DIRECTORY}`,
+								`mkdir -p ${Computers.WORK_DIRECTORY} && chown ${BOT_USER}: ${Computers.WORK_DIRECTORY}`,
 								{ user: "root" },
 							);
 							return toComputer(sandbox);
@@ -218,11 +218,6 @@ export const fromE2b = (access: Computers.E2bAccess, ids: Ids.Interface): Comput
 							...networkRulesOf(network.reach),
 							rules: credentialRules(network.credentials),
 						});
-						await sandbox.files.write(
-							Computers.NETWORK_ENVIRONMENT_FILE,
-							Computers.environmentScript(network.environment),
-							{ user: "root" },
-						);
 					},
 					catch: unavailable,
 				}),
@@ -246,7 +241,7 @@ async function run(
 	});
 	try {
 		await sandbox.commands.run(Computers.keepingOutputEnd(command, options.maxOutputCharacters), {
-			cwd: options.cwd ?? Computers.WORKSPACE_DIRECTORY,
+			cwd: options.cwd ?? Computers.WORK_DIRECTORY,
 			user: BOT_USER,
 			envs: { ...options.env },
 			timeoutMs: Duration.toMillis(timeout),

@@ -19,9 +19,8 @@ import { CurrentActor } from "./current-actor.ts";
 
 /**
  * What the current actor can see. A project's chats are seen by the
- * people in it; a bot, and its chats and automations, by whoever reaches the
- * bot; and a collaboration by whoever sees the chat it was opened
- * from. Lists are scoped by
+ * members in it; and a bot, and its chats and automations, by whoever reaches
+ * the bot. Lists are scoped by
  * `reachesProjectFor`, `reachesBotFor` and `reachesChatFor`, the rules
  * `Authorization` checks for one project, bot or chat written as SQL, so a
  * list holds what reading each one directly would allow.
@@ -37,7 +36,7 @@ export interface Interface {
 	readonly chatStanding: (
 		chatId: string,
 	) => Effect.Effect<ChatStanding, ResourceHidden, CurrentActor.Service>;
-	/** The chat people open by its id: one of the `OPENABLE_CHAT_KINDS`. */
+	/** The chat members open by its id: one of the `OPENABLE_CHAT_KINDS`. */
 	readonly chat: (
 		chatId: string,
 	) => Effect.Effect<schema.PlacedChatRow, ResourceHidden, CurrentActor.Service>;
@@ -62,31 +61,31 @@ export const make = Effect.gen(function* () {
 	return Service.of({
 		reachesProject: Effect.map(
 			CurrentActor.Service,
-			({ personId }) =>
+			({ memberId }) =>
 				(projectId) =>
-					reachesProjectFor(projectId, personId),
+					reachesProjectFor(projectId, memberId),
 		),
 
 		reachesBot: Effect.map(
 			CurrentActor.Service,
-			({ personId }) =>
+			({ memberId }) =>
 				(botId) =>
-					reachesBotFor(botId, personId),
+					reachesBotFor(botId, memberId),
 		),
 
 		reachesChat: Effect.map(
 			CurrentActor.Service,
-			({ personId }) =>
+			({ memberId }) =>
 				(row) =>
-					reachesChatFor(row, personId),
+					reachesChatFor(row, memberId),
 		),
 
 		chatStanding: (chatId) =>
 			operation(
 				"chatStanding",
 				Effect.gen(function* () {
-					const { personId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => chatStandingFor(db, chatId, personId));
+					const { memberId } = yield* CurrentActor.Service;
+					const standing = yield* query((db) => chatStandingFor(db, chatId, memberId));
 					if (!standing) return yield* new ResourceHidden({ resource: "chat" });
 					return standing;
 				}),
@@ -96,7 +95,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"chat",
 				Effect.gen(function* () {
-					const { personId } = yield* CurrentActor.Service;
+					const { memberId } = yield* CurrentActor.Service;
 					const [row] = isUuid(chatId)
 						? yield* query((db) =>
 								db
@@ -106,7 +105,7 @@ export const make = Effect.gen(function* () {
 										and(
 											eq(placedChat.id, chatId),
 											inArray(placedChat.kind, [...OPENABLE_CHAT_KINDS]),
-											reachesChatFor(placedChat, personId),
+											reachesChatFor(placedChat, memberId),
 										),
 									)
 									.limit(1),

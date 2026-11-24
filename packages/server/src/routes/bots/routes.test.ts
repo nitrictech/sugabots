@@ -7,8 +7,8 @@ import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administra
 import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
-import type { PersonResolver } from "../../http/app.test-support.ts";
-import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
+import type { MemberResolver } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy, signedInWith } from "../../http/app.test-support.ts";
 
 /**
  * The bot routes, over doubles of `BotAdministration`. Who may do what to
@@ -17,7 +17,7 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000101";
 const BOT = "0199a3a0-0000-7000-8000-000000000201";
-const PERSON = "0199a3a0-0000-7000-8000-000000000002";
+const MEMBER = "0199a3a0-0000-7000-8000-000000000002";
 const MODEL = "gpt-4o-mini";
 
 const bot: Bot = {
@@ -30,7 +30,7 @@ const bot: Bot = {
 	eyes: "pill",
 	shape: "circle",
 	model: MODEL,
-	prompt: "",
+	instructions: "",
 	disabledTools: [],
 	usesComputer: false,
 	naturalBrowsing: false,
@@ -57,8 +57,8 @@ const bot: Bot = {
 	createdAt: "2026-09-10T00:00:00.000Z",
 };
 
-const resolvePerson: PersonResolver = async () => ({
-	id: PERSON,
+const resolveMember: MemberResolver = async () => ({
+	id: MEMBER,
 	name: "Sam",
 	email: "sam@example.com",
 	image: null,
@@ -67,13 +67,13 @@ const resolvePerson: PersonResolver = async () => ({
 /** The app with `bots` as the only bot methods it has. */
 const app = (bots: Partial<BotAdministration.Interface> = {}) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolvePerson), unimplemented(BotAdministration.Service, bots)),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(BotAdministration.Service, bots)),
 	);
 
 const auth = (body?: unknown): RequestInit => ({
 	method: body === undefined ? "GET" : "POST",
 	headers: {
-		authorization: "Bearer sam",
+		...signedInWith("sam"),
 		...(body === undefined ? {} : { "content-type": "application/json" }),
 	},
 	body: body === undefined ? undefined : JSON.stringify(body),
@@ -94,12 +94,12 @@ describe("bot routes", () => {
 		expect(await response.json()).toEqual([bot]);
 	});
 
-	it("creates a bot in the workspace it is posted to, as the person asking", async () => {
+	it("creates a bot in the workspace it is posted to, as the member asking", async () => {
 		let created: unknown;
 		const response = await app({
 			create: (input) =>
-				Effect.map(CurrentActor.Service, ({ personId }) => {
-					created = { ...input, personId };
+				Effect.map(CurrentActor.Service, ({ memberId }) => {
+					created = { ...input, memberId };
 					return bot;
 				}),
 		}).request(`/workspaces/${WORKSPACE}/bots`, auth({ name: "Writer", model: MODEL }));
@@ -108,7 +108,7 @@ describe("bot routes", () => {
 		expect(created).toEqual({
 			workspace: WORKSPACE,
 			bot: { name: "Writer", model: MODEL },
-			personId: PERSON,
+			memberId: MEMBER,
 		});
 	});
 
@@ -138,12 +138,12 @@ describe("bot routes", () => {
 		});
 	});
 
-	it("pins and unpins the bot in the path for the person asking", async () => {
+	it("pins and unpins the bot in the path for the member asking", async () => {
 		const asked: unknown[] = [];
 		const routes = app({
 			setPinned: (input) =>
-				Effect.map(CurrentActor.Service, ({ personId }) => {
-					asked.push({ ...input, personId });
+				Effect.map(CurrentActor.Service, ({ memberId }) => {
+					asked.push({ ...input, memberId });
 					return { ...bot, pinned: input.pinned };
 				}),
 		});
@@ -156,18 +156,18 @@ describe("bot routes", () => {
 		expect(unpinned.status).toBe(200);
 		expect(await unpinned.json()).toMatchObject({ pinned: false });
 		expect(asked).toEqual([
-			{ botId: BOT, pinned: true, personId: PERSON },
-			{ botId: BOT, pinned: false, personId: PERSON },
+			{ botId: BOT, pinned: true, memberId: MEMBER },
+			{ botId: BOT, pinned: false, memberId: MEMBER },
 		]);
 	});
 
-	it("returns the person's Personal Assistant in the workspace in the path", async () => {
+	it("returns the member's Personal Assistant in the workspace in the path", async () => {
 		let asked: unknown;
 		const response = await app({
 			ensureAssistant: (input) =>
 				Effect.sync(() => {
 					asked = input;
-					return { ...bot, assistant: true, visibility: "private" as const };
+					return { ...bot, assistant: true, visibility: "personal" as const };
 				}),
 		}).request(`/workspaces/${WORKSPACE}/assistant`, auth({ model: MODEL }));
 

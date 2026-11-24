@@ -14,7 +14,7 @@ import { Files } from "./files.ts";
  * origin of their own, so a page shares nothing with the app: not its
  * cookies, not its site, not its process. The content origin has no session,
  * so a page is reached by an address that carries its own permission: a
- * sealed token naming the page, given out to someone who may read it and
+ * token naming the page, encrypted for that one use, given out to someone who may read it and
  * good for a few minutes.
  */
 export interface Interface {
@@ -53,12 +53,12 @@ export const make = Effect.gen(function* () {
 						return yield* new ResourceHidden({ resource: "file" });
 					}
 					const now = yield* DateTime.nowAsDate;
-					const sealed: PageAddress = {
+					const address: PageAddress = {
 						fileId: at.fileId,
 						version: at.version,
 						expiresAt: now.getTime() + ADDRESS_LIFETIME_MS,
 					};
-					const token = secrets.encrypt(JSON.stringify(sealed), SECRET_PURPOSE);
+					const token = secrets.encrypt(JSON.stringify(address), SECRET_PURPOSE);
 					return `${contentOrigin}${PAGE_PATH}/${token}`;
 				}),
 			),
@@ -67,7 +67,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"open",
 				Effect.gen(function* () {
-					const sealed = yield* Effect.try({
+					const address = yield* Effect.try({
 						try: () =>
 							Schema.decodeUnknownSync(pageAddressSchema)(
 								JSON.parse(secrets.decrypt(token, SECRET_PURPOSE)),
@@ -75,8 +75,8 @@ export const make = Effect.gen(function* () {
 						catch: () => new PageUnavailable(),
 					});
 					const now = yield* DateTime.nowAsDate;
-					if (sealed.expiresAt <= now.getTime()) return yield* new PageUnavailable();
-					const shown = yield* readVersion(sealed.fileId, sealed.version);
+					if (address.expiresAt <= now.getTime()) return yield* new PageUnavailable();
+					const shown = yield* readVersion(address.fileId, address.version);
 					if (shown?.kind !== "html") return yield* new PageUnavailable();
 					return { title: shown.title, html: shown.content };
 				}),
@@ -99,7 +99,7 @@ interface Page {
 	html: string;
 }
 
-/** What page addresses are sealed for, so no other value sealed with the same key opens as one. */
+/** The use page addresses are encrypted for, so no other value encrypted with the same key opens as one. */
 export const SECRET_PURPOSE = "file-page-address";
 
 const pageAddressSchema = Schema.Struct({

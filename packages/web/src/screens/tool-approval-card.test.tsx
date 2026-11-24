@@ -22,6 +22,7 @@ function asking(
 	input: ToolCallPart["input"],
 	approval: ToolCallPart["approval"] = {
 		status: "pending",
+		approvers: "chat",
 		decidedByName: null,
 		decidedAt: null,
 	},
@@ -34,7 +35,6 @@ function asking(
 		output: null,
 		status: "awaiting_approval",
 		error: null,
-		writeOrDelete: true,
 		atOffset: 0,
 		startedAt: "2026-09-18T09:00:00.000Z",
 		finishedAt: null,
@@ -97,7 +97,12 @@ describe("an approval request", () => {
 		recorded({
 			...asking(
 				{ team: "Platform" },
-				{ status: "allowed", decidedByName: "You", decidedAt: "2026-09-18T09:01:00.000Z" },
+				{
+					status: "allowed",
+					approvers: "chat",
+					decidedByName: "You",
+					decidedAt: "2026-09-18T09:01:00.000Z",
+				},
 			),
 			status: "running",
 		});
@@ -184,7 +189,12 @@ describe("an approval request", () => {
 			show(
 				asking(
 					{ team: "Platform" },
-					{ status, decidedByName: "Mia Chen", decidedAt: "2026-09-18T09:01:00.000Z" },
+					{
+						status,
+						approvers: "chat",
+						decidedByName: "Mia Chen",
+						decidedAt: "2026-09-18T09:01:00.000Z",
+					},
 				),
 			);
 

@@ -52,6 +52,7 @@ const wiki: TestConnector = {
 		email: "sam@example.com",
 		image: null,
 	},
+	signedInAs: null,
 	createdAt: "2026-09-14T00:00:00.000Z",
 };
 
@@ -142,12 +143,31 @@ describe("a bot's Connectors page", () => {
 	});
 
 	it("says on a connector's page who it is signed in as, or offers to sign it in", async () => {
-		serveConnectors({ ...wiki, auth: "oauth", signedIn: true, secretHeader: null });
+		// Kim signed in the connector Sam added.
+		const kim = {
+			id: "0199a3a0-0000-7000-8000-0000000000c2",
+			name: "Kim",
+			email: "kim@example.com",
+			image: null,
+		};
+		serveConnectors({
+			...wiki,
+			auth: "oauth",
+			signedIn: true,
+			secretHeader: null,
+			signedInAs: kim,
+		});
 		mount(wikiPage);
 
 		const account = await screen.findByRole("region", { name: "Account" });
 		expect(within(account).getByText("Signed in as")).toBeDefined();
-		expect(within(account).getByText("Sam")).toBeDefined();
+		expect(within(account).getByText("Kim")).toBeDefined();
+		cleanup();
+
+		mount(connectorsPage);
+		await showConnectors();
+		const row = await screen.findByRole("article", { name: "Wiki" });
+		expect(within(row).getByText(/· Signed in as Kim$/)).toBeDefined();
 		expect(within(account).queryByRole("button", { name: "Sign in" })).toBeNull();
 		cleanup();
 

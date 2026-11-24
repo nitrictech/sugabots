@@ -13,12 +13,11 @@ import { toProjectChat } from "@sugabots/core/chats/chats/chat";
 import { chatTitleFrom } from "@sugabots/core/chats/chats/chat-title";
 import { ChatEvent, type ToolCallChange } from "@sugabots/core/chats/events";
 import { seedChat } from "@sugabots/core/chats/seed.test-support";
-import { toCollaborationPart } from "@sugabots/core/chats/store/collaboration-parts";
 import {
 	authorRow,
-	personAuthor,
+	memberAuthor,
+	toMember,
 	toMessage,
-	toPerson,
 	toReactions,
 } from "@sugabots/core/chats/store/participants";
 import { toToolCallPart } from "@sugabots/core/chats/store/tool-calls";
@@ -33,19 +32,19 @@ import {
 	bot as botTable,
 	chat,
 	chatParticipant,
-	chatRead,
-	collaboration,
 	connector,
 	file,
+	member,
 	membership,
 	message,
 	messageReaction,
 	type PlacedChatRow,
-	person,
 	placedChat,
 	project,
 	projectMember,
+	readCursor,
 	type StoredMessagePart,
+	type TurnReason,
 	toolCall,
 	turn,
 	WRITTEN_FILE_KINDS,
@@ -58,7 +57,7 @@ import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { defaultProjectIdOf } from "@sugabots/core/workspaces/bots/bot";
 import { and, eq, getColumns, gt, inArray, sql } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { STAGED_TURN_OWNER, SUPPORT_HANDOVER_CHAT } from "./chats.ts";
+import { placedById, STAGED_EXECUTION_ID, SUPPORT_HANDOVER_CHAT, textOf } from "./chats.ts";
 
 /**
  * Plays the demo video's story in the showcase seed (see `seed.ts`),
@@ -71,6 +70,7 @@ import { STAGED_TURN_OWNER, SUPPORT_HANDOVER_CHAT } from "./chats.ts";
  *   node --env-file=.env packages/demo/src/showcase/stage.ts send <chatId> <messageId> <text>
  *   node --env-file=.env packages/demo/src/showcase/stage.ts allow <toolCallId>
  *   node --env-file=.env packages/demo/src/showcase/stage.ts cue mention
+ *   node --env-file=.env packages/demo/src/showcase/stage.ts sign-in-connectors
  *
  * `reset` takes the story back to where it starts. `start` starts a chat with
  * the bot, with the owner's message in it, prints them as the API would
@@ -78,17 +78,19 @@ import { STAGED_TURN_OWNER, SUPPORT_HANDOVER_CHAT } from "./chats.ts";
  * message in a project's chat or a bot's chat, and plays whoever answers her
  * there. `allow` plays what follows an allowed approval, and `cue mention`
  * has Doreen ask Anita something when the demo is looking.
+ * `sign-in-connectors` gives the showcase's connectors placeholder credentials.
  *
  * The story: in Support's handover chat, Lorraine says Kestrel Freight was charged
  * twice. Anita starts a chat asking Ticket Desk to refund it, and Ticket Desk
- * offers to find out why too. Told to go ahead, it checks Stripe and hands
- * the why to Billing Engineer, which runs the billing tests on its computer
- * and writes the incident up; then it asks to refund. Support's people answer
+ * offers to find out why too. Told to go ahead, it checks Stripe and asks
+ * Billing Engineer why by mentioning it; Billing Engineer runs the billing
+ * tests on its computer, writes the incident up and answers in the chat; then
+ * Ticket Desk, handed back the floor, asks to refund. Support's members answer
  * as she goes.
  */
 
 const WORKSPACE_SLUG = "fieldnote";
-/** The project whose people the story is told with, by slug. */
+/** The project whose members the story is told with, by slug. */
 const SUPPORT_PROJECT = "support";
 
 /** Pauses that make the staged work read as a model's pace. */
@@ -120,8 +122,11 @@ const TICKET_DESK = {
 			],
 		},
 	},
-	found:
-		"There are two charges of $1,280 on 3 Oct, a minute apart. I've asked Billing Engineer why, and I'll refund the second once you allow it.\n\n",
+	found: "There are two charges of $1,280 on 3 Oct, a minute apart.\n\n",
+	/** Asking Billing Engineer, which the mention gives a turn of its own. */
+	ask: `@${handleFromName("Billing Engineer")}, can you find out why in the billing code? They're pi_3QhF7uLz2mN4 and pi_3QhF8kLz2mN4. I'll refund the second once Anita allows it.`,
+	/** Its hand-back, once Billing Engineer has answered. */
+	handBack: "Billing Engineer found the cause. Refunding the second charge once you allow it.\n\n",
 	refund: {
 		tool: "create_refund",
 		input: {
@@ -137,9 +142,6 @@ const TICKET_DESK = {
 
 const BILLING_ENGINEER = {
 	bot: "Billing Engineer",
-	title: "Why Kestrel Freight was charged twice",
-	brief:
-		"Kestrel Freight was charged $1,280 twice on 3 Oct, a minute apart (pi_3QhF7uLz2mN4 and pi_3QhF8kLz2mN4). Can you find out why in the billing code?",
 	opening: "Reproducing it against the billing code.\n\n",
 	tests: {
 		input: { command: "npm test -- billing", timeout_seconds: 300 },
@@ -182,17 +184,17 @@ const BILLING_ENGINEER = {
 		"Found it. When a charge to Stripe times out, the billing job retries it without an idempotency key, so Stripe takes the retry as a second charge. That's what happened to Kestrel on 3 Oct. The fix is to pass the invoice id as the idempotency key in `chargeInvoice`: I've opened #491 with it, and written the incident up.",
 } as const;
 
-/** What Support's people do while Anita works through the story. */
-const PEOPLE = {
+/** What Support's members do while Anita works through the story. */
+const MEMBERS = {
 	/** Lorraine, in the chat, once the refund is through. */
-	thanks: { person: "Lorraine Delgado", emoji: "🙏", text: "Thanks! I'll let Kestrel know." },
+	thanks: { member: "Lorraine Delgado", emoji: "🙏", text: "Thanks! I'll let Kestrel know." },
 	/** Doreen, in Support's handover chat, asking Anita what to tell Kestrel: written after Anita's handle. */
 	mention: {
-		person: "Doreen Nakamura",
+		member: "Doreen Nakamura",
 		text: "Kestrel are asking whether this could happen again. Anything I can tell them?",
 	},
 	/** Doreen again, answering Anita. */
-	closing: { person: "Doreen Nakamura", text: "Great, I've closed the ticket with Kestrel." },
+	closing: { member: "Doreen Nakamura", text: "Great, I've closed the ticket with Kestrel." },
 } as const;
 
 /** How long someone shows as typing before their message arrives. */
@@ -204,10 +206,10 @@ const wait = (milliseconds: number) => Effect.sleep(milliseconds);
 const showcase = Effect.gen(function* () {
 	const [found] = yield* query((db) =>
 		db
-			.select({ workspace, owner: person })
+			.select({ workspace, owner: member })
 			.from(workspace)
 			.innerJoin(membership, eq(membership.workspaceId, workspace.id))
-			.innerJoin(person, eq(person.id, membership.personId))
+			.innerJoin(member, eq(member.id, membership.memberId))
 			.where(and(eq(workspace.slug, WORKSPACE_SLUG), eq(membership.role, "owner"))),
 	);
 	if (!found) {
@@ -262,38 +264,38 @@ interface Reply {
 	readonly parts: StoredMessagePart[];
 }
 
-const personNamed = (workspaceId: string, name: string) =>
+const memberNamed = (workspaceId: string, name: string) =>
 	Effect.flatMap(
 		query((db) =>
 			db
-				.select({ id: person.id, name: person.name, email: person.email, image: person.image })
-				.from(person)
-				.innerJoin(membership, eq(membership.personId, person.id))
-				.where(and(eq(membership.workspaceId, workspaceId), eq(person.name, name))),
+				.select({ id: member.id, name: member.name, email: member.email, image: member.image })
+				.from(member)
+				.innerJoin(membership, eq(membership.memberId, member.id))
+				.where(and(eq(membership.workspaceId, workspaceId), eq(member.name, name))),
 		),
 		([row]) => (row ? Effect.succeed(row) : Effect.die(new Error(`Nobody named ${name}`))),
 	);
 
-type Person = Effect.Success<ReturnType<typeof personNamed>>;
+type Member = Effect.Success<ReturnType<typeof memberNamed>>;
 
-/** Shows `person` typing in the chat, as their composer would. */
-const showTyping = (inChat: PlacedChatRow, person: Person) =>
+/** Shows `member` typing in the chat, as their composer would. */
+const showTyping = (inChat: PlacedChatRow, member: Member) =>
 	Effect.gen(function* () {
 		const bus = yield* EventBus.Service;
 		yield* Effect.promise(() =>
 			bus.publish(
 				chatStream(inChat.id),
-				streamEvent("person.typing", {
+				streamEvent("member.typing", {
 					chatId: inChat.id,
-					person: toPerson(person),
+					member: toMember(member),
 				}),
 			),
 		);
 	});
 
-/** `person` posts `text` in the chat, announced as a sent message is. */
+/** `member` posts `text` in the chat, announced as a sent message is. */
 const postAs = (
-	person: Person,
+	member: Member,
 	inChat: PlacedChatRow,
 	text: string,
 	id: string = crypto.randomUUID(),
@@ -308,8 +310,7 @@ const postAs = (
 						.values({
 							id,
 							chatId: inChat.id,
-							authorPersonId: person.id,
-							kind: "text",
+							authorMemberId: member.id,
 							status: "complete",
 							parts: [{ type: "text", text }],
 							content: text,
@@ -320,10 +321,10 @@ const postAs = (
 				yield* query((db) =>
 					db
 						.insert(chatParticipant)
-						.values({ chatId: inChat.id, personId: person.id })
+						.values({ chatId: inChat.id, memberId: member.id })
 						.onConflictDoNothing(),
 				);
-				const posted: Message = toMessage(row, personAuthor(person));
+				const posted: Message = toMessage(row, memberAuthor(member));
 				yield* emit([
 					ChatEvent.MessagePosted({
 						chatId: inChat.id,
@@ -336,16 +337,16 @@ const postAs = (
 		);
 	});
 
-/** `person` types for a moment, then posts `text`. */
-const typeAndPost = (person: Person, inChat: PlacedChatRow, text: string) =>
+/** `member` types for a moment, then posts `text`. */
+const typeAndPost = (member: Member, inChat: PlacedChatRow, text: string) =>
 	Effect.gen(function* () {
-		yield* showTyping(inChat, person);
+		yield* showTyping(inChat, member);
 		yield* wait(TYPING);
-		yield* postAs(person, inChat, text);
+		yield* postAs(member, inChat, text);
 	});
 
 /** `reactor` reacts to the message, and the chat hears its reactions as they now are. */
-const react = (reactor: Person, inChat: PlacedChatRow, messageId: string, emoji: string) =>
+const react = (reactor: Member, inChat: PlacedChatRow, messageId: string, emoji: string) =>
 	Effect.gen(function* () {
 		const { emit } = yield* ChatEvents.Service;
 		yield* transaction(
@@ -353,7 +354,7 @@ const react = (reactor: Person, inChat: PlacedChatRow, messageId: string, emoji:
 				yield* query((db) =>
 					db
 						.insert(messageReaction)
-						.values({ messageId, personId: reactor.id, emoji })
+						.values({ messageId, memberId: reactor.id, emoji })
 						.onConflictDoNothing(),
 				);
 				const rows = yield* query((db) =>
@@ -361,11 +362,11 @@ const react = (reactor: Person, inChat: PlacedChatRow, messageId: string, emoji:
 						.select({
 							emoji: messageReaction.emoji,
 							createdAt: messageReaction.createdAt,
-							person: { id: person.id, name: person.name },
+							member: { id: member.id, name: member.name },
 							bot: sql<null>`null`,
 						})
 						.from(messageReaction)
-						.innerJoin(person, eq(person.id, messageReaction.personId))
+						.innerJoin(member, eq(member.id, messageReaction.memberId))
 						.where(eq(messageReaction.messageId, messageId))
 						.orderBy(messageReaction.createdAt),
 				);
@@ -380,8 +381,13 @@ const react = (reactor: Person, inChat: PlacedChatRow, messageId: string, emoji:
 		);
 	});
 
-/** The bot starts its turn on `triggerMessageId`: a reply with nothing in it yet. */
-const startReply = (bot: BotRow, inChat: PlacedChatRow, triggerMessageId: string) =>
+/** The bot starts its turn on `triggerMessageId`, for `reason`: a reply with nothing in it yet. */
+const startReply = (
+	bot: BotRow,
+	inChat: PlacedChatRow,
+	triggerMessageId: string,
+	reason: TurnReason = "default",
+) =>
 	Effect.gen(function* () {
 		const { emit } = yield* ChatEvents.Service;
 		return yield* transaction(
@@ -394,9 +400,9 @@ const startReply = (bot: BotRow, inChat: PlacedChatRow, triggerMessageId: string
 							botId: bot.id,
 							triggerMessageId,
 							status: "running",
-							owner: STAGED_TURN_OWNER,
+							executionId: STAGED_EXECUTION_ID,
 							model: bot.model ?? "",
-							reason: "default",
+							reason,
 							startedAt: new Date(),
 						})
 						.returning(),
@@ -408,7 +414,6 @@ const startReply = (bot: BotRow, inChat: PlacedChatRow, triggerMessageId: string
 						.values({
 							chatId: inChat.id,
 							authorBotId: bot.id,
-							kind: "text",
 							status: "writing",
 							parts: [],
 							content: "",
@@ -544,11 +549,6 @@ const finishCall = (callId: string, output: JsonValue, decidedByName: string | n
 		decidedByName,
 	);
 
-/** The text of a reply's parts, run together, as its content is. */
-function textOf(parts: readonly StoredMessagePart[]): string {
-	return parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
-}
-
 /** The reply writes `text` after what it holds so far, typed in a few words at a time. */
 const say = (reply: Reply, text: string) =>
 	Effect.gen(function* () {
@@ -591,10 +591,11 @@ const finishReply = (reply: Reply, text: string) =>
 				yield* query((db) =>
 					db.update(message).set({ status: "complete" }).where(eq(message.id, reply.messageId)),
 				);
+				const finishedAt = new Date();
 				yield* query((db) =>
 					db
 						.update(turn)
-						.set({ status: "done", finishedAt: new Date(), contextCapacity: CONTEXT_CAPACITY })
+						.set({ status: "done", finishedAt, contextCapacity: CONTEXT_CAPACITY })
 						.where(eq(turn.id, reply.turnId)),
 				);
 				yield* emit([
@@ -605,6 +606,7 @@ const finishReply = (reply: Reply, text: string) =>
 						botId: reply.bot.id,
 						messageId: reply.messageId,
 						content,
+						finishedAt,
 						contextTokens: undefined,
 						contextCapacity: CONTEXT_CAPACITY,
 						readKeptFrom: null,
@@ -613,114 +615,6 @@ const finishReply = (reply: Reply, text: string) =>
 			}),
 		);
 		return content;
-	});
-
-/**
- * The reply asks `collaborator` for help: the collaboration's own chat, the
- * brief, the collaborator's turn there played by `answer`, and what it said
- * recorded as the answer.
- */
-const collaborate = <E, R>(
-	reply: Reply,
-	collaborator: BotRow,
-	ask: { title: string; brief: string },
-	answer: (answering: Reply) => Effect.Effect<string, E, R>,
-) =>
-	Effect.gen(function* () {
-		const { emit } = yield* ChatEvents.Service;
-		const opened = yield* transaction(
-			Effect.gen(function* () {
-				// Its `collaboration` row, written below in this transaction, is what makes it one.
-				const [child] = yield* query((db) =>
-					db
-						.insert(chat)
-						.values({
-							workspaceId: reply.chat.workspaceId,
-							kind: "collaboration",
-							title: ask.title,
-						})
-						.returning(),
-				);
-				if (!child) return yield* Effect.die(new Error("The collaboration wasn't opened"));
-				yield* query((db) =>
-					db.insert(chatParticipant).values([
-						{ chatId: child.id, botId: reply.bot.id },
-						{ chatId: child.id, botId: collaborator.id },
-					]),
-				);
-				const [briefRow] = yield* query((db) =>
-					db
-						.insert(message)
-						.values({
-							chatId: child.id,
-							authorBotId: reply.bot.id,
-							kind: "text",
-							status: "complete",
-							parts: [{ type: "text", text: ask.brief }],
-							content: ask.brief,
-						})
-						.returning(),
-				);
-				if (!briefRow) return yield* Effect.die(new Error("The brief wasn't written"));
-				const [row] = yield* query((db) =>
-					db
-						.insert(collaboration)
-						.values({
-							parentChatId: reply.chat.id,
-							rootChatId: reply.chat.rootChatId ?? reply.chat.id,
-							parentMessageId: reply.messageId,
-							turnId: reply.turnId,
-							chatId: child.id,
-							collaboratorBotId: collaborator.id,
-							brief: ask.brief,
-							status: "waiting",
-							atOffset: textOf(reply.parts).length,
-						})
-						.returning(),
-				);
-				if (!row) return yield* Effect.die(new Error("The collaboration wasn't written"));
-				reply.parts.push({ type: "collaboration", collaborationId: row.id });
-				yield* saveParts(reply);
-				yield* emit([
-					ChatEvent.CollaborationOpened({
-						parentChatId: reply.chat.id,
-						parentMessageId: reply.messageId,
-						collaboration: toCollaborationPart(row, collaborator.name),
-						workspaceId: reply.chat.workspaceId,
-						collaboratorBotId: collaborator.id,
-						briefMessageId: briefRow.id,
-					}),
-				]);
-				const [placed] = yield* query((db) =>
-					db.select().from(placedChat).where(eq(placedChat.id, child.id)).limit(1),
-				);
-				if (!placed) return yield* Effect.die(new Error("The collaboration wasn't placed"));
-				return { child: placed, briefId: briefRow.id, collaborationId: row.id };
-			}),
-		);
-		yield* wait(BETWEEN_STEPS);
-		const answering = yield* startReply(collaborator, opened.child, opened.briefId);
-		const answered = yield* answer(answering);
-		yield* transaction(
-			Effect.gen(function* () {
-				const [row] = yield* query((db) =>
-					db
-						.update(collaboration)
-						.set({ status: "answered", answer: answered })
-						.where(eq(collaboration.id, opened.collaborationId))
-						.returning(),
-				);
-				if (!row) return yield* Effect.die(new Error("The collaboration went missing"));
-				yield* emit([
-					ChatEvent.CollaborationAnswered({
-						parentChatId: reply.chat.id,
-						parentMessageId: reply.messageId,
-						collaboration: toCollaborationPart(row, collaborator.name),
-						askerToResume: null,
-					}),
-				]);
-			}),
-		);
 	});
 
 /** Ticket Desk answers Anita's ask with a question, before it does anything. */
@@ -769,16 +663,15 @@ const playTicketDeskWork = (bot: BotRow, inChat: PlacedChatRow, triggerId: strin
 		yield* wait(STRIPE_LOOKUP);
 		yield* finishCall(lookup, TICKET_DESK.lookup.output);
 		yield* say(reply, TICKET_DESK.found);
-		yield* wait(BETWEEN_STEPS);
+		yield* finishReply(reply, TICKET_DESK.ask);
+		yield* wait(BEFORE_REPLY_STARTS);
 		const billingEngineer = yield* botNamed(inChat.workspaceId, BILLING_ENGINEER.bot);
-		yield* collaborate(
-			reply,
-			billingEngineer,
-			{ title: BILLING_ENGINEER.title, brief: BILLING_ENGINEER.brief },
-			playBillingEngineer,
-		);
-		yield* wait(BETWEEN_STEPS);
-		yield* callTool(reply, {
+		const answering = yield* startReply(billingEngineer, inChat, reply.messageId, "collaboration");
+		yield* playBillingEngineer(answering);
+		yield* wait(BEFORE_REPLY_STARTS);
+		const handBack = yield* startReply(bot, inChat, reply.messageId, "hand_back");
+		yield* say(handBack, TICKET_DESK.handBack);
+		yield* callTool(handBack, {
 			...stripeCall(TICKET_DESK.refund.tool),
 			input: TICKET_DESK.refund.input,
 			writeOrDelete: true,
@@ -787,13 +680,13 @@ const playTicketDeskWork = (bot: BotRow, inChat: PlacedChatRow, triggerId: strin
 		yield* transaction(
 			Effect.gen(function* () {
 				yield* query((db) =>
-					db.update(turn).set({ status: "waiting" }).where(eq(turn.id, reply.turnId)),
+					db.update(turn).set({ status: "waiting" }).where(eq(turn.id, handBack.turnId)),
 				);
 				yield* emit([
 					ChatEvent.TurnSuspended({
 						chatId: inChat.id,
 						workspaceId: inChat.workspaceId,
-						turnId: reply.turnId,
+						turnId: handBack.turnId,
 					}),
 				]);
 			}),
@@ -821,8 +714,8 @@ const playBillingEngineer = (reply: Reply) =>
 const cueMention = Effect.gen(function* () {
 	const { workspace: showcaseWorkspace, owner } = yield* showcase;
 	const support = yield* handoverChatOf(showcaseWorkspace.id);
-	const asking = yield* personNamed(showcaseWorkspace.id, PEOPLE.mention.person);
-	yield* typeAndPost(asking, support, `@${handleFromName(owner.name)} ${PEOPLE.mention.text}`);
+	const asking = yield* memberNamed(showcaseWorkspace.id, MEMBERS.mention.member);
+	yield* typeAndPost(asking, support, `@${handleFromName(owner.name)} ${MEMBERS.mention.text}`);
 });
 
 /**
@@ -833,7 +726,7 @@ const writeIncident = (reply: Reply) =>
 	Effect.gen(function* () {
 		const authoring = yield* Files.Authoring;
 		const { title, content } = BILLING_ENGINEER.incident;
-		const input = { kind: "document", title, content };
+		const input = { kind: "markdown", title, content };
 		const call = yield* callTool(reply, { tool: FILE_WRITE_TOOL, input, writeOrDelete: true });
 		const written = yield* authoring
 			.create(
@@ -841,7 +734,7 @@ const writeIncident = (reply: Reply) =>
 					botId: reply.bot.id,
 					chatId: reply.chat.id,
 				},
-				{ kind: "document", title, content },
+				{ kind: "markdown", title, content },
 			)
 			.pipe(Effect.orDie);
 		yield* wait(BETWEEN_STEPS);
@@ -861,13 +754,13 @@ const PARTS = new Map([[TICKET_DESK.bot as string, playTicketDesk]]);
 const BOT_WORK = new Map([[TICKET_DESK.bot as string, playTicketDeskWork]]);
 
 /** Who answers Anita when she writes in a project's chat, by the project's slug. */
-const PEOPLE_PARTS = new Map([
+const MEMBERS_PARTS = new Map([
 	[
 		SUPPORT_PROJECT,
 		(inChat: PlacedChatRow) =>
 			Effect.gen(function* () {
-				const answering = yield* personNamed(inChat.workspaceId, PEOPLE.closing.person);
-				yield* typeAndPost(answering, inChat, PEOPLE.closing.text);
+				const answering = yield* memberNamed(inChat.workspaceId, MEMBERS.closing.member);
+				yield* typeAndPost(answering, inChat, MEMBERS.closing.text);
 			}),
 	],
 ]);
@@ -915,13 +808,10 @@ const start = (botId: string, messageId: string, text: string) =>
 						title: chatTitleFrom(text),
 					}),
 				);
-				const [row] = yield* query((db) =>
-					db.select().from(placedChat).where(eq(placedChat.id, id)).limit(1),
-				);
-				if (!row) return yield* Effect.die(new Error("The chat wasn't started"));
+				const row = yield* placedById(id);
 				yield* query((db) =>
 					db.insert(chatParticipant).values([
-						{ chatId: id, personId: owner.id },
+						{ chatId: id, memberId: owner.id },
 						{ chatId: id, botId: bot.id },
 					]),
 				);
@@ -938,7 +828,7 @@ const start = (botId: string, messageId: string, text: string) =>
 
 /**
  * Posts the owner's message in the chat, prints it as the API answers
- * a send, then plays who answers her: in a project's chat its people, and in
+ * a send, then plays who answers her: in a project's chat its members, and in
  * a bot's chat that bot.
  */
 const send = (chatId: string, messageId: string, text: string) =>
@@ -952,7 +842,7 @@ const send = (chatId: string, messageId: string, text: string) =>
 			if (part) yield* part(found.bot, found.chat, messageId);
 			return;
 		}
-		const answer = found.projectSlug ? PEOPLE_PARTS.get(found.projectSlug) : undefined;
+		const answer = found.projectSlug ? MEMBERS_PARTS.get(found.projectSlug) : undefined;
 		if (answer) yield* answer(found.chat);
 	});
 
@@ -1011,19 +901,18 @@ const allow = (toolCallId: string) =>
 		yield* wait(BETWEEN_STEPS);
 		yield* finishReply(reply, TICKET_DESK.reply);
 
-		const lorraine = yield* personNamed(found.chat.workspaceId, PEOPLE.thanks.person);
+		const lorraine = yield* memberNamed(found.chat.workspaceId, MEMBERS.thanks.member);
 		yield* showTyping(found.chat, lorraine);
 		yield* wait(BETWEEN_STEPS);
-		yield* react(lorraine, found.chat, reply.messageId, PEOPLE.thanks.emoji);
+		yield* react(lorraine, found.chat, reply.messageId, MEMBERS.thanks.emoji);
 		yield* wait(TYPING);
-		yield* postAs(lorraine, found.chat, PEOPLE.thanks.text);
+		yield* postAs(lorraine, found.chat, MEMBERS.thanks.text);
 	});
 
 /**
  * Takes the story back to where it starts: what the seed wrote. The chats
- * started with the story's bots since go, the collaborations and files made
- * in them included, and so does what was said in Support's handover chat since; and
- * Support's people have read what's left there.
+ * started with the story's bots since go, the files made in them included, and so does what was said in Support's handover chat since; and
+ * Support's members have read what's left there.
  */
 const reset = Effect.gen(function* () {
 	const { workspace: showcaseWorkspace } = yield* showcase;
@@ -1067,7 +956,7 @@ const reset = Effect.gen(function* () {
 							),
 						),
 				);
-				// A chat's messages, turns, calls and collaborations go with it.
+				// A chat's messages, turns and calls go with it.
 				yield* query((db) => db.delete(chat).where(inArray(chat.id, startedIds)));
 			}
 			const gone = yield* query((db) =>
@@ -1078,7 +967,7 @@ const reset = Effect.gen(function* () {
 			);
 			const readers = yield* query((db) =>
 				db
-					.select({ personId: projectMember.personId })
+					.select({ memberId: projectMember.memberId })
 					.from(projectMember)
 					.where(eq(projectMember.projectId, support.projectId ?? "")),
 			);
@@ -1086,7 +975,7 @@ const reset = Effect.gen(function* () {
 			if (readers.length > 0) {
 				yield* query((db) =>
 					db
-						.insert(chatRead)
+						.insert(readCursor)
 						.values(
 							readers.map((reader) => ({
 								...reader,
@@ -1095,7 +984,7 @@ const reset = Effect.gen(function* () {
 							})),
 						)
 						.onConflictDoUpdate({
-							target: [chatRead.personId, chatRead.chatId],
+							target: [readCursor.memberId, readCursor.chatId],
 							set: { readThrough: now },
 						}),
 				);
@@ -1109,9 +998,9 @@ const reset = Effect.gen(function* () {
 });
 
 /**
- * Gives every showcase connector placeholder tokens, so the connectors page
- * shows them signed in. Only for a throwaway capture database: the tokens
- * open nothing, and a turn that used them would fail.
+ * Gives every showcase connector a placeholder credential, so the connectors
+ * page shows them signed in. Only for a throwaway capture database: the
+ * credentials open nothing, and a turn that used them would fail.
  */
 const signInConnectors = Effect.gen(function* () {
 	const secrets = yield* Secrets.Service;
@@ -1124,10 +1013,10 @@ const signInConnectors = Effect.gen(function* () {
 			.where(and(eq(connector.workspaceId, showcaseWorkspace.id), eq(connector.authKind, "oauth")))
 			.returning({ id: connector.id }),
 	);
-	console.log(`Signed in ${signedIn.length} connectors with placeholder tokens.`);
+	console.log(`Signed in ${signedIn.length} connectors with placeholder credentials.`);
 });
 
-/** Only the chat feed hears what the stage emits: it is what tells the open page. */
+/** Only the chat event stream hears what the stage emits: it is what tells the open page. */
 const chatEvents = Layer.effect(
 	ChatEvents.Service,
 	Effect.map(EventOutbox.Service, (outbox) =>

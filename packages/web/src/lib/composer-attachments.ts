@@ -85,7 +85,7 @@ export function canSend(draftText: string, items: readonly ComposerAttachment[])
  * The composer's attachments for the chat `chatId`. Each file uploads as soon
  * as it is attached. They are kept in memory only, so leaving the chat stops
  * the uploads still going, removes the files uploaded and not sent, which
- * would otherwise count toward the files a person can have waiting, and
+ * would otherwise count toward the files a member can have waiting, and
  * empties the composer for the next chat.
  */
 export function useComposerAttachments(chatId: string): ComposerAttachments {
@@ -198,7 +198,7 @@ export function useComposerAttachments(chatId: string): ComposerAttachments {
 				}
 				// The API attaches all of a message's files or none, without saying
 				// which was missing, so each uploads again. The ones still there go,
-				// so they stop counting toward the files a person can have waiting.
+				// so they stop counting toward the files a member can have waiting.
 				for (const fileId of fileIds) removeChatFile(takenFrom, fileId);
 				commit((items) => [
 					...taken.map((item): ComposerAttachment => ({ ...item, upload: FILE_GONE })),
@@ -252,7 +252,7 @@ function uploadToStart(file: File): AttachmentUpload {
 
 /**
  * Why an upload failed, and whether trying again could work: it can after the
- * connection drops, the API has trouble of its own, or a person has too many
+ * connection drops, the API has trouble of its own, or a member has too many
  * files waiting, but not when the API refuses the file itself.
  */
 function uploadFailure(failure: unknown): AttachmentUpload {
@@ -284,7 +284,7 @@ const FILE_GONE: AttachmentUpload = {
  * the API cleared for waiting too long.
  */
 export function isFileGoneRefusal(failure: unknown): boolean {
-	return isApiFailure(failure) && failure.error?._tag === "UploadsNotFound";
+	return isApiFailure(failure) && failure.error?._tag === "UnsentAttachmentsNotFound";
 }
 
 function uploadedFileIds(items: readonly ComposerAttachment[]): string[] {

@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { type Database, query, type RunEffect } from "../../../database/database.ts";
-import { bot, person, toolCall } from "../../../database/schema.ts";
+import { bot, member, toolCall } from "../../../database/schema.ts";
 import {
 	BOT_BRANCH_PREFIX,
 	type Connected,
@@ -130,9 +130,9 @@ const attribution = (call: { botId: string; turnId: string; sdkToolCallId: strin
 		);
 		const [approver] = yield* query((db) =>
 			db
-				.select({ name: person.name })
+				.select({ name: member.name })
 				.from(toolCall)
-				.innerJoin(person, eq(person.id, toolCall.decidedById))
+				.innerJoin(member, eq(member.id, toolCall.decidedById))
 				.where(
 					and(eq(toolCall.turnId, call.turnId), eq(toolCall.sdkToolCallId, call.sdkToolCallId)),
 				)

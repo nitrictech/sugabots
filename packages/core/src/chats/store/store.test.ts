@@ -9,10 +9,10 @@ import {
 	bot,
 	chat,
 	file,
+	member,
 	membership,
 	message,
 	modelProvider,
-	person,
 	project,
 	projectBot,
 	projectMember,
@@ -62,14 +62,14 @@ const eventStore = await runOnPostgres(EventStore.make);
 describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () => {
 	const eventBus = EventBus.inProcess({ store: eventStore });
 	const services = await chatServicesForTests(eventBus);
-	const viewAs = (personId: string) =>
-		onPostgresAs(personId)(Context.get(services, ChatDetailsView.Service));
-	const chatsAs = (personId: string) =>
-		onPostgresAs(personId)(Context.get(services, Chats.Service));
-	const chatViewAs = (personId: string) =>
-		onPostgresAs(personId)(Context.get(services, ChatView.Service));
+	const viewAs = (memberId: string) =>
+		onPostgresAs(memberId)(Context.get(services, ChatDetailsView.Service));
+	const chatsAs = (memberId: string) =>
+		onPostgresAs(memberId)(Context.get(services, Chats.Service));
+	const chatViewAs = (memberId: string) =>
+		onPostgresAs(memberId)(Context.get(services, ChatView.Service));
 	const turns = onPostgres({ prepare: Context.get(services, TurnExecution.Service).prepare });
-	const turnRecords = onPostgres(Context.get(services, TurnStore.Service));
+	const turnStore = onPostgres(Context.get(services, TurnStore.Service));
 	const compactions = onPostgres({
 		prepare: Context.get(services, Compactions.Service).prepare,
 		complete: Context.get(services, Compactions.Service).complete,
@@ -81,7 +81,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	let outsiderId: string;
 	let outsiderEmail: string;
 
-	/** A chat the person starts with the bot by sending it `message`, which the bot is asked to answer. */
+	/** A chat the member starts with the bot by sending it `message`, which the bot is asked to answer. */
 	async function startChat(input: { botId: string; startedById: string; message: string }) {
 		const started = await startBotChat(chatsAs(input.startedById), {
 			botId: input.botId,
@@ -127,28 +127,28 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.values({ name: `Chat test ${suffix}`, slug: `chat-test-${suffix}` })
 				.returning(),
 		);
-		const people = await onDatabase((db) =>
+		const members = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values([
 					{ name: "Sam", email: `chat-sam-${suffix}@example.com` },
 					{ name: "Kim", email: `chat-kim-${suffix}@example.com` },
 				])
 				.returning(),
 		);
-		const [member, outsider] = people;
-		if (!workspaceRow || !member || !outsider) {
+		const [insider, outsider] = members;
+		if (!workspaceRow || !insider || !outsider) {
 			throw new Error("Could not create chat test records");
 		}
 		workspaceId = workspaceRow.id;
-		memberId = member.id;
+		memberId = insider.id;
 		outsiderId = outsider.id;
 		outsiderEmail = outsider.email;
 
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId, personId: memberId },
-				{ workspaceId, personId: outsiderId },
+				{ workspaceId, memberId: memberId },
+				{ workspaceId, memberId: outsiderId },
 			]),
 		);
 		const projectRow = await onDatabase((db) =>
@@ -177,7 +177,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		projectId = projectRow.id;
 		botId = botRow.id;
 		await onDatabase((db) =>
-			db.insert(projectMember).values({ workspaceId, projectId, personId: memberId }),
+			db.insert(projectMember).values({ workspaceId, projectId, memberId: memberId }),
 		);
 		// The system bots belong to the workspace, not to the project, and each is
 		// set up by being given a model.
@@ -195,7 +195,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 						color: definition.color,
 						eyes: definition.eyes,
 						model: SYSTEM_BOT_MODEL,
-						prompt: definition.prompt,
+						instructions: definition.instructions,
 					})),
 				)
 				.returning({ id: bot.id }),
@@ -207,8 +207,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("prepares a turn for a project bot other than the one that spoke first", async () => {
 		// Every bot mentioned in a project's chat takes a turn, not only the
-		// first: preparing one for any bot but the first must not discard it as
-		// "the chat or its host bot no longer exists".
+		// first, so a turn for any of them prepares.
 		const [otherRow] = await onDatabase((db) =>
 			db
 				.insert(bot)
@@ -252,37 +251,18 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(prepared.context.bot.id).toBe(otherRow.id);
 	});
 
-	it("refuses a bot's turn by name once its model has been cleared", async () => {
-		// Cleared after the message is queued: a chat refuses the message itself
-		// when the model is already gone, so this is the turn that slips through.
-		const details = await startChatShown({
-			botId,
-			startedById: memberId,
-			message: "Anyone there?",
-		});
-		await onDatabase((db) => db.update(bot).set({ model: null }).where(eq(bot.id, botId)));
-		const run = await runningTurn(details.chat.id);
-
-		// It stops rather than falling back to some other model, and the reason
-		// names the bot so somebody can go and fix it.
-		expect(await turns.prepare(run)).toMatchObject({
-			_tag: "NotRunnable",
-			reason: expect.stringContaining("has no model chosen"),
-		});
-	});
-
-	it("shows a chat as running while its turn lane is busy", async () => {
+	it("shows a chat as working while its turn lane is busy", async () => {
 		const details = await startChatShown({
 			botId,
 			startedById: memberId,
 			message: "Run as a workflow",
 		});
-		const statusNow = async () => (await viewAs(memberId).get(details.chat.id))?.chat.status;
-		expect(await statusNow()).toBe("running");
+		const workingNow = async () => (await viewAs(memberId).get(details.chat.id))?.chat.working;
+		expect(await workingNow()).toBe(true);
 
 		await runOnPostgres(releaseTurn(await runningTurn(details.chat.id)));
 
-		expect(await statusNow()).toBe("done");
+		expect(await workingNow()).toBe(false);
 	});
 
 	it("loads a chat with its participants and first message", async () => {
@@ -294,10 +274,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		// A chat is titled from its first message.
 		expect(details.chat.title).toBe("Check the release Pay attention to migrations.");
-		expect(details.participants.map(({ kind }) => kind).sort()).toEqual(["bot", "person"]);
+		expect(details.participants.map(({ kind }) => kind).sort()).toEqual(["bot", "member"]);
 		expect(details.messages).toMatchObject([
 			{
-				author: { kind: "person", id: memberId },
+				author: { kind: "member", id: memberId },
 				content: "Check the release\nPay attention to migrations.",
 				parts: [{ type: "text", text: "Check the release\nPay attention to migrations." }],
 			},
@@ -338,8 +318,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				historyIds.map((id, index) => ({
 					id,
 					chatId: details.chat.id,
-					authorPersonId: memberId,
-					kind: "text" as const,
+					authorMemberId: memberId,
 					status: "complete" as const,
 					parts: [{ type: "text" as const, text: `Message ${String(index + 1).padStart(3, "0")}` }],
 					content: `Message ${String(index + 1).padStart(3, "0")}`,
@@ -381,7 +360,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		]);
 		await expect(
 			viewAs(memberId).get(details.chat.id, { limit: 50, cursor: "not-a-cursor" }),
-		).rejects.toMatchObject({ _tag: "InvalidChatHistoryCursor" });
+		).rejects.toMatchObject({ _tag: "InvalidCursor" });
 	});
 
 	it("replays a committed message after reconnect", async () => {
@@ -427,7 +406,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			throw new Error("Could not create other chat workspace");
 		}
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId: otherWorkspace.id, personId: memberId }),
+			db.insert(membership).values({ workspaceId: otherWorkspace.id, memberId: memberId }),
 		);
 		const foreignProject = await onDatabase((db) =>
 			seedProject(db, {
@@ -491,7 +470,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		).toHaveLength(0);
 	});
 
-	it("adds each person who writes to the participant stack", async () => {
+	it("adds each member who writes to the participant stack", async () => {
 		const details = await startChatShown({
 			botId,
 			startedById: memberId,
@@ -507,7 +486,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		expect((await viewAs(memberId).get(details.chat.id))?.participants).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ kind: "person", id: outsiderId, email: outsiderEmail }),
+				expect.objectContaining({ kind: "member", id: outsiderId, email: outsiderEmail }),
 			]),
 		);
 	});
@@ -519,10 +498,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			message: "Latest",
 		});
 		const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-		const written = (author: { authorPersonId: string } | { authorBotId: string }, at: Date) => ({
+		const written = (author: { authorMemberId: string } | { authorBotId: string }, at: Date) => ({
 			chatId: details.chat.id,
 			...author,
-			kind: "text" as const,
 			status: "complete" as const,
 			parts: [{ type: "text" as const, text: "Earlier" }],
 			content: "Earlier",
@@ -532,7 +510,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			db
 				.insert(message)
 				.values([
-					written({ authorPersonId: outsiderId }, daysAgo(30)),
+					written({ authorMemberId: outsiderId }, daysAgo(30)),
 					written({ authorBotId: botId }, daysAgo(3)),
 				]),
 		);
@@ -547,13 +525,13 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			db
 				.insert(message)
 				.values(
-					Array.from({ length: 100 }, () => written({ authorPersonId: memberId }, daysAgo(1))),
+					Array.from({ length: 100 }, () => written({ authorMemberId: memberId }, daysAgo(1))),
 				),
 		);
 		expect(await recentIds()).toEqual([memberId, botId]);
 	});
 
-	it("compacts a long chat into a summary and the newest messages, and searches what came before", async () => {
+	it("compacts a long chat into a condensed account and the newest messages, and searches what came before", async () => {
 		const details = await startChatShown({
 			botId,
 			startedById: memberId,
@@ -569,8 +547,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.values(
 					Array.from({ length: 20 }, (_, index) => ({
 						chatId: details.chat.id,
-						authorPersonId: memberId,
-						kind: "text" as const,
+						authorMemberId: memberId,
 						status: "complete" as const,
 						parts: [{ type: "text" as const, text: long(index + 1) }],
 						content: long(index + 1),
@@ -589,7 +566,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		// Kept word for word: the newest six long messages and the short one,
-		// about a quarter of the window. Summarised: the eleven before them.
+		// about a quarter of the window. Condensed: the eleven before them.
 		expect(prepared.model).toBe("claude-opus-4-1-20250805");
 		expect(prepared.keptFrom).toEqual(earlier[14]?.createdAt);
 		expect(prepared.historyStartsAt).toEqual(earlier[3]?.createdAt);
@@ -607,7 +584,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		const turn = await prepareRunnable(turns, await runningTurn(details.chat.id));
 		expect(turn.context.compaction).toEqual({
-			summary: "The family is planning a trip.",
+			condensed: "The family is planning a trip.",
 			historyStartsAt: earlier[3]?.createdAt,
 			keptFrom: earlier[14]?.createdAt,
 		});
@@ -622,9 +599,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			computer: undefined,
 		});
 		expect(prompt.messages[0]?.content).toContain("The family is planning a trip.");
-		await turnRecords.complete(
+		await turnStore.complete(
 			replyTurnOf(turn),
-			{ content: "Here is the plan.", collaborations: [], toolCalls: [] },
+			{ content: "Here is the plan.", toolCalls: [] },
 			{
 				contextTokens: 70_000,
 				contextCapacity: turn.context.windowTokens,
@@ -672,7 +649,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		const readKeptFrom = prepared.keptFrom.toISOString();
-		// Nothing new past what the compaction kept: nothing to summarise.
+		// Nothing new past what the compaction kept: nothing to condense.
 		expect(
 			await compactions.prepare({
 				chatId: details.chat.id,
@@ -690,8 +667,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.values(
 					Array.from({ length: 3 }, (_, index) => ({
 						chatId: details.chat.id,
-						authorPersonId: memberId,
-						kind: "text" as const,
+						authorMemberId: memberId,
 						status: "complete" as const,
 						parts: [{ type: "text" as const, text: long(21 + index) }],
 						content: long(21 + index),
@@ -709,9 +685,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			_tag: "Skipped",
 		});
 
-		// The next compaction carries the first summary forward rather than dropping it.
+		// The next compaction carries the first condensed account forward rather than dropping it.
 		const next = await preparedCompaction({ ...newest, readKeptFrom });
-		expect(next.previousSummary).toBe("The family is planning a trip.");
+		expect(next.previousCondensed).toBe("The family is planning a trip.");
 		expect(next.historyStartsAt).toEqual(earlier[3]?.createdAt);
 		expect(next.keptFrom).toEqual(earlier[17]?.createdAt);
 		expect(next.transcript.map(({ content }) => content.split(".")[0])).toEqual([
@@ -735,9 +711,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			});
 			const prepared = await prepareRunnable(turns, await runningTurn(details.chat.id));
 
-			await turnRecords.complete(
+			await turnStore.complete(
 				replyTurnOf(prepared),
-				{ content: "Here is the plan.", collaborations: [], toolCalls: [] },
+				{ content: "Here is the plan.", toolCalls: [] },
 				{
 					contextTokens,
 					contextCapacity: 128_000,
@@ -785,8 +761,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			db.insert(message).values(
 				said.map((content, index) => ({
 					chatId: details.chat.id,
-					authorPersonId: memberId,
-					kind: "text" as const,
+					authorMemberId: memberId,
 					status: "complete" as const,
 					parts: [{ type: "text" as const, text: content }],
 					content,
@@ -831,8 +806,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.values(
 					["Here is the signed contract", ""].map((content, index) => ({
 						chatId: details.chat.id,
-						authorPersonId: memberId,
-						kind: "text" as const,
+						authorMemberId: memberId,
 						status: "complete" as const,
 						parts: content ? [{ type: "text" as const, text: content }] : [],
 						content,
@@ -853,7 +827,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					].map((file) => ({
 						...file,
 						chatId: details.chat.id,
-						kind: "upload" as const,
+						kind: "attachment" as const,
 						uploaderId: memberId,
 						position: 0,
 						size: 2048,
@@ -937,8 +911,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.values(
 					Array.from({ length: 20 }, (_, index) => ({
 						chatId: details.chat.id,
-						authorPersonId: memberId,
-						kind: "text" as const,
+						authorMemberId: memberId,
 						status: "complete" as const,
 						parts: [{ type: "text" as const, text: long(index + 1) }],
 						content: long(index + 1),
@@ -963,7 +936,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(prepared.model).toBe("claude-opus-4-1-20250805");
 		// A quarter of the bot's 128K is kept: the three newest long messages.
 		expect(prepared.keptFrom).toEqual(earlier[17]?.createdAt);
-		// Up to the 89.6K compaction line less what is kept is summarised.
+		// Up to the 89.6K compaction line less what is kept is condensed.
 		expect(prepared.transcript.map(({ content }) => content.split(".")[0])).toEqual([
 			"Message 13",
 			"Message 14",
@@ -974,9 +947,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		const turn = await prepareRunnable(turns, await runningTurn(details.chat.id));
 		expect(turn.context.windowTokens).toBe(128_000);
-		await turnRecords.complete(
+		await turnStore.complete(
 			replyTurnOf(turn),
-			{ content: "Here is the plan.", collaborations: [], toolCalls: [] },
+			{ content: "Here is the plan.", toolCalls: [] },
 			{
 				contextTokens: 50_000,
 				contextCapacity: turn.context.windowTokens,

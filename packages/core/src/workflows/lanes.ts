@@ -1,7 +1,7 @@
 export * as Lanes from "./lanes.ts";
 
 import type { Activities } from "@sugabots/workflow/activities";
-import { and, asc, eq, lt, type SQLWrapper, sql } from "drizzle-orm";
+import { and, asc, eq, lt, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Context, Duration, Effect, Exit, Layer, Option, Schema } from "effect";
 import { Activity, type Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { afterCommit, Database, query, transaction } from "../database/database.ts";
@@ -26,6 +26,11 @@ export interface Interface {
 		readonly workflow: W;
 		readonly payload: W["payloadSchema"]["Type"];
 		readonly whenBusy: WhenBusy;
+		/**
+		 * For `coalesce`: whether this request may join the waiting request
+		 * whose payload is `waiting`. Any, when unset.
+		 */
+		readonly joins?: (waiting: W["payloadSchema"]["Type"]) => boolean;
 	}) => Effect.Effect<Admission>;
 	/**
 	 * Frees the lane an execution holds and starts the next request waiting in
@@ -51,7 +56,8 @@ export interface Interface {
 
 /**
  * What a request does when its lane is busy:
- * - `coalesce`: joins a request already waiting (which keeps its payload), or waits.
+ * - `coalesce`: joins the oldest request already waiting that it `joins`
+ *   (which keeps its payload), or waits.
  * - `replace`: gives a request already waiting its payload, or waits.
  * - `queue`: waits behind every request already waiting.
  */
@@ -102,6 +108,30 @@ export const waitingSince = (subject: SQLWrapper, workflow: string) =>
 		join ${lane} on ${lane.key} = waiting.lane_key
 		where ${lane.subject} = (${subject})::text and ${lane.workflow} = ${workflow}
 	)`;
+
+/**
+ * Whether a lane about `subject` holds a request for `workflow` whose payload
+ * `matches`, starting, running or waiting to start, as a condition for a
+ * query. `matches` is given the payload as its JSON encoding.
+ */
+export const holdsRequest = (
+	subject: SQLWrapper,
+	workflow: string,
+	matches: (payload: SQLWrapper) => SQL | undefined,
+) =>
+	sql<boolean>`(exists (
+		select 1 from ${lane}
+		where ${lane.subject} = (${subject})::text
+			and ${lane.workflow} = ${workflow}
+			and ${lane.state} <> 'idle'
+			and ${matches(lane.payload) ?? sql`true`}
+	) or exists (
+		select 1 from ${laneRequest} waiting
+		join ${lane} on ${lane.key} = waiting.lane_key
+		where ${lane.subject} = (${subject})::text
+			and waiting.workflow = ${workflow}
+			and ${matches(sql`waiting.payload`) ?? sql`true`}
+	))`;
 
 /** The statement behind `Interface.dropWaiting`. */
 const dropWaitingStatement = (subjects: ReadonlyArray<string>, workflows: ReadonlyArray<string>) =>
@@ -198,7 +228,7 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 				yield* startAfterCommit(key, workflow, executionId, payload);
 			});
 
-		const admit: Interface["admit"] = ({ key, subject, workflow, payload, whenBusy }) =>
+		const admit: Interface["admit"] = ({ key, subject, workflow, payload, whenBusy, joins }) =>
 			transaction(
 				Effect.gen(function* () {
 					const encoded = encodePayload(workflow, payload);
@@ -215,15 +245,23 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 						yield* occupy(key, workflow, encoded);
 						return "started" as const;
 					}
-					const [waiting] = yield* query((db) =>
+					const allWaiting = yield* query((db) =>
 						db
-							.select({ id: laneRequest.id })
+							.select({ id: laneRequest.id, payload: laneRequest.payload })
 							.from(laneRequest)
 							.where(eq(laneRequest.laneKey, key))
-							.orderBy(asc(laneRequest.createdAt), asc(laneRequest.id))
-							.limit(1),
+							.orderBy(asc(laneRequest.createdAt), asc(laneRequest.id)),
 					);
-					if (waiting && whenBusy === "coalesce") return "coalesced" as const;
+					const [waiting] = allWaiting;
+					if (
+						whenBusy === "coalesce" &&
+						allWaiting.some(
+							(candidate) =>
+								!joins || joins(decodePayload(workflow, candidate.payload) as typeof payload),
+						)
+					) {
+						return "coalesced" as const;
+					}
 					if (waiting && whenBusy === "replace") {
 						yield* query((db) =>
 							db

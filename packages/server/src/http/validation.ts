@@ -73,7 +73,8 @@ function tooLarge() {
 	);
 }
 
-function isJson(contentType: string | undefined): boolean {
+/** Whether `contentType` names JSON: `application/json`, or any `+json` media type. */
+export function isJson(contentType: string | undefined): boolean {
 	const mediaType = contentType?.split(";", 1)[0]?.trim().toLowerCase();
 	return mediaType === "application/json" || mediaType?.endsWith("+json") === true;
 }

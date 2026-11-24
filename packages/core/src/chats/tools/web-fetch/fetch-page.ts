@@ -19,13 +19,21 @@ import { readablePage } from "./readable.ts";
  * HTTP is rare enough that an upgrade serves better than a refusal.
  *
  * Every way a fetch can go wrong is an answer, not an error: the bot is
- * told why and can try another address or tell the person.
+ * told why and can try another address or tell the member.
  */
 
-export const MAX_REDIRECTS = 5;
-const DEFAULT_TIMEOUT_MS = 15_000;
-const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
-const DEFAULT_MAX_CHARACTERS = 40_000;
+const MAX_REDIRECTS = 5;
+
+/**
+ * How long a page may take, how large it may be, and how much of its text the
+ * bot gets: under the 50,000 characters at which a tool's result is kept as a
+ * file, with room for the page's other fields, so a page comes back whole.
+ */
+export const WEB_FETCH_LIMITS: PageLimits = {
+	timeoutMs: 15_000,
+	maxBytes: 5 * 1024 * 1024,
+	maxCharacters: 40_000,
+};
 const USER_AGENT = `Sugabots/1 (+${projectLinks.repository})`;
 
 interface FetchedPage {
@@ -41,8 +49,8 @@ interface FetchedPage {
 	truncated: boolean;
 }
 
-/** Why a page was not fetched, as the model reads it and people see it among the reply's tool calls. */
-export interface Refusal {
+/** Why a page was not fetched, as the model reads it and members see it among the reply's tool calls. */
+interface Refusal {
 	ok: false;
 	reason: UserText;
 }
@@ -51,19 +59,22 @@ type PageOutcome = { ok: true; page: FetchedPage } | Refusal;
 
 export type FetchPage = (url: string, signal?: AbortSignal) => Promise<PageOutcome>;
 
-interface PageFetcherOptions {
+interface PageLimits {
+	timeoutMs: number;
+	maxBytes: number;
+	maxCharacters: number;
+}
+
+interface PageFetcherOptions extends PageLimits {
 	/** An unbound egress client, `createEgressHttpClient`. */
 	fetch: EgressHttpClient;
-	timeoutMs?: number;
-	maxBytes?: number;
-	maxCharacters?: number;
 }
 
 export function pageFetcher({
 	fetch,
-	timeoutMs = DEFAULT_TIMEOUT_MS,
-	maxBytes = DEFAULT_MAX_BYTES,
-	maxCharacters = DEFAULT_MAX_CHARACTERS,
+	timeoutMs,
+	maxBytes,
+	maxCharacters,
 }: PageFetcherOptions): FetchPage {
 	return async (requested, signal) => {
 		const start = webUrl(requested);

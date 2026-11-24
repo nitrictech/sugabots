@@ -17,21 +17,21 @@ import { Button } from "@/components/ui/button";
 export interface ChatBot {
 	kind: "bot";
 	name: string;
-	look: AvatarParts;
+	avatar: AvatarParts;
 }
 
-interface ChatPerson {
-	kind: "person";
+interface ChatMember {
+	kind: "member";
 	name: string;
 	initials: string;
 	/** A licensed photo, which the landing page's demos show in place of the initials. */
 	photo?: string;
 }
 
-/** Who wrote a message: a bot with its face, or a person. */
-export type ChatAuthor = ChatBot | ChatPerson;
+/** Who wrote a message: a bot with its face, or a member. */
+export type ChatAuthor = ChatBot | ChatMember;
 
-/** A bot's face, or a person's photo or initials. */
+/** A bot's face, or a member's photo or initials. */
 export function ChatAvatar({
 	author,
 	size,
@@ -39,7 +39,7 @@ export function ChatAvatar({
 	author: ChatAuthor;
 	size?: ComponentProps<typeof Avatar>["size"];
 }) {
-	if (author.kind === "bot") return <BotAvatar size={size} {...author.look} />;
+	if (author.kind === "bot") return <BotAvatar size={size} {...author.avatar} />;
 	return (
 		<Avatar size={size}>
 			{author.photo && <AvatarImage src={author.photo} alt="" />}
@@ -56,7 +56,7 @@ interface ChatMessageProps {
 	/** When it was sent, beside the name, e.g. "7:12 PM". */
 	time?: string;
 	className?: string;
-	/** Its words, then anything it opened, like a collaboration. */
+	/** Its words, then anything it made, like a tool's line or a file. */
 	children: ReactNode;
 }
 
@@ -97,46 +97,6 @@ export function ChatText({ className, ...props }: ComponentProps<"p">) {
 export function ChatToolLine({ className, ...props }: ComponentProps<"p">) {
 	return (
 		<p className={cn("pb-1 text-sm font-medium text-muted-foreground", className)} {...props} />
-	);
-}
-
-interface ChatCollaborationProps {
-	from: AvatarParts;
-	to: { name: string; look: AvatarParts };
-	/** When the other bot last wrote in it, e.g. "9:05am". */
-	lastReply?: string;
-	/** Where it stands, e.g. "Done". */
-	status: string;
-}
-
-/**
- * The collaboration a bot's message opened with another bot, as a line
- * under its words. The faces are ringed in the card's colour, which every demo
- * chat sits on, so the ring only shows where they overlap.
- */
-export function ChatCollaboration({ from, to, lastReply, status }: ChatCollaborationProps) {
-	return (
-		<div className="mt-1 flex max-w-full items-center gap-2 py-1">
-			<span aria-hidden className="flex shrink-0">
-				{[from, to.look].map((look) => (
-					<BotAvatar
-						key={`${look.color}-${look.eyes}`}
-						size="xs"
-						className="-mr-1.75 ring-2 ring-card"
-						{...look}
-					/>
-				))}
-			</span>
-			<span className="truncate pl-2 text-xs font-semibold text-link">
-				Collaboration with {to.name}
-			</span>
-			{lastReply && (
-				<span className="shrink-0 text-xs text-muted-foreground">Last reply {lastReply}</span>
-			)}
-			<span className="shrink-0 rounded-sm bg-muted px-1.5 py-px text-xs font-semibold text-muted-foreground">
-				{status}
-			</span>
-		</div>
 	);
 }
 

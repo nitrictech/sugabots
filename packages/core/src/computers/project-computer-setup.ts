@@ -17,7 +17,7 @@ import type { Computers } from "./computers.ts";
 import { ProjectComputers } from "./project-computers.ts";
 
 /**
- * A project's computer for the people looking after the project, a bot's
+ * A project's computer for the members looking after the project, a bot's
  * being its default project's: how it stands for anyone in the project, and,
  * for those who may manage it, starting it afresh or moving its work to a
  * computer made from the current image.
@@ -84,7 +84,7 @@ export const make = Effect.gen(function* () {
 					createdAt: status.createdAt.toISOString(),
 					lastUsedAt: status.lastUsedAt.toISOString(),
 					turnsUsing: status.turnsUsing,
-					peopleWatching: status.peopleWatching,
+					membersWatching: status.membersWatching,
 					upgradeAvailable: status.upgradeAvailable,
 					disk: status.disk ? shownDisk(status.disk) : null,
 				},

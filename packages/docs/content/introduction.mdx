@@ -1,6 +1,6 @@
 ---
 title: What is Sugabots?
-description: A workspace where people and AI bots work together, in chats and projects.
+description: A workspace where members and AI bots work together, in chats and projects.
 ---
 
 Sugabots is a workspace where some of your teammates are bots. You give each bot
@@ -13,11 +13,11 @@ own database, and messages only go to the model providers you choose.
 ## The workspace, taken apart
 
 - **Bots** are AI teammates. A **public** bot is for everyone in the workspace;
-  a **private** one only for the person who made it. Each has its own chats,
+  a **personal** one only for the member who made it. Each has its own chats,
   files, computer, connectors and automations.
 - A bot's **chats** are its chats, each about one piece of work.
   Whoever can talk to the bot can read and join its chats.
-- **Projects** are long-running pieces of work shared by many people and many
+- **Projects** are long-running pieces of work shared by many members and many
   bots, made of their chats, with the files made there.
 - **Your Personal Assistant** is a bot only you can talk to. It knows the
   workspace, and points you to the right bot or project.
@@ -34,25 +34,26 @@ Trip Planner gets Budget Keeper's opinion before it books anything.
 <Chat title="Lisbon trip">
   <Say from="mum">Can someone please sort the Lisbon flights before the prices jump again</Say>
   <Say from="you">On it. @trip-planner, find us something Friday after 5, and check it fits the holiday pot</Say>
-  <Say from="tripPlanner" collaboratesWith="budgetKeeper">Found two. Checking them against the holiday pot.</Say>
-  <Say from="tripPlanner">Two options under €180 each. The 18:40 lands in time for dinner, and Budget Keeper says four seats still leave €220 in the pot.</Say>
+  <Say from="tripPlanner">Found two under €180 each. @budget-keeper, do four seats fit the holiday pot?</Say>
+  <Say from="budgetKeeper">They do. Four seats still leave €220 in the pot.</Say>
+  <Say from="tripPlanner">Then the 18:40: it lands in time for dinner.</Say>
   <Say from="dad">18:40. Nobody is doing a 6am flight again.</Say>
 </Chat>
 
 Three things happened there:
 
 - **Everyone saw the same chat.** A project's chats belong to everyone in
-  it, people and bots.
-- **One bot asked another.** Trip Planner wrote to Budget Keeper on its own, and
-  anyone can open that exchange and read it.
+  it, members and bots.
+- **One bot asked another.** Trip Planner asked Budget Keeper on its own, by
+  mentioning it, and Budget Keeper answered in the chat for everyone to read.
 - **Nothing was booked without asking.** The travel app's connector was set to
-  Ask, so each tool the bot used waited for a person to allow it.
+  Ask, so each tool the bot used waited for a member to allow it.
 
 ## The pieces
 
 | Piece | What it is | Read more |
 | --- | --- | --- |
-| Projects | Long-running work shared by people and bots | [Projects](/docs/projects) |
+| Projects | Long-running work shared by members and bots | [Projects](/docs/projects) |
 | Bots | AI teammates with a job, a model and a face | [Bots](/docs/bots) |
 | Chats | A bot's chats and a project's chats | [Chats](/docs/chats) |
 | Tools | What bots can do beyond talking, and when they ask first | [Tools and approvals](/docs/tools-and-approvals) |
@@ -60,7 +61,7 @@ Three things happened there:
 | Models | The providers your bots think with | [Models](/docs/models) |
 | Web search | How bots search the web and read pages | [Web search](/docs/web-search) |
 | Automations | Work bots do on a routine, such as every weekday at 9, or when something triggers it | [Automations](/docs/automations) |
-| People | Who can join, and what each role can do | [People and roles](/docs/people-and-roles) |
+| Members | Who can join, and what each role can do | [Members and roles](/docs/members-and-roles) |
 
 <Tip title="Ready?">
 

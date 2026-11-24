@@ -2,7 +2,7 @@ export * as GitHubConnectors from "./github-connectors.ts";
 
 import type { AccountRepository, ConnectorRepositories } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Context, DateTime, Effect, ErrorReporter, Layer, Schema } from "effect";
 import type { AuthorizationDenied } from "../../../authorization/access.ts";
 import { Authorization } from "../../../authorization/authorization.ts";
@@ -13,9 +13,9 @@ import {
 	connector,
 	type GitHubConnectorRepository,
 	type GitHubConnectorSettings,
-	person,
 } from "../../../database/schema.ts";
 import { Secrets } from "../../../secrets/secrets.ts";
+import { memberNamesOf } from "../../../workspaces/membership/member-reads.ts";
 import { Egress } from "../../network/egress.ts";
 import { ConnectorStore } from "../connector-store.ts";
 import { Connected } from "./connected.ts";
@@ -134,20 +134,10 @@ export const make = Effect.gen(function* () {
 			return app;
 		});
 
-	/** The connector's repositories as people are shown them, with who added each. */
+	/** The connector's repositories as members are shown them, with who added each. */
 	const shown = (settings: GitHubConnectorSettings) =>
 		Effect.gen(function* () {
-			const adders = [...new Set(settings.repositories.flatMap((one) => one.addedById ?? []))];
-			const names = new Map(
-				adders.length === 0
-					? []
-					: (yield* query((db) =>
-							db
-								.select({ id: person.id, name: person.name })
-								.from(person)
-								.where(inArray(person.id, adders)),
-						)).map((one) => [one.id, one.name]),
-			);
+			const names = yield* memberNamesOf(settings.repositories.map((one) => one.addedById ?? null));
 			return {
 				account: settings.account,
 				repositories: [...settings.repositories]
@@ -159,7 +149,7 @@ export const make = Effect.gen(function* () {
 			} satisfies ConnectorRepositories;
 		});
 
-	/** Changes the connector's repositories, answering them as people are shown them after. */
+	/** Changes the connector's repositories, answering them as members are shown them after. */
 	const changed = (
 		project: Project,
 		connectorId: string,
@@ -213,7 +203,7 @@ export const make = Effect.gen(function* () {
 						(one) => one.fullName.toLowerCase() === repository.toLowerCase(),
 					);
 					if (!found) return yield* new RepositoryUnreachable({ repository });
-					const { personId } = yield* CurrentActor.Service;
+					const { memberId } = yield* CurrentActor.Service;
 					const addedAt = DateTime.formatIso(yield* DateTime.now);
 					const pathOf = new Map(reached.map((one) => [one.id, one.fullName]));
 					return yield* changed(project, connectorId, settings, (repositories) => [
@@ -221,7 +211,7 @@ export const make = Effect.gen(function* () {
 						...repositories.map((one) => ({ ...one, path: pathOf.get(one.id) ?? one.path })),
 						...(repositories.some((one) => one.id === found.id)
 							? []
-							: [{ id: found.id, path: found.fullName, addedById: personId, addedAt }]),
+							: [{ id: found.id, path: found.fullName, addedById: memberId, addedAt }]),
 					]);
 				}),
 			),

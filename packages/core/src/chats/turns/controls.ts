@@ -1,7 +1,7 @@
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
-import { computerProjectStandingFor, mayDecideToolCall } from "../../authorization/access.ts";
+import { mayDecideToolCall } from "../../authorization/access.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
@@ -17,7 +17,7 @@ import type { Turns } from "./turns.ts";
 import { WorkAdmission } from "./work-admission.ts";
 
 /**
- * `Turns.Controls`: people deciding the tool calls a turn parked for
+ * `Turns.Controls`: members deciding the tool calls a turn parked for
  * approval. The turn reading their decisions and running what they allowed is
  * `ApprovedToolCalls`.
  */
@@ -41,9 +41,8 @@ export const makeControls = Effect.gen(function* () {
 								.select({
 									call: toolCall,
 									chatId: toolCall.chatId,
-									botId: turn.botId,
-									owner: turn.owner,
-									turn: { status: turn.status, cancelRequested: turn.cancelRequested },
+									executionId: turn.executionId,
+									turn: { status: turn.status, interruptRequested: turn.interruptRequested },
 								})
 								.from(toolCall)
 								.innerJoin(turn, eq(turn.id, toolCall.turnId))
@@ -59,24 +58,18 @@ export const makeControls = Effect.gen(function* () {
 						const reached = yield* visibility
 							.chatStanding(candidate.chatId)
 							.pipe(Effect.mapError(() => new ToolApprovalNotFound()));
-						const { personId } = yield* CurrentActor.Service;
+						const { memberId } = yield* CurrentActor.Service;
 						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
 						const approvers = approversOf(candidate.call.tool);
-						const computerProject =
-							approvers === "computer-managers"
-								? yield* query((db) =>
-										computerProjectStandingFor(db, candidate.chatId, candidate.botId, personId),
-									)
-								: undefined;
-						// The chat's people decide, and in an automation's run only those managing its bot.
+						// Those who reach the chat decide, and in an automation's run only those managing its bot.
 						const runBot =
 							approvers === "chat" ? yield* admission.runBotOf(candidate.chatId) : undefined;
-						if (!mayDecideToolCall(reached.standing, computerProject, runBot, approvers)) {
+						if (!mayDecideToolCall(reached.standing, runBot, approvers)) {
 							return yield* new ToolApprovalForbidden();
 						}
 						const approvalId = candidate.call.approvalId;
-						const decision = { decision: input.decision, personId };
-						if (!candidate.owner) return yield* new ToolApprovalNotFound();
+						const decision = { decision: input.decision, memberId };
+						if (!candidate.executionId) return yield* new ToolApprovalNotFound();
 						// Recorded and sent in one transaction: the engine writes the signal
 						// through the same connection, so both commit or neither does, and
 						// everyone watching the chat sees it decided as this commits. The
@@ -87,7 +80,11 @@ export const makeControls = Effect.gen(function* () {
 							decision,
 						});
 						if (!recorded) return yield* new ToolApprovalConflict();
-						return yield* signals.decide({ owner: candidate.owner, approvalId, decision });
+						return yield* signals.decide({
+							executionId: candidate.executionId,
+							approvalId,
+							decision,
+						});
 					}),
 				),
 			),

@@ -113,11 +113,10 @@ describe.each(accesses)("%s computers", (_, access) => {
 					computer.setNetwork({
 						reach: { kind: "allowed-hosts-only", hosts: ["github.com"] },
 						credentials: [],
-						environment: {},
 					}),
 				);
 				expect([await reaches("example.com"), await reaches("github.com")]).toEqual([false, true]);
-				await run(computer.setNetwork({ reach: SPEC.reach, credentials: [], environment: {} }));
+				await run(computer.setNetwork({ reach: SPEC.reach, credentials: [] }));
 			},
 			SLOW,
 		);
@@ -130,11 +129,10 @@ describe.each(accesses)("%s computers", (_, access) => {
 					computer.setNetwork({
 						reach: { kind: "open", blockedHosts: blocksHosts ? ["github.com"] : [] },
 						credentials: [],
-						environment: {},
 					}),
 				);
 				const open = [await reaches("example.com"), await reaches("github.com")];
-				await run(computer.setNetwork({ reach: SPEC.reach, credentials: [], environment: {} }));
+				await run(computer.setNetwork({ reach: SPEC.reach, credentials: [] }));
 				const allowedHostsOnly = [await reaches("example.com"), await reaches("github.com")];
 
 				expect(open).toEqual([true, !blocksHosts]);
@@ -144,7 +142,7 @@ describe.each(accesses)("%s computers", (_, access) => {
 		);
 
 		it(
-			"adds credentials to its HTTPS requests outside it, and gives login shells only placeholders",
+			"adds credentials to its HTTPS requests outside it, never inside it",
 			async () => {
 				const { credentials: scope } = (await run(provider)).capabilities;
 				// A provider that can't add credentials is never given any.
@@ -163,17 +161,15 @@ describe.each(accesses)("%s computers", (_, access) => {
 								value: Redacted.make("the-credential"),
 							},
 						],
-						environment: { SUGABOTS_TEST_TOKEN: "a-placeholder" },
 					}),
 				);
 				const signed = await echoed("/anything/signed/repository");
 				const elsewhere = await echoed("/anything/other/repository");
 				const shell = await run(computer.exec("bash -lc 'env'", EXEC));
-				await run(computer.setNetwork({ reach: SPEC.reach, credentials: [], environment: {} }));
+				await run(computer.setNetwork({ reach: SPEC.reach, credentials: [] }));
 
 				expect(signed).toContain("the-credential");
 				if (scope === "host-and-path") expect(elsewhere).not.toContain("the-credential");
-				expect(shell.stdout.text).toContain("SUGABOTS_TEST_TOKEN=a-placeholder");
 				expect(shell.stdout.text).not.toContain("the-credential");
 			},
 			SLOW,
@@ -183,9 +179,9 @@ describe.each(accesses)("%s computers", (_, access) => {
 			const execution = await run(computer.exec("pwd; id -u", EXEC));
 
 			expect(execution.exitCode).toBe(0);
-			const [directory, personId] = execution.stdout.text.trim().split("\n");
-			expect(directory).toBe(Computers.WORKSPACE_DIRECTORY);
-			expect(personId).not.toBe("0");
+			const [directory, uid] = execution.stdout.text.trim().split("\n");
+			expect(directory).toBe(Computers.WORK_DIRECTORY);
+			expect(uid).not.toBe("0");
 		});
 
 		it("answers a failing command with its exit code and output", async () => {
@@ -246,7 +242,7 @@ describe.each(accesses)("%s computers", (_, access) => {
 		});
 
 		it("writes files the bots' user owns, making their directories", async () => {
-			const path = `${Computers.WORKSPACE_DIRECTORY}/notes/today.txt`;
+			const path = `${Computers.WORK_DIRECTORY}/notes/today.txt`;
 			const content = new TextEncoder().encode("written by a test\n");
 
 			await run(computer.writeFile(path, content));
@@ -259,14 +255,14 @@ describe.each(accesses)("%s computers", (_, access) => {
 
 		it("refuses to read a file that doesn't exist", async () => {
 			const exit = await runExit(
-				computer.readFile(`${Computers.WORKSPACE_DIRECTORY}/missing.txt`, 1_000),
+				computer.readFile(`${Computers.WORK_DIRECTORY}/missing.txt`, 1_000),
 			);
 
 			expect(failureTag(exit)).toBe("ComputerFileFailed");
 		});
 
 		it("reads only the start of a large file, with its whole size", async () => {
-			const path = `${Computers.WORKSPACE_DIRECTORY}/large.bin`;
+			const path = `${Computers.WORK_DIRECTORY}/large.bin`;
 			await run(computer.exec(`truncate -s 1G ${path}`, EXEC));
 
 			const read = await run(computer.readFile(path, 10));

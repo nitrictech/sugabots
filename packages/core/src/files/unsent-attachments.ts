@@ -1,16 +1,16 @@
-export * as UnsentUploads from "./unsent-uploads.ts";
+export * as UnsentAttachments from "./unsent-attachments.ts";
 
 import { Duration, Effect, Layer, Schedule } from "effect";
 import { ChatFileStore } from "./chat-file-store.ts";
 
-/** How long an upload may wait to be attached to a message before it is removed. */
+/** How long an attachment may wait for its message to be sent before it is removed. */
 const UNSENT_FOR = Duration.hours(24);
 
-/** How often unsent uploads are looked for. */
+/** How often unsent attachments are looked for. */
 const INTERVAL = Duration.hours(1);
 
 /**
- * Removes uploads never attached to a message, such as files added to a draft
+ * Removes attachments whose message was never sent, such as files added to a draft
  * that was abandoned, every `INTERVAL` for as long as the layer's scope is
  * open, starting at once.
  */
@@ -18,8 +18,8 @@ export const layer = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const files = yield* ChatFileStore.Service;
 		yield* Effect.forkScoped(
-			files.removeUnsentUploads(UNSENT_FOR).pipe(
-				Effect.catchCause((cause) => Effect.logError("Removing unsent uploads failed", cause)),
+			files.removeUnsentAttachments(UNSENT_FOR).pipe(
+				Effect.catchCause((cause) => Effect.logError("Removing unsent attachments failed", cause)),
 				Effect.repeat(Schedule.spaced(INTERVAL)),
 			),
 		);

@@ -16,12 +16,12 @@ leads, so they run on its own computer with its own connectors. They're in the
 bot's **Automations**.
 
 Whoever may change the project makes and changes its automations, and switches
-them on or off: for the own automations of a bot people made, its creator, the
-owner and admins; for a project people made, the owner and admins. Anyone in the
+them on or off: for the own automations of a bot members made, its creator, the
+owner and admins; for a project members made, the owner and admins. Anyone in the
 project, or who can talk to the bot, can see them and, except viewers, choose
 **Start a run**.
 
-A [Personal Assistant](/docs/bots#your-personal-assistant)'s automations are its person's,
+A [Personal Assistant](/docs/bots#your-personal-assistant)'s automations are its member's,
 whatever their role, so a viewer manages their own assistant's too: they make
 and change them, switch them on or off, choose **Start a run**, and answer the
 approvals their runs ask for. Nobody else sees them, not even the owner or an
@@ -52,12 +52,12 @@ one with none runs only when someone chooses **Start a run**.
 
 When a run finishes, the bot's last reply is posted in the automation feed,
 where anyone in the project can answer it and carry on. There the lead bot
-answers every message, unless it mentions only people; mentioning another bot
+answers every message, unless it mentions only members; mentioning another bot
 doesn't bring it in. Any file it wrote during the run is shown under that reply, at the version the run
 left it at. The bot is told its last reply goes there, so it writes that reply
 for you: a morning check-in, the week's sales, a reminder.
 
-When something needs a person to act or decide, the bot mentions them, which
+When something needs a member to act or decide, the bot mentions them, which
 notifies them. Unless the instructions say who, that's whoever made the
 automation and whoever started the run.
 
@@ -200,13 +200,6 @@ webhook with an explicit header reads nothing else, so a caller that names its
 deliveries another way, such as `Svix-Id` or `X-Shopify-Webhook-Id`, needs its
 header named here. Authentication headers cannot be used as delivery IDs.
 
-Existing webhooks and API-created webhooks without a delivery ID setting retain
-**Automatic detection**: the first nonempty `Idempotency-Key`, `Linear-Delivery`,
-`X-GitHub-Delivery`, `X-Shopify-Webhook-Id`, `Svix-Id`, or `Webhook-Id`, then the
-body’s `event_id` or a Stripe event’s `id`. A header carrying the API key is
-skipped. Unrelated edits keep this behavior until you choose a header or
-**Every call runs**.
-
 <Careful title="Sentry retries aren't deduplicated">
 
 Sentry's `Request-ID` changes with every attempt, so a retry of a Sentry delivery
@@ -221,7 +214,7 @@ Each run has a chat of its own with everything the bot did, and shows in the
 automation feed as a line like "Morning inbox sweep ran". A posted
 result links back to its run, under the message. A run that fails or is
 stopped posts nothing; its line says what happened. If a run needs an
-[approval](/docs/tools-and-approvals), only whoever manages the project's
-automations can answer it: for the own automations of a bot people made, its
-creator, the owner or an admin; for a Personal Assistant's, its person, even a
-viewer.
+[approval](/docs/tools-and-approvals), only whoever manages the bot doing the
+run, and can see its chat, can answer it: the bot's creator, if they're in the
+project and not a viewer, the owner or an admin; for a Personal Assistant, its
+member, even a viewer. See [who can answer](/docs/tools-and-approvals#who-can-answer).

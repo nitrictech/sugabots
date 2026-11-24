@@ -19,23 +19,23 @@ import type { TurnStatus } from "../../database/schema.ts";
  */
 export const MAX_TURN_RUNS = 3;
 
-/** What people are told of a cancelled turn's tool calls that were cut short. */
+/** What members are told of a cancelled turn's tool calls that were cut short. */
 export const TURN_CANCELLED = userText`Turn cancelled`;
 
-/** What people are told of a turn's tool calls cut short because its automation run ended. */
+/** What members are told of a turn's tool calls cut short because its automation run ended. */
 export const RUN_ENDED = userText`Automation run ended`;
 
-/** What people are told of a turn a defect ended, rather than a failure it expects. */
+/** What members are told of a turn a defect ended, rather than a failure it expects. */
 export const TURN_STOPPED_UNEXPECTEDLY = userText`The reply stopped unexpectedly.`;
 
-/** What people are told of a system bot's turn cut short by its process stopping. */
+/** What members are told of a system bot's turn cut short by its process stopping. */
 export const SYSTEM_TURN_INTERRUPTED = userText`It was interrupted before it finished.`;
 
 /** What the lifecycle knows of a turn besides its status. */
 interface TurnFacts {
-	/** The workflow execution running the turn. A suspended turn resumes only for its owner. */
-	readonly owner: string | null;
-	readonly cancelRequested: boolean;
+	/** The workflow execution running the turn. A suspended turn resumes only in that execution. */
+	readonly executionId: string | null;
+	readonly interruptRequested: boolean;
 	/** Runs since the turn last got anywhere; see `MAX_TURN_RUNS`. */
 	readonly runs: number;
 	/** Whether a model transcript is parked to continue from after approvals. */
@@ -47,7 +47,7 @@ interface TurnFacts {
 export type TurnState = TurnFacts &
 	(
 		| { readonly status: Exclude<TurnStatus, "failed"> }
-		/** `userMessage` is what people are told went wrong. */
+		/** `userMessage` is what members are told went wrong. */
 		| { readonly status: "failed"; readonly userMessage: UserText }
 	);
 
@@ -61,20 +61,20 @@ export type Ended =
 
 export type TurnEvent = Data.TaggedEnum<{
 	/**
-	 * Another run of the turn is starting, for the workflow execution `owner`.
+	 * Another run of the turn is starting, for the workflow execution `executionId`.
 	 * `uncertainWriteOrDelete` is whether a write/delete tool call was left running, so
 	 * whether it happened is unknown.
 	 */
-	Reopen: { readonly owner: string | null; readonly uncertainWriteOrDelete: boolean };
-	/** The reply stopped to wait for people to decide tool approvals. */
+	Reopen: { readonly executionId: string | null; readonly uncertainWriteOrDelete: boolean };
+	/** The reply stopped to wait for members to decide tool approvals. */
 	Suspend: Record<never, never>;
 	Complete: Record<never, never>;
 	Fail: { readonly userMessage: UserText };
 	/** The run stopped short, as it was asked to. */
 	Cancel: Record<never, never>;
 	/**
-	 * The turn ends without running again: its owner gave up on it, or it may
-	 * not run. `userMessage` is what people are told of it and of its
+	 * The turn ends without running again: its workflow execution gave up on it, or it may
+	 * not run. `userMessage` is what members are told of it and of its
 	 * unfinished tool calls.
 	 */
 	Abandon: { readonly status: "failed" | "cancelled"; readonly userMessage: UserText };
@@ -94,7 +94,7 @@ export type FollowUp = Data.TaggedEnum<{
 	Retry: Record<never, never>;
 	/**
 	 * The turn ended mid-run: its reply and unfinished tool calls end with it,
-	 * and people are told `userMessage` of the calls.
+	 * and members are told `userMessage` of the calls.
 	 */
 	End: { readonly userMessage: UserText };
 	/** Tell the workflow running the turn to stop. */
@@ -110,7 +110,8 @@ export type Transition =
 
 export function transition(state: TurnState, event: TurnEvent): Transition {
 	return TurnEvent.$match(event, {
-		Reopen: ({ owner, uncertainWriteOrDelete }) => reopen(state, owner, uncertainWriteOrDelete),
+		Reopen: ({ executionId, uncertainWriteOrDelete }) =>
+			reopen(state, executionId, uncertainWriteOrDelete),
 		Suspend: () =>
 			mayRunTools(state)
 				? next({ ...factsOf(state), status: "waiting", checkpointed: true, runs: 0 })
@@ -129,7 +130,7 @@ export function transition(state: TurnState, event: TurnEvent): Transition {
 		CancelWaiting: () =>
 			state.status === "waiting"
 				? next(
-						{ ...cancelled(state), cancelRequested: true },
+						{ ...cancelled(state), interruptRequested: true },
 						FollowUp.End({ userMessage: TURN_CANCELLED }),
 					)
 				: refused("The turn is not waiting"),
@@ -138,13 +139,13 @@ export function transition(state: TurnState, event: TurnEvent): Transition {
 		AutomationEnded: () => {
 			if (state.status === "waiting") {
 				return next(
-					{ ...cancelled(state), cancelRequested: true },
+					{ ...cancelled(state), interruptRequested: true },
 					FollowUp.End({ userMessage: RUN_ENDED }),
 				);
 			}
 			if (state.status === "running") {
 				return next(
-					{ ...factsOf(state), status: "running", cancelRequested: true },
+					{ ...factsOf(state), status: "running", interruptRequested: true },
 					FollowUp.AnnounceCancelRequest(),
 				);
 			}
@@ -162,13 +163,13 @@ export function transition(state: TurnState, event: TurnEvent): Transition {
 export const runsAgainAfterFailure = (state: TurnState): boolean =>
 	!state.checkpointed && !state.writeOrDeleteStarted && state.runs < MAX_TURN_RUNS;
 
-/** mayRunTools reports whether the turn may start a tool: it is running and nobody asked it to stop. */
-export const mayRunTools = (state: Pick<TurnState, "status" | "cancelRequested">): boolean =>
-	state.status === "running" && !state.cancelRequested;
+/** mayRunTools reports whether the turn may start a tool: it is running and was not asked to stop. */
+export const mayRunTools = (state: Pick<TurnState, "status" | "interruptRequested">): boolean =>
+	state.status === "running" && !state.interruptRequested;
 
-/** awaitsDecisions reports whether people may decide the turn's approvals: it waits on them and nobody asked it to stop. */
-export const awaitsDecisions = (state: Pick<TurnState, "status" | "cancelRequested">): boolean =>
-	state.status === "waiting" && !state.cancelRequested;
+/** awaitsDecisions reports whether members may decide the turn's approvals: it waits on them and was not asked to stop. */
+export const awaitsDecisions = (state: Pick<TurnState, "status" | "interruptRequested">): boolean =>
+	state.status === "waiting" && !state.interruptRequested;
 
 /** endedAs returns how a turn in the ended `state` settles its automation run. */
 export function endedAs(state: TurnState): Ended {
@@ -184,11 +185,11 @@ const ended = refused("The turn has already ended");
 
 function reopen(
 	state: TurnState,
-	owner: string | null,
+	executionId: string | null,
 	uncertainWriteOrDelete: boolean,
 ): Transition {
 	if (state.status === "done" || state.status === "cancelled") return ended;
-	if (state.cancelRequested) {
+	if (state.interruptRequested) {
 		return next(cancelled(state), FollowUp.End({ userMessage: TURN_CANCELLED }));
 	}
 	if (state.writeOrDeleteStarted && (!state.checkpointed || uncertainWriteOrDelete)) {
@@ -202,21 +203,27 @@ function reopen(
 		return next(failed(state, gaveUp), FollowUp.End({ userMessage: gaveUp }));
 	}
 	if (state.checkpointed) {
-		if (!isActive(state) || state.owner !== owner) {
+		if (!isActive(state) || state.executionId !== executionId) {
 			return refused("The suspended turn no longer belongs to this workflow");
 		}
 		return next({ ...factsOf(state), status: "running", runs: state.runs + 1 }, FollowUp.Resume());
 	}
 	return next(
-		{ ...factsOf(state), status: "running", owner, checkpointed: false, runs: state.runs + 1 },
+		{
+			...factsOf(state),
+			status: "running",
+			executionId,
+			checkpointed: false,
+			runs: state.runs + 1,
+		},
 		FollowUp.Retry(),
 	);
 }
 
 function factsOf(state: TurnState): TurnFacts {
 	return {
-		owner: state.owner,
-		cancelRequested: state.cancelRequested,
+		executionId: state.executionId,
+		interruptRequested: state.interruptRequested,
 		runs: state.runs,
 		checkpointed: state.checkpointed,
 		writeOrDeleteStarted: state.writeOrDeleteStarted,

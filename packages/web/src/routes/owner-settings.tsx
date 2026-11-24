@@ -38,7 +38,7 @@ export const botComputerRoute = createRoute({
 	component: () => {
 		const owner = useBotRouteOwner();
 		if (!owner) return null;
-		// A Personal Assistant's computer is ours to set up; its person changes its look and connectors.
+		// A Personal Assistant's computer is ours to set up; its member changes its look and connectors.
 		if (owner.bot.assistant) return <Navigate {...botSettingsLink(owner.bot)} replace />;
 		return <ComputerSettingsPage key={owner.bot.id} owner={owner} />;
 	},
@@ -51,11 +51,11 @@ export const projectSettingsRoute = createRoute({
 	component: () => <ProjectSettings section="general" />,
 });
 
-export const projectPeopleRoute = createRoute({
+export const projectMembersRoute = createRoute({
 	getParentRoute: () => projectRoute,
-	path: "/settings/people",
+	path: "/settings/members",
 	loader: () => ProjectSettingsPage.preload(),
-	component: () => <ProjectSettings section="people" />,
+	component: () => <ProjectSettings section="members" />,
 });
 
 export const projectBotsRoute = createRoute({

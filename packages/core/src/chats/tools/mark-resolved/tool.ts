@@ -9,7 +9,7 @@ export const MARK_RESOLVED_TOOL = "mark_resolved";
 type MarkResolvedResult = { resolved: true } | { refused: string };
 
 /**
- * The `mark_resolved` tool: marks this chat resolved for the person who asks, until
+ * The `mark_resolved` tool: marks this chat resolved for the member who asks, until
  * somebody posts in it again.
  */
 export function markResolvedTool({
@@ -26,7 +26,7 @@ export function markResolvedTool({
 }) {
 	return tool({
 		description:
-			"Mark this chat resolved, when the person asks you to or agrees the work in it is finished. It leaves your open chats, and opens again when anyone posts in it. Don't mark it resolved unasked.",
+			"Mark this chat resolved, when the member asks you to or agrees the work in it is finished. It leaves your open chats, and opens again when anyone posts in it. Don't mark it resolved unasked.",
 		inputSchema: noInputSchema,
 		execute: (): Promise<MarkResolvedResult> =>
 			run(

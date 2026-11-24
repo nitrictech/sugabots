@@ -1,10 +1,4 @@
-import {
-	type CollaborationPart,
-	isAttached,
-	isNarration,
-	type Message,
-	type ToolCallPart,
-} from "@sugabots/contracts";
+import { isAttached, isNarration, type Message, type ToolCallPart } from "@sugabots/contracts";
 import { awaitsApproval } from "./tool-activity.ts";
 
 /*
@@ -54,13 +48,11 @@ export function startsRun(
 
 /**
  * Whether `message` heads a group of its own, with its author's face and name:
- * a new author, an hour's quiet, a reply, whose quote sits over its author's
- * name, or a message after one that opened a collaboration, whose side line
- * ends that group.
+ * a new author, an hour's quiet, or a reply, whose quote sits over its author's
+ * name.
  */
 export function startsGroup(previous: Message | undefined, message: Message): boolean {
 	if (!previous || !sameAuthor(previous, message) || message.replyTo) return true;
-	if (previous.parts.some((part) => part.type === "collaboration")) return true;
 	return (
 		new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime() >= LONG_QUIET_MS
 	);
@@ -72,21 +64,13 @@ export function startsGroup(previous: Message | undefined, message: Message): bo
  * it, and the line would say the same thing twice.
  */
 export function isTyping(message: Message): boolean {
-	// While a collaboration runs the bot is quiet in its own chat; the collaboration line says so.
-	if (waitingOn(message)) return false;
 	const awaitingApproval = message.parts.some(
 		(part) => part.type === "tool_call" && awaitsApproval(part),
 	);
 	return message.status === "writing" && !awaitingApproval;
 }
 
-/** The collaborator a running reply has asked and not yet heard back from. */
-function waitingOn(message: Message): string | undefined {
-	const last = message.parts.at(-1);
-	return last?.type === "collaboration" ? last.botName : undefined;
-}
-
-/** Whether a person was asked to allow the call, rather than policy allowing it on its own. */
+/** Whether a member was asked to allow the call, rather than policy allowing it on its own. */
 function wasPutToSomeone(call: ToolCallPart): boolean {
 	const status = call.approval?.status;
 	return status === "pending" || status === "allowed" || status === "denied";
@@ -94,7 +78,6 @@ function wasPutToSomeone(call: ToolCallPart): boolean {
 
 type Segment =
 	| { type: "text"; key: string; text: string }
-	| { type: "collaboration"; key: string; collaboration: CollaborationPart }
 	| { type: "tool_call"; key: string; toolCall: ToolCallPart };
 
 /** Whether a reply being written has nothing settled to show yet, so shows only as its typing line. */
@@ -114,15 +97,10 @@ export function showsNothingYet(message: Message): boolean {
  */
 export function segmentsOf(message: Message): Segment[] {
 	const finished = message.status !== "writing";
-	// A text run is keyed by where in the message it starts; a collaboration or
-	// tool call by its id.
+	// A text run is keyed by where in the message it starts; a tool call by its id.
 	let written = 0;
 	const segments: Segment[] = [];
 	message.parts.forEach((part, index) => {
-		if (part.type === "collaboration") {
-			segments.push({ type: "collaboration", key: part.id, collaboration: part });
-			return;
-		}
 		if (part.type === "tool_call") {
 			// A call somebody had to answer is the only one drawn among the bubbles, as its card.
 			if (wasPutToSomeone(part)) segments.push({ type: "tool_call", key: part.id, toolCall: part });

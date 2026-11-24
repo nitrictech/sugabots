@@ -1,6 +1,6 @@
 ---
 title: Bots
-description: AI teammates with a job, a model to think with, and a face.
+description: AI teammates with a job, a model to think with, and an avatar.
 ---
 
 A bot is an AI teammate. Each one has its own instructions and model, and its
@@ -12,13 +12,13 @@ in a hidden project of its own, which it leads alone, so they work just as a
 
 Owners, admins and editors can make bots. You choose:
 
-- **Colour** and **Eyes**: how it looks. There are eight colours and five pairs
-  of eyes.
-- **Name**: what people call it. Its handle comes from the name, so
+- **Shape**, **Eyes** and **Colour**: its avatar. There are 21 shapes, five
+  pairs of eyes and 16 colours.
+- **Name**: what members call it. Its handle comes from the name, so
   "Trip Planner" is `@trip-planner`. Names and handles are unique across the
   workspace.
-- **Public** or **private**: who can talk to it. See
-  [below](#public-and-private).
+- **Public** or **personal**: who can talk to it. See
+  [below](#public-and-personal).
 
 A new bot starts on the workspace's [default model](/docs/models#default-model).
 If there's none, connect one in **Settings → Models** first. Bots can't think
@@ -28,17 +28,16 @@ A new bot is pinned to your sidebar, and opens in a setup chat: it interviews
 you about the work it's for, then writes its own instructions. You can read and
 change them afterwards in its settings.
 
-## Public and private
+## Public and personal
 
 - A **public** bot is for everyone in the workspace. Anyone can find it, talk to
   it, and see its chats and files. Only public bots can be added to
   [projects](/docs/projects).
-- A **private** bot is for its creator alone. Nobody else can talk to it or see
+- A **personal** bot is for its creator alone. Nobody else can talk to it or see
   its chats. The owner and admins see that it exists, but not its chats.
 
-Other bots can still [ask a private bot for help](/docs/chats#bots-asking-bots).
-Making a bot private takes it out of every project people made that it was in.
-A bot that [leads](/docs/projects#lead-bot) such a project can't be made private
+Making a bot personal takes it out of every project members made that it was in.
+A bot that [leads](/docs/projects#lead-bot) such a project can't be made personal
 until another bot leads it.
 
 ## What a bot has
@@ -47,7 +46,7 @@ until another bot leads it.
 | --- | --- |
 | Chats | Its chats, each about one piece of work. See [Chats](/docs/chats) |
 | Files | Files uploaded or made in its chats |
-| Computer | Its own machine, where it runs commands and keeps files in its chats. It's paused when idle. In a project's chats it uses the [project's computer](/docs/projects#computer) instead |
+| Computer | Its own machine, where it runs commands and keeps files in its chats. It sleeps when idle. In a project's chats it uses the [project's computer](/docs/projects#computer) instead |
 | Connectors | The services and APIs it works with, and its own GitHub app. In a project's chats it also uses the [project's](/docs/projects#connectors), which win where both have one with the same name. See [Connectors](/docs/connectors) |
 | Automations | Work it does on its own, on a routine, such as every weekday at 9, or when something triggers it. See [Automations](/docs/automations) |
 
@@ -61,13 +60,13 @@ Its creator, the owner and admins can change a bot's settings:
 | Model | What it thinks with. Each bot can use a different one |
 | Instructions | How it should work. It follows these in every chat and project |
 | Tools | Which built-in tools it may use |
-| Visibility | Public or private |
+| Visibility | Public or personal |
 
 <Tip title="Writing instructions">
 
 Write them like a note to a new teammate: what it's for, how to sound, and what
 to never do. You have up to 20,000 characters. Everyone who can see a public bot
-can read its instructions, so describe the job, not the person asking.
+can read its instructions, so describe the job, not the member asking.
 
 </Tip>
 
@@ -100,7 +99,7 @@ approvals and failing automations. Ask it what needs you, or how something in
 Sugabots works. It points you to the right bot, and starts a chat with it for
 you when you agree. It can also make a project, join one, add a bot to a
 project or pin a bot for you: each waits for your approval before it happens. You can change
-its name and look, add connectors to it, and manage its automations, which only you
+its name and avatar, add connectors to it, and manage its automations, which only you
 can see, run or answer. Its instructions are looked after by Sugabots, so you can't
 edit them.
 
@@ -108,5 +107,5 @@ edit them.
 
 **Delete bot** is at the bottom of its settings. Its chats, files, automations
 and connectors go with it, and that can't be undone. Its creator, the owner and
-admins can delete it, once another bot leads each project people made that it
+admins can delete it, once another bot leads each project members made that it
 leads. A Personal Assistant can't be deleted.

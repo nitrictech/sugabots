@@ -14,13 +14,13 @@ describe("asking a model again", () => {
 
 	it("stops as soon as one answer is usable", async () => {
 		const ask = vi
-			.fn((): Effect.Effect<string, Models.UnusableAnswer> => Effect.succeed("a summary"))
+			.fn((): Effect.Effect<string, Models.UnusableAnswer> => Effect.succeed("an answer"))
 			.mockImplementationOnce(() => new Models.UnusableAnswer({ reason: "not JSON" }));
 
 		const answer = await Effect.runPromise(Models.retryUnusable(Effect.suspend(ask)));
 
 		expect(ask).toHaveBeenCalledTimes(2);
-		expect(answer).toBe("a summary");
+		expect(answer).toBe("an answer");
 	});
 
 	it("does not ask again for anything but the shape", async () => {

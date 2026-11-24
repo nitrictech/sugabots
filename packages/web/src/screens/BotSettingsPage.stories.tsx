@@ -47,7 +47,7 @@ const bots = storyBots.map((bot) =>
 		? {
 				...bot,
 				description: "Runs outbound, watches replies and keeps the pipeline moving.",
-				prompt:
+				instructions:
 					"Work the Revenue pipeline. Draft replies in the rep's voice, keep them short, and never send without asking.",
 			}
 		: bot,
@@ -78,6 +78,7 @@ function connector(
 		tools: tools.map((tool) => ({ ...tool, access: "allow" as const })),
 		lastTestError: null,
 		connectedBy: null,
+		signedInAs: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
 }
@@ -127,7 +128,12 @@ const automations: Automation[] = [
 		},
 		"enabled",
 	),
-	automation(2, "Inbound lead", { kind: "webhook", auth: { kind: "bearer" } }, "paused"),
+	automation(
+		2,
+		"Inbound lead",
+		{ kind: "webhook", deliveryIdHeader: null, auth: { kind: "bearer" } },
+		"paused",
+	),
 ];
 
 const meta = preview.meta({

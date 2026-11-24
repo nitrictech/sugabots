@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SettingsNameRow } from "@/ui/settings-page.tsx";
@@ -37,21 +37,21 @@ describe("IconButton", () => {
 	});
 });
 
-describe("PersonAvatar", () => {
+describe("MemberAvatar", () => {
 	it("falls back to initials until there is a photo", () => {
-		render(<PersonAvatar person={{ name: "Rowan Ellis", email: "rowan@example.com" }} />);
+		render(<MemberAvatar member={{ name: "Rowan Ellis", email: "rowan@example.com" }} />);
 
 		expect(screen.getByTitle("Rowan Ellis").textContent).toBe("RE");
 	});
 
 	it("gives two letters for a single name, so a stack stays even", () => {
-		render(<PersonAvatar person={{ name: "Juno", email: "juno@example.com" }} />);
+		render(<MemberAvatar member={{ name: "Juno", email: "juno@example.com" }} />);
 
 		expect(screen.getByTitle("Juno").textContent).toBe("JU");
 	});
 
 	it("shows the Gravatar for the normalized email", async () => {
-		render(<PersonAvatar person={{ name: "Rowan Ellis", email: " ROWAN@Example.com" }} />);
+		render(<MemberAvatar member={{ name: "Rowan Ellis", email: " ROWAN@Example.com" }} />);
 
 		await vi.waitFor(() =>
 			expect(screen.getByTitle("Rowan Ellis").querySelector("img")?.getAttribute("src")).toBe(
@@ -64,8 +64,8 @@ describe("PersonAvatar", () => {
 		const rowan = { name: "Rowan Ellis", email: "rowan@example.com" };
 		render(
 			<>
-				<PersonAvatar person={rowan} size={20} />
-				<PersonAvatar person={rowan} size={64} />
+				<MemberAvatar member={rowan} size={20} />
+				<MemberAvatar member={rowan} size={64} />
 			</>,
 		);
 
@@ -79,7 +79,7 @@ describe("PersonAvatar", () => {
 	});
 
 	it("keeps the initials when there is no Gravatar", async () => {
-		render(<PersonAvatar person={{ name: "Rowan Ellis", email: "rowan@example.com" }} />);
+		render(<MemberAvatar member={{ name: "Rowan Ellis", email: "rowan@example.com" }} />);
 		const gravatar = await vi.waitFor(() => {
 			const img = screen.getByTitle("Rowan Ellis").querySelector("img");
 			if (!img) throw new Error("No Gravatar yet");

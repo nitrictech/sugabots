@@ -1,7 +1,7 @@
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSignedInPerson } from "../../auth/middleware.ts";
+import { asCurrentUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -11,7 +11,7 @@ export const usageRoutes = HttpApiBuilder.group(ServerApi, "usage", (handlers) =
 		return handlers.handle("month", ({ params, query }) =>
 			usage
 				.month({ workspace: params.workspace, ...query })
-				.pipe(asSignedInPerson, asHttpError(refusals)),
+				.pipe(asCurrentUser, asHttpError(refusals)),
 		);
 	}),
 );

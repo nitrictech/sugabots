@@ -5,7 +5,7 @@ description: What bots can do beyond talking, and when they check with you first
 
 Tools let a bot do things: read a web page, search, or work in your apps through
 a [connector](/docs/connectors). You decide which tools each bot gets, and
-which ones need a person to say yes.
+which ones need a member to say yes.
 
 ## Built-in tools
 
@@ -28,17 +28,17 @@ That's always on.
 ## Tools from connectors
 
 A connector's tools belong to its project, a bot's own to its default
-project. Each tool has its own approval:
+project. Each tool has its own tool access:
 
-| Approval | What happens |
+| Tool access | What happens |
 | --- | --- |
 | Off | Every call is refused, and the bot is told the tool is off |
-| Ask | Every call waits for a person |
+| Ask | Every call waits for a member |
 | Allow | Every call runs straight away |
 
-Until someone chooses, a tool is on **Allow** when the app says it only reads,
-on **Off** when the app says it deletes or overwrites, and on **Ask** otherwise.
-A choice stays, even while the app stops listing the tool. Turning a tool off
+Until someone chooses, a tool is on **Allow** when the connector says it only
+reads, on **Off** when it says the tool deletes or overwrites, and on **Ask**
+otherwise. A choice stays, even while the connector stops listing the tool. Turning a tool off
 also stops a call someone already allowed but that hasn't run yet.
 
 To change them, open **Connectors** beside the bot's chats. Each row's
@@ -49,7 +49,7 @@ can be set on its own.
 
 ## Try it
 
-Set the tool's approval and pick what the bot wants to do. A read and a change are treated the same, so only the approval decides what happens.
+Set the tool's access and pick what the bot wants to do. A read and a change are treated the same, so only the tool access decides what happens.
 
 <ApprovalPlayground />
 
@@ -64,14 +64,14 @@ one call run. There's no "always allow": the next call asks again.
   in their own Personal Assistant's chats, where they answer its approvals.
 - **Only those who manage the bot doing the run, and can see the chat**, can
   answer approvals raised by an [automation](/docs/automations) run: the bot's
-  creator, the owner and admins; for a Personal Assistant, its person alone,
+  creator, the owner and admins; for a Personal Assistant, its member alone,
   viewers included. A bot's own automations are run by that bot, and a
   project's by its [lead bot](/docs/projects#lead-bot) when the run started, so
   whoever made the lead bot answers its runs' approvals in a project they're
-  in. Viewers can't, even for a bot they made. An admin can't see a private
+  in. Viewers can't, even for a bot they made. An admin can't see a personal
   bot's chats, so can't answer its automation's approvals.
 - **Only those who manage the computer, and can see the chat**, can
   allow it to reach an internet address it couldn't before: for a bot's own
   computer, the bot's creator, the owner and admins; for a
   [project's computer](/docs/projects#computer), the owner and admins. An admin
-  can't see a private bot's chats, so can't answer a request raised in one.
+  can't see a personal bot's chats, so can't answer a request raised in one.

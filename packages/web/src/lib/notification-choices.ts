@@ -1,6 +1,6 @@
 import type { NotificationLevel } from "@sugabots/contracts";
 
-/* The choices a person makes about notifications. */
+/* The choices a member makes about notifications. */
 
 /** The quiet hours offered when somebody switches them on, in their device's time zone. */
 export const DEFAULT_QUIET_HOURS = { from: "22:00", to: "08:00" } as const;
@@ -8,7 +8,7 @@ export const DEFAULT_QUIET_HOURS = { from: "22:00", to: "08:00" } as const;
 /** The levels, most notified first, as they are offered. */
 export const NOTIFICATION_LEVELS: readonly NotificationLevel[] = ["all", "mentions", "nothing"];
 
-/** What each level is called where a person chooses one. */
+/** What each level is called where a member chooses one. */
 export const NOTIFICATION_LEVEL_LABELS: Record<NotificationLevel, string> = {
 	all: "Everything",
 	mentions: "Mentions and replies",

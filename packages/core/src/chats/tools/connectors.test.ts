@@ -12,6 +12,7 @@ import type { ConnectorTarget } from "../../providers/connectors/connector-targe
 import { connectServer } from "../../providers/connectors/mcp.ts";
 import { SignInRequired, storedOAuthProvider } from "../../providers/connectors/oauth.ts";
 import { ConnectorTools } from "./connectors.ts";
+import { NO_TURN } from "./testing.ts";
 
 /**
  * A turn's connector tools against a real MCP server in this process. What
@@ -503,13 +504,3 @@ describe("a turn's connector tools", () => {
 
 /** A turn in the bot's own default project, so its connectors are that project's alone. */
 const OWN_PROJECT = { projectId: "p", ownProjectId: "p" };
-
-/** A turn with no computer, for cases that only look at MCP servers' tools. */
-const NO_TURN = {
-	turnId: "t",
-	botId: "a",
-	chatId: "0199a3a0-0000-7000-8000-000000000001",
-	files: { read: () => Effect.die(new Error("No chat files in this test")) },
-	workspace: undefined,
-	computerSignsIn: false,
-};

@@ -45,6 +45,7 @@ const linear: TestConnector = {
 	tools: [],
 	lastTestError: null,
 	connectedBy: null,
+	signedInAs: null,
 	createdAt: "2026-09-18T08:00:00.000Z",
 };
 

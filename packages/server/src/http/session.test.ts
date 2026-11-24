@@ -8,7 +8,7 @@ import { createTestApp, identifiedBy } from "./app.test-support.ts";
  *
  * The other HTTP tests each check one route they know about. This one reads
  * the API definition, so an endpoint added without a session check fails here
- * rather than shipping. What a signed-in person may do is decided by the use
+ * rather than shipping. What a current user may do is decided by the use
  * case each endpoint calls, which refuses in core whoever called it.
  */
 
@@ -27,7 +27,7 @@ const PLACEHOLDERS: Record<string, string> = {
 	chatId: "0199a3a0-0000-7000-8000-000000000005",
 	turnId: "0199a3a0-0000-7000-8000-000000000006",
 	modelId: "some-model",
-	personId: "0199a3a0-0000-7000-8000-000000000007",
+	memberId: "0199a3a0-0000-7000-8000-000000000007",
 	connectorId: "0199a3a0-0000-7000-8000-000000000008",
 	automationId: "0199a3a0-0000-7000-8000-000000000009",
 	toolCallId: "0199a3a0-0000-7000-8000-00000000000a",

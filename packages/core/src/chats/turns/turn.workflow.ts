@@ -5,10 +5,11 @@
  *
  * A turn runs in segments. Each segment streams the reply until it ends or
  * stops to wait for tool approvals; the workflow then waits, durably, for
- * people to decide them, and runs the next segment from the checkpoint,
+ * members to decide them, and runs the next segment from the checkpoint,
  * which reads the decisions recorded as they were made.
  */
 import { Activities } from "@sugabots/workflow/activities";
+import { and, sql } from "drizzle-orm";
 import { Context, Duration, Effect, Schema } from "effect";
 import { DurableClock, DurableDeferred, Workflow } from "effect/unstable/workflow";
 import { Lanes } from "../../workflows/lanes.ts";
@@ -27,7 +28,7 @@ export const TurnRequest = Schema.Struct({
 		"optional",
 		"collaboration",
 		"automation",
-		"resume",
+		"hand_back",
 		"interview",
 		"brief",
 	]) satisfies Schema.Codec<TurnReason>,
@@ -45,9 +46,19 @@ export const turnLane = (request: Pick<TurnRequest, "chatId" | "botId">) =>
 	`turn:${request.chatId}:${request.botId}`;
 
 /**
+ * Whether a turn for `reason` answers its own message alone: a helper's,
+ * asked by another bot's message, and a hand-back, asked once the helpers are
+ * done. Such a turn never joins another waiting for its bot, and nothing joins
+ * it, so a member's message can't make a helper the bot answering a member.
+ */
+export const answersAlone = (reason: TurnReason): boolean =>
+	reason === "collaboration" || reason === "hand_back";
+
+/**
  * Asks for the turn in its lane, joining the caller's transaction, and says
- * whether it started or waits. A turn already asked for is kept: it will read
- * every message posted since.
+ * whether it started or waits. A turn already waiting is kept, and this one
+ * joins it, as it will read every message posted since; unless either answers
+ * its own message alone (see `answersAlone`), when this one waits behind it.
  */
 export const admitTurn = (lanes: Lanes.Interface, request: TurnRequest) =>
 	lanes.admit({
@@ -55,8 +66,28 @@ export const admitTurn = (lanes: Lanes.Interface, request: TurnRequest) =>
 		subject: request.chatId,
 		workflow: Turn,
 		payload: request,
-		whenBusy: "coalesce",
+		whenBusy: answersAlone(request.reason) ? "queue" : "coalesce",
+		joins: (waiting) => !answersAlone(waiting.reason),
 	});
+
+/**
+ * Whether the lanes of the chat `chatId` hold a turn for `reason` on the
+ * message `triggerMessageId`, not yet started, running, or ended with its lane
+ * not yet free; other than `exceptBotId`'s, when given. As a condition for a
+ * query.
+ */
+export const heldInLane = (
+	chatId: string,
+	turn: { triggerMessageId: string; reason: TurnReason; exceptBotId?: string },
+) =>
+	// Every field of a `TurnRequest` is a string, so its JSON encoding names them as it does.
+	Lanes.holdsRequest(sql`${chatId}`, Turn._tag, (payload) =>
+		and(
+			sql`${payload}->>'triggerMessageId' = ${turn.triggerMessageId}`,
+			sql`${payload}->>'reason' = ${turn.reason}`,
+			turn.exceptBotId === undefined ? undefined : sql`${payload}->>'botId' <> ${turn.exceptBotId}`,
+		),
+	);
 
 /**
  * How a segment ended: the turn is over, it waits for approvals, or it failed
@@ -76,14 +107,14 @@ export const SegmentOutcome = Schema.Union([
 export type SegmentOutcome = typeof SegmentOutcome.Type;
 
 /**
- * A person's decision on one approval. It is sent in the transaction that
+ * A member's decision on one approval. It is sent in the transaction that
  * records it (see `Turns.Controls`), so the two commit or roll back together.
  */
 export const approvalDecided = (approvalId: string) =>
 	DurableDeferred.make(`approval/${approvalId}`, { success: ApprovalDecision });
 
 /** The turn was cancelled while it waited for approvals, because its automation run ended. */
-export const cancelRequested = DurableDeferred.make("cancelled");
+export const interruptRequested = DurableDeferred.make("interrupted");
 
 export class TurnSteps extends Context.Service<
 	TurnSteps,
@@ -140,7 +171,7 @@ const Awaited = Schema.Union([Schema.Literal("cancelled"), DecidedApproval]);
 
 /**
  * Waits for every approval still outstanding (or a cancel), in whatever order
- * people decide them, by racing them. The race's winner is stored, so a replay
+ * members decide them, by racing them. The race's winner is stored, so a replay
  * takes the same path. Returns whether the turn was cancelled instead.
  */
 const waitForApprovals = (run: number, approvals: ReadonlyArray<string>) =>
@@ -152,7 +183,7 @@ const waitForApprovals = (run: number, approvals: ReadonlyArray<string>) =>
 				success: Awaited,
 				error: Schema.Never,
 				effects: [
-					Effect.as(DurableDeferred.await(cancelRequested), "cancelled" as const),
+					Effect.as(DurableDeferred.await(interruptRequested), "cancelled" as const),
 					...outstanding.map((approvalId) =>
 						Effect.map(DurableDeferred.await(approvalDecided(approvalId)), (decision) => ({
 							approvalId,

@@ -19,9 +19,9 @@ export const relations = defineRelations(schema, (r) => ({
 			from: r.placedChat.id,
 			to: r.chatParticipant.chatId,
 		}),
-		reads: r.many.chatRead({
+		reads: r.many.readCursor({
 			from: r.placedChat.id,
-			to: r.chatRead.chatId,
+			to: r.readCursor.chatId,
 		}),
 		automationRun: r.one.automationRun({
 			from: r.placedChat.id,
@@ -32,7 +32,7 @@ export const relations = defineRelations(schema, (r) => ({
 			to: r.chatCompaction.chatId,
 		}),
 		bot: r.one.bot({ from: r.placedChat.botId, to: r.bot.id }),
-		// On a chat people open: every chat in it, its own included.
+		// On a chat members open: every chat in it, its own included.
 		rootedChats: r.many.placedChat({
 			from: r.placedChat.id,
 			to: r.placedChat.rootChatId,
@@ -47,21 +47,13 @@ export const relations = defineRelations(schema, (r) => ({
 			from: r.project.id.through(r.projectBot.projectId),
 			to: r.bot.id.through(r.projectBot.botId),
 		}),
-		members: r.many.person({
-			from: r.project.id.through(r.projectMember.projectId),
-			to: r.person.id.through(r.projectMember.personId),
-		}),
 	},
 	message: {
-		authorPerson: r.one.person({ from: r.message.authorPersonId, to: r.person.id }),
+		authorMember: r.one.member({ from: r.message.authorMemberId, to: r.member.id }),
 		authorBot: r.one.bot({ from: r.message.authorBotId, to: r.bot.id }),
 		turn: r.one.turn({ from: r.message.turnId, to: r.turn.id }),
 		toolCalls: r.many.toolCall({ from: r.message.id, to: r.toolCall.messageId }),
 		files: r.many.file({ from: r.message.id, to: r.file.messageId }),
-		collaborations: r.many.collaboration({
-			from: r.message.id,
-			to: r.collaboration.parentMessageId,
-		}),
 		automationRun: r.one.automationRun({
 			from: r.message.runId,
 			to: r.automationRun.id,
@@ -71,29 +63,17 @@ export const relations = defineRelations(schema, (r) => ({
 	},
 	messageReaction: {
 		// One of the two, by `message_reaction_one_reactor`.
-		person: r.one.person({ from: r.messageReaction.personId, to: r.person.id }),
+		member: r.one.member({ from: r.messageReaction.memberId, to: r.member.id }),
 		bot: r.one.bot({ from: r.messageReaction.botId, to: r.bot.id }),
 	},
-	chatRead: {
-		person: r.one.person({ from: r.chatRead.personId, to: r.person.id, optional: false }),
+	readCursor: {
+		member: r.one.member({ from: r.readCursor.memberId, to: r.member.id, optional: false }),
 	},
 	chatParticipant: {
-		person: r.one.person({ from: r.chatParticipant.personId, to: r.person.id }),
+		member: r.one.member({ from: r.chatParticipant.memberId, to: r.member.id }),
 		bot: r.one.bot({ from: r.chatParticipant.botId, to: r.bot.id }),
 	},
 	toolCall: {
-		decidedBy: r.one.person({ from: r.toolCall.decidedById, to: r.person.id }),
-	},
-	collaboration: {
-		parentMessage: r.one.message({
-			from: r.collaboration.parentMessageId,
-			to: r.message.id,
-			optional: false,
-		}),
-		collaborator: r.one.bot({
-			from: r.collaboration.collaboratorBotId,
-			to: r.bot.id,
-			optional: false,
-		}),
+		decidedBy: r.one.member({ from: r.toolCall.decidedById, to: r.member.id }),
 	},
 }));

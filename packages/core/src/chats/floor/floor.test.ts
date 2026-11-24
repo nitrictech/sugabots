@@ -1,3 +1,4 @@
+import { type AskingMessage, helpersAskedBy } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
 import { type FloorInput, floorOf } from "./floor.ts";
 
@@ -23,7 +24,7 @@ function input(overrides: Partial<FloorInput> = {}): FloorInput {
 		content: "Hello",
 		mentionableBots: projectBots,
 		lead: { id: lead, hasModel: true },
-		peopleHandles: new Set(["sam"]),
+		membersHandles: new Set(["sam"]),
 		repliedToBotId: undefined,
 		...overrides,
 	};
@@ -32,7 +33,7 @@ function input(overrides: Partial<FloorInput> = {}): FloorInput {
 const turns = (...bots: Array<{ botId: string; reason: string }>) => ({ kind: "turns", bots });
 const nobody = { kind: "nobody" };
 
-describe("a person's message in a project's chat", () => {
+describe("a member's message in a project's chat", () => {
 	it("goes to every project bot it mentions, each at once", () => {
 		expect(floorOf(input({ content: "@reviewer and @scout, thoughts?" }))).toEqual(
 			turns({ botId: reviewer, reason: "mention" }, { botId: scout, reason: "mention" }),
@@ -47,13 +48,13 @@ describe("a person's message in a project's chat", () => {
 		expect(floorOf(input({ ...replyToScout, content: "@reviewer can you check?" }))).toEqual(
 			turns({ botId: reviewer, reason: "mention" }),
 		);
-		// A reply to a bot is for that bot, though it names a person.
+		// A reply to a bot is for that bot, though it names a member.
 		expect(floorOf(input({ ...replyToScout, content: "@sam what do you think?" }))).toEqual(
 			turns({ botId: scout, reason: "reply" }),
 		);
 	});
 
-	it("gives the lead an optional turn when it mentions only people", () => {
+	it("gives the lead an optional turn when it mentions only members", () => {
 		expect(floorOf(input({ content: "@sam can you look?" }))).toEqual(
 			turns({ botId: lead, reason: "optional" }),
 		);
@@ -72,7 +73,7 @@ describe("a person's message in a project's chat", () => {
 		expect(floorOf(input({ content: "Raise it with @Backlog Manager" }))).toEqual(
 			turns({ botId: lead, reason: "default" }),
 		);
-		// Mentioning a person beside one is mentioning only people.
+		// Mentioning a member beside one is mentioning only members.
 		expect(floorOf(input({ content: "@sam and @Backlog Manager, look" }))).toEqual(
 			turns({ botId: lead, reason: "optional" }),
 		);
@@ -91,11 +92,11 @@ describe("a person's message in a project's chat", () => {
 	});
 });
 
-describe("a person's message in an automation's feed", () => {
+describe("a member's message in an automation's feed", () => {
 	const feed = (content: string): FloorInput => input({ chatKind: "automation_feed", content });
 
 	it("goes to the project's lead bot, not to the bots mentioned", () => {
-		// Another bot, a private one too, is reached by the lead collaborating.
+		// Mentions bring in no other bot here.
 		expect(floorOf(feed("@reviewer and @scout, thoughts?"))).toEqual(
 			turns({ botId: lead, reason: "default" }),
 		);
@@ -104,8 +105,41 @@ describe("a person's message in an automation's feed", () => {
 		);
 	});
 
-	it("goes to nobody when it mentions only people", () => {
+	it("goes to nobody when it mentions only members", () => {
 		expect(floorOf(feed("@sam can you look?"))).toEqual(nobody);
 		expect(floorOf(feed("@channel the report is late"))).toEqual(nobody);
+	});
+});
+
+describe("a bot's message", () => {
+	/** The lead's reply in a project's chat, mentioning `mentionedBotIds`. */
+	const asking = (overrides: Partial<AskingMessage> = {}): AskingMessage => ({
+		chatKind: "project_chat",
+		authorBotId: lead,
+		mayAsk: true,
+		mentionedBotIds: [reviewer, scout],
+		alreadyAsked: new Set(),
+		...overrides,
+	});
+
+	it("asks every other project bot it mentions for help, in a project's chat or a run", () => {
+		expect(helpersAskedBy(asking())).toEqual([reviewer, scout]);
+		expect(helpersAskedBy(asking({ chatKind: "run" }))).toEqual([reviewer, scout]);
+	});
+
+	it("asks nobody by mentioning its own bot", () => {
+		expect(helpersAskedBy(asking({ mentionedBotIds: [lead, scout] }))).toEqual([scout]);
+	});
+
+	it("asks nobody when a helper wrote it, so collaborations go one deep", () => {
+		expect(helpersAskedBy(asking({ mayAsk: false }))).toEqual([]);
+	});
+
+	it("asks nobody in an automation's feed", () => {
+		expect(helpersAskedBy(asking({ chatKind: "automation_feed" }))).toEqual([]);
+	});
+
+	it("asks only the bots not already asked for the same message, brief or run", () => {
+		expect(helpersAskedBy(asking({ alreadyAsked: new Set([reviewer]) }))).toEqual([scout]);
 	});
 });

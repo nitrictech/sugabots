@@ -5,12 +5,12 @@ import {
 	type ComputerNetworkMode,
 	type ComputerProvider,
 	type ComputerProviderSettings,
-	type ComputerProviderTestResult,
 	type ComputerProviderUpdate,
 	computerBuiltInProvider,
 	computerCpuCountSchema,
 	computerDiskShare,
 	computerMemoryGiBSchema,
+	type ProviderTestResult,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
@@ -286,7 +286,7 @@ function ProviderSettings({
 	chosen: BuiltInComputerProviderId;
 	provider: ComputerProvider | undefined;
 	pending: boolean;
-	testResult: ComputerProviderTestResult | undefined;
+	testResult: ProviderTestResult | undefined;
 	onConfigure: (changes: ComputerProviderUpdate) => Promise<void>;
 	/** Says why a typed value can't be saved. */
 	onInvalid: (message: string) => void;
@@ -513,7 +513,7 @@ function wholeNumber(typed: string): number | undefined {
 /** What the last test said, once one has run, or what the provider recorded. */
 function testStanding(
 	provider: ComputerProvider | undefined,
-	latest: ComputerProviderTestResult | undefined,
+	latest: ProviderTestResult | undefined,
 ): string | undefined {
 	if (latest) {
 		return latest.reachable

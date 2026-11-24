@@ -3,16 +3,16 @@ import { Option, Schema } from "effect";
 import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 
 /**
- * The unsent message in one person's chat, kept in localStorage
+ * The unsent message in one member's chat, kept in localStorage
  * so it survives switching chats, projects, or reloading. A blank draft removes
  * its key, so only chats with something waiting to be sent take up room. Two
  * tabs on the same chat do not sync; whichever wrote last is what comes back.
  */
 export function useChatDraft(
-	personId: string,
+	memberId: string,
 	chatId: string,
 ): [string, Dispatch<SetStateAction<string>>] {
-	const key = draftKey(personId, chatId);
+	const key = draftKey(memberId, chatId);
 	const [draft, setDraft] = useState(() => read(key));
 
 	useEffect(() => {
@@ -28,10 +28,10 @@ export function useChatDraft(
  * quote is dropped.
  */
 export function useReplyDraft(
-	personId: string,
+	memberId: string,
 	chatId: string,
 ): [MessageReplyTo | undefined, Dispatch<SetStateAction<MessageReplyTo | undefined>>] {
-	const key = `sugabots-draft-reply:${draftPlace(personId, chatId)}`;
+	const key = `sugabots-draft-reply:${draftPlace(memberId, chatId)}`;
 	const [replyTo, setReplyTo] = useState(() => decodeReplyTo(read(key)));
 
 	useEffect(() => {
@@ -47,10 +47,10 @@ export function useReplyDraft(
  * is that last message: once another is sent, none is taken off.
  */
 export function useTakenOffRecipients(
-	personId: string,
+	memberId: string,
 	chatId: string,
 ): [TakenOffRecipients, Dispatch<SetStateAction<TakenOffRecipients>>] {
-	const key = `sugabots-draft-taken-off:${draftPlace(personId, chatId)}`;
+	const key = `sugabots-draft-taken-off:${draftPlace(memberId, chatId)}`;
 	const [takenOff, setTakenOff] = useState(() => decodeTakenOff(read(key)));
 
 	useEffect(() => {
@@ -103,12 +103,12 @@ function write(key: string, value: string): void {
 	}
 }
 
-/** Where `useChatDraft` keeps one person's draft in one chat. */
-function draftKey(personId: string, chatId: string): string {
-	return `sugabots-draft:${draftPlace(personId, chatId)}`;
+/** Where `useChatDraft` keeps one member's draft in one chat. */
+function draftKey(memberId: string, chatId: string): string {
+	return `sugabots-draft:${draftPlace(memberId, chatId)}`;
 }
 
 /** Whose draft in which chat a stored key holds. A chat's id is unique across projects. */
-function draftPlace(personId: string, chatId: string): string {
-	return `${personId}:${chatId}`;
+function draftPlace(memberId: string, chatId: string): string {
+	return `${memberId}:${chatId}`;
 }

@@ -162,7 +162,7 @@ function ShapePicker({
 			{botShapes.map((shape) => (
 				<label
 					key={shape}
-					className="grid h-9 cursor-pointer place-items-center rounded-lg bg-chip max-sm:aspect-square max-sm:h-auto text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
+					className="grid h-9 cursor-pointer place-items-center rounded-lg bg-chip max-sm:aspect-square max-sm:h-auto text-soft-foreground transition-colors has-checked:bg-member-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
 				>
 					<input
 						type="radio"
@@ -203,7 +203,7 @@ function EyesPicker({ value, onChange }: { value: BotEyes; onChange: (eyes: BotE
 			{botEyes.map((eyes) => (
 				<label
 					key={eyes}
-					className="grid h-8 cursor-pointer place-items-center rounded-lg bg-chip max-sm:h-11 text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
+					className="grid h-8 cursor-pointer place-items-center rounded-lg bg-chip max-sm:h-11 text-soft-foreground transition-colors has-checked:bg-member-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
 				>
 					<input
 						type="radio"

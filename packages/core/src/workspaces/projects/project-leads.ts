@@ -6,13 +6,13 @@ import { bot, project, projectMember } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 
 /**
- * The lead bot of a project people made is always one of its public bots. So
- * a bot leading projects people made is not taken out of one, made private or
+ * The lead bot of a project members made is always one of its public bots. So
+ * a bot leading projects members made is not taken out of one, made personal or
  * deleted until each has another lead; its own default project, which it
  * leads, goes with it.
  *
  * Fails with `LeadsProjects` when the bot `botId` leads any of the projects
- * `among` selects (every project people made, unless narrowed to one). The
+ * `among` selects (every project members made, unless narrowed to one). The
  * refusal names only the projects `viewerId` sees, the public ones and those
  * they are in, so it never tells them a private project's name. Run it in the
  * transaction that changes the bot, after locking its row, so a lead chosen
@@ -30,7 +30,7 @@ export const refuseWhileLeading = Effect.fn("ProjectLeads.refuseWhileLeading")(f
 				seen: sql<boolean>`(${project.visibility} = 'public' or exists (
 					select 1 from ${projectMember}
 					where ${projectMember.projectId} = ${project.id}
-						and ${projectMember.personId} = ${among.viewerId}
+						and ${projectMember.memberId} = ${among.viewerId}
 				))`,
 			})
 			.from(project)
@@ -56,8 +56,8 @@ export const refuseWhileLeading = Effect.fn("ProjectLeads.refuseWhileLeading")(f
 const LIST = new Intl.ListFormat("en", { type: "conjunction" });
 
 /**
- * The bot leads projects people made, so it stays in them, public, until each
- * has another lead. `projects` names those the person refused sees;
+ * The bot leads projects members made, so it stays in them, public, until each
+ * has another lead. `projects` names those the member refused sees;
  * `leadsUnseenProjects` says it also leads private ones they aren't in.
  */
 export class LeadsProjects
@@ -76,7 +76,7 @@ export class LeadsProjects
 			const names = DisplayName.fromRecord(this.projects.join(", "));
 			return userText`${this.botName} leads ${names} and private projects you aren't in. Each needs another lead bot first.`;
 		}
-		// A list of names people see is itself a name they see.
+		// A list of names members see is itself a name they see.
 		const names = DisplayName.fromRecord(LIST.format(this.projects));
 		const them = this.projects.length === 1 ? "it" : "each";
 		return userText`${this.botName} leads ${names}. Choose another lead bot for ${them} first.`;

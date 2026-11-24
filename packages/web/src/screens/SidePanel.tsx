@@ -1,18 +1,16 @@
 import { cn } from "cn";
 import { ChevronDown } from "lucide-react";
-import { createContext, type ReactNode, type Ref, use, useState } from "react";
+import { createContext, type ReactNode, use, useState } from "react";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { BackButton } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
-import { SheetHandle } from "@/ui/dialog.tsx";
 
 /**
- * The column beside a chat: its Details, a collaboration opened from its line,
- * or an automation's panel. Only a wide screen has room for both side by side; on a
- * tablet it slides over the dimmed chat from the right, and on a phone it
- * covers the chat or, as a `sheet`, rises from the bottom over it.
+ * The column beside a chat: its Details, or an automation's panel. Only a
+ * wide screen has room for both side by side; on a tablet it slides over the
+ * dimmed chat from the right, and on a phone it covers the chat.
  *
  * `floating` Details are instead a stack of cards over the chat's right edge,
  * each folding to its title, with the chat showing between them; a phone
@@ -20,27 +18,16 @@ import { SheetHandle } from "@/ui/dialog.tsx";
  */
 export function SidePanel({
 	label,
-	heading = label,
-	subheading,
-	headingRef,
 	onClose,
-	sheet = false,
 	headerless = false,
 	floating = false,
 	actions,
 	className,
 	children,
 }: {
-	/** Its name, as assistive technology announces it. */
+	/** Its name, as its header says and assistive technology announces it. */
 	label: string;
-	/** What its header says, when that is not its name. */
-	heading?: string;
-	/** A quieter line beside the heading, such as who is in it. */
-	subheading?: string;
-	/** For focusing the heading when the side panel opens, so a screen reader starts there. */
-	headingRef?: Ref<HTMLHeadingElement>;
 	onClose: () => void;
-	sheet?: boolean;
 	/**
 	 * Without its header where it sits beside the chat, as Details does: what it
 	 * shows heads it, and the chat's own button closes it. Where it covers the
@@ -57,15 +44,14 @@ export function SidePanel({
 	const keys = usePanelKeys<HTMLElement>(onClose);
 	return (
 		<>
-			{/* The dimmed chat behind it closes it, as a tap outside a sheet or drawer does. */}
+			{/* The dimmed chat behind it closes it, as a tap outside a drawer does. */}
 			<button
 				type="button"
 				tabIndex={-1}
 				aria-hidden
 				onClick={onClose}
 				className={cn(
-					"absolute inset-0 z-30 cursor-default bg-scrim xl:hidden",
-					!sheet && "max-md:hidden",
+					"absolute inset-0 z-30 cursor-default bg-scrim max-md:hidden xl:hidden",
 					floating && "hidden",
 				)}
 			/>
@@ -73,19 +59,14 @@ export function SidePanel({
 				aria-label={label}
 				{...keys}
 				className={cn(
-					"flex min-h-0 w-95 outline-none shrink-0 flex-col border-border border-l bg-aside max-md:absolute max-md:z-40 max-md:w-full max-md:border-l-0",
+					"flex min-h-0 w-95 outline-none shrink-0 flex-col border-border border-l bg-aside max-md:absolute max-md:inset-0 max-md:z-40 max-md:w-full max-md:border-l-0",
 					floating
 						? // Under the header's Details button, over the chat, which makes way for it; the chat stays reachable between the cards.
 							"md:pointer-events-none md:absolute md:top-13 md:right-0 md:bottom-0 md:z-20 md:w-68 md:border-l-0 md:bg-transparent md:motion-safe:animate-cards-in"
 						: "md:max-xl:absolute md:max-xl:inset-y-0 md:max-xl:right-0 md:max-xl:z-40 md:max-xl:w-100 max-w-full md:max-xl:border-l-0 md:max-xl:shadow-dialog",
-					sheet
-						? // Over the floating tabs, as a phone's sheet covers its tab bar.
-							"max-md:inset-x-0 max-md:bottom-0 max-md:z-50 max-md:max-h-9/11 max-md:rounded-t-dialog max-md:shadow-dialog max-md:motion-safe:animate-sheet-up max-md:bg-list"
-						: "max-md:inset-0",
 					className,
 				)}
 			>
-				{sheet && <SheetHandle className="mx-auto mt-2 mb-3.5 md:hidden" />}
 				<header
 					className={cn(
 						"flex h-13 shrink-0 items-center gap-2 border-border border-b pr-3 pl-4.5",
@@ -96,30 +77,16 @@ export function SidePanel({
 					)}
 				>
 					{headerless && <BackButton onClick={onClose} className="md:hidden" />}
-					<div className="flex min-w-0 flex-1 items-baseline gap-2">
-						<h2
-							ref={headingRef}
-							tabIndex={headingRef ? -1 : undefined}
-							className={cn(
-								"m-0 min-w-0 shrink-0 truncate font-semibold text-sm text-foreground outline-none max-md:shrink",
-								headerless && "max-md:sr-only",
-							)}
-						>
-							{heading}
-						</h2>
-						{subheading && (
-							<span className="min-w-0 truncate text-xs text-subtle-foreground">{subheading}</span>
-						)}
-					</div>
-					{actions}
-					{/* A sheet closes by its dimmed backdrop on a phone; Close stays for the keyboard. */}
-					<CloseButton
-						onClick={onClose}
+					<h2
 						className={cn(
-							sheet && "max-md:not-focus-visible:sr-only",
-							headerless && "max-md:hidden",
+							"m-0 min-w-0 flex-1 truncate font-semibold text-sm text-foreground",
+							headerless && "max-md:sr-only",
 						)}
-					/>
+					>
+						{label}
+					</h2>
+					{actions}
+					<CloseButton onClick={onClose} className={cn(headerless && "max-md:hidden")} />
 				</header>
 				<FloatingCards value={floating}>{children}</FloatingCards>
 			</aside>

@@ -24,14 +24,13 @@ import { EventStore } from "@sugabots/core/database/events/store";
 import { Email } from "@sugabots/core/email/email";
 import { Files } from "@sugabots/core/files/files";
 import { FilePages } from "@sugabots/core/files/pages";
-import { UnsentUploads } from "@sugabots/core/files/unsent-uploads";
+import { UnsentAttachments } from "@sugabots/core/files/unsent-attachments";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Notifications } from "@sugabots/core/notifications/notifications";
 import { ConnectorSetup } from "@sugabots/core/providers/connectors/connector-setup";
 import { GitHubApps } from "@sugabots/core/providers/connectors/github/github-app";
 import { GitHubConnectors } from "@sugabots/core/providers/connectors/github/github-connectors";
 import { GitHubSignIn } from "@sugabots/core/providers/connectors/github/github-sign-in";
-import { BuiltInProviderSeeding } from "@sugabots/core/providers/model-providers/built-in-provider-seeding";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { Models } from "@sugabots/core/providers/models/models";
 import { Egress } from "@sugabots/core/providers/network/egress";
@@ -42,7 +41,8 @@ import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administra
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { ProjectAdministration } from "@sugabots/core/workspaces/projects/project-administration";
 import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/workspace-setup";
-import { Layer } from "effect";
+import { WorkflowEngines } from "@sugabots/workflow/engine";
+import { Duration, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";
 import { apiLayer } from "./http/app.ts";
@@ -51,7 +51,6 @@ import { listeningLayer, nodeServerLayer } from "./http/serve.ts";
 import { requestSpanNames } from "./http/tracing.ts";
 import { observabilityLayer } from "./observability.ts";
 import { StreamAccess } from "./routes/events/access.ts";
-import { Workflows } from "./workflows.ts";
 
 /**
  * What the process owns once and every service above builds on: the pools,
@@ -60,6 +59,16 @@ import { Workflows } from "./workflows.ts";
  * engine with its lanes. A service's `layer` never provides these, so there is one of each
  * however many services use them.
  */
+/**
+ * The workflow engine, embedded in this server on its Postgres; one server
+ * process only. Its messages go through the main pool, so a signal sent in a
+ * transaction commits with it; its locks go through the direct connection.
+ */
+const workflowEngine = WorkflowEngines.singleRunnerWith({
+	hostLockWait: Duration.seconds(30),
+	sessions: directClientLayer,
+});
+
 const Infrastructure = Layer.mergeAll(
 	BlobStore.layer,
 	Secrets.layer,
@@ -71,7 +80,7 @@ const Infrastructure = Layer.mergeAll(
 		Layer.mergeAll(
 			ServerSettings.layer,
 			EventBus.layer.pipe(Layer.provide(directClientLayer)),
-			Workflows.engine,
+			workflowEngine,
 		),
 	),
 	Layer.provideMerge(Layer.mergeAll(Ids.layer, EventStore.layer)),
@@ -90,7 +99,7 @@ const OutsideSystems = Layer.mergeAll(
 
 /**
  * Accounts, memberships, projects, bots, their files and the providers they
- * use, trying a model, and notifying people.
+ * use, trying a model, and notifying members.
  */
 const WorkspacesAndProviders = Layer.mergeAll(
 	Membership.layer,
@@ -121,17 +130,15 @@ const ChatServiceLayers = ChatServices.layer.pipe(
 
 /**
  * What runs without a request: the workflows, the automation scheduler, the
- * nightly event prune, deleting queued blobs, seeding the built-in providers
- * into every workspace, pausing idle computers, and measuring running ones'
- * disks.
+ * nightly event prune, deleting queued blobs, putting idle computers to
+ * sleep, and measuring running ones' disks.
  */
 const Background = Layer.mergeAll(
 	ChatWorkflows.layer,
 	Automations.schedulerLayer,
 	EventPruning.layer,
 	BlobDeletions.layer,
-	UnsentUploads.layer,
-	BuiltInProviderSeeding.layer,
+	UnsentAttachments.layer,
 	ProjectComputers.sweepLayer,
 );
 

@@ -48,7 +48,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 
 	afterAll(closeDatabase);
 
-	const as = (personId: string) => onPostgresAs(personId)(gitHubApps);
+	const as = (memberId: string) => onPostgresAs(memberId)(gitHubApps);
 
 	it("makes the project's app from a manifest, for someone who manages its connectors", async () => {
 		const { projectId, adminId, editorId } = await workspaceWithProject("Make");
@@ -154,7 +154,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 		await expect(as(editorId).installUrl({ projectId, connectorId })).rejects.toMatchObject({
 			_tag: "ActionForbidden",
 		});
-		// GitHub sends people back here after they change what an installation reaches.
+		// GitHub sends members back here after they change what an installation reaches.
 		const url = await as(adminId).installUrl({ projectId, connectorId });
 		const again = await as(adminId).installed({
 			installationId: OTHER_INSTALLATION_ID,
@@ -214,7 +214,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 				yield* TestClock.setTime(Date.now() + AFTER_STATE_EXPIRES_MILLISECONDS);
 				return yield* gitHubApps.made({ code: MANIFEST_CODE, state: stateIn(form.url) });
 			}).pipe(
-				CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(adminId)),
+				CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(adminId)),
 				Effect.provide(TestClock.layer()),
 			),
 		);
@@ -223,7 +223,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 		expect(await listedIn(fixture)).toEqual([]);
 	});
 
-	it("says the person declined, for the bot the step was for", async () => {
+	it("says the member declined, for the bot the step was for", async () => {
 		const { workspaceId, projectId, adminId } = await workspaceWithProject("Declined");
 		const form = await as(adminId).start({ projectId, organization: undefined });
 

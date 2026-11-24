@@ -1,13 +1,15 @@
 export * as EventStore from "./store.ts";
 
-import type { EventStream, StreamEvent } from "@sugabots/contracts";
+import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
 import { and, asc, count, eq, gt, lt } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { type Database, type Executor, type QueryFailure, query } from "../database.ts";
 import { event } from "../schema.ts";
+import type { CommittedEvent } from "./outbox.ts";
 
 /**
- * Where durable events are kept between a disconnect and a reconnect.
+ * Where durable events are read back between a disconnect and a reconnect.
+ * `EventOutbox` writes them, on the transaction that made the change.
  *
  * An interface rather than a handful of queries because the bus above it has
  * nothing else to say to the database, and because a store that lives in memory
@@ -15,9 +17,6 @@ import { event } from "../schema.ts";
  * `make` is the real thing; `inMemory` is the same contract, for tests.
  */
 export interface Interface {
-	/** Persists an event on a stream and returns its `seq`. */
-	append(stream: EventStream, event: StreamEvent): Promise<number>;
-
 	/** Events on a stream after `since`, oldest first, at most `limit` of them. */
 	replay(stream: EventStream, since: number, limit: number): Promise<Stored[]>;
 
@@ -48,20 +47,6 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 		Effect.runPromiseWith(context)(query(statement));
 
 	return {
-		async append(stream, payload) {
-			const [row] = await run((db) =>
-				db
-					.insert(event)
-					.values({ stream, type: payload.type, payload })
-					.returning({ seq: event.seq }),
-			);
-
-			if (!row) {
-				throw new Error(`Storing a ${payload.type} on ${stream} returned no row`);
-			}
-			return row.seq;
-		},
-
 		async replay(stream, since, limit) {
 			const rows = await run((db) =>
 				db
@@ -88,8 +73,8 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 		},
 
 		async prune(before) {
-			// The count, not the rows. A week of events is the largest result set
-			// this process would ever pull back, and it was only being counted.
+			// The count, not the rows: a week of events is the largest result set
+			// this process would ever pull back, and only its size is wanted.
 			const [counted] = await run((db) => {
 				const deleted = db
 					.$with("deleted")
@@ -120,19 +105,25 @@ interface InMemoryOptions {
 	now?: () => Date;
 }
 
+/** The memory store, and `record`, which stands in for the outbox's insert. */
+export interface InMemory extends Interface {
+	/** Stores `event` as the outbox would, ready to hand to `EventBus.publishCommitted`. */
+	record(stream: EventStream, event: StreamEvent & { type: DurableEventType }): CommittedEvent;
+}
+
 /**
  * The same store, in an array. Sequence numbers are global and monotonic here
  * too, so anything that depends on ordering behaves as it does in Postgres.
  */
-export function inMemory({ now = () => new Date() }: InMemoryOptions = {}): Interface {
+export function inMemory({ now = () => new Date() }: InMemoryOptions = {}): InMemory {
 	const rows: MemoryRow[] = [];
 	let next = 0;
 
 	return {
-		async append(stream, event) {
+		record(stream, event) {
 			next += 1;
 			rows.push({ seq: next, stream, event, createdAt: now() });
-			return next;
+			return { stream, seq: next, event };
 		},
 
 		async replay(stream, since, limit) {

@@ -13,7 +13,7 @@ if (!bot || !project) throw new Error("The story app has no bot or project");
 
 /**
  * Right-clicks `row` until its notifications menu opens: a row only has the
- * menu once the person's notification settings have loaded.
+ * menu once the member's notification settings have loaded.
  */
 async function openMenuOf(row: Element) {
 	await waitFor(async () => {

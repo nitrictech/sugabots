@@ -11,7 +11,7 @@ type StartChatResult = { chat: BotStartedChat } | { refused: string };
 
 /**
  * The `start_chat` tool: moves a piece of work that came up in this
- * chat to a new chat with this bot or another, when the person asks.
+ * chat to a new chat with this bot or another, when the member asks.
  * The new chat's bot starts on it at once, from the brief this bot writes.
  */
 export function startChatTool({
@@ -25,7 +25,7 @@ export function startChatTool({
 }) {
 	return tool({
 		description:
-			"Start a new chat with you or another bot for a separate piece of work, when the person asks to take something to a chat of its own. The person is added to it, and its bot starts at once on your brief, its first message. Its bot sees only the brief, not this chat, so include the work and everything it needs from here. Then tell the person you started it, by its title.",
+			"Start a new chat with you or another bot for a separate piece of work, when the member asks to take something to a chat of its own. The member is added to it, and its bot starts at once on your brief, its first message. Its bot sees only the brief, not this chat, so include the work and everything it needs from here. Then tell the member you started it, by its title.",
 		inputSchema: Schema.Struct({
 			title: Schema.Trim.check(
 				Schema.isMinLength(1),

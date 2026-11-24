@@ -49,7 +49,7 @@ const running: ProjectComputer = {
 		createdAt: "2026-09-29T09:00:00.000Z",
 		lastUsedAt: "2026-10-02T05:40:00.000Z",
 		turnsUsing: 0,
-		peopleWatching: 0,
+		membersWatching: 0,
 		upgradeAvailable: false,
 		disk: diskWith(6.2),
 	},
@@ -208,10 +208,10 @@ export const AsleepWithUpgrade = meta.story({
 /** In use by a bot and watched: the actions wait until the bot has finished. */
 export const InUse = meta.story({
 	beforeEach({ msw }) {
-		msw.use(answers(present({ turnsUsing: 1, peopleWatching: 2 })));
+		msw.use(answers(present({ turnsUsing: 1, membersWatching: 2 })));
 	},
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("A bot is using it, 2 people watching")).toBeVisible();
+		await expect(await canvas.findByText("A bot is using it, 2 members watching")).toBeVisible();
 	},
 });
 

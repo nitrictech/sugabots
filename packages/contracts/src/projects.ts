@@ -4,7 +4,7 @@ import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
 /**
- * Projects: long-running pieces of work where many people and many bots
+ * Projects: long-running pieces of work where many members and many bots
  * talk, in the project's chats, each led by one lead bot.
  *
  * A project is reached by its members, and every workspace admin is one of
@@ -41,7 +41,7 @@ export const projectSlugSchema = slugSchema.check(
  * The colours a project's tile can be, in the order a colour picker shows
  * them and new projects take them. Their own list rather than the bots' colours:
  * a tile fills its whole square, so its hues are spread evenly round the
- * wheel where the bots' have two blues a face can tell apart and a tile
+ * wheel where the bots' have two blues an avatar can tell apart and a tile
  * cannot. Each names a tile palette; see `projectPalettes` in the web app's
  * `ProjectTile`.
  */
@@ -77,7 +77,7 @@ export function leastUsedProjectColor(taken: readonly ProjectColor[]): ProjectCo
  * What the caller may do in this project, already decided by the API.
  *
  * So a control nobody can use is not drawn at all: showing it and letting the
- * request fail teaches people that things here sometimes do not work. The API
+ * request fail teaches members that things here sometimes do not work. The API
  * remains the authority — these are answers it has given, not a check the
  * client performs.
  *
@@ -86,7 +86,7 @@ export function leastUsedProjectColor(taken: readonly ProjectColor[]): ProjectCo
  * with `visibility` or `isMember` to know whether to draw something.
  */
 /**
- * What the person may do with what a project holds besides its people and
+ * What the member may do with what a project holds besides its members and
  * bots, the same on a project and on a bot, whose are its default
  * project's: its chats' history, settings, files, connectors, computer
  * and automations.
@@ -115,13 +115,13 @@ export type ResourcePermissions = typeof resourcePermissionsSchema.Type;
 export const projectPermissionsSchema = Schema.Struct({
 	/** Change the project's name, address, colour, description, visibility and lead bot. */
 	rename: Schema.Boolean,
-	/** Invite and remove people. */
-	managePeople: Schema.Boolean,
+	/** Invite and remove members. */
+	manageMembers: Schema.Boolean,
 	/** Add and remove bots, which must be public. */
 	manageBots: Schema.Boolean,
 	/** Take yourself out of the project. Never for an administrator, who is in every one. */
 	leave: Schema.Boolean,
-	/** Join it from the directory: a public project the person isn't in. */
+	/** Join it from the directory: a public project the member isn't in. */
 	join: Schema.Boolean,
 	delete: Schema.Boolean,
 	resources: resourcePermissionsSchema,
@@ -146,16 +146,16 @@ export const projectSchema = Schema.Struct({
 	 * is asked: one of its bots.
 	 */
 	leadBotId: uuidSchema,
-	/** Whether the person asking is in it, rather than seeing it in the directory. */
+	/** Whether the member asking is in it, rather than seeing it in the directory. */
 	isMember: Schema.Boolean,
 	/**
-	 * How many people are in it, as its members list counts them. Given in the
-	 * workspace's list of projects, for a project whose members the person may list.
+	 * How many members are in it, as its members list counts them. Given in the
+	 * workspace's list of projects, for a project whose members the member may list.
 	 */
 	memberCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 	/**
 	 * How many bots are in it, as its bots list counts them. Given in the
-	 * workspace's list of projects, for a project whose bots the person may list.
+	 * workspace's list of projects, for a project whose bots the member may list.
 	 */
 	botCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 	permissions: projectPermissionsSchema,
@@ -190,9 +190,9 @@ export const projectUpdateSchema = newProjectSchema.mapFields(Struct.map(Schema.
 
 export type ProjectUpdate = typeof projectUpdateSchema.Type;
 
-/** Somebody in a project. Every administrator is in every project people made. */
+/** Somebody in a project. Every administrator is in every project members made. */
 export const projectMemberSchema = Schema.Struct({
-	personId: uuidSchema,
+	memberId: uuidSchema,
 	name: Schema.String,
 	email: emailSchema,
 	image: Schema.NullOr(Schema.String),
@@ -203,18 +203,21 @@ export const projectMemberSchema = Schema.Struct({
 export type ProjectMember = typeof projectMemberSchema.Type;
 
 export const newProjectMemberSchema = Schema.Struct({
-	personId: uuidSchema,
+	memberId: uuidSchema,
 });
 
 /**
- * `Suga Team` becomes `suga-team`. Used for project slugs, which the API
- * derives when one is omitted, and for workspace slugs on the setup screen.
+ * `Suga Team` becomes `suga-team`, and `Café` becomes `cafe`. Used for project
+ * slugs, which the API derives when one is omitted, for workspace slugs on the
+ * setup screen, and for handles.
  *
  * The trailing-hyphen strip turns twice on purpose: once before the length cap
  * and once after, because the cap can land mid-separator.
  */
 export function slugify(name: string): string {
 	return name
+		.normalize("NFKD")
+		.replace(/[\u0300-\u036f]/g, "")
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "")

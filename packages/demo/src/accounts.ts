@@ -1,14 +1,14 @@
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { query } from "@sugabots/core/database/database";
-import { person } from "@sugabots/core/database/schema";
+import { member } from "@sugabots/core/database/schema";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer } from "effect";
 
 /** Someone a development seed signs in as. */
-interface SeedPerson {
+interface SeedMember {
 	name: string;
 	email: string;
 	password: string;
@@ -19,32 +19,32 @@ interface SeedPerson {
  * first if there is no account, through the same route the web app signs up
  * with.
  */
-export const ensureAccount = (seed: SeedPerson) =>
+export const ensureAccount = (seed: SeedMember) =>
 	Effect.gen(function* () {
 		const [existing] = yield* query((db) =>
-			db.select({ id: person.id }).from(person).where(eq(person.email, seed.email)),
+			db.select({ id: member.id }).from(member).where(eq(member.email, seed.email)),
 		);
 		if (!existing) {
 			yield* signUp(seed);
 		}
 		const [account] = yield* query((db) =>
 			db
-				.select({ id: person.id, emailVerified: person.emailVerified })
-				.from(person)
-				.where(eq(person.email, seed.email)),
+				.select({ id: member.id, emailVerified: member.emailVerified })
+				.from(member)
+				.where(eq(member.email, seed.email)),
 		);
 		if (!account) {
 			return yield* Effect.die(new Error(`could not create ${seed.email}`));
 		}
 		if (!account.emailVerified) {
 			yield* query((db) =>
-				db.update(person).set({ emailVerified: true }).where(eq(person.id, account.id)),
+				db.update(member).set({ emailVerified: true }).where(eq(member.id, account.id)),
 			);
 		}
 		return account.id;
 	});
 
-const signUp = (seed: SeedPerson) =>
+const signUp = (seed: SeedMember) =>
 	Effect.gen(function* () {
 		const serverSettings = yield* ServerSettings.Service;
 		const authentication = yield* Authentication.Service;
@@ -60,7 +60,7 @@ const signUp = (seed: SeedPerson) =>
 		);
 		if (!response.ok) {
 			const reason = yield* Effect.promise(() => response.text());
-			return yield* Effect.die(new Error(`could not sign up ${person.email}: ${reason}`));
+			return yield* Effect.die(new Error(`could not sign up ${seed.email}: ${reason}`));
 		}
 	});
 

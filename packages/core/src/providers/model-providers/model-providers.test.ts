@@ -1,9 +1,9 @@
 import type { ModelProviderUpdate, NewModelProvider } from "@sugabots/contracts";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
-import { bot, membership, modelProvider, person, workspace } from "../../database/schema.ts";
+import { bot, member, membership, modelProvider, workspace } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -14,7 +14,6 @@ import {
 import { BotStore } from "../../workspaces/bots/bot-store.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
-import { seedEveryWorkspace } from "./built-in-provider-seeding.ts";
 import { ModelInUse } from "./held-models.ts";
 import { providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderSetup } from "./model-provider-setup.ts";
@@ -39,7 +38,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	 */
 	const setupWith = async (
 		respond: (url: string) => Response | Promise<Response>,
-		{ allowPrivateNetwork = true, as = personId } = {},
+		{ allowPrivateNetwork = true, as = memberId } = {},
 	) =>
 		(
 			await servedOnPostgresAs(
@@ -60,7 +59,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	const view = (providerId: string) => runOnPostgres(providerIn(workspaceId, providerId));
 	const list = (inWorkspace: string) => runOnPostgres(providersIn(inWorkspace));
 	const create = (provider: NewModelProvider) =>
-		store.create(workspaceId, { createdById: personId, provider });
+		store.create(workspaceId, { createdById: memberId, provider });
 	/** Switches a provider on as a fixture, the way only a passing test does in the product. */
 	const switchOn = (id: string) =>
 		onDatabase((db) =>
@@ -71,7 +70,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		);
 
 	let workspaceId: string;
-	let personId: string;
+	let memberId: string;
 	let providerId: string;
 
 	afterAll(async () => {
@@ -88,15 +87,15 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		);
 		const [somebody] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
 				.returning(),
 		);
 		if (!made || !somebody) throw new Error("could not create the test workspace");
 		workspaceId = made.id;
-		personId = somebody.id;
+		memberId = somebody.id;
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, personId, role: "admin" }),
+			db.insert(membership).values({ workspaceId, memberId, role: "admin" }),
 		);
 		await store.seedBuiltInProviders(workspaceId);
 		const provider = await create({
@@ -139,7 +138,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			if (!openai) throw new Error("fixture");
 			expect(openai).toMatchObject({ active: false, hasApiKey: false });
 			if (key === "replacement") {
-				await store.update(workspaceId, openai.id, { apiKey: "old-key" }, personId);
+				await store.update(workspaceId, openai.id, { apiKey: "old-key" }, memberId);
 				await switchOn(openai.id);
 			}
 			let activeDuringCheck: boolean | undefined;
@@ -184,8 +183,8 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	it.each([{ baseUrl: "https://other.example/v1" }, { apiKey: null }])(
 		"does not enable a disabled provider for an unrelated update: %j",
 		async (input) => {
-			await store.update(workspaceId, providerId, { active: false }, personId);
-			await store.update(workspaceId, providerId, input, personId);
+			await store.update(workspaceId, providerId, { active: false }, memberId);
+			await store.update(workspaceId, providerId, input, memberId);
 
 			expect(await view(providerId)).toMatchObject({ active: false });
 		},
@@ -299,13 +298,13 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		if (!ollama) throw new Error("fixture");
 		const [bob] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Bob", email: `bob-${workspaceId}@example.com` })
 				.returning(),
 		);
 		if (!bob) throw new Error("fixture");
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, personId: bob.id, role: "admin" }),
+			db.insert(membership).values({ workspaceId, memberId: bob.id, role: "admin" }),
 		);
 		const respond = () => Response.json({ models: [] });
 		await (await setupWith(respond)).update({
@@ -329,13 +328,13 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	it("names nobody as who connected a provider once they have left the workspace, though they are in another", async () => {
 		const [bob] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Bob", email: `bob-${workspaceId}@example.com` })
 				.returning(),
 		);
 		if (!bob) throw new Error("fixture");
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, personId: bob.id, role: "admin" }),
+			db.insert(membership).values({ workspaceId, memberId: bob.id, role: "admin" }),
 		);
 		await (await setupWith(() => Response.json({ data: [] }), { as: bob.id })).update({
 			workspace: workspaceId,
@@ -351,13 +350,13 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		);
 		if (!elsewhere) throw new Error("fixture");
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId: elsewhere.id, personId: bob.id, role: "admin" }),
+			db.insert(membership).values({ workspaceId: elsewhere.id, memberId: bob.id, role: "admin" }),
 		);
 
 		await onDatabase((db) =>
 			db
 				.delete(membership)
-				.where(and(eq(membership.workspaceId, workspaceId), eq(membership.personId, bob.id))),
+				.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, bob.id))),
 		);
 
 		expect(await view(providerId)).toMatchObject({ connectedBy: null });
@@ -370,7 +369,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			await switchOn(providerId);
 			const setup = await setupWith(async () => {
 				vi.setSystemTime(new Date("2030-01-01T00:00:01Z"));
-				await store.update(workspaceId, providerId, { active: false }, personId);
+				await store.update(workspaceId, providerId, { active: false }, memberId);
 				return Response.json({ data: [] });
 			});
 
@@ -383,7 +382,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("does not reactivate a manually disabled provider when refreshing models", async () => {
-		await store.update(workspaceId, providerId, { active: false }, personId);
+		await store.update(workspaceId, providerId, { active: false }, memberId);
 		const setup = await setupWith(() => Response.json({ data: [] }));
 
 		await setup.discoverModels({ workspace: workspaceId, providerId });
@@ -408,13 +407,13 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	it("lets an editor see the models offered, and nothing more", async () => {
 		const [sam] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Sam", email: `sam-${crypto.randomUUID()}@example.com` })
 				.returning(),
 		);
 		if (!sam) throw new Error("fixture");
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, personId: sam.id, role: "editor" }),
+			db.insert(membership).values({ workspaceId, memberId: sam.id, role: "editor" }),
 		);
 		const setup = await setupWith(() => Response.json({ data: [] }), { as: sam.id });
 
@@ -444,7 +443,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		it("drops the key and headers, which would otherwise go to the new address, and switches it off", async () => {
 			const headed = await withHeaders();
 
-			await store.update(workspaceId, headed, { baseUrl: elsewhere }, personId);
+			await store.update(workspaceId, headed, { baseUrl: elsewhere }, memberId);
 
 			expect(await view(headed)).toMatchObject({
 				baseUrl: elsewhere,
@@ -466,7 +465,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 					apiKey: "new-secret",
 					customHeaders: [{ name: "x-team-token", value: "new-team-secret" }],
 				},
-				personId,
+				memberId,
 			);
 
 			expect(await view(headed)).toMatchObject({ active: false });
@@ -480,7 +479,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		it("keeps the key and headers when the address given is the one it has", async () => {
 			const headed = await withHeaders();
 
-			await store.update(workspaceId, headed, { baseUrl: "https://headed.example/v1" }, personId);
+			await store.update(workspaceId, headed, { baseUrl: "https://headed.example/v1" }, memberId);
 
 			expect(await view(headed)).toMatchObject({ active: true });
 			expect(await store.access(workspaceId, headed)).toMatchObject({
@@ -499,10 +498,10 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 					expiresAt: Date.now() + 60_000,
 					accountId: null,
 				},
-				signedInById: personId,
+				signedInById: memberId,
 			});
 
-			await store.update(workspaceId, chatgpt.id, { baseUrl: elsewhere }, personId);
+			await store.update(workspaceId, chatgpt.id, { baseUrl: elsewhere }, memberId);
 
 			expect(await view(chatgpt.id)).toMatchObject({ signedIn: false });
 			expect(await store.access(workspaceId, chatgpt.id)).toBeUndefined();
@@ -603,32 +602,6 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			setup.update({ workspace: workspaceId, providerId: keyless.id, changes: { active: true } }),
 		).rejects.toBeInstanceOf(ModelProviderSetup.ProviderActivationRequiresCredential);
 		expect(await view(keyless.id)).toMatchObject({ active: false });
-	});
-
-	it("catches every workspace up at start-up, and changes nothing the second time", async () => {
-		const seedAll = () =>
-			runOnPostgres(seedEveryWorkspace.pipe(Effect.provide(ModelProviderStore.layer)));
-		const [fresh] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({
-					name: "Fresh",
-					slug: `fresh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-				})
-				.returning(),
-		);
-		if (!fresh) throw new Error("fixture");
-		expect(await list(fresh.id)).toEqual([]);
-
-		await seedAll();
-		const seeded = await list(fresh.id);
-		expect(seeded.map(({ builtIn }) => builtIn)).toEqual(
-			expect.arrayContaining(["openai", "ollama"]),
-		);
-
-		await seedAll();
-
-		expect(await list(fresh.id)).toEqual(seeded);
 	});
 
 	it("lists nothing it was not given, and seeds the built-in providers once when provisioned", async () => {
@@ -811,23 +784,23 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 
 		it("makes the first model switched on the default and every system bot's and Personal Assistant's", async () => {
 			const bots = await botsOnPostgres();
-			await bots.ensureSystemBots({ workspaceId, createdById: personId });
+			await bots.createSystemBots({ workspaceId, createdById: memberId });
 			// Made while the workspace offered no model, as for somebody who joined then.
-			const assistant = await bots.provisionPersonalAssistant({ workspaceId, personId });
+			const assistant = await bots.provisionPersonalAssistant({ workspaceId, memberId });
 			const ids = await offerable("first", "second");
 			const setup = await answering();
 
-			await setup.setModelsEnabled({
+			await setup.updateModel({
 				workspace: workspaceId,
 				providerId,
-				modelIds: [ids.first ?? ""],
-				enabled: true,
+				modelId: ids.first ?? "",
+				changes: { enabled: true },
 			});
-			await setup.setModelsEnabled({
+			await setup.updateModel({
 				workspace: workspaceId,
 				providerId,
-				modelIds: [ids.second ?? ""],
-				enabled: true,
+				modelId: ids.second ?? "",
+				changes: { enabled: true },
 			});
 
 			expect(await setup.listEnabledModels({ workspace: workspaceId })).toMatchObject({
@@ -844,11 +817,11 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			const ids = await offerable("first", "second");
 			const setup = await answering();
 			const enable = (modelId: string, enabled: boolean) =>
-				setup.setModelsEnabled({
+				setup.updateModel({
 					workspace: workspaceId,
 					providerId,
-					modelIds: [ids[modelId] ?? ""],
-					enabled,
+					modelId: ids[modelId] ?? "",
+					changes: { enabled: enabled },
 				});
 			await enable("first", true);
 			await enable("second", true);
@@ -878,24 +851,24 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		});
 
 		it("refuses to switch off a model a system bot runs on", async () => {
-			await (await botsOnPostgres()).ensureSystemBots({ workspaceId, createdById: personId });
+			await (await botsOnPostgres()).createSystemBots({ workspaceId, createdById: memberId });
 			const ids = await offerable("first", "second");
 			const setup = await answering();
 			for (const modelId of ["first", "second"]) {
-				await setup.setModelsEnabled({
+				await setup.updateModel({
 					workspace: workspaceId,
 					providerId,
-					modelIds: [ids[modelId] ?? ""],
-					enabled: true,
+					modelId: ids[modelId] ?? "",
+					changes: { enabled: true },
 				});
 			}
 			await setup.setDefaultModel({ workspace: workspaceId, model: "second" });
 
-			const refused = setup.setModelsEnabled({
+			const refused = setup.updateModel({
 				workspace: workspaceId,
 				providerId,
-				modelIds: [ids.first ?? ""],
-				enabled: false,
+				modelId: ids.first ?? "",
+				changes: { enabled: false },
 			});
 
 			await expect(refused).rejects.toMatchObject({
@@ -910,12 +883,14 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			const withBotsOnFirst = async () => {
 				const ids = await offerable("first", "second", "third");
 				const setup = await answering();
-				await setup.setModelsEnabled({
-					workspace: workspaceId,
-					providerId,
-					modelIds: Object.values(ids),
-					enabled: true,
-				});
+				for (const modelId of Object.values(ids)) {
+					await setup.updateModel({
+						workspace: workspaceId,
+						providerId,
+						modelId,
+						changes: { enabled: true },
+					});
+				}
 				await setup.setDefaultModel({ workspace: workspaceId, model: "third" });
 				await onDatabase((db) =>
 					db.insert(bot).values(
@@ -979,11 +954,11 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				]);
 				await switchOn(other.id);
 				const [elsewhere] = (await view(other.id))?.models ?? [];
-				await setup.setModelsEnabled({
+				await setup.updateModel({
 					workspace: workspaceId,
 					providerId: other.id,
-					modelIds: [elsewhere?.id ?? ""],
-					enabled: true,
+					modelId: elsewhere?.id ?? "",
+					changes: { enabled: true },
 				});
 				await setup.setDefaultModel({ workspace: workspaceId, model: "elsewhere" });
 
@@ -1019,15 +994,15 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		describe("switching off the model new bots and system bots use", () => {
 			/** `first` and `second` on, with `first` the default and every system bot's. */
 			const withSettingsOnFirst = async () => {
-				await (await botsOnPostgres()).ensureSystemBots({ workspaceId, createdById: personId });
+				await (await botsOnPostgres()).createSystemBots({ workspaceId, createdById: memberId });
 				const ids = await offerable("first", "second");
 				const setup = await answering();
 				for (const modelId of ["first", "second"]) {
-					await setup.setModelsEnabled({
+					await setup.updateModel({
 						workspace: workspaceId,
 						providerId,
-						modelIds: [ids[modelId] ?? ""],
-						enabled: true,
+						modelId: ids[modelId] ?? "",
+						changes: { enabled: true },
 					});
 				}
 				return { ids, setup };

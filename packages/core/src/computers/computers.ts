@@ -29,9 +29,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
-
-export const layer = layerNoDeps;
+export const layer = Layer.effect(Service, make);
 
 /**
  * Makes and reaches the machines of one provider account.
@@ -94,7 +92,7 @@ export type TemplateStatus = "missing" | "building" | "ready" | "failed";
 export interface Info {
 	readonly state: "running" | "asleep";
 	/**
-	 * Whether its {@link WORKSPACE_DIRECTORY} is kept apart from it, so a new
+	 * Whether its {@link WORK_DIRECTORY} is kept apart from it, so a new
 	 * computer made with the same {@link Spec.workName} carries on with that
 	 * work. Otherwise the work goes with the computer and must be copied out.
 	 */
@@ -165,7 +163,7 @@ export interface Spec {
 	readonly labels: Readonly<Record<string, string>>;
 	readonly reach: Reach;
 	/**
-	 * Names the work in its {@link WORKSPACE_DIRECTORY}: lowercase letters,
+	 * Names the work in its {@link WORK_DIRECTORY}: lowercase letters,
 	 * digits and dashes. A provider that keeps work apart from the computer
 	 * gives every computer made with this name the same work.
 	 */
@@ -178,13 +176,18 @@ export interface Opened {
 }
 
 /** Where bots work. It belongs to the bots' user. */
-export const WORKSPACE_DIRECTORY = "/workspace";
+export const WORK_DIRECTORY = "/workspace";
 
 /** Where each chat's folder is, named by the chat's id. */
-export const CHATS_DIRECTORY = `${WORKSPACE_DIRECTORY}/chats`;
+export const CHATS_DIRECTORY = `${WORK_DIRECTORY}/chats`;
 
 /** Where each bot's home folder is, named by the bot's id. */
-export const BOTS_DIRECTORY = `${WORKSPACE_DIRECTORY}/bots`;
+export const BOTS_DIRECTORY = `${WORK_DIRECTORY}/bots`;
+
+/** A bot's home folder, matched with the bot's id as its first group. */
+export const HOME_FOLDER = new RegExp(
+	`^${BOTS_DIRECTORY}/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`,
+);
 
 export interface Computer {
 	readonly id: ComputerId;
@@ -239,11 +242,6 @@ interface Network {
 	 * can't.
 	 */
 	readonly credentials: readonly Credential[];
-	/**
-	 * Set for its login shells, such as a placeholder token that tells a
-	 * command-line tool it is signed in while the real one is added outside.
-	 */
-	readonly environment: Readonly<Record<string, string>>;
 }
 
 /**
@@ -273,16 +271,6 @@ export interface Credential {
 	readonly value: Redacted.Redacted;
 }
 
-/** Where a computer's {@link Network.environment} is written, for login shells to read. */
-export const NETWORK_ENVIRONMENT_FILE = "/etc/profile.d/sugabots-network.sh";
-
-/** {@link Network.environment} as a script for {@link NETWORK_ENVIRONMENT_FILE}. */
-export function environmentScript(environment: Readonly<Record<string, string>>) {
-	return Object.entries(environment)
-		.map(([name, value]) => `export ${name}=${shellQuoted(value)}\n`)
-		.join("");
-}
-
 export interface Endpoint {
 	/** The port's root, such as `http://172.17.0.1:50699/proxy/8931`, without a trailing slash. */
 	readonly url: string;
@@ -291,7 +279,7 @@ export interface Endpoint {
 }
 
 export interface ExecOptions {
-	/** Absolute directory to run in. Unset, {@link WORKSPACE_DIRECTORY}. */
+	/** Absolute directory to run in. Unset, {@link WORK_DIRECTORY}. */
 	readonly cwd?: string;
 	readonly env?: Readonly<Record<string, string>>;
 	/** After this the command is stopped, and its execution has no exit code. */
@@ -325,7 +313,7 @@ export class Unavailable
 	extends Data.TaggedError("ComputerUnavailable")<{
 		provider: ProviderAccess["provider"];
 		cause: unknown;
-		/** What went wrong, when the provider said something people can act on. */
+		/** What went wrong, when the provider said something members can act on. */
 		reason?: UserText;
 	}>
 	implements UserFacing

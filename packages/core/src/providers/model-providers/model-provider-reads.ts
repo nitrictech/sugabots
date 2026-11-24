@@ -1,22 +1,30 @@
-import type { ModelProvider, NamedPerson, WorkspaceModelsResponse } from "@sugabots/contracts";
+import type {
+	ModelProvider,
+	NamedMember,
+	ProviderModelCapability,
+	WorkspaceModelsResponse,
+} from "@sugabots/contracts";
 import {
 	builtInSignsIn,
 	providerIsConnected,
 	providerLacksCredential,
 	seededBuiltIns,
 } from "@sugabots/contracts";
+import { DisplayName } from "@sugabots/errors";
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
-import { namedPersonColumns } from "../../chats/store/participants.ts";
+import { namedMemberColumns } from "../../chats/store/participants.ts";
 import { type Executor, query } from "../../database/database.ts";
 import {
 	type ModelProviderRow,
+	member,
 	membership,
 	modelProvider,
 	type ProviderModelRow,
-	person,
 	providerModel,
 } from "../../database/schema.ts";
+import { membershipOf } from "../../workspaces/membership/member-reads.ts";
 import { configurationStatus } from "../tested-configuration.ts";
 import { defaultModelOf, offeredIn } from "./model-provider-store.ts";
 
@@ -27,7 +35,7 @@ import { defaultModelOf, offeredIn } from "./model-provider-store.ts";
 export const providersIn = (workspaceId: string) =>
 	Effect.gen(function* () {
 		const providers = yield* query((db) =>
-			withConnectedBy(db)
+			withMembers(db)
 				.where(eq(modelProvider.workspaceId, workspaceId))
 				.orderBy(asc(modelProvider.createdAt)),
 		);
@@ -47,10 +55,10 @@ export const providersIn = (workspaceId: string) =>
 				)
 				.orderBy(asc(providerModel.displayName), asc(providerModel.modelId)),
 		);
-		return inListOrder(providers).map(({ provider, connectedBy }) =>
+		return inListOrder(providers).map(({ provider, connectedBy, signedInAs }) =>
 			toProvider(
 				provider,
-				connectedBy,
+				{ connectedBy, signedInAs },
 				models.filter((model) => model.providerId === provider.id),
 			),
 		);
@@ -60,7 +68,7 @@ export const providersIn = (workspaceId: string) =>
 export const providerIn = (workspaceId: string, providerId: string) =>
 	Effect.gen(function* () {
 		const [row] = yield* query((db) =>
-			withConnectedBy(db)
+			withMembers(db)
 				.where(and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId)))
 				.limit(1),
 		);
@@ -74,8 +82,27 @@ export const providerIn = (workspaceId: string, providerId: string) =>
 				)
 				.orderBy(asc(providerModel.displayName), asc(providerModel.modelId)),
 		);
-		return toProvider(row.provider, row.connectedBy, models);
+		return toProvider(row.provider, row, models);
 	});
+
+/**
+ * The names of the workspace's model providers that sign in with `memberId`'s
+ * subscription, in the order the list shows them.
+ */
+export const providersSignedInAs = (workspaceId: string, memberId: string) =>
+	query((db) =>
+		db
+			.select({ provider: modelProvider })
+			.from(modelProvider)
+			.where(
+				and(eq(modelProvider.workspaceId, workspaceId), eq(modelProvider.signedInById, memberId)),
+			)
+			.orderBy(asc(modelProvider.createdAt)),
+	).pipe(
+		Effect.map((rows) =>
+			inListOrder(rows).map(({ provider }) => DisplayName.fromRecord(provider.name)),
+		),
+	);
 
 /**
  * The models the workspace offers for bots to run on, and its default, which
@@ -100,9 +127,7 @@ export const offeredModels = (workspaceId: string) =>
 					providerBuiltIn: provider.builtIn,
 					modelId: model.modelId,
 					displayName: model.displayName,
-					capabilities: model.capabilities.filter(
-						(capability) => !model.disabledCapabilities.includes(capability),
-					),
+					capabilities: capabilitiesOn(model),
 				})),
 				defaultModel: defaultModel ?? null,
 			}),
@@ -117,24 +142,37 @@ function inListOrder<Row extends { provider: ModelProviderRow }>(rows: Row[]): R
 	return rows.toSorted((a, b) => rank(a) - rank(b));
 }
 
-/** Providers with whoever connected each, while they are still in the workspace. */
-function withConnectedBy(db: Executor) {
+/** The member whose subscription a provider signs in with, beside whoever connected it. */
+const signer = alias(member, "signer");
+const signerMembership = alias(membership, "signer_membership");
+
+/**
+ * Providers with whoever connected each, and whose subscription each signs in
+ * with, while they are still in the workspace.
+ */
+function withMembers(db: Executor) {
 	return db
-		.select({ provider: modelProvider, connectedBy: namedPersonColumns })
+		.select({
+			provider: modelProvider,
+			connectedBy: namedMemberColumns,
+			signedInAs: { id: signer.id, name: signer.name, email: signer.email, image: signer.image },
+		})
 		.from(modelProvider)
+		.leftJoin(membership, membershipOf(modelProvider.workspaceId, modelProvider.connectedById))
+		.leftJoin(member, eq(member.id, membership.memberId))
 		.leftJoin(
-			membership,
+			signerMembership,
 			and(
-				eq(membership.workspaceId, modelProvider.workspaceId),
-				eq(membership.personId, modelProvider.connectedById),
+				eq(signerMembership.workspaceId, modelProvider.workspaceId),
+				eq(signerMembership.memberId, modelProvider.signedInById),
 			),
 		)
-		.leftJoin(person, eq(person.id, membership.personId));
+		.leftJoin(signer, eq(signer.id, signerMembership.memberId));
 }
 
 function toProvider(
 	row: ModelProviderRow,
-	connectedBy: NamedPerson | null,
+	members: { connectedBy: NamedMember | null; signedInAs: NamedMember | null },
 	models: ProviderModelRow[],
 ): ModelProvider {
 	const hasApiKey = row.apiKeyEncrypted !== null;
@@ -154,7 +192,7 @@ function toProvider(
 		apiFormat: row.apiFormat,
 		active: row.active,
 		status:
-			builtInSignsIn(row.builtIn) && row.oauthTokensEncrypted === null
+			builtInSignsIn(row.builtIn) && !signedIn && !hasApiKey
 				? "signed_out"
 				: configurationStatus({
 						missingKey: providerLacksCredential({ builtIn: row.builtIn, hasApiKey, signedIn }),
@@ -165,7 +203,8 @@ function toProvider(
 		signedIn,
 		customHeaders: row.customHeadersEncrypted.map(({ name }) => ({ name })),
 		lastTestError: row.lastTestError,
-		connectedBy: connected ? connectedBy : null,
+		connectedBy: connected ? members.connectedBy : null,
+		signedInAs: members.signedInAs,
 		createdAt: row.createdAt.toISOString(),
 		models: models.map((model) => ({
 			id: model.id,
@@ -200,11 +239,14 @@ export const modelAcceptsImages = (workspaceId: string, modelId: string) =>
 					eq(providerModel.enabled, true),
 				),
 			),
-	).pipe(
-		Effect.map((models) =>
-			models.some(
-				(model) =>
-					model.capabilities.includes("vision") && !model.disabledCapabilities.includes("vision"),
-			),
-		),
+	).pipe(Effect.map((models) => models.some((model) => capabilitiesOn(model).includes("vision"))));
+
+/** The model's capabilities, less those someone switched off. */
+function capabilitiesOn(model: {
+	capabilities: readonly ProviderModelCapability[];
+	disabledCapabilities: readonly ProviderModelCapability[];
+}) {
+	return model.capabilities.filter(
+		(capability) => !model.disabledCapabilities.includes(capability),
 	);
+}

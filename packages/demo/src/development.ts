@@ -2,14 +2,13 @@ import { NodeRuntime } from "@effect/platform-node";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ComputerSignIn } from "@sugabots/core/computers/computer-sign-in";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
-import { bot as botTable, type project, workspace } from "@sugabots/core/database/schema";
+import { bot as botTable, workspace } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { Secrets } from "@sugabots/core/secrets/secrets";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
-import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { ProjectStore } from "@sugabots/core/workspaces/projects/project-store";
 import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/workspace-setup";
@@ -23,9 +22,9 @@ import { ensureAccount, seedAccountsLayer } from "./accounts.ts";
  * opening. Run it with `bun run db:seed`, against a migrated database.
  *
  * It creates an account you can sign in as, the workspace everything else
- * hangs off, the membership joining them, the person's Personal Assistant,
- * a project, and the three bots the design's artboards show: two private to
- * the person and one public bot in the project.
+ * hangs off, the membership joining them, the member's Personal Assistant,
+ * a project, and three bots: two personal to the member and one public bot in
+ * the project.
  *
  * Every step must be idempotent, because this is run repeatedly against a
  * database that already has data in it, not only against an empty one.
@@ -40,28 +39,23 @@ const seed = Effect.gen(function* () {
 		return yield* Effect.die(new Error("The development seed cannot run in production."));
 	}
 	const membership = yield* Membership.Service;
-	const personalAssistants = yield* PersonalAssistants.Service;
 	const projects = yield* ProjectStore.Service;
 	const bots = yield* BotStore.Service;
-	const personId = yield* ensureAccount({ name: "Development", email: EMAIL, password: PASSWORD });
+	const memberId = yield* ensureAccount({ name: "Development", email: EMAIL, password: PASSWORD });
 
 	// Made the way the app makes one, so it has its system bots, search
-	// provider and the person's Personal Assistant. The system bots are left unset:
+	// provider and the member's Personal Assistant. The system bots are left unset:
 	// the seed provisions no model provider, so naming a model would only make
 	// them look ready while nothing they need is configured.
 	const workspaceId = yield* membership
 		.create({ details: { name: "Development", slug: "dev" } })
 		.pipe(
-			CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(personId)),
+			CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(memberId)),
 			Effect.map((created) => created.id),
 			Effect.catchTag("SlugTaken", () => idOf(workspace, eq(workspace.slug, "dev"))),
 		);
 	// The seed stands in for setting it up, so it opens straight into the app.
 	yield* WorkspaceSetup.recordSetUp(workspaceId);
-
-	// Already made with a new workspace; this makes it when a run before
-	// the Personal Assistant existed made the workspace.
-	yield* personalAssistants.provision({ workspaceId, personId: personId });
 
 	const model = "claude-sonnet-4-20250514";
 	for (const seedling of [
@@ -71,7 +65,7 @@ const seed = Effect.gen(function* () {
 			eyes: "pill" as const,
 			shape: "squircle" as const,
 			description: "Reads and writes Linear on the team's behalf.",
-			visibility: "private" as const,
+			visibility: "personal" as const,
 			leadsSupport: false,
 		},
 		{
@@ -80,7 +74,7 @@ const seed = Effect.gen(function* () {
 			eyes: "dot" as const,
 			shape: "hexagon" as const,
 			description: "Sorts incoming issues every weekday morning.",
-			visibility: "private" as const,
+			visibility: "personal" as const,
 			leadsSupport: false,
 		},
 		{
@@ -95,7 +89,7 @@ const seed = Effect.gen(function* () {
 	]) {
 		const { leadsSupport, ...bot } = seedling;
 		const botId = yield* bots
-			.create(workspaceId, { createdById: personId, bot: { ...bot, model } })
+			.create(workspaceId, { createdById: memberId, bot: { ...bot, model } })
 			.pipe(
 				Effect.map((created) => created.id),
 				Effect.catchTag("BotNameTaken", () =>
@@ -105,7 +99,7 @@ const seed = Effect.gen(function* () {
 		if (!leadsSupport) continue;
 		yield* projects
 			.create(workspaceId, {
-				creatorId: personId,
+				creatorId: memberId,
 				name: "Support",
 				slug: "support",
 				leadBotId: botId,
@@ -117,11 +111,11 @@ const seed = Effect.gen(function* () {
 	}
 
 	console.log(`workspace dev, administered by ${EMAIL} (password: ${PASSWORD})`);
-	console.log("project Support, and three bots: two private, one public leading Support");
+	console.log("project Support, and three bots: two personal, one public leading Support");
 });
 
 /** The id of the one row of `table` matching `where`, which a previous run made. */
-const idOf = (table: typeof workspace | typeof project | typeof botTable, where: SQL | undefined) =>
+const idOf = (table: typeof workspace | typeof botTable, where: SQL | undefined) =>
 	Effect.flatMap(
 		query((db) => db.select({ id: table.id }).from(table).where(where).limit(1)),
 		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error("A seeded row is missing"))),
@@ -130,13 +124,7 @@ const idOf = (table: typeof workspace | typeof project | typeof botTable, where:
 seed.pipe(
 	Effect.scoped,
 	Effect.provide(
-		Layer.mergeAll(
-			Authentication.layer,
-			Membership.layer,
-			PersonalAssistants.layer,
-			ProjectStore.layer,
-			BotStore.layer,
-		).pipe(
+		Layer.mergeAll(Authentication.layer, Membership.layer, ProjectStore.layer, BotStore.layer).pipe(
 			Layer.provideMerge(
 				Layer.mergeAll(
 					Ids.layer,

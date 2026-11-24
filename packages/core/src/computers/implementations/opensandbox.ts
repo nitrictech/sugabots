@@ -123,7 +123,7 @@ export const fromOpenSandbox = (
 									createIfNotExists: true,
 									deleteOnSandboxTermination: false,
 								},
-								mountPath: Computers.WORKSPACE_DIRECTORY,
+								mountPath: Computers.WORK_DIRECTORY,
 							},
 						],
 					}),
@@ -257,25 +257,8 @@ export const fromOpenSandbox = (
 						if (!isSamePolicy(meanwhile, current)) await replacePolicy(sandbox.id, meanwhile);
 						await setCredentials(sandbox, network.credentials);
 						if (!isSamePolicy(wanted, meanwhile)) await replacePolicy(sandbox.id, wanted);
-						await writeAsRoot(
-							sandbox,
-							Computers.NETWORK_ENVIRONMENT_FILE,
-							Computers.environmentScript(network.environment),
-						);
 					},
-					catch: (cause) =>
-						new Computers.Unavailable({
-							provider: "opensandbox",
-							cause,
-							// What the server answers for a sandbox made without a policy,
-							// which has no egress sidecar to set one in.
-							...(cause instanceof SandboxApiException && cause.statusCode === 502
-								? { reason: MADE_WITHOUT_NETWORK_RULES }
-								: {}),
-							...(cause instanceof SandboxApiException && cause.statusCode === 412
-								? { reason: MADE_WITHOUT_CREDENTIAL_PROXY }
-								: {}),
-						}),
+					catch: unavailable,
 				}),
 		};
 	}
@@ -345,14 +328,6 @@ async function setCredentials(sandbox: OpenSandbox, credentials: readonly Comput
 	});
 }
 
-/** Writes a file only root may change, readable by everyone, such as one under /etc. */
-async function writeAsRoot(sandbox: OpenSandbox, path: string, content: string) {
-	await sandbox.files.writeFiles([
-		// Octal digits written as a decimal number, as the API reads them.
-		{ path, data: content, mode: 644, owner: "root", group: "root" },
-	]);
-}
-
 function policyOf(reach: Computers.Reach): NetworkPolicy {
 	return reach.kind === "allowed-hosts-only"
 		? { defaultAction: "deny", egress: rulesFor("allow", reach.hosts) }
@@ -399,14 +374,6 @@ function rulesFor(action: NetworkRuleAction, hosts: readonly string[]): NetworkR
 	return hosts.map((host) => ({ action, target: host }));
 }
 
-// A provider doesn't know whose computer it runs, so the copy names both
-// places its Computer settings can be: a project's, or a bot's for the
-// computer of the bot's default project.
-const UPGRADE_UNDER_COMPUTER =
-	"Upgrade it under Computer in its project's settings, or in its bot's settings if it's a bot's own computer: its work is kept.";
-const MADE_WITHOUT_CREDENTIAL_PROXY = userText`This computer was made before computers could be signed in to the services its project is connected to, such as its repositories. ${UPGRADE_UNDER_COMPUTER}`;
-const MADE_WITHOUT_NETWORK_RULES = userText`This computer was made before computers had network rules, so it can't be kept to them. ${UPGRADE_UNDER_COMPUTER}`;
-
 async function run(
 	sandbox: OpenSandbox,
 	command: string,
@@ -419,7 +386,7 @@ async function run(
 	const execution = await sandbox.commands.run(
 		Computers.keepingOutputEnd(command, options.maxOutputCharacters),
 		{
-			workingDirectory: options.cwd ?? Computers.WORKSPACE_DIRECTORY,
+			workingDirectory: options.cwd ?? Computers.WORK_DIRECTORY,
 			timeoutSeconds: Math.ceil(Duration.toSeconds(timeout)),
 			uid: BOT_USER.id,
 			gid: BOT_USER.id,
@@ -450,7 +417,7 @@ async function run(
  */
 async function prepareBotUser(sandbox: OpenSandbox) {
 	const { name, id, home } = BOT_USER;
-	const directories = `${Computers.WORKSPACE_DIRECTORY} ${home}`;
+	const directories = `${Computers.WORK_DIRECTORY} ${home}`;
 	const prepared = await sandbox.commands.run(
 		[
 			`getent group ${name} >/dev/null || groupadd -o -g ${id} ${name}`,

@@ -1,7 +1,7 @@
 import { Layer } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
-import { membership, person, workspace } from "../../database/schema.ts";
+import { member, membership, workspace } from "../../database/schema.ts";
 import { closeDatabase, onDatabase } from "../../database/testing.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
@@ -57,7 +57,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 		);
 		const [admin, editor] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values([
 					{ name: "Ada", email: `ada-${suffix}@example.com` },
 					{ name: "Sam", email: `sam-${suffix}@example.com` },
@@ -70,8 +70,8 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 		editorId = editor.id;
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId, personId: adminId, role: "admin" },
-				{ workspaceId, personId: editorId, role: "editor" },
+				{ workspaceId, memberId: adminId, role: "admin" },
+				{ workspaceId, memberId: editorId, role: "editor" },
 			]),
 		);
 	});

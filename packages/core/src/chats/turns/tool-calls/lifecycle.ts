@@ -5,10 +5,10 @@ import { Data, Schema } from "effect";
 /**
  * A tool call's lifecycle, as a pure transition function.
  *
- * A built-in tool's call opens `running` and closes `completed` or `failed`.
- * A connector tool's call is parked first, `awaiting_approval` with its
- * approval `pending`: a person decides it, an allowed call then
- * runs, and a denied one completes with the denial as its output. A call
+ * A call opens `running` and closes `completed` or `failed`. A call parks
+ * when its tool asks for approval: `awaiting_approval` with its approval
+ * `pending`, a member decides it, an allowed call then runs, and a denied
+ * one completes with the denial as its output. A call
  * still open when its turn ends fails, and a pending approval is denied.
  * `ToolCallStore` loads a call, asks `transition` what the event makes of
  * it, and writes the answer.
@@ -20,10 +20,10 @@ export const UNFINISHED_STATUSES = [
 	"awaiting_approval",
 ] as const satisfies readonly ToolCallStatus[];
 
-/** A person's decision on one approval, as it is recorded and sent to the turn's workflow. */
+/** A member's decision on one approval, as it is recorded and sent to the turn's workflow. */
 export const ApprovalDecision = Schema.Struct({
 	decision: Schema.Literals(["allow_once", "deny"]),
-	personId: Schema.String,
+	memberId: Schema.String,
 });
 export type ApprovalDecision = typeof ApprovalDecision.Type;
 
@@ -51,7 +51,7 @@ export type ToolCallEvent = Data.TaggedEnum<{
 	Decide: { readonly decision: ApprovalDecision };
 	/** The allowed call began running. */
 	BeginExecution: Record<never, never>;
-	/** The call's turn ended before it finished; `userMessage` is what people are told of it. */
+	/** The call's turn ended before it finished; `userMessage` is what members are told of it. */
 	Abandon: { readonly userMessage: UserText };
 }>;
 
@@ -62,7 +62,7 @@ export type Transition =
 	| { readonly _tag: "Refused"; readonly reason: string };
 
 /** What a denied call's output says, for the model to read. */
-export const DENIED_OUTPUT = { status: "denied", reason: "A person denied this action" };
+export const DENIED_OUTPUT = { status: "denied", reason: "A member denied this action" };
 
 export function transition(state: ToolCallState, event: ToolCallEvent): Transition {
 	return ToolCallEvent.$match(event, {
@@ -80,12 +80,12 @@ export function transition(state: ToolCallState, event: ToolCallEvent): Transiti
 				return next({
 					...state,
 					approvalStatus: "denied",
-					decidedById: decision.personId,
+					decidedById: decision.memberId,
 					status: "completed",
 					output: DENIED_OUTPUT,
 				});
 			}
-			return next({ ...state, approvalStatus: "allowed", decidedById: decision.personId });
+			return next({ ...state, approvalStatus: "allowed", decidedById: decision.memberId });
 		},
 		BeginExecution: () =>
 			state.approvalStatus === "allowed" && state.status === "awaiting_approval"
@@ -104,7 +104,7 @@ export function transition(state: ToolCallState, event: ToolCallEvent): Transiti
 	});
 }
 
-/** awaitsDecision reports whether the call's approval waits for a person's decision. */
+/** awaitsDecision reports whether the call's approval waits for a member's decision. */
 export const awaitsDecision = (state: Pick<ToolCallState, "approvalStatus">): boolean =>
 	state.approvalStatus === "pending";
 

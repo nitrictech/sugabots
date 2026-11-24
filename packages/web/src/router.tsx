@@ -38,7 +38,7 @@ import {
 	botSettingsRoute,
 	projectBotsRoute,
 	projectComputerRoute,
-	projectPeopleRoute,
+	projectMembersRoute,
 	projectSettingsRoute,
 } from "./routes/owner-settings.tsx";
 import {
@@ -53,7 +53,7 @@ import {
 import { type RouterContext, rootRoute } from "./routes/root.tsx";
 import {
 	settingsDefaultModelRoute,
-	settingsPersonRoute,
+	settingsMemberRoute,
 	settingsProviderRoute,
 	settingsRoute,
 	settingsSectionRoute,
@@ -85,22 +85,22 @@ import { workspaceSetupRoute } from "./routes/workspace-setup.tsx";
  *   /connectors/oauth/return        where a connector's sign-in comes back
  *   /connectors/github/return       where installing a project's GitHub app comes back
  *   /workspace-setup         setting up a workspace, the first or another
- *   /$workspace              the person's Personal Assistant
+ *   /$workspace              the member's Personal Assistant
  *   /$workspace/home         on a phone, Home: the Personal Assistant, projects and pinned bots
  *   /$workspace/you          on a phone, You: the workspace, its settings and signing out
  *   /$workspace/settings     workspace settings
  *   /$workspace/approvals    every approval across the workspace
  *   /$workspace/approvals/$call   one of them in full, by its tool call's id
- *   /$workspace/projects     every project the person is in or could join
+ *   /$workspace/projects     every project the member is in or could join
  *   /$workspace/projects/$project   a project, which opens its newest chat, or a new one; on a phone, its sidebar
  *   /$workspace/projects/$project/new   starting a chat from its first message
  *   /$workspace/projects/$project/$chat   one of its chats
  *   /$workspace/projects/$project/files[/$file]   the files made in it
  *   /$workspace/projects/$project/connectors[/$connector]   the services it is connected to
- *   /$workspace/projects/$project/settings[/people|/bots]   its settings, and its people and bots
+ *   /$workspace/projects/$project/settings[/members|/bots]   its settings, and its members and bots
  *   /$workspace/projects/$project/computer   its computer
  *   /$workspace/projects/$project/automations[/new|/$automation]   its automations
- *   /$workspace/bots         every bot the person reaches
+ *   /$workspace/bots         every bot the member reaches
  *   /$workspace/bots/$bot    a bot, starting a chat with it from its first message
  *   /$workspace/bots/$bot/chats/$chat   one of its chats, or an automation's feed
  *   /$workspace/bots/$bot/files[/$file]   the files it made
@@ -109,15 +109,15 @@ import { workspaceSetupRoute } from "./routes/workspace-setup.tsx";
  *   /$workspace/bots/$bot/computer   its computer
  *   /$workspace/bots/$bot/automations[/new|/$automation]   its automations
  *   /$workspace/chats/$chat   a chat by its id alone, which goes on to its bot's address
- *   /$workspace/settings/people/$membership   one person, by membership id
+ *   /$workspace/settings/members/$membership   one member, by membership id
  *   /$workspace/settings/providers/$provider   one model provider
  *   /$workspace/settings/providers/default  the model new bots start on
  *   /$workspace/settings/providers/system   the model the system bots use
  *
  * A bot's address uses its handle, unique in its workspace, rather than its
- * name, so renaming a bot keeps its links. A collaboration or automation run
- * has no address of its own: it opens beside its chat, as `?nestedChat=`,
- * or, from an automation's page, as that page, as `?nestedChatPage=`.
+ * name, so renaming a bot keeps its links. An automation run has no address
+ * of its own: its feed's address, or its automation's, names it as the page,
+ * as `?nestedChatPage=`.
  *
  * Each area's routes and their pages are declared in a module of its own under
  * `routes/`; the tree below puts them together.
@@ -136,7 +136,7 @@ const routeTree = rootRoute.addChildren([
 		workspaceIndexRoute,
 		settingsRoute,
 		settingsSectionRoute,
-		settingsPersonRoute,
+		settingsMemberRoute,
 		settingsSystemModelRoute,
 		settingsDefaultModelRoute,
 		settingsProviderRoute,
@@ -154,7 +154,7 @@ const routeTree = rootRoute.addChildren([
 			projectConnectorsRoute,
 			projectConnectorRoute,
 			projectSettingsRoute,
-			projectPeopleRoute,
+			projectMembersRoute,
 			projectBotsRoute,
 			projectComputerRoute,
 			projectAutomationsRoute.addChildren([
@@ -244,14 +244,13 @@ function isSettingsPath(pathname: string): boolean {
 }
 
 /**
- * A page's depth, and a step more while a nested chat is open over it: a run or
- * collaboration opened from a chat or a notification, which the address names in
- * its search rather than its path.
+ * A page's depth, and a step more while a run is open over it, as a
+ * notification or its automation opens one, which the address names in its
+ * search rather than its path.
  */
 function locationDepth(location: ParsedLocation): number {
-	const search = location.search as { nestedChat?: unknown; nestedChatPage?: unknown };
-	const nestedChatOpen = search.nestedChat !== undefined || search.nestedChatPage !== undefined;
-	return pageDepth(location.pathname) + (nestedChatOpen ? 1 : 0);
+	const search = location.search as { nestedChatPage?: unknown };
+	return pageDepth(location.pathname) + (search.nestedChatPage !== undefined ? 1 : 0);
 }
 
 /**
@@ -324,7 +323,7 @@ export function AppRouterProvider({
 	const queries = useQueryClient();
 	return (
 		<SessionContext value={session}>
-			<RouterProvider router={router} context={{ person: session.person, queries }} />
+			<RouterProvider router={router} context={{ member: session.member, queries }} />
 		</SessionContext>
 	);
 }

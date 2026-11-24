@@ -66,7 +66,6 @@ const UNSUPPORTED_PROTOCOL_VERSION = -32022;
 export async function connectServer(
 	target: ServerTarget,
 	fetch: EgressHttpClient,
-	timeoutMs = SERVER_TIMEOUT_MS,
 ): Promise<ServerSession> {
 	const open = (protocolVersionDiscovery: boolean) =>
 		createMCPClient({
@@ -79,7 +78,7 @@ export async function connectServer(
 				authProvider: target.authProvider,
 				fetch,
 			},
-			initializationOptions: { timeout: timeoutMs },
+			initializationOptions: { timeout: SERVER_TIMEOUT_MS },
 			protocolVersionDiscovery,
 		});
 	// The SDK first asks for the newest protocol, and gives up when a server on an
@@ -92,7 +91,7 @@ export async function connectServer(
 	const runnable = new WeakMap<ServerListing, Record<string, Tool>>();
 	return {
 		list: async () => {
-			const listed = await client.listTools({ options: { timeout: timeoutMs } });
+			const listed = await client.listTools({ options: { timeout: SERVER_TIMEOUT_MS } });
 			const callable = client.toolsFromDefinitions(listed);
 			const tools = listed.tools.flatMap((definition) => {
 				const tool = callable[definition.name];
@@ -143,10 +142,9 @@ export async function connectServer(
 export async function listServerTools(
 	target: ServerTarget,
 	fetch: EgressHttpClient,
-	timeoutMs = SERVER_TIMEOUT_MS,
 ): Promise<ServerTools> {
 	try {
-		const session = await connectServer(target, fetch, timeoutMs);
+		const session = await connectServer(target, fetch);
 		try {
 			const { tools } = await session.list();
 			return { ok: true, tools: tools.map((tool) => tool.described) };
@@ -159,7 +157,7 @@ export async function listServerTools(
 }
 
 /**
- * describe returns what a person is told about `cause`, worded for what
+ * describe returns what a member is told about `cause`, worded for what
  * `target` sent. Only the HTTP status and content type are taken from the SDK's
  * error message, because the rest of it can quote the server's response.
  */

@@ -26,7 +26,7 @@ function NewProjectForm({ onSubmit }: { onSubmit: () => void }) {
 			>
 				<DialogFormHeader title="New project" />
 				<DialogFormBody>
-					<DialogDescription>You'll add bots, people and connectors next.</DialogDescription>
+					<DialogDescription>You'll add bots, members and connectors next.</DialogDescription>
 					<SettingsGroup>
 						<SettingsFieldRow
 							label="Name"

@@ -2,14 +2,13 @@ import { handleFromName } from "@sugabots/contracts";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Effect, Layer, Schema } from "effect";
 import { query } from "../../database/database.ts";
-import { bot, connector, membership, person, workspace } from "../../database/schema.ts";
+import { bot, connector, member, membership, workspace } from "../../database/schema.ts";
 import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { Files } from "../../files/files.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
 import { BotStore } from "../../workspaces/bots/bot-store.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
-import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
 import type { Chats } from "../chats/chats.ts";
 import { startBotChat } from "../chats/testing.ts";
 import { lanesForTests } from "../testing.ts";
@@ -97,14 +96,13 @@ export async function prepareRunnable(
 
 /**
  * A bot with a connector, whose admin has asked it something in a chat, so
- * its turn is asked for in the chat. A project stands beside it, for cases
- * that need one.
+ * its turn is asked for in the chat.
  */
 export async function aChatAwaitingReply(
-	chatsAs: (personId: string) => Pick<Promised<Chats.Interface>, "startProjectChat">,
+	chatsAs: (memberId: string) => Pick<Promised<Chats.Interface>, "startProjectChat">,
 ) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-	const [space] = await onDatabase((db) =>
+	const [created] = await onDatabase((db) =>
 		db
 			.insert(workspace)
 			.values({ name: `Turns ${suffix}`, slug: `turns-${suffix}` })
@@ -112,35 +110,23 @@ export async function aChatAwaitingReply(
 	);
 	const [admin] = await onDatabase((db) =>
 		db
-			.insert(person)
+			.insert(member)
 			.values({ name: "Sam", email: `turns-${suffix}@example.com` })
 			.returning(),
 	);
-	if (!space || !admin) throw new Error("fixture");
-	const workspaceId = space.id;
+	if (!created || !admin) throw new Error("fixture");
+	const workspaceId = created.id;
 	const adminId = admin.id;
-	// An admin, because granting a standing approval for a bot is
-	// administration; the ordinary-approval path is covered by the route tests.
 	await onDatabase((db) =>
-		db.insert(membership).values({ workspaceId, personId: adminId, role: "admin" }),
+		db.insert(membership).values({ workspaceId, memberId: adminId, role: "admin" }),
 	);
-	const room = await onDatabase((db) =>
-		seedProject(db, {
-			workspaceId,
-			name: "Room",
-			slug: `room-${suffix}`,
-			createdById: adminId,
-		}),
-	);
-	if (!room) throw new Error("fixture");
-	const projectId = room.id;
-	const [host] = await onDatabase((db) =>
+	const [chatBot] = await onDatabase((db) =>
 		db
 			.insert(bot)
 			.values({
 				workspaceId,
-				name: `Host ${suffix}`,
-				handle: handleFromName(`Host ${suffix}`),
+				name: `Bot ${suffix}`,
+				handle: handleFromName(`Bot ${suffix}`),
 				color: "rose",
 				eyes: "pill",
 				model: "m",
@@ -148,9 +134,9 @@ export async function aChatAwaitingReply(
 			})
 			.returning({ id: bot.id }),
 	);
-	if (!host) throw new Error("fixture");
+	if (!chatBot) throw new Error("fixture");
 	// The bot's own connector, which its default project holds.
-	const ownProjectId = await runOnPostgres(defaultProjectOf(host.id));
+	const ownProjectId = await runOnPostgres(defaultProjectOf(chatBot.id));
 	const [connected] = await onDatabase((db) =>
 		db
 			.insert(connector)
@@ -167,16 +153,15 @@ export async function aChatAwaitingReply(
 	);
 	if (!connected) throw new Error("fixture");
 	const started = await startBotChat(chatsAs(adminId), {
-		botId: host.id,
+		botId: chatBot.id,
 		messageId: crypto.randomUUID(),
 		content: "What does example.com say?",
 	});
 	const opened = started.chat;
 	return {
 		workspaceId,
-		projectId,
 		adminId,
-		hostId: host.id,
+		botId: chatBot.id,
 		connectorId: connected.id,
 		chatId: opened.id,
 	};

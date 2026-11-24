@@ -40,28 +40,28 @@ function roleIsOneOf(column: AnyPgColumn, roles: readonly WorkspaceRole[]) {
 	)})`;
 }
 
-/** A person. One row per person, across every workspace they belong to. */
-export const person = pgTable(
-	"person",
+/** A member. One row per member, across every workspace they belong to. */
+export const member = pgTable(
+	"member",
 	{
 		id: primaryKey(),
 		name: text("name").notNull(),
 		email: text("email").notNull(),
 		emailVerified: boolean("email_verified").notNull().default(false),
 		image: text("image"),
-		/** Who sent the referral link this person signed up with. */
-		referredBy: uuid("referred_by").references((): AnyPgColumn => person.id, {
+		/** Who sent the referral link this member signed up with. */
+		referredBy: uuid("referred_by").references((): AnyPgColumn => member.id, {
 			onDelete: "set null",
 		}),
-		/** The code in this person's referral link, made when they first ask for it and replaced when they reset it. */
+		/** The code in this member's referral link, made when they first ask for it and replaced when they reset it. */
 		referralCode: text("referral_code"),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
-		uniqueIndex("person_email_idx").on(table.email),
-		uniqueIndex("person_referral_code_idx").on(table.referralCode),
-		index("person_referred_by_idx").on(table.referredBy),
+		uniqueIndex("member_email_idx").on(table.email),
+		uniqueIndex("member_referral_code_idx").on(table.referralCode),
+		index("member_referred_by_idx").on(table.referredBy),
 	],
 );
 
@@ -74,9 +74,9 @@ export const session = pgTable(
 	{
 		id: primaryKey(),
 		token: text("token").notNull(),
-		personId: uuid("person_id")
+		memberId: uuid("member_id")
 			.notNull()
-			.references(() => person.id, { onDelete: "cascade" }),
+			.references(() => member.id, { onDelete: "cascade" }),
 		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 		ipAddress: text("ip_address"),
 		userAgent: text("user_agent"),
@@ -85,12 +85,12 @@ export const session = pgTable(
 	},
 	(table) => [
 		uniqueIndex("session_token_idx").on(table.token),
-		index("session_person_id_idx").on(table.personId),
+		index("session_member_id_idx").on(table.memberId),
 	],
 );
 
 /**
- * How a user proves who they are. One row per credential: `password` for email
+ * How a member proves who they are. One row per credential: `password` for email
  * and password, or the tokens from an OAuth provider when we add one.
  */
 export const account = pgTable(
@@ -99,9 +99,9 @@ export const account = pgTable(
 		id: primaryKey(),
 		accountId: text("account_id").notNull(),
 		providerId: text("provider_id").notNull(),
-		personId: uuid("person_id")
+		memberId: uuid("member_id")
 			.notNull()
-			.references(() => person.id, { onDelete: "cascade" }),
+			.references(() => member.id, { onDelete: "cascade" }),
 		password: text("password"),
 		accessToken: text("access_token"),
 		refreshToken: text("refresh_token"),
@@ -112,7 +112,7 @@ export const account = pgTable(
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
-	(table) => [index("account_person_id_idx").on(table.personId)],
+	(table) => [index("account_member_id_idx").on(table.memberId)],
 );
 
 /** Short-lived tokens: email verification, password reset. */
@@ -138,10 +138,8 @@ export const workspace = pgTable(
 	{
 		id: primaryKey(),
 		name: text("name").notNull(),
-		// URL-facing identifier: `/w/acme`. Unique across the server.
+		// URL-facing identifier: `/acme`. Unique across the server.
 		slug: text("slug").notNull(),
-		// Not yet settable.
-		logo: text("logo"),
 		/** An IANA time zone: where the workspace's days and months begin. */
 		timeZone: text("time_zone").notNull().default(DEFAULT_TIME_ZONE),
 		/** When its setup was finished; null while it is still being set up. */
@@ -157,7 +155,7 @@ export const workspace = pgTable(
  *
  * `membership_owner_idx` lets a workspace have one owner at most. That
  * it has one at least is `Membership`'s to keep: the creator is made owner, and
- * the owner's row changes only by transferring ownership.
+ * the owner's row changes only when the owner hands over ownership.
  */
 export const membership = pgTable(
 	"membership",
@@ -166,15 +164,15 @@ export const membership = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		personId: uuid("person_id")
+		memberId: uuid("member_id")
 			.notNull()
-			.references(() => person.id, { onDelete: "cascade" }),
+			.references(() => member.id, { onDelete: "cascade" }),
 		role: workspaceRole("role").notNull().default("editor"),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
-		uniqueIndex("membership_idx").on(table.workspaceId, table.personId),
-		index("membership_person_id_idx").on(table.personId),
+		uniqueIndex("membership_idx").on(table.workspaceId, table.memberId),
+		index("membership_member_id_idx").on(table.memberId),
 		uniqueIndex("membership_owner_idx").on(table.workspaceId).where(sql`${table.role} = 'owner'`),
 		check("membership_role_check", roleIsOneOf(table.role, WORKSPACE_ROLES)),
 	],
@@ -197,7 +195,7 @@ export const invitation = pgTable(
 			.default("pending"),
 		inviterId: uuid("inviter_id")
 			.notNull()
-			.references(() => person.id, { onDelete: "cascade" }),
+			.references(() => member.id, { onDelete: "cascade" }),
 		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 		createdAt: stamp("created_at"),
 	},
@@ -213,7 +211,7 @@ export const invitation = pgTable(
  * A project: a long-running piece of work, made of its chats, led by one
  * bot (`lead_bot_id`) and worked on by the bots in `project_bot`.
  *
- * A row is one of two things. An ordinary project, which people make, find in
+ * A row is one of two things. An ordinary project, which members make, find in
  * the directory and join (`default_of_bot_id` null). Or a bot's default
  * project (`default_of_bot_id` names the bot): the hidden project where the
  * bot's own chats live, led by that bot alone, with it as its only bot. It
@@ -225,7 +223,7 @@ export const invitation = pgTable(
  * `lead_bot_id`'s foreign key is checked when the transaction commits, so
  * deleting a bot can delete the default project it leads with it. Drizzle has
  * no way to declare that, so `20261122231027_fresh_start_requirements` makes
- * it deferrable. A bot leading a project people made can't be deleted until
+ * it deferrable. A bot leading a project members made can't be deleted until
  * it is replaced as lead there.
  */
 export const project = pgTable(
@@ -243,7 +241,7 @@ export const project = pgTable(
 		description: text("description"),
 		visibility: text("visibility").$type<"public" | "private">().notNull().default("public"),
 		// Who made it. Kept when they leave the workspace; cleared when their account is deleted.
-		createdById: uuid("created_by_id").references(() => person.id, { onDelete: "set null" }),
+		createdById: uuid("created_by_id").references(() => member.id, { onDelete: "set null" }),
 		/** The bot that works on the project and answers its chats unless another is asked. */
 		leadBotId: uuid("lead_bot_id")
 			.notNull()
@@ -262,7 +260,7 @@ export const project = pgTable(
 			"project_default_led_by_its_bot",
 			sql`${table.defaultOfBotId} is null or ${table.leadBotId} = ${table.defaultOfBotId}`,
 		),
-		// A default project's slug is never in an address, so it never takes one from a project people name.
+		// A default project's slug is never in an address, so it never takes one from a project members name.
 		uniqueIndex("project_slug_idx")
 			.on(table.workspaceId, table.slug)
 			.where(sql`${table.defaultOfBotId} is null`),
@@ -275,7 +273,7 @@ export const project = pgTable(
 /**
  * Who is in a project.
  *
- * These rows are the whole answer to who is in a project people made. A public
+ * These rows are the whole answer to who is in a project members made. A public
  * project is listed to everybody in the workspace, but its chats are
  * reached only with a row: joining writes one. Every workspace admin has one in
  * every such project, and demoting them leaves their rows as they are. A bot's
@@ -288,9 +286,9 @@ export const project = pgTable(
  * The administrators' rows are written by triggers, which Drizzle has no way
  * to declare, so they live in migrations and are named here because this is
  * where somebody checking what writes these rows looks:
- * `project_administrators` adds every owner and admin to a new project people
+ * `project_administrators` adds every owner and admin to a new project members
  * made, and `administrator_projects` adds a new owner or admin to every project
- * people made. Both take
+ * members made. Both take
  * `lock_project_membership(workspace_id)`, as must anything that removes a row
  * on the strength of somebody's role, so a promotion cannot slip between them.
  */
@@ -300,7 +298,7 @@ export const projectMember = pgTable(
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id").notNull(),
 		projectId: uuid("project_id").notNull(),
-		personId: uuid("person_id").notNull(),
+		memberId: uuid("member_id").notNull(),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
@@ -310,21 +308,21 @@ export const projectMember = pgTable(
 			name: "project_member_project_workspace_fkey",
 		}).onDelete("cascade"),
 		foreignKey({
-			columns: [table.workspaceId, table.personId],
-			foreignColumns: [membership.workspaceId, membership.personId],
+			columns: [table.workspaceId, table.memberId],
+			foreignColumns: [membership.workspaceId, membership.memberId],
 			name: "project_member_membership_fkey",
 		}).onDelete("cascade"),
-		uniqueIndex("project_member_idx").on(table.projectId, table.personId),
-		// "Which projects can this person see", which is every sidebar load.
-		index("project_member_person_id_idx").on(table.personId),
+		uniqueIndex("project_member_idx").on(table.projectId, table.memberId),
+		// "Which projects can this member see", which is every sidebar load.
+		index("project_member_member_id_idx").on(table.memberId),
 	],
 );
 
 /**
- * A bot: a name, a face, a prompt and the tools it may reach for.
+ * A bot: a name, an avatar, instructions and the tools it may reach for.
  *
- * A row is one of three things: a bot people made (`system_bot_key` and
- * `assistant_of` both null), public or private by `visibility`; somebody's
+ * A row is one of three things: a bot members made (`system_bot_key` and
+ * `assistant_of` both null), public or personal by `visibility`; somebody's
  * Personal Assistant (`assistant_of` names them), only ever theirs; or a
  * system bot (`system_bot_key` names it), which works in the background for
  * the whole workspace and nobody talks to.
@@ -333,13 +331,13 @@ export const projectMember = pgTable(
  * state the product allows rather than a broken row: a system bot does not
  * run, and other bots' turns refuse with a reason naming it.
  *
- * `name` is unique per workspace among the bots people make, because a name
- * is how a person addresses a bot: `@Linear Handler` in a message has to mean
- * one of them. Every Personal Assistant may share one, as only its person
- * talks to it.
+ * `name` and `handle` are unique per workspace among the bots members make,
+ * because a handle is how a member addresses a bot (`@linear-handler` in a
+ * message has to mean one of them) and a name is how they tell bots apart.
+ * Every Personal Assistant may share them, as only its member talks to it.
  *
- * `color`, `face` and `shape` are the whole avatar. Small columns rather than
- * an image, which is what lets a bot created at run time have a face at all.
+ * `color`, `eyes` and `shape` are the whole avatar. Small columns rather than
+ * an image, which is what lets a bot created at run time have an avatar at all.
  *
  * Every bot but a system bot has a default project, where its own chats
  * live, made with it by the `bot_default_project` trigger, which Drizzle has
@@ -358,42 +356,41 @@ export const bot = pgTable(
 		handle: text("handle").notNull(),
 		systemBotKey: text("system_bot_key").$type<SystemBotKey>(),
 		// Whether everyone in the workspace sees the bot, or only its creator.
-		visibility: text("visibility").$type<"public" | "private">().notNull().default("public"),
-		// On a Personal Assistant: the one person who sees it and talks to it.
+		visibility: text("visibility").$type<"public" | "personal">().notNull().default("public"),
+		// On a Personal Assistant: the one member who sees it and talks to it.
 		assistantOf: uuid("assistant_of"),
 		description: text("description"),
 		// One of the contract's colour names. Not a Postgres enum: the palette is
 		// the contract's to state, and an enum here would be a second place to change it.
 		color: text("color").$type<BotColor>().notNull(),
 		eyes: text("eyes").$type<BotEyes>().notNull(),
-		// Every bot made before shapes existed was a circle.
 		shape: text("shape").$type<BotShape>().notNull().default("circle"),
 		// Null when nobody has chosen one, or somebody has cleared it. A system
-		// bot with no model does not run; a turn of a bot people talk to refuses.
+		// bot with no model does not run; a turn of a bot members talk to refuses.
 		model: text("model"),
-		prompt: text("prompt").notNull().default(""),
+		instructions: text("instructions").notNull().default(""),
 		// The built-in tools switched off for this bot, by key. What is off
 		// rather than what is on, so a new tool reaches every existing bot.
 		disabledTools: jsonb("disabled_tools").$type<string[]>().notNull().default([]),
 		// Whether it may use its computer. Off until its creator or an admin
 		// turns it on: running commands is a bigger step than the other built-in tools.
 		usesComputer: boolean("uses_computer").notNull().default(false),
-		// Whether it browses so people watching can follow, which is slower.
+		// Whether it browses so members watching can follow, which is slower.
 		naturalBrowsing: boolean("natural_browsing").notNull().default(false),
 		// Who made it. Kept when they leave the workspace; cleared when their account is deleted.
-		createdById: uuid("created_by_id").references(() => person.id, { onDelete: "set null" }),
+		createdById: uuid("created_by_id").references(() => member.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
-		check("bot_visibility_check", sql`${table.visibility} in ('public', 'private')`),
-		// A Personal Assistant goes with its person's membership.
+		check("bot_visibility_check", sql`${table.visibility} in ('public', 'personal')`),
+		// A Personal Assistant goes with its member's membership.
 		foreignKey({
 			columns: [table.workspaceId, table.assistantOf],
-			foreignColumns: [membership.workspaceId, membership.personId],
+			foreignColumns: [membership.workspaceId, membership.memberId],
 			name: "bot_assistant_membership_fkey",
 		}).onDelete("cascade"),
-		// How people address a bot, so one of each per workspace. System bots
+		// How members address a bot, so one of each per workspace. System bots
 		// and Personal Assistants are never addressed by others.
 		uniqueIndex("bot_name_idx")
 			.on(table.workspaceId, sql`lower(${table.name})`)
@@ -441,20 +438,20 @@ export const projectBot = pgTable(
 	],
 );
 
-/** A bot a person pinned to their sidebar. */
+/** A bot a member pinned to their sidebar. */
 export const pinnedBot = pgTable(
 	"pinned_bot",
 	{
 		workspaceId: uuid("workspace_id").notNull(),
-		personId: uuid("person_id").notNull(),
+		memberId: uuid("member_id").notNull(),
 		botId: uuid("bot_id").notNull(),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
-		compositePrimaryKey({ columns: [table.personId, table.botId] }),
+		compositePrimaryKey({ columns: [table.memberId, table.botId] }),
 		foreignKey({
-			columns: [table.workspaceId, table.personId],
-			foreignColumns: [membership.workspaceId, membership.personId],
+			columns: [table.workspaceId, table.memberId],
+			foreignColumns: [membership.workspaceId, membership.memberId],
 			name: "pinned_bot_membership_fkey",
 		}).onDelete("cascade"),
 		foreignKey({

@@ -8,7 +8,7 @@ import {
 	type MessageReplyTo,
 	mentionedHandles,
 	mentionPattern,
-	mentionsOnlyPeople,
+	mentionsOnlyMembers,
 	type Participant,
 } from "@sugabots/contracts";
 import type { Dispatch, SetStateAction } from "react";
@@ -30,14 +30,14 @@ export interface ChatRecipients {
 }
 
 /**
- * The bots the message being written goes to, where the person chooses them:
- * those the draft names, the bot replied to, and the bots the person's last
+ * The bots the message being written goes to, where the member chooses them:
+ * those the draft names, the bot replied to, and the bots the member's last
  * message went to, which stay addressed until they take them off: talking to
  * a bot is a chat, not a mention every time. Taking one off lasts
- * until they send again. Where the person does not choose, there are none.
+ * until they send again. Where the member does not choose, there are none.
  */
 export function useChatRecipients({
-	personId,
+	memberId,
 	chatId,
 	choosesBots,
 	projectBots: allProjectBots,
@@ -46,9 +46,9 @@ export function useChatRecipients({
 	setDraft,
 	replyingTo,
 }: {
-	personId: string;
+	memberId: string;
 	chatId: string;
-	/** Whether the person chooses which bots answer here; see `choosesBotsIn`. */
+	/** Whether the member chooses which bots answer here; see `choosesBotsIn`. */
 	choosesBots: boolean;
 	/** The project's bots, when the chat has loaded. */
 	projectBots: readonly BotParticipant[] | undefined;
@@ -60,10 +60,10 @@ export function useChatRecipients({
 	const projectBots = choosesBots ? (allProjectBots ?? []) : [];
 	const lastOwnMessage = choosesBots
 		? shownMessages.findLast(
-				(message) => message.author.kind === "person" && message.author.id === personId,
+				(message) => message.author.kind === "member" && message.author.id === memberId,
 			)
 		: undefined;
-	const [takenOff, setTakenOff] = useTakenOffRecipients(personId, chatId);
+	const [takenOff, setTakenOff] = useTakenOffRecipients(memberId, chatId);
 	const takenOffIds = takenOff.after === lastOwnMessage?.id ? takenOff.botIds : [];
 	const named = botsNamed(draft, projectBots);
 	const repliedToBot = botRepliedTo(replyingTo, projectBots);
@@ -93,7 +93,7 @@ export function useChatRecipients({
 }
 
 /**
- * Whether the person chooses which bots answer a message in `details`: in a
+ * Whether the member chooses which bots answer a message in `details`: in a
  * project's chat with more than its lead bot, as the floor gives each bot a
  * message names, or replies to, its turn. With the lead alone, as in a bot's own
  * chats, the lead answers whichever it is, so there is nothing to choose;
@@ -111,11 +111,11 @@ export function choosesBotsIn(
  * - `bots`: in a chat, the project's bots the message mentions, else the one
  *   it replies to; each must reply.
  * - `lead`: the project's lead bot, which must reply.
- * - `leadMayReply`: in a chat, the draft mentions only people, so the lead reads
+ * - `leadMayReply`: in a chat, the draft mentions only members, so the lead reads
  *   it and either replies or reacts 👀.
- * - `leadWontReply`: in an automation's feed, the draft mentions only people.
+ * - `leadWontReply`: in an automation's feed, the draft mentions only members.
  * - `nobody`: no bot answers. In a chat, because the draft mentions only
- *   people and the lead has no model to reply with; and in any other
+ *   members and the lead has no model to reply with; and in any other
  *   chat.
  */
 export type DraftFloor =
@@ -129,8 +129,8 @@ export type DraftFloor =
 export interface DraftAudience {
 	/** Everyone here the draft mentions. */
 	mentions: Participant[];
-	/** Whether the draft mentions people and none of the project's bots. */
-	peopleOnly: boolean;
+	/** Whether the draft mentions members and none of the project's bots. */
+	membersOnly: boolean;
 	floor: DraftFloor;
 }
 
@@ -156,17 +156,17 @@ export function draftAudience({
 	lead: BotParticipant | undefined;
 	/** Whether `lead` has a model, without which it takes no optional turn. */
 	leadHasModel: boolean;
-	/** The bots the person chose (see `useChatRecipients`), which the message is sent mentioning. */
+	/** The bots the member chose (see `useChatRecipients`), which the message is sent mentioning. */
 	chosen: readonly BotParticipant[];
 	/** The message the draft replies to. */
 	replyingTo: MessageReplyTo | undefined;
 }): DraftAudience {
 	const handles = mentionedHandles(draft);
 	const mentions = mentionable.filter((participant) => handles.includes(participant.handle));
-	const peopleOnly = mentionsOnlyPeople(handles, {
+	const membersOnly = mentionsOnlyMembers(handles, {
 		botHandles: new Set(projectBots.map((bot) => bot.handle)),
-		peopleHandles: new Set(
-			mentionable.filter((one) => one.kind === "person").map((person) => person.handle),
+		membersHandles: new Set(
+			mentionable.filter((one) => one.kind === "member").map((member) => member.handle),
 		),
 	});
 	const mentionedBots = [...chosen, ...botsNamed(draft, projectBots)].filter(
@@ -178,15 +178,15 @@ export function draftAudience({
 		lead: lead ? { id: lead.id, hasModel: leadHasModel } : null,
 		mentionedBotIds: mentionedBots.map((bot) => bot.id),
 		repliedToProjectBotId: repliedTo?.id,
-		peopleOnly,
+		membersOnly,
 	});
 	return {
 		mentions,
-		peopleOnly,
+		membersOnly,
 		floor: draftFloorOf(floor, {
 			chatKind,
 			lead,
-			peopleOnly,
+			membersOnly,
 			bots: [...mentionedBots, ...(repliedTo ? [repliedTo] : [])],
 		}),
 	};
@@ -205,19 +205,19 @@ function draftFloorOf(
 	{
 		chatKind,
 		lead,
-		peopleOnly,
+		membersOnly,
 		bots,
 	}: {
 		chatKind: ChatKind;
 		lead: BotParticipant | undefined;
-		/** Whether the draft mentions only people. */
-		peopleOnly: boolean;
+		/** Whether the draft mentions only members. */
+		membersOnly: boolean;
 		/** The bots the draft mentions or replies to. */
 		bots: readonly BotParticipant[];
 	},
 ): DraftFloor {
 	if (floor.kind === "nobody") {
-		return chatKind === "automation_feed" && peopleOnly && lead
+		return chatKind === "automation_feed" && membersOnly && lead
 			? { kind: "leadWontReply", lead }
 			: { kind: "nobody" };
 	}

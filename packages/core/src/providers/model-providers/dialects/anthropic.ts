@@ -1,9 +1,10 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
-import { Effect, Schema, SchemaGetter } from "effect";
+import { Schema, SchemaGetter } from "effect";
 import type { RecognizeFailure } from "../../models/request-failures.ts";
 import {
 	dataListing,
 	discoveredModel,
+	lenientOptional,
 	type ProviderDialect,
 	type ProviderModelFields,
 } from "./dialect.ts";
@@ -31,7 +32,6 @@ export const recognizeAnthropicFailure: RecognizeFailure = ({ status, code, mess
  * request marks.
  */
 export const anthropic: ProviderDialect = {
-	name: "Anthropic",
 	discoveryRoot: apiRoot,
 	requestRoot: apiRoot,
 	recognizeFailure: recognizeAnthropicFailure,
@@ -48,9 +48,7 @@ export const anthropic: ProviderDialect = {
 	listing: dataListing,
 	model: Schema.Struct({
 		id: Schema.String,
-		display_name: Schema.optional(Schema.String).pipe(
-			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
-		),
+		display_name: lenientOptional(Schema.String),
 	}).pipe(
 		Schema.decodeTo(discoveredModel, {
 			decode: SchemaGetter.transform(

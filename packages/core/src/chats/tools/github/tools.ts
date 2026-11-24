@@ -1,16 +1,18 @@
-import { connectorToolKey } from "@sugabots/contracts";
-import { asSchema, type Tool } from "ai";
+import type { Tool } from "ai";
 import type { Database, RunEffect } from "../../../database/database.ts";
 import {
 	BOT_BRANCH_PREFIX,
 	type Connected,
 } from "../../../providers/connectors/github/connected.ts";
-import { GITHUB_CONNECTOR_TOOLS } from "../../../providers/connectors/github/github-tools.ts";
-import { toolAccessOf } from "../../../providers/connectors/tool-access.ts";
-import type { OfferedTool } from "../connectors.ts";
+import {
+	GITHUB_CONNECTOR_TOOLS,
+	type GitHubToolName,
+} from "../../../providers/connectors/github/github-tools.ts";
+import type { ComputerAtPlace } from "../computer/tools.ts";
+import { type OfferedTool, offeredTool } from "../connectors.ts";
 import { issueTools } from "./issue-tools.ts";
 import { pullRequestTools } from "./pull-request-tools.ts";
-import { pushTool, type Workspace } from "./push-tool.ts";
+import { pushTool } from "./push-tool.ts";
 import { readTools } from "./read-tools.ts";
 import { toolContext } from "./shared.ts";
 
@@ -24,44 +26,36 @@ export function gitHubTools({
 	connected,
 	turnId,
 	botId,
-	workspace,
+	computer,
 	run,
 }: {
 	connected: Connected;
 	turnId: string;
 	botId: string;
 	/** Undefined when the turn has no computer, so pushes are refused. */
-	workspace: Workspace | undefined;
+	computer: ComputerAtPlace | undefined;
 	run: RunEffect<Database>;
 }): Record<string, OfferedTool> {
 	const { connector } = connected;
 	const context = toolContext({ connected, turnId, botId, run });
-	const tools: Record<string, Tool> = {
-		...pushTool(context, workspace),
+	// Every tool the connector describes, so one described without being built doesn't compile.
+	const tools: Record<GitHubToolName, Tool> = {
+		...pushTool(context, computer),
 		...pullRequestTools(context),
 		...issueTools(context),
 		...readTools(context),
 	};
-
-	const offered: Record<string, OfferedTool> = {};
-	for (const described of GITHUB_CONNECTOR_TOOLS) {
-		const found = tools[described.name];
-		if (!found) continue;
-		const inputSchema = asSchema(found.inputSchema).jsonSchema;
-		if ("then" in inputSchema) throw new Error(`The ${described.name} tool's schema isn't ready`);
-		offered[connectorToolKey(connector.handle, described.name)] = {
-			tool: found,
-			handle: connector.handle,
-			description: typeof found.description === "string" ? found.description : "",
-			inputSchema,
-			writeOrDelete: described.readOnly !== true,
-			access: toolAccessOf(connector.toolAccess, described),
-			connectorId: connector.id,
-			connectorRevision: connector.configurationRevision,
-			remoteToolName: described.name,
-		};
-	}
-	return offered;
+	const offering = {
+		connectorId: connector.id,
+		handle: connector.handle,
+		toolAccess: connector.toolAccess,
+		configurationRevision: connector.configurationRevision,
+	};
+	return Object.fromEntries(
+		GITHUB_CONNECTOR_TOOLS.map((described) =>
+			offeredTool(offering, described, tools[described.name]),
+		),
+	);
 }
 
 /** What the model is told of the bot's GitHub connector with the turn. */

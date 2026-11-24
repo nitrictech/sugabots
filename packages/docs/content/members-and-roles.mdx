@@ -1,5 +1,5 @@
 ---
-title: People and roles
+title: Members and roles
 description: Who can join a workspace, and what its owner, admins, editors and viewers can do.
 ---
 
@@ -10,17 +10,17 @@ what they can see.
 ## Who gets in
 
 Whoever creates a workspace owns it. Anyone can sign up to a new server, so
-its first account can be made. After that, sign-up is closed and people arrive
+its first account can be made. After that, sign-up is closed and members arrive
 by invitation, unless the server sets
 [`SIGNUP_MODE`](/docs/configuration#access) to `referral` or `open`.
 
-To invite people, go to **Settings → People** and choose **Invite people**.
-Type their email addresses, separated by commas, and pick a **Role**. Each person
+To invite members, go to **Settings → Members** and choose **Invite members**.
+Type their email addresses, separated by commas, and pick a **Role**. Each member
 gets an email with a link to join.
 
 <Tip>
 
-Invites expire after two days. Anyone who joins gets their own
+Invitations expire after two days. Anyone who joins gets their own
 [Personal Assistant](/docs/bots#your-personal-assistant) straight away.
 
 </Tip>
@@ -29,7 +29,7 @@ Invites expire after two days. Anyone who joins gets their own
 
 On a server whose `SIGNUP_MODE` is `referral`, everyone has a link that
 lets somebody new make an account. Find yours in **Settings → Profile** under
-**Invite to Sugabots**. Whoever signs up with it sets up a workspace of their own;
+**Share your referral link**. Whoever signs up with it sets up a workspace of their own;
 it doesn't add them to yours.
 
 The link keeps working until you choose **Reset link**, which replaces it and
@@ -42,8 +42,8 @@ There are four. Pick one to see what it can do.
 <RoleMatrix />
 
 Everyone can talk to the workspace's public bots and find its public projects.
-A private bot is for its creator alone, and a private project for the people in
-it. The owner and admins are in every project people made, and see that private
+A personal bot is for its creator alone, and a private project for the members in
+it. The owner and admins are in every project members made, and see that personal
 bots exist, but not their chats. Nobody can see into someone else's Personal
 Assistant.
 
@@ -53,12 +53,12 @@ them being one, or remove them.
 
 ## Leaving and removing
 
-Open a person in **Settings → People** to change their role or remove them.
+Open a member in **Settings → Members** to change their role or remove them.
 Removing someone takes away their access to the workspace and every project in
 it. Their Personal Assistant and its chats are deleted, but the projects and
 bots they made stay.
 
 The owner can't be removed or lose their role, and can't leave. To hand the
-workspace on, the owner opens another person in **Settings → People** and makes
+workspace on, the owner opens another member in **Settings → Members** and makes
 them the owner. The new owner takes over, and the old one stays on as an
 admin.

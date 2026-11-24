@@ -5,63 +5,63 @@ import { revenue } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	StoryApp,
-	storyPerson,
+	storyMember,
 	storyProjects,
 	storyWorkspace,
 } from "../story-app.tsx";
 
 /*
- * A project's settings, a page of its own beside its chats, with its people
+ * A project's settings, a page of its own beside its chats, with its members
  * and its bots each a page under it. On a phone each opens full screen, with
- * the way back to the project, or from its people or bots back to its settings.
+ * the way back to the project, or from its members or bots back to its settings.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
 const revenueSettings = `/${storyWorkspace.slug}/projects/${revenue.slug}/settings`;
-const revenuePage = (page: "people" | "bots") => `${revenueSettings}/${page}`;
+const revenuePage = (page: "members" | "bots") => `${revenueSettings}/${page}`;
 const PHONE = { viewport: { value: "iphone12", isRotated: false } };
 
-const people = [
-	{ personId: storyPerson.id, name: storyPerson.name, email: storyPerson.email, image: null },
+const members = [
+	{ memberId: storyMember.id, name: storyMember.name, email: storyMember.email, image: null },
 	{
-		personId: "0199a3a0-0000-7000-8000-000000000012",
+		memberId: "0199a3a0-0000-7000-8000-000000000012",
 		name: "Jay Young",
 		email: "jay@nitric.io",
 		image: null,
 	},
 	{
-		personId: "0199a3a0-0000-7000-8000-000000000013",
+		memberId: "0199a3a0-0000-7000-8000-000000000013",
 		name: "Mara Kent",
 		email: "mara@nitric.io",
 		image: null,
 	},
-].map((person, index) => ({
-	...person,
+].map((member, index) => ({
+	...member,
 	// The first two are administrators, as the workspace roster below says.
 	removable: index > 1,
 }));
 
-/** The Revenue project's people, which the example workspace has none of by default. */
+/** The Revenue project's members, which the example workspace has none of by default. */
 const revenueHandlers = [
-	// The project's people are the workspace's too, with the roles the project's rows show.
+	// The project's members are the workspace's too, with the roles the project's rows show.
 	http.get(`${API}/workspaces/:workspace/memberships`, () =>
 		HttpResponse.json(
-			people.map((person, index) => ({
+			members.map((member, index) => ({
 				id: `0199a3a0-0000-7000-8000-0000000007${index}0`,
 				role: index === 0 ? "admin" : index === 1 ? "admin" : "editor",
-				person: { id: person.personId, name: person.name, email: person.email, image: null },
+				member: { id: member.memberId, name: member.name, email: member.email, image: null },
 				joinedAt: "2026-09-02T00:00:00.000Z",
 			})),
 		),
 	),
 	http.get(`${API}/projects/:projectId/members`, ({ params }) =>
-		HttpResponse.json(params.projectId === revenue.id ? people : people.slice(0, 1)),
+		HttpResponse.json(params.projectId === revenue.id ? members : members.slice(0, 1)),
 	),
 ];
 
-/** The projects, with Revenue counting the people its members list answers with. */
-const projectsWithPeople = storyProjects.map((project) =>
-	project.id === revenue.id ? { ...project, memberCount: people.length } : project,
+/** The projects, with Revenue counting the members its members list answers with. */
+const projectsWithMembers = storyProjects.map((project) =>
+	project.id === revenue.id ? { ...project, memberCount: members.length } : project,
 );
 
 const meta = preview.meta({
@@ -69,11 +69,11 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
-		msw.use(...revenueHandlers, ...appHandlers({ projects: projectsWithPeople }));
+		msw.use(...revenueHandlers, ...appHandlers({ projects: projectsWithMembers }));
 	},
 });
 
-/** A project's settings, picked out among its pages beside its chats: its name and colour, its people and bots, and deleting it. */
+/** A project's settings, picked out among its pages beside its chats: its name and colour, its members and bots, and deleting it. */
 export const General = meta.story({
 	render: () => <StoryApp path={revenueSettings} />,
 	play: async ({ canvas }) => {
@@ -83,9 +83,9 @@ export const General = meta.story({
 			"aria-current",
 			"page",
 		);
-		await expect(canvas.getByRole("link", { name: /^People/ })).toHaveAttribute(
+		await expect(canvas.getByRole("link", { name: /^Members/ })).toHaveAttribute(
 			"href",
-			revenuePage("people"),
+			revenuePage("members"),
 		);
 		await expect(canvas.getByRole("button", { name: "Delete project" })).toBeInTheDocument();
 	},
@@ -95,10 +95,10 @@ export const General = meta.story({
  * Who can see into the project. Administrators are in every project, so only
  * Mara, an editor, can be taken out, and you cannot leave.
  */
-export const People = meta.story({
-	render: () => <StoryApp path={revenuePage("people")} />,
+export const Members = meta.story({
+	render: () => <StoryApp path={revenuePage("members")} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "People" })).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "Members" })).toBeInTheDocument();
 		await expect(await canvas.findByText("Jay Young")).toBeInTheDocument();
 		await expect(await canvas.findByText("Admin")).toBeInTheDocument();
 		await expect(
@@ -106,7 +106,7 @@ export const People = meta.story({
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Remove Jay Young" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Leave Revenue" })).toBeNull();
-		await expect(canvas.getByRole("button", { name: "Add people" })).toBeInTheDocument();
+		await expect(canvas.getByRole("button", { name: "Add members" })).toBeInTheDocument();
 	},
 });
 
@@ -123,16 +123,16 @@ export const Bots = meta.story({
 	},
 });
 
-/** An editor reads the project's people, without the controls only an administrator has, and can leave it. */
+/** An editor reads the project's members, without the controls only an administrator has, and can leave it. */
 export const AsAnEditor = meta.story({
 	beforeEach({ msw }) {
 		// A project carries what its viewer may do there; an editor may not rename, delete or manage it.
-		const asEditor = projectsWithPeople.map((project) => ({
+		const asEditor = projectsWithMembers.map((project) => ({
 			...project,
 			permissions: {
 				...project.permissions,
 				rename: false,
-				managePeople: false,
+				manageMembers: false,
 				manageBots: false,
 				delete: false,
 				leave: true,
@@ -140,10 +140,10 @@ export const AsAnEditor = meta.story({
 		}));
 		msw.use(...revenueHandlers, ...appHandlers({ role: "editor", projects: asEditor }));
 	},
-	render: () => <StoryApp path={revenuePage("people")} />,
+	render: () => <StoryApp path={revenuePage("members")} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "People" })).toBeInTheDocument();
-		await expect(canvas.queryByRole("button", { name: "Add people" })).toBeNull();
+		await expect(await canvas.findByRole("heading", { name: "Members" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Add members" })).toBeNull();
 		await expect(await canvas.findByRole("button", { name: "Leave Revenue" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Remove Mara Kent" })).toBeNull();
 	},
@@ -173,15 +173,15 @@ export const Phone = meta.story({
 	},
 });
 
-/** On a phone a project's people, under its settings, have the way back to its settings. */
-export const PeopleOnAPhone = meta.story({
+/** On a phone a project's members, under its settings, have the way back to its settings. */
+export const MembersOnAPhone = meta.story({
 	globals: PHONE,
-	render: () => <StoryApp path={revenuePage("people")} />,
+	render: () => <StoryApp path={revenuePage("members")} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("link", { name: "Back to Settings" })).toHaveAttribute(
 			"href",
 			revenueSettings,
 		);
-		await expect(await canvas.findByRole("heading", { name: "People" })).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "Members" })).toBeInTheDocument();
 	},
 });

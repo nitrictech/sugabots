@@ -7,13 +7,13 @@ import { DemoCard } from "@/components/demo-card";
 import { riseIn } from "@/components/reveal";
 import { ChoiceChips } from "@/components/ui/choice-chips";
 
-/** A tool's approval setting, as the app labels it. */
-const approvals = {
+/** A tool's tool access, as the app labels it. */
+const toolAccesses = {
 	off: "Off",
 	ask: "Ask",
 	allow: "Allow",
 } as const;
-type ApprovalSetting = keyof typeof approvals;
+type ToolAccess = keyof typeof toolAccesses;
 
 const tools = {
 	read: { name: "linear__list_issues", label: "List issues", changes: false },
@@ -23,9 +23,9 @@ type ToolChoice = keyof typeof tools;
 
 type Outcome = "refused" | "waits" | "runs";
 
-function outcomeOf(setting: ApprovalSetting): Outcome {
-	if (setting === "off") return "refused";
-	return setting === "allow" ? "runs" : "waits";
+function outcomeOf(access: ToolAccess): Outcome {
+	if (access === "off") return "refused";
+	return access === "allow" ? "runs" : "waits";
 }
 
 const outcomeText: Record<Outcome, string> = {
@@ -41,12 +41,12 @@ const decisionOutcomes = {
 
 const CHOICE_LEGEND = "pb-1.5 text-sm font-semibold";
 
-/** The approval rules to play with: set a tool's approval, pick the tool, and answer the request. */
+/** The approval rules to play with: set a tool's access, pick the tool, and answer the request. */
 export function ApprovalPlayground() {
-	const [setting, setSetting] = useState<ApprovalSetting>("allow");
+	const [access, setAccess] = useState<ToolAccess>("allow");
 	const [tool, setTool] = useState<ToolChoice>("change");
 	const [decision, setDecision] = useState<ApprovalDecision>("pending");
-	const outcome = outcomeOf(setting);
+	const outcome = outcomeOf(access);
 	const bot = cast.inboxSorter;
 	const toolLabels = { read: tools.read.label, change: tools.change.label };
 
@@ -61,11 +61,11 @@ export function ApprovalPlayground() {
 		<DemoCard>
 			<div className="flex flex-wrap gap-6 border-b px-5 py-4">
 				<ChoiceChips
-					label="The tool's approval"
+					label="The tool's access"
 					labelClassName={CHOICE_LEGEND}
-					options={approvals}
-					value={setting}
-					onChange={reset(setSetting)}
+					options={toolAccesses}
+					value={access}
+					onChange={reset(setAccess)}
 				/>
 				<ChoiceChips
 					label="The bot wants to"
@@ -77,7 +77,7 @@ export function ApprovalPlayground() {
 			</div>
 			<AnimatePresence mode="wait" initial={false}>
 				<motion.div
-					key={`${setting}-${tool}`}
+					key={`${access}-${tool}`}
 					variants={riseIn}
 					initial="hidden"
 					animate="visible"

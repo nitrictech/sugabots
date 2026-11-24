@@ -16,7 +16,7 @@ import {
 import {
 	chat,
 	connector,
-	person,
+	member,
 	projectBot,
 	type ToolCallRow,
 	toolCall,
@@ -39,7 +39,7 @@ import {
 
 /**
  * The only writer of `tool_call`: what a bot's reply asked a tool, whether
- * a person allowed it, and what it got.
+ * a member allowed it, and what it got.
  *
  * Each command locks the call, asks `lifecycle.ts` what the command makes of
  * it, writes that and emits it, in one transaction. A command the lifecycle
@@ -61,15 +61,15 @@ export interface Interface {
 		input: unknown;
 		/** How far into the reply's text the call was made. */
 		atOffset: number;
-		/** Whether the tool may change something at the other end. Off when left out. */
-		writeOrDelete?: boolean;
+		/** Whether the tool may change something at the other end. */
+		writeOrDelete: boolean;
 	}) => Effect.Effect<ToolCallPart>;
 	/** Records what the tool returned or how it failed. `undefined` if the call is not running. */
 	readonly close: (
 		toolCallId: string,
 		outcome: ToolCallOutcome,
 	) => Effect.Effect<ToolCallPart | undefined>;
-	/** Parks the calls a reply asked for until people decide them. */
+	/** Parks the calls a reply asked for until members decide them. */
 	readonly requestApprovals: (
 		reply: { chatId: string; messageId: string; turnId: string },
 		approvals: readonly PendingToolApproval[],
@@ -100,7 +100,7 @@ export interface Interface {
 	}) => Effect.Effect<BeganExecution>;
 	/**
 	 * Fails these turns' unfinished calls, denying pending approvals, for turns
-	 * that ended before their tools returned. `userMessage` is what people are
+	 * that ended before their tools returned. `userMessage` is what members are
 	 * told of each call.
 	 */
 	readonly abandonUnfinished: (
@@ -169,7 +169,7 @@ export const make = Effect.gen(function* () {
 									tool: input.tool,
 									input: boundedJson(input.input),
 									atOffset: input.atOffset,
-									writeOrDelete: input.writeOrDelete ?? false,
+									writeOrDelete: input.writeOrDelete,
 									startedAt,
 								})
 								.returning(),
@@ -261,10 +261,10 @@ export const make = Effect.gen(function* () {
 							db
 								.select({
 									workspaceId: chat.workspaceId,
-									approverName: person.name,
+									approverName: member.name,
 								})
 								.from(chat)
-								.leftJoin(person, eq(person.id, input.decision.personId))
+								.leftJoin(member, eq(member.id, input.decision.memberId))
 								.where(eq(chat.id, decided.chatId))
 								.limit(1),
 						);
@@ -294,7 +294,7 @@ export const make = Effect.gen(function* () {
 									workspaceId: chat.workspaceId,
 									botId: turn.botId,
 									status: turn.status,
-									cancelRequested: turn.cancelRequested,
+									interruptRequested: turn.interruptRequested,
 								})
 								.from(turn)
 								.innerJoin(chat, eq(chat.id, turn.chatId))
@@ -346,7 +346,7 @@ export const make = Effect.gen(function* () {
 								eq(toolCall.sdkToolCallId, input.sdkToolCallId),
 							),
 						);
-						// Every call bound to an approval was parked for a person to allow first.
+						// Every call bound to an approval was parked for a member to allow first.
 						if (!row) return refusedExecution("The call has no approval record");
 						if (!sameCallAsApproved(row, input)) {
 							return refusedExecution(
@@ -426,14 +426,14 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(Service, make);
 
 /** Stored inputs and outputs are cut at this many characters of JSON. */
-export const MAX_STORED_JSON_CHARACTERS = 64_000;
+const MAX_STORED_JSON_CHARACTERS = 64_000;
 
 type ToolCallOutcome = { output: unknown } | { error: UserText };
 
 /**
  * What an approved call must still match when it runs, beyond its tool and
  * input: for a connector's tool, the connector configured as it was when
- * the person allowed it. A built-in tool is the same tool wherever it runs.
+ * the member allowed it. A built-in tool is the same tool wherever it runs.
  */
 export type ApprovalBinding =
 	| {
@@ -444,7 +444,7 @@ export type ApprovalBinding =
 	  }
 	| { readonly kind: "built-in" };
 
-/** A tool call a reply asked for, to be parked until a person decides it. */
+/** A tool call a reply asked for, to be parked until a member decides it. */
 export interface PendingToolApproval {
 	id: string;
 	approvalId: string;
@@ -469,7 +469,7 @@ type BeganExecution =
  * cannot carry; the cut keeps the start, which is where a page's title and a
  * result list's first entries are.
  */
-export function boundedJson(value: unknown): JsonValue {
+function boundedJson(value: unknown): JsonValue {
 	const text = JSON.stringify(value ?? null) ?? "null";
 	if (text.length <= MAX_STORED_JSON_CHARACTERS) {
 		return JSON.parse(text);
@@ -506,7 +506,7 @@ function refusedExecution(reason: string): BeganExecution {
 	return { _tag: "Refused", reason };
 }
 
-/** sameCallAsApproved reports whether the call about to run is the one a person saw and allowed. */
+/** sameCallAsApproved reports whether the call about to run is the one a member saw and allowed. */
 function sameCallAsApproved(
 	row: ToolCallRow,
 	input: Parameters<Interface["beginExecution"]>[0],

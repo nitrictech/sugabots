@@ -31,6 +31,7 @@ const webhookAutomation = {
 	instructions: "Triage the request.",
 	triggers: automationTriggers("0199a3a0-0000-7000-8000-0000000000a1", {
 		kind: "webhook",
+		deliveryIdHeader: null,
 		auth: { kind: "bearer" },
 	}),
 	state: "enabled",
@@ -101,12 +102,13 @@ function linearConnector(over: Partial<TestConnector> = {}): TestConnector {
 		],
 		lastTestError: null,
 		connectedBy: null,
+		signedInAs: null,
 		createdAt: "2026-09-19T00:00:00.000Z",
 		...over,
 	};
 }
 
-/** Opens the bot's avatar by clicking its face, as a person would. */
+/** Opens the bot's avatar by clicking its face, as a member would. */
 async function openAvatar() {
 	fireEvent.click(await screen.findByRole("button", { name: "Change avatar" }));
 	return screen.findByRole("dialog", { name: `${linear.name}'s avatar` });
@@ -409,14 +411,14 @@ describe("an admin", () => {
 
 		const instructions = await screen.findByRole("textbox", { name: "Instructions" });
 		fireEvent.change(instructions, { target: { value: "Be terse." } });
-		rosterAnswers({ prompt: "Be terse." });
+		rosterAnswers({ instructions: "Be terse." });
 		expect(client.api.bots.update).not.toHaveBeenCalled();
 		fireEvent.blur(instructions);
 
 		await waitFor(() => {
 			expect(client.api.bots.update).toHaveBeenCalledWith({
 				params: { botId: linear.id },
-				payload: { prompt: "Be terse." },
+				payload: { instructions: "Be terse." },
 			});
 		});
 	});

@@ -3,7 +3,7 @@ import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
 import { ProjectComputerSetup } from "@sugabots/core/computers/project-computer-setup";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSignedInPerson } from "../../auth/middleware.ts";
+import { asCurrentUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -16,28 +16,26 @@ export const projectComputerRoutes = HttpApiBuilder.group(
 			const network = yield* ComputerNetwork.Service;
 			return handlers
 				.handle("get", ({ params }) =>
-					setup.get(params.projectId).pipe(asSignedInPerson, asHttpError(projectComputerErrors)),
+					setup.get(params.projectId).pipe(asCurrentUser, asHttpError(projectComputerErrors)),
 				)
 				.handle("reset", ({ params }) =>
-					setup.reset(params.projectId).pipe(asSignedInPerson, asHttpError(projectComputerErrors)),
+					setup.reset(params.projectId).pipe(asCurrentUser, asHttpError(projectComputerErrors)),
 				)
 				.handle("upgrade", ({ params }) =>
-					setup
-						.upgrade(params.projectId)
-						.pipe(asSignedInPerson, asHttpError(projectComputerErrors)),
+					setup.upgrade(params.projectId).pipe(asCurrentUser, asHttpError(projectComputerErrors)),
 				)
 				.handle("network", ({ params }) =>
-					network.projectSettings(params.projectId).pipe(asSignedInPerson, asHttpError(refusals)),
+					network.projectSettings(params.projectId).pipe(asCurrentUser, asHttpError(refusals)),
 				)
 				.handle("addHost", ({ params, payload }) =>
 					network
 						.addProjectHost({ projectId: params.projectId, host: payload.host })
-						.pipe(asSignedInPerson, asHttpError({ ...refusals, ComputerHostBlocked: BadRequest })),
+						.pipe(asCurrentUser, asHttpError({ ...refusals, ComputerHostBlocked: BadRequest })),
 				)
 				.handle("removeHost", ({ params }) =>
 					network
 						.removeProjectHost({ projectId: params.projectId, host: params.host })
-						.pipe(asSignedInPerson, asHttpError(refusals)),
+						.pipe(asCurrentUser, asHttpError(refusals)),
 				);
 		}),
 );

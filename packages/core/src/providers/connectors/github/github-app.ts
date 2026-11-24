@@ -30,7 +30,7 @@ import {
 } from "./github-connectors.ts";
 
 /**
- * Connecting a project to GitHub: a person makes the project its own private
+ * Connecting a project to GitHub: a member makes the project its own private
  * GitHub App, from a manifest Sugabots writes, owned by the account whose
  * repositories the project's bots work on, then installs it there; GitHub
  * sends the browser back to Sugabots after each step. The app is the
@@ -39,7 +39,7 @@ import {
  * a bot's GitHub app is its default project's.
  */
 export interface Interface {
-	/** The form that makes the project's GitHub App, owned by `organization` or by the person. */
+	/** The form that makes the project's GitHub App, owned by `organization` or by the member. */
 	readonly start: (input: {
 		projectId: string;
 		organization: string | undefined;
@@ -104,11 +104,11 @@ export const make = Effect.gen(function* () {
 
 	const stateFor = (step: SetupStep) =>
 		Effect.gen(function* () {
-			const { personId } = yield* CurrentActor.Service;
+			const { memberId } = yield* CurrentActor.Service;
 			const now = yield* Clock.currentTimeMillis;
 			const encoded = Schema.encodeSync(SetupStateJson)({
 				...step,
-				personId,
+				memberId,
 				expiresAt: now + SETUP_STATE_LIFETIME_MILLISECONDS,
 			});
 			return secrets.encrypt(encoded, SETUP_STATE_PURPOSE);
@@ -118,14 +118,14 @@ export const make = Effect.gen(function* () {
 	const stepOf = (state: string | undefined, step: SetupStep["step"]) =>
 		Effect.gen(function* () {
 			if (!state) return undefined;
-			const { personId } = yield* CurrentActor.Service;
+			const { memberId } = yield* CurrentActor.Service;
 			const now = yield* Clock.currentTimeMillis;
 			const opened = Option.liftThrowable(() =>
 				Schema.decodeSync(SetupStateJson)(secrets.decrypt(state, SETUP_STATE_PURPOSE)),
 			)();
 			if (Option.isNone(opened)) return undefined;
 			const setup = opened.value;
-			return setup.step === step && setup.personId === personId && setup.expiresAt > now
+			return setup.step === step && setup.memberId === memberId && setup.expiresAt > now
 				? setup
 				: undefined;
 		});
@@ -192,9 +192,9 @@ export const make = Effect.gen(function* () {
 					);
 					if (Option.isNone(made)) return failed(setup, "github");
 					const app = made.value;
-					const { personId } = yield* CurrentActor.Service;
+					const { memberId } = yield* CurrentActor.Service;
 					const created = yield* connectors
-						.createGitHub(setup.workspaceId, setup.projectId, personId, {
+						.createGitHub(setup.workspaceId, setup.projectId, memberId, {
 							id: setup.connectorId,
 							app: { appId: app.id, slug: app.slug, owner: app.owner },
 							appCredentialEncrypted: encryptAppCredential(secrets, {
@@ -241,8 +241,13 @@ export const make = Effect.gen(function* () {
 						Effect.option,
 					);
 					if (Option.isNone(found)) return failed(setup, "github");
-					const { id, account } = found.value;
-					yield* connectors.installed(setup.workspaceId, row.id, { installationId: id, account });
+					const { id, account, onUserAccount } = found.value;
+					yield* connectors.installed(setup.workspaceId, row.id, {
+						installationId: id,
+						account,
+						// Only a member's own account is theirs alone, so only then is the installation theirs.
+						installedById: onUserAccount ? setup.memberId : null,
+					});
 					return {
 						kind: "done",
 						at: setupProjectOf(setup),
@@ -302,7 +307,7 @@ const setupProjectOf = ({ workspaceId, projectId }: SetupProject): SetupProject 
 	projectId,
 });
 
-/** How long a person has to finish a step on GitHub's pages. */
+/** How long a member has to finish a step on GitHub's pages. */
 const SETUP_STATE_LIFETIME_MILLISECONDS = 60 * 60 * 1000;
 
 const SETUP_STATE_PURPOSE = "github-app-setup";
@@ -323,7 +328,7 @@ const SetupStateJson = Schema.fromJsonString(
 		workspaceId: Schema.String,
 		projectId: Schema.String,
 		connectorId: Schema.String,
-		personId: Schema.String,
+		memberId: Schema.String,
 		expiresAt: Schema.Finite,
 	}),
 );

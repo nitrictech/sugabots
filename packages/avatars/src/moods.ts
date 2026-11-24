@@ -114,7 +114,7 @@ function glanceOrBlink(face: FaceControls): void {
 		return;
 	}
 	const [x, y] = Math.random() < LOOK_AHEAD_CHANCE ? [0, 0] : randomGlance(IDLE_GLANCE_REACH);
-	// People blink as their eyes shift a long way.
+	// Members blink as their eyes shift a long way.
 	if (face.lookAt(x, y) > LONG_GLANCE_DISTANCE && Math.random() < LONG_GLANCE_BLINK_CHANCE) {
 		face.blink();
 	}

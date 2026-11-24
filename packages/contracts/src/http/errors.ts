@@ -11,7 +11,7 @@ import { Schema } from "effect";
  * class.
  */
 
-/** What went wrong, for people to read. */
+/** What went wrong, for members to read. */
 const message = UserText.schema;
 
 /**

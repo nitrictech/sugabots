@@ -1,4 +1,4 @@
-import { asc, eq, like, sql } from "drizzle-orm";
+import { eq, like, sql } from "drizzle-orm";
 import { Effect, Option, Stream } from "effect";
 import { Database, query, serviceOperations } from "../../database/database.ts";
 import { blob } from "../../database/schema.ts";
@@ -58,17 +58,6 @@ export const fromPostgres = Effect.gen(function* () {
 			operation(
 				"delete",
 				query((db) => db.delete(blob).where(eq(blob.key, key))),
-			),
-		list: (prefix) =>
-			operation(
-				"list",
-				query((db) =>
-					db
-						.select({ key: blob.key, contentType: blob.contentType, size: blob.size })
-						.from(blob)
-						.where(like(blob.key, underPattern(prefix)))
-						.orderBy(asc(blob.key)),
-				),
 			),
 		deletePrefix: (prefix) =>
 			operation(

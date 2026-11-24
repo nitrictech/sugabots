@@ -4,7 +4,7 @@ import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
-import { bot, connector, membership, person, toolCall, turn } from "../../../database/schema.ts";
+import { bot, connector, member, membership, toolCall, turn } from "../../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -31,13 +31,7 @@ import {
 	turnWorkflow,
 } from "../turn.workflow.ts";
 import { Turns } from "../turns.ts";
-import {
-	type ApprovalBinding,
-	boundedJson,
-	MAX_STORED_JSON_CHARACTERS,
-	type PendingToolApproval,
-	ToolCallStore,
-} from "./store.ts";
+import { type ApprovalBinding, type PendingToolApproval, ToolCallStore } from "./store.ts";
 
 /**
  * Tool calls against Postgres: what `open` and `close` write, how the reply
@@ -56,31 +50,31 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		Context.get(services, ToolCallStore.Service),
 	);
 	const turns = onPostgres(Context.get(services, TurnStore.Service));
-	const approvalsAs = (personId: string): Promised<Turns.ControlsInterface> =>
-		onPostgresAs(personId)(Context.get(services, Turns.Controls));
+	const approvalsAs = (memberId: string): Promised<Turns.ControlsInterface> =>
+		onPostgresAs(memberId)(Context.get(services, Turns.Controls));
 	const approvals = onPostgres({
 		beginExecution: Context.get(services, ApprovedToolCalls.Service).beginExecution,
 	});
-	const detailsAs = (personId: string) =>
-		onPostgresAs(personId)(Context.get(services, ChatDetailsView.Service));
-	const chatsAs = (personId: string) =>
-		onPostgresAs(personId)(Context.get(services, Chats.Service));
+	const detailsAs = (memberId: string) =>
+		onPostgresAs(memberId)(Context.get(services, ChatDetailsView.Service));
+	const chatsAs = (memberId: string) =>
+		onPostgresAs(memberId)(Context.get(services, Chats.Service));
 	const execution = onPostgres({
 		prepare: Context.get(services, TurnExecution.Service).prepare,
 	});
 	let workspaceId: string;
-	let hostId: string;
+	let botId: string;
 	let adminId: string;
 	let chatId: string;
 	let connectorId: string;
 	let prepared: PreparedTurn;
 
-	/** Records a person allowing the call, as the turn's workflow does once told. */
+	/** Records a member allowing the call, as the turn's workflow does once told. */
 	const allow = (pending: PendingToolApproval) =>
 		calls.recordDecision({
 			chatId,
 			approvalId: pending.approvalId,
-			decision: { decision: "allow_once", personId: adminId },
+			decision: { decision: "allow_once", memberId: adminId },
 		});
 
 	afterAll(async () => {
@@ -88,7 +82,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, hostId, adminId, chatId, connectorId } = await aChatAwaitingReply(chatsAs));
+		({ workspaceId, botId, adminId, chatId, connectorId } = await aChatAwaitingReply(chatsAs));
 		const [run] = await runOnPostgres(runningTurns(chatId));
 		if (!run) throw new Error("no turn running");
 		prepared = await prepareRunnable(execution, run);
@@ -102,13 +96,14 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		tool: "web_fetch",
 		input: { url: "https://example.com" },
 		atOffset,
+		writeOrDelete: false,
 	});
 
 	const checkpoint = (overrides: Partial<TurnCheckpoint> = {}): TurnCheckpoint => ({
 		messages: [],
 		approvals: [],
 		modelInput: { model: "test", system: "test", messages: [] },
-		reply: { content: "Waiting.", collaborations: [], toolCalls: [] },
+		reply: { content: "Waiting.", toolCalls: [] },
 		modelRequests: 1,
 		...overrides,
 	});
@@ -138,19 +133,10 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			replyTurnOf(prepared),
 			checkpoint({
 				approvals: [
-					pending.binding.kind === "connector"
-						? {
-								approvalId: pending.approvalId,
-								tool: pending.tool,
-								connectorId: pending.binding.connectorId,
-								connectorRevision: pending.binding.connectorRevision,
-								remoteToolName: pending.binding.remoteToolName,
-							}
-						: { approvalId: pending.approvalId, tool: pending.tool, builtIn: true as const },
+					{ approvalId: pending.approvalId, tool: pending.tool, binding: pending.binding },
 				],
 				reply: {
 					content: "",
-					collaborations: [],
 					toolCalls: [{ id: pending.id, atOffset: pending.atOffset }],
 				},
 			}),
@@ -183,7 +169,6 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			output: null,
 			status: "running",
 			error: null,
-			writeOrDelete: false,
 			atOffset: 4,
 			finishedAt: null,
 		});
@@ -225,7 +210,6 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		await calls.close(opened.id, { output: { title: "Example Domain" } });
 		await turns.saveReply(replyTurnOf(prepared), {
 			content: "Looking now. Found it.",
-			collaborations: [],
 			toolCalls: [{ id: opened.id, atOffset: 7 }],
 		});
 
@@ -255,43 +239,6 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		await expect(
 			approvals.beginExecution({ ...execution, sdkToolCallId: "sdk-create-never-parked" }),
 		).rejects.toThrow("no approval record");
-	});
-
-	it("records that the turn acted once an allowed call that changes things starts", async () => {
-		const execution = await allowAndResume(pendingCall());
-
-		await approvals.beginExecution(execution);
-
-		const [acted] = await onDatabase((db) =>
-			db
-				.select({ writeOrDeleteStarted: turn.writeOrDeleteStarted })
-				.from(turn)
-				.where(eq(turn.id, prepared.turnId)),
-		);
-		expect(acted?.writeOrDeleteStarted).toBe(true);
-	});
-
-	it("runs an allowed read that asked first, without counting it as a change", async () => {
-		const execution = await allowAndResume(
-			pendingCall({
-				sdkToolCallId: "sdk-read",
-				tool: "linear__list_issues",
-				input: {},
-				binding: connectorBinding("list_issues"),
-				writeOrDelete: false,
-			}),
-		);
-
-		const running = await approvals.beginExecution(execution);
-
-		expect(running.status).toBe("running");
-		const [resumed] = await onDatabase((db) =>
-			db
-				.select({ writeOrDeleteStarted: turn.writeOrDeleteStarted })
-				.from(turn)
-				.where(eq(turn.id, prepared.turnId)),
-		);
-		expect(resumed?.writeOrDeleteStarted).toBe(false);
 	});
 
 	it("starts an allowed call to a built-in tool, which no connector's settings bind", async () => {
@@ -339,19 +286,19 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	it("conceals a pending approval from somebody who cannot reach the bot", async () => {
 		const pending = pendingCall({ sdkToolCallId: "sdk-stranger" });
 		await park(pending);
-		// A private bot, which only its creator reaches.
+		// A personal bot, which only its creator reaches.
 		await onDatabase((db) =>
-			db.update(bot).set({ visibility: "private" }).where(eq(bot.id, hostId)),
+			db.update(bot).set({ visibility: "personal" }).where(eq(bot.id, botId)),
 		);
 		const [stranger] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Kim", email: `stranger-${crypto.randomUUID()}@example.com` })
 				.returning(),
 		);
 		if (!stranger) throw new Error("fixture");
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, personId: stranger.id, role: "editor" }),
+			db.insert(membership).values({ workspaceId, memberId: stranger.id, role: "editor" }),
 		);
 
 		await expect(
@@ -364,13 +311,13 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		await park(pending);
 		const [viewer] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Lee", email: `viewer-${crypto.randomUUID()}@example.com` })
 				.returning(),
 		);
 		if (!viewer) throw new Error("fixture");
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, personId: viewer.id, role: "viewer" }),
+			db.insert(membership).values({ workspaceId, memberId: viewer.id, role: "viewer" }),
 		);
 
 		await expect(
@@ -385,7 +332,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	it("fails calls still running when their turn is cancelled, and keeps them failed", async () => {
 		const opened = await calls.open(from(0));
 
-		await turns.cancel(replyTurnOf(prepared), { content: "", collaborations: [], toolCalls: [] });
+		await turns.cancel(replyTurnOf(prepared), { content: "", toolCalls: [] });
 
 		const [row] = await onDatabase((db) =>
 			db.select().from(toolCall).where(eq(toolCall.id, opened.id)),
@@ -409,7 +356,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		const opened = await calls.open(from(0));
 		await turns.fail(
 			replyTurnOf(prepared),
-			{ content: "", collaborations: [], toolCalls: [] },
+			{ content: "", toolCalls: [] },
 			{ userMessage: userText`provider down`, mayRunAgain: true },
 		);
 
@@ -465,7 +412,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			);
 			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(1));
 			await onDatabase((db) =>
-				db.update(turn).set({ owner: executionId }).where(eq(turn.id, prepared.turnId)),
+				db.update(turn).set({ executionId }).where(eq(turn.id, prepared.turnId)),
 			);
 			await park(pending);
 			return workflows.runPromise(TurnSignals.make);
@@ -494,13 +441,13 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			const signals = await parkInWorkflow(pending);
 			const [administrator] = await onDatabase((db) =>
 				db
-					.insert(person)
+					.insert(member)
 					.values({ name: "Ada", email: `admin-${crypto.randomUUID()}@example.com` })
 					.returning(),
 			);
 			if (!administrator) throw new Error("fixture");
 			await onDatabase((db) =>
-				db.insert(membership).values({ workspaceId, personId: administrator.id, role: "admin" }),
+				db.insert(membership).values({ workspaceId, memberId: administrator.id, role: "admin" }),
 			);
 
 			await onPostgresAs(administrator.id)(
@@ -514,7 +461,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			expect(decided).toMatchObject({ approvalStatus: "allowed", decidedById: administrator.id });
 		});
 
-		it("tells a second person the approval is already decided", async () => {
+		it("tells a second member the approval is already decided", async () => {
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
 			const deciding = onPostgresAs(adminId)(
@@ -558,7 +505,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			await onDatabase((db) =>
 				db
 					.update(turn)
-					.set({ status: "cancelled", cancelRequested: true })
+					.set({ status: "cancelled", interruptRequested: true })
 					.where(eq(turn.id, prepared.turnId)),
 			);
 
@@ -569,18 +516,6 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			// The workflow heard it and stopped waiting.
 			await vi.waitFor(() => expect(cancelWaiting).toHaveBeenCalledTimes(1));
 			expect(segment).toHaveBeenCalledTimes(1);
-		});
-	});
-});
-
-describe("boundedJson", () => {
-	it("cuts a value that does not fit and says so", () => {
-		const large = "x".repeat(MAX_STORED_JSON_CHARACTERS + 10);
-
-		expect(boundedJson(large)).toEqual({
-			truncated: true,
-			characters: large.length + 2,
-			preview: `"${"x".repeat(MAX_STORED_JSON_CHARACTERS - 1)}`,
 		});
 	});
 });

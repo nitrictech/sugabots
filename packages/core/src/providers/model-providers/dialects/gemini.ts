@@ -11,7 +11,6 @@ import { openaiCompatible } from "./openai-compatible.ts";
  */
 export const gemini: ProviderDialect = {
 	...openaiCompatible,
-	name: "Gemini",
 	requestRoot: (baseUrl) => baseUrl.replace(/\/openai$/, ""),
 	// The native API reports context overflow in its own words.
 	recognizeFailure: ({ message }) =>

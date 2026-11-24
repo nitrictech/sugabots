@@ -8,36 +8,39 @@ import type {
 	PlacedChat,
 } from "@sugabots/contracts";
 import { DEFAULT_CHAT_HISTORY_LIMIT } from "@sugabots/contracts";
-import { userText } from "@sugabots/errors";
 import { and, eq, type SQLWrapper, sql } from "drizzle-orm";
-import { Context, Data, DateTime, Effect, Layer } from "effect";
+import { Context, DateTime, Effect, Layer } from "effect";
 import {
 	type ChatStanding,
-	computerProjectStandingFor,
 	mayDecideToolCall,
-	peopleReachingProject,
+	membersReachingProject,
 	ResourceHidden,
 } from "../authorization/access.ts";
-import { CurrentActor } from "../authorization/current-actor.ts";
+import type { CurrentActor } from "../authorization/current-actor.ts";
 import { Visibility } from "../authorization/visibility.ts";
 import { type Executor, query, serviceOperations } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
-import { automation, chatCompaction, person, placedChat, turn } from "../database/schema.ts";
+import { automation, chatCompaction, member, placedChat, turn } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
-import type { UserFacing } from "../user-message.ts";
 import { automationFailing, resultPosted, runBotFactsOf, toRun } from "./automations/execution.ts";
 import { compactionLineTokens } from "./compaction/window.ts";
-import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "./cursor.ts";
+import {
+	type CursorPoint,
+	earlierThan,
+	encodeCursor,
+	type InvalidCursor,
+	parseCursor,
+} from "./cursor.ts";
 import {
 	authorRow,
 	botColumns,
+	type MemberIdentity,
+	memberColumns,
+	memberJson,
 	messageFromRelations,
 	messageRelations,
-	type PersonIdentity,
-	personColumns,
-	personJson,
+	toMember,
 	toParticipant,
-	toPerson,
 } from "./store/participants.ts";
 import { Turns } from "./turns/turns.ts";
 
@@ -49,7 +52,7 @@ export interface Interface {
 	readonly get: (
 		chatId: string,
 		history?: ChatHistoryQuery,
-	) => Effect.Effect<ChatDetails, ResourceHidden | InvalidChatHistoryCursor, CurrentActor.Service>;
+	) => Effect.Effect<ChatDetails, ResourceHidden | InvalidCursor, CurrentActor.Service>;
 	/** How much of its bot's context window the chat fills; null until a reply in it has been measured. */
 	readonly context: (
 		chatId: string,
@@ -71,12 +74,11 @@ export const make = Effect.gen(function* () {
 					yield* Effect.annotateCurrentSpan("chat.id", chatId);
 					// Before anything is looked up, and whether or not the chat is there,
 					// so a bad cursor says nothing about the chat.
-					const before = history.cursor ? yield* historyCursor(history.cursor) : undefined;
+					const before = history.cursor ? yield* parseCursor(history.cursor) : undefined;
 					const standing = yield* visibility.chatStanding(chatId);
 					const row = yield* query((db) => loadChat(db, standing.chat.id, history.limit, before));
 					if (!row) return yield* new ResourceHidden({ resource: "chat" });
-					const computerApprovers = yield* computerRequestApproversIn(row, standing);
-					const details = toChatDetails(row, standing, computerApprovers, history.limit);
+					const details = toChatDetails(row, standing, history.limit);
 					const { automationId } = row;
 					if (!automationId) return details;
 					const [owned] = yield* query((db) =>
@@ -128,18 +130,9 @@ export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(Layer.provide(Visibility.layer));
 
-export class InvalidChatHistoryCursor
-	extends Data.TaggedError("InvalidChatHistoryCursor")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`That chat history cursor is invalid`;
-	}
-}
-
 /**
  * The chat `chatId`, a page of its messages with their authors and the parts
- * placed in them, its participants, its project's bots and the people who reach
+ * placed in them, its participants, its project's bots and the members who reach
  * its project: one statement.
  */
 const loadChat = Effect.fn("ChatDetailsView.loadChat")(function* (
@@ -151,16 +144,16 @@ const loadChat = Effect.fn("ChatDetailsView.loadChat")(function* (
 	return yield* db.query.placedChat.findFirst({
 		where: { id: chatId },
 		extras: {
-			running: (row) => Turns.busyIn(sql`${row.id}`),
+			working: (row) => Turns.busyIn(sql`${row.id}`),
 			queuedSince: (row) => Turns.queuedSince(sql`${row.id}`),
-			// Who decides the approvals of a run, and of a collaboration in one, turns on the run's bot.
+			// Who decides the approvals of a run turns on the run's bot.
 			runBot: (row) => runBotFactsOf(row.id),
 			// Not the project's members: a bot's default project has none, and the
 			// floor reads mentions of everyone who reaches the project.
-			peopleReachingProject: (row) => sql<PersonIdentity[]>`(
-				select coalesce(json_agg(${personJson} order by ${person.name}), '[]'::json)
-				from ${person}
-				where ${person.id} in (${peopleReachingProject(sql`${row.projectId}`)})
+			membersReachingProject: (row) => sql<MemberIdentity[]>`(
+				select coalesce(json_agg(${memberJson} order by ${member.name}), '[]'::json)
+				from ${member}
+				where ${member.id} in (${membersReachingProject(sql`${row.projectId}`)})
 			)`,
 		},
 		with: {
@@ -177,11 +170,11 @@ const loadChat = Effect.fn("ChatDetailsView.loadChat")(function* (
 			participants: {
 				columns: {},
 				orderBy: { createdAt: "asc", id: "asc" },
-				with: { person: personColumns, bot: botColumns },
+				with: { member: memberColumns, bot: botColumns },
 			},
 			reads: {
 				columns: { readThrough: true, updatedAt: true },
-				with: { person: personColumns },
+				with: { member: memberColumns },
 			},
 			automationRun: { extras: { posted: (row) => resultPosted(sql`${row.id}`) } },
 			messages: {
@@ -205,68 +198,27 @@ const loadChat = Effect.fn("ChatDetailsView.loadChat")(function* (
 
 type Chat = NonNullable<Effect.Success<ReturnType<typeof loadChat>>>;
 
-/**
- * The bots that speak in the chat, its own and any taking part, whose
- * requests to change the computer they work on the caller may decide: those
- * who manage that computer's project, the chat's, or in a
- * collaboration the bot's own default project. Outside a collaboration every
- * bot works on the chat's project, in which the caller's `standing`
- * is already known.
- */
-const computerRequestApproversIn = Effect.fn("ChatDetailsView.computerRequestApproversIn")(
-	function* (row: Chat, standing: ChatStanding) {
-		const speakers = new Set(
-			[row.botId, ...row.participants.map(({ bot: participant }) => participant?.id)].filter(
-				(id): id is string => typeof id === "string",
-			),
-		);
-		if (row.kind !== "collaboration") {
-			const managesComputer = standing.standing.may("computer.request.decide");
-			return managesComputer ? [...speakers] : [];
-		}
-		const { personId } = yield* CurrentActor.Service;
-		const deciding: string[] = [];
-		for (const botId of speakers) {
-			const standing = yield* query((db) =>
-				computerProjectStandingFor(db, row.id, botId, personId),
-			);
-			if (standing?.may("computer.request.decide")) deciding.push(botId);
-		}
-		return deciding;
-	},
-);
-
-function toChatDetails(
-	row: Chat,
-	standing: ChatStanding,
-	computerApprovers: readonly string[],
-	limit: number,
-): ChatDetails {
+function toChatDetails(row: Chat, standing: ChatStanding, limit: number): ChatDetails {
 	const page = row.messages.slice(0, limit).reverse();
 	const oldest = page[0];
 	return {
-		chat: toPlacedChat(row, row.running),
-		// What this person may do with the approvals this chat raises, decided
+		chat: toPlacedChat(row, row.working),
+		// What this member may do with the approvals this chat raises, decided
 		// once here so the chat does not have to work it out from a role.
-		capabilities: {
-			approveToolCalls: mayDecideToolCall(
-				standing.standing,
-				undefined,
-				row.runBot ?? undefined,
-				"chat",
-			),
-			approveComputerRequestsOf: computerApprovers,
+		permissions: {
+			approveToolCalls: mayDecideToolCall(standing.standing, row.runBot ?? undefined, "chat"),
+			approveComputerRequests: mayDecideToolCall(standing.standing, undefined, "computer-managers"),
 		},
 		// A run is always listed in its automation's feed.
 		automationRun:
 			row.automationRun && row.rootChatId
 				? toRun(row.automationRun, row.rootChatId, row.automationRun.posted)
 				: null,
-		participants: row.participants.map(({ person, bot: participant }) =>
-			toParticipant(authorRow(person, participant)),
+		participants: row.participants.map(({ member, bot: participant }) =>
+			toParticipant(authorRow(member, participant)),
 		),
 		projectBots: (row.project?.bots ?? []).map((bot): BotParticipant => ({ kind: "bot", ...bot })),
-		peopleReachingProject: row.peopleReachingProject.map(toPerson),
+		membersReachingProject: row.membersReachingProject.map(toMember),
 		messages: page.map((stored) => messageFromRelations(stored, stored.turn)),
 		olderMessagesCursor:
 			row.messages.length > limit && oldest
@@ -274,7 +226,7 @@ function toChatDetails(
 				: null,
 		queuedSince: row.queuedSince,
 		reads: row.reads.map((read) => ({
-			person: toPerson(read.person),
+			member: toMember(read.member),
 			readThrough: read.readThrough.toISOString(),
 			// Written whenever they read further, so when they last did.
 			readAt: read.updatedAt.toISOString(),
@@ -295,7 +247,7 @@ const latestMeasurementOf = (chatId: SQLWrapper) => sql<Measurement | null>`(
 	limit 1
 )`;
 
-/** A turn's prompt size, the window it was read with (unset on older turns), and when. */
+/** A turn's prompt size, the window it was read with (unset on a system bot's turn), and when. */
 interface Measurement {
 	tokens: number;
 	window: number | null;
@@ -314,12 +266,7 @@ function toChatContext(measured: Measurement, compactedAt: Date | null): ChatCon
 	};
 }
 
-const historyCursor = (cursor: string) => {
-	const point = decodeCursor(cursor);
-	return point ? Effect.succeed(point) : Effect.fail(new InvalidChatHistoryCursor());
-};
-
-function toPlacedChat(row: schema.PlacedChatRow, running: boolean): PlacedChat {
+function toPlacedChat(row: schema.PlacedChatRow, working: boolean): PlacedChat {
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
@@ -328,8 +275,7 @@ function toPlacedChat(row: schema.PlacedChatRow, running: boolean): PlacedChat {
 		rootChatId: row.rootChatId,
 		kind: row.kind,
 		title: row.title,
-		status: running ? "running" : "done",
-		parentChatId: row.parentChatId,
+		working,
 		resolvedAt: row.resolvedAt?.toISOString() ?? null,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),

@@ -3,7 +3,7 @@ import { Effect, Schema } from "effect";
 import { Computers } from "../../../computers/computers.ts";
 import { BOT_BRANCH_PREFIX } from "../../../providers/connectors/github/connected.ts";
 import { BUNDLE_REF, pushBundle } from "../../../providers/connectors/github/push.ts";
-import { inComputer, type Place, type TurnComputer } from "../computer/tools.ts";
+import { type ComputerAtPlace, inComputer, type Place } from "../computer/tools.ts";
 import {
 	botBranchSchema,
 	commitSchema,
@@ -15,15 +15,10 @@ import {
 /** The largest bundle a push carries: a whole branch's history, read into the API's memory. */
 const MAX_BUNDLE_BYTES = 256 * 1024 * 1024;
 
-/** The computer of the project the turn works in, while the turn may use it, for tools that work from a checkout there. */
-export interface Workspace extends TurnComputer {
-	readonly place: Place;
-}
-
-/** `push_branch`, refused when `workspace` is undefined because the turn has no computer. */
+/** `push_branch`, refused when `computer` is undefined because the turn has no computer. */
 export function pushTool(
 	{ connected, turnId, repositorySchema, onRepository }: ToolContext,
-	workspace: Workspace | undefined,
+	computer: ComputerAtPlace | undefined,
 ) {
 	return {
 		push_branch: tool({
@@ -33,8 +28,8 @@ export function pushTool(
 				branch: botBranchSchema,
 				commit: commitSchema,
 				directory: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
-					description: workspace
-						? `The checkout, relative to ${workspace.place.folder} unless it starts with /`
+					description: computer
+						? `The checkout, relative to ${computer.place.folder} unless it starts with /`
 						: "The checkout in the computer",
 				}),
 				force: Schema.optional(Schema.Boolean).annotate({
@@ -48,9 +43,9 @@ export function pushTool(
 			) => {
 				const path = connected.repository(repository);
 				if (!path) return notConnectorRepository(repository, connected.repositories);
-				if (!workspace) return failed("This bot has no computer to push from in this turn.");
-				const bundled = await inComputer(workspace, abortSignal, (computer) =>
-					bundleCommit(computer, workspace.place, { turnId, directory, commit }),
+				if (!computer) return failed("This bot has no computer to push from in this turn.");
+				const bundled = await inComputer(computer, abortSignal, (opened) =>
+					bundleCommit(opened, computer.place, { turnId, directory, commit }),
 				);
 				if (!("bundle" in bundled)) return bundled;
 				return onRepository(path, (target) =>

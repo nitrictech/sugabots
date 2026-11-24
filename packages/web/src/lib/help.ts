@@ -99,7 +99,7 @@ function systemIn(userAgent: string): string {
 	return SYSTEMS.find(([, pattern]) => pattern.test(userAgent))?.[0] ?? "Unknown system";
 }
 
-/** What About shows and Copy debug info copies, each as the words a person reads. */
+/** What About shows and Copy debug info copies, each as the words a member reads. */
 interface DebugDetails {
 	version: string;
 	commit: string;

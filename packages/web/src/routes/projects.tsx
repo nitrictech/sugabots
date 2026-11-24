@@ -26,7 +26,7 @@ import { shellRoute } from "./workspace.tsx";
 
 const NewChatPage = lazyNamed(() => import("@/screens/NewChatPage.tsx"), "NewChatPage");
 
-/** Every project the person is in or could join, and making another. */
+/** Every project the member is in or could join, and making another. */
 export const projectsRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/projects",
@@ -51,7 +51,7 @@ function ProjectRoute() {
 	const project = findProject(projects, slug);
 	if (isPending) return <Panes>{null}</Panes>;
 	if (!project) return <OwnerNotFound kind="project" error={error} />;
-	// A public project the person isn't in, opened by its address: what it is, and Join.
+	// A public project the member isn't in, opened by its address: what it is, and Join.
 	if (!project.isMember) {
 		return (
 			<Panes>
@@ -66,7 +66,7 @@ function ProjectRoute() {
 	);
 }
 
-/** A project the person isn't in: its name and what it's for, with Join where they may. */
+/** A project the member isn't in: its name and what it's for, with Join where they may. */
 function JoinProject({ project }: { project: Project }) {
 	const join = useJoinProject();
 	return (

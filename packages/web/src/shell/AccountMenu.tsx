@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { Check, LogOut, Plus, UserPlus, UserRound } from "lucide-react";
 import type { useBackToHere } from "@/lib/settings-back.tsx";
 import { chooseWorkspace } from "@/lib/workspace.ts";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -18,7 +18,7 @@ import { initialOf } from "@/ui/letter-tile.tsx";
 /**
  * You, at the foot of the sidebar. The menu names you, leads to your
  * preferences and signs you out, and its workspace item opens the workspace's
- * own menu: inviting people, and any other workspace you belong to, or a new
+ * own menu: inviting members, and any other workspace you belong to, or a new
  * one. The workspace's settings are in the sidebar.
  *
  * Choosing a workspace goes to its address, which is what decides the
@@ -46,14 +46,14 @@ export function AccountMenu({
 				aria-label={`Account: ${signedIn.name}`}
 				className="focus-ring flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1.5 text-left transition-colors hover:bg-row-hover data-popup-open:bg-row-selected"
 			>
-				<PersonAvatar person={signedIn} size={24} />
+				<MemberAvatar member={signedIn} size={24} />
 				<span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">
 					{signedIn.name}
 				</span>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent side="top" align="start" className="w-58">
 				<div className="flex items-center gap-2.5 p-2">
-					<PersonAvatar person={signedIn} size={32} />
+					<MemberAvatar member={signedIn} size={32} />
 					<span className="flex min-w-0 flex-1 flex-col leading-snug">
 						<span className="truncate font-medium text-sm text-foreground">{signedIn.name}</span>
 						<span className="truncate text-xs text-subtle-foreground">{signedIn.email}</span>
@@ -69,13 +69,13 @@ export function AccountMenu({
 							render={
 								<Link
 									to="/$workspace/settings/$section"
-									params={{ workspace: current.slug, section: "people" }}
+									params={{ workspace: current.slug, section: "members" }}
 									state={settingsBack}
 								/>
 							}
 						>
 							<UserPlus />
-							Invite people
+							Invite members
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
 						{workspaces.map((workspace) =>

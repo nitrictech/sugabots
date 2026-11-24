@@ -9,28 +9,25 @@ import { query, serviceOperations, transaction } from "../../../database/databas
 import { toolCall } from "../../../database/schema.ts";
 import type { UserFacing } from "../../../user-message.ts";
 import { toToolCallPart } from "../../store/tool-calls.ts";
-import { TurnStore } from "../store.ts";
+import { DENIED_OUTPUT } from "../tool-calls/lifecycle.ts";
 import { ToolCallStore } from "../tool-calls/store.ts";
 
 /**
- * A turn reading what people decided on the calls it parked for approval, and
+ * A turn reading what members decided on the calls it parked for approval, and
  * running the ones they allowed. The turn runs for its workflow, not for a
- * person, so this asks for no actor and is never handed to a route; the
- * people deciding are `ToolApprovals`.
+ * member, so this asks for no actor and is never handed to a route; the
+ * members deciding go through `Turns.Controls`.
  */
 export interface Interface {
 	/**
-	 * What people decided on the approvals a suspended turn asked for, as the
+	 * What members decided on the approvals a suspended turn asked for, as the
 	 * model reads it when the turn continues. Fails while any is undecided.
 	 */
 	readonly responsesForTurn: (
 		turnId: string,
 		approvalIds: readonly string[],
 	) => Effect.Effect<ToolModelMessage, ToolApprovalsIncomplete>;
-	/**
-	 * Starts an allowed call (see `ToolCallStore.beginExecution`). A call
-	 * that may change something marks its turn as having acted.
-	 */
+	/** Starts an allowed call (see `ToolCallStore.beginExecution`). */
 	readonly beginExecution: (input: {
 		chatId: string;
 		messageId: string;
@@ -38,7 +35,6 @@ export interface Interface {
 		sdkToolCallId: string;
 		tool: string;
 		input: unknown;
-		atOffset: number;
 		binding: ToolCallStore.ApprovalBinding;
 	}) => Effect.Effect<ToolCallPart, ToolExecutionRefused>;
 }
@@ -50,7 +46,6 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ApprovedToolCalls");
 	const toolCalls = yield* ToolCallStore.Service;
-	const turns = yield* TurnStore.Service;
 	return Service.of({
 		responsesForTurn: (turnId, approvalIds) =>
 			operation(
@@ -87,8 +82,8 @@ export const make = Effect.gen(function* () {
 									approved: row.status === "allowed",
 									reason:
 										row.status === "allowed"
-											? "A person approved this action"
-											: "A person denied this action",
+											? "A member approved this action"
+											: DENIED_OUTPUT.reason,
 								}),
 							),
 						});
@@ -105,7 +100,6 @@ export const make = Effect.gen(function* () {
 						if (began._tag === "Refused") {
 							return yield* new ToolExecutionRefused({ message: began.reason });
 						}
-						if (began.call.writeOrDelete) yield* turns.markActed(began.call.turnId);
 						return toToolCallPart(began.call);
 					}),
 				),
@@ -115,7 +109,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide([ToolCallStore.layer, TurnStore.layer]));
+export const layer = layerNoDeps.pipe(Layer.provide(ToolCallStore.layer));
 
 /** A resumed turn found its approvals not all decided, so it cannot continue. */
 export class ToolApprovalsIncomplete

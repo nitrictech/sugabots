@@ -5,9 +5,12 @@ import type { ToolSet } from "ai";
 import { Context, Effect, Layer } from "effect";
 import { type Database, effectRunner } from "../../database/database.ts";
 import { Egress, type EgressHttpClients } from "../../providers/network/egress.ts";
-import { searchBackend, searchEndpoint } from "../../providers/search-providers/backends.ts";
+import {
+	providerSearch,
+	searchEndpoint,
+} from "../../providers/search-providers/provider-search.ts";
 import { SearchProviderStore } from "../../providers/search-providers/search-provider-store.ts";
-import { type FetchPage, pageFetcher } from "./web-fetch/fetch-page.ts";
+import { type FetchPage, pageFetcher, WEB_FETCH_LIMITS } from "./web-fetch/fetch-page.ts";
 import { WEB_FETCH_TOOL, webFetchTool } from "./web-fetch/tool.ts";
 import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
 
@@ -18,7 +21,7 @@ import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
  * `searchProviders.resolve` finds an enabled search provider with every
  * setting a search needs. The provider's enabled flag
  * is the workspace's one setting for whether bots may use the web, and each
- * search is billed to the workspace. forWorkspace looks the provider
+ * search counts towards the workspace's usage. forWorkspace looks the provider
  * up on every call, so a provider enabled between turns applies from the next
  * turn without a restart. A failed search points at `searchSettingsPageUrl`.
  */
@@ -45,7 +48,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const egress = yield* Egress.Service;
 	return from({
-		fetchPage: pageFetcher({ fetch: egress.webFetch }),
+		fetchPage: pageFetcher({ fetch: egress.webFetch, ...WEB_FETCH_LIMITS }),
 		searchProviders: yield* SearchProviderStore.Service,
 		httpClients: egress.providers,
 	});
@@ -68,8 +71,8 @@ export function from({ fetchPage, searchProviders, httpClients }: Parts): Interf
 	return {
 		forWorkspace: (workspaceId, searchSettingsPageUrl) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Database> {
-				const connector = yield* searchProviders.resolve(workspaceId);
-				if (!connector) {
+				const provider = yield* searchProviders.resolve(workspaceId);
+				if (!provider) {
 					return {
 						tools: {
 							[WEB_FETCH_TOOL]: webFetch,
@@ -85,9 +88,9 @@ export function from({ fetchPage, searchProviders, httpClients }: Parts): Interf
 				const run = effectRunner<never>({
 					runPromiseExit: Effect.runPromiseExitWith(yield* Effect.context<never>()),
 				});
-				const search = searchBackend(
-					connector,
-					httpClients.for({ baseUrl: searchEndpoint(connector) }),
+				const search = providerSearch(
+					provider,
+					httpClients.for({ baseUrl: searchEndpoint(provider) }),
 				);
 				return {
 					tools: {

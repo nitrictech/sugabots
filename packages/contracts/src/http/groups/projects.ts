@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import { botSchema } from "../../bots.ts";
-import { personParticipantSchema } from "../../messages.ts";
+import { memberParticipantSchema } from "../../messages.ts";
 import {
 	newProjectMemberSchema,
 	newProjectSchema,
@@ -48,13 +48,13 @@ export class ProjectsApi extends HttpApiGroup.make("projects")
 			error: refused,
 		}),
 		/**
-		 * The people who reach the project, by name: in a project people made, its
+		 * The members who reach the project, by name: in a project members made, its
 		 * members; in a bot's default project, whoever reaches the bot. Who a
 		 * mention in a chat's first message can name, before the chat has details.
 		 */
-		HttpApiEndpoint.get("listPeople", "/projects/:projectId/people", {
+		HttpApiEndpoint.get("listMembersReaching", "/projects/:projectId/members-reaching", {
 			params: { projectId: uuidSchema },
-			success: Schema.Array(personParticipantSchema),
+			success: Schema.Array(memberParticipantSchema),
 			error: refused,
 		}),
 		HttpApiEndpoint.post("addMember", "/projects/:projectId/members", {
@@ -62,8 +62,8 @@ export class ProjectsApi extends HttpApiGroup.make("projects")
 			payload: newProjectMemberSchema,
 			error: refused,
 		}),
-		HttpApiEndpoint.delete("removeMember", "/projects/:projectId/members/:personId", {
-			params: { projectId: uuidSchema, personId: Schema.String },
+		HttpApiEndpoint.delete("removeMember", "/projects/:projectId/members/:memberId", {
+			params: { projectId: uuidSchema, memberId: Schema.String },
 			error: refused,
 		}),
 		/** Takes the caller out of the project. */

@@ -29,7 +29,7 @@ const connectorsPageUrl = "https://app.example.com/acme/bots/support/connectors"
 describe("the turn's note on connector tools", () => {
 	it("quotes what a server says about its tools as the server's own text, without hidden characters", () => {
 		const note = toolCatalogNote({
-			catalog: buildCatalog({ wiki__lookup: lookup }),
+			catalog: buildCatalog({ wiki__lookup: lookup }, {}),
 			unavailable: [],
 			signInExpired: [],
 			instructions: { wiki: "Search before you look up.\u{E0041}\u{E0042}" },
@@ -45,7 +45,7 @@ describe("the turn's note on connector tools", () => {
 
 	it("says a project's connector is used where the bot's own has the same name", () => {
 		const note = toolCatalogNote({
-			catalog: buildCatalog({ wiki__lookup: lookup }),
+			catalog: buildCatalog({ wiki__lookup: lookup }, {}),
 			unavailable: [],
 			signInExpired: [],
 			instructions: {},
@@ -72,7 +72,7 @@ describe("the turn's note on connector tools", () => {
 		expect(note).toContain("- Sentry (Errors and performance issues)");
 	});
 
-	it("tells the model which connectors need signing in again, each with its owner's page, apart from ones not answering", () => {
+	it("tells the model which connectors need signing in again, each with the page of the project or bot it belongs to, apart from ones not answering", () => {
 		const projectConnectorsPageUrl = "https://app.example.com/acme/projects/launch/connectors";
 		const note = toolCatalogNote({
 			catalog: [],

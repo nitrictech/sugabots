@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { computer, computerProvider, membership, person, workspace } from "../database/schema.ts";
+import { computer, computerProvider, member, membership, workspace } from "../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -16,7 +16,7 @@ import { noComputers, recordingFirstComputer } from "./testing.ts";
 
 /** Removing a computer provider, against Postgres. Skips without a database. */
 describe.skipIf(!process.env.DATABASE_URL)("removing a computer provider, against Postgres", () => {
-	let setupAs: (personId: string) => Promised<ComputerProviderSetup.Interface>;
+	let setupAs: (memberId: string) => Promised<ComputerProviderSetup.Interface>;
 
 	beforeAll(async () => {
 		setupAs = await servedOnPostgresAs(
@@ -37,13 +37,13 @@ describe.skipIf(!process.env.DATABASE_URL)("removing a computer provider, agains
 		);
 		const [owner] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Ada", email: `providers-${suffix}@example.com` })
 				.returning(),
 		);
 		if (!space || !owner) throw new Error("fixture");
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId: space.id, personId: owner.id, role: "owner" }),
+			db.insert(membership).values({ workspaceId: space.id, memberId: owner.id, role: "owner" }),
 		);
 		const launch = await onDatabase((db) =>
 			seedProject(db, { workspaceId: space.id, name: "Launch", slug: "launch" }),

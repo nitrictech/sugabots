@@ -6,7 +6,6 @@ import { noDatabase } from "../../database/testing.ts";
 import {
 	anthropic,
 	chatgpt,
-	emptyRegistry,
 	gemini,
 	ollama,
 	openaiCompatible,
@@ -54,7 +53,7 @@ vi.mock("ai", async (importOriginal) => {
 import { APICallError, TypeValidationError } from "ai";
 import type { ModelProviderStore } from "../model-providers/model-provider-store.ts";
 import { Models } from "./models.ts";
-import { resolvedModel } from "./testing.ts";
+import { emptyRegistry, resolvedModel } from "./testing.ts";
 
 /** The fake resolver never queries, so nothing here reaches the database. */
 const run = effectRunner(ManagedRuntime.make(noDatabase));
@@ -365,7 +364,7 @@ describe("a failed model request", () => {
 			recognize: dialect.recognizeFailure,
 		});
 
-	it("logs what the provider said, and tells people what it means in the names they know", () => {
+	it("logs what the provider said, and tells members what it means in the names they know", () => {
 		const failure = classify(
 			answered(403, {
 				error: {
@@ -612,7 +611,7 @@ describe("a failed model request", () => {
 		});
 	});
 
-	it("keeps an unreadable response for the logs and tells people only that it failed", () => {
+	it("keeps an unreadable response for the logs and tells members only that it failed", () => {
 		const opaque = answered(502, "<html>upstream timed out</html>");
 
 		expect(classify(opaque)).toMatchObject({

@@ -6,7 +6,7 @@ import {
 	type Run,
 } from "@sugabots/contracts";
 import { Conflict } from "@sugabots/contracts/http";
-import { listedChat, type TestConnector, testPerson } from "@sugabots/contracts/testing";
+import { listedChat, type TestConnector, testMember } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -36,8 +36,8 @@ const leadParticipant = botParticipantOf(lead);
 /** Another of the project's bots. */
 const other = bots.find((bot) => bot.id !== lead.id) as (typeof bots)[number];
 const otherParticipant = botParticipantOf(other);
-/** One of the project's people. */
-const robin = testPerson({ id: "0199a3a0-0000-7000-8000-0000000003d1", name: "Robin Vale" });
+/** One of the project's members. */
+const robin = testMember({ id: "0199a3a0-0000-7000-8000-0000000003d1", name: "Robin Vale" });
 const chatId = "0199a3a0-0000-7000-8000-0000000003e1";
 const feedId = "0199a3a0-0000-7000-8000-0000000003e2";
 const runChatId = "0199a3a0-0000-7000-8000-0000000003e3";
@@ -77,7 +77,6 @@ const result: Message = {
 	id: "0199a3a0-0000-7000-8000-0000000003f1",
 	chatId,
 	author: leadParticipant,
-	kind: "text",
 	status: "complete",
 	parts: [{ type: "text", text: "Prices are unchanged." }],
 	content: "Prices are unchanged.",
@@ -107,6 +106,7 @@ function expiredConnector(id: string, projectId: string, name: string): TestConn
 		tools: [],
 		lastTestError: null,
 		connectedBy: null,
+		signedInAs: null,
 		createdAt: at,
 	};
 }
@@ -121,13 +121,12 @@ function details(
 			id,
 			workspaceId: project.workspaceId,
 			projectId: project.id,
-			// In a project people made, no chat is with a bot of its own, not even a run.
+			// In a project members made, no chat is with a bot of its own, not even a run.
 			botId: null,
 			rootChatId: kind === "run" ? feedId : id,
 			kind,
 			title: kind === "run" ? run.automationName : chat.title,
-			status: "done",
-			parentChatId: kind === "run" ? feedId : null,
+			working: false,
 			resolvedAt: null,
 			createdAt: at,
 			updatedAt: at,
@@ -135,7 +134,7 @@ function details(
 		automationRun: null,
 		participants: [leadParticipant],
 		projectBots: [leadParticipant, otherParticipant],
-		peopleReachingProject: [robin],
+		membersReachingProject: [robin],
 		messages: [],
 		olderMessagesCursor: null,
 		queuedSince: null,
@@ -195,7 +194,7 @@ describe("a project's chat", () => {
 		expect(await within(sidebar).findByRole("button", { name: "Not running" })).toBeDefined();
 	});
 
-	it("says who will answer a draft that mentions someone: the bots it mentions, else the lead, which may let one for people pass", async () => {
+	it("says who will answer a draft that mentions someone: the bots it mentions, else the lead, which may let one for members pass", async () => {
 		mount(`/suga/projects/${project.slug}/${chatId}`);
 		const composer = await screen.findByLabelText(`Message ${chat.title}`);
 		expect(screen.queryByText(/will reply here/)).toBeNull();
@@ -207,7 +206,7 @@ describe("a project's chat", () => {
 		expect(await screen.findByText(`${lead.name} may reply.`)).toBeDefined();
 	});
 
-	it("promises no reply to a draft for people when the lead has no model to answer with", async () => {
+	it("promises no reply to a draft for members when the lead has no model to answer with", async () => {
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed(bots.map((bot) => (bot.id === lead.id ? { ...bot, model: null } : bot))),
 		);
@@ -345,13 +344,13 @@ describe("a project's new chat", () => {
 		expect(start.disabled).toBe(false);
 	});
 
-	it("starts a chat for a person the first message names, though the lead has no model", async () => {
+	it("starts a chat for a member the first message names, though the lead has no model", async () => {
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed(bots.map((bot) => (bot.id === lead.id ? { ...bot, model: null } : bot))),
 		);
 		client.api.projects.listBots.mockReturnValue(Effect.succeed([lead, other]));
-		client.api.projects.listPeople.mockReturnValue(
-			Effect.succeed([testPerson({ id: sam.id, name: sam.name }), robin]),
+		client.api.projects.listMembersReaching.mockReturnValue(
+			Effect.succeed([testMember({ id: sam.id, name: sam.name }), robin]),
 		);
 		mount(`/suga/projects/${project.slug}/new`);
 		const composer = await screen.findByLabelText(`Message ${project.name}`);
@@ -364,12 +363,12 @@ describe("a project's new chat", () => {
 	});
 
 	it("offers @here and @channel in the first message, as in any of the project's chats", async () => {
-		client.api.projects.listPeople.mockReturnValue(
-			Effect.succeed([testPerson({ id: sam.id, name: sam.name }), robin]),
+		client.api.projects.listMembersReaching.mockReturnValue(
+			Effect.succeed([testMember({ id: sam.id, name: sam.name }), robin]),
 		);
 		mount(`/suga/projects/${project.slug}/new`);
 		const composer = await screen.findByLabelText(`Message ${project.name}`);
-		await waitFor(() => expect(client.api.projects.listPeople).toHaveBeenCalled());
+		await waitFor(() => expect(client.api.projects.listMembersReaching).toHaveBeenCalled());
 		writeDraft(composer, "@");
 
 		const list = within(await screen.findByRole("listbox"));

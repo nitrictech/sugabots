@@ -3,7 +3,7 @@ import { useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import { useState } from "react";
 import { CHAT_NOT_STARTED, needsViewer, useChatStarter, useProjectChats } from "@/lib/chats.ts";
-import { usePeopleReachingProject, useProjectBots } from "@/lib/projects.ts";
+import { useMembersReachingProject, useProjectBots } from "@/lib/projects.ts";
 import {
 	ownerName,
 	type ResourceOwner,
@@ -38,17 +38,17 @@ export function NewChatPage({ owner }: { owner: ResourceOwner }) {
 	const bot = useLeadBot(owner);
 	const name = ownerName(owner);
 	const waiting = useWaitingOnViewer(owner);
-	const viewer = useSession().person;
+	const viewer = useSession().member;
 	const lead = bot && botParticipantOf(bot);
 	// A bot's default project has only the bot, its lead; a project's bots are asked for.
 	const projectBots =
 		useProjectBots("project" in owner ? owner.project.id : undefined).data?.map(botParticipantOf) ??
 		(lead ? [lead] : []);
 	// Whom a mention can name, as in any of the project's chats: nobody is in this one yet.
-	const people = usePeopleReachingProject(resourceProjectId(owner)).data ?? [];
+	const members = useMembersReachingProject(resourceProjectId(owner)).data ?? [];
 	const mentionable = viewer
 		? composerMentionable(
-				{ participants: [], projectBots, peopleReachingProject: [...people] },
+				{ participants: [], projectBots, membersReachingProject: [...members] },
 				viewer,
 				"project_chat",
 			)
@@ -58,8 +58,8 @@ export function NewChatPage({ owner }: { owner: ResourceOwner }) {
 		draftAudience({
 			draft,
 			chatKind: "project_chat",
-			// Yourself too: a message that mentions only you mentions only people.
-			mentionable: [...projectBots, ...people],
+			// Yourself too: a message that mentions only you mentions only members.
+			mentionable: [...projectBots, ...members],
 			projectBots,
 			lead,
 			leadHasModel: bot?.model != null,

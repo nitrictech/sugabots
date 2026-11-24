@@ -12,23 +12,23 @@ import {
 } from "drizzle-orm/pg-core";
 import { chat, message, toolCall } from "../chats/sql.ts";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { bot, person } from "../workspaces/sql.ts";
+import { bot, member } from "../workspaces/sql.ts";
 
 /**
  * Where a file came from, which decides the columns it sets:
- * - `document` and `html`: a bot wrote it with its file tools. Its content is
+ * - `markdown` and `html`: a bot wrote it with its file tools. Its content is
  *   in `file_version`, and it has a title and a current version.
- * - `upload`: a person uploaded it, unsent until it is attached to a message.
+ * - `attachment`: a member added it to a message, unsent until that message is.
  * - `bot_attachment`: a bot attached it to its reply.
  * - `tool_result`: a tool call's result, too long to give the model whole.
  */
-type FileKind = WrittenFileKind | "upload" | "bot_attachment" | "tool_result";
+type FileKind = WrittenFileKind | "attachment" | "bot_attachment" | "tool_result";
 
 /** The kinds a bot writes with its file tools, which alone have versions. */
-export const WRITTEN_FILE_KINDS = ["document", "html"] as const satisfies readonly FileKind[];
+export const WRITTEN_FILE_KINDS = ["markdown", "html"] as const satisfies readonly FileKind[];
 
 /**
- * A file a person uploaded or a bot made, in the chat it was uploaded
+ * A file a member uploaded or a bot made, in the chat it was uploaded
  * or made in, through which it is reached and with which it goes.
  *
  * A written file's content is in `file_version`, in the blob store under
@@ -46,8 +46,8 @@ export const file = pgTable(
 			.references(() => chat.id, { onDelete: "cascade" }),
 		kind: text("kind").$type<FileKind>().notNull(),
 		/**
-		 * A written file's title; an upload's name as the person's computer had
-		 * it; an attachment's, as the bot gave it. A tool result has none.
+		 * A written file's title; an attachment's name as the member's computer
+		 * had it; a bot's attachment's, as the bot gave it. A tool result has none.
 		 */
 		name: text("name"),
 		/** For all but a written file, whose versions each have their own. */
@@ -56,11 +56,11 @@ export const file = pgTable(
 		size: integer("size"),
 		/** For a tool result: the call whose result this is. */
 		toolCallId: uuid("tool_call_id").references(() => toolCall.id, { onDelete: "set null" }),
-		/** For an upload: who uploaded it, the only one who may attach it while it is unsent. */
-		uploaderId: uuid("uploader_id").references(() => person.id, { onDelete: "set null" }),
+		/** For an attachment: who uploaded it, the only one who may send it while it is unsent. */
+		uploaderId: uuid("uploader_id").references(() => member.id, { onDelete: "set null" }),
 		/**
-		 * For an upload, the message it is attached to, unset until that message
-		 * is sent; for a bot's attachment, the reply it was attached to.
+		 * For an attachment, the message it is on, unset until that message is
+		 * sent; for a bot's attachment, the reply it was attached to.
 		 */
 		messageId: uuid("message_id").references(() => message.id, { onDelete: "cascade" }),
 		/** For a file on a message: its place among the message's files, from 0. */
@@ -81,12 +81,12 @@ export const file = pgTable(
 		uniqueIndex("file_id_kind_idx").on(table.id, table.kind),
 		check(
 			"file_kind_valid",
-			sql`${table.kind} in ('document', 'html', 'upload', 'bot_attachment', 'tool_result')`,
+			sql`${table.kind} in ('markdown', 'html', 'attachment', 'bot_attachment', 'tool_result')`,
 		),
 		check(
 			"file_source_valid",
 			sql`case ${table.kind}
-				when 'upload' then ${table.name} is not null and ${table.contentType} is not null
+				when 'attachment' then ${table.name} is not null and ${table.contentType} is not null
 					and ${table.size} is not null and ${table.toolCallId} is null
 					and (${table.messageId} is null) = (${table.position} is null)
 					and ${table.createdByBotId} is null and ${table.currentVersion} is null
@@ -136,7 +136,7 @@ export const fileVersion = pgTable(
 			columns: [table.fileId, table.fileKind],
 			foreignColumns: [file.id, file.kind],
 		}).onDelete("cascade"),
-		check("file_version_file_kind_valid", sql`${table.fileKind} in ('document', 'html')`),
+		check("file_version_file_kind_valid", sql`${table.fileKind} in ('markdown', 'html')`),
 	],
 );
 

@@ -7,11 +7,12 @@ import {
 	blobDeletion,
 	bot,
 	fileVersion,
+	member,
 	membership,
 	message,
-	person,
 	projectBot,
 	projectMember,
+	toolCall,
 	turn,
 	workspace,
 } from "../database/schema.ts";
@@ -36,10 +37,6 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 	let projectId: string;
 	/** A bot outside the project, working in a chat of its own. */
 	let botElsewhere: Files.BotInChat;
-	/** The project's bot, asked by the bot outside it from that bot's chat. */
-	let writerAskedFromChat: Files.BotInChat;
-	/** The bot outside the project, asked from one of the project's chats. */
-	let strangerAskedFromProject: Files.BotInChat;
 
 	const authoring = async () => ({
 		service: await runOnPostgres(Effect.provide(Files.Authoring, Files.authoringLayer)),
@@ -50,7 +47,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 	it("writes over a version in place, keeping its number and queueing its old content", async () => {
 		const { service } = await authoring();
 		const made = await runOnPostgres(
-			service.create(by, { kind: "document", title: "Notes", content: "# One" }),
+			service.create(by, { kind: "markdown", title: "Notes", content: "# One" }),
 		);
 
 		const over = await runOnPostgres(
@@ -80,7 +77,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 	it("keeps both of two in-place edits made at once", async () => {
 		const { service } = await authoring();
 		const made = await runOnPostgres(
-			service.create(by, { kind: "document", title: "Notes", content: "# One\n\nTwo" }),
+			service.create(by, { kind: "markdown", title: "Notes", content: "# One\n\nTwo" }),
 		);
 		const inPlaceEdit = (oldText: string, newText: string) =>
 			service.edit(by, { fileId: made.id, baseVersion: 1, oldText, newText, inPlace: true });
@@ -119,7 +116,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			);
 		};
 
-		it("gives the project's people an address on the content origin that opens the page", async () => {
+		it("gives the project's members an address on the content origin that opens the page", async () => {
 			const made = await aPage();
 			const pages = (await pagesAt("https://pages.example-content.com"))(editorId);
 
@@ -134,7 +131,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			const made = await aPage();
 			const { service } = await authoring();
 			const notes = await runOnPostgres(
-				service.create(by, { kind: "document", title: "Notes", content: "# Notes" }),
+				service.create(by, { kind: "markdown", title: "Notes", content: "# Notes" }),
 			);
 
 			const unset = (await pagesAt(undefined))(editorId);
@@ -153,7 +150,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			});
 		});
 
-		it("hides a page from people outside its project", async () => {
+		it("hides a page from members outside its project", async () => {
 			const made = await aPage();
 			const pages = (await pagesAt("https://pages.example-content.com"))(outsiderId);
 
@@ -192,60 +189,6 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		await closeDatabase();
 	});
 
-	/** A collaboration `askingBotId` asked of `collaboratorBotId` from its reply in `from`. */
-	async function aCollaboration(asked: {
-		workspaceId: string;
-		from: string;
-		askingBotId: string;
-		collaboratorBotId: string;
-		title: string;
-	}) {
-		const [reply] = await onDatabase((db) =>
-			db
-				.insert(message)
-				.values({
-					chatId: asked.from,
-					authorBotId: asked.askingBotId,
-					kind: "text",
-					status: "complete",
-					parts: [],
-					content: "",
-				})
-				.returning(),
-		);
-		if (!reply) throw new Error("fixture");
-		const [asking] = await onDatabase((db) =>
-			db
-				.insert(turn)
-				.values({
-					chatId: asked.from,
-					botId: asked.askingBotId,
-					triggerMessageId: reply.id,
-					status: "done",
-					model: "test/model",
-					startedAt: new Date(),
-				})
-				.returning(),
-		);
-		if (!asking) throw new Error("fixture");
-		return onDatabase((db) =>
-			seedChat(db, {
-				workspaceId: asked.workspaceId,
-				kind: "collaboration",
-				title: asked.title,
-				collaboration: {
-					parentChatId: asked.from,
-					rootChatId: asked.from,
-					parentMessageId: reply.id,
-					turnId: asking.id,
-					collaboratorBotId: asked.collaboratorBotId,
-					brief: "Help.",
-					atOffset: 0,
-				},
-			}),
-		);
-	}
-
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const [space] = await onDatabase((db) =>
@@ -256,7 +199,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		);
 		const [editor, outsider, admin] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values([
 					{ name: "Kim", email: `kim-${stamp}@example.com` },
 					{ name: "Ola", email: `ola-${stamp}@example.com` },
@@ -271,9 +214,9 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		adminId = admin.id;
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId, personId: editorId, role: "editor" },
-				{ workspaceId, personId: outsiderId, role: "editor" },
-				{ workspaceId, personId: adminId, role: "admin" },
+				{ workspaceId, memberId: editorId, role: "editor" },
+				{ workspaceId, memberId: outsiderId, role: "editor" },
+				{ workspaceId, memberId: adminId, role: "admin" },
 			]),
 		);
 		const room = await onDatabase((db) =>
@@ -282,7 +225,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		if (!room) throw new Error("fixture");
 		projectId = room.id;
 		await onDatabase((db) =>
-			db.insert(projectMember).values({ workspaceId, projectId, personId: editorId }),
+			db.insert(projectMember).values({ workspaceId, projectId, memberId: editorId }),
 		);
 		const [writer, stranger] = await onDatabase((db) =>
 			db
@@ -324,30 +267,13 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		);
 		by = { botId: writer.id, chatId: planning.id };
 		botElsewhere = { botId: stranger.id, chatId: strangersChat.id };
-		// The project's bot asked from the other bot's chat, and the other bot from the project.
-		const askedFromChat = await aCollaboration({
-			workspaceId,
-			from: strangersChat.id,
-			askingBotId: stranger.id,
-			collaboratorBotId: writer.id,
-			title: "Asked from the chat",
-		});
-		const askedFromProject = await aCollaboration({
-			workspaceId,
-			from: planning.id,
-			askingBotId: writer.id,
-			collaboratorBotId: stranger.id,
-			title: "Asked from the project",
-		});
-		writerAskedFromChat = { botId: writer.id, chatId: askedFromChat.id };
-		strangerAskedFromProject = { botId: stranger.id, chatId: askedFromProject.id };
 	});
 
-	it("keeps every version of a document a bot writes, for people in its project to read", async () => {
+	it("keeps every version of a document a bot writes, for members in its project to read", async () => {
 		const { service } = await authoring();
 		const made = await runOnPostgres(
 			service.create(by, {
-				kind: "document",
+				kind: "markdown",
 				title: "Launch plan",
 				content: "# Launch plan\n\n## Goals\n\nShip.\n\n## Risks\n\nNone yet.\n",
 			}),
@@ -396,7 +322,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 					fileId: made.id,
 					baseVersion: 2,
 					content: "# Doc",
-					kind: "document",
+					kind: "markdown",
 				}),
 			),
 		).toMatchObject({ _tag: "FileKindFixed", kind: "html" });
@@ -424,7 +350,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		const { service, failureOf } = await authoring();
 		const made = await runOnPostgres(
 			service.create(by, {
-				kind: "document",
+				kind: "markdown",
 				title: "Long",
 				content: `${"x".repeat(MAX_FILE_CONTENT_CHARACTERS - 1)}!`,
 			}),
@@ -437,10 +363,10 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		).toMatchObject({ _tag: "FileContentTooLarge", maxCharacters: MAX_FILE_CONTENT_CHARACTERS });
 	});
 
-	it("hides a project's files from people outside it and from bots outside it", async () => {
+	it("hides a project's files from members outside it and from bots outside it", async () => {
 		const { service, failureOf } = await authoring();
 		const made = await runOnPostgres(
-			service.create(by, { kind: "document", title: "Private", content: "# Private" }),
+			service.create(by, { kind: "markdown", title: "Private", content: "# Private" }),
 		);
 
 		const outsider = (await servedOnPostgresAs(Files.Service, Files.layer))(outsiderId);
@@ -455,7 +381,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 	it("lets an admin delete a project's file with its versions, and refuses its members", async () => {
 		const { service } = await authoring();
 		const made = await runOnPostgres(
-			service.create(by, { kind: "document", title: "Draft", content: "# One" }),
+			service.create(by, { kind: "markdown", title: "Draft", content: "# One" }),
 		);
 		await runOnPostgres(service.replace(by, { fileId: made.id, baseVersion: 1, content: "# Two" }));
 		const as = await servedOnPostgresAs(Files.Service, Files.layer);
@@ -475,10 +401,10 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 	it("shows the files a bot made in its chats to whoever reaches the bot, and to nobody else", async () => {
 		const { service } = await authoring();
 		await onDatabase((db) =>
-			db.update(bot).set({ visibility: "private" }).where(eq(bot.id, botElsewhere.botId)),
+			db.update(bot).set({ visibility: "personal" }).where(eq(bot.id, botElsewhere.botId)),
 		);
 		const made = await runOnPostgres(
-			service.create(botElsewhere, { kind: "document", title: "Diary", content: "# Diary" }),
+			service.create(botElsewhere, { kind: "markdown", title: "Diary", content: "# Diary" }),
 		);
 		const as = await servedOnPostgresAs(Files.Service, Files.layer);
 
@@ -501,7 +427,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 	it("lists the files sent on a project's messages beside those bots wrote, and only those sent", async () => {
 		const { service } = await authoring();
 		const written = await runOnPostgres(
-			service.create(by, { kind: "document", title: "Plan", content: "# Plan" }),
+			service.create(by, { kind: "markdown", title: "Plan", content: "# Plan" }),
 		);
 		const files = await runOnPostgres(Effect.provide(ChatFileStore.Service, ChatFileStore.layer));
 		const content = (text: string) => ({
@@ -510,7 +436,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		});
 		const messageIn = (
 			chatId: string,
-			author: { authorPersonId: string } | { authorBotId: string },
+			author: { authorMemberId: string } | { authorBotId: string },
 		) =>
 			onDatabase((db) =>
 				db
@@ -518,7 +444,6 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 					.values({
 						chatId,
 						...author,
-						kind: "text",
 						status: "complete",
 						parts: [],
 						content: "",
@@ -541,12 +466,44 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		await runOnPostgres(
 			files.attach({
 				chatId: by.chatId,
-				messageId: await messageIn(by.chatId, { authorPersonId: editorId }),
+				messageId: await messageIn(by.chatId, { authorMemberId: editorId }),
 				uploaderId: editorId,
 				fileIds: [sent.id],
 			}),
 		);
-		await runOnPostgres(files.write({ chatId: by.chatId, content: content("a long result") }));
+		const replyId = await messageIn(by.chatId, { authorBotId: by.botId });
+		const [call] = await onDatabase((db) =>
+			Effect.gen(function* () {
+				const [ran] = yield* db
+					.insert(turn)
+					.values({
+						chatId: by.chatId,
+						botId: by.botId,
+						triggerMessageId: replyId,
+						status: "done",
+						model: "test/model",
+						startedAt: new Date(),
+					})
+					.returning({ id: turn.id });
+				if (!ran) throw new Error("fixture");
+				return yield* db
+					.insert(toolCall)
+					.values({
+						chatId: by.chatId,
+						messageId: replyId,
+						turnId: ran.id,
+						tool: "web_fetch",
+						status: "completed",
+						input: {},
+						atOffset: 0,
+					})
+					.returning({ id: toolCall.id });
+			}),
+		);
+		if (!call) throw new Error("fixture");
+		await runOnPostgres(
+			files.write({ chatId: by.chatId, toolCallId: call.id, content: content("a long result") }),
+		);
 		const attachTo = async (chatId: string, botId: string, name: string) => {
 			const messageId = await messageIn(chatId, { authorBotId: botId });
 			return runOnPostgres(
@@ -563,64 +520,24 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			);
 		};
 		const chart = await attachTo(by.chatId, by.botId, "chart.csv");
-		// Attached in a collaboration opened from the project, where only the bots read it.
-		await attachTo(strangerAskedFromProject.chatId, strangerAskedFromProject.botId, "aside.csv");
 
 		const as = await servedOnPostgresAs(Files.Service, Files.layer);
 		const listed = await as(editorId).listInProject({ projectId });
 
 		expect(listed.map(({ id }) => id).sort()).toEqual([written.id, sent.id, chart.id].sort());
 		expect(listed.find(({ id }) => id === sent.id)).toMatchObject({
-			kind: "upload",
+			kind: "attachment",
 			name: "brief.txt",
-			sentBy: "Kim",
+			author: "Kim",
 		});
 		expect(listed.find(({ id }) => id === chart.id)).toMatchObject({
-			kind: "attachment",
+			kind: "bot_attachment",
 			name: "chart.csv",
-			sentBy: "Writer",
+			author: "Writer",
 		});
 		// Only a written file is read here; a sent one is read through its chat.
 		await expect(as(editorId).get({ fileId: sent.id })).rejects.toMatchObject({
 			_tag: "ResourceHidden",
 		});
-	});
-
-	it("keeps a bot's files with the chat it made them in, wherever else it works", async () => {
-		const { service, failureOf } = await authoring();
-		const inProject = await runOnPostgres(
-			service.create(by, { kind: "document", title: "Project plan", content: "# Plan" }),
-		);
-		const forTheChat = await runOnPostgres(
-			service.create(writerAskedFromChat, { kind: "document", title: "Answer", content: "# A" }),
-		);
-		const forTheProject = await runOnPostgres(
-			service.create(strangerAskedFromProject, { kind: "document", title: "Help", content: "# H" }),
-		);
-		const ids = (summaries: { id: string }[]) => summaries.map(({ id }) => id).sort();
-
-		// Asked from another bot's chat, the project's bot can't bring the project's files.
-		expect(await failureOf(service.read(writerAskedFromChat, inProject.id))).toMatchObject({
-			_tag: "FileNotFound",
-		});
-		expect(ids(await runOnPostgres(service.list(writerAskedFromChat)))).toEqual([forTheChat.id]);
-		// What it made there belongs to the chat that asked, and the project sees what it asked for.
-		expect(ids(await runOnPostgres(service.list(botElsewhere)))).toEqual([forTheChat.id]);
-		expect(ids(await runOnPostgres(service.list(by)))).toEqual(
-			[inProject.id, forTheProject.id].sort(),
-		);
-
-		const as = await servedOnPostgresAs(Files.Service, Files.layer);
-		expect(ids(await as(editorId).listInProject({ projectId }))).toEqual(
-			[inProject.id, forTheProject.id].sort(),
-		);
-		const botsOwn = async (botId: string) =>
-			ids(
-				await as(editorId).listInProject({
-					projectId: await runOnPostgres(defaultProjectOf(botId)),
-				}),
-			);
-		expect(await botsOwn(by.botId)).toEqual([]);
-		expect(await botsOwn(botElsewhere.botId)).toEqual([forTheChat.id]);
 	});
 });

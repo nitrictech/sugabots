@@ -4,12 +4,12 @@ import {
 	type BotPermissions,
 	botParticipantOf,
 	type ChatDetails,
+	type CurrentUser,
 	type ModelProvider,
 	type Project,
 	type ProjectChat,
 	type ProjectPermissions,
 	type ResourcePermissions,
-	type SignedInPerson,
 	type StreamEvent,
 	type SystemBot,
 	type WorkspaceRole,
@@ -20,7 +20,7 @@ import {
 	listedChat,
 	listedConnector,
 	type TestConnector,
-	testPerson,
+	testMember,
 } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -55,7 +55,7 @@ import { TooltipProvider } from "@/ui/tooltip.tsx";
  * around, because the router is the real one.
  */
 
-export const sam: SignedInPerson = {
+export const sam: CurrentUser = {
 	id: "0199a3a0-0000-7000-8000-000000000009",
 	email: "sam@example.com",
 	name: "Sam",
@@ -65,8 +65,8 @@ export const sam: SignedInPerson = {
 /** Sam, as a bot names who added it. */
 const samAsCreator = { id: sam.id, name: sam.name, email: sam.email, image: null };
 
-/** A second person in the workspace, so the roster has somebody who is not you. */
-export const juno: SignedInPerson = {
+/** A second member in the workspace, so the roster has somebody who is not you. */
+export const juno: CurrentUser = {
 	id: "0199a3a0-0000-7000-8000-00000000000a",
 	email: "juno@example.com",
 	name: "Juno",
@@ -107,7 +107,7 @@ const USER_OF_RESOURCES: ResourcePermissions = {
 /** Every project permission, as an admin gets them. */
 const ADMIN_IN_PROJECT: ProjectPermissions = {
 	rename: true,
-	managePeople: true,
+	manageMembers: true,
 	manageBots: true,
 	leave: false,
 	join: false,
@@ -127,7 +127,7 @@ const EDITOR_IN_PROJECT: ProjectPermissions = {
 /** What a viewer gets there: nothing they could change. */
 const VIEWER_IN_PROJECT: ProjectPermissions = {
 	...EDITOR_IN_PROJECT,
-	managePeople: false,
+	manageMembers: false,
 	manageBots: false,
 	resources: { ...USER_OF_RESOURCES, runAutomations: false, useDesktop: false },
 };
@@ -203,6 +203,7 @@ export const modelProviders: ModelProvider[] = [
 		customHeaders: [],
 		lastTestError: null,
 		connectedBy: null,
+		signedInAs: null,
 		createdAt: "2026-09-09T00:00:00.000Z",
 		models: [
 			{
@@ -231,6 +232,7 @@ export const modelProviders: ModelProvider[] = [
 		customHeaders: [],
 		lastTestError: null,
 		connectedBy: null,
+		signedInAs: null,
 		createdAt: "2026-09-09T00:00:00.000Z",
 		models: [
 			{
@@ -259,7 +261,7 @@ export const bots: Bot[] = [
 		eyes: "dot",
 		shape: "circle",
 		model: MODELS[1] as string,
-		prompt: "",
+		instructions: "",
 		disabledTools: [],
 		usesComputer: false,
 		naturalBrowsing: false,
@@ -281,7 +283,7 @@ export const bots: Bot[] = [
 		eyes: "arc",
 		shape: "circle",
 		model: MODELS[0] as string,
-		prompt: "",
+		instructions: "",
 		disabledTools: [],
 		usesComputer: false,
 		naturalBrowsing: false,
@@ -303,7 +305,7 @@ export const bots: Bot[] = [
 		eyes: "pill",
 		shape: "circle",
 		model: MODELS[0] as string,
-		prompt: "Be brief.",
+		instructions: "Be brief.",
 		disabledTools: [],
 		usesComputer: false,
 		naturalBrowsing: false,
@@ -326,20 +328,20 @@ export const personalAssistant: Bot = {
 	defaultProjectId: "0199a3a0-0000-7000-8000-0000000002bf",
 	name: "Personal Assistant",
 	handle: "personal-assistant",
-	description: "Your private assistant.",
+	description: "Your guide to the workspace.",
 	color: "green",
 	eyes: "pill",
 	shape: "circle",
 	model: MODELS[1] as string,
-	prompt: "",
+	instructions: "",
 	disabledTools: [],
 	usesComputer: false,
 	naturalBrowsing: false,
 	createdBy: samAsCreator,
-	visibility: "private",
+	visibility: "personal",
 	assistant: true,
 	pinned: false,
-	// As the API answers: its person manages all but its computer, which Sugabots manages.
+	// As the API answers: its member manages all but its computer, which Sugabots manages.
 	permissions: {
 		...MANAGER_OF_BOT,
 		delete: false,
@@ -392,14 +394,13 @@ export function chatDetails(bot: Bot, chat: ProjectChat = chatWith(bot)): ChatDe
 			...placed,
 			rootChatId: chat.id,
 			kind: "project_chat",
-			status: "done",
-			parentChatId: null,
+			working: false,
 		},
 		automationRun: null,
 		participants: [participant],
 		projectBots: [participant],
 		// Sam reaches the bot, so its default project.
-		peopleReachingProject: [testPerson({ id: sam.id, name: sam.name })],
+		membersReachingProject: [testMember({ id: sam.id, name: sam.name })],
 		messages: [],
 		olderMessagesCursor: null,
 		queuedSince: null,
@@ -441,13 +442,13 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			{
 				id: "0199a3a0-0000-7000-8000-0000000000d1",
 				role: "admin",
-				person: sam,
+				member: sam,
 				joinedAt: "2026-09-09T00:00:00.000Z",
 			},
 			{
 				id: "0199a3a0-0000-7000-8000-0000000000d2",
 				role: "editor",
-				person: juno,
+				member: juno,
 				joinedAt: "2026-09-10T00:00:00.000Z",
 			},
 		]),
@@ -481,8 +482,8 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		),
 	);
 	client.api.projects.listMembers.mockReturnValue(Effect.succeed([]));
-	client.api.projects.listPeople.mockReturnValue(
-		Effect.succeed([testPerson({ id: sam.id, name: sam.name })]),
+	client.api.projects.listMembersReaching.mockReturnValue(
+		Effect.succeed([testMember({ id: sam.id, name: sam.name })]),
 	);
 	// Both of the seed's Suga-Team bots are in each project.
 	client.api.projects.listBots.mockReturnValue(Effect.succeed([triager, linear]));
@@ -542,7 +543,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 				createBots: role !== "viewer",
 				updateWorkspace: administersWorkspace(role),
 				manageProviders: administersWorkspace(role),
-				managePeople: administersWorkspace(role),
+				manageMembers: administersWorkspace(role),
 				chooseSystemModel: administersWorkspace(role),
 				manageUsage: administersWorkspace(role),
 				manageAdmins: role === "owner",
@@ -670,7 +671,7 @@ export function prefersReducedMotion(): void {
 	});
 }
 
-/** Types `text` into a composer's `box`, as a person would, all at once. */
+/** Types `text` into a composer's `box`, as a member would, all at once. */
 export function writeDraft(box: HTMLElement, text: string): void {
 	box.textContent = text;
 	fireEvent.input(box);
@@ -685,11 +686,11 @@ export function writeDraft(box: HTMLElement, text: string): void {
 export function mount(
 	path: string,
 	{
-		person = sam,
+		member = sam,
 		refresh = vi.fn(),
 		queries = createQueryClient(),
 	}: {
-		person?: SignedInPerson | null;
+		member?: CurrentUser | null;
 		refresh?: () => Promise<void>;
 		queries?: QueryClient;
 	} = {},
@@ -699,7 +700,7 @@ export function mount(
 	});
 
 	render(
-		<TestApp router={router} queries={queries} session={{ person, error: undefined, refresh }} />,
+		<TestApp router={router} queries={queries} session={{ member, error: undefined, refresh }} />,
 	);
 
 	return { router, queries };

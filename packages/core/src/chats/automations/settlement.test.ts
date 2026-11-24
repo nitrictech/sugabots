@@ -8,11 +8,11 @@ import type { CommittedEvent } from "../../database/events/outbox.ts";
 import {
 	automation,
 	automationRun,
-	collaboration,
-	lane,
+	bot,
 	laneRequest,
 	message,
 	placedChat,
+	projectBot,
 	toolCall,
 	turn,
 } from "../../database/schema.ts";
@@ -37,7 +37,6 @@ import {
 	replyTurnOf,
 	runningTurns,
 	ToolCallStore,
-	Turn,
 	type TurnCheckpoint,
 	TurnExecution,
 	TurnStore,
@@ -47,7 +46,7 @@ import type { Turns } from "../turns/turns.ts";
 import { AutomationRunner } from "./automation-runner.ts";
 import { Automations } from "./automations.ts";
 import { AutomationSettlement } from "./settlement.ts";
-import { anAutomationOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
+import { anAutomationAdmin, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
 
 /**
  * Automation settlement against Postgres, driven by the events that settle a
@@ -62,7 +61,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	};
 	const services = await chatServicesForTests(bus);
 	const { emit } = Context.get(services, ChatEvents.Service);
-	/** As the automations' owner, who administers their workspace. */
+	/** As an admin of the automations' workspace. */
 	let automations: Promised<Automations.Interface>;
 	const { settleRun, failRun } = Context.get(services, AutomationSettlement.Service);
 	const settlement = onPostgres({ settleRun, failRun });
@@ -87,7 +86,9 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	let workspaceId: string;
 	let botId: string;
 	let ownProjectId: string;
-	let personId: string;
+	/** A project members made, which the automation bot leads. */
+	let projectId: string;
+	let memberId: string;
 
 	afterAll(async () => {
 		await closeDatabase();
@@ -95,14 +96,17 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 	beforeEach(async () => {
 		delivered = [];
-		({ workspaceId, botId, personId, ownProjectId } = await anAutomationOwner());
-		automations = onPostgresAs(personId)(Context.get(services, Automations.Service));
+		({ workspaceId, botId, memberId, ownProjectId, projectId } = await anAutomationAdmin());
+		automations = onPostgresAs(memberId)(Context.get(services, Automations.Service));
 	});
 
-	/** An automation with one accepted manual trigger, whose run has started and asked for its turn. */
-	async function aRunningRun() {
+	/**
+	 * An automation of the project `inProject`, the bot's own by default, with
+	 * one accepted manual trigger, whose run has started and asked for its turn.
+	 */
+	async function aRunningRun(inProject = ownProjectId) {
 		const created = await automations.create(
-			{ projectId: ownProjectId },
+			{ projectId: inProject },
 			{
 				name: `Settlement ${crypto.randomUUID()}`,
 				instructions: "Complete the delegated work.",
@@ -111,7 +115,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		);
 		const requestId = crypto.randomUUID();
 		const accepted = await automations.run({
-			projectId: ownProjectId,
+			projectId: inProject,
 			automationId: created.automation.id,
 			requestId,
 		});
@@ -123,16 +127,36 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	}
 
 	/**
-	 * A running run whose turn delegated to a collaborator: the asking turn is
-	 * done, its collaboration is `status`, and the run's turn workflow still
-	 * holds its lane.
+	 * A running run of a project's automation whose bot asked another of the
+	 * project's bots for help: its asking turn is done, with the reply that
+	 * mentioned the helper, and the helper's turn on that reply is asked for in
+	 * the run's chat, holding its lane, as the run's own turn workflow still
+	 * holds its.
 	 */
-	async function aRunWithCollaboration(status: "waiting" | "pending") {
-		const { accepted, run } = await aRunningRun();
+	async function aRunWithHelper() {
+		const { accepted, run } = await aRunningRun(projectId);
 		const [triggerMessage] = await onDatabase((db) =>
 			db.select({ id: message.id }).from(message).where(eq(message.chatId, accepted.chatId)),
 		);
 		if (!triggerMessage) throw new Error("Settlement test trigger message is missing");
+		const [helper] = await onDatabase((db) =>
+			db
+				.insert(bot)
+				.values({
+					workspaceId,
+					name: "Helper Bot",
+					handle: `helper-${crypto.randomUUID()}`,
+					color: "rose",
+					eyes: "dot",
+					model: "test/model",
+					createdById: memberId,
+				})
+				.returning(),
+		);
+		if (!helper) throw new Error("Could not create settlement test helper");
+		await onDatabase((db) =>
+			db.insert(projectBot).values({ workspaceId, projectId, botId: helper.id }),
+		);
 		const now = new Date();
 		const [askingTurn] = await onDatabase((db) =>
 			db
@@ -142,6 +166,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 					botId,
 					triggerMessageId: triggerMessage.id,
 					status: "done",
+					reason: "automation",
 					model: "test/model",
 					startedAt: now,
 					finishedAt: now,
@@ -149,54 +174,36 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 				.returning(),
 		);
 		if (!askingTurn) throw new Error("Could not create settlement test turn");
-		const [parentMessage] = await onDatabase((db) =>
+		const [askingMessage] = await onDatabase((db) =>
 			db
 				.insert(message)
 				.values({
 					chatId: accepted.chatId,
 					authorBotId: botId,
-					kind: "text",
 					status: "complete",
 					parts: [],
-					content: "Delegating.",
+					content: `@${helper.handle} Complete the delegated work.`,
 					turnId: askingTurn.id,
 				})
 				.returning(),
 		);
-		if (!parentMessage) throw new Error("Could not create settlement test asking message");
-		const [placedRun] = await onDatabase((db) =>
-			db
-				.select({ rootChatId: placedChat.rootChatId })
-				.from(placedChat)
-				.where(eq(placedChat.id, accepted.chatId)),
-		);
-		const rootChatId = placedRun?.rootChatId;
-		if (!rootChatId) throw new Error("The run has no root chat");
-		const childChat = await onDatabase((db) =>
-			seedChat(db, {
-				workspaceId,
-				kind: "collaboration",
-				title: "Delegated work",
-				collaboration: {
-					parentChatId: accepted.chatId,
-					rootChatId,
-					parentMessageId: parentMessage.id,
-					turnId: askingTurn.id,
-					collaboratorBotId: botId,
-					brief: "Complete delegated work",
-					status,
-					atOffset: 0,
-				},
+		if (!askingMessage) throw new Error("Could not create settlement test asking message");
+		const [runningTurn] = await runOnPostgres(runningTurns(accepted.chatId));
+		await runOnPostgres(
+			queueTurnForTests({
+				chatId: accepted.chatId,
+				botId: helper.id,
+				triggerMessageId: askingMessage.id,
+				reason: "collaboration",
 			}),
 		);
-		const [activeCollaboration] = await onDatabase((db) =>
-			db.select().from(collaboration).where(eq(collaboration.chatId, childChat.id)),
+		const helperTurn = (await runOnPostgres(runningTurns(accepted.chatId))).find(
+			({ request }) => request.botId === helper.id,
 		);
-		const [runningTurn] = await runOnPostgres(runningTurns(accepted.chatId));
-		if (!activeCollaboration || !runningTurn) {
+		if (!runningTurn || !helperTurn) {
 			throw new Error("Could not create settlement test active work");
 		}
-		return { accepted, run, askingTurn, childChat, activeCollaboration, runningTurn };
+		return { accepted, run, askingTurn, askingMessage, helper, runningTurn, helperTurn };
 	}
 
 	/**
@@ -229,7 +236,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		await runOnPostgres(releaseTurn(turnRun));
 		await turns.complete(
 			replyTurnOf(prepared),
-			{ content, collaborations: [], toolCalls: calls },
+			{ content, toolCalls: calls },
 			{ contextCapacity: 128_000, readKeptFrom: null },
 		);
 	}
@@ -251,7 +258,6 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 				.values({
 					chatId,
 					authorBotId: botId,
-					kind: "text",
 					status: "complete",
 					parts: [],
 					content: "Earlier work.",
@@ -281,7 +287,6 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 				.values({
 					chatId,
 					authorBotId: botId,
-					kind: "text",
 					status: "complete",
 					parts: [],
 					content: "Asking first.",
@@ -389,15 +394,12 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	});
 
 	it.each([
-		{
-			outcome: failed(userText`Model failed`),
-			collaborationStatus: "waiting" as const,
-		},
-		{ outcome: { state: "cancelled" } as const, collaborationStatus: "pending" as const },
+		{ outcome: failed(userText`Model failed`) },
+		{ outcome: { state: "cancelled" } as const },
 	])(
-		"ends a run early as $outcome.state despite a $collaborationStatus collaboration",
-		async ({ outcome, collaborationStatus }) => {
-			const fixture = await aRunWithCollaboration(collaborationStatus);
+		"ends a run early as $outcome.state despite a helper's turn still to run",
+		async ({ outcome }) => {
+			const fixture = await aRunWithHelper();
 			// Asked for while the first turn runs, so it waits in the lane.
 			await runOnPostgres(
 				queueTurnForTests({
@@ -408,11 +410,8 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 				}),
 			);
 
-			await announce(ended(fixture.childChat.id, outcome));
+			await announce(ended(fixture.accepted.chatId, outcome));
 
-			const [settledCollaboration] = await onDatabase((db) =>
-				db.select().from(collaboration).where(eq(collaboration.id, fixture.activeCollaboration.id)),
-			);
 			const waitingTurns = await onDatabase((db) =>
 				db
 					.select()
@@ -424,16 +423,12 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 				error: outcome.state === "failed" ? outcome.error : null,
 				finishedAt: expect.any(Date),
 			});
-			expect(settledCollaboration?.status).toBe("failed");
-			expect(delivered).toContainEqual(
-				expect.objectContaining({
-					event: expect.objectContaining({
-						type: "collaboration.updated",
-						collaboration: expect.objectContaining({ status: "failed" }),
-					}),
-				}),
-			);
 			expect(waitingTurns).toEqual([]);
+			// The helper's turn is refused once its workflow starts it.
+			expect(await execution.prepare(fixture.helperTurn)).toMatchObject({
+				_tag: "NotRunnable",
+				reason: "The automation run has ended",
+			});
 		},
 	);
 
@@ -468,58 +463,35 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		expect(await settlement.settleRun(run)).toBe(true);
 	});
 
-	it("keeps a run going while its work remains active", async () => {
-		const fixture = await aRunWithCollaboration("waiting");
+	it("keeps a run going while a bot it asked for help still has a turn to take", async () => {
+		const fixture = await aRunWithHelper();
 		await runOnPostgres(releaseTurn(fixture.runningTurn));
 
 		expect(await settlement.settleRun(fixture.run)).toBe(false);
-
-		const [activeCollaboration] = await onDatabase((db) =>
-			db.select().from(collaboration).where(eq(collaboration.id, fixture.activeCollaboration.id)),
-		);
 		expect(await executionOf(fixture.accepted.runId)).toMatchObject({
 			state: "running",
 			finishedAt: null,
 		});
-		expect(activeCollaboration?.status).toBe("waiting");
 	});
 
-	it("keeps a run going while a turn lane in its collaboration is busy", async () => {
-		const fixture = await aRunWithCollaboration("waiting");
+	it("settles a run once its helper's lane is free, when the helper took no turn", async () => {
+		const fixture = await aRunWithHelper();
 		await runOnPostgres(releaseTurn(fixture.runningTurn));
-		await onDatabase((db) =>
-			db
-				.update(collaboration)
-				.set({ status: "answered" })
-				.where(eq(collaboration.id, fixture.activeCollaboration.id)),
-		);
-		const busy = {
-			key: turnLane({ chatId: fixture.childChat.id, botId }),
-			subject: fixture.childChat.id,
-			workflow: Turn._tag,
-			state: "running" as const,
-			executionId: crypto.randomUUID(),
-		};
-		await onDatabase((db) => db.insert(lane).values(busy));
-
 		expect(await settlement.settleRun(fixture.run)).toBe(false);
 
-		await onDatabase((db) =>
-			db
-				.update(lane)
-				.set({ state: "idle", workflow: null, executionId: null })
-				.where(eq(lane.key, busy.key)),
-		);
-		await announce(ChatEvent.LaneReleased({ chatId: fixture.childChat.id }));
+		await runOnPostgres(releaseTurn(fixture.helperTurn));
+		await announce(ChatEvent.LaneReleased(fixture.helperTurn.request));
+
+		// No helper's turn ever ran, so its asking bot is owed no hand-back.
 		expect(await executionOf(fixture.accepted.runId)).toMatchObject({ state: "completed" });
 	});
 
 	it("tells the workflows of waiting turns to stop once a run ending early commits", async () => {
-		const fixture = await aRunWithCollaboration("waiting");
+		const fixture = await aRunWithHelper();
 		await onDatabase((db) =>
 			db
 				.update(turn)
-				.set({ status: "waiting", owner: "workflow-execution" })
+				.set({ status: "waiting", executionId: "workflow-execution" })
 				.where(eq(turn.chatId, fixture.accepted.chatId)),
 		);
 		const sentBeforeCommit: number[] = [];
@@ -530,7 +502,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			transaction(
 				Effect.gen(function* () {
 					yield* Context.get(ending, ChatEvents.Service).emit([
-						ended(fixture.childChat.id, { state: "cancelled" }),
+						ended(fixture.accepted.chatId, { state: "cancelled" }),
 					]);
 					// Queued behind the handlers, so it runs after settlement and before the commit.
 					yield* beforeCommit(Effect.sync(() => sentBeforeCommit.push(cancel.mock.calls.length)));
@@ -547,10 +519,10 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	});
 
 	it("asks a running turn to stop, and waits for it, before ending a run as failed", async () => {
-		const fixture = await aRunWithCollaboration("waiting");
+		const fixture = await aRunWithHelper();
 		await runAgain(fixture.askingTurn.id);
 
-		await announce(ended(fixture.childChat.id, failed(userText`Child model failed`)));
+		await announce(ended(fixture.accepted.chatId, failed(userText`Helper's model failed`)));
 
 		const [stopping] = await onDatabase((db) =>
 			db.select().from(turn).where(eq(turn.id, fixture.askingTurn.id)),
@@ -558,15 +530,15 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		expect(await executionOf(fixture.accepted.runId)).toMatchObject({
 			state: "running",
 			pendingTerminalState: "failed",
-			pendingTerminalError: "Child model failed",
+			pendingTerminalError: "Helper's model failed",
 			finishedAt: null,
 		});
-		expect(stopping?.cancelRequested).toBe(true);
+		expect(stopping?.interruptRequested).toBe(true);
 		// The workflow running it hears at once, rather than on its next poll.
 		expect(delivered).toContainEqual(
 			expect.objectContaining({
 				event: expect.objectContaining({
-					type: "turn.cancel_requested",
+					type: "turn.interrupt_requested",
 					turnId: fixture.askingTurn.id,
 				}),
 			}),
@@ -582,7 +554,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		expect(await settlement.settleRun(fixture.run)).toBe(true);
 		expect(await executionOf(fixture.accepted.runId)).toMatchObject({
 			state: "failed",
-			error: userText`Child model failed`,
+			error: userText`Helper's model failed`,
 			pendingTerminalState: null,
 			pendingTerminalError: null,
 			finishedAt: expect.any(Date),
@@ -590,36 +562,12 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	});
 
 	it("refuses to open a turn once a run has started ending", async () => {
-		const fixture = await aRunWithCollaboration("waiting");
+		const fixture = await aRunWithHelper();
 		await runAgain(fixture.askingTurn.id);
-		const [childTrigger] = await onDatabase((db) =>
-			db
-				.insert(message)
-				.values({
-					chatId: fixture.childChat.id,
-					authorBotId: botId,
-					kind: "text",
-					status: "complete",
-					parts: [],
-					content: "Start child work.",
-				})
-				.returning(),
-		);
-		if (!childTrigger) throw new Error("Could not create settlement test child trigger");
-		await runOnPostgres(
-			queueTurnForTests({
-				chatId: fixture.childChat.id,
-				botId,
-				triggerMessageId: childTrigger.id,
-				reason: "collaboration",
-			}),
-		);
-		const [childRun] = await runOnPostgres(runningTurns(fixture.childChat.id));
-		if (!childRun) throw new Error("Could not start settlement test child turn");
 
-		await announce(ended(fixture.childChat.id, failed(userText`Child model failed`)));
+		await announce(ended(fixture.accepted.chatId, failed(userText`Helper's model failed`)));
 
-		expect(await execution.prepare(childRun)).toMatchObject({
+		expect(await execution.prepare(fixture.helperTurn)).toMatchObject({
 			_tag: "NotRunnable",
 			reason: "The automation run has ended",
 		});
@@ -644,12 +592,12 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const [skipped] = await onDatabase((db) =>
 			db.select().from(turn).where(eq(turn.id, prepared.turnId)),
 		);
-		expect(skipped).toMatchObject({ status: "running", cancelRequested: false });
+		expect(skipped).toMatchObject({ status: "running", interruptRequested: false });
 		expect(await executionOf(run.runId)).toMatchObject({
 			state: "running",
 			pendingTerminalState: "failed",
 		});
-		const draft = { content: "Half a reply", collaborations: [], toolCalls: [] };
+		const draft = { content: "Half a reply", toolCalls: [] };
 		const replyTurn = replyTurnOf(prepared);
 		expect(await turns.suspend(replyTurn, checkpointFor(draft), [])).toBe(false);
 
@@ -662,7 +610,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	});
 
 	it("lets a transaction holding a turn record the run's ending while settlement waits on that turn", async () => {
-		const fixture = await aRunWithCollaboration("waiting");
+		const fixture = await aRunWithHelper();
 		await onDatabase((db) =>
 			db.update(turn).set({ status: "waiting" }).where(eq(turn.id, fixture.askingTurn.id)),
 		);
@@ -681,7 +629,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 				return backend?.pid ?? 0;
 			}),
 			// Ends a turn in the run, as a turn writer holding its turn does.
-			emit([ended(fixture.childChat.id, { state: "cancelled" })]),
+			emit([ended(fixture.accepted.chatId, { state: "cancelled" })]),
 		);
 		const pid = await holder.held;
 
@@ -715,7 +663,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 		await turns.complete(
 			replyTurnOf(prepared),
-			{ content: "Done.", collaborations: [], toolCalls: [] },
+			{ content: "Done.", toolCalls: [] },
 			{ contextCapacity: 128_000, readKeptFrom: null },
 		);
 
@@ -723,7 +671,9 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const completed = types.indexOf("turn.completed");
 		const settled = delivered.findIndex(
 			({ event }) =>
-				event.type === "chat.item_changed" && "chatId" in event && event.chatId === accepted.chatId,
+				event.type === "chat.nested_chat_changed" &&
+				"chatId" in event &&
+				event.chatId === accepted.chatId,
 		);
 		expect(completed).toBeGreaterThanOrEqual(0);
 		expect(settled).toBeGreaterThan(completed);
@@ -742,7 +692,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const inFeed = posted.find((row) => row.chatKind === "automation_feed");
 		const chatId = inFeed?.rootChatId;
 		if (!chatId) throw new Error("The result was posted outside a chat");
-		const page = await onPostgresAs(personId)(Context.get(services, ChatView.Service)).messages(
+		const page = await onPostgresAs(memberId)(Context.get(services, ChatView.Service)).messages(
 			chatId,
 		);
 		expect(page.items).toContainEqual({
@@ -799,7 +749,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		};
 		const notes = {
 			fileId: crypto.randomUUID(),
-			kind: "document" as const,
+			kind: "markdown" as const,
 			title: "Traction notes",
 			version: 1,
 		};
@@ -822,7 +772,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const { accepted, run } = await aRunningRun();
 		const report = {
 			fileId: crypto.randomUUID(),
-			kind: "document" as const,
+			kind: "markdown" as const,
 			title: "Weekly report",
 			version: 2,
 		};
@@ -909,53 +859,50 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	});
 
 	it("settles a run once when its last two pieces of work finish together", async () => {
-		const fixture = await aRunWithCollaboration("waiting");
-		await runAgain(fixture.askingTurn.id);
-		const [childTrigger] = await onDatabase((db) =>
-			db
-				.insert(message)
-				.values({
-					chatId: fixture.childChat.id,
-					authorBotId: botId,
-					kind: "text",
-					status: "complete",
-					parts: [],
-					content: "Start child work.",
-				})
-				.returning(),
+		const { accepted } = await aRunningRun();
+		const [runningTurn] = await runOnPostgres(runningTurns(accepted.chatId));
+		if (!runningTurn) throw new Error("The run asked for no turn");
+		const pieces = await Promise.all(
+			["First piece.", "Second piece."].map(async (content) => {
+				const [trigger] = await onDatabase((db) =>
+					db
+						.insert(message)
+						.values({
+							chatId: accepted.chatId,
+							authorBotId: botId,
+							status: "complete",
+							parts: [],
+							content,
+						})
+						.returning(),
+				);
+				if (!trigger) throw new Error("Could not create settlement test trigger");
+				const [piece] = await onDatabase((db) =>
+					db
+						.insert(turn)
+						.values({
+							chatId: accepted.chatId,
+							botId,
+							triggerMessageId: trigger.id,
+							status: "running",
+							model: "test/model",
+							startedAt: new Date(),
+						})
+						.returning(),
+				);
+				if (!piece) throw new Error("Could not create settlement test turn");
+				return piece;
+			}),
 		);
-		if (!childTrigger) throw new Error("Could not create settlement test child trigger");
-		const [childTurn] = await onDatabase((db) =>
-			db
-				.insert(turn)
-				.values({
-					chatId: fixture.childChat.id,
-					botId,
-					triggerMessageId: childTrigger.id,
-					status: "running",
-					model: "test/model",
-					startedAt: new Date(),
-				})
-				.returning(),
-		);
-		if (!childTurn) throw new Error("Could not create settlement test child turn");
-		await onDatabase((db) =>
-			db
-				.update(collaboration)
-				.set({ status: "failed" })
-				.where(eq(collaboration.id, fixture.activeCollaboration.id)),
-		);
+		const [first, second] = pieces;
+		if (!first || !second) throw new Error("Could not create settlement test work");
 
 		let arrivals = 0;
 		let release: (() => void) | undefined;
 		const bothWorkersFinished = new Promise<void>((resolve) => {
 			release = resolve;
 		});
-		const finish = (
-			turnId: string,
-			endWork: Effect.Effect<unknown, unknown, Database>,
-			chatId: string,
-		) =>
+		const finish = (turnId: string, endWork: Effect.Effect<unknown, unknown, Database>) =>
 			runOnPostgres(
 				transaction(
 					Effect.gen(function* () {
@@ -969,26 +916,23 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 						arrivals += 1;
 						if (arrivals === 2) release?.();
 						yield* Effect.promise(() => bothWorkersFinished);
-						yield* emit([ChatEvent.LaneReleased({ chatId })]);
+						yield* emit([ChatEvent.LaneReleased(runningTurn.request)]);
 					}),
 				),
 			);
 
 		delivered = [];
-		await Promise.all([
-			finish(fixture.askingTurn.id, releaseTurn(fixture.runningTurn), fixture.accepted.chatId),
-			finish(childTurn.id, Effect.void, fixture.childChat.id),
-		]);
+		await Promise.all([finish(first.id, releaseTurn(runningTurn)), finish(second.id, Effect.void)]);
 
-		expect(await executionOf(fixture.accepted.runId)).toMatchObject({
+		expect(await executionOf(accepted.runId)).toMatchObject({
 			state: "completed",
 			finishedAt: expect.any(Date),
 		});
 		const settledAnnouncements = delivered.filter(
 			({ event }) =>
-				event.type === "chat.item_changed" &&
+				event.type === "chat.nested_chat_changed" &&
 				"chatId" in event &&
-				event.chatId === fixture.accepted.chatId,
+				event.chatId === accepted.chatId,
 		);
 		expect(settledAnnouncements).toHaveLength(1);
 	});

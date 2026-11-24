@@ -45,19 +45,6 @@ describe("Egress.layer", () => {
 			"resolved",
 		],
 		["outside production when refused", { ALLOW_UNSAFE_WORKSPACE_URLS: "false" }, PRIVATE],
-		[
-			"in production when allowed by the deprecated name",
-			{ NODE_ENV: "production", ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "true" },
-			"resolved",
-		],
-		[
-			"when the new name refuses what the deprecated name allows",
-			{
-				ALLOW_UNSAFE_WORKSPACE_URLS: "false",
-				ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "true",
-			},
-			PRIVATE,
-		],
 	])(
 		"lets workspace addresses reach a private network %s as configured",
 		async (_, env, expected) => {
@@ -82,7 +69,6 @@ describe("Egress.layer", () => {
 
 	it.each([
 		["ALLOW_UNSAFE_WORKSPACE_URLS", "maybe"],
-		["ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK", "maybe"],
 		["ALLOW_PRIVATE_WEB_FETCH_NETWORK", "ture"],
 	])("refuses to start when %s is not a boolean", async (name, value) => {
 		const exit = await withEgress({ [name]: value }, async () => undefined);

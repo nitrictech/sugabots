@@ -1,8 +1,8 @@
 import {
 	type BotParticipant,
+	type CurrentUser,
 	MESSAGE_MAX_LENGTH,
 	type MessageReplyTo,
-	type SignedInPerson,
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { type Dispatch, type SetStateAction, useState } from "react";
@@ -39,7 +39,7 @@ export function useMessageSending({
 	scrollToLatest,
 }: {
 	chatId: string;
-	signedIn: SignedInPerson;
+	signedIn: CurrentUser;
 	draft: string;
 	setDraft: Dispatch<SetStateAction<string>>;
 	replyingTo: MessageReplyTo | undefined;

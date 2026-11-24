@@ -1,4 +1,4 @@
-import type { Bot, SignedInPerson } from "@sugabots/contracts";
+import type { Bot, CurrentUser } from "@sugabots/contracts";
 import { Plus, RefreshCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useOpenAutomationFeed } from "@/lib/chats.ts";
@@ -15,7 +15,7 @@ import type { StagedChange } from "./staged.ts";
 
 interface AutomationsStageProps {
 	bot: Bot;
-	signedIn: SignedInPerson;
+	signedIn: CurrentUser;
 	view: AutomationsView;
 	onViewChange: (view: AutomationsView) => void;
 	/** Opens something else beside the bot's chat, such as a file from an automation's feed. */
@@ -175,7 +175,7 @@ function AutomationFeed({
 	trailing,
 }: {
 	bot: Bot;
-	signedIn: SignedInPerson;
+	signedIn: CurrentUser;
 	automationId: string;
 	onStagedChange: StagedChange;
 	/** The bot's automations, which the Back before the automation's name returns to. */
@@ -184,7 +184,6 @@ function AutomationFeed({
 }) {
 	const opened = useOpenAutomationFeed(bot.defaultProjectId, automationId);
 	const keys = usePanelKeys<HTMLElement>(parent.onBack);
-	const [nestedChatId, setNestedChatId] = useState<string>();
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	return (
 		// In place of the list, and like it, covering the chat on a phone; there
@@ -204,8 +203,6 @@ function AutomationFeed({
 						chatLocation={{ bot }}
 						chatId={opened.data.id}
 						signedIn={signedIn}
-						nestedChatId={nestedChatId}
-						onNestedChatChange={setNestedChatId}
 						place={{ kind: "own", detailsOpen, onDetailsChange: setDetailsOpen, parent, trailing }}
 						onStagedChange={onStagedChange}
 					/>

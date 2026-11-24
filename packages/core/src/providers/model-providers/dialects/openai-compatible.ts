@@ -5,6 +5,7 @@ import type { EgressHttpClient } from "../../network/egress.ts";
 import {
 	dataListing,
 	discoveredModel,
+	lenientOptional,
 	type ProviderDialect,
 	type ProviderModelFields,
 	type RequestEndpoint,
@@ -42,7 +43,6 @@ export function openaiClient(endpoint: RequestEndpoint, fetch: EgressHttpClient)
  * servers include.
  */
 export const openaiCompatible: ProviderDialect = {
-	name: "OpenAI-compatible",
 	listingUrl: (root) => `${root}/models`,
 	authorization: (apiKey): Record<string, string> =>
 		apiKey ? { authorization: `Bearer ${apiKey}` } : {},
@@ -51,12 +51,8 @@ export const openaiCompatible: ProviderDialect = {
 	listing: dataListing,
 	model: Schema.Struct({
 		id: Schema.String,
-		display_name: Schema.optional(Schema.String).pipe(
-			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
-		),
-		name: Schema.optional(Schema.String).pipe(
-			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
-		),
+		display_name: lenientOptional(Schema.String),
+		name: lenientOptional(Schema.String),
 		architecture: Schema.Struct({
 			modality: Schema.String.pipe(
 				Schema.withDecodingDefault(Effect.succeed("")),
@@ -66,9 +62,7 @@ export const openaiCompatible: ProviderDialect = {
 			Schema.withDecodingDefaultType(Effect.succeed({ modality: "" })),
 			Schema.catchDecoding(() => Effect.succeedSome({ modality: "" })),
 		),
-		context_length: Schema.optional(Schema.Finite).pipe(
-			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
-		),
+		context_length: lenientOptional(Schema.Finite),
 	}).pipe(
 		Schema.decodeTo(discoveredModel, {
 			decode: SchemaGetter.transform(

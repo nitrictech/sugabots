@@ -4,9 +4,9 @@ import {
 	fileContentSchema,
 	fileTitleSchema,
 	fileWrittenSchema,
+	type ListedWrittenFile,
 	MAX_FILE_CONTENT_CHARACTERS,
 	type WrittenFile,
-	type WrittenFileSummary,
 	writtenFileKindSchema,
 } from "@sugabots/contracts";
 import { type Tool, tool } from "ai";
@@ -135,7 +135,7 @@ export function fileTools({
 		}),
 
 		[FILE_WRITE_TOOL]: tool({
-			description: `Write a file, for work people will come back to: a plan, report, notes or a page. Without \`fileId\` it creates one, with \`kind\` and \`title\`. With \`fileId\` and \`baseVersion\` it replaces that file's whole content as a new version; pass them whenever you change a file that already exists, rather than making another, and use file_edit for a small change. ${KIND_RULES}`,
+			description: `Write a file, for work members will come back to: a plan, report, notes or a page. Without \`fileId\` it creates one, with \`kind\` and \`title\`. With \`fileId\` and \`baseVersion\` it replaces that file's whole content as a new version; pass them whenever you change a file that already exists, rather than making another, and use file_edit for a small change. ${KIND_RULES}`,
 			inputSchema: Schema.Struct({
 				fileId: Schema.optional(
 					Schema.String.annotate({
@@ -201,11 +201,11 @@ export function fileTools({
 	};
 }
 
-type FileListing = Pick<WrittenFileSummary, "kind" | "title" | "version" | "updatedAt"> & {
+type FileListing = Pick<ListedWrittenFile, "kind" | "title" | "version" | "updatedAt"> & {
 	fileId: string;
 };
 
-const listing = (summary: WrittenFileSummary): FileListing => ({
+const listing = (summary: ListedWrittenFile): FileListing => ({
 	fileId: summary.id,
 	kind: summary.kind,
 	title: summary.title,
@@ -215,7 +215,7 @@ const listing = (summary: WrittenFileSummary): FileListing => ({
 
 /** How each kind is written, for file_write to tell the model. */
 const KIND_RULES =
-	"A `document` is markdown with `#` headings. An `html` page is a complete HTML document, shown in the chat under your reply as well as on its own, so it suits charts, tables and small interactive tools. Make it responsive: it is shown in the chat, opened large beside it and on phones, from about 360px to 1200px wide, so use fluid widths with no fixed or maximum width of its own, let rows wrap or stack when narrow, and size charts and canvases to their container, redrawing when it resizes. It is drawn on the chat's own ground with the app's theme, so it looks part of the chat: leave the page background transparent, add no outer card or border of your own, and colour it with the app's CSS variables, which follow light and dark mode: --foreground, --body-foreground, --muted-foreground, --subtle-foreground for text; --card, --panel, --chip, --hover for surfaces; --border, --border-strong; --primary, --link, --success-text, --destructive-text, --warning for accents; and --font-sans, --font-mono. It runs in an isolated frame with no network access except scripts from https://cdn.jsdelivr.net (such as Chart.js), so inline its CSS and embed its data.";
+	"A `markdown` file is markdown with `#` headings. An `html` page is a complete HTML document, shown in the chat under your reply as well as on its own, so it suits charts, tables and small interactive tools. Make it responsive: it is shown in the chat, opened large beside it and on phones, from about 360px to 1200px wide, so use fluid widths with no fixed or maximum width of its own, let rows wrap or stack when narrow, and size charts and canvases to their container, redrawing when it resizes. It is drawn on the chat's own ground with the app's theme, so it looks part of the chat: leave the page background transparent, add no outer card or border of your own, and colour it with the app's CSS variables, which follow light and dark mode: --foreground, --body-foreground, --muted-foreground, --subtle-foreground for text; --card, --panel, --chip, --hover for surfaces; --border, --border-strong; --primary, --link, --success-text, --destructive-text, --warning for accents; and --font-sans, --font-mono. It runs in an isolated frame with no network access except scripts from https://cdn.jsdelivr.net (such as Chart.js), so inline its CSS and embed its data.";
 
 /** file_write's inputs that don't go together, and what to do instead. */
 const WRITE_REFUSALS = {

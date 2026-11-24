@@ -1,4 +1,4 @@
-import type { SignedInPerson } from "@sugabots/contracts";
+import type { CurrentUser } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
@@ -18,13 +18,13 @@ const workspace = {
 	setUpAt: "2026-09-01T00:00:00.000Z",
 	createdAt: "2026-09-01T00:00:00.000Z",
 };
-const person = {
+const member = {
 	id: "0199a3a0-0000-7000-8000-000000000009",
 	name: "Rowan Ellis",
 	email: "rowan@example.com",
 };
 const session: Session = {
-	person: person as SignedInPerson,
+	member: member as CurrentUser,
 	error: undefined,
 	refresh: async () => {},
 };
@@ -33,17 +33,17 @@ const placeholder = {
 	workspaceId: WORKSPACE,
 	name: "Personal Assistant",
 	handle: "personal-assistant",
-	description: "Your private assistant.",
+	description: "Your guide to the workspace.",
 	color: "sky",
 	eyes: "pill",
 	shape: "circle",
 	model: "claude-sonnet",
-	prompt: "",
+	instructions: "",
 	disabledTools: [],
 	usesComputer: false,
 	naturalBrowsing: false,
-	createdBy: { ...person, image: null },
-	visibility: "private",
+	createdBy: { ...member, image: null },
+	visibility: "personal",
 	assistant: true,
 	pinned: false,
 	defaultProjectId: "0199a3a0-0000-7000-8000-0000000002ff",
@@ -190,6 +190,7 @@ const anthropic = {
 	customHeaders: [],
 	lastTestError: null,
 	connectedBy: null,
+	signedInAs: null,
 	createdAt: "2026-09-11T00:00:00.000Z",
 	models: [
 		["claude-3-5-haiku-20241022", "Claude 3.5 Haiku"],
@@ -329,7 +330,7 @@ async function makeChief(
 	await userEvent.click(canvas.getByRole("button", { name: "Create bot" }));
 }
 
-/** Inviting people: addresses turn into chips, and the button counts them. */
+/** Inviting members: addresses turn into chips, and the button counts them. */
 export const Invites = meta.story({
 	render: (args) => (
 		<Preview stage="model">

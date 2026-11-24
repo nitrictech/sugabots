@@ -70,7 +70,9 @@ export const makeService = Effect.gen(function* () {
 						// holding its lane, until it is told to stop.
 						const stillWaiting = yield* turns.cancelUnder(chatIds);
 						yield* afterCommit(
-							Effect.forEach(stillWaiting, (owner) => signals.cancel(owner), { discard: true }),
+							Effect.forEach(stillWaiting, (executionId) => signals.cancel(executionId), {
+								discard: true,
+							}),
 						);
 						yield* lanes.dropWaiting(chatIds, [Turn._tag]);
 					}),

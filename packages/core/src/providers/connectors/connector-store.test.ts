@@ -5,8 +5,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	bot as botTable,
 	connector,
+	member,
 	membership,
-	person,
 	project,
 	workspace,
 } from "../../database/schema.ts";
@@ -25,7 +25,7 @@ import { GITHUB_CONNECTOR_TOOLS } from "./github/github-tools.ts";
 describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () => {
 	let connectors: Promised<ConnectorStore.Interface>;
 	let workspaceId: string;
-	let personId: string;
+	let memberId: string;
 	let projectId: string;
 	let otherProjectId: string;
 
@@ -38,7 +38,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 	});
 
 	const create = (input: NewConnector) =>
-		connectors.create(workspaceId, projectId, personId, input);
+		connectors.create(workspaceId, projectId, memberId, input);
 	/** The connector as the settings page is shown it, through the project `owner`. */
 	const shown = (connectorId: string, owner = projectId) =>
 		runOnPostgres(
@@ -57,15 +57,15 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 		);
 		const [somebody] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Sam", email: `connectors-${suffix}@example.com` })
 				.returning(),
 		);
 		if (!space || !somebody) throw new Error("fixture");
 		workspaceId = space.id;
-		personId = somebody.id;
+		memberId = somebody.id;
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, personId, role: "admin" }),
+			db.insert(membership).values({ workspaceId, memberId, role: "admin" }),
 		);
 		const [bot, otherBot] = await onDatabase((db) =>
 			db
@@ -226,7 +226,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 
 	it("names who added a connector while they are in the workspace, and nobody once they leave it for another", async () => {
 		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
-		expect((await shown(made.id))?.connectedBy).toMatchObject({ id: personId, name: "Sam" });
+		expect((await shown(made.id))?.connectedBy).toMatchObject({ id: memberId, name: "Sam" });
 		const [elsewhere] = await onDatabase((db) =>
 			db
 				.insert(workspace)
@@ -235,13 +235,13 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 		);
 		if (!elsewhere) throw new Error("could not create the other workspace");
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId: elsewhere.id, personId, role: "editor" }),
+			db.insert(membership).values({ workspaceId: elsewhere.id, memberId, role: "editor" }),
 		);
 
 		await onDatabase((db) =>
 			db
 				.delete(membership)
-				.where(and(eq(membership.workspaceId, workspaceId), eq(membership.personId, personId))),
+				.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId))),
 		);
 
 		expect((await shown(made.id))?.connectedBy).toBeNull();
@@ -266,7 +266,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 	});
 
 	it("gives a GitHub connector this version's tools, whenever it was made", async () => {
-		const made = await connectors.createGitHub(workspaceId, projectId, personId, {
+		const made = await connectors.createGitHub(workspaceId, projectId, memberId, {
 			id: crypto.randomUUID(),
 			app: { appId: 42, slug: "acme-sugabots", owner: { login: "acme", type: "Organization" } },
 			appCredentialEncrypted: "sealed",
@@ -327,7 +327,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 				.values({
 					workspaceId,
 					projectId,
-					createdById: personId,
+					createdById: memberId,
 					kind: "http",
 					name: "Alerts",
 					handle: "alerts",

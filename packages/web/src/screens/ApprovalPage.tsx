@@ -20,7 +20,7 @@ import { PageBackLink } from "@/ui/settings-page.tsx";
 import { Answer, fieldsOf, RequestValue } from "./ToolApprovalCard.tsx";
 import { awaitsApproval } from "./tool-activity.ts";
 
-/** A request as the person's approvals list it: waiting on their decision, or answered. */
+/** A request as the member's approvals list it: waiting on their decision, or answered. */
 type ListedRequest =
 	| { kind: "waiting"; request: ApprovalRequest }
 	| { kind: "answered"; request: AnsweredApproval };
@@ -106,7 +106,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 				</dl>
 				<div className="flex flex-wrap items-center gap-3 pt-1 max-md:flex-col max-md:items-stretch max-md:gap-4">
 					{found.kind === "answered" ? (
-						// Announced when the person has just answered it here.
+						// Announced when the member has just answered it here.
 						<AnswerGiven answer={found.request.answer} announced={review.isSuccess} />
 					) : (
 						<PendingApprovalAnswer request={request} actionLabel={action} review={review} />
@@ -124,7 +124,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 }
 
 /**
- * Allow and Deny for a request still waiting on the person, or, once its bot
+ * Allow and Deny for a request still waiting on the member, or, once its bot
  * stopped before it was answered, that it no longer waits. A phone answers with
  * two wide buttons. `review` answers it, so the caller can tell once it has.
  */
@@ -195,9 +195,9 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * Open chat: the chat a request was asked in, with the run or
- * collaboration it came from open beside it. A project's chat links
- * once `project` is known; a request outside any chat has none.
+ * Open chat: the chat a request was asked in, or, for one an automation's run
+ * asked, that run as the page of its automation's feed. A project's chat
+ * links once `project` is known; a request outside any chat has none.
  */
 export function RequestChatLink({
 	request,
@@ -214,7 +214,7 @@ export function RequestChatLink({
 		<ChatLink
 			project={project ?? null}
 			chatId={request.rootChatId}
-			search={request.chatId === request.rootChatId ? {} : { nestedChat: request.chatId }}
+			search={request.chatId === request.rootChatId ? {} : { nestedChatPage: request.chatId }}
 			className={className}
 		>
 			Open chat

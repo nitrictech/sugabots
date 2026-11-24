@@ -3,7 +3,7 @@ export * as Egress from "./egress.ts";
 import { lookup as nodeLookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
 import { type UserText, userText } from "@sugabots/errors";
-import { Config, Context, Data, Effect, Layer, Option } from "effect";
+import { Config, Context, Data, Effect, Layer } from "effect";
 import {
 	Agent,
 	type Dispatcher,
@@ -108,7 +108,6 @@ export interface EgressOptions {
 	lookup?: (hostname: string) => Promise<Array<{ address: string; family: number }>>;
 	fetch?: EgressDispatch;
 	dispatcherFactory?: (hostname: string, addresses?: ResolvedAddress[]) => Dispatcher;
-	maxDispatchers?: number;
 }
 
 const MAX_DISPATCHERS = 100;
@@ -163,11 +162,7 @@ export function createEgressHttpClient({
 	lookup = resolveHostname,
 	fetch: dispatch = dispatchWithUndici,
 	dispatcherFactory = pinnedDispatcher,
-	maxDispatchers = MAX_DISPATCHERS,
 }: EgressOptions = {}): ClosableEgressHttpClient {
-	if (!Number.isInteger(maxDispatchers) || maxDispatchers < 1) {
-		throw new TypeError("maxDispatchers must be a positive integer");
-	}
 	const dispatchers = new Map<string, Dispatcher>();
 
 	const client = async (input: Parameters<EgressHttpClient>[0], init?: RequestInit) => {
@@ -184,7 +179,7 @@ export function createEgressHttpClient({
 		} else {
 			dispatcher = dispatcherFactory(hostname, addresses);
 			dispatchers.set(key, dispatcher);
-			if (dispatchers.size > maxDispatchers) {
+			if (dispatchers.size > MAX_DISPATCHERS) {
 				const oldest = dispatchers.entries().next().value;
 				if (oldest) {
 					dispatchers.delete(oldest[0]);
@@ -431,27 +426,11 @@ function closedWithLayer<A extends { close(): Promise<void> }>(create: () => A) 
 }
 
 const UNSAFE_WORKSPACE_URLS = "ALLOW_UNSAFE_WORKSPACE_URLS";
-/** The deprecated name for `UNSAFE_WORKSPACE_URLS`, still read so existing servers keep working. */
-const DEPRECATED_UNSAFE_WORKSPACE_URLS = "ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK";
 
 /**
  * unsafeWorkspaceUrls reads whether workspaces may give plain-HTTP and
- * local-network addresses: `UNSAFE_WORKSPACE_URLS` if set, else
- * `DEPRECATED_UNSAFE_WORKSPACE_URLS`, else `defaultValue`. It logs a warning
- * whenever `DEPRECATED_UNSAFE_WORKSPACE_URLS` is set.
+ * local-network addresses: `UNSAFE_WORKSPACE_URLS` if set, else `defaultValue`.
  */
 function unsafeWorkspaceUrls(defaultValue: boolean) {
-	return Effect.gen(function* () {
-		const current = yield* Config.option(Config.Boolean(UNSAFE_WORKSPACE_URLS));
-		const deprecated = yield* Config.option(Config.Boolean(DEPRECATED_UNSAFE_WORKSPACE_URLS));
-		if (Option.isSome(deprecated)) {
-			yield* Effect.logWarning(
-				`${DEPRECATED_UNSAFE_WORKSPACE_URLS} is deprecated: set ${UNSAFE_WORKSPACE_URLS} instead`,
-			);
-		}
-		return Option.getOrElse(
-			Option.orElse(current, () => deprecated),
-			() => defaultValue,
-		);
-	});
+	return Config.withDefault(Config.Boolean(UNSAFE_WORKSPACE_URLS), defaultValue);
 }

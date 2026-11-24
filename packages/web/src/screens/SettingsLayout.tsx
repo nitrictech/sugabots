@@ -29,7 +29,7 @@ import {
 } from "@/lib/workspace-settings.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import {
@@ -212,10 +212,10 @@ function useWorkspaceSections() {
 	const may = useWorkspacePermissions();
 	const { workspace } = useWorkspace();
 	const { data: memberships } = useMemberships(workspace?.id);
-	// The one person a workspace always has is you, so the roster starts at two.
-	const people = memberships?.length;
+	// The one member a workspace always has is you, so the roster starts at two.
+	const members = memberships?.length;
 	const counts: Partial<Record<SettingSection["id"], number | undefined>> = {
-		people: people === 1 ? undefined : people,
+		members: members === 1 ? undefined : members,
 	};
 	const sections = workspaceSettingSections.filter(
 		(section: SettingSection) => !("needs" in section) || may[section.needs],
@@ -262,7 +262,7 @@ function SettingsNavigation() {
 			/>
 			<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pt-3 pb-3">
 				{/* Your own settings first: they follow you from workspace to workspace. */}
-				{session.person && (
+				{session.member && (
 					<NavigationGroup label="You">
 						{yourSettingSections.map((section) => (
 							<SectionLink
@@ -365,7 +365,7 @@ export function SettingsListGroups({
 }) {
 	const { sections, counts } = useWorkspaceSections();
 	const { projects, bots } = useListed();
-	const { person: signedIn } = useSession();
+	const { member: signedIn } = useSession();
 	return (
 		<>
 			{/* You first, on a card that opens your account, which leads on to your Notifications. */}
@@ -380,7 +380,7 @@ export function SettingsListGroups({
 						"focus-ring flex shrink-0 items-center gap-4 px-4 py-4 active:bg-row-selected",
 					)}
 				>
-					<PersonAvatar person={signedIn} size={64} />
+					<MemberAvatar member={signedIn} size={64} />
 					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 						<span className="truncate font-semibold text-xl text-foreground">{signedIn.name}</span>
 						<span className="truncate text-sm text-subtle-foreground">
@@ -527,8 +527,8 @@ function useSettingsCrumbs(): Crumb[] {
 	if (item === undefined) {
 		return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
 	}
-	if (sectionId === "people") {
-		return [workspaceCrumb, sectionCrumb("people"), { label: <PersonName membershipId={item} /> }];
+	if (sectionId === "members") {
+		return [workspaceCrumb, sectionCrumb("members"), { label: <MemberName membershipId={item} /> }];
 	}
 	if (sectionId === "providers") {
 		return [workspaceCrumb, sectionCrumb("providers"), { label: <ProviderPageName id={item} /> }];
@@ -536,10 +536,10 @@ function useSettingsCrumbs(): Crumb[] {
 	return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
 }
 
-function PersonName({ membershipId }: { membershipId: string }) {
+function MemberName({ membershipId }: { membershipId: string }) {
 	const { workspace } = useWorkspace();
 	const { data: memberships } = useMemberships(workspace?.id);
-	return memberships?.find((membership) => membership.id === membershipId)?.person.name ?? null;
+	return memberships?.find((membership) => membership.id === membershipId)?.member.name ?? null;
 }
 
 /** The provider an address names, or one of the two model choices kept beside them. */
@@ -574,7 +574,7 @@ function SectionLink({
 	const className = cn(NAVIGATION_ITEM, navigationItemState(selected));
 	const content = <NavigationItemContent label={section.label} count={count} />;
 	// Nothing separates the label from the count on screen but a gap, which a
-	// name taken from the contents does not hear: "People4".
+	// name taken from the contents does not hear: "Members4".
 	const label = count === undefined ? undefined : `${section.label}, ${count}`;
 	return section.id === "general" ? (
 		<Link

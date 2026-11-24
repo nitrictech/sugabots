@@ -20,7 +20,7 @@ export interface Interface {
 	 * One month's usage in a workspace named by its id or its slug, with the
 	 * month and its days in the workspace's time zone. It shows every bot's
 	 * usage, so it takes the current actor's `workspace.usage.manage`; the
-	 * Personal Assistants', each its own person's, only together.
+	 * Personal Assistants', each its own member's, only together.
 	 */
 	readonly month: (
 		input: UsageQuery & { workspace: string },
@@ -117,7 +117,8 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 	const bots = yield* query((db) =>
 		db
 			.select({
-				botId: modelRequest.botId,
+				// Never null for a bot's turn, by `model_request_bot_valid`.
+				botId: sql<string>`${modelRequest.botId}`,
 				name: bot.name,
 				color: bot.color,
 				eyes: bot.eyes,
@@ -162,9 +163,7 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 		timeZone,
 		...total,
 		days: datesIn(month).map((date) => ({ date, usd: costByDay.get(date) ?? 0 })),
-		bots: mostExpensiveFirst(
-			bots.flatMap(({ botId, ...rest }) => (botId ? [{ botId, ...rest }] : [])),
-		),
+		bots: mostExpensiveFirst(bots),
 		models: mostExpensiveFirst(models),
 		systemBots,
 		personalAssistants,

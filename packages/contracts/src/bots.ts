@@ -1,19 +1,19 @@
 import { Schema, Struct } from "effect";
-import { namedPersonSchema } from "./api.ts";
-import { resourcePermissionsSchema } from "./projects.ts";
+import { namedMemberSchema } from "./api.ts";
+import { resourcePermissionsSchema, slugify } from "./projects.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
 /**
- * Bots: a configured model with a name, a face and a prompt.
+ * Bots: AI teammates, each with a name, handle, avatar, model and instructions.
  *
  * A bot belongs to its workspace. It is public, for everyone in the
- * workspace, or private, for the person who made it; a Personal Assistant is
- * its person's alone. Public bots can be added to projects.
+ * workspace, or personal, for the member who made it; a Personal Assistant is
+ * its member's alone. Public bots can be added to projects.
  */
 
 /**
- * The colours a bot's face can be, in the order a colour picker shows them:
+ * The colours a bot's avatar can be, in the order a colour picker shows them:
  * round the hue wheel from red.
  * Each names a face, eye and bubble palette; see `botPalettes` in
  * `@sugabots/avatars`.
@@ -109,18 +109,9 @@ export const handleSchema = Schema.String.check(
 	}),
 );
 
-/** The handle a bot or person gets from their name: `Personal Assistant` becomes `personal-assistant`. */
+/** The handle a bot or member gets from their name: `Personal Assistant` becomes `personal-assistant`. */
 export function handleFromName(name: string): string {
-	return (
-		name
-			.normalize("NFKD")
-			.replace(/[\u0300-\u036f]/g, "")
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, "-")
-			.replace(/^-+|-+$/g, "")
-			.slice(0, 48)
-			.replace(/-+$/g, "") || "bot"
-	);
+	return slugify(name) || "bot";
 }
 
 /**
@@ -134,18 +125,18 @@ export function handleFromName(name: string): string {
 export const systemBotKeySchema = Schema.Literals(["compact"]);
 export type SystemBotKey = typeof systemBotKeySchema.Type;
 
-/** Whether everyone in the workspace sees a bot, or only the person who made it. */
-const botVisibilitySchema = Schema.Literals(["public", "private"]);
+/** Whether everyone in the workspace sees a bot, or only the member who made it. */
+const botVisibilitySchema = Schema.Literals(["public", "personal"]);
 export type BotVisibility = typeof botVisibilitySchema.Type;
 
-/** What the person asking may do with a bot, resolved by the API so a client never reasons about roles. */
+/** What the member asking may do with a bot, resolved by the API so a client never reasons about roles. */
 export const botPermissionsSchema = Schema.Struct({
-	/** Change its name, look, model, instructions, tools and visibility. */
+	/** Change its name, avatar, model, instructions, tools and visibility. */
 	update: Schema.Boolean,
 	delete: Schema.Boolean,
-	/** Read and write in its chats. False for a private bot an admin only sees listed. */
+	/** Read and write in its chats. False for a personal bot an admin only sees listed. */
 	talk: Schema.Boolean,
-	/** What the person may do with what its default project holds. */
+	/** What the member may do with what its default project holds. */
 	resources: resourcePermissionsSchema,
 });
 
@@ -165,8 +156,8 @@ export const botSchema = Schema.Struct({
 	 * cleared it — the bot's turns then refuse rather than run on a guess.
 	 */
 	model: Schema.NullOr(modelIdSchema),
-	/** The bot's instructions. Empty until somebody writes them. */
-	prompt: Schema.String,
+	/** Who the bot is and how it works. Empty until somebody writes them. */
+	instructions: Schema.String,
 	/**
 	 * The built-in tools switched off for this bot, by key. A list of what is
 	 * off rather than what is on, so a new built-in tool reaches every existing
@@ -181,22 +172,22 @@ export const botSchema = Schema.Struct({
 	 */
 	usesComputer: Schema.Boolean,
 	/**
-	 * Whether it browses in a way people watching its desktop can follow: a
+	 * Whether it browses in a way members watching its desktop can follow: a
 	 * cursor that moves to what it clicks, smooth scrolling, and typing at a
 	 * typing pace. Slower, so off unless somebody turns it on, as for a demo.
 	 */
 	naturalBrowsing: Schema.Boolean,
 	/** Who added it, by name: null when nobody did, or they are no longer in the workspace. */
-	createdBy: Schema.NullOr(namedPersonSchema),
+	createdBy: Schema.NullOr(namedMemberSchema),
 	/**
 	 * Whether everyone in the workspace sees it, or only its creator.
 	 * Meaningless when `assistant` is true: a Personal Assistant is neither
-	 * public nor private, as only its person ever sees it.
+	 * public nor personal, as only its member ever sees it.
 	 */
 	visibility: botVisibilitySchema,
-	/** Whether it is the person's own Personal Assistant, which only they see. */
+	/** Whether it is the member's own Personal Assistant, which only they see. */
 	assistant: Schema.Boolean,
-	/** Whether the person asking pinned it to their sidebar. */
+	/** Whether the member asking pinned it to their sidebar. */
 	pinned: Schema.Boolean,
 	/**
 	 * Its hidden default project, which holds its own chats, files,
@@ -220,10 +211,10 @@ const toolKeysSchema = Schema.mutable(
 	Schema.Array(Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(64))),
 ).check(Schema.isMaxLength(32), Schema.isUnique({ message: "Tool keys must be unique" }));
 
-/** How long a prompt may be. The settings page counts against it as you type. */
-export const PROMPT_MAX_LENGTH = 20_000;
+/** How long a bot's instructions may be. The settings page counts against it as you type. */
+export const INSTRUCTIONS_MAX_LENGTH = 20_000;
 
-/** How long a description may be: one or two lines, read by people and by other bots. */
+/** How long a description may be: one or two lines, read by members and by other bots. */
 export const DESCRIPTION_MAX_LENGTH = 280;
 
 export const newBotSchema = Schema.Struct({
@@ -237,7 +228,7 @@ export const newBotSchema = Schema.Struct({
 	eyes: Schema.optional(botEyesSchema),
 	shape: Schema.optional(botShapeSchema),
 	model: modelIdSchema,
-	prompt: Schema.optional(Schema.String.check(Schema.isMaxLength(PROMPT_MAX_LENGTH))),
+	instructions: Schema.optional(Schema.String.check(Schema.isMaxLength(INSTRUCTIONS_MAX_LENGTH))),
 	disabledTools: Schema.optional(toolKeysSchema),
 	usesComputer: Schema.optional(Schema.Boolean),
 	naturalBrowsing: Schema.optional(Schema.Boolean),

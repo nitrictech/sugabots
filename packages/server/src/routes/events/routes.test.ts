@@ -1,12 +1,25 @@
-import { EVENT_VERSION, type EventType, type StreamEvent, streamEvent } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import {
+	type DurableEventType,
+	EVENT_VERSION,
+	type EventStream,
+	type EventType,
+	type StreamEvent,
+	streamEvent,
+} from "@sugabots/contracts";
+import { testMember } from "@sugabots/contracts/testing";
 import { Audience } from "@sugabots/core/database/events/audience";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { Effect, Layer, Logger } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { PersonResolver } from "../../http/app.test-support.ts";
-import { createTestApp, identifiedBy, type TestApp } from "../../http/app.test-support.ts";
+import type { MemberResolver } from "../../http/app.test-support.ts";
+import {
+	createTestApp,
+	identifiedBy,
+	sessionTokenIn,
+	signedInWith,
+	type TestApp,
+} from "../../http/app.test-support.ts";
 import { openStreamAccess } from "./access.test-support.ts";
 import { StreamAccess } from "./access.ts";
 import { StreamTiming, type Timing } from "./routes.ts";
@@ -19,7 +32,10 @@ import { StreamTiming, type Timing } from "./routes.ts";
 const WORKSPACE = "0199a3a0-0000-7000-8000-00000000000a";
 const CHAT = "0199a3a0-0000-7000-8000-00000000000b";
 
-function rawEvent(type: EventType, data: Record<string, unknown> = {}): StreamEvent {
+function rawEvent<const T extends EventType>(
+	type: T,
+	data: Record<string, unknown> = {},
+): StreamEvent & { type: T } {
 	return { ...data, v: EVENT_VERSION, type };
 }
 
@@ -30,12 +46,19 @@ const signedIn = {
 	image: null,
 };
 
-const resolvePerson: PersonResolver = async (headers) =>
-	headers.get("authorization") === "Bearer good-token" ? signedIn : null;
+const resolveMember: MemberResolver = async (headers) =>
+	sessionTokenIn(headers) === "good-token" ? signedIn : null;
 
+/**
+ * The app over a bus of its own. `commit` stores an event and delivers it, as
+ * the outbox does once a transaction commits.
+ */
 function server(access: StreamAccess.Interface = openStreamAccess, timing?: Partial<Timing>) {
-	const bus = EventBus.inProcess({ store: EventStore.inMemory() });
-	return { bus, app: streaming(bus, { access, timing }) };
+	const store = EventStore.inMemory();
+	const bus = EventBus.inProcess({ store });
+	const commit = (stream: EventStream, event: StreamEvent & { type: DurableEventType }) =>
+		bus.publishCommitted([store.record(stream, event)]);
+	return { bus, commit, app: streaming(bus, { access, timing }) };
 }
 
 /** The app with its streams on `bus`, open to everyone unless `access` says otherwise. */
@@ -49,7 +72,7 @@ function streaming(
 ) {
 	return createTestApp(
 		Layer.mergeAll(
-			identifiedBy(resolvePerson),
+			identifiedBy(resolveMember),
 			Layer.succeed(EventBus.Service, bus),
 			Layer.succeed(StreamAccess.Service, access),
 			Layer.succeed(StreamTiming, { ...StreamTiming.defaultValue(), ...timing }),
@@ -77,7 +100,7 @@ async function open(
 ) {
 	const response = await app.request(path, {
 		headers: {
-			authorization: `Bearer ${token}`,
+			...signedInWith(token),
 			...(lastEventId ? { "last-event-id": lastEventId } : {}),
 		},
 	});
@@ -138,11 +161,11 @@ describe("authorisation", () => {
 			workspace: () => Effect.undefined,
 			chat: () => Effect.undefined,
 			hears: () => Effect.succeed(false),
-			me: () => Effect.succeed("person:me"),
+			me: () => Effect.succeed("member:me"),
 		});
 
 		const response = await app.request(`/chats/${CHAT}/events`, {
-			headers: { authorization: "Bearer good-token" },
+			headers: signedInWith("good-token"),
 		});
 
 		expect(response.status).toBe(404);
@@ -151,15 +174,15 @@ describe("authorisation", () => {
 	it("subscribes to the stream authorisation resolved, not the one in the path", async () => {
 		// Access answers with the stream to listen to, and the route must use that
 		// answer rather than build a stream from the path itself.
-		const { app, bus } = server({
+		const { app, commit } = server({
 			workspace: () => Effect.undefined,
 			chat: () => Effect.succeed("chat:root"),
 			hears: () => Effect.succeed(true),
-			me: () => Effect.succeed("person:me"),
+			me: () => Effect.succeed("member:me"),
 		});
 
 		const stream = await open(app, `/chats/${CHAT}/events`);
-		await bus.publish("chat:root", rawEvent("message.created", { id: "m1" }));
+		await commit("chat:root", rawEvent("message.created", { id: "m1" }));
 
 		expect((await stream.take(1))[0]?.event).toBe("message.created");
 		stream.close();
@@ -177,33 +200,16 @@ describe("the stream", () => {
 		stream.close();
 	});
 
-	it("answers HEAD with stream headers without subscribing", async () => {
-		const { app, bus } = server();
-		const subscribe = vi.spyOn(bus, "subscribe");
-
-		const response = await app.request(`/workspaces/${WORKSPACE}/events`, {
-			method: "HEAD",
-			headers: { authorization: "Bearer good-token" },
-		});
-
-		expect(response.status).toBe(200);
-		expect(response.headers.get("content-type")).toContain("text/event-stream");
-		expect(response.headers.get("cache-control")).toBe("no-store");
-		expect(response.headers.get("x-accel-buffering")).toBe("no");
-		expect(response.body).toBeNull();
-		expect(subscribe).not.toHaveBeenCalled();
-	});
-
 	it("carries the event name, the payload and the id", async () => {
-		const { app, bus } = server();
+		const { app, commit } = server();
 		const stream = await open(app, `/workspaces/${WORKSPACE}/events`);
 
-		await bus.publish(`workspace:${WORKSPACE}`, streamEvent("chat.created", { chatId: "c1" }));
+		await commit(`workspace:${WORKSPACE}`, streamEvent("chat.changed", { chatId: "c1" }));
 
 		expect((await stream.take(1))[0]).toEqual({
-			event: "chat.created",
+			event: "chat.changed",
 			id: "1",
-			data: { v: 1, type: "chat.created", chatId: "c1" },
+			data: { v: 1, type: "chat.changed", chatId: "c1" },
 		});
 		stream.close();
 	});
@@ -237,10 +243,16 @@ describe("the stream", () => {
 		const app = streaming(counted);
 
 		const response = await app.request(`/workspaces/${WORKSPACE}/events`, {
-			headers: { authorization: "Bearer good-token" },
+			headers: signedInWith("good-token"),
 		});
 		const reader = response.body?.getReader();
-		await bus.publish(`workspace:${WORKSPACE}`, streamEvent("chat.created", { chatId: "c1" }));
+		await bus.publishCommitted([
+			{
+				stream: `workspace:${WORKSPACE}`,
+				seq: 1,
+				event: streamEvent("chat.changed", { chatId: "c1" }),
+			},
+		]);
 		await reader?.read();
 		expect(open).toBe(1);
 
@@ -257,7 +269,7 @@ describe("the stream", () => {
 		stream.close();
 	});
 
-	it("hangs up eventually, so a client that went away cannot hold a connector", async () => {
+	it("hangs up eventually, so a client that went away cannot hold a stream open", async () => {
 		const { app } = server(openStreamAccess, { maxAge: "10 millis" });
 		const stream = await open(app, `/workspaces/${WORKSPACE}/events`);
 
@@ -266,20 +278,20 @@ describe("the stream", () => {
 
 	it.each(["revoked", "changed"])("ends when chat access is %s", async (change) => {
 		let streamName: "chat:root" | "chat:other" | undefined = "chat:root";
-		const { app, bus } = server(
+		const { app, commit } = server(
 			{
 				workspace: () => Effect.undefined,
 				chat: () => Effect.succeed(streamName),
 				hears: () => Effect.succeed(true),
-				me: () => Effect.succeed("person:me"),
+				me: () => Effect.succeed("member:me"),
 			},
 			{ recheck: 0 },
 		);
 		const stream = await open(app, `/chats/${CHAT}/events`);
-		await bus.publish("chat:root", rawEvent("message.created"));
+		await commit("chat:root", rawEvent("message.created"));
 		await stream.take(1);
 		streamName = change === "revoked" ? undefined : "chat:other";
-		await bus.publish("chat:root", rawEvent("message.created"));
+		await commit("chat:root", rawEvent("message.created"));
 		await expect(stream.take(1)).rejects.toThrow("stream ended");
 	});
 
@@ -293,7 +305,7 @@ describe("the stream", () => {
 					return "chat:root" as const;
 				}),
 			hears: () => Effect.succeed(true),
-			me: () => Effect.succeed("person:me"),
+			me: () => Effect.succeed("member:me"),
 		});
 		const stream = await open(app, `/chats/${CHAT}/events`);
 		for (let i = 0; i < 3; i++) {
@@ -344,7 +356,7 @@ describe("the stream", () => {
 			},
 		});
 		const response = await app.request(`/chats/${CHAT}/events`, {
-			headers: { authorization: "Bearer good-token" },
+			headers: signedInWith("good-token"),
 		});
 		try {
 			await vi.waitFor(() => expect(produced).toBeGreaterThan(16));
@@ -359,11 +371,11 @@ describe("the stream", () => {
 		const bus = EventBus.inProcess({ store: EventStore.inMemory(), maxBuffered: 2 });
 		const app = streaming(bus);
 		const response = await app.request(`/chats/${CHAT}/events`, {
-			headers: { authorization: "Bearer good-token" },
+			headers: signedInWith("good-token"),
 		});
 		try {
 			for (let index = 0; index < 200; index += 1) {
-				await bus.publish(`chat:${CHAT}`, rawEvent("message.created"));
+				await bus.publish(`chat:${CHAT}`, rawEvent("message.delta"));
 			}
 			const text = await response.text();
 			const frames = text.trim().split("\n\n").map(parseFrame);
@@ -383,7 +395,7 @@ describe("the stream", () => {
 	});
 });
 
-describe("events meant for the people who reach one chat", () => {
+describe("events meant for the members who reach one chat", () => {
 	const REACHED = "0199a3a0-0000-7000-8000-0000000000c1";
 	const UNREACHED = "0199a3a0-0000-7000-8000-0000000000c2";
 	const reachingOne: StreamAccess.Interface = {
@@ -395,11 +407,11 @@ describe("events meant for the people who reach one chat", () => {
 		Audience.forChat(chatId, streamEvent("chat.changed", { chatId }));
 
 	it("skips what a listener who does not reach the chat may not hear, and sends the rest without its audience", async () => {
-		const { app, bus } = server(reachingOne);
+		const { app, commit } = server(reachingOne);
 		const stream = await open(app, `/workspaces/${WORKSPACE}/events`);
 
-		await bus.publish(streamName, about(UNREACHED));
-		await bus.publish(streamName, about(REACHED));
+		await commit(streamName, about(UNREACHED));
+		await commit(streamName, about(REACHED));
 
 		expect(await stream.take(1)).toEqual([
 			{
@@ -412,10 +424,10 @@ describe("events meant for the people who reach one chat", () => {
 	});
 
 	it("skips them on a replay too", async () => {
-		const { app, bus } = server(reachingOne);
-		await bus.publish(streamName, rawEvent("chat.created", { chatId: "first" }));
-		await bus.publish(streamName, about(UNREACHED));
-		await bus.publish(streamName, about(REACHED));
+		const { app, commit } = server(reachingOne);
+		await commit(streamName, rawEvent("chat.changed", { chatId: "first" }));
+		await commit(streamName, about(UNREACHED));
+		await commit(streamName, about(REACHED));
 
 		const resumed = await open(app, `/workspaces/${WORKSPACE}/events`, { lastEventId: "1" });
 
@@ -429,16 +441,16 @@ describe("events meant for the people who reach one chat", () => {
 
 describe("resuming", () => {
 	it("replays events published after the client's Last-Event-ID", async () => {
-		const { app, bus } = server();
+		const { app, commit } = server();
 		const streamName = `chat:${CHAT}`;
 		const path = `/chats/${CHAT}/events`;
 
 		const initial = await open(app, path);
-		await bus.publish(streamName, rawEvent("message.created", { id: "m1" }));
+		await commit(streamName, rawEvent("message.created", { id: "m1" }));
 		const [seen] = await initial.take(1);
 		expect(seen?.id).toBe("1");
 		initial.close();
-		await bus.publish(streamName, rawEvent("message.completed", { id: "m1" }));
+		await commit(streamName, rawEvent("message.completed", { id: "m1" }));
 
 		const resumed = await open(app, path, { lastEventId: seen?.id });
 		expect((await resumed.take(1))[0]).toEqual({
@@ -451,8 +463,8 @@ describe("resuming", () => {
 	});
 
 	it("tells a client whose resume point is gone to start again", async () => {
-		const { app, bus } = server();
-		await bus.publish(`chat:${CHAT}`, rawEvent("message.created"));
+		const { app, commit } = server();
+		await commit(`chat:${CHAT}`, rawEvent("message.created"));
 
 		const stream = await open(app, `/chats/${CHAT}/events`, {
 			lastEventId: "9999",
@@ -463,12 +475,12 @@ describe("resuming", () => {
 	});
 
 	it("ignores a Last-Event-ID that is not a sequence number", async () => {
-		const { app, bus } = server();
+		const { app, commit } = server();
 		const stream = await open(app, `/chats/${CHAT}/events`, {
 			lastEventId: "nonsense",
 		});
 
-		await bus.publish(`chat:${CHAT}`, rawEvent("message.created", { id: "m1" }));
+		await commit(`chat:${CHAT}`, rawEvent("message.created", { id: "m1" }));
 
 		expect((await stream.take(1))[0]?.event).toBe("message.created");
 		stream.close();
@@ -479,7 +491,7 @@ describe("typing", () => {
 	const typing = (app: TestApp) =>
 		app.request(`/chats/${CHAT}/typing`, {
 			method: "POST",
-			headers: { authorization: "Bearer good-token" },
+			headers: signedInWith("good-token"),
 		});
 
 	it("tells the chat's watchers who is typing, without an id to resume from", async () => {
@@ -489,12 +501,12 @@ describe("typing", () => {
 		expect((await typing(app)).status).toBe(204);
 
 		expect((await stream.take(1))[0]).toEqual({
-			event: "person.typing",
+			event: "member.typing",
 			data: {
 				v: 1,
-				type: "person.typing",
+				type: "member.typing",
 				chatId: CHAT,
-				person: testPerson({ id: signedIn.id, name: "Sam" }),
+				member: testMember({ id: signedIn.id, name: "Sam" }),
 			},
 		});
 		stream.close();

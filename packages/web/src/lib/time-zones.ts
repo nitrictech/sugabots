@@ -3,7 +3,7 @@ import { DEFAULT_TIME_ZONE, type TimeZone } from "@sugabots/contracts";
 /** A time zone as a list of them shows it. */
 export interface TimeZoneChoice {
 	readonly zone: TimeZone;
-	/** Where it is, as people name it: "Buenos Aires", or "UTC". */
+	/** Where it is, as members name it: "Buenos Aires", or "UTC". */
 	readonly place: string;
 	/** How far it is from UTC now, such as "UTC+11", or "UTC" itself. */
 	readonly offset: string;
@@ -30,7 +30,7 @@ export interface TimeZoneRegion {
 	readonly choices: readonly TimeZoneChoice[];
 }
 
-/** The regions a zone's first part names, as people call them, in the order they are listed. */
+/** The regions a zone's first part names, as members call them, in the order they are listed. */
 const NAMED_REGIONS: readonly (readonly [prefix: string, name: string])[] = [
 	["Africa", "Africa"],
 	["America", "Americas"],

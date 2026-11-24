@@ -1,10 +1,9 @@
-import { type CollaborationPart, FILE_WRITING_TOOLS, START_CHAT_TOOL } from "@sugabots/contracts";
+import { FILE_WRITING_TOOLS, START_CHAT_TOOL } from "@sugabots/contracts";
 import { docPages } from "@sugabots/docs";
 import { userText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
 import type { Effect } from "effect";
 import type { RunEffect } from "../../database/database.ts";
-import type { EventBus } from "../../database/events/bus.ts";
 import type { ChatFileStore } from "../../files/chat-file-store.ts";
 import type { Files } from "../../files/files.ts";
 import { botSettingsPath } from "../../server-settings/web-app-paths.ts";
@@ -22,12 +21,6 @@ import {
 	hasAutomationTools,
 } from "../tools/automations/tool.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
-import type { Collaborations } from "../tools/collaborate/collaborations.ts";
-import {
-	COLLABORATE_TOOL,
-	type CollaborateToolOptions,
-	collaborateTool,
-} from "../tools/collaborate/tool.ts";
 import { READ_FILE_TOOL, SHARE_FILE_TOOL } from "../tools/computer/tools.ts";
 import type { ComputerTools, Request } from "../tools/computer.ts";
 import type { OfferedTool } from "../tools/connectors.ts";
@@ -40,7 +33,7 @@ import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import { startChatTool } from "../tools/start-chat/tool.ts";
 import { buildCatalog, type CatalogEntry } from "../tools/tool-search/catalog.ts";
 import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
-import { WORKSPACE_ACCESS_TOOL, workspaceAccessTool } from "../tools/workspace-access/tool.ts";
+import { WORKSPACE_ROLE_TOOL, workspaceRoleTool } from "../tools/workspace-role/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import type { PreparedTurn } from "./execution.ts";
 import type { TurnStore } from "./store.ts";
@@ -52,16 +45,16 @@ import type { ToolCallStore } from "./tool-calls/store.ts";
  * this is the only place that knows which ones exist, so adding a tool is a
  * folder and a line here rather than a change to the turn's steps.
  *
- * Four kinds. The collaboration tool `collaborate` reaches other bots
- * and leave their own records. The built-in tools do work for the bot, the
- * computer tools work in the computer of the project the turn works in (see
- * `TurnContext.projectId`), and the connector tools do work at a server one
- * of the turn's connectors reaches: the project's and the bot's own, the
+ * Three kinds. The built-in tools do work for the bot,
+ * the computer tools work in the computer of the project the turn works in
+ * (see `TurnContext.projectId`), and the connector tools do work at a server
+ * one of the turn's connectors reaches: the project's and the bot's own, the
  * project's winning when both have a connector with the same handle. Every
- * call to any of them is recorded
- * as a `tool_call` part of the reply (`calls/`).
+ * call is recorded as a `tool_call` part of the reply
+ * (`tool-calls/recorded.ts`). A bot asks another bot for help by mentioning
+ * it in its reply, not through a tool.
  * Connector tools, and the built-in tools a bot needs only now and then,
- * such as `read_docs` and `workspace_access`, are in the catalog: reached
+ * such as `read_docs` and `workspace_role`, are in the catalog: reached
  * through `tool_search` and `call_tool`, so they cost a line in the turn's
  * note rather than a whole description and schema in every request.
  *
@@ -71,7 +64,6 @@ import type { ToolCallStore } from "./tool-calls/store.ts";
  */
 
 interface ToolDependencies {
-	collaborations: Pick<Collaborations.Interface, "open" | "collectAnswer">;
 	authoring: Files.AuthoringInterface;
 	/** Where a built-in tool's calls are written down. */
 	calls: Pick<ToolCallStore.Interface, "open" | "close" | "completedOutputs">;
@@ -79,7 +71,7 @@ interface ToolDependencies {
 	/** Where the turn records that a tool which may change something started. */
 	turns: Pick<TurnStore.Interface, "markActed">;
 	/** Resumed approval calls stay guarded even if fresh server metadata calls them read-only. */
-	approvalBoundTools?: ReadonlySet<string>;
+	approvalBoundTools: ReadonlySet<string>;
 	/** The built-in tools this server offers, by key. */
 	builtIn: BuiltInTools.Offered;
 	/** The tools that work in the computer of the project the turn works in. */
@@ -88,49 +80,38 @@ interface ToolDependencies {
 	connectors: Readonly<Record<string, OfferedTool>>;
 	/** The chat's files: where long tool results are kept, and what `read_chat_file` reads. */
 	files: Pick<ChatFileStore.Interface, "read" | "readMessageFile" | "write">;
-	/** Where the bot's own instructions are saved, as the person it is answering. */
+	/** Where the bot's own instructions are saved, as the member it is answering. */
 	bots: Pick<BotAdministration.Interface, "update">;
 	/** Where the web app is served, for links to its pages. */
 	webAppUrl: string;
-	/** The automations of the project the turn works in, read and changed for the person it is answering. */
+	/** The automations of the project the turn works in, read and changed for the member it is answering. */
 	automations: BotAutomations.Interface;
-	/** Chats the bot starts, and marks resolved, for the person it is answering. */
+	/** Chats the bot starts, and marks resolved, for the member it is answering. */
 	chats: Pick<BotChats.Interface, "start" | "markResolved">;
-	/** For a tool that watches for something else to happen. */
-	bus: Pick<EventBus.Interface, "subscribe">;
 	/** Runs a service's Effect from inside the SDK's promise-shaped tool call. */
 	run: RunEffect;
 	/** The reply being written, for tools that leave a mark in it. */
 	reply: {
 		length: () => number;
-		noteCollaboration: (
-			collaboration: Pick<CollaborationPart, "id" | "atOffset">,
-		) => Effect.Effect<void>;
 		noteToolCall: (call: {
 			id: string;
 			atOffset: number;
 			writeOrDelete: boolean;
 		}) => Effect.Effect<void>;
 	};
-	/** The turn's own abort signal, so a cancelled turn stops its tools too. */
-	signal: AbortSignal;
 	/**
-	 * On a Personal Assistant's turn answering its person: what it knows of
+	 * On a Personal Assistant's turn answering its member: what it knows of
 	 * their workspace, and what it does there for them once they approve.
 	 */
 	assistant?: {
 		guide: Pick<AssistantGuide.Interface, "guide">;
-		person: AssistantGuide.Person;
+		member: AssistantGuide.Member;
 		requests: Readonly<Record<string, Request>>;
 	};
 }
 
-/** What people, and the model, are told of a call to a tool the bot has turned off. */
+/** What members, and the model, are told of a call to a tool the bot has turned off. */
 const TOOL_TURNED_OFF = userText`This tool is turned off for this bot.`;
-
-const TOOL_UNAVAILABLE = userText`This tool is switched off for this bot.`;
-
-const ASSISTANT_ASKS_ONLY_FOR_ITS_PERSON = userText`A Personal Assistant asks other bots only while answering its person, who approves each request.`;
 
 const NO_COMPUTER = userText`This bot has no computer to work in.`;
 
@@ -166,7 +147,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 	for (const [key, tool] of Object.entries(deps.builtIn.tools)) {
 		tools[key] = deps.builtIn.usable.includes(key)
 			? recorded(key, tool, recording)
-			: refused(key, tool, TOOL_UNAVAILABLE, recording);
+			: refused(key, tool, TOOL_TURNED_OFF, recording);
 	}
 	// Once a command or a write has started, the computer may have changed, so
 	// a turn that fails afterwards is not run again.
@@ -200,7 +181,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 	// Sugabots' own tools in the catalog, which are always there to be found.
 	const builtInFound: Record<string, Tool> = {
 		[READ_DOCS_TOOL]: readDocs,
-		[WORKSPACE_ACCESS_TOOL]: workspaceAccessTool({
+		[WORKSPACE_ROLE_TOOL]: workspaceRoleTool({
 			chatId: prepared.context.chat.id,
 			workspaceId: prepared.context.chat.workspaceId,
 			run: deps.run,
@@ -211,7 +192,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		catalogTools[key] = recorded(key, found, recording);
 	}
 	for (const [key, offered] of Object.entries(deps.connectors)) {
-		const approvalBound = deps.approvalBoundTools?.has(key) ?? false;
+		const approvalBound = deps.approvalBoundTools.has(key);
 		// An approved call is left to its approval, which refuses it if the tool
 		// was turned off since.
 		if (offered.access === "off" && !approvalBound) {
@@ -278,7 +259,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		});
 		for (const key of AUTOMATION_TOOLS) {
 			tools[key] = automationsOff
-				? refused(key, ownAutomations[key], TOOL_UNAVAILABLE, recording)
+				? refused(key, ownAutomations[key], TOOL_TURNED_OFF, recording)
 				: recorded(key, ownAutomations[key], {
 						...recording,
 						writeOrDelete: AUTOMATION_TOOL_WRITES_OR_DELETES[key],
@@ -290,11 +271,12 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		workspaceId: prepared.context.chat.workspaceId,
 		askerId: prepared.context.askerId,
 	};
-	// Offered only when a person asked: a turn answering a bot, a brief or an
+	// Offered only when a member asked: a turn answering a brief or an
 	// automation could only be refused, and a briefed bot starting chats of its
-	// own would let bots brief each other without end. A Personal Assistant's
-	// is among its requests, which wait for its person to allow them.
-	if (prepared.context.askerId && !deps.assistant) {
+	// own would let bots brief each other without end. Nor to a helper, which
+	// writes no briefs. A Personal Assistant's is among its requests, which wait
+	// for its member to allow them.
+	if (prepared.context.askerId && prepared.context.reason !== "collaboration" && !deps.assistant) {
 		tools[START_CHAT_TOOL] = recorded(
 			START_CHAT_TOOL,
 			startChatTool({ bot: askedBot, chats: deps.chats, run: deps.run }),
@@ -323,7 +305,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 			workspaceGuideTool({ ...deps.assistant, run: deps.run }),
 			recording,
 		);
-		// Each changes the workspace for the person, so each waits for them to allow it.
+		// Each changes the workspace for the member, so each waits for them to allow it.
 		for (const [key, request] of Object.entries(deps.assistant.requests)) {
 			tools[key] = recorded(key, request.tool, {
 				...recording,
@@ -344,32 +326,6 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 				run: deps.run,
 			}),
 			{ ...recording, writeOrDelete: true },
-		);
-	}
-	const collaborating: CollaborateToolOptions = {
-		from: {
-			chatId: prepared.context.chat.id,
-			botId: prepared.context.bot.id,
-			turnId: prepared.turnId,
-			messageId: prepared.responseMessage.id,
-		},
-		collaborations: deps.collaborations,
-		bus: deps.bus,
-		run: deps.run,
-		replyLength: deps.reply.length,
-		noteCollaboration: deps.reply.noteCollaboration,
-		signal: deps.signal,
-	};
-	// A Personal Assistant's is among its requests, which wait for its person to
-	// allow them; on a turn that isn't answering its person there is nobody to ask.
-	if (prepared.context.bot.assistantOf === null) {
-		tools[COLLABORATE_TOOL] = collaborateTool(collaborating);
-	} else if (!deps.assistant) {
-		tools[COLLABORATE_TOOL] = refused(
-			COLLABORATE_TOOL,
-			collaborateTool(collaborating),
-			ASSISTANT_ASKS_ONLY_FOR_ITS_PERSON,
-			recording,
 		);
 	}
 	return { tools, catalog };

@@ -3,11 +3,11 @@ import {
 	botParticipantOf,
 	type ChatDetails,
 	type ChatMessageItem,
+	type CurrentUser,
 	type Message,
 	type NotificationSettings,
 	type Project,
 	type ProjectChat,
-	type SignedInPerson,
 	type SystemBot,
 	type WorkspacePermissions,
 	type WorkspaceRole,
@@ -17,7 +17,7 @@ import {
 	listedChat,
 	listedConnector,
 	type TestConnector,
-	testPerson,
+	testMember,
 } from "@sugabots/contracts/testing";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
@@ -40,12 +40,12 @@ import { projectsWithBots, storyBots } from "@/shell/story-fixtures.ts";
 const API = import.meta.env.VITE_API_URL as string;
 const api = (path: string) => `${API}${path}`;
 
-export const storyPerson: SignedInPerson = {
+export const storyMember: CurrentUser = {
 	id: "0199a3a0-0000-7000-8000-000000000009",
 	name: "Rowan Ellis",
 	email: "rowan@example.com",
 	image: null,
-} as SignedInPerson;
+} as CurrentUser;
 
 const firstProject = projectsWithBots[0]?.project as Project;
 
@@ -113,7 +113,7 @@ const NO_PERMISSIONS: WorkspacePermissions = {
 	createBots: false,
 	updateWorkspace: false,
 	manageProviders: false,
-	managePeople: false,
+	manageMembers: false,
 	chooseSystemModel: false,
 	manageUsage: false,
 	manageAdmins: false,
@@ -128,7 +128,7 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 		createBots: true,
 		updateWorkspace: true,
 		manageProviders: true,
-		managePeople: true,
+		manageMembers: true,
 		chooseSystemModel: true,
 		manageUsage: true,
 		manageAdmins: true,
@@ -140,7 +140,7 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 		createBots: true,
 		updateWorkspace: true,
 		manageProviders: true,
-		managePeople: true,
+		manageMembers: true,
 		chooseSystemModel: true,
 		manageUsage: true,
 		manageAdmins: false,
@@ -155,7 +155,7 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 export function storyChatDetails(bot: Bot, messages: Message[] = []): ChatDetails {
 	const chat = storyChatFor(bot);
 	const participant = botParticipantOf(bot);
-	const person = testPerson({ id: storyPerson.id, name: storyPerson.name });
+	const member = testMember({ id: storyMember.id, name: storyMember.name });
 	return {
 		chat: {
 			id: chat.id,
@@ -165,18 +165,17 @@ export function storyChatDetails(bot: Bot, messages: Message[] = []): ChatDetail
 			rootChatId: chat.id,
 			kind: "project_chat",
 			title: chat.title,
-			status: "done",
-			parentChatId: null,
+			working: false,
 			resolvedAt: null,
 			createdAt: chat.createdAt,
 			updatedAt: chat.updatedAt,
 		},
-		capabilities: { approveToolCalls: true },
+		permissions: { approveToolCalls: true, approveComputerRequests: true },
 		automationRun: null,
-		participants: [person, participant],
+		participants: [member, participant],
 		projectBots: [participant],
 		// The bot is public, so everyone reaches its default project; the viewer stands for them.
-		peopleReachingProject: [person],
+		membersReachingProject: [member],
 		olderMessagesCursor: null,
 		queuedSince: null,
 		reads: [],
@@ -199,14 +198,14 @@ export function storyProjectChatFor(project: Project): ProjectChat {
 	};
 }
 
-/** What a project's chat holds: its messages, and the project's people and bots to mention. */
+/** What a project's chat holds: its messages, and the project's members and bots to mention. */
 export function storyProjectChatDetails(
 	project: Project,
 	bots: readonly Bot[],
 	messages: Message[] = [],
 ): ChatDetails {
 	const chat = storyProjectChatFor(project);
-	const person = testPerson({ id: storyPerson.id, name: storyPerson.name });
+	const member = testMember({ id: storyMember.id, name: storyMember.name });
 	return {
 		chat: {
 			id: chat.id,
@@ -218,17 +217,16 @@ export function storyProjectChatDetails(
 			updatedAt: chat.updatedAt,
 			rootChatId: chat.id,
 			kind: "project_chat",
-			status: "done",
-			parentChatId: null,
+			working: false,
 			resolvedAt: null,
 		},
-		capabilities: { approveToolCalls: true },
+		permissions: { approveToolCalls: true, approveComputerRequests: true },
 		automationRun: null,
-		participants: [person],
+		participants: [member],
 		projectBots: bots
 			.filter((bot) => botsInProject.get(project.id)?.some((one) => one.id === bot.id))
 			.map(botParticipantOf),
-		peopleReachingProject: [person],
+		membersReachingProject: [member],
 		olderMessagesCursor: null,
 		queuedSince: null,
 		reads: [],
@@ -252,11 +250,11 @@ interface StoryAppData {
 	/** Messages in each project's chat, by the project's id. */
 	projectChatMessages?: Record<string, Message[]>;
 	models?: (typeof storyModel)[];
-	/** The viewer's referral link, where the server signs people up by referral. */
+	/** The viewer's referral link, where the server signs members up by referral. */
 	referralLink?: string;
 }
 
-/** What the person chose to be notified about: nothing. */
+/** What the member chose to be notified about: nothing. */
 const noNotificationChoices: NotificationSettings = {
 	level: "mentions",
 	pausedUntil: null,
@@ -288,7 +286,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				{
 					id: "0199a3a0-0000-7000-8000-0000000000d1",
 					role: data.role ?? "owner",
-					person: storyPerson,
+					member: storyMember,
 					joinedAt: "2026-09-01T00:00:00.000Z",
 				},
 			]),
@@ -388,15 +386,15 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			HttpResponse.json({ computer: { kind: "none" }, providerEnabled: false }),
 		),
 		// The viewer alone reaches each project, as its members list answers.
-		http.get(api("/projects/:projectId/people"), () =>
-			HttpResponse.json([testPerson({ id: storyPerson.id, name: storyPerson.name })]),
+		http.get(api("/projects/:projectId/members-reaching"), () =>
+			HttpResponse.json([testMember({ id: storyMember.id, name: storyMember.name })]),
 		),
 		http.get(api("/projects/:projectId/members"), () =>
 			HttpResponse.json([
 				{
-					personId: storyPerson.id,
-					name: storyPerson.name,
-					email: storyPerson.email,
+					memberId: storyMember.id,
+					name: storyMember.name,
+					email: storyMember.email,
 					image: null,
 					removable: false,
 				},
@@ -439,7 +437,7 @@ export function connectorHandlers(connectors: readonly TestConnector[]): Request
 	];
 }
 
-/** The app at `path`, signed in as `storyPerson`, with a cache of its own. */
+/** The app at `path`, signed in as `storyMember`, with a cache of its own. */
 export function StoryApp({ path }: { path: string }) {
 	const [queryClient] = useState(() => createQueryClient());
 	const [router] = useState(() =>
@@ -449,7 +447,7 @@ export function StoryApp({ path }: { path: string }) {
 		}),
 	);
 	useEffect(() => () => queryClient.clear(), [queryClient]);
-	const session = { person: storyPerson, error: undefined, refresh: async () => {} };
+	const session = { member: storyMember, error: undefined, refresh: async () => {} };
 	return (
 		<QueryClientProvider client={queryClient}>
 			<div className="h-screen">

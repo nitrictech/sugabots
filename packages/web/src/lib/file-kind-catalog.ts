@@ -7,12 +7,12 @@ import type { WrittenFileKind } from "@sugabots/contracts";
 
 /** What it is called beside its title, such as "Document". */
 export const FILE_KIND_LABELS: Record<WrittenFileKind, string> = {
-	document: "Document",
+	markdown: "Document",
 	html: "Page",
 };
 
 /** How Download saves it: as `type`, ending in `.extension`. */
 export const FILE_KIND_DOWNLOADS: Record<WrittenFileKind, { extension: string; type: string }> = {
-	document: { extension: "md", type: "text/markdown" },
+	markdown: { extension: "md", type: "text/markdown" },
 	html: { extension: "html", type: "text/html" },
 };

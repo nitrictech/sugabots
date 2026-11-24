@@ -4,7 +4,7 @@ import { COMPUTER_OPENSANDBOX_DEFAULT_SIZE } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { DateTime, type Duration, Effect, Fiber, Layer, Redacted } from "effect";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { computer, computerLease, membership, person, workspace } from "../database/schema.ts";
+import { computer, computerLease, member, membership, workspace } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import { Egress } from "../providers/network/egress.ts";
@@ -114,14 +114,14 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 		);
 		const [owner] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Sam", email: `computer-${suffix}@example.com` })
 				.returning(),
 		);
 		if (!space || !owner) throw new Error("fixture");
 		ownerId = owner.id;
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId: space.id, personId: owner.id }),
+			db.insert(membership).values({ workspaceId: space.id, memberId: owner.id }),
 		);
 		const made = await onDatabase((db) =>
 			seedProject(db, { workspaceId: space.id, name: "Launch", slug: "launch" }),
@@ -178,33 +178,31 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 	it(
 		"signs the project's computer in when it opens, and again when a renewal finds that near expiry",
 		async () => {
-			const signedInUntil = (expiresIn: Duration.Input, version: string) => ({
+			const signedInUntil = (expiresIn: Duration.Input) => ({
 				credentials: [
 					{
 						host: "github.com",
 						pathPrefix: "/acme/",
 						header: "Authorization",
-						value: Redacted.make(`Bearer ${version}`),
+						value: Redacted.make("Bearer a-token"),
 					},
 				],
-				environment: { SIGNED_IN_AS: version },
 				expiresAt: DateTime.addDuration(DateTime.nowUnsafe(), expiresIn),
 			});
-			const signedInAs = async (computer: Computers.Computer) =>
-				(await exec(computer, "bash -lc 'echo $SIGNED_IN_AS'")).stdout.text.trim();
-			signedIn = signedInUntil("2 hours", "first");
+			signedIn = signedInUntil("2 hours");
 
-			const { computer: opened } = await open();
+			await open();
 			const asked = signIns;
 			await runOnPostgres(projectComputers.renew(HOLDER));
 			const notYetDue = signIns - asked;
-			signedIn = signedInUntil("5 minutes", "second");
+			signedIn = signedInUntil("5 minutes");
 			await open();
-			signedIn = signedInUntil("2 hours", "third");
+			const beforeDue = signIns;
+			signedIn = signedInUntil("2 hours");
 			await runOnPostgres(projectComputers.renew(HOLDER));
 
 			expect(notYetDue).toBe(0);
-			expect(await signedInAs(opened)).toBe("third");
+			expect(signIns - beforeDue).toBe(1);
 		},
 		SLOW,
 	);

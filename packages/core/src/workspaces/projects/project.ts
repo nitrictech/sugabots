@@ -30,9 +30,9 @@ function toProject(
 }
 
 /**
- * The project as one person sees it, permissions and all.
+ * The project as one member sees it, permissions and all.
  *
- * Takes a standing rather than a project and a person, so the permissions on
+ * Takes a standing rather than a project and a member, so the permissions on
  * it are always the ones the caller who asked for it holds.
  */
 export function projectSeenBy({ project: row, actor, facts }: ProjectStanding): Project {

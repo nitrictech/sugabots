@@ -31,7 +31,7 @@ import {
 /**
  * Connecting a project to GitHub: the project gets a private GitHub App of its
  * own, made on GitHub from Sugabots' manifest, owned by the organization named
- * or by the person, then installed there; its repositories are chosen on its
+ * or by the member, then installed there; its repositories are chosen on its
  * page once it is. A project connects to one account, since its computer can be
  * signed in to only one at GitHub.
  */

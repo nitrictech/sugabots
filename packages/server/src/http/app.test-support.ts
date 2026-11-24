@@ -1,4 +1,4 @@
-import type { SignedInPerson } from "@sugabots/contracts";
+import type { CurrentUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
@@ -44,6 +44,28 @@ export const BASE_URL = "http://localhost:3000";
 /** Where the test app's web app is served, a browser origin it trusts besides its own. */
 export const WEB_ORIGIN = "http://localhost:5173";
 
+/** The cookie better-auth keeps a browser's session in. */
+const SESSION_COOKIE = "better-auth.session_token";
+
+/**
+ * The headers a browser on the test app's web app sends once signed in with
+ * session `token`: the session cookie, and the web app's origin, without which
+ * a write with a cookie is refused.
+ */
+export function signedInWith(token: string): Record<string, string> {
+	return { cookie: `${SESSION_COOKIE}=${token}`, origin: WEB_ORIGIN };
+}
+
+/** The session token in a request's cookie, as `signedInWith` put it there. */
+export function sessionTokenIn(headers: Headers): string | undefined {
+	const prefix = `${SESSION_COOKIE}=`;
+	return headers
+		.get("cookie")
+		?.split(/;\s*/)
+		.find((cookie) => cookie.startsWith(prefix))
+		?.slice(prefix.length);
+}
+
 export interface TestApp {
 	/** A request to `path` under `API_BASE_PATH`, e.g. `/bots/…`. */
 	request(path: string, init?: RequestInit): Promise<Response>;
@@ -88,11 +110,11 @@ export function testRoutes<Provided extends TestServices = never>(
 	);
 }
 
-/** `Authentication` asking `resolvePerson` who holds a request's credentials. */
-export function identifiedBy(resolvePerson: PersonResolver): Layer.Layer<Authentication.Service> {
+/** `Authentication` asking `resolveMember` who holds a request's credentials. */
+export function identifiedBy(resolveMember: MemberResolver): Layer.Layer<Authentication.Service> {
 	return Layer.succeed(Authentication.Service, {
 		handler: () => Effect.succeed(new Response(null, { status: 404 })),
-		identify: identifyFromResolver(resolvePerson),
+		identify: identifyFromResolver(resolveMember),
 	});
 }
 
@@ -111,7 +133,7 @@ export function serverSettingsWithWebAppAt(webAppUrl: string): Layer.Layer<Serve
  */
 const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Accounts.Service),
-	// `/me` answers with these beside the signed-in person; a case about them supplies its own.
+	// `/me` answers with these beside the current user; a case about them supplies its own.
 	unimplemented(Membership.Service, { workspaces: Effect.succeed([]) }),
 	unimplemented(ProjectAdministration.Service),
 	unimplemented(WorkspaceTimeZone.Service),
@@ -145,14 +167,14 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: EventStore.inMemory() })),
 );
 
-/** Who a test says holds the credentials in `headers`, so HTTP tests run without a database. */
-export type PersonResolver = (headers: Headers) => Promise<SignedInPerson | null>;
+/** Whose session a test says the cookie in `headers` holds, so HTTP tests run without a database. */
+export type MemberResolver = (headers: Headers) => Promise<CurrentUser | null>;
 
 /** The `Authentication.identify` a test's resolver stands in for. */
-function identifyFromResolver(resolvePerson: PersonResolver) {
+function identifyFromResolver(resolveMember: MemberResolver) {
 	return (headers: Headers) =>
 		Effect.map(
-			Effect.promise(() => resolvePerson(headers)),
-			(person) => (person ? { person, refreshedCookies: Cookies.empty } : undefined),
+			Effect.promise(() => resolveMember(headers)),
+			(member) => (member ? { member, refreshedCookies: Cookies.empty } : undefined),
 		);
 }

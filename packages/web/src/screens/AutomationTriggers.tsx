@@ -103,7 +103,10 @@ export function triggerDraftOf(trigger: AutomationTriggerInput): TriggerDraft {
 				kind: "webhook",
 				webhook: {
 					auth: trigger.auth ?? NEW_WEBHOOK.auth,
-					deliveryIdHeader: trigger.deliveryIdHeader,
+					deliveryIdHeader:
+						trigger.deliveryIdHeader === undefined
+							? NEW_WEBHOOK.deliveryIdHeader
+							: trigger.deliveryIdHeader,
 					secret: trigger.secret ?? "",
 					filter: trigger.filter ?? [],
 				},

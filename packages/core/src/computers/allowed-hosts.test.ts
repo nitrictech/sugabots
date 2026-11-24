@@ -2,14 +2,14 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	allowedHost,
 	blockedHost,
+	member,
 	membership,
-	person,
 	projectAllowedHost,
 	workspace,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { seedProject } from "../workspaces/projects/seed.test-support.ts";
-import { allowedHostsOf, reachOf, TRUSTED_HOSTS } from "./allowed-hosts.ts";
+import { reachOf, TRUSTED_HOSTS } from "./allowed-hosts.ts";
 import type { Computers } from "./computers.ts";
 
 const BLOCKS_HOSTS: Computers.Capabilities = {
@@ -36,13 +36,13 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 		);
 		const [owner] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Sam", email: `hosts-${suffix}@example.com` })
 				.returning(),
 		);
 		if (!space || !owner) throw new Error("fixture");
 		workspaceId = space.id;
-		await onDatabase((db) => db.insert(membership).values({ workspaceId, personId: owner.id }));
+		await onDatabase((db) => db.insert(membership).values({ workspaceId, memberId: owner.id }));
 		const aProject = async (name: string) => {
 			const made = await onDatabase((db) =>
 				seedProject(db, { workspaceId, name, slug: name.toLowerCase() }),
@@ -61,13 +61,19 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 		);
 	const block = (host: string) =>
 		onDatabase((db) => db.insert(blockedHost).values({ workspaceId, host }));
+	const allowedHostsFor = async (target: { workspaceId: string; projectId: string }) => {
+		const reach = await runOnPostgres(
+			reachOf(target, { networkMode: "allowed-hosts-only", capabilities: BLOCKS_HOSTS }),
+		);
+		return reach.kind === "allowed-hosts-only" ? reach.hosts : [];
+	};
 
 	it("gives a project the trusted hosts, the workspace's, and its own, but not another project's", async () => {
 		await allowForWorkspace("api.example.com");
 		await allowForProject(builders, "builders.example.com");
 		await allowForProject(research, "research.example.com");
 
-		const hosts = await runOnPostgres(allowedHostsOf(builders));
+		const hosts = await allowedHostsFor(builders);
 
 		expect(hosts).toEqual(
 			expect.arrayContaining([...TRUSTED_HOSTS, "api.example.com", "builders.example.com"]),
@@ -82,7 +88,7 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 		await block("github.com");
 
 		for (const target of [builders, research]) {
-			const hosts = await runOnPostgres(allowedHostsOf(target));
+			const hosts = await allowedHostsFor(target);
 			expect(hosts).not.toContain("api.example.com");
 			expect(hosts).not.toContain("github.com");
 		}
@@ -95,7 +101,7 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 		await block("api.example.com");
 		await block("*.example.org");
 
-		const hosts = await runOnPostgres(allowedHostsOf(builders));
+		const hosts = await allowedHostsFor(builders);
 
 		expect(hosts).not.toContain("*.example.com");
 		expect(hosts).not.toContain("cdn.example.org");
@@ -108,7 +114,7 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 		await allowForProject(builders, "*.pastebin.com");
 		await block("pastebin.com");
 
-		const hosts = await runOnPostgres(allowedHostsOf(builders));
+		const hosts = await allowedHostsFor(builders);
 
 		expect(hosts).not.toContain("www.pastebin.com");
 		expect(hosts).not.toContain("*.pastebin.com");

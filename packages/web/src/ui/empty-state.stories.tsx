@@ -9,7 +9,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: {
 		title: "No projects yet",
-		children: "Its bots, its people and the apps they share are here.",
+		children: "Its bots, its members and the apps they share are here.",
 	},
 	render: (args) => (
 		<div className="flex min-h-80">

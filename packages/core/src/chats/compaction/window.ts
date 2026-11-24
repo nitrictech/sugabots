@@ -13,8 +13,8 @@ const KEPT_SHARE = 0.25;
 
 /**
  * How much of its own window the model compacting a chat may be given to
- * summarise. The rest holds its instructions, the previous summary, the
- * summary it writes, and the error in estimating tokens.
+ * condense. The rest holds its instructions, the previous condensed account, the
+ * condensed account it writes, and the error in estimating tokens.
  */
 const COMPACTOR_INPUT_SHARE = 0.6;
 
@@ -32,9 +32,9 @@ export function needsCompaction(contextTokens: number | undefined, windowTokens:
 }
 
 interface CompactionPlan<Message> {
-	/** The messages the Compaction bot summarises, oldest first. */
-	summarised: Message[];
-	/** When the first summarised message was written: history before it is left out. */
+	/** The messages the Compaction bot condenses, oldest first. */
+	toCondense: Message[];
+	/** When the first condensed message was written: history before it is left out. */
 	historyStartsAt: Date;
 	/** When the first message kept word for word was written. */
 	keptFrom: Date;
@@ -42,14 +42,14 @@ interface CompactionPlan<Message> {
 
 /**
  * Where to cut a chat's history, oldest first: the newest messages are kept
- * word for word, and the ones just before them are summarised. Nothing before
- * `previousKeptFrom` is summarised again, since the last compaction already
- * folded it into its summary. Nothing is planned when there is nothing to
- * summarise, such as when the newest messages alone fill what is kept.
+ * word for word, and the ones just before them are condensed. Nothing before
+ * `previousKeptFrom` is condensed again, since the last compaction already
+ * folded it into its condensed account. Nothing is planned when there is nothing to
+ * condense, such as when the newest messages alone fill what is kept.
  *
- * What is kept and summarised is sized to the window of the bot reading the
+ * What is kept and condensed is sized to the window of the bot reading the
  * chat: at the compaction line, the bot read about what is kept plus what is
- * summarised. What is summarised is also capped to what the model summarising
+ * condensed. What is condensed is also capped to what the model condensing
  * it can read.
  */
 export function planCompaction<Message extends { createdAt: Date; tokens: number }>(
@@ -58,7 +58,7 @@ export function planCompaction<Message extends { createdAt: Date; tokens: number
 	windows: { readerTokens: number; compactorTokens: number },
 ): CompactionPlan<Message> | undefined {
 	const keptTokens = Math.floor(windows.readerTokens * KEPT_SHARE);
-	const summarisedTokens = Math.min(
+	const condensedTokens = Math.min(
 		compactionLineTokens(windows.readerTokens) - keptTokens,
 		Math.floor(windows.compactorTokens * COMPACTOR_INPUT_SHARE),
 	);
@@ -66,21 +66,21 @@ export function planCompaction<Message extends { createdAt: Date; tokens: number
 	const beforeKept = history
 		.slice(0, history.length - kept.length)
 		.filter((message) => !previousKeptFrom || message.createdAt >= previousKeptFrom);
-	const summarised = Turns.newestWithinLimit(
+	const toCondense = Turns.newestWithinLimit(
 		beforeKept,
 		(message) => message.tokens,
-		summarisedTokens,
+		condensedTokens,
 	);
-	const [firstSummarised] = summarised;
+	const [firstCondensed] = toCondense;
 	const [firstKept] = kept;
 	// The newest message before what is kept is always taken, so a single one
-	// larger than the Compaction bot may read leaves it nothing it can summarise.
-	if (!firstSummarised || !firstKept || firstSummarised.tokens > summarisedTokens) {
+	// larger than the Compaction bot may read leaves it nothing it can condense.
+	if (!firstCondensed || !firstKept || firstCondensed.tokens > condensedTokens) {
 		return undefined;
 	}
 	return {
-		summarised,
-		historyStartsAt: firstSummarised.createdAt,
+		toCondense,
+		historyStartsAt: firstCondensed.createdAt,
 		keptFrom: firstKept.createdAt,
 	};
 }

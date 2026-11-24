@@ -38,7 +38,7 @@ import {
 import { Toggle } from "@/ui/toggle.tsx";
 import { NotificationLevelPicker } from "./NotificationLevelMenu.tsx";
 
-/** What Sugabots notifies the person about, where, and when not. */
+/** What Sugabots notifies the member about, where, and when not. */
 export function NotificationsSettings() {
 	const { data: settings, error } = useNotificationSettings();
 	return (
@@ -176,7 +176,7 @@ const AUTOMATION_RUN_OPTIONS: { value: AutomationRunNotifications; label: string
 	{ value: "none", label: "None" },
 ];
 
-/** What besides messages the person hears of, unless their level is Nothing. */
+/** What besides messages the member hears of, unless their level is Nothing. */
 function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
 	const change = useChangeNotificationPreferences();
 	return (
@@ -276,7 +276,7 @@ function TimeInput({
 	);
 }
 
-/** A level for each project, in place of the person's own. */
+/** A level for each project, in place of the member's own. */
 function ProjectLevels({ settings }: { settings: NotificationSettings }) {
 	const { data: projects } = useProjects();
 	if (!projects || projects.length === 0) return null;

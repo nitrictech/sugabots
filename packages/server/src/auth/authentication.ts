@@ -1,47 +1,42 @@
 export * as Authentication from "./authentication.ts";
 
 import {
+	type CurrentUser,
 	httpUrlSchema,
-	PERSON_NAME_MAX_LENGTH,
-	personNameSchema,
-	type SignedInPerson,
+	MEMBER_NAME_MAX_LENGTH,
+	memberNameSchema,
 } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { type Database, effectRunner } from "@sugabots/core/database/database";
 import { Email } from "@sugabots/core/email/email";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
-import { account, person, session, verification } from "@sugabots/core/workspaces/sql";
+import { account, member, session, verification } from "@sugabots/core/workspaces/sql";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
-import { bearer } from "better-auth/plugins/bearer";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Config, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { Cookies } from "effect/unstable/http";
 import { Pool } from "pg";
 
 /**
- * How the HTTP API proves who is calling: better-auth's accounts (the people
- * it calls users, kept in `person`), credentials, sessions, email verification and password resets, under its own routes at
+ * How the HTTP API proves who is calling: better-auth's accounts (the members
+ * it calls users, kept in `member`), credentials, sessions, email verification and password resets, under its own routes at
  * `/api/auth`.
- * Everything else in the API asks `identify` who holds the request's cookie or
- * bearer token. What the caller may then do is core's to decide.
- *
- * Browsers use better-auth's HttpOnly cookie. The `bearer` plugin also makes
- * every session token usable as `Authorization: Bearer …`, for Electron, React
- * Native and scripts.
+ * Everything else in the API asks `identify` whose session the request's
+ * HttpOnly cookie holds. What the caller may then do is core's to decide.
  */
 export interface Interface {
 	/** Answers a request to better-auth's own routes under `/api/auth`. */
 	readonly handler: (request: Request) => Effect.Effect<Response>;
-	/** Who holds the cookie or bearer token in `headers`, or `undefined` when nobody does. */
+	/** Whose session the cookie in `headers` holds, or `undefined` when nobody's does. */
 	readonly identify: (headers: Headers) => Effect.Effect<Identified | undefined>;
 }
 
 /** The holder of a request's credentials. */
 interface Identified {
-	readonly person: SignedInPerson;
+	readonly member: CurrentUser;
 	/**
 	 * Cookies better-auth set while checking the credentials, such as a renewed
 	 * session cache. They belong on the response, or the browser never gets them.
@@ -102,17 +97,17 @@ export const make = Effect.gen(function* () {
 
 		database: drizzleAdapter(drizzle({ client: pool }), {
 			provider: "pg",
-			schema: { person, session, account, verification },
+			schema: { member, session, account, verification },
 		}),
 
 		// Postgres mints the id of every row better-auth inserts, as it does
 		// every other table's, so better-auth leaves the column alone.
 		advanced: { database: { generateId: false } },
 
-		// better-auth calls a person a user; ours are kept in `person`, and
-		// sessions and accounts name theirs by `personId`.
+		// better-auth calls a member a user; ours are kept in `member`, and
+		// sessions and accounts name theirs by `memberId`.
 		user: {
-			modelName: "person",
+			modelName: "member",
 			additionalFields: {
 				// Set from the referral link the account signed up with, never by the caller.
 				referredBy: { type: "string", required: false, input: false },
@@ -124,19 +119,15 @@ export const make = Effect.gen(function* () {
 			user: {
 				create: {
 					before: async (creating, context) => {
-						const name = validPersonName(creating.name);
-						const image = validPersonImage(creating.image);
+						const name = validMemberName(creating.name);
+						const image = validMemberImage(creating.image);
 						const { referredBy } = await run(
 							Effect.mapError(
 								accounts.admit({
 									email: creating.email,
 									referralCode: referralCodeIn(context?.body),
 								}),
-								(refused) =>
-									new APIError("FORBIDDEN", {
-										code: refusalCodes[refused._tag],
-										message: refused.userMessage,
-									}),
+								(refused) => new APIError("FORBIDDEN", { message: refused.userMessage }),
 							),
 						);
 						return { data: { ...creating, name, image, referredBy } };
@@ -147,8 +138,8 @@ export const make = Effect.gen(function* () {
 						return {
 							data: {
 								...updating,
-								...(updating.name !== undefined && { name: validPersonName(updating.name) }),
-								...(updating.image !== undefined && { image: validPersonImage(updating.image) }),
+								...(updating.name !== undefined && { name: validMemberName(updating.name) }),
+								...(updating.image !== undefined && { image: validMemberImage(updating.image) }),
 							},
 						};
 					},
@@ -156,7 +147,7 @@ export const make = Effect.gen(function* () {
 			},
 		},
 
-		account: { fields: { userId: "personId" } },
+		account: { fields: { userId: "memberId" } },
 
 		emailAndPassword: {
 			enabled: true,
@@ -192,7 +183,7 @@ export const make = Effect.gen(function* () {
 		},
 
 		session: {
-			fields: { userId: "personId" },
+			fields: { userId: "memberId" },
 			cookieCache: { enabled: true, maxAge: SESSION_COOKIE_CACHE_SECONDS },
 		},
 
@@ -204,8 +195,6 @@ export const make = Effect.gen(function* () {
 				"/sign-up/email": { window: SIGN_UP_WINDOW_SECONDS, max: SIGN_UP_ATTEMPTS_PER_WINDOW },
 			},
 		},
-
-		plugins: [bearer()],
 	});
 
 	return Service.of({
@@ -217,7 +206,7 @@ export const make = Effect.gen(function* () {
 				({ headers: responseHeaders, response }): Identified | undefined =>
 					response
 						? {
-								person: {
+								member: {
 									id: response.user.id,
 									email: response.user.email,
 									name: response.user.name,
@@ -232,34 +221,23 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-/** The codes a refused sign-up answers with, which clients tell apart. */
-const refusalCodes = {
-	SignUpClosed: "SIGN_UP_CLOSED",
-	ReferralLinkInvalid: "REFERRAL_LINK_INVALID",
-} as const;
-
 /** `name` trimmed, or a refusal the caller is shown when it is blank or too long. */
-function validPersonName(name: unknown): string {
+function validMemberName(name: unknown): string {
 	return Option.getOrThrowWith(
-		Schema.decodeUnknownOption(personNameSchema)(name),
+		Schema.decodeUnknownOption(memberNameSchema)(name),
 		() =>
 			new APIError("BAD_REQUEST", {
-				code: "INVALID_NAME",
-				message: `Your name needs 1 to ${PERSON_NAME_MAX_LENGTH} characters.`,
+				message: `Your name needs 1 to ${MEMBER_NAME_MAX_LENGTH} characters.`,
 			}),
 	);
 }
 
 /** `image` as an HTTP address, or a refusal the caller is shown. Null, or none, is no picture. */
-function validPersonImage(image: unknown): string | null | undefined {
+function validMemberImage(image: unknown): string | null | undefined {
 	if (image === null || image === undefined) return image;
 	return Option.getOrThrowWith(
 		Schema.decodeUnknownOption(httpUrlSchema)(image),
-		() =>
-			new APIError("BAD_REQUEST", {
-				code: "INVALID_IMAGE",
-				message: "Your picture needs to be an HTTP address.",
-			}),
+		() => new APIError("BAD_REQUEST", { message: "Your picture needs to be an HTTP address." }),
 	);
 }
 

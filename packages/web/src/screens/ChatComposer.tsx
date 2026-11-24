@@ -200,7 +200,7 @@ export function ChatComposer({
 	 * starts, since a file uploads to its chat.
 	 */
 	attachments?: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
-	/** A strip over everything else in the box, of what the person should know before sending, such as a connector bots can't use. */
+	/** A strip over everything else in the box, of what the member should know before sending, such as a connector bots can't use. */
 	notice?: ReactNode;
 	/** Send is off, as while a bot the message must go to has no model; `notice` says why. */
 	held?: boolean;
@@ -634,7 +634,7 @@ function AttachButton({
 						}}
 					>
 						<AtSign aria-hidden size={16} />
-						Mention a bot or person
+						Mention a bot or member
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
@@ -757,7 +757,7 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-sm">@{suggestion.handle}</span>
 					<span className="truncate text-muted-foreground text-xs">
-						Notifies {countOf(suggestion.notifies.length, "person", "people")}
+						Notifies {countOf(suggestion.notifies.length, "member", "members")}
 					</span>
 				</span>
 			</>
@@ -820,7 +820,7 @@ function shortcodeClosed(value: string, cursor: number) {
 
 /**
  * The mention the cursor is in: an `@` where the API would read one, and what
- * has been typed after it on the same line. Spaces are allowed, so a person can
+ * has been typed after it on the same line. Spaces are allowed, so a member can
  * type a name as it is written, but not straight after the `@`: in "meet @ noon"
  * the `@` means "at". It ends past any handle characters after the cursor, so
  * choosing someone with the cursor inside a handle replaces all of it.

@@ -1,8 +1,8 @@
 export * as EventBus from "./bus.ts";
 
 import {
+	type EphemeralEventType,
 	type EventStream,
-	isDurableEventType,
 	resetEvent,
 	type StreamEvent,
 } from "@sugabots/contracts";
@@ -22,7 +22,9 @@ import { EventStore } from "./store.ts";
  */
 
 export interface Interface {
-	publish(stream: EventStream, event: StreamEvent): Promise<void>;
+	/** Sends an event that is never stored to the stream's live subscribers. */
+	publish(stream: EventStream, event: StreamEvent & { type: EphemeralEventType }): Promise<void>;
+	/** Sends events `EventOutbox` stored, once their transaction committed. */
 	publishCommitted(events: CommittedEvent[]): Promise<void>;
 	subscribe(stream: EventStream, options?: SubscribeOptions): AsyncIterable<Delivery>;
 	/**
@@ -122,9 +124,9 @@ export function inProcess({
 	/**
 	 * One publish at a time per stream.
 	 *
-	 * Subscribers receive a stream's events in sequence order, and two
-	 * overlapping publishes could otherwise take their sequence numbers in one
-	 * order and reach subscribers in the other.
+	 * Subscribers, here and in other processes, receive a stream's events in
+	 * the order they were published, because each waits for the relay to send
+	 * the one before it.
 	 */
 	const publishing = new Map<EventStream, Promise<void>>();
 
@@ -164,11 +166,10 @@ export function inProcess({
 	return {
 		publish(stream, event) {
 			return serialize(stream, async () => {
-				const seq = isDurableEventType(event.type) ? await store.append(stream, event) : undefined;
-				const delivery: Delivery = seq === undefined ? { event } : { seq, event };
+				const delivery: Delivery = { event };
 				deliver(stream, delivery);
 				// Inside the serialised publish so this stream's notices leave in
-				// the order its events were numbered.
+				// the order its events were published.
 				await broadcast(stream, delivery);
 			});
 		},

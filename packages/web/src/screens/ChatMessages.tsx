@@ -2,28 +2,25 @@ import { botColorVariables } from "@sugabots/avatars";
 import {
 	type BotParticipant,
 	type ChatKind,
-	type CollaborationPart,
 	type FilePart,
+	type MemberParticipant,
 	type Message,
 	type MessageReplyTo,
 	messageAuthorName,
 	type Participant,
-	type PersonParticipant,
 	type ToolCallPart,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { CornerUpLeft, Reply, SquareArrowOutUpRight } from "lucide-react";
+import { CornerUpLeft, Reply } from "lucide-react";
 import { type CSSProperties, Fragment, type ReactNode, useMemo, useRef, useState } from "react";
-import { type ApprovalCapabilities, mayAnswer } from "@/lib/approvals.ts";
+import { type ApprovalPermissions, mayAnswer } from "@/lib/approvals.ts";
 import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
-import { useChatEvents } from "@/lib/chat-events.ts";
-import { useChat } from "@/lib/chat-query.ts";
 import { type MarkedConnector, useMarkedConnectors } from "@/lib/connectors.ts";
 import { formatClockTime, formatDay, formatFullTimestamp } from "@/lib/list-time.ts";
 import { BROWSER_TOOL_PREFIX, splitToolKey } from "@/lib/tool-names.ts";
 import { BotAvatar, WatchingAvatar } from "@/shell/Bot.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { LabelledRule } from "@/ui/labelled-rule.tsx";
@@ -50,18 +47,14 @@ import { type Typer, TypingIndicator } from "./TypingIndicator.tsx";
 
 /*
  * A bot's message is drawn open on the page, its face and name at the head of
- * a group, then its parts in order. Text is its words, and each collaboration
- * is a card showing the chat it started. So a bot that writes, asks
- * another bot, and writes again shows as words, a card, and words, in the
- * order it happened. A person's message sits in a bubble.
+ * a group, then its parts in order. A member's message sits in a bubble.
  *
  * A reply's text is drawn once it is settled, never as it streams. What the
  * bot writes on the way is often the lead-in to a tool call ("Let me find
  * the cycle:"), and that cannot be told until the call arrives, so text drawn
  * live would show words and then take them back. Text is settled when the
- * reply finishes or when something follows it: text before a collaboration is
- * shown while the collaboration runs, so the chat reads in the order it
- * happened. While the turn runs, one line says the bot is typing.
+ * reply finishes or when something follows it. While the turn runs, one line
+ * says the bot is typing.
  *
  * Tool calls are not drawn as parts at all. They belong to the turn rather than
  * to the transcript: the work line above a reply is the way to what they did.
@@ -75,15 +68,14 @@ export function ChatMessages({
 	messages,
 	typing,
 	participants,
-	peopleReachingProject,
+	membersReachingProject,
 	chatKind,
 	projectId,
 	dividers = true,
-	onOpenNestedChat,
 	onOpenFile,
 	onOpenDesktop,
 	previews = true,
-	approvalCapabilities,
+	approvalPermissions,
 	compact = false,
 	queued = NONE_QUEUED,
 	sending = NONE_SENDING,
@@ -108,17 +100,14 @@ export function ChatMessages({
 	 * chat does under its composer.
 	 */
 	typing?: { host: BotParticipant | undefined; isRunning: boolean };
-	/**
-	 * Everyone in the chat and the project's bots and people: how a
-	 * collaboration's other bot is found, and who a mention can name.
-	 */
+	/** Everyone in the chat and the project's bots and members: who a mention can name. */
 	participants: Participant[];
-	/** The people who reach the project, whom a person's `@here` or `@channel` would notify. */
-	peopleReachingProject: readonly PersonParticipant[];
+	/** The members who reach the project, whom a member's `@here` or `@channel` would notify. */
+	membersReachingProject: readonly MemberParticipant[];
 	/** What kind of chat it is, which decides whether `@here` and `@channel` notify anyone. */
 	chatKind: ChatKind;
 	/**
-	 * The project the chat is in, a bot's default one or one people
+	 * The project the chat is in, a bot's default one or one members
 	 * made, whose connectors its tools may come from.
 	 */
 	projectId?: string | null;
@@ -127,8 +116,6 @@ export function ChatMessages({
 	 * chat does between these messages and its activity rows.
 	 */
 	dividers?: boolean;
-	/** Opens a collaboration from its line, in the sidebar beside this chat. */
-	onOpenNestedChat: (chatId: string) => void;
 	/** Opens a file a reply wrote, from its card. Without it, no cards are drawn. */
 	onOpenFile?: (fileId: string) => void;
 	/**
@@ -142,12 +129,12 @@ export function ChatMessages({
 	 */
 	previews?: boolean;
 
-	/** What the person may decide of the approvals the chat raises. */
-	approvalCapabilities?: ApprovalCapabilities;
+	/** What the member may decide of the approvals the chat raises. */
+	approvalPermissions?: ApprovalPermissions;
 	/** The sidebar's narrower chat: smaller faces and words. */
 	compact?: boolean;
 	/**
-	 * People's messages that wait for the next reply, because one is still being
+	 * Members' messages that wait for the next reply, because one is still being
 	 * written: `queuedBehindReply` over the whole chat, not only these
 	 * messages, since the reply may sit in an earlier run of them.
 	 */
@@ -168,7 +155,7 @@ export function ChatMessages({
 	/** Goes to the message a reply quotes, from its quote. Without it, the quote is only read. */
 	onJumpToMessage?: (messageId: string) => void;
 	/**
-	 * How the person reacts to messages: from the hover toolbar, and by clicking
+	 * How the member reacts to messages: from the hover toolbar, and by clicking
 	 * a reaction. Without it, reactions are only shown.
 	 */
 	reacting?: Reacting;
@@ -181,7 +168,7 @@ export function ChatMessages({
 	answeringFace?: AnsweringFace;
 	/** Whether the viewer is writing a reply, which the answering face watches. */
 	viewerWriting?: boolean;
-	/** The person reading, whose own messages are drawn on the right. Without it, everyone's are drawn alike. */
+	/** The member reading, whose own messages are drawn on the right. Without it, everyone's are drawn alike. */
 	viewerId?: string;
 	/**
 	 * The bot the chat's header already names, as a bot's chat names its own
@@ -190,7 +177,7 @@ export function ChatMessages({
 	 */
 	namedBotId?: string;
 	/**
-	 * The chat people's name colours are picked for, so a person keeps
+	 * The chat members' name colours are picked for, so a member keeps
 	 * theirs on a message brought in from elsewhere. By default, each message's
 	 * own chat.
 	 */
@@ -198,7 +185,7 @@ export function ChatMessages({
 }) {
 	// The turn has started but its reply has not been created yet.
 	const pendingReplier =
-		typing?.isRunning && messages.at(-1)?.author.kind === "person" ? typing.host : undefined;
+		typing?.isRunning && messages.at(-1)?.author.kind === "member" ? typing.host : undefined;
 	const speakers = useMemo(() => speakersIn(messages), [messages]);
 	const markedConnectorsOf = useMarkedConnectors(speakers, projectId);
 	const fileNames = useMemo(() => fileNamesIn(messages), [messages]);
@@ -210,7 +197,7 @@ export function ChatMessages({
 				const next = messages[index + 1];
 				const divider = dividers && startsNewDay(previous?.createdAt, message.createdAt);
 				const headsRun = startsRun(previous, message, dividers);
-				// One note for each person's run of waiting messages, under the last of them.
+				// One note for each member's run of waiting messages, under the last of them.
 				const queuedNote =
 					queued.has(message.id) &&
 					(next === undefined ||
@@ -232,7 +219,7 @@ export function ChatMessages({
 									: undefined
 							}
 							participants={participants}
-							peopleReachingProject={peopleReachingProject}
+							membersReachingProject={membersReachingProject}
 							chatKind={chatKind}
 							markedConnectors={
 								message.author.kind === "bot"
@@ -240,7 +227,7 @@ export function ChatMessages({
 									: NO_MARKED_CONNECTORS
 							}
 							fileNames={fileNames}
-							approvalCapabilities={approvalCapabilities}
+							approvalPermissions={approvalPermissions}
 							compact={compact}
 							arrivedLive={watchedWritten.has(message.id)}
 							queued={queued.has(message.id)}
@@ -253,7 +240,6 @@ export function ChatMessages({
 							onJumpToMessage={onJumpToMessage}
 							reacting={reacting}
 							fileUrlOf={fileUrlOf}
-							onOpenNestedChat={onOpenNestedChat}
 							onOpenFile={onOpenFile}
 							onOpenDesktop={onOpenDesktop}
 							previews={previews}
@@ -271,15 +257,15 @@ export function ChatMessages({
 
 /**
  * Who is typing after `messages`: the bot writing the last of them, and the
- * people writing in the composer.
+ * members writing in the composer.
  */
 export function typersAfter(
 	messages: readonly Message[],
-	peopleTyping: readonly PersonParticipant[],
+	membersTyping: readonly MemberParticipant[],
 ): Typer[] {
 	const last = messages.at(-1);
-	if (last?.author.kind === "bot" && isTyping(last)) return [last.author, ...peopleTyping];
-	return [...peopleTyping];
+	if (last?.author.kind === "bot" && isTyping(last)) return [last.author, ...membersTyping];
+	return [...membersTyping];
 }
 
 interface AnsweringFaceState {
@@ -326,8 +312,8 @@ function fileNamesIn(messages: readonly Message[]): ReadonlyMap<string, string> 
 	);
 }
 
-/** How big a face is beside its author's name: a bot's over its words, a person's in their bubble. */
-const FACE_PX = { bot: 16, person: 16 } as const;
+/** How big a face is beside its author's name: a bot's over its words, a member's in their bubble. */
+const FACE_PX = { bot: 16, member: 16 } as const;
 
 /** How the words of a message are set: the regular chat, or the sidebar's narrower chat. */
 const WORDS = {
@@ -340,15 +326,15 @@ const WORDS = {
  * name, someone else's in an outlined bubble beside their face, and the
  * viewer's own in a filled bubble on the right.
  */
-type RowSide = "bot" | "person" | "mine";
+type RowSide = "bot" | "member" | "mine";
 
 /**
  * One message. A bot's carries its face, name and
- * time at the head of a group, then its work line, words, any collaboration it
- * opened as a card, and any call somebody was asked to approve as its card,
- * with a row of actions under it. A person's words sit in a bubble: someone else's on the
+ * time at the head of a group, then its work line, words, and any call
+ * somebody was asked to approve as its card,
+ * with a row of actions under it. A member's words sit in a bubble: someone else's on the
  * left, headed by their name, the viewer's own on the right over its time. A reply
- * quotes the message it answers above its words, and people's reactions sit
+ * quotes the message it answers above its words, and members' reactions sit
  * under them.
  */
 function ChatMessage({
@@ -358,11 +344,11 @@ function ChatMessage({
 	namedBotId,
 	nameColorsFor,
 	participants,
-	peopleReachingProject,
+	membersReachingProject,
 	chatKind,
 	markedConnectors,
 	fileNames,
-	approvalCapabilities,
+	approvalPermissions,
 	compact,
 	arrivedLive,
 	queued,
@@ -375,7 +361,6 @@ function ChatMessage({
 	onJumpToMessage,
 	reacting,
 	fileUrlOf,
-	onOpenNestedChat,
 	onOpenFile,
 	onOpenDesktop,
 	previews,
@@ -384,20 +369,20 @@ function ChatMessage({
 	message: Message;
 	/** Whether it heads its author's group, so it carries their face and name. */
 	startsGroup: boolean;
-	/** The person reading, whose own messages are drawn on the right. */
+	/** The member reading, whose own messages are drawn on the right. */
 	viewerId: string | undefined;
 	/** The bot the chat's header names, whose face and name are there rather than over its messages. */
 	namedBotId: string | undefined;
-	/** The chat people's name colours are picked for; each message's own without it. */
+	/** The chat members' name colours are picked for; each message's own without it. */
 	nameColorsFor: string | undefined;
 	participants: Participant[];
-	peopleReachingProject: readonly PersonParticipant[];
+	membersReachingProject: readonly MemberParticipant[];
 	chatKind: ChatKind;
 	/** The connectors its bot's calls were made with, by handle. */
 	markedConnectors: ReadonlyMap<string, MarkedConnector>;
 	/** The chat's files by id, for the work line's calls that read them. */
 	fileNames: ReadonlyMap<string, string>;
-	approvalCapabilities: ApprovalCapabilities | undefined;
+	approvalPermissions: ApprovalPermissions | undefined;
 	compact: boolean;
 	/** Finished while the chat was open, so it arrives rather than simply being there. */
 	arrivedLive: boolean;
@@ -417,7 +402,6 @@ function ChatMessage({
 	reacting?: Reacting;
 	/** Where a file attached to it is served. */
 	fileUrlOf: (fileId: string) => string;
-	onOpenNestedChat: (chatId: string) => void;
 	onOpenFile?: (fileId: string) => void;
 	onOpenDesktop?: () => void;
 	previews: boolean;
@@ -434,13 +418,13 @@ function ChatMessage({
 	if (showsNothingYet(message)) return null;
 
 	const bot = author.kind === "bot" ? author : undefined;
-	const side: RowSide = bot ? "bot" : author.id === viewerId ? "mine" : "person";
+	const side: RowSide = bot ? "bot" : author.id === viewerId ? "mine" : "member";
 	const calls = message.parts.filter((part): part is ToolCallPart => part.type === "tool_call");
 	const files = message.parts.filter((part): part is FilePart => part.type === "file");
 	const segments = segmentsOf(message);
 	const mentionable = [
 		...participants,
-		...groupMentionsBy(author, peopleReachingProject, chatKind),
+		...groupMentionsBy(author, membersReachingProject, chatKind),
 	];
 	const words = segments
 		.flatMap((segment) => (segment.type === "text" && segment.text ? [segment.text] : []))
@@ -459,24 +443,6 @@ function ChatMessage({
 	);
 
 	const parts = segments.map((segment) => {
-		if (segment.type === "collaboration") {
-			const recipient = participants.find(
-				(participant): participant is BotParticipant =>
-					participant.kind === "bot" && participant.id === segment.collaboration.botId,
-			);
-			if (!bot || !recipient) return null;
-			return (
-				<CollaborationCard
-					key={segment.key}
-					initiator={bot}
-					recipient={recipient}
-					chatId={segment.collaboration.chatId}
-					status={segment.collaboration.status}
-					participants={participants}
-					onOpen={() => onOpenNestedChat(segment.collaboration.chatId)}
-				/>
-			);
-		}
 		if (segment.type === "tool_call") {
 			const call = segment.toolCall;
 			if (!bot) return null;
@@ -486,7 +452,7 @@ function ChatMessage({
 						call={call}
 						bot={bot}
 						chatId={message.chatId}
-						canApprove={mayAnswer(call, bot.id, approvalCapabilities)}
+						canApprove={mayAnswer(call, approvalPermissions)}
 						connector={markedConnectors.get(splitToolKey(call.tool).handle)}
 					/>
 				</div>
@@ -660,11 +626,11 @@ function ChatMessage({
 										side === "mine" ? "bubble-mine" : "bg-bubble",
 									)}
 								>
-									{startsGroup && side === "person" && (
+									{startsGroup && side === "member" && (
 										<header className="flex items-center gap-1.5 pb-0.5 text-xs">
-											{author.kind === "person" && (
+											{author.kind === "member" && (
 												<span aria-hidden className="flex">
-													<PersonAvatar person={author} size={FACE_PX.person} />
+													<MemberAvatar member={author} size={FACE_PX.member} />
 												</span>
 											)}
 											<AuthorName
@@ -793,7 +759,7 @@ interface QuoteTone {
 
 /** The colour of a quote of `author`'s message: their name's colour in this chat, or a bot's own colour. */
 function quoteToneOf(author: MessageReplyTo["author"], chatId: string): QuoteTone {
-	if (author.kind === "person") return nameColorIn(chatId, author.id);
+	if (author.kind === "member") return nameColorIn(chatId, author.id);
 	if (author.kind === "bot") {
 		return {
 			text: "text-bot-text",
@@ -866,7 +832,7 @@ function AuthorName({
 }: {
 	name: string;
 	link: AuthorLink | undefined;
-	/** The colour it is set in, as a group chat tells its people apart; muted without one. */
+	/** The colour it is set in, as a group chat tells its members apart; muted without one. */
 	colorClassName?: string;
 }) {
 	const className = cn(
@@ -898,12 +864,12 @@ const NAME_COLORS = [
 ] as const;
 
 /**
- * The colour a person's name is set in within one chat: the same there every
+ * The colour a member's name is set in within one chat: the same there every
  * time, but picked again in each chat, as a messaging app's groups do.
  */
-function nameColorIn(chatId: string, personId: string): QuoteTone {
+function nameColorIn(chatId: string, memberId: string): QuoteTone {
 	let hash = 0;
-	for (const character of `${chatId}:${personId}`) {
+	for (const character of `${chatId}:${memberId}`) {
 		hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
 	}
 	return NAME_COLORS[hash % NAME_COLORS.length] ?? NAME_COLORS[0];
@@ -924,106 +890,6 @@ function RowNote({ className, children }: { className: string; children: ReactNo
 	return <p className={cn("m-0 pt-1 text-xs", className)}>{children}</p>;
 }
 
-/**
- * The collaboration a bot's message opened, inline in the chat: what the
- * two said to each other, each with their face, name and time, and a button
- * opening it beside the chat. Followed live while it runs; once it is over it
- * is only read.
- */
-function CollaborationCard({
-	initiator,
-	recipient,
-	chatId,
-	status,
-	participants,
-	onOpen,
-}: {
-	initiator: BotParticipant;
-	recipient: BotParticipant;
-	chatId: string;
-	status: CollaborationPart["status"];
-	participants: Participant[];
-	onOpen: () => void;
-}) {
-	const running = status === "pending" || status === "waiting";
-	const chat = useChat(chatId);
-	useChatEvents(running ? chatId : undefined);
-	const messages = (chat.data?.messages ?? []).filter(
-		(message) => message.author.kind === "bot" && !showsNothingYet(message),
-	);
-	return (
-		<section
-			aria-label={`${initiator.name} asked ${recipient.name} for help`}
-			className="group/collaboration relative my-1 flex w-full flex-col gap-3 rounded-2xl border border-border bg-list px-4 py-3.5"
-		>
-			<IconButton
-				label={`Open Collaboration: ${initiator.name} and ${recipient.name}`}
-				side="top"
-				variant="toolbar"
-				onClick={onOpen}
-				className="absolute top-2 right-2 opacity-0 transition-opacity group-has-focus-visible/collaboration:opacity-100 group-hover/collaboration:opacity-100 [@media(hover:none)]:opacity-100 [&_svg]:size-3.5"
-			>
-				<SquareArrowOutUpRight aria-hidden />
-			</IconButton>
-			{chat.isPending ? (
-				<p className="m-0 text-subtle-foreground text-xs">Loading…</p>
-			) : chat.isError ? (
-				<p className="m-0 text-subtle-foreground text-xs">
-					This collaboration could not be loaded.
-				</p>
-			) : (
-				messages.map((message) => (
-					<CollaborationMessage key={message.id} message={message} participants={participants} />
-				))
-			)}
-			{status === "failed" && <p className="m-0 text-destructive-text text-xs">Stopped</p>}
-		</section>
-	);
-}
-
-/** One bot's message in an inline collaboration: its face, name and time over its words. */
-function CollaborationMessage({
-	message,
-	participants,
-}: {
-	message: Message;
-	participants: Participant[];
-}) {
-	const { author } = message;
-	if (author.kind !== "bot") return null;
-	const words = segmentsOf(message).flatMap((segment) =>
-		segment.type === "text" && segment.text ? [{ key: segment.key, text: segment.text }] : [],
-	);
-	return (
-		<article
-			aria-label={author.name}
-			className="flex flex-col gap-1"
-			style={botColorVariables(author.color)}
-		>
-			<header className="flex items-center gap-2 text-subtle-foreground text-xs">
-				<span aria-hidden className="flex">
-					<BotAvatar
-						color={author.color}
-						eyes={author.eyes}
-						shape={author.shape}
-						size={FACE_PX.bot}
-					/>
-				</span>
-				<span className="font-medium text-soft-foreground">{author.name}</span>
-				<MessageTime createdAt={message.createdAt} />
-			</header>
-			{words.map(({ key, text }) => (
-				<div
-					key={key}
-					className="min-w-0 break-words pl-6 text-body-foreground text-sm leading-relaxed"
-				>
-					<MessageMarkdown text={text} mentionable={participants} writer={writerOf(author)} />
-				</div>
-			))}
-		</article>
-	);
-}
-
 /** Where the chat moves on to a new day: a rule either side of "Today", "Yesterday" or the date. */
 export function DaySeparator({ at }: { at: string }) {
 	return <LabelledRule className="pt-6 pb-1">{formatDay(new Date(at))}</LabelledRule>;
@@ -1042,7 +908,7 @@ function messageStatus(message: Message, { queued }: { queued: boolean }): strin
 	return formatClockTime(new Date(message.createdAt));
 }
 
-/** A person's message makes no calls, so no connector names any. */
+/** A member's message makes no calls, so no connector names any. */
 const NO_MARKED_CONNECTORS: ReadonlyMap<string, MarkedConnector> = new Map();
 
 /** The bots who wrote in the chat, whose connectors its tool calls went through. */

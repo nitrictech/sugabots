@@ -3,10 +3,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden } from "../authorization/access.ts";
 import {
 	bot,
+	member,
 	membership,
 	modelProvider,
 	modelRequest,
-	person,
 	workspace,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, type Promised } from "../database/testing.ts";
@@ -20,7 +20,7 @@ import { Usage } from "./usage.ts";
  * without one; CI always has one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
-	let usageAs: (personId: string) => Promised<Usage.Interface>;
+	let usageAs: (memberId: string) => Promised<Usage.Interface>;
 	let workspaceId: string;
 	let adminId: string;
 	let editorId: string;
@@ -43,7 +43,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 		);
 		const [admin, editor] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values([
 					{ name: "Ada", email: `ada-${suffix}@example.com` },
 					{ name: "Sam", email: `sam-${suffix}@example.com` },
@@ -56,8 +56,8 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 		editorId = editor.id;
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId, personId: adminId, role: "admin" },
-				{ workspaceId, personId: editorId, role: "editor" },
+				{ workspaceId, memberId: adminId, role: "admin" },
+				{ workspaceId, memberId: editorId, role: "editor" },
 			]),
 		);
 		const [growthDesk, accountManager] = await onDatabase((db) =>
@@ -182,7 +182,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 		]);
 	});
 
-	it("counts people's Personal Assistants together, naming none", async () => {
+	it("counts members' Personal Assistants together, naming none", async () => {
 		const [assistant] = await onDatabase((db) =>
 			db
 				.insert(bot)
@@ -192,7 +192,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 					handle: "personal-assistant",
 					color: "sky",
 					eyes: "pill",
-					visibility: "private",
+					visibility: "personal",
 					assistantOf: editorId,
 				})
 				.returning(),

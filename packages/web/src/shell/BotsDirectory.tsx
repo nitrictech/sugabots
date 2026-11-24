@@ -13,8 +13,8 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
 
 /**
- * Every bot the person reaches: their Personal Assistant, the public bots
- * and their own private ones, each opening the bot, with a pin that puts it
+ * Every bot the member reaches: their Personal Assistant, the public bots
+ * and their own personal ones, each opening the bot, with a pin that puts it
  * in the sidebar or takes it out. A + makes another.
  */
 export function BotsDirectory() {
@@ -72,7 +72,7 @@ export function BotsDirectory() {
 
 /**
  * A bot in the directory: its face, name and what it's for, with its pin.
- * The name opens the bot, or, for someone else's private bot an
+ * The name opens the bot, or, for someone else's personal bot an
  * administrator only sees listed, its settings; the pin sits beside it, so no
  * button is inside a link.
  */
@@ -108,10 +108,10 @@ function BotRow({
 				bot.assistant
 					? "Your Personal Assistant"
 					: [
-							bot.visibility === "private"
+							bot.visibility === "personal"
 								? usable
-									? "Private"
-									: "Someone else's private bot"
+									? "Personal"
+									: "Someone else's personal bot"
 								: null,
 							bot.description,
 						]

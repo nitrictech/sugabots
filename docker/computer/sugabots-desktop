@@ -10,7 +10,7 @@
 #                                                  the desktop for `name`, with its browser
 #   sugabots-desktop open browser|terminal|files   what the dock opens, on $DISPLAY
 #
-# `desktop` is what Sugabots runs when a person opens a bot's desktop, and
+# `desktop` is what Sugabots runs when a member opens a bot's desktop, and
 # `session` when the bot uses its browser. Both start the named desktop, or
 # find it running: an Xfce session with a dock, served to VNC viewers.
 # `session` also starts the browser on it, or finds it running, and prints
@@ -29,7 +29,7 @@
 # folder it runs in.
 #
 # The browser is Chromium driven by Playwright MCP, shown on the desktop so
-# people watching see what the bot does, with its profile under `profile`
+# members watching see what the bot does, with its profile under `profile`
 # and its downloads and screenshots in `output`. Programs that stopped, as
 # they do when a paused computer comes back, start again on the same display.
 #
@@ -86,7 +86,7 @@ desktop() {
 	# no screensaver, which would blank the screen after ten minutes without
 	# keyboard or mouse input, and bots drive the browser through
 	# Playwright, not the X server. -SendPrimary=0: viewers get what's
-	# copied, not every selection, which would replace the person's clipboard.
+	# copied, not every selection, which would replace the member's clipboard.
 	# -FrameRate 30: half the default's frames, which over a long link settle
 	# sooner than more frames would; it costs a keystroke about 8 ms.
 	# -CompareFB 1: never sends a region redrawn with the pixels it had.
@@ -113,7 +113,7 @@ desktop() {
 	echo $! >>"$pids"
 	# Bots drive the browser through Playwright, which never moves the X
 	# pointer, so it would sit wherever it was left, drawn into the picture
-	# viewers see. Hidden until a person's mouse moves it, and again once
+	# viewers see. Hidden until a member's mouse moves it, and again once
 	# it's been still for a few seconds.
 	unclutter --start-hidden >>"$log" 2>&1 &
 	echo $! >>"$pids"
@@ -140,7 +140,7 @@ display_folder() {
 	cat "$state/$1.folder" 2>/dev/null || true
 }
 
-# Where display N's browser saves what people download: in the chat's
+# Where display N's browser saves what members download: in the chat's
 # folder, beside the bots' work, or the bot's home without one.
 display_downloads() {
 	local chat

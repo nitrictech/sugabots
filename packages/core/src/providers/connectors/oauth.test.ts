@@ -116,27 +116,35 @@ function text(request: import("node:http").IncomingMessage): Promise<string> {
 
 function memoryStorage() {
 	let record: OAuthRecord | undefined;
+	let signedInBy: string | undefined;
 	return {
 		load: async () => record,
-		save: async (next: OAuthRecord) => {
+		save: async (next: OAuthRecord, signedInById?: string) => {
 			record = next;
+			signedInBy = signedInById ?? signedInBy;
 		},
 		now: async () => new Date("2026-10-05T21:00:08.000Z"),
 		record: () => record,
+		/** Who the last save that said so had signed in. */
+		signedInBy: () => signedInBy,
 	};
 }
 
 describe("signing a connector in", () => {
 	it("registers, sends the browser to sign in, exchanges the code, and then lists tools with the token", async () => {
 		const storage = memoryStorage();
-		const provider = (startedByPersonId?: string) =>
+		const provider = (signIn?: { startedByMemberId: string } | { finishedByMemberId: string }) =>
 			storedOAuthProvider(storage, {
 				redirectUrl: "http://localhost:3000/connectors/oauth/callback",
 				clientName: "Sugabots",
-				startedByPersonId,
+				...signIn,
 			});
 
-		const started = await beginAuthorization(provider("person-1"), serverUrl, fetch);
+		const started = await beginAuthorization(
+			provider({ startedByMemberId: "member-1" }),
+			serverUrl,
+			fetch,
+		);
 		if (!("authorizationUrl" in started)) throw new Error("expected a URL to sign in at");
 		const sendTo = new URL(started.authorizationUrl);
 		expect(sendTo.origin + sendTo.pathname).toBe(`${origin}/authorize`);
@@ -150,15 +158,23 @@ describe("signing a connector in", () => {
 		expect(storage.record()).toMatchObject({
 			clientInformation: { client_id: "client-1" },
 			state,
-			startedByPersonId: "person-1",
+			startedByMemberId: "member-1",
 		});
 		expect(storage.record()?.codeVerifier).toBeTruthy();
+		expect(storage.signedInBy()).toBeUndefined();
 
-		await finishAuthorization(provider(), serverUrl, "the-code", state ?? "", fetch);
+		await finishAuthorization(
+			provider({ finishedByMemberId: "member-1" }),
+			serverUrl,
+			"the-code",
+			state ?? "",
+			fetch,
+		);
 
 		expect(storage.record()?.tokens).toMatchObject({ access_token: "token-1" });
+		expect(storage.signedInBy()).toBe("member-1");
 		expect(storage.record()?.state).toBe("");
-		expect(storage.record()?.startedByPersonId).toBeUndefined();
+		expect(storage.record()?.startedByMemberId).toBeUndefined();
 		expect(tokenRequests.at(-1)?.get("code_verifier")).toBeTruthy();
 
 		const listed = await listServerTools(
@@ -170,16 +186,16 @@ describe("signing a connector in", () => {
 		expect(await beginAuthorization(provider(), serverUrl, fetch)).toEqual({ authorized: true });
 	});
 
-	it("records a refused refresh as needing sign-in, leaving a person's sign-in under way alone", async () => {
+	it("records a refused refresh as needing sign-in, leaving a member's sign-in under way alone", async () => {
 		const storage = memoryStorage();
-		const provider = (startedByPersonId?: string) =>
+		const provider = (startedByMemberId?: string) =>
 			storedOAuthProvider(storage, {
 				redirectUrl: "http://localhost:3000/connectors/oauth/callback",
 				clientName: "Sugabots",
-				startedByPersonId,
+				startedByMemberId,
 			});
 		const signIn = async () => {
-			const started = await beginAuthorization(provider("person-1"), serverUrl, fetch);
+			const started = await beginAuthorization(provider("member-1"), serverUrl, fetch);
 			if (!("authorizationUrl" in started)) throw new Error("expected a URL to sign in at");
 			const state = new URL(started.authorizationUrl).searchParams.get("state") ?? "";
 			await finishAuthorization(provider(), serverUrl, "the-code", state, fetch);
@@ -190,9 +206,9 @@ describe("signing a connector in", () => {
 		await storage.save({
 			...signedIn,
 			tokens: { ...signedIn.tokens, access_token: "expired", refresh_token: "revoked" },
-			state: "person-state",
-			codeVerifier: "person-verifier",
-			startedByPersonId: "person-2",
+			state: "member-state",
+			codeVerifier: "member-verifier",
+			startedByMemberId: "member-2",
 		});
 
 		const listed = await listServerTools(
@@ -206,9 +222,9 @@ describe("signing a connector in", () => {
 		expect(storage.record()?.tokens).toBeUndefined();
 		expect(storage.record()?.signInRejectedAt).toBeTruthy();
 		expect(storage.record()).toMatchObject({
-			state: "person-state",
-			codeVerifier: "person-verifier",
-			startedByPersonId: "person-2",
+			state: "member-state",
+			codeVerifier: "member-verifier",
+			startedByMemberId: "member-2",
 		});
 
 		await signIn();

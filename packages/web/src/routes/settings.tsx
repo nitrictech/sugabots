@@ -26,19 +26,19 @@ export const settingsSectionRoute = createRoute({
 	component: SettingsSectionRoute,
 });
 
-/** One person in the workspace, by their membership's id. */
-export const settingsPersonRoute = createRoute({
+/** One member in the workspace, by their membership's id. */
+export const settingsMemberRoute = createRoute({
 	getParentRoute: () => shellRoute,
-	path: "/settings/people/$membership",
+	path: "/settings/members/$membership",
 	loader: () => WorkspaceSettings.preload(),
-	component: SettingsPersonRoute,
+	component: SettingsMemberRoute,
 });
 
-function SettingsPersonRoute() {
-	const { membership } = settingsPersonRoute.useParams();
+function SettingsMemberRoute() {
+	const { membership } = settingsMemberRoute.useParams();
 	return (
 		<SettingsLayout>
-			<WorkspaceSettings section="people" selectedMembershipId={membership} />
+			<WorkspaceSettings section="members" selectedMembershipId={membership} />
 		</SettingsLayout>
 	);
 }

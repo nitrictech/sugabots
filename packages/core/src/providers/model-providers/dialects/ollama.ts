@@ -34,7 +34,6 @@ const shown = Schema.Struct({
  */
 export const ollama: ProviderDialect = {
 	...openaiCompatible,
-	name: "Ollama",
 	discoveryRoot: (baseUrl) => baseUrl.replace(/\/v1$/, ""),
 	listingUrl: (root) => `${root}/api/tags`,
 	listing: Schema.Struct({ models: Schema.mutable(Schema.Array(Schema.Unknown)) }).pipe(

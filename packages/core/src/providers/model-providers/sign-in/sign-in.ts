@@ -13,7 +13,7 @@ import { chatgpt } from "./chatgpt.ts";
 import { xai } from "./xai.ts";
 
 /**
- * Signing a model provider in with a person's subscription, such as ChatGPT
+ * Signing a model provider in with a member's subscription, such as ChatGPT
  * Plus or SuperGrok, so its requests draw on their plan rather than API
  * credit. Each service is signed in to with a device code, the only OAuth
  * flow a server can use with the command-line clients these borrow: those
@@ -31,7 +31,7 @@ export const OAuthTokens = Schema.Struct({
 });
 export type OAuthTokens = typeof OAuthTokens.Type;
 
-/** A device code waiting for the person to enter it at `verificationUrl`. */
+/** A device code waiting for the member to enter it at `verificationUrl`. */
 interface DeviceCode {
 	/** The service's secret for this sign-in, which it asks for back when the code is redeemed. */
 	deviceCode: string;
@@ -44,11 +44,11 @@ interface DeviceCode {
 /** One service's sign-in. Every request goes through an egress client for `issuer`. */
 export interface SubscriptionSignIn {
 	readonly issuer: string;
-	/** Asks the service for a code the person enters to sign in. */
+	/** Asks the service for a code the member enters to sign in. */
 	readonly requestDeviceCode: (
 		http: EgressHttpClient,
 	) => Effect.Effect<DeviceCode, ProviderSignInFailed>;
-	/** `undefined` while the person has not entered the code; the tokens once they have. */
+	/** `undefined` while the member has not entered the code; the tokens once they have. */
 	readonly redeemDeviceCode: (
 		http: EgressHttpClient,
 		code: Pick<DeviceCode, "deviceCode" | "userCode">,

@@ -75,13 +75,14 @@ interface BuiltInDefaults {
 
 /**
  * What the provider needs before it answers: an API key, nothing (a key is
- * optional), or a person signing in to `signIn` with their subscription.
+ * optional), or a member signing in to `signIn` with their subscription, or a
+ * key in its place.
  */
 type BuiltInCredential =
 	| { credential: "api-key" | "optional" }
 	| { credential: "sign-in"; signIn: SignInServiceId };
 
-/** The services a person signs a provider in to with their subscription, in place of a key. */
+/** The services a member signs a provider in to with their subscription, in place of a key. */
 export type SignInServiceId = "chatgpt" | "xai";
 
 /** Each sign-in service as the sign-in button names it. */

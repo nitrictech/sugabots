@@ -1,5 +1,5 @@
 import type { Participant } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import { testMember } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, fn, waitFor, within } from "storybook/test";
@@ -41,7 +41,7 @@ const workspace = {
 	setUpAt: "2026-09-01T00:00:00.000Z",
 };
 
-const sam = testPerson({ id: "0199a3a0-0000-7000-8000-000000000002", name: "Sam Rivera" });
+const sam = testMember({ id: "0199a3a0-0000-7000-8000-000000000002", name: "Sam Rivera" });
 
 /** Who is writing the draft: someone other than Sam, so `@here` would notify Sam. */
 const WRITER_ID = "0199a3a0-0000-7000-8000-000000000004";
@@ -72,7 +72,7 @@ const meta = preview.meta({
 		submitLabel: "Send message",
 		mentionable: [
 			...mentionable,
-			...groupMentionsBy({ kind: "person", id: WRITER_ID }, [sam], "project_chat"),
+			...groupMentionsBy({ kind: "member", id: WRITER_ID }, [sam], "project_chat"),
 		],
 		attachments: withFiles([]),
 	},
@@ -147,7 +147,7 @@ export const SelectMention = meta.story({
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Ask @");
 		await expect(canvas.getByRole("listbox", { name: "Who to mention" })).toBeVisible();
-		// The three people and bots, then @here and @channel.
+		// The three members and bots, then @here and @channel.
 		await expect(canvas.getAllByRole("option")).toHaveLength(5);
 		await userEvent.type(input, "ri");
 		await expect(canvas.getAllByRole("option")).toHaveLength(2);
@@ -158,7 +158,7 @@ export const SelectMention = meta.story({
 		);
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Ask @sam-rivera ");
-		// The chosen person shows in the draft as a chip of their name.
+		// The chosen member shows in the draft as a chip of their name.
 		await expect(within(input).getByText("@sam-rivera")).toBeVisible();
 		await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
 		await expect(args.onSubmit).not.toHaveBeenCalled();
@@ -170,7 +170,7 @@ export const SelectMention = meta.story({
 });
 
 /**
- * `@here` and `@channel` are offered after the people and bots, written as
+ * `@here` and `@channel` are offered after the members and bots, written as
  * typed, like a handle, and shown in the draft as a chip.
  */
 export const SelectGroupMention = meta.story({
@@ -180,7 +180,7 @@ export const SelectGroupMention = meta.story({
 		await userEvent.type(input, "Heads up @cha");
 		await expect(canvas.getAllByRole("option")).toHaveLength(1);
 		// Sam is everyone else in the project.
-		await expect(canvas.getByRole("option", { name: /Notifies 1 person/ })).toBeVisible();
+		await expect(canvas.getByRole("option", { name: /Notifies 1 member/ })).toBeVisible();
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Heads up @channel ");
 		await expect(within(input).getByText("@channel")).toHaveAttribute("data-mention", "@channel");

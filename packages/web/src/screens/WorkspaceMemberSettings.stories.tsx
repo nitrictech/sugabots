@@ -14,7 +14,7 @@ import {
 	oncall,
 	revenue,
 } from "@/shell/story-fixtures.ts";
-import { WorkspacePeopleSettings } from "./WorkspacePeopleSettings.tsx";
+import { WorkspaceMemberSettings } from "./WorkspaceMemberSettings.tsx";
 
 const workspace = {
 	id: "0199a3a0-0000-7000-8000-000000000001",
@@ -23,25 +23,25 @@ const workspace = {
 	createdAt: "2026-09-01T00:00:00.000Z",
 };
 
-function person(n: number, name: string, email: string, role: string) {
-	const personId = `0199a3a0-0000-7000-8000-0000000000${String(n).padStart(2, "0")}`;
+function member(n: number, name: string, email: string, role: string) {
+	const memberId = `0199a3a0-0000-7000-8000-0000000000${String(n).padStart(2, "0")}`;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000000d${n}`,
 		role,
-		person: { id: personId, name, email, image: null },
+		member: { id: memberId, name, email, image: null },
 		joinedAt: `2026-09-0${n}T00:00:00.000Z`,
 	};
 }
 
-const rowan = person(1, "Rowan Ellis", "rowan@example.com", "owner");
-const jay = person(2, "Jay Young", "jay@nitric.io", "admin");
-const mara = person(3, "Mara Kent", "mara@nitric.io", "editor");
-const sam = person(4, "Sam Park", "sam@nitric.io", "viewer");
+const rowan = member(1, "Rowan Ellis", "rowan@example.com", "owner");
+const jay = member(2, "Jay Young", "jay@nitric.io", "admin");
+const mara = member(3, "Mara Kent", "mara@nitric.io", "editor");
+const sam = member(4, "Sam Park", "sam@nitric.io", "viewer");
 
 const inProject = (membership: typeof rowan) => ({
-	personId: membership.person.id,
-	name: membership.person.name,
-	email: membership.person.email,
+	memberId: membership.member.id,
+	name: membership.member.name,
+	email: membership.member.email,
 	image: null,
 	removable: membership.role !== "owner" && membership.role !== "admin",
 });
@@ -70,7 +70,7 @@ function SettingsPreview({ children }: { children: ReactNode }) {
 		const client = new QueryClient({
 			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
 		});
-		// What a person's page reads besides the roster: the projects, their bots and who is in each.
+		// What a member's page reads besides the roster: the projects, their bots and who is in each.
 		client.setQueryData(["workspaces"], [workspace]);
 		client.setQueryData(
 			["projects", workspace.id],
@@ -99,15 +99,15 @@ function SettingsPreview({ children }: { children: ReactNode }) {
 }
 
 const meta = preview.meta({
-	title: "Views/WorkspacePeopleSettings",
-	component: WorkspacePeopleSettings,
+	title: "Views/WorkspaceMemberSettings",
+	component: WorkspaceMemberSettings,
 	tags: ["ai-generated"],
 	args: {
 		workspaceId: workspace.id,
 		canManage: true,
 		canManageAdmins: true,
 		canHandOverOwnership: true,
-		currentPersonId: rowan.person.id,
+		currentUserId: rowan.member.id,
 	},
 	parameters: {
 		layout: "fullscreen",
@@ -143,7 +143,7 @@ export const Managing = meta.story({
 		const mara = await canvas.findByRole("link", { name: /Mara Kent/ });
 		await expect(mara).toHaveTextContent("Editor");
 		await expect(canvas.getByRole("link", { name: /Rowan Ellis/ })).toHaveTextContent("(you)");
-		// People and invitations are two requests, so the invitation is awaited.
+		// Members and invitations are two requests, so the invitation is awaited.
 		await expect(await canvas.findByText("alex@nitric.io")).toBeInTheDocument();
 		await expect(canvas.getByText(/^Sent .+, expires in \d+ hours$/)).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Resend" })).toBeInTheDocument();
@@ -153,8 +153,8 @@ export const Managing = meta.story({
 /** Addresses in one field, and the role described as it is picked. */
 export const Inviting = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Invite people" }));
-		const dialog = await screen.findByRole("dialog", { name: "Invite people" });
+		await userEvent.click(await canvas.findByRole("button", { name: "Invite members" }));
+		const dialog = await screen.findByRole("dialog", { name: "Invite members" });
 
 		await expect(within(dialog).getByLabelText("Email addresses")).toBeInTheDocument();
 		await expect(
@@ -165,7 +165,7 @@ export const Inviting = meta.story({
 });
 
 /** Somebody else's page: their role, the projects they are in, when they joined, and removing them. */
-export const Person = meta.story({
+export const Member = meta.story({
 	args: { selectedMembershipId: mara.id },
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Mara Kent" })).toBeInTheDocument();
@@ -215,7 +215,7 @@ export const AdminManaging = meta.story({
 	args: {
 		canManageAdmins: false,
 		canHandOverOwnership: false,
-		currentPersonId: jay.person.id,
+		currentUserId: jay.member.id,
 		selectedMembershipId: mara.id,
 	},
 	play: async ({ canvas }) => {
@@ -232,7 +232,7 @@ export const AdminOnOwner = meta.story({
 	args: {
 		canManageAdmins: false,
 		canHandOverOwnership: false,
-		currentPersonId: jay.person.id,
+		currentUserId: jay.member.id,
 		selectedMembershipId: rowan.id,
 	},
 	play: async ({ canvas }) => {
@@ -248,7 +248,7 @@ export const Leaving = meta.story({
 	args: {
 		canManageAdmins: false,
 		canHandOverOwnership: false,
-		currentPersonId: jay.person.id,
+		currentUserId: jay.member.id,
 		selectedMembershipId: jay.id,
 	},
 	play: async ({ canvas, userEvent }) => {
@@ -261,7 +261,7 @@ export const Leaving = meta.story({
 
 /** Reading is everybody else: the same pages, stated rather than editable. */
 export const Reading = meta.story({
-	args: { canManage: false, currentPersonId: mara.person.id, selectedMembershipId: sam.id },
+	args: { canManage: false, currentUserId: mara.member.id, selectedMembershipId: sam.id },
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Sam Park" })).toBeInTheDocument();
 		await expect(canvas.getByText("Viewer")).toBeInTheDocument();

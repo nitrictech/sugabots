@@ -283,20 +283,19 @@ export const goToken = (executionId: string, workflow: Workflows = Suspending) =
 
 type Workflows = typeof Suspending | typeof Racing | typeof Waiting | typeof Inputs;
 
-export const suspendingActivities = Activities.fromService<typeof Suspending.payloadSchema.Type>()(
-	Probe,
-	{ step: { input: Schema.String } },
-);
-
-export const flakyActivities = Activities.fromService<typeof Flaky.payloadSchema.Type>()(Probe, {
-	flaky: { success: Schema.Finite, error: Schema.String },
-});
-
-export const racingActivities = Activities.fromService<typeof Racing.payloadSchema.Type>()(Probe, {
+const suspendingActivities = Activities.fromService<typeof Suspending.payloadSchema.Type>()(Probe, {
 	step: { input: Schema.String },
 });
 
-export const inputActivities = Activities.fromService<typeof Inputs.payloadSchema.Type>()(Probe, {
+const flakyActivities = Activities.fromService<typeof Flaky.payloadSchema.Type>()(Probe, {
+	flaky: { success: Schema.Finite, error: Schema.String },
+});
+
+const racingActivities = Activities.fromService<typeof Racing.payloadSchema.Type>()(Probe, {
+	step: { input: Schema.String },
+});
+
+const inputActivities = Activities.fromService<typeof Inputs.payloadSchema.Type>()(Probe, {
 	labelled: { input: Labelled, success: Schema.String },
 });
 

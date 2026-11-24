@@ -41,11 +41,10 @@ function asking(over: Partial<ToolCallPart> = {}): ToolCallPart {
 		output: null,
 		status: "awaiting_approval",
 		error: null,
-		writeOrDelete: true,
 		atOffset: 0,
 		startedAt: "2026-11-10T09:00:00.000Z",
 		finishedAt: null,
-		approval: { status: "pending", decidedByName: null, decidedAt: null },
+		approval: { status: "pending", approvers: "chat", decidedByName: null, decidedAt: null },
 		...over,
 	};
 }
@@ -68,6 +67,7 @@ const decided = (status: "allowed" | "denied", by: string) =>
 	asking({
 		approval: {
 			status,
+			approvers: "chat",
 			decidedByName: by,
 			decidedAt: "2026-11-10T09:02:00.000Z",
 		},

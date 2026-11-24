@@ -9,7 +9,7 @@ import { ChoiceChips } from "@/components/ui/choice-chips";
 interface Scenario {
 	label: string;
 	message: string;
-	/** The bot that answers, or none when it reads the message and leaves it to the people. */
+	/** The bot that answers, or none when it reads the message and leaves it to the members. */
 	replier?: ChatBot;
 	why: string;
 }
@@ -27,10 +27,10 @@ const scenarios = {
 		replier: cast.tripPlanner,
 		why: "The chat's own bot still answers. It can bring Budget Keeper in itself, and you can read that exchange.",
 	},
-	mentionOnlyPeople: {
-		label: "Mention only people",
+	mentionOnlyMembers: {
+		label: "Mention only members",
 		message: "@sam are you free that weekend?",
-		why: "A message that mentions only people is likely for them. Trip Planner reads it, and answers only if it can help; otherwise it leaves a 👀 to show it read it.",
+		why: "A message that mentions only members is likely for them. Trip Planner reads it, and answers only if it can help; otherwise it leaves a 👀 to show it read it.",
 	},
 } satisfies Record<string, Scenario>;
 

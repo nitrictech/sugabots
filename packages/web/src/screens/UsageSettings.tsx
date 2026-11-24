@@ -354,7 +354,7 @@ function providerColors(models: readonly ModelUsage[]): (model: ModelUsage) => s
 
 function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 	const spent = (line: Line) => line.usd > 0 || line.unknownCostRequests > 0;
-	// Each is its own person's, so they are shown together, never one by one.
+	// Each is its own member's, so they are shown together, never one by one.
 	const personalAssistants: Line = {
 		key: "personal-assistants",
 		icon: <FacelessTile name="Personal Assistants" />,

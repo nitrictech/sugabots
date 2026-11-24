@@ -23,20 +23,18 @@ import { Compactions } from "./compaction/compactions.ts";
 import type { ChatEvent } from "./events.ts";
 import { FloorControl } from "./floor/floor-control.ts";
 import { Reactions } from "./reactions/reactions.ts";
-import { Collaborations } from "./tools/collaborate/collaborations.ts";
 import { Turns } from "./turns/turns.ts";
 
 /**
  * `Turns` is provided here, once, to all of these, with automation runs deciding
- * which chats take more work (see `WorkAdmission`). The turn's own steps call
- * back into collaborations and floor control, so a service providing it
- * itself would load it before it exists.
+ * which chats take more work (see `WorkAdmission`). Floor control asks for
+ * turns and reads what they wrote, so a service providing it itself would load
+ * it before it exists.
  */
 const services = Layer.mergeAll(
 	Chats.layer,
 	Reactions.layer,
 	ChatFiles.layer,
-	Collaborations.layer,
 	Automations.layer,
 	Automations.webhooksLayer,
 	Automations.connectorEventsLayer,
@@ -63,12 +61,12 @@ export type Services = Layer.Success<typeof services> | ChatEvents.Service;
 
 /**
  * The chat services, with `ChatEvents` handing what they
- * emit to its handlers, in order: the chat feed tells watching clients what
- * happened, automation settlement ends the runs that work finished,
- * collaborations whose collaborator stopped without answering fail, the floor
- * passes after each completed reply, a reply past the compaction line asks for
+ * emit to its handlers, in order: the chat event stream tells watching clients what
+ * happened, automation settlement ends the runs that work finished, the floor
+ * passes to the bots a completed reply asks for help and back to the asking
+ * bot once they are done, a reply past the compaction line asks for
  * its chat's compaction once it commits, and
- * people are notified of finished messages and approvals waiting on them.
+ * members are notified of finished messages and approvals waiting on them.
  */
 export const layer = Layer.effectContext(
 	Effect.gen(function* () {
@@ -84,7 +82,6 @@ export const layer = Layer.effectContext(
 		const dispatch = DomainEvents.emitTo<ChatEvent>([
 			ChatEventStream.handler(outbox),
 			Context.get(built, AutomationSettlement.Service).handler,
-			Context.get(built, Collaborations.Service).handler,
 			Context.get(built, FloorControl.Service).handler,
 			Context.get(built, Compactions.Service).handler,
 			notifications.handler,

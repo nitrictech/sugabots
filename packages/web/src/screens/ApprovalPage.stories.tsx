@@ -34,7 +34,6 @@ function request(
 			output: null,
 			status,
 			error: null,
-			writeOrDelete: true,
 			atOffset: 0,
 			startedAt: ASKED_AT,
 			finishedAt: null,
@@ -55,9 +54,15 @@ function request(
 	};
 }
 
-const pending = { status: "pending", decidedByName: null, decidedAt: null } as const;
+const pending = {
+	status: "pending",
+	approvers: "chat",
+	decidedByName: null,
+	decidedAt: null,
+} as const;
 const denied = {
 	status: "denied",
+	approvers: "chat",
 	decidedByName: "Rowan Ellis",
 	decidedAt: "2026-09-18T09:04:00.000Z",
 } as const;

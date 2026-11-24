@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEgressHttpClient, type EgressDispatch } from "../../../providers/network/egress.ts";
-import { type FetchPage, MAX_REDIRECTS, pageFetcher } from "./fetch-page.ts";
+import { type FetchPage, pageFetcher, WEB_FETCH_LIMITS } from "./fetch-page.ts";
 
 /**
  * The fetcher against a fake `fetch`: what it follows, what it refuses, and
@@ -26,7 +26,7 @@ function fetcher(
 	fetch: FakeFetch,
 	options: Partial<Parameters<typeof pageFetcher>[0]> = {},
 ): FetchPage {
-	return pageFetcher({ fetch: fetch as typeof globalThis.fetch, ...options });
+	return pageFetcher({ ...WEB_FETCH_LIMITS, fetch: fetch as typeof globalThis.fetch, ...options });
 }
 
 const page = `<html><head><title>Example Domain</title></head><body>
@@ -135,9 +135,9 @@ describe("fetching a page", () => {
 		const forever = vi.fn<FakeFetch>(async () => redirect("/again"));
 		expect(await fetcher(forever)("https://example.com/")).toEqual({
 			ok: false,
-			reason: `Gave up after ${MAX_REDIRECTS} redirects`,
+			reason: "Gave up after 5 redirects",
 		});
-		expect(forever).toHaveBeenCalledTimes(MAX_REDIRECTS + 1);
+		expect(forever).toHaveBeenCalledTimes(6);
 	});
 
 	it("reports the status of a page the server would not give", async () => {
@@ -206,7 +206,9 @@ describe("fetching a page", () => {
 			fetch: dispatch,
 		});
 		try {
-			expect(await pageFetcher({ fetch: client })("https://intranet.example/")).toEqual({
+			expect(
+				await pageFetcher({ ...WEB_FETCH_LIMITS, fetch: client })("https://intranet.example/"),
+			).toEqual({
 				ok: false,
 				reason:
 					"That address is on a local or private network, which this server doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.",

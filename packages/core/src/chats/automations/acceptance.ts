@@ -8,7 +8,7 @@ import {
 	automation,
 	automationRun,
 	automationTrigger,
-	person,
+	member,
 	project,
 } from "../../database/schema.ts";
 import { ChatStore } from "../store/store.ts";
@@ -103,9 +103,9 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 				const runChat = yield* chats.openRun({
 					workspaceId: input.workspaceId,
 					botId: leadBotId,
-					title: executionTitle(definition.automation.name, acceptedAt),
+					title: runTitle(definition.automation.name, acceptedAt),
 				});
-				const execution = yield* store.accept({
+				const accepted = yield* store.accept({
 					automationId: input.automationId,
 					workspaceId: input.workspaceId,
 					botId: leadBotId,
@@ -122,18 +122,18 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					chatId: runChat.id,
 					trigger: {
 						kind: "automation_trigger",
-						runId: execution.id,
+						runId: accepted.id,
 						automationName: definition.automation.name,
 						triggerKind: input.trigger.kind,
 					},
 					content: triggerMessageContent(
 						definition.automation.instructions,
-						yield* runOwnersOf(definition.automation.createdById, input.trigger),
+						yield* membersToMentionOf(definition.automation.createdById, input.trigger),
 						input.trigger,
 					),
 				});
-				yield* runs.queue({ automationId: input.automationId, runId: execution.id });
-				return { runId: execution.id, chatId: runChat.id, duplicate: false };
+				yield* runs.queue({ automationId: input.automationId, runId: accepted.id });
+				return { runId: accepted.id, chatId: runChat.id, duplicate: false };
 			}),
 		);
 });
@@ -171,64 +171,71 @@ const acceptedAs = (input: Trigger, identity: string) =>
 		([row]) => row,
 	);
 
-function triggerMessageContent(instructions: string, owners: RunOwners, trigger: RunTrigger) {
-	return `Automation instructions:\n${instructions}\n\n${resultNote(owners)}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;
+function triggerMessageContent(
+	instructions: string,
+	toMention: MembersToMention,
+	trigger: RunTrigger,
+) {
+	return `Automation instructions:\n${instructions}\n\n${resultNote(toMention)}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;
 }
 
 /**
- * Tells the bot of a run that its last reply is what people will read, so
+ * Tells the bot of a run that its last reply is what members will read, so
  * it writes that reply to them; that it may post nothing when there is nothing
  * to report; and that mentioning somebody is how it asks for them, by default
- * the run's `owners`.
+ * the members `toMention`.
  */
-function resultNote(owners: RunOwners): string {
+function resultNote(toMention: MembersToMention): string {
 	return [
-		`When you finish, your last reply is posted in this automation's feed for people to read and answer. Write it to them: what they need to know, or what you want to ask them. Files you write are shown with it; the rest of the work stays in this run.`,
+		`When you finish, your last reply is posted in this automation's feed for members to read and answer. Write it to them: what they need to know, or what you want to ask them. Files you write are shown with it; the rest of the work stays in this run.`,
 		"If there is nothing worth telling them, end without a last reply, writing nothing after your last tool call: nothing is posted, and the run shows it had nothing to report.",
-		`When something needs a person to act or decide, @mention them in your reply, which notifies them.${ownersToMention(owners)}`,
+		`When something needs a member to act or decide, @mention them in your reply, which notifies them.${mentionNote(toMention)}`,
 	].join(" ");
 }
 
-/** The handles of the people a run asks for when its instructions name nobody. */
-interface RunOwners {
+/** The handles of the members a run asks for when its instructions name nobody. */
+interface MembersToMention {
 	/** Who made the automation, when they still have an account. */
 	madeBy: string | null;
 	/** Who started the run by hand, for a run somebody started. */
 	startedBy: string | null;
 }
 
-function ownersToMention({ madeBy, startedBy }: RunOwners): string {
+function mentionNote({ madeBy, startedBy }: MembersToMention): string {
 	if (madeBy && madeBy === startedBy) {
 		return ` Unless the instructions say who, mention @${madeBy}, who made this automation and started this run.`;
 	}
 	const named = [
 		madeBy && `@${madeBy}, who made this automation`,
 		startedBy && `@${startedBy}, who started this run`,
-	].filter((owner) => owner !== null);
+	].filter((phrase) => phrase !== null);
 	return named.length === 0
 		? ""
 		: ` Unless the instructions say who, mention ${named.join(", and ")}.`;
 }
 
 /** The handles of who made the automation `createdById` names and who started a run by hand. */
-const runOwnersOf = (createdById: string | null, trigger: RunTrigger) =>
+const membersToMentionOf = (createdById: string | null, trigger: RunTrigger) =>
 	Effect.gen(function* () {
-		const startedById = trigger.kind === "manual" ? trigger.requestedByPersonId : null;
+		const startedById = trigger.kind === "manual" ? trigger.requestedByMemberId : null;
 		const ids = [createdById, startedById].filter((id) => id !== null);
-		const people =
+		const members =
 			ids.length === 0
 				? []
 				: yield* query((db) =>
 						db
-							.select({ id: person.id, name: person.name })
-							.from(person)
-							.where(inArray(person.id, ids)),
+							.select({ id: member.id, name: member.name })
+							.from(member)
+							.where(inArray(member.id, ids)),
 					);
 		const handleOf = (id: string | null) => {
-			const person = people.find((candidate) => candidate.id === id);
-			return person ? handleFromName(person.name) : null;
+			const member = members.find((candidate) => candidate.id === id);
+			return member ? handleFromName(member.name) : null;
 		};
-		return { madeBy: handleOf(createdById), startedBy: handleOf(startedById) } satisfies RunOwners;
+		return {
+			madeBy: handleOf(createdById),
+			startedBy: handleOf(startedById),
+		} satisfies MembersToMention;
 	});
 
 function sameTrigger(left: RunTrigger, right: RunTrigger) {
@@ -238,7 +245,7 @@ function sameTrigger(left: RunTrigger, right: RunTrigger) {
 	}
 	if (left.kind === "manual" && right.kind === "manual") {
 		return (
-			left.requestId === right.requestId && left.requestedByPersonId === right.requestedByPersonId
+			left.requestId === right.requestId && left.requestedByMemberId === right.requestedByMemberId
 		);
 	}
 	if (left.kind === "github" && right.kind === "github") {
@@ -252,7 +259,7 @@ function sameTrigger(left: RunTrigger, right: RunTrigger) {
 	);
 }
 
-function executionTitle(name: string, acceptedAt: Date) {
+function runTitle(name: string, acceptedAt: Date) {
 	const suffix = ` - ${acceptedAt.toISOString()}`;
 	return `${name.slice(0, MAX_CHAT_TITLE_CHARACTERS - suffix.length)}${suffix}`;
 }

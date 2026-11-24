@@ -3,7 +3,7 @@ import { tool } from "ai";
 import { and, asc, desc, eq, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
 import { DateTime, Effect, Schema } from "effect";
 import { type Executor, query, type RunEffect } from "../../../database/database.ts";
-import { bot, file, type MessageRow, message, person } from "../../../database/schema.ts";
+import { bot, file, type MessageRow, member, message } from "../../../database/schema.ts";
 import { loadFileParts } from "../../store/file-parts.ts";
 import { describeAttachment, formatHistoryTime } from "../../store/message-text.ts";
 import { type ParticipantRow, participantColumns, toMessage } from "../../store/participants.ts";
@@ -35,7 +35,7 @@ interface HistorySearch {
 
 /**
  * The `search_history` tool: find what was said in this chat before the
- * part the bot reads word for word, which compaction summarises or leaves out.
+ * part the bot reads word for word, which compaction condenses or leaves out.
  */
 export function searchHistoryTool({
 	chatId,
@@ -51,7 +51,7 @@ export function searchHistoryTool({
 	run: RunEffect;
 }) {
 	return tool({
-		description: `Search the messages here from before the summary of its earlier history, which you only have that summary of. Give words to look for, in any language, a time range, or both. With words, it returns up to ${MAX_MATCHES} matching messages, best first; with only a time range, the first ${MAX_MATCHES} messages in it, oldest first. Each comes with who wrote it and when. Use it when you need a detail from earlier that the summary leaves out, or what was said around a particular time.`,
+		description: `Search the messages here from before the condensed account of its earlier history, which you only have that condensed account of. Give words to look for, in any language, a time range, or both. With words, it returns up to ${MAX_MATCHES} matching messages, best first; with only a time range, the first ${MAX_MATCHES} messages in it, oldest first. Each comes with who wrote it and when. Use it when you need a detail from earlier that the condensed account leaves out, or what was said around a particular time.`,
 		inputSchema: Schema.Struct({
 			query: Schema.optional(
 				Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)).annotate({
@@ -108,7 +108,7 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
 	const rows = yield* db
 		.select({ message, ...participantColumns })
 		.from(message)
-		.leftJoin(person, eq(person.id, message.authorPersonId))
+		.leftJoin(member, eq(member.id, message.authorMemberId))
 		.leftJoin(bot, eq(bot.id, message.authorBotId))
 		.where(and(...conditions))
 		.orderBy(

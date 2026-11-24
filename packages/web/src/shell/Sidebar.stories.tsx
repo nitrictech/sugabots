@@ -4,7 +4,7 @@ import { expect, fn, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
 import { SessionContext } from "@/lib/session.ts";
-import { appHandlers, storyPerson } from "@/story-app.tsx";
+import { appHandlers, storyMember } from "@/story-app.tsx";
 import { IconRail } from "./IconRail.tsx";
 import { OwnerSidebar } from "./OwnerSidebar.tsx";
 import { SidebarView } from "./Sidebar.tsx";
@@ -98,7 +98,7 @@ export const OwnerOpen = meta.story({
 	// Revenue's chats mark the ones that need you, so they ask who you are.
 	decorators: [
 		(Story) => (
-			<SessionContext value={{ person: storyPerson, error: undefined, refresh: async () => {} }}>
+			<SessionContext value={{ member: storyMember, error: undefined, refresh: async () => {} }}>
 				<Story />
 			</SessionContext>
 		),

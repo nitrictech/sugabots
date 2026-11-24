@@ -23,27 +23,27 @@ import { violatedUniqueConstraint } from "../../database/errors.ts";
 import { bot, pinnedBot, projectBot } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { type LeadsProjects, refuseWhileLeading } from "../projects/project-leads.ts";
-import { defaultProjectIdOf, type PersonFacingBotRow, personFacingBotRow } from "./bot.ts";
+import { defaultProjectIdOf, type MemberFacingBotRow, memberFacingBotRow } from "./bot.ts";
 import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
-import { SYSTEM_BOTS, type SystemBotDefinition } from "./system-bots.ts";
+import { SYSTEM_BOTS } from "./system-bots.ts";
 
 /**
- * The only writer of `bot` and `pinned_bot`: the bots people make, each
- * person's Personal Assistant, and the workspace's system bots, of which only
+ * The only writer of `bot` and `pinned_bot`: the bots members make, each
+ * member's Personal Assistant, and the workspace's system bots, of which only
  * the model ever changes. Each bot but a system bot gets its default project
  * as it is made, from the `bot_default_project` trigger, and it goes with it.
  */
 export interface Interface {
 	/**
-	 * Creates a bot, pinned for its creator. Without a prompt it starts with
+	 * Creates a bot, pinned for its creator. Without instructions it starts with
 	 * `INTERVIEW_PROMPT`.
 	 */
 	readonly create: (
 		workspaceId: string,
 		input: { createdById: string; bot: NewBot },
-	) => Effect.Effect<PersonFacingBotRow, BotNameTaken | BotHandleReserved>;
+	) => Effect.Effect<MemberFacingBotRow, BotNameTaken | BotHandleReserved>;
 	/**
-	 * Refused when it makes the bot private while it leads a project people
+	 * Refused when it makes the bot personal while it leads a project members
 	 * made (see `refuseWhileLeading`), naming to `viewerId` the projects they see.
 	 */
 	readonly update: (
@@ -52,12 +52,12 @@ export interface Interface {
 		changes: BotUpdate,
 		viewerId: string,
 	) => Effect.Effect<
-		PersonFacingBotRow,
+		MemberFacingBotRow,
 		BotNameTaken | BotHandleReserved | BotGone | SystemBotImmutable | LeadsProjects
 	>;
 	/**
 	 * Deletes the bot, its default project with it, after `beforeDeleting`.
-	 * Refused while the bot leads a project people made (see
+	 * Refused while the bot leads a project members made (see
 	 * `refuseWhileLeading`), naming to `viewerId` the projects they see.
 	 * `beforeDeleting` runs once the bot is locked and found free to delete, and
 	 * the lock is held until the deletion commits, so no project can choose
@@ -70,27 +70,23 @@ export interface Interface {
 		beforeDeleting: Effect.Effect<void, E, R>,
 	) => Effect.Effect<void, SystemBotImmutable | LeadsProjects | E, Exclude<R, Transaction>>;
 	/**
-	 * `personId`'s Personal Assistant, made on `model`, or with no model, if they
+	 * `memberId`'s Personal Assistant, made on `model`, or with no model, if they
 	 * have none. One they have is returned exactly as they left it.
 	 */
 	readonly provisionPersonalAssistant: (input: {
 		workspaceId: string;
-		personId: string;
+		memberId: string;
 		model?: string;
-	}) => Effect.Effect<PersonFacingBotRow>;
-	/** Pins or unpins the bot for `personId`. Pinning one already pinned changes nothing. */
+	}) => Effect.Effect<MemberFacingBotRow>;
+	/** Pins or unpins the bot for `memberId`. Pinning one already pinned changes nothing. */
 	readonly setPinned: (input: {
 		workspaceId: string;
-		personId: string;
+		memberId: string;
 		botId: string;
 		pinned: boolean;
 	}) => Effect.Effect<void>;
-	/**
-	 * Creates any system bot the workspace does not have yet, with no model.
-	 * An existing one is left exactly as it is, so repeating this never unsets
-	 * a model an administrator chose.
-	 */
-	readonly ensureSystemBots: (input: {
+	/** Creates the system bots of a workspace being made, with no model. */
+	readonly createSystemBots: (input: {
 		workspaceId: string;
 		createdById: string;
 	}) => Effect.Effect<void>;
@@ -112,8 +108,8 @@ export interface Interface {
 	 * before the workspace offered one. One already on a model keeps it.
 	 */
 	readonly fillMissingAssistantModels: (workspaceId: string, model: string) => Effect.Effect<void>;
-	/** Points every bot people talk to on model `from` at model `to`, and returns how many moved. */
-	readonly movePersonFacingBotsToModel: (
+	/** Points every bot members talk to on model `from` at model `to`, and returns how many moved. */
+	readonly moveMemberFacingBotsToModel: (
 		workspaceId: string,
 		from: string,
 		to: string,
@@ -142,30 +138,6 @@ export const make = Effect.gen(function* () {
 				.limit(1),
 		).pipe(Effect.map(([row]) => Boolean(row?.systemBotKey)));
 
-	const ensureSystemBot = (
-		workspaceId: string,
-		createdById: string,
-		definition: SystemBotDefinition,
-	) =>
-		query((db) =>
-			db
-				.insert(bot)
-				.values({
-					workspaceId,
-					createdById,
-					name: definition.name,
-					handle: handleFromName(definition.name),
-					systemBotKey: definition.key,
-					description: definition.description,
-					color: definition.color,
-					eyes: definition.eyes,
-					shape: definition.shape,
-					model: null,
-					prompt: definition.prompt,
-				})
-				.onConflictDoNothing({ target: [bot.workspaceId, bot.systemBotKey] }),
-		).pipe(Effect.asVoid);
-
 	return Service.of({
 		create: (workspaceId, { createdById, bot: input }) =>
 			operation(
@@ -188,7 +160,7 @@ export const make = Effect.gen(function* () {
 										eyes: input.eyes ?? "pill",
 										shape: input.shape ?? "circle",
 										model: input.model,
-										prompt: input.prompt ?? INTERVIEW_PROMPT,
+										instructions: input.instructions ?? INTERVIEW_PROMPT,
 										disabledTools: input.disabledTools ?? [],
 										usesComputer: input.usesComputer ?? false,
 										naturalBrowsing: input.naturalBrowsing ?? false,
@@ -197,14 +169,14 @@ export const make = Effect.gen(function* () {
 									.returning(),
 							(failure) => nameTaken(failure, { name: input.name, handle }),
 						);
-						const created = row && personFacingBotRow(row);
+						const created = row && memberFacingBotRow(row);
 						if (!created) {
 							return yield* Effect.die(new Error("Bot insert returned a system bot row"));
 						}
 						yield* query((db) =>
 							db
 								.insert(pinnedBot)
-								.values({ workspaceId, personId: createdById, botId: created.id }),
+								.values({ workspaceId, memberId: createdById, botId: created.id }),
 						);
 						return created;
 					}),
@@ -233,13 +205,13 @@ export const make = Effect.gen(function* () {
 									.returning(),
 							(failure) => nameTaken(failure, changes),
 						);
-						const updated = row && personFacingBotRow(row);
+						const updated = row && memberFacingBotRow(row);
 						if (!updated) {
 							return yield* new BotGone({ botId });
 						}
-						// Only public bots are in projects people made, so one made private
+						// Only public bots are in projects members made, so one made personal
 						// leaves them, unless it leads one. Its default project it keeps.
-						if (updated.visibility === "private") {
+						if (updated.visibility === "personal") {
 							yield* refuseWhileLeading(updated.id, { viewerId });
 							yield* query((db) =>
 								db
@@ -276,7 +248,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		provisionPersonalAssistant: ({ workspaceId, personId, model }) =>
+		provisionPersonalAssistant: ({ workspaceId, memberId, model }) =>
 			operation(
 				"provisionPersonalAssistant",
 				Effect.gen(function* () {
@@ -285,9 +257,9 @@ export const make = Effect.gen(function* () {
 							.insert(bot)
 							.values({
 								workspaceId,
-								createdById: personId,
-								assistantOf: personId,
-								visibility: "private",
+								createdById: memberId,
+								assistantOf: memberId,
+								visibility: "personal",
 								name: "Personal Assistant",
 								handle: PERSONAL_ASSISTANT_HANDLE,
 								description: "Your guide to the workspace.",
@@ -295,7 +267,7 @@ export const make = Effect.gen(function* () {
 								eyes: "pill",
 								shape: "circle",
 								model: model ?? null,
-								prompt: "",
+								instructions: "",
 							})
 							.onConflictDoNothing({
 								target: [bot.workspaceId, bot.assistantOf],
@@ -309,10 +281,10 @@ export const make = Effect.gen(function* () {
 								db
 									.select()
 									.from(bot)
-									.where(and(eq(bot.workspaceId, workspaceId), eq(bot.assistantOf, personId)))
+									.where(and(eq(bot.workspaceId, workspaceId), eq(bot.assistantOf, memberId)))
 									.limit(1),
 							);
-					const provisioned = assistant && personFacingBotRow(assistant);
+					const provisioned = assistant && memberFacingBotRow(assistant);
 					if (!provisioned) {
 						return yield* Effect.die(new Error("Personal Assistant could not be provisioned"));
 					}
@@ -320,26 +292,38 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		setPinned: ({ workspaceId, personId, botId, pinned }) =>
+		setPinned: ({ workspaceId, memberId, botId, pinned }) =>
 			operation(
 				"setPinned",
 				query((db) =>
 					pinned
-						? db.insert(pinnedBot).values({ workspaceId, personId, botId }).onConflictDoNothing()
+						? db.insert(pinnedBot).values({ workspaceId, memberId, botId }).onConflictDoNothing()
 						: db
 								.delete(pinnedBot)
-								.where(and(eq(pinnedBot.personId, personId), eq(pinnedBot.botId, botId))),
+								.where(and(eq(pinnedBot.memberId, memberId), eq(pinnedBot.botId, botId))),
 				).pipe(Effect.asVoid),
 			),
 
-		ensureSystemBots: ({ workspaceId, createdById }) =>
+		createSystemBots: ({ workspaceId, createdById }) =>
 			operation(
-				"ensureSystemBots",
-				Effect.forEach(
-					SYSTEM_BOTS,
-					(definition) => ensureSystemBot(workspaceId, createdById, definition),
-					{ discard: true },
-				),
+				"createSystemBots",
+				query((db) =>
+					db.insert(bot).values(
+						SYSTEM_BOTS.map((definition) => ({
+							workspaceId,
+							createdById,
+							name: definition.name,
+							handle: handleFromName(definition.name),
+							systemBotKey: definition.key,
+							description: definition.description,
+							color: definition.color,
+							eyes: definition.eyes,
+							shape: definition.shape,
+							model: null,
+							instructions: definition.instructions,
+						})),
+					),
+				).pipe(Effect.asVoid),
 			),
 
 		setSystemBotModel: (workspaceId, key, model) =>
@@ -381,9 +365,9 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.asVoid),
 			),
 
-		movePersonFacingBotsToModel: (workspaceId, from, to) =>
+		moveMemberFacingBotsToModel: (workspaceId, from, to) =>
 			operation(
-				"movePersonFacingBotsToModel",
+				"moveMemberFacingBotsToModel",
 				query((db) =>
 					db
 						.update(bot)
@@ -417,7 +401,7 @@ export class BotNameTaken
 	}
 }
 
-/** A handle no bot people make may take: see `isReservedHandle`. */
+/** A handle no bot members make may take: see `isReservedHandle`. */
 export class BotHandleReserved
 	extends Data.TaggedError("BotHandleReserved")<{ readonly handle: string }>
 	implements UserFacing
@@ -474,15 +458,15 @@ export class SystemBotMissing
 }
 
 /**
- * Every Personal Assistant's handle; only its person ever talks to it, so it
+ * Every Personal Assistant's handle; only its member ever talks to it, so it
  * needn't be unique, but no other bot may take it, so it names one bot for
- * each person.
+ * each member.
  */
 const PERSONAL_ASSISTANT_HANDLE = "personal-assistant";
 
 /**
- * Whether no bot people make may take `handle`: `@here` and `@channel`
- * mention everyone, and `personal-assistant` is each person's Personal
+ * Whether no bot members make may take `handle`: `@here` and `@channel`
+ * mention everyone, and `personal-assistant` is each member's Personal
  * Assistant.
  */
 function isReservedHandle(handle: string): boolean {

@@ -31,7 +31,6 @@ function call(id: string, tool: string, approval: ToolCallPart["approval"]): Too
 		output: null,
 		status: approval?.status === "pending" ? "awaiting_approval" : "completed",
 		error: null,
-		writeOrDelete: true,
 		atOffset: 0,
 		startedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
 		finishedAt: null,
@@ -58,13 +57,14 @@ function request(id: string, tool: string, approval: ToolCallPart["approval"]): 
 }
 
 function answered(id: string, tool: string, answer: AnsweredApproval["answer"]): AnsweredApproval {
-	return { ...request(id, tool, answer), answer };
+	return { ...request(id, tool, { ...answer, approvers: "chat" }), answer };
 }
 
 const approvals: WorkspaceApprovals = {
 	waiting: [
 		request("01", "stripe__send_quote", {
 			status: "pending",
+			approvers: "chat",
 			decidedByName: null,
 			decidedAt: null,
 		}),

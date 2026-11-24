@@ -5,7 +5,7 @@ import { Data, Effect } from "effect";
 import type { UserFacing } from "../../user-message.ts";
 import { calendarLatestAtOrBefore, calendarOccurrencesAfter } from "./calendar.ts";
 
-/** A schedule that cannot run. People are told what to fix in our words, not the cron parser's. */
+/** A routine's timetable that cannot run. Members are told what to fix in our words, not the cron parser's. */
 export class InvalidRoutineSchedule
 	extends Data.TaggedError("InvalidRoutineSchedule")<{
 		readonly reason: ScheduleProblem;
@@ -15,7 +15,7 @@ export class InvalidRoutineSchedule
 	implements UserFacing
 {
 	override get message() {
-		return `Invalid automation schedule: ${this.reason}`;
+		return `Invalid routine timetable: ${this.reason}`;
 	}
 	get userMessage() {
 		return SCHEDULE_PROBLEM_USER_MESSAGES[this.reason];
@@ -28,7 +28,7 @@ const SCHEDULE_PROBLEM_USER_MESSAGES: Record<ScheduleProblem, UserText> = {
 	notFiveFields: userText`Use a five-field cron expression`,
 	unknownTimeZone: userText`That time zone is not recognised`,
 	unparseable: userText`That cron expression is invalid`,
-	neverRuns: userText`That schedule never runs`,
+	neverRuns: userText`That timetable never runs`,
 };
 
 function requireTimeZone(timezone: string) {
@@ -48,35 +48,32 @@ const unparseable = (cause: unknown) =>
 		? cause
 		: new InvalidRoutineSchedule({ reason: "unparseable", cause });
 
-/** The schedule's next `count` runs after `from`, in `timezone`. */
-export function upcomingOccurrences(
+/** The timetable's next run after `from`. A timetable that never runs again is refused. */
+export function nextOccurrence(
 	schedule: RoutineSchedule,
 	timezone: string,
 	from: Date,
-	count = 5,
-): Effect.Effect<Date[], InvalidRoutineSchedule> {
+): Effect.Effect<Date, InvalidRoutineSchedule> {
 	return Effect.try({
 		try: () => {
 			requireTimeZone(timezone);
 			if (schedule.repeat !== "cron") {
-				return calendarOccurrencesAfter(schedule, timezone, from, count);
+				return calendarOccurrencesAfter(schedule, timezone, from, 1)[0];
 			}
 			requireFiveFields(schedule.expression);
-			const interval = CronExpressionParser.parse(schedule.expression, {
-				currentDate: from,
-				tz: timezone,
-			});
-			return Array.from({ length: count }, () => interval.next().toDate());
+			return CronExpressionParser.parse(schedule.expression, { currentDate: from, tz: timezone })
+				.next()
+				.toDate();
 		},
 		catch: unparseable,
-	});
-}
-
-/** The schedule's next run after `from`. A schedule that never runs again is refused. */
-export const nextOccurrence = (schedule: RoutineSchedule, timezone: string, from: Date) =>
-	Effect.flatMap(upcomingOccurrences(schedule, timezone, from, 1), ([next]) =>
-		next ? Effect.succeed(next) : Effect.fail(new InvalidRoutineSchedule({ reason: "neverRuns" })),
+	}).pipe(
+		Effect.flatMap((next) =>
+			next
+				? Effect.succeed(next)
+				: Effect.fail(new InvalidRoutineSchedule({ reason: "neverRuns" })),
+		),
 	);
+}
 
 /**
  * The run that fell due last, at or before `now`, and the one after it: so

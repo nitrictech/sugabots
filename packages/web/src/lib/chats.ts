@@ -5,15 +5,15 @@ import {
 	type Bot,
 	type ChatDetails,
 	type ChatMessageItem,
+	type CurrentUser,
 	type FilePart,
 	type FirstChatMessage,
 	handleFromName,
 	type ListedChat,
+	type MemberParticipant,
 	type MessageReplyTo,
 	type NewMessage,
-	type PersonParticipant,
 	type Project,
-	type SignedInPerson,
 	type StartedChat,
 } from "@sugabots/contracts";
 import {
@@ -98,7 +98,7 @@ export function needsViewer(row: ListedChat): boolean {
 
 /** When a chat last had something in it: its newest message, else when it was started. */
 export function lastMovedAt(row: ListedChat): number {
-	return Date.parse(row.lastMessage?.at ?? row.chat.createdAt);
+	return Date.parse(row.lastMessageAt ?? row.chat.createdAt);
 }
 
 /** How a project stands while the attention marks have nothing for it, or have not loaded. */
@@ -110,7 +110,7 @@ const NO_ATTENTION_MARK: AttentionMark = {
 
 /**
  * How each project stands for the sidebar, by its id: its unread messages,
- * whether any chat waits on the person, and how many of its
+ * whether any chat waits on the member, and how many of its
  * automations are failing unseen. A bot's is its default project's.
  */
 export function useAttentionMarks(): { attentionMarkOf: (projectId: string) => AttentionMark } {
@@ -129,7 +129,7 @@ export function useAttentionMarks(): { attentionMarkOf: (projectId: string) => A
 }
 
 /**
- * The approvals across the workspace: those waiting on the person, and the
+ * The approvals across the workspace: those waiting on the member, and the
  * latest answered.
  */
 export function useWorkspaceApprovals() {
@@ -145,31 +145,31 @@ export function useWorkspaceApprovals() {
 	});
 }
 
-/** A person, as a message's author or somebody it is written to. */
-function personParticipantOf(person: {
+/** A member, as a message's author or somebody it is written to. */
+function memberParticipantOf(member: {
 	id: string;
 	name: string;
 	email: string;
 	image?: string | null;
-}): PersonParticipant {
+}): MemberParticipant {
 	return {
-		kind: "person",
-		id: person.id,
-		name: person.name,
-		email: person.email,
-		handle: handleFromName(person.name),
-		image: person.image ?? null,
+		kind: "member",
+		id: member.id,
+		name: member.name,
+		email: member.email,
+		handle: handleFromName(member.name),
+		image: member.image ?? null,
 	};
 }
 
-/** How much waits for the person while the counts are loading: nothing. */
+/** How much waits for the member while the counts are loading: nothing. */
 const NO_ATTENTION: AttentionCounts = {
 	waitingApprovals: 0,
 	unreadForYou: 0,
 };
 
 /**
- * How much in the workspace is waiting for the person, which the app's badge
+ * How much in the workspace is waiting for the member, which the app's badge
  * and the Approvals tab count.
  */
 export function useAttentionCounts(): AttentionCounts {
@@ -187,7 +187,7 @@ export function useAttentionCounts(): AttentionCounts {
 }
 
 /**
- * Records that the person has read the chat up to its newest message, and
+ * Records that the member has read the chat up to its newest message, and
  * clears its dot and its count in the sidebar.
  */
 function useMarkChatRead(chatId: string | undefined) {
@@ -203,7 +203,7 @@ function useMarkChatRead(chatId: string | undefined) {
 }
 
 /**
- * Marks one automation run or collaboration read, by its own chat, while the
+ * Marks one automation run read, by its own chat, while the
  * window has focus, without reading the rest of the chat it is in.
  * Checks when the nested chat opens and when the window gains focus.
  */
@@ -219,13 +219,13 @@ export function useMarkNestedChatReadWhileSeen(nestedChatId: string) {
 }
 
 /**
- * Marks the chat read while the person can see `newest`, its latest item: the
+ * Marks the chat read while the member can see `newest`, its latest item: the
  * window has focus and `latestInView` holds. Checks when it opens, when
  * `newest` arrives or finishes, when `latestInView` turns true, and when the
  * window gains focus.
  *
  * Focus, not visibility: a window beside the one being worked in is visible,
- * and what arrives there is unseen until the person comes back to it.
+ * and what arrives there is unseen until the member comes back to it.
  */
 export function useMarkReadWhileSeen(
 	chatId: string | undefined,
@@ -298,7 +298,7 @@ export function refreshAfterChatChange(queries: QueryClient, workspaceId: string
 }
 
 /**
- * Whose a chat is: a project people made, for its chats and its
+ * Whose a chat is: a project members made, for its chats and its
  * automations' feeds; or a bot, for its own, which are its default project's.
  * That project is hidden and has no address of its own, so the place names the bot.
  */
@@ -342,7 +342,7 @@ export function useBotChatPlace(
 
 /**
  * Whether the chat `chatId` is in the project `projectId`, a
- * bot's default one or one people made: one of its chats or automations'
+ * bot's default one or one members made: one of its chats or automations'
  * feeds. Read from the project's list, and from the chat itself only
  * when the list does not have it, such as one started since the list was read.
  */
@@ -359,7 +359,6 @@ function useChatInProject(
 		...chatQuery(chatId),
 		enabled: chatId !== undefined && list.isSuccess && !listed,
 	});
-	// By its project, not its bot, which on a collaboration names the bot asked, whoever's chat it hangs under.
 	const unlistedKind = unlisted.data?.chat?.kind;
 	const inProject =
 		listed ||
@@ -458,7 +457,7 @@ function chatMessagesQuery(chatId: string | undefined) {
 	});
 }
 
-/** The runs and collaborations opened beside the chat, a page at a time, newest activity first. */
+/** The automation runs the chat lists, a page at a time, newest activity first. */
 function chatHistoryQuery(chatId: string | undefined) {
 	return infiniteQueryOptions({
 		queryKey: chatHistoryKey(chatId),
@@ -509,7 +508,7 @@ type MessageToSend = Omit<NewMessage, "replyTo" | "attachments"> & {
 	files?: readonly FilePart[];
 };
 
-export function useSendMessage(chatId: string, signedIn: SignedInPerson) {
+export function useSendMessage(chatId: string, signedIn: CurrentUser) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useMutation({
@@ -528,8 +527,7 @@ export function useSendMessage(chatId: string, signedIn: SignedInPerson) {
 				message: {
 					id: input.id,
 					chatId,
-					author: personParticipantOf(signedIn),
-					kind: "text",
+					author: memberParticipantOf(signedIn),
 					status: "complete",
 					parts: [
 						...(input.message === "" ? [] : [{ type: "text" as const, text: input.message }]),

@@ -26,7 +26,7 @@ export function MarkdownLink({
 	/**
 	 * Which links off the app ask before opening. A bot's ask `always`, because
 	 * a model's link text need not match where it goes, and a link written
-	 * under a prompt injection can carry data out in its URL. A person's ask
+	 * under a prompt injection can carry data out in its URL. A member's ask
 	 * `unless-text-is-address`: one that shows where it goes opens at once.
 	 */
 	asks: "always" | "unless-text-is-address";

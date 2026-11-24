@@ -55,7 +55,7 @@ export function OwnerWork({
 	search?: string;
 	className?: string;
 }) {
-	const personId = useSession().person?.id;
+	const memberId = useSession().member?.id;
 	const searching = search.trim() !== "";
 	// A run open as a page of its automation's, marked in the list.
 	const openRun = useSearch({ strict: false, select: (params) => params.nestedChatPage });
@@ -112,7 +112,7 @@ export function OwnerWork({
 								<ChatEntry
 									row={row}
 									owner={owner}
-									personId={personId}
+									memberId={memberId}
 									selected={row.chat.id === selectedChatId}
 								/>
 							</li>
@@ -150,7 +150,7 @@ export function OwnerWork({
 								<ResolvedEntry
 									row={row}
 									owner={owner}
-									personId={personId}
+									memberId={memberId}
 									selected={row.chat.id === selectedChatId}
 								/>
 							</li>
@@ -320,22 +320,22 @@ function NeedsYouRow({
 function ChatEntry({
 	row,
 	owner,
-	personId,
+	memberId,
 	selected,
 }: {
 	row: ListedChat;
 	owner: ResourceOwner;
-	personId: string | undefined;
+	memberId: string | undefined;
 	selected: boolean;
 }) {
 	const hideSidebar = useHideSidebar();
 	const setResolved = useSetResolved(row.chat.id);
 	const { chat } = row;
-	const people = row.participants.filter((participant) => participant.kind === "person");
+	const members = row.participants.filter((participant) => participant.kind === "member");
 	const talking =
-		people.length === 0
+		members.length === 0
 			? "No one yet"
-			: people.map((person) => (person.id === personId ? "You" : person.name)).join(", ");
+			: members.map((member) => (member.id === memberId ? "You" : member.name)).join(", ");
 	const unread = row.unreadMessages > 0;
 	const movedAt = new Date(lastMovedAt(row));
 	return (
@@ -372,11 +372,16 @@ function ChatEntry({
 				</span>
 				{/* Who is talking, by their names, for whoever can't see the faces. */}
 				<span className="sr-only">{talking}</span>
-				{(row.status || people.length > 0) && (
+				{(row.status || members.length > 0) && (
 					<span className="order-3 flex h-4 min-w-0 items-center justify-between gap-1.5">
-						{people.length > 0 && (
+						{members.length > 0 && (
 							<span aria-hidden className="flex shrink-0">
-								<ParticipantFaces participants={people} shown={4} size={16} surface="var(--rail)" />
+								<ParticipantFaces
+									participants={members}
+									shown={4}
+									size={16}
+									surface="var(--rail)"
+								/>
 							</span>
 						)}
 						{row.status && (
@@ -410,18 +415,20 @@ function ChatEntry({
 function ResolvedEntry({
 	row,
 	owner,
-	personId,
+	memberId,
 	selected,
 }: {
 	row: ListedChat;
 	owner: ResourceOwner;
-	personId: string | undefined;
+	memberId: string | undefined;
 	selected: boolean;
 }) {
 	const hideSidebar = useHideSidebar();
 	const setResolved = useSetResolved(row.chat.id);
-	const people = row.participants.filter((participant) => participant.kind === "person");
-	const talking = people.map((person) => (person.id === personId ? "You" : person.name)).join(", ");
+	const members = row.participants.filter((participant) => participant.kind === "member");
+	const talking = members
+		.map((member) => (member.id === memberId ? "You" : member.name))
+		.join(", ");
 	const movedAt = new Date(lastMovedAt(row));
 	const about = [talking, countOf(row.messageCount, "message", "messages")]
 		.filter(Boolean)
@@ -442,8 +449,8 @@ function ResolvedEntry({
 					)}
 				>
 					<span aria-hidden className="flex shrink-0 opacity-70">
-						{people.length > 0 ? (
-							<ParticipantFaces participants={people} shown={1} size={16} surface="var(--rail)" />
+						{members.length > 0 ? (
+							<ParticipantFaces participants={members} shown={1} size={16} surface="var(--rail)" />
 						) : (
 							<MessageSquare size={14} strokeWidth={1.75} />
 						)}

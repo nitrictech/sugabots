@@ -6,7 +6,7 @@ import { Email } from "./email.ts";
 
 const message: Email.Message = {
 	from: { email: "sugabots@example.com", name: "Sugabots" },
-	to: [{ email: "person@example.com" }],
+	to: [{ email: "member@example.com" }],
 	subject: "Invitation",
 	text: "Open this link",
 };
@@ -90,25 +90,21 @@ describe("Email.layerNoDeps", () => {
 		expect(requests[0]?.headers.authorization).toBe("Bearer re_secret");
 		expect(jsonBody(requests[0])).toEqual({
 			from: '"Sugabots" <sugabots@example.com>',
-			to: ["person@example.com"],
+			to: ["member@example.com"],
 			subject: "Invitation",
 			text: "Open this link",
 		});
 	});
 
-	it("gives Resend every recipient, keeping a name with a comma or quote whole", async () => {
+	it("gives Resend the sender and reply address, keeping a name with a comma or quote whole", async () => {
 		const { requests } = await sendWith(resend, 200, {
 			...message,
 			from: { email: "sugabots@example.com", name: 'Sugabots, "Inc"' },
-			cc: [{ email: "lead@example.com", name: "Lead" }],
-			bcc: [{ email: "audit@example.com" }],
 			replyTo: { email: "support@example.com" },
 		});
 
 		expect(jsonBody(requests[0])).toMatchObject({
 			from: '"Sugabots, \\"Inc\\"" <sugabots@example.com>',
-			cc: ['"Lead" <lead@example.com>'],
-			bcc: ["audit@example.com"],
 			reply_to: "support@example.com",
 		});
 	});
@@ -143,21 +139,6 @@ describe("Email.layerNoDeps", () => {
 	});
 });
 
-describe("Email.parseAddress", () => {
-	it.each([
-		["Sugabots <no-reply@example.com>", { email: "no-reply@example.com", name: "Sugabots" }],
-		[
-			'"Sugabots, Inc" <no-reply@example.com>',
-			{ email: "no-reply@example.com", name: "Sugabots, Inc" },
-		],
-		[" no-reply@example.com ", { email: "no-reply@example.com" }],
-		["Sugabots", undefined],
-		["Sugabots <not-an-address>", undefined],
-	])("parses %j", (value, expected) => {
-		expect(Email.parseAddress(value)).toEqual(expected);
-	});
-});
-
 describe("Email.transactionalSender", () => {
 	function senderFor(env: Record<string, string>) {
 		return Effect.runPromiseExit(
@@ -182,10 +163,15 @@ describe("Email.transactionalSender", () => {
 		);
 	});
 
-	it("reads a named address", async () => {
-		expect(
-			await senderFor({ EMAIL_TRANSACTIONAL_FROM: "Sugabots <no-reply@example.com>" }),
-		).toEqual(Exit.succeed({ email: "no-reply@example.com", name: "Sugabots" }));
+	it.each([
+		["Sugabots <no-reply@example.com>", { email: "no-reply@example.com", name: "Sugabots" }],
+		[
+			'"Sugabots, Inc" <no-reply@example.com>',
+			{ email: "no-reply@example.com", name: "Sugabots, Inc" },
+		],
+		[" no-reply@example.com ", { email: "no-reply@example.com" }],
+	])("reads %j", async (value, expected) => {
+		expect(await senderFor({ EMAIL_TRANSACTIONAL_FROM: value })).toEqual(Exit.succeed(expected));
 	});
 
 	it("refuses a value that is not an address", async () => {

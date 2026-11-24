@@ -1,4 +1,4 @@
-import type { WrittenFileSummary } from "@sugabots/contracts";
+import type { ListedWrittenFile } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -8,7 +8,7 @@ import {
 	StoryApp,
 	storyChatDetails,
 	storyChatFor,
-	storyPerson,
+	storyMember,
 	storySecondChatFor,
 	storyWorkspace,
 } from "@/story-app.tsx";
@@ -36,7 +36,7 @@ const meta = preview.meta({
 });
 
 /**
- * Home: the projects the person is in, each opening its chats, then
+ * Home: the projects the member is in, each opening its chats, then
  * the bots they pinned, with Home marked among the tabs.
  */
 export const Home = meta.story({
@@ -93,7 +93,7 @@ export const You = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
 		await expect(
-			await canvas.findByRole("link", { name: new RegExp(storyPerson.name) }),
+			await canvas.findByRole("link", { name: new RegExp(storyMember.name) }),
 		).toHaveAttribute("href", `/${storyWorkspace.slug}/settings/account`);
 		await expect(await canvas.findByRole("link", { name: "Computers" })).toHaveAttribute(
 			"href",
@@ -107,7 +107,7 @@ export const You = meta.story({
 export const Account = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/settings/account`} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: storyPerson.name })).toBeVisible();
+		await expect(await canvas.findByRole("heading", { name: storyMember.name })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Notifications" })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/settings/notifications`,
@@ -123,14 +123,14 @@ export const ProjectPart = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { level: 1, name: "Bots" })).toBeVisible();
 		await expect(await canvas.findByRole("link", { name: growthDesk.name })).toBeVisible();
-		await expect(canvas.queryByRole("heading", { name: "People" })).toBeNull();
+		await expect(canvas.queryByRole("heading", { name: "Members" })).toBeNull();
 	},
 });
 
-const plan: WrittenFileSummary = {
+const plan: ListedWrittenFile = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
 	chatId: storyChatFor(growthDesk).id,
-	kind: "document",
+	kind: "markdown",
 	title: "Q4 outreach plan",
 	version: 1,
 	createdBy: { botId: growthDesk.id, name: growthDesk.name },

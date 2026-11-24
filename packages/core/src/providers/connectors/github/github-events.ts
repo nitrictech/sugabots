@@ -26,7 +26,7 @@ export function activityOf(
 	const common = Schema.decodeUnknownOption(Common)(payload);
 	if (Option.isNone(common)) return undefined;
 	const { repository, sender } = common.value;
-	if (sender.login === `${appSlug}[bot]`) return undefined;
+	if (sender.login === GitHub.appLogin(appSlug)) return undefined;
 	const found = (
 		kind: RepositoryEvent,
 		details: Omit<RepositoryActivity, "event" | "repository" | "sender">,

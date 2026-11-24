@@ -4,7 +4,7 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 
 /** Why the viewer may find no bot or project at an address that names one. */
 const NOT_FOUND_REASONS = {
-	bot: "It may have been removed or renamed, or it is someone else's private bot.",
+	bot: "It may have been removed or renamed, or it is someone else's personal bot.",
 	project: "It may have been removed, or it is private and you're not in it.",
 } as const;
 

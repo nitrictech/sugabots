@@ -20,11 +20,7 @@ export const make = Effect.gen(function* () {
 					return ComputerSignIn.NOT_SIGNED_IN;
 				}
 				const signedIn = yield* connected.computerSignIn();
-				return {
-					credentials: signedIn.credentials,
-					environment: {},
-					expiresAt: signedIn.expiresAt,
-				};
+				return { credentials: signedIn.credentials, expiresAt: signedIn.expiresAt };
 			}).pipe(
 				Effect.catch((failure) =>
 					Effect.as(

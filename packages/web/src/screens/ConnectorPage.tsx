@@ -5,7 +5,7 @@ import {
 	type ConnectorToolSetting,
 	connectorMarkFor,
 	connectorToolWritesOrDeletes,
-	type NamedPerson,
+	type NamedMember,
 } from "@sugabots/contracts";
 import { projectLinks } from "@sugabots/contracts/project-links";
 import { cn } from "cn";
@@ -28,7 +28,7 @@ import {
 import { TOOL_ACCESS_LABELS } from "@/lib/tool-access-labels.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
 import { Alert } from "@/ui/alert.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
@@ -171,7 +171,7 @@ function ConnectorCard({
 						trailing={
 							connector.signedIn ? (
 								<span className="flex min-w-0 items-center gap-3">
-									<SignedInPerson person={connector.connectedBy} />
+									<ConnectedBy member={isServer ? connector.signedInAs : connector.connectedBy} />
 									{canManage &&
 										(isServer ? (
 											connector.auth === "oauth" && (
@@ -339,12 +339,12 @@ function TestConnector({ connector, projectId }: { connector: Connector; project
 }
 
 /** Whoever signed the connector in, with their face. */
-function SignedInPerson({ person }: { person: NamedPerson | null }) {
-	if (person === null) return <SettingsValue>Someone no longer here</SettingsValue>;
+function ConnectedBy({ member }: { member: NamedMember | null }) {
+	if (member === null) return <SettingsValue>Someone no longer here</SettingsValue>;
 	return (
 		<span className="flex min-w-0 items-center gap-2">
-			<PersonAvatar person={person} size={20} />
-			<SettingsValue>{person.name}</SettingsValue>
+			<MemberAvatar member={member} size={20} />
+			<SettingsValue>{member.name}</SettingsValue>
 		</span>
 	);
 }

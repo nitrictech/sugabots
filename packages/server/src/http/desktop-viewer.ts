@@ -18,7 +18,7 @@ import { Authentication } from "../auth/authentication.ts";
  * logs in to the server with its password and offers the viewer no
  * authentication, then passes frames both ways untouched; neither the
  * password nor the computer's address reaches the browser. It closes once the
- * person may no longer see the desktop as it was opened for them.
+ * member may no longer see the desktop as it was opened for them.
  */
 export const desktopViewerRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
@@ -33,7 +33,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 			Effect.gen(function* () {
 				const request = yield* HttpServerRequest.HttpServerRequest;
 				// Any page the browser visits can open a WebSocket here with the
-				// person's cookie, so only the web app's own origin may.
+				// member's cookie, so only the web app's own origin may.
 				if (!request.headers.origin || !trusted.has(request.headers.origin)) {
 					return HttpServerResponse.text("Untrusted origin", { status: 403 });
 				}
@@ -46,7 +46,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 					Effect.gen(function* () {
 						const desktop = yield* viewer.open({ chatId, botId });
 						const browserSide = yield* request.upgrade;
-						// Ending the relay closes the person's socket.
+						// Ending the relay closes the member's socket.
 						yield* Effect.raceFirst(
 							relay(browserSide, upstream(desktop.endpoint), desktop.password),
 							desktop.accessLost,
@@ -54,7 +54,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 						return HttpServerResponse.empty();
 					}),
 				).pipe(
-					CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(holder.person.id)),
+					CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(holder.member.id)),
 					Effect.catchTags({
 						DesktopUnavailable: (failure) =>
 							Effect.succeed(HttpServerResponse.text(failure.userMessage, { status: 404 })),
@@ -75,8 +75,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 
 /**
  * The desktop's VNC server as a WebSocket, reached through the computer
- * provider: websockify in front of Xvnc, or x11vnc itself in computers made
- * from images before Xvnc.
+ * provider: websockify in front of Xvnc.
  */
 function upstream(desktop: Computers.Endpoint) {
 	const url = desktop.url.replace(/^http/, "ws");
@@ -84,12 +83,11 @@ function upstream(desktop: Computers.Endpoint) {
 		Effect.acquireRelease(
 			Effect.sync(
 				// Node's WebSocket takes headers as well as protocols: a provider
-				// may need them to route the request, and x11vnc refuses a
-				// handshake without an Origin, which only browsers send unasked.
+				// may need them to route the request.
 				() =>
 					new WebSocket(url, {
 						protocols: [VNC_SUBPROTOCOL],
-						headers: { ...desktop.headers, origin: RELAY_ORIGIN },
+						headers: desktop.headers,
 					} as unknown as string[]),
 			),
 			(socket) => Effect.sync(() => socket.close()),
@@ -99,7 +97,7 @@ function upstream(desktop: Computers.Endpoint) {
 }
 
 /**
- * Logs in to the desktop for the person, then copies frames each way until
+ * Signs in to the desktop for the member, then copies frames each way until
  * either side closes.
  */
 function relay(
@@ -113,7 +111,7 @@ function relay(
 			const browser = bytesOf(yield* browserSide.reader);
 			const desktop = bytesOf(yield* desktopSocket.reader);
 			const [toBrowser, toDesktop] = yield* Effect.all([browserSide.writer, desktopSocket.writer]);
-			yield* logIn({ browser, toBrowser, desktop, toDesktop, password });
+			yield* signIn({ browser, toBrowser, desktop, toDesktop, password });
 			const pump = (from: Bytes, to: Socket.Writer) =>
 				Effect.gen(function* () {
 					const unread = from.rest();
@@ -128,8 +126,8 @@ function relay(
 			return yield* Effect.raceFirst(pump(browser, toDesktop), pump(desktop, toBrowser));
 		}),
 	).pipe(
-		Effect.catchTag("DesktopLoginFailed", (failure) =>
-			Effect.logWarning(`Couldn't log in to the desktop for its viewer: ${failure.reason}`),
+		Effect.catchTag("DesktopSignInFailed", (failure) =>
+			Effect.logWarning(`Couldn't sign in to the desktop for its viewer: ${failure.reason}`),
 		),
 		Effect.ignore,
 	);
@@ -140,7 +138,7 @@ function relay(
  * relay answers the desktop's VNC authentication, and tells the viewer it
  * needs none.
  */
-function logIn({
+function signIn({
 	browser,
 	toBrowser,
 	desktop,
@@ -158,25 +156,25 @@ function logIn({
 		yield* toBrowser.write(version);
 		const viewerVersion = yield* browser.take(VERSION_BYTES);
 		if (new TextDecoder().decode(viewerVersion) !== RFB_3_8) {
-			return yield* new DesktopLoginFailed({ reason: "the viewer doesn't speak RFB 3.8" });
+			return yield* new DesktopSignInFailed({ reason: "the viewer doesn't speak RFB 3.8" });
 		}
 		yield* toDesktop.write(viewerVersion);
 		const [offered = 0] = yield* desktop.take(1);
 		const securityTypes = yield* desktop.take(offered);
 		if (!securityTypes.includes(VNC_AUTHENTICATION)) {
-			return yield* new DesktopLoginFailed({ reason: "the desktop doesn't ask for a password" });
+			return yield* new DesktopSignInFailed({ reason: "the desktop doesn't ask for a password" });
 		}
 		yield* toBrowser.write(Uint8Array.of(1, NO_AUTHENTICATION));
 		const [chosen] = yield* browser.take(1);
 		if (chosen !== NO_AUTHENTICATION) {
-			return yield* new DesktopLoginFailed({ reason: "the viewer chose another security type" });
+			return yield* new DesktopSignInFailed({ reason: "the viewer chose another security type" });
 		}
 		yield* toDesktop.write(Uint8Array.of(VNC_AUTHENTICATION));
 		const challenge = yield* desktop.take(CHALLENGE_BYTES);
 		yield* toDesktop.write(answerChallenge(password, challenge));
 		const result = yield* desktop.take(SECURITY_RESULT_BYTES);
 		if (result.some((byte) => byte !== 0)) {
-			return yield* new DesktopLoginFailed({ reason: "the desktop refused its password" });
+			return yield* new DesktopSignInFailed({ reason: "the desktop refused its password" });
 		}
 		yield* toBrowser.write(result);
 	});
@@ -228,7 +226,7 @@ function concatenated(parts: readonly Uint8Array[]) {
 }
 
 /** The desktop and its viewer couldn't be joined, for `reason`. */
-class DesktopLoginFailed extends Data.TaggedError("DesktopLoginFailed")<{ reason: string }> {}
+class DesktopSignInFailed extends Data.TaggedError("DesktopSignInFailed")<{ reason: string }> {}
 
 const RFB_3_8 = "RFB 003.008\n";
 const VERSION_BYTES = RFB_3_8.length;
@@ -238,9 +236,3 @@ const SECURITY_RESULT_BYTES = 4;
 
 /** Asks for VNC's bytes as they are rather than as base64 text. */
 const VNC_SUBPROTOCOL = "binary";
-
-/**
- * Any origin satisfies x11vnc, which only checks that one is given, and
- * websockify, which doesn't check.
- */
-const RELAY_ORIGIN = "http://sugabots-desktop-relay";

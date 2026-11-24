@@ -11,7 +11,7 @@ import { Automations } from "@sugabots/core/chats/automations/automations";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy, signedInWith } from "../../http/app.test-support.ts";
 import { MAX_JSON_BODY_BYTES } from "../../http/validation.ts";
 
 const AUTOMATION_ID = "0199a3a0-0000-7000-8000-000000000001";
@@ -186,17 +186,17 @@ function appAs(services: { automations?: Partial<Automations.Interface> } = {}) 
 	);
 }
 
-const session = { authorization: "Bearer session", "content-type": "application/json" };
+const session = { ...signedInWith("session"), "content-type": "application/json" };
 
-/** The actor a double was called as, alongside what it was given. */
-const asked = <Input>(calls: Array<{ input: Input; personId: string }>, input: Input) =>
-	Effect.map(CurrentActor.Service, ({ personId }) => {
-		calls.push({ input, personId });
+/** The member a double was called as, alongside what it was given. */
+const asked = <Input>(calls: Array<{ input: Input; memberId: string }>, input: Input) =>
+	Effect.map(CurrentActor.Service, ({ memberId }) => {
+		calls.push({ input, memberId });
 	});
 
 describe("an automation's runs", () => {
-	it("starts a run by hand as the person asking", async () => {
-		const calls: Array<{ input: unknown; personId: string }> = [];
+	it("starts a run by hand as the member asking", async () => {
+		const calls: Array<{ input: unknown; memberId: string }> = [];
 		const requestId = "0199a3a0-0000-7000-8000-0000000000c1";
 		const response = await appAs({
 			automations: {
@@ -217,7 +217,7 @@ describe("an automation's runs", () => {
 		expect(calls).toEqual([
 			{
 				input: { projectId: PROJECT_ID, automationId: AUTOMATION_ID, requestId },
-				personId: USER_ID,
+				memberId: USER_ID,
 			},
 		]);
 	});
@@ -240,8 +240,8 @@ describe("an automation's runs", () => {
 describe("an automation's triggers", () => {
 	const triggerPath = `/projects/${PROJECT_ID}/automations/${AUTOMATION_ID}/triggers/${TRIGGER_ID}`;
 
-	it("changes the trigger in the path, as the person asking", async () => {
-		const calls: Array<{ input: unknown; personId: string }> = [];
+	it("changes the trigger in the path, as the member asking", async () => {
+		const calls: Array<{ input: unknown; memberId: string }> = [];
 		const input = { kind: "webhook" as const, auth: { kind: "bearer" as const } };
 		const response = await appAs({
 			automations: {
@@ -260,7 +260,7 @@ describe("an automation's triggers", () => {
 					trigger: { projectId: PROJECT_ID, automationId: AUTOMATION_ID, triggerId: TRIGGER_ID },
 					changed: input,
 				},
-				personId: USER_ID,
+				memberId: USER_ID,
 			},
 		]);
 	});
@@ -304,7 +304,9 @@ function anAutomation(): Automation {
 		projectId: PROJECT_ID,
 		name: "Alerts",
 		instructions: "Handle input.",
-		triggers: [{ id: TRIGGER_ID, kind: "webhook", auth: { kind: "bearer" } }],
+		triggers: [
+			{ id: TRIGGER_ID, kind: "webhook", auth: { kind: "bearer" }, deliveryIdHeader: null },
+		],
 		state: "enabled",
 		createdById: USER_ID,
 		pausedAfterFailures: false,

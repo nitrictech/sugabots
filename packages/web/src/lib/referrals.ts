@@ -4,7 +4,7 @@ import { client } from "@/api.ts";
 
 const referralLinkKey = ["referral-link"];
 
-/** The signed-in person's referral link, `null` where the server does not sign people up by referral. */
+/** The current user's referral link, `null` where the server does not sign members up by referral. */
 export function useReferralLink() {
 	return useQuery({
 		queryKey: referralLinkKey,
@@ -13,7 +13,7 @@ export function useReferralLink() {
 	});
 }
 
-/** Replaces the signed-in person's referral link; the one they had stops working. */
+/** Replaces the current user's referral link; the one they had stops working. */
 export function useResetReferralLink() {
 	const queries = useQueryClient();
 	return useMutation({

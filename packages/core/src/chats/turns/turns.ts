@@ -2,12 +2,12 @@
  * A bot's turn: one bot answering one message, from being asked until
  * its reply is complete, failed or cancelled. Hidden behind this module are
  * the turn's durable workflow, its lifecycle, the reply streamed and saved as
- * it arrives, the tools it calls and the approvals people give them, and the
+ * it arrives, the tools it calls and the approvals members give them, and the
  * signals that reach a turn while it runs or waits.
  *
  * Two services. `Service` is for the rest of the system and acts for no one:
  * asking for a turn, stopping the turns under an automation run, and recording a
- * system bot's work as a turn. `Controls` is for people, and checks what
+ * system bot's work as a turn. `Controls` is for members, and checks what
  * the current actor may do: deciding a turn's tool approvals.
  *
  * This is the only file outside `turns/` may import.
@@ -42,6 +42,7 @@ import { ToolCallStore } from "./tool-calls/store.ts";
 import { turnStepsLayer } from "./turn.steps.ts";
 import { Turn, type TurnRequest, turnWorkflow } from "./turn.workflow.ts";
 
+export { botsAskedBefore, handBackOwed } from "./collaboration.ts";
 export {
 	contextWindowTokens,
 	estimatedTokens,
@@ -105,7 +106,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Turns") {}
 
-/** What people may do to a turn, as the current actor. */
+/** What members may do to a turn, as the current actor. */
 export interface ControlsInterface {
 	/**
 	 * Decides a tool call a turn is waiting on, as the actor, once they may.
@@ -162,7 +163,7 @@ export const stepsLayer = Layer.suspend(() =>
 );
 
 /**
- * How a turn hears people while it runs or waits, over the workflow engine.
+ * How a turn hears members while it runs or waits, over the workflow engine.
  * Provided with the engine, so a test can stand in for it.
  */
 export const signalsLayer = TurnSignals.layer;

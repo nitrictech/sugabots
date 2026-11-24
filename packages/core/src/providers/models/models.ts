@@ -38,6 +38,7 @@ import {
 import { ModelRequests } from "../../accounting/model-requests.ts";
 import { streamLedger } from "../../accounting/stream-ledger.ts";
 import type { Database } from "../../database/database.ts";
+import { causesOf } from "../causes.ts";
 import type { ProviderOptions } from "../model-providers/dialects/dialect.ts";
 import { dialectFor, type ModelRegistry, modelsDev } from "../model-providers/dialects/index.ts";
 import { ModelProviderStore } from "../model-providers/model-provider-store.ts";
@@ -195,23 +196,16 @@ function logJson(value: unknown): string {
 	);
 }
 
-/** How many causes deep `causeChain` follows, so a cycle can't run forever. */
-const MAX_CAUSE_DEPTH = 5;
-
 /**
  * causeChain describes `error` and each error it was caused by, with their
  * stacks and the fields providers and the SDK put on them: an HTTP address,
  * status, response, code or data.
  */
 function causeChain(error: unknown): Array<Record<string, unknown>> {
-	const chain: Array<Record<string, unknown>> = [];
-	for (let current = error, depth = 0; current !== undefined && depth < MAX_CAUSE_DEPTH; depth++) {
-		if (!(current instanceof Error)) {
-			chain.push({ value: current });
-			break;
-		}
+	return causesOf(error).map((current) => {
+		if (!(current instanceof Error)) return { value: current };
 		const fields = current as Error & Record<string, unknown>;
-		chain.push({
+		return {
 			name: current.name,
 			message: current.message,
 			stack: current.stack,
@@ -219,10 +213,8 @@ function causeChain(error: unknown): Array<Record<string, unknown>> {
 				? { url: current.url, status: current.statusCode, headers: current.responseHeaders }
 				: {}),
 			...definedFields(fields, ["statusCode", "responseBody", "code", "data"]),
-		});
-		current = current.cause;
-	}
-	return chain;
+		};
+	});
 }
 
 /** definedFields returns those of `names` that `record` has a value for. */

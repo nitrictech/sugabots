@@ -117,8 +117,8 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			error: refused,
 		}),
 		/**
-		 * Reads one automation run or collaboration, by its own chat, and
-		 * nothing else in the chat it is in.
+		 * Reads one automation run, by its own chat, and nothing else in the
+		 * chat it is in.
 		 */
 		HttpApiEndpoint.post("markNestedChatRead", "/nested-chats/:chatId/read", {
 			params: { chatId: Schema.String },
@@ -157,8 +157,6 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: HttpApiSchema.StreamUint8Array(),
 			error: refused,
 		}),
-		// HEAD answers the same with a one-message page, for asking whether the
-		// chat is there without its history.
 		HttpApiEndpoint.get("get", "/chats/:chatId", {
 			params: { chatId: Schema.String },
 			query: chatHistoryQuerySchema,

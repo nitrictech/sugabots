@@ -14,8 +14,8 @@ import type { SearchProviderAccess } from "./search-provider-access.ts";
 /**
  * The search services `web_search` knows how to call, one function each.
  *
- * Every backend takes the same request and answers the same shape, so the
- * tool and the settings test are written once. A failure is an answer with a
+ * Every provider's search takes the same request and answers the same shape,
+ * so the tool and the settings test are written once. A failure is an answer with a
  * reason, never a throw: the bot, or the admin testing the provider,
  * reads it as a sentence, and the bot also gets what the service said.
  */
@@ -38,13 +38,13 @@ export type SearchOutcome =
 
 export interface SearchRequest {
 	query: string;
-	/** How many results to ask for; a backend may return fewer. */
+	/** How many results to ask for; a provider may return fewer. */
 	count: number;
 	signal?: AbortSignal;
 }
 
 /** Never fails: what goes wrong is an outcome, and its details are logged. */
-type SearchBackend = (request: SearchRequest) => Effect.Effect<SearchOutcome>;
+type ProviderSearch = (request: SearchRequest) => Effect.Effect<SearchOutcome>;
 
 export const MAX_SEARCH_RESULTS = 10;
 const SEARCH_TIMEOUT_MS = 10_000;
@@ -58,11 +58,11 @@ export function searchEndpoint(access: SearchProviderAccess): string {
 	return access.builtIn === "exa" && !access.apiKey ? EXA_FREE_SEARCH_URL : access.baseUrl;
 }
 
-/** The backend for a workspace's provider access, calling through its bound egress client. */
-export function searchBackend(
+/** Searching with a workspace's provider access, through its bound egress client. */
+export function providerSearch(
 	access: SearchProviderAccess,
 	fetch: EgressHttpClient,
-): SearchBackend {
+): ProviderSearch {
 	switch (access.builtIn) {
 		case "brave":
 			return braveSearch(access, fetch);
@@ -91,37 +91,28 @@ const braveResponse = Schema.Struct({
 	),
 });
 
-function braveSearch(access: SearchProviderAccess, fetch: EgressHttpClient): SearchBackend {
-	return ({ query, count, signal }) => {
-		const url = new URL(`${access.baseUrl.replace(/\/$/, "")}/web/search`);
-		url.searchParams.set("q", query);
-		url.searchParams.set("count", String(count));
-		return answer("Brave Search", signal, async (stop) => {
-			const response = await fetch(url, {
-				signal: stop,
-				headers: {
-					accept: "application/json",
-					"x-subscription-token": access.apiKey ?? "",
-				},
-			});
-			if (!response.ok) {
-				return httpRefusal("Brave Search", response, access.apiKey);
-			}
-			const parsed = Schema.decodeUnknownResult(braveResponse)(await response.json());
-			if (parsed._tag === "Failure") {
-				return refused(userText`Brave Search answered with something that is not a result list`);
-			}
+function braveSearch(access: SearchProviderAccess, fetch: EgressHttpClient): ProviderSearch {
+	return jsonSearch(fetch, {
+		service: "Brave Search",
+		apiKey: access.apiKey,
+		schema: braveResponse,
+		request: ({ query, count }) => {
+			const url = new URL(`${access.baseUrl.replace(/\/$/, "")}/web/search`);
+			url.searchParams.set("q", query);
+			url.searchParams.set("count", String(count));
 			return {
-				ok: true,
-				results: (parsed.success.web?.results ?? []).map((result) => ({
-					title: result.title,
-					url: result.url,
-					snippet: result.description ?? "",
-					published: result.page_age ?? result.age ?? null,
-				})),
+				url,
+				headers: { accept: "application/json", "x-subscription-token": access.apiKey ?? "" },
 			};
-		});
-	};
+		},
+		toResults: (body) =>
+			(body.web?.results ?? []).map((result) => ({
+				title: result.title,
+				url: result.url,
+				snippet: result.description ?? "",
+				published: result.page_age ?? result.age ?? null,
+			})),
+	});
 }
 
 const exaResponse = Schema.Struct({
@@ -135,44 +126,35 @@ const exaResponse = Schema.Struct({
 	),
 });
 
-function exaSearch(access: SearchProviderAccess, fetch: EgressHttpClient): SearchBackend {
-	return ({ query, count, signal }) => {
-		const url = `${access.baseUrl.replace(/\/$/, "")}/search`;
-		return answer("Exa", signal, async (stop) => {
-			const response = await fetch(url, {
-				method: "POST",
-				signal: stop,
-				headers: {
-					accept: "application/json",
-					"content-type": "application/json",
-					"x-api-key": access.apiKey ?? "",
-				},
-				body: JSON.stringify({
-					query,
-					numResults: count,
-					type: "auto",
-					// A sentence or two per result is the snippet; the page itself is web_fetch's job.
-					contents: { highlights: { maxCharacters: 300 } },
-				}),
-			});
-			if (!response.ok) {
-				return httpRefusal("Exa", response, access.apiKey);
-			}
-			const parsed = Schema.decodeUnknownResult(exaResponse)(await response.json());
-			if (parsed._tag === "Failure") {
-				return refused(userText`Exa answered with something that is not a result list`);
-			}
-			return {
-				ok: true,
-				results: parsed.success.results.map((result) => ({
-					title: result.title ?? result.url,
-					url: result.url,
-					snippet: (result.highlights ?? []).join(" "),
-					published: result.publishedDate ?? null,
-				})),
-			};
-		});
-	};
+function exaSearch(access: SearchProviderAccess, fetch: EgressHttpClient): ProviderSearch {
+	return jsonSearch(fetch, {
+		service: "Exa",
+		apiKey: access.apiKey,
+		schema: exaResponse,
+		request: ({ query, count }) => ({
+			url: `${access.baseUrl.replace(/\/$/, "")}/search`,
+			method: "POST",
+			headers: {
+				accept: "application/json",
+				"content-type": "application/json",
+				"x-api-key": access.apiKey ?? "",
+			},
+			body: JSON.stringify({
+				query,
+				numResults: count,
+				type: "auto",
+				// A sentence or two per result is the snippet; the page itself is web_fetch's job.
+				contents: { highlights: { maxCharacters: 300 } },
+			}),
+		}),
+		toResults: (body) =>
+			body.results.map((result) => ({
+				title: result.title ?? result.url,
+				url: result.url,
+				snippet: (result.highlights ?? []).join(" "),
+				published: result.publishedDate ?? null,
+			})),
+	});
 }
 
 const tavilyResponse = Schema.Struct({
@@ -186,38 +168,29 @@ const tavilyResponse = Schema.Struct({
 	),
 });
 
-function tavilySearch(access: SearchProviderAccess, fetch: EgressHttpClient): SearchBackend {
-	return ({ query, count, signal }) => {
-		const url = `${access.baseUrl.replace(/\/$/, "")}/search`;
-		return answer("Tavily", signal, async (stop) => {
-			const response = await fetch(url, {
-				method: "POST",
-				signal: stop,
-				headers: {
-					accept: "application/json",
-					"content-type": "application/json",
-					authorization: `Bearer ${access.apiKey ?? ""}`,
-				},
-				body: JSON.stringify({ query, max_results: count, search_depth: "basic" }),
-			});
-			if (!response.ok) {
-				return httpRefusal("Tavily", response, access.apiKey);
-			}
-			const parsed = Schema.decodeUnknownResult(tavilyResponse)(await response.json());
-			if (parsed._tag === "Failure") {
-				return refused(userText`Tavily answered with something that is not a result list`);
-			}
-			return {
-				ok: true,
-				results: parsed.success.results.map((result) => ({
-					title: result.title,
-					url: result.url,
-					snippet: result.content ?? "",
-					published: result.published_date ?? null,
-				})),
-			};
-		});
-	};
+function tavilySearch(access: SearchProviderAccess, fetch: EgressHttpClient): ProviderSearch {
+	return jsonSearch(fetch, {
+		service: "Tavily",
+		apiKey: access.apiKey,
+		schema: tavilyResponse,
+		request: ({ query, count }) => ({
+			url: `${access.baseUrl.replace(/\/$/, "")}/search`,
+			method: "POST",
+			headers: {
+				accept: "application/json",
+				"content-type": "application/json",
+				authorization: `Bearer ${access.apiKey ?? ""}`,
+			},
+			body: JSON.stringify({ query, max_results: count, search_depth: "basic" }),
+		}),
+		toResults: (body) =>
+			body.results.map((result) => ({
+				title: result.title,
+				url: result.url,
+				snippet: result.content ?? "",
+				published: result.published_date ?? null,
+			})),
+	});
 }
 
 /**
@@ -225,7 +198,7 @@ function tavilySearch(access: SearchProviderAccess, fetch: EgressHttpClient): Se
  * rather than JSON, which `parseExaText` reads back into results. Each search
  * is one short MCP session.
  */
-function exaFreeSearch(fetch: EgressHttpClient): SearchBackend {
+function exaFreeSearch(fetch: EgressHttpClient): ProviderSearch {
 	return ({ query, count, signal }) =>
 		answer("Exa", signal, async (stop) => {
 			const client = new Client({ name: "sugabots", version: VERSION });
@@ -268,7 +241,7 @@ function exaFreeSearch(fetch: EgressHttpClient): SearchBackend {
  * `Published:`, `Author:`, then `Highlights:` and the passages, results
  * separated by a rule. "N/A" is how it says it does not know.
  */
-export function parseExaText(text: string): SearchResult[] {
+function parseExaText(text: string): SearchResult[] {
 	return text
 		.split(/\n---\n/)
 		.map((block) => block.trim())
@@ -307,43 +280,74 @@ const searxngResponse = Schema.Struct({
 	),
 });
 
-function searxngSearch(access: SearchProviderAccess, fetch: EgressHttpClient): SearchBackend {
-	return ({ query, count, signal }) => {
-		const url = new URL(`${access.baseUrl.replace(/\/$/, "")}/search`);
-		url.searchParams.set("q", query);
-		url.searchParams.set("format", "json");
-		return answer("SearXNG", signal, async (stop) => {
-			const response = await fetch(url, {
-				signal: stop,
+function searxngSearch(access: SearchProviderAccess, fetch: EgressHttpClient): ProviderSearch {
+	return jsonSearch(fetch, {
+		service: "SearXNG",
+		apiKey: access.apiKey,
+		schema: searxngResponse,
+		request: ({ query }) => {
+			const url = new URL(`${access.baseUrl.replace(/\/$/, "")}/search`);
+			url.searchParams.set("q", query);
+			url.searchParams.set("format", "json");
+			return {
+				url,
 				headers: {
 					accept: "application/json",
 					// A key is unusual for SearXNG itself; a proxy in front of it may check one.
 					...(access.apiKey ? { authorization: `Bearer ${access.apiKey}` } : {}),
 				},
-			});
-			if (response.status === 403) {
+			};
+		},
+		refusalOf: (response) =>
+			response.status === 403
+				? refused(userText`SearXNG refused the request; its JSON format may be off in settings.yml`)
+				: undefined,
+		toResults: (body, count) =>
+			body.results.slice(0, count).map((result) => ({
+				title: result.title,
+				url: result.url,
+				snippet: result.content ?? "",
+				published: result.publishedDate ?? null,
+			})),
+	});
+}
+
+/** How one JSON request searches a provider. */
+interface JsonSearch<S extends Schema.Decoder<unknown>> {
+	readonly service: Service;
+	/** Kept out of what the provider said, when that is passed on. */
+	readonly apiKey: string | undefined;
+	/** The answer's body. */
+	readonly schema: S;
+	readonly request: (request: SearchRequest) => RequestInit & { url: string | URL };
+	/** A refusal the provider means something particular by, before any other is reported. */
+	readonly refusalOf?: (response: Response) => SearchOutcome | undefined;
+	readonly toResults: (body: S["Type"], count: number) => SearchResult[];
+}
+
+/**
+ * A search one JSON request answers: the request is sent, a refusal becomes
+ * a reason, and the body is decoded and turned into results.
+ */
+function jsonSearch<S extends Schema.Decoder<unknown>>(
+	fetch: EgressHttpClient,
+	search: JsonSearch<S>,
+): ProviderSearch {
+	return (request) =>
+		answer(search.service, request.signal, async (stop) => {
+			const { url, ...init } = search.request(request);
+			const response = await fetch(url, { ...init, signal: stop });
+			const refusal = search.refusalOf?.(response);
+			if (refusal) return refusal;
+			if (!response.ok) return httpRefusal(search.service, response, search.apiKey);
+			const parsed = Schema.decodeUnknownResult(search.schema)(await response.json());
+			if (parsed._tag === "Failure") {
 				return refused(
-					userText`SearXNG refused the request; its JSON format may be off in settings.yml`,
+					userText`${search.service} answered with something that is not a result list`,
 				);
 			}
-			if (!response.ok) {
-				return httpRefusal("SearXNG", response, access.apiKey);
-			}
-			const parsed = Schema.decodeUnknownResult(searxngResponse)(await response.json());
-			if (parsed._tag === "Failure") {
-				return refused(userText`SearXNG answered with something that is not a result list`);
-			}
-			return {
-				ok: true,
-				results: parsed.success.results.slice(0, count).map((result) => ({
-					title: result.title,
-					url: result.url,
-					snippet: result.content ?? "",
-					published: result.publishedDate ?? null,
-				})),
-			};
+			return { ok: true, results: search.toResults(parsed.success, request.count) };
 		});
-	};
 }
 
 function refused(reason: UserText): SearchOutcome {

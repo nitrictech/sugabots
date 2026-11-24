@@ -2,7 +2,7 @@ import type { ToolCallPart } from "@sugabots/contracts";
 import { eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
-import { person, type ToolCallRow, toolCall } from "../../database/schema.ts";
+import { member, type ToolCallRow, toolCall } from "../../database/schema.ts";
 import { approversOf } from "../tools/approvers.ts";
 
 /**
@@ -24,9 +24,9 @@ export const loadToolCallParts = Effect.fn("ToolCalls.loadToolCallParts")(functi
 		return byMessage;
 	}
 	const rows = yield* db
-		.select({ call: toolCall, decidedByName: person.name })
+		.select({ call: toolCall, decidedByName: member.name })
 		.from(toolCall)
-		.leftJoin(person, eq(person.id, toolCall.decidedById))
+		.leftJoin(member, eq(member.id, toolCall.decidedById))
 		.where(inArray(toolCall.messageId, [...messageIds]))
 		.orderBy(toolCall.startedAt, toolCall.id);
 	for (const { call, decidedByName } of rows) {
@@ -57,7 +57,6 @@ export function toToolCallPart(
 				}
 			: null,
 		error: row.error,
-		writeOrDelete: row.writeOrDelete,
 		atOffset: row.atOffset,
 		startedAt: row.startedAt.toISOString(),
 		finishedAt: row.finishedAt?.toISOString() ?? null,

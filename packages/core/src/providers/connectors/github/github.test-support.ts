@@ -2,8 +2,8 @@ import { createVerify, generateKeyPairSync } from "node:crypto";
 import { Effect, Layer } from "effect";
 import {
 	bot as botTable,
+	member,
 	membership,
-	person,
 	projectMember,
 	workspace,
 } from "../../../database/schema.ts";
@@ -24,6 +24,8 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", {
 export const INSTALLATION_ID = 7;
 /** The app's installation on a second organization, `acme-labs`. */
 export const OTHER_INSTALLATION_ID = 8;
+/** The app's installation on a GitHub user's own account, `ada-codes`. */
+export const USER_INSTALLATION_ID = 9;
 export const WEBHOOK_SECRET = "the-webhook-secret";
 /** The code GitHub sends the browser back with once it has made an app. */
 export const MANIFEST_CODE = "the-code";
@@ -37,11 +39,11 @@ interface Asked {
 	readonly body: unknown;
 }
 
-export type Route = (asked: Asked) => Response | undefined;
+export type Route = (asked: Asked) => Response | Promise<Response> | undefined;
 
 /**
  * GitHub as a bot's app sees it: it makes the app from a manifest, and
- * finds the app's installations, on `acme` and `acme-labs`, only with a
+ * finds the app's installations, on `acme`, `acme-labs` and `ada-codes`, only with a
  * token signed by the app's key. `routes` answer anything else, before a 404.
  */
 export function standInGitHub(...routes: Route[]) {
@@ -87,14 +89,28 @@ const findsInstallation: Route = ({ method, path, bearer }) => {
 	if (!signedByApp(bearer)) return json({ message: "Bad credentials" }, 401);
 	const id = Number(path.slice("/app/installations/".length));
 	const account = INSTALLED_ON.get(id);
-	return account ? json({ id, account: { login: account } }) : json({ message: "Not Found" }, 404);
+	return account ? json({ id, account }) : json({ message: "Not Found" }, 404);
 };
 
 /** The account each of the app's installations is on. */
 const INSTALLED_ON = new Map([
-	[INSTALLATION_ID, "acme"],
-	[OTHER_INSTALLATION_ID, "acme-labs"],
+	[INSTALLATION_ID, { login: "acme", type: "Organization" }],
+	[OTHER_INSTALLATION_ID, { login: "acme-labs", type: "Organization" }],
+	[USER_INSTALLATION_ID, { login: "ada-codes", type: "User" }],
 ]);
+
+/**
+ * Uninstalls the app's installations, for the app's own token, answering
+ * with what `answer` makes of the installation's id.
+ */
+export const uninstalls =
+	(answer: (installationId: number) => Promise<Response>): Route =>
+	({ method, path, bearer }) => {
+		const id = /^\/app\/installations\/(\d+)$/.exec(path)?.[1];
+		if (method !== "DELETE" || id === undefined) return undefined;
+		if (!signedByApp(bearer)) return json({ message: "Bad credentials" }, 401);
+		return answer(Number(id));
+	};
 
 /**
  * Mints installation tokens for the app's own token: `token-<installation>-<n>`,
@@ -135,15 +151,19 @@ function signedByApp(jwt: string) {
 		.verify(publicKey, signature, "base64url");
 }
 
+/** Egress that reaches only `github`. */
+export const egressToGitHub = (github: typeof fetch) =>
+	Layer.succeed(Egress.Service, {
+		providers: { for: () => github },
+		validateProviderUrl: () => Effect.void,
+		oauth: github,
+		webFetch: github,
+	});
+
 /** Egress that reaches only `github`, for an installation served at `publicUrl`. */
 export const reachingGitHub = (github: typeof fetch, publicUrl: string) =>
 	Layer.mergeAll(
-		Layer.succeed(Egress.Service, {
-			providers: { for: () => github },
-			validateProviderUrl: () => Effect.void,
-			oauth: github,
-			webFetch: github,
-		}),
+		egressToGitHub(github),
 		Layer.succeed(
 			ServerSettings.Service,
 			ServerSettings.fromUrls({ isProduction: false, publicUrl }),
@@ -161,7 +181,7 @@ export async function workspaceWithProject(label: string) {
 	);
 	const [admin, editor] = await onDatabase((db) =>
 		db
-			.insert(person)
+			.insert(member)
 			.values([
 				{ name: "Ada", email: `${label}-ada-${suffix}@example.com` },
 				{ name: "Kim", email: `${label}-kim-${suffix}@example.com` },
@@ -172,8 +192,8 @@ export async function workspaceWithProject(label: string) {
 	const workspaceId = space.id;
 	await onDatabase((db) =>
 		db.insert(membership).values([
-			{ workspaceId, personId: admin.id, role: "admin" },
-			{ workspaceId, personId: editor.id, role: "editor" },
+			{ workspaceId, memberId: admin.id, role: "admin" },
+			{ workspaceId, memberId: editor.id, role: "editor" },
 		]),
 	);
 	const shared = await onDatabase((db) =>
@@ -186,7 +206,7 @@ export async function workspaceWithProject(label: string) {
 	);
 	if (!shared) throw new Error("fixture");
 	await onDatabase((db) =>
-		db.insert(projectMember).values({ workspaceId, projectId: shared.id, personId: editor.id }),
+		db.insert(projectMember).values({ workspaceId, projectId: shared.id, memberId: editor.id }),
 	);
 	const [bot] = await onDatabase((db) =>
 		db
@@ -204,7 +224,7 @@ export async function workspaceWithProject(label: string) {
 	const ownProjectId = await runOnPostgres(defaultProjectOf(bot.id));
 	return {
 		workspaceId,
-		/** The project people made, whose GitHub app the tests make. */
+		/** The project members made, whose GitHub app the tests make. */
 		projectId: shared.id,
 		botId: bot.id,
 		/** The bot's default project, which holds its own GitHub app. */
@@ -232,14 +252,18 @@ export async function madeConnector(
 	return { connectorId, installState: stateIn(made.url) };
 }
 
-/** The project's GitHub app, made by the fixture's admin and installed on `acme`. */
+/**
+ * The project's GitHub app, made by the fixture's admin and installed on
+ * `acme`, or on the account `installationId` is on.
+ */
 export async function installedConnector(
 	gitHubApps: GitHubApps.Interface,
 	fixture: { projectId: string; adminId: string },
+	installationId = INSTALLATION_ID,
 ) {
 	const { connectorId, installState } = await madeConnector(gitHubApps, fixture);
 	const installed = await onPostgresAs(fixture.adminId)(gitHubApps).installed({
-		installationId: INSTALLATION_ID,
+		installationId,
 		state: installState,
 	});
 	if (installed.kind !== "done") throw new Error(`Not installed: ${JSON.stringify(installed)}`);

@@ -1,7 +1,7 @@
 import type { NewComputerProvider } from "@sugabots/contracts";
 import { Effect, Exit } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { person, workspace } from "../database/schema.ts";
+import { member, workspace } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { toComputerProvider } from "./computer-provider-reads.ts";
 import { ComputerProviderStore } from "./computer-provider-store.ts";
@@ -35,7 +35,7 @@ describe.skipIf(!process.env.DATABASE_URL)("computer providers, against Postgres
 		);
 		const [somebody] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Sam", email: `providers-${suffix}@example.com` })
 				.returning(),
 		);

@@ -4,9 +4,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
 import {
 	bot,
+	member,
 	membership,
 	modelProvider,
-	person,
 	providerModel,
 	workspace,
 	workspaceDefaultModel,
@@ -33,12 +33,12 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 		await closeDatabase();
 	});
 
-	const as = (personId: string) =>
-		onPostgresAs(personId)({
+	const as = (memberId: string) =>
+		onPostgresAs(memberId)({
 			complete: workspaceSetup.complete,
 		});
-	const complete = (personId: string, botId: string) =>
-		as(personId).complete({ workspaceId, botId });
+	const complete = (memberId: string, botId: string) =>
+		as(memberId).complete({ workspaceId, botId });
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -48,16 +48,16 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 				.values({ name: `Test ${stamp}`, slug: `workspace-setup-${stamp}` })
 				.returning(),
 		);
-		const people = await onDatabase((db) =>
+		const members = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values([
 					{ name: "Admin", email: `admin-${stamp}@example.com` },
 					{ name: "Editor", email: `editor-${stamp}@example.com` },
 				])
 				.returning(),
 		);
-		const [admin, editor] = people;
+		const [admin, editor] = members;
 		if (!madeWorkspace || !admin || !editor)
 			throw new Error("could not create workspace setup fixtures");
 		workspaceId = madeWorkspace.id;
@@ -65,8 +65,8 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 		editorId = editor.id;
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId, personId: adminId, role: "admin" },
-				{ workspaceId, personId: editorId, role: "editor" },
+				{ workspaceId, memberId: adminId, role: "admin" },
+				{ workspaceId, memberId: editorId, role: "editor" },
 			]),
 		);
 		const [provider] = await onDatabase((db) =>

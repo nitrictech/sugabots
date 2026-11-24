@@ -34,7 +34,7 @@ export interface Emoji {
 	skins?: Record<SkinTone, string>;
 	/** One of the flags of a country or region, which Windows draws as two letters. */
 	countryFlag?: true;
-	/** The same emoji with a different skin tone for each person in it, as 🧑🏻‍🤝‍🧑🏿, which names it by this one. */
+	/** The same emoji with a different skin tone for each figure in it, as 🧑🏻‍🤝‍🧑🏿, which names it by this one. */
 	aliases?: string[];
 }
 

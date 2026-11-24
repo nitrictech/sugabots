@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { namedPersonSchema } from "./api.ts";
+import { namedMemberSchema } from "./api.ts";
 import { modelIdSchema } from "./bots.ts";
 import {
 	builtInProviderIdSchema,
@@ -157,7 +157,7 @@ export const providerModelCapabilityCatalog: ReadonlyArray<{
 	{
 		key: "tools",
 		name: "Tools",
-		description: "Can call tools: collaborate, search, fetch a page.",
+		description: "Can call tools: search, fetch a page.",
 	},
 	{ key: "vision", name: "Vision", description: "Reads images sent to it." },
 	{ key: "images", name: "Images", description: "Makes images." },
@@ -202,10 +202,16 @@ export const modelProviderSchema = Schema.Struct({
 	hasApiKey: Schema.Boolean,
 	/** For a provider signed in to rather than given a key (ChatGPT, SuperGrok), whether somebody has. */
 	signedIn: Schema.Boolean,
+	/**
+	 * The member whose subscription it signs in with, while they are still in
+	 * the workspace. They can't leave the workspace, or be removed from it,
+	 * until another member signs it in or it is given a key.
+	 */
+	signedInAs: Schema.NullOr(namedMemberSchema),
 	customHeaders: Schema.mutable(Schema.Array(Schema.Struct({ name: Schema.String }))),
 	lastTestError: Schema.NullOr(Schema.String),
 	/** Whoever connected it, while it is connected and they are still in the workspace. */
-	connectedBy: Schema.NullOr(namedPersonSchema),
+	connectedBy: Schema.NullOr(namedMemberSchema),
 	/** When somebody added it, or, for a built-in provider every workspace starts with, when it was seeded. */
 	createdAt: isoTimestampSchema,
 	models: Schema.mutable(Schema.Array(providerModelSchema)),
@@ -213,11 +219,14 @@ export const modelProviderSchema = Schema.Struct({
 
 export type ModelProvider = typeof modelProviderSchema.Type;
 
-/** Whether the provider still needs its key, or its sign-in, before it can be used. */
+/**
+ * Whether the provider still needs its key, or its sign-in, before it can be
+ * used. One signed in to takes a key in place of a sign-in.
+ */
 export function providerLacksCredential(
 	provider: Pick<ModelProvider, "builtIn" | "hasApiKey" | "signedIn">,
 ): boolean {
-	if (builtInSignsIn(provider.builtIn)) return !provider.signedIn;
+	if (builtInSignsIn(provider.builtIn)) return !provider.signedIn && !provider.hasApiKey;
 	return builtInRequiresApiKey(provider.builtIn) && !provider.hasApiKey;
 }
 
@@ -254,7 +263,7 @@ export function providerIsReady(
 }
 
 /**
- * A subscription sign-in waiting on the person: they open `verificationUrl`, enter
+ * A subscription sign-in waiting on the member: they open `verificationUrl`, enter
  * `userCode`, and the page asks for the outcome with `attempt` every
  * `pollIntervalMs` until it is no longer pending.
  */
@@ -391,14 +400,6 @@ export const providerSwitchOffSchema = Schema.Struct({
 });
 export type ProviderSwitchOff = typeof providerSwitchOffSchema.Type;
 
-export const bulkProviderModelUpdateSchema = Schema.Struct({
-	modelIds: Schema.mutable(Schema.Array(uuidSchema)).check(
-		Schema.isMinLength(1),
-		Schema.isMaxLength(MAX_PROVIDER_MODELS),
-	),
-	enabled: Schema.Boolean,
-});
-
 const workspaceModelSchema = Schema.Struct({
 	providerId: uuidSchema,
 	providerName: Schema.String,
@@ -431,14 +432,11 @@ export const providerSignInOutcomeSchema = Schema.Union([
 ]);
 export type ProviderSignInOutcome = typeof providerSignInOutcomeSchema.Type;
 
+/** What testing a provider or connector found: whether it answered, how fast, and why not. */
 export const providerTestResultSchema = Schema.Struct({
 	reachable: Schema.Boolean,
 	latencyMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	error: Schema.optional(Schema.String),
 });
-export const providerFetchResultSchema = Schema.Struct({
-	added: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	/** Models already listed whose capabilities, context length or name the provider now reports differently. */
-	updated: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	unchanged: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-});
+
+export type ProviderTestResult = typeof providerTestResultSchema.Type;

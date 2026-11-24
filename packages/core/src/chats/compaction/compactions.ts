@@ -23,33 +23,33 @@ import {
 } from "../store/system-bot-chats.ts";
 import { Turns } from "../turns/turns.ts";
 import { admitCompaction, type CompactionRequest } from "./compaction.workflow.ts";
-import { makeRecords } from "./store.ts";
+import { makeCompactionStore } from "./store.ts";
 import { needsCompaction, planCompaction } from "./window.ts";
 
 /**
  * Compaction, done by the `compact` system bot, Compaction.
  *
  * When a turn's prompt passes the compaction line, the chat is queued for
- * compaction. The Compaction bot summarises the stretch of history just
+ * compaction. The Compaction bot condenses the stretch of history just
  * before the newest messages, and from then on a bot in the chat reads that
- * summary and the newest messages instead of the whole chat. People still
+ * condensed account and the newest messages instead of the whole chat. Members still
  * see every message. Its turns live in a system chat hanging off the
  * one it works on. It runs on the model of the bot whose reply asked for it,
- * so a chat is summarised as well as it is read, and falls back to the
+ * so a chat is condensed as well as it is read, and falls back to the
  * system bots' model for a bot with none.
  */
 export interface Interface {
 	/**
-	 * Opens the Compaction bot's chat and loads what it summarises, or says
+	 * Opens the Compaction bot's chat and loads what it condenses, or says
 	 * why there is nothing to do: the chat is gone, neither the bot nor the
 	 * Compaction bot has a model, the turn that asked was measured before
-	 * the latest compaction, or there is nothing new to summarise.
+	 * the latest compaction, or there is nothing new to condense.
 	 */
 	readonly prepare: (
 		request: CompactionRequest,
 	) => Effect.Effect<PreparedCompaction | CompactionSkipped>;
-	/** Records the summary as what the chat's bots read from now on. */
-	readonly complete: (prepared: PreparedCompaction, summary: string) => Effect.Effect<void>;
+	/** Records the condensed account as what the chat's bots read from now on. */
+	readonly complete: (prepared: PreparedCompaction, condensed: string) => Effect.Effect<void>;
 	/**
 	 * Asks for a compaction once a completed reply's prompt reaches the
 	 * compaction line, after it commits. One that can't be asked for is logged
@@ -64,7 +64,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Compactions");
 	const lanes = yield* Lanes.Service;
 	const chats = yield* ChatStore.Service;
-	const compactions = yield* makeRecords;
+	const compactions = yield* makeCompactionStore;
 	return Service.of({
 		prepare: (request) =>
 			operation(
@@ -98,7 +98,7 @@ export const make = Effect.gen(function* () {
 						if (previous && previous.keptFrom.toISOString() !== request.readKeptFrom) {
 							return skipped("The turn was measured before the chat's latest compaction");
 						}
-						// Only what the last compaction kept can be summarised now (see
+						// Only what the last compaction kept can be condensed now (see
 						// `planCompaction`), so nothing before it is read.
 						const transcript = yield* query((db) =>
 							loadTranscript(db, scope.chatId, { from: previous?.keptFrom }),
@@ -112,7 +112,7 @@ export const make = Effect.gen(function* () {
 									: [],
 							);
 						// Sized to the bot that reads the chat next, and capped to what
-						// the model summarising it can read.
+						// the model condensing it can read.
 						const readerModel = scope.botModel;
 						const readerTokens =
 							readerModel === null
@@ -126,7 +126,7 @@ export const make = Effect.gen(function* () {
 							readerTokens,
 							compactorTokens,
 						});
-						if (!plan) return skipped("There is nothing new to summarise");
+						if (!plan) return skipped("There is nothing new to condense");
 
 						const systemChatId = yield* chats.openSystemChat({
 							served: { id: scope.chatId, workspaceId: scope.workspaceId },
@@ -136,20 +136,19 @@ export const make = Effect.gen(function* () {
 						});
 						return {
 							_tag: "Prepared",
-							request,
 							compactor: { chatId: systemChatId, botId: compactor.id },
 							chatId: scope.chatId,
 							workspaceId: scope.workspaceId,
 							chatTitle: scope.chatTitle,
 							model,
-							transcript: plan.summarised.map(({ author, kind, content, createdAt }) => ({
+							transcript: plan.toCondense.map(({ author, kind, content, createdAt }) => ({
 								author,
 								kind,
 								content,
 								createdAt,
 							})),
-							previousSummary: previous?.summary,
-							// The previous summary is folded into this one, so what it covers
+							previousCondensed: previous?.condensed,
+							// The previous condensed account is folded into this one, so what it covers
 							// still starts where the first compaction's history did.
 							historyStartsAt: previous?.historyStartsAt ?? plan.historyStartsAt,
 							keptFrom: plan.keptFrom,
@@ -158,7 +157,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		complete: (prepared, summary) =>
+		complete: (prepared, condensed) =>
 			operation(
 				"complete",
 				transaction(
@@ -166,7 +165,7 @@ export const make = Effect.gen(function* () {
 						yield* compactions.save({
 							workspaceId: prepared.workspaceId,
 							chatId: prepared.chatId,
-							summary,
+							condensed,
 							historyStartsAt: prepared.historyStartsAt,
 							keptFrom: prepared.keptFrom,
 						});
@@ -200,7 +199,7 @@ export const layer = layerNoDeps.pipe(Layer.provide(ChatStore.layer));
 
 /**
  * A compaction with nothing to do: its chat or source is gone, there is
- * nothing new to summarise, or the Compaction bot's turn may not run.
+ * nothing new to condense, or the Compaction bot's turn may not run.
  * `reason` is for the logs.
  */
 interface CompactionSkipped {
@@ -211,16 +210,15 @@ interface CompactionSkipped {
 /** A requested compaction with its turn opened and its input loaded. */
 export interface PreparedCompaction {
 	readonly _tag: "Prepared";
-	request: CompactionRequest;
 	/** The Compaction bot, and the chat its turns are recorded in. */
 	compactor: { chatId: string; botId: string };
 	chatId: string;
 	workspaceId: string;
 	chatTitle: string;
 	model: string;
-	/** The summary the chat's bots read until now, which this one replaces and carries forward. */
-	previousSummary: string | undefined;
-	/** The messages to summarise, oldest first: those since the previous summary's. */
+	/** The condensed account the chat's bots read until now, which this one replaces and carries forward. */
+	previousCondensed: string | undefined;
+	/** The messages to condense, oldest first: those since the previous condensed account's. */
 	transcript: Array<TranscriptEntry & { createdAt: Date }>;
 	historyStartsAt: Date;
 	keptFrom: Date;
@@ -237,7 +235,7 @@ const loadCompaction = Effect.fn("Compactions.loadCompaction")(function* (
 ) {
 	const [row] = yield* db
 		.select({
-			summary: chatCompaction.summary,
+			condensed: chatCompaction.condensed,
 			historyStartsAt: chatCompaction.historyStartsAt,
 			keptFrom: chatCompaction.keptFrom,
 		})

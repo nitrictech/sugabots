@@ -121,8 +121,8 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 			return { action: "Saved its instructions" };
 		case "request_host":
 			return step("Asked to reach", code(input.host), "Asked to reach a host");
-		case "workspace_access":
-			return step("Checked the access of", name(input.person), "Checked a person's access");
+		case "workspace_role":
+			return step("Checked the role of", name(input.member), "Checked a member's role");
 	}
 	const action = stepLabel(call.tool);
 	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) {

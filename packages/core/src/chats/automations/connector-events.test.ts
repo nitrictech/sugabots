@@ -17,7 +17,7 @@ import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { chatServicesForTests } from "../testing.ts";
 import { Automations } from "./automations.ts";
-import { anAutomationOwner } from "./testing.ts";
+import { anAutomationAdmin } from "./testing.ts";
 
 const opened: RepositoryActivity = {
 	event: "pull_request_opened",
@@ -35,21 +35,21 @@ describe.skipIf(!process.env.DATABASE_URL)("connector automations, against Postg
 	const services = await chatServicesForTests(EventBus.inProcess({ store: EventStore.inMemory() }));
 	const events = onPostgres(Context.get(services, Automations.ConnectorEvents));
 	let automations: Promised<Automations.Interface>;
-	let owner: Awaited<ReturnType<typeof anAutomationOwner>>;
+	let admin: Awaited<ReturnType<typeof anAutomationAdmin>>;
 	let connectorId: string;
 
 	afterAll(closeDatabase);
 
 	beforeEach(async () => {
-		owner = await anAutomationOwner();
-		automations = onPostgresAs(owner.personId)(Context.get(services, Automations.Service));
-		connectorId = await gitHubConnectorWith(owner.workspaceId, owner.ownProjectId, "acme/web");
+		admin = await anAutomationAdmin();
+		automations = onPostgresAs(admin.memberId)(Context.get(services, Automations.Service));
+		connectorId = await gitHubConnectorWith(admin.workspaceId, admin.ownProjectId, "acme/web");
 	});
 
 	const repositoryAutomation = (
 		repository: string,
 		events: RepositoryActivity["event"][],
-		on = { projectId: owner.ownProjectId, connectorId },
+		on = { projectId: admin.ownProjectId, connectorId },
 	) =>
 		automations.create(
 			{ projectId: on.projectId },
@@ -61,7 +61,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connector automations, against Postg
 		);
 
 	const deliver = (deliveryId: string, activity = opened) =>
-		events.accept({ workspaceId: owner.workspaceId, connectorId, deliveryId, activity });
+		events.accept({ workspaceId: admin.workspaceId, connectorId, deliveryId, activity });
 
 	it("takes only a repository its bot's GitHub app has, written as the connector has it", async () => {
 		await expect(repositoryAutomation("acme/infra", ["push"])).rejects.toMatchObject({
@@ -107,9 +107,9 @@ describe.skipIf(!process.env.DATABASE_URL)("connector automations, against Postg
 	});
 
 	it("runs only the automations of the project whose GitHub app the delivery came to", async () => {
-		const other = await anotherBotOf(owner);
+		const other = await anotherBotOf(admin);
 		const otherConnectorId = await gitHubConnectorWith(
-			owner.workspaceId,
+			admin.workspaceId,
 			other.projectId,
 			"acme/web",
 		);
@@ -167,20 +167,20 @@ async function gitHubConnectorWith(workspaceId: string, projectId: string, repos
 	return connected.id;
 }
 
-/** A second bot in the owner's workspace, with its default project. */
-async function anotherBotOf(owner: { workspaceId: string; personId: string }) {
+/** A second bot in the admin's workspace, with its default project. */
+async function anotherBotOf(admin: { workspaceId: string; memberId: string }) {
 	const suffix = crypto.randomUUID();
 	const [bot] = await onDatabase((db) =>
 		db
 			.insert(botTable)
 			.values({
-				workspaceId: owner.workspaceId,
+				workspaceId: admin.workspaceId,
 				name: "Other Bot",
 				handle: handleFromName(`Other Bot ${suffix}`),
 				color: "green",
 				eyes: "pill",
 				model: "test/model",
-				createdById: owner.personId,
+				createdById: admin.memberId,
 			})
 			.returning(),
 	);

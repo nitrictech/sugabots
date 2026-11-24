@@ -1,10 +1,10 @@
-import type { BotParticipant, PersonParticipant } from "@sugabots/contracts";
+import type { BotParticipant, MemberParticipant } from "@sugabots/contracts";
 import { cn } from "cn";
 import { listNames } from "@/lib/name-list.ts";
 import { TypingDots } from "@/ui/typing-dots.tsx";
 
-/** Somebody the indicator shows: a bot at work on its reply, or a person writing in the composer. */
-export type Typer = Pick<BotParticipant | PersonParticipant, "kind" | "id" | "name">;
+/** Somebody the indicator shows: a bot at work on its reply, or a member writing in the composer. */
+export type Typer = Pick<BotParticipant | MemberParticipant, "kind" | "id" | "name">;
 
 /** Whether there is anybody to show, which `TypingIndicator` needs. */
 export function anyoneTyping<T extends Typer>(

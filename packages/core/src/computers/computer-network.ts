@@ -6,22 +6,22 @@ import {
 	type ProjectComputerNetwork,
 } from "@sugabots/contracts";
 import { UserText, userText } from "@sugabots/errors";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
-import { type AuthorizationDenied, computerProjectIdOf } from "../authorization/access.ts";
+import type { AuthorizationDenied } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
 import { type Database, query, serviceOperations } from "../database/database.ts";
 import {
 	allowedHost,
 	blockedHost,
-	person,
 	placedChat,
 	projectAllowedHost,
 	toolCall,
 	turn,
 } from "../database/schema.ts";
 import type { UserFacing } from "../user-message.ts";
+import { memberNamesOf } from "../workspaces/membership/member-reads.ts";
 import {
 	addedHostsOf,
 	blockedHostsOf,
@@ -85,7 +85,7 @@ export interface Interface {
 	}) => Effect.Effect<ProjectComputerNetwork, AuthorizationDenied, CurrentActor.Service>;
 	/**
 	 * Adds `host` to the project whose computer the turn worked on whose call
-	 * `sdkToolCallId` asked for it, if a person allowed that call and the
+	 * `sdkToolCallId` asked for it, if a member allowed that call and the
 	 * workspace hasn't blocked the host since.
 	 */
 	readonly grantRequest: (input: {
@@ -133,7 +133,7 @@ export const make = Effect.gen(function* () {
 				addedHostsOf(workspaceId),
 				blockedHostsOf(workspaceId),
 			]);
-			const names = yield* namesOf([
+			const names = yield* memberNamesOf([
 				...added.map((row) => row.addedById),
 				...blocked.map((row) => row.blockedById),
 			]);
@@ -160,7 +160,7 @@ export const make = Effect.gen(function* () {
 				blockedHostsOf(project.workspaceId),
 			]);
 			const blocks = blocked.map((row) => row.host);
-			const names = yield* namesOf(projectAdded.map((row) => row.addedById));
+			const names = yield* memberNamesOf(projectAdded.map((row) => row.addedById));
 			return {
 				...network,
 				workspaceHosts: [...TRUSTED_HOSTS, ...workspaceAdded.map((row) => row.host)].map(
@@ -210,7 +210,7 @@ export const make = Effect.gen(function* () {
 						yield* query((db) =>
 							db
 								.insert(allowedHost)
-								.values({ workspaceId, host, addedById: actor.personId })
+								.values({ workspaceId, host, addedById: actor.memberId })
 								.onConflictDoNothing(),
 						);
 						yield* projectComputers.applyNetwork({ workspaceId });
@@ -243,7 +243,7 @@ export const make = Effect.gen(function* () {
 					const blocked = yield* query((db) =>
 						db
 							.insert(blockedHost)
-							.values({ workspaceId, host, blockedById: actor.personId })
+							.values({ workspaceId, host, blockedById: actor.memberId })
 							.onConflictDoNothing()
 							.returning({ host: blockedHost.host }),
 					);
@@ -285,7 +285,7 @@ export const make = Effect.gen(function* () {
 					const by = yield* blockFor(project.workspaceId, host);
 					if (by !== undefined) return yield* new HostBlocked({ host, by });
 					if (!TRUSTED_HOSTS.includes(host)) {
-						yield* addToProject({ ...project, host, addedById: standing.actor.personId });
+						yield* addToProject({ ...project, host, addedById: standing.actor.memberId });
 					}
 					return yield* projectSettingsOf(project);
 				}),
@@ -320,7 +320,7 @@ export const make = Effect.gen(function* () {
 						db
 							.select({
 								workspaceId: placedChat.workspaceId,
-								projectId: computerProjectIdOf(placedChat, turn.botId),
+								projectId: placedChat.projectId,
 								approvalStatus: toolCall.approvalStatus,
 								decidedById: toolCall.decidedById,
 							})
@@ -383,26 +383,11 @@ export class HostBlocked
 	}
 }
 
-/** A host as people read it. Hosts are domain names, checked by `computerHostSchema` on the way in. */
+/** A host as members read it. Hosts are domain names, checked by `computerHostSchema` on the way in. */
 function hostName(host: string) {
 	return UserText.unchecked(host);
 }
 
-const namesOf = (personIds: ReadonlyArray<string | null>) => {
-	const ids = [...new Set(personIds.filter((id) => id !== null))];
-	return Effect.map(
-		ids.length === 0
-			? Effect.succeed([])
-			: query((db) =>
-					db
-						.select({ id: person.id, name: person.name })
-						.from(person)
-						.where(inArray(person.id, ids)),
-				),
-		(rows) => new Map(rows.map((row) => [row.id, row.name])),
-	);
-};
-
-function nameOf(names: ReadonlyMap<string, string>, personId: string | null) {
-	return (personId && names.get(personId)) ?? null;
+function nameOf(names: ReadonlyMap<string, string>, memberId: string | null) {
+	return (memberId && names.get(memberId)) ?? null;
 }

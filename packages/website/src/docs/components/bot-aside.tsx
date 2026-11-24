@@ -36,7 +36,7 @@ export function Tip({ children, title = "Tip" }: { children: ReactNode; title?: 
 	);
 }
 
-/** Something that loses data or locks people out if it's missed. */
+/** Something that loses data or locks members out if it's missed. */
 export function Careful({ children, title = "Careful" }: { children: ReactNode; title?: string }) {
 	return (
 		<BotAside bot={{ color: "rose", eyes: "square" }} label={title}>

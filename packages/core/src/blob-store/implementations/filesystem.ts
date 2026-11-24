@@ -1,5 +1,5 @@
 import { rmdir } from "node:fs/promises";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Effect, FileSystem, type PlatformError, Stream } from "effect";
 import { Ids } from "../../ids/ids.ts";
 import { BlobStore } from "../blob-store.ts";
@@ -168,28 +168,6 @@ export const fromFileSystem = (root: string) =>
 					Effect.withSpan("BlobStore.delete"),
 				);
 			},
-			list: (prefix) =>
-				Effect.gen(function* () {
-					const paths = yield* fs
-						.readDirectory(directoryOf(root, prefix), { recursive: true })
-						.pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed([])));
-					const keys = paths
-						.filter((path) => basename(path) === BYTES_FILE && path !== BYTES_FILE)
-						.map((path) => keyUnder(prefix, dirname(path)));
-					const entries = yield* Effect.forEach(
-						keys,
-						(key) =>
-							entryOf(key).pipe(
-								Effect.map((entry): BlobStore.Entry | undefined => ({ key, ...entry })),
-								// Deleted since the directory was read.
-								Effect.catchReason("PlatformError", "NotFound", () => Effect.undefined),
-							),
-						{ concurrency: LIST_CONCURRENCY },
-					);
-					return entries
-						.filter((entry) => entry !== undefined)
-						.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-				}).pipe(Effect.mapError(failure("list")), Effect.withSpan("BlobStore.list")),
 			deletePrefix: (prefix) => {
 				const directory = directoryOf(root, prefix);
 				// Not the directory's own files, which hold the blob stored under `prefix`, if any.
@@ -213,17 +191,8 @@ const BYTES_FILE = ".bytes";
 
 const CONTENT_TYPE_FILE = ".content-type";
 
-/** How many blobs `list` reads the details of at once. */
-const LIST_CONCURRENCY = 16;
-
 function directoryOf(root: string, key: BlobStore.Key): string {
 	return join(root, ...key.split("/").map(encodeSegment));
-}
-
-/** The key of the blob in `relativeDirectory`, a directory below `prefix`'s. */
-function keyUnder(prefix: BlobStore.Key, relativeDirectory: string): BlobStore.Key {
-	const segments = relativeDirectory.split(sep).map((segment) => decodeURIComponent(segment));
-	return `${prefix}/${segments.join("/")}` as BlobStore.Key;
 }
 
 function encodeSegment(segment: string): string {

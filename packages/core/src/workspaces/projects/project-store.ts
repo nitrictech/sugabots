@@ -3,25 +3,23 @@ export * as ProjectStore from "./project-store.ts";
 import {
 	administersWorkspace,
 	leastUsedProjectColor,
-	type NamedPerson,
 	type ProjectColor,
 	type ProjectUpdate,
 	type ProjectVisibility,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
 import { bot, membership, project, projectBot, projectMember } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { creatorOf, defaultProjectIdOf, pinnedBy } from "../bots/bot.ts";
 import { projectColorOf } from "./project.ts";
 import { type LeadsProjects, refuseWhileLeading } from "./project-leads.ts";
 
 /**
- * The only writer of `project`, `project_member` and `project_bot`: projects, the people
+ * The only writer of `project`, `project_member` and `project_bot`: projects, the members
  * in them, and their bots. A bot's default project is the exception, made
  * with its bot by a trigger (see `project`).
  *
@@ -30,7 +28,7 @@ import { type LeadsProjects, refuseWhileLeading } from "./project-leads.ts";
  * and its lead bot is one of them. Whether somebody may ask for any of this is
  * not decided here. `update` refuses a default project as gone, before it
  * writes anything; `remove` and the member and bot methods don't check, so their callers pass a project
- * people made, which they have already authorized.
+ * members made, which they have already authorized.
  */
 export interface Interface {
 	/**
@@ -51,7 +49,7 @@ export interface Interface {
 		},
 	) => Effect.Effect<schema.ProjectRow, ProjectSlugTaken | BotNotPublic>;
 	/**
-	 * Changes a project people made; a new lead bot, which must be public, is
+	 * Changes a project members made; a new lead bot, which must be public, is
 	 * added to its bots. A default project, or one not in `workspaceId`, fails
 	 * with `ProjectGone` before anything is written.
 	 */
@@ -63,32 +61,32 @@ export interface Interface {
 	/** Removes a project. One already gone counts as removed. */
 	readonly remove: (workspaceId: string, projectId: string) => Effect.Effect<void>;
 	/**
-	 * Adds a person in the project's workspace, and says whether `personId` is in
+	 * Adds a member in the project's workspace, and says whether `memberId` is in
 	 * the project now: `false` when they aren't in its workspace. Adding
 	 * somebody already in it changes nothing.
 	 */
 	readonly addMember: (
 		workspaceId: string,
 		projectId: string,
-		personId: string,
+		memberId: string,
 	) => Effect.Effect<boolean>;
 	/**
-	 * Puts `personId` in the public project people made, checking its visibility
+	 * Puts `memberId` in the public project members made, checking its visibility
 	 * under the project's lock, so the join can't follow a change making it
-	 * private. Returns the project as it then is, with `personId` in it, or
+	 * private. Returns the project as it then is, with `memberId` in it, or
 	 * undefined when it is private, a bot's default project or gone, or
-	 * `personId` is not in its workspace. Somebody already in it stays in it.
+	 * `memberId` is not in its workspace. Somebody already in it stays in it.
 	 */
 	readonly join: (
 		workspaceId: string,
 		projectId: string,
-		personId: string,
+		memberId: string,
 	) => Effect.Effect<schema.ProjectRow | undefined>;
-	/** Refuses an administrator, who belongs to every project people made. */
+	/** Refuses an administrator, who belongs to every project members made. */
 	readonly removeMember: (
 		workspaceId: string,
 		projectId: string,
-		personId: string,
+		memberId: string,
 	) => Effect.Effect<"removed" | "not_a_member" | "administrator">;
 	/** Puts a public bot of the workspace in the project. Adding one already in it changes nothing. */
 	readonly addBot: (
@@ -106,15 +104,6 @@ export interface Interface {
 		botId: string,
 		viewerId: string,
 	) => Effect.Effect<void, LeadsProjects>;
-	/** The project's bots by name, each with its own default project's id. */
-	readonly bots: (
-		projectId: string,
-		viewerId: string,
-	) => Effect.Effect<
-		Array<
-			schema.BotRow & { defaultProjectId: string; pinned: boolean; createdBy: NamedPerson | null }
-		>
-	>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ProjectStore") {}
@@ -125,7 +114,7 @@ export const make = Effect.gen(function* () {
 	/** Puts a public bot of the workspace in the project. Adding one already in it changes nothing. */
 	const addBot = (workspaceId: string, projectId: string, botId: string) =>
 		Effect.gen(function* () {
-			// The share lock waits for a change making the bot private to commit,
+			// The share lock waits for a change making the bot personal to commit,
 			// then checks the bot as it is: that change takes the bot out of its
 			// projects, and the row added here would otherwise be one it missed.
 			const added = yield* query((db) =>
@@ -161,22 +150,22 @@ export const make = Effect.gen(function* () {
 		});
 
 	/**
-	 * Puts `personId` in the project if they are in its workspace, and says
+	 * Puts `memberId` in the project if they are in its workspace, and says
 	 * whether this added them. Somebody already in it is left as they are.
 	 */
-	const insertMember = (workspaceId: string, projectId: string, personId: string) =>
+	const insertMember = (workspaceId: string, projectId: string, memberId: string) =>
 		query((db) =>
 			db.execute<{ id: string }>(
 				sql`
-				insert into ${projectMember} ("workspace_id", "project_id", "person_id")
-				select ${project.workspaceId}, ${project.id}, ${personId}
+				insert into ${projectMember} ("workspace_id", "project_id", "member_id")
+				select ${project.workspaceId}, ${project.id}, ${memberId}
 				from ${project}
 				inner join ${membership}
 					on ${membership.workspaceId} = ${project.workspaceId}
-					and ${membership.personId} = ${personId}
+					and ${membership.memberId} = ${memberId}
 				where ${project.id} = ${projectId}
 				and ${project.workspaceId} = ${workspaceId}
-				on conflict ("project_id", "person_id") do nothing
+				on conflict ("project_id", "member_id") do nothing
 				returning "id"
 			`,
 				"objects",
@@ -184,13 +173,13 @@ export const make = Effect.gen(function* () {
 		).pipe(Effect.map((inserted) => inserted.length > 0));
 
 	/**
-	 * Adds a person in the project's workspace, as {@link insertMember} does,
-	 * and says whether `personId` is in the project now: added, or already in it,
+	 * Adds a member in the project's workspace, as {@link insertMember} does,
+	 * and says whether `memberId` is in the project now: added, or already in it,
 	 * as when another request added them at the same time.
 	 */
-	const addedOrAlreadyMember = (workspaceId: string, projectId: string, personId: string) =>
+	const addedOrAlreadyMember = (workspaceId: string, projectId: string, memberId: string) =>
 		Effect.gen(function* () {
-			if (yield* insertMember(workspaceId, projectId, personId)) return true;
+			if (yield* insertMember(workspaceId, projectId, memberId)) return true;
 			// `project_member`'s foreign key to `membership` means somebody
 			// already in the project is in its workspace.
 			const [existing] = yield* query((db) =>
@@ -201,7 +190,7 @@ export const make = Effect.gen(function* () {
 						and(
 							eq(projectMember.workspaceId, workspaceId),
 							eq(projectMember.projectId, projectId),
-							eq(projectMember.personId, personId),
+							eq(projectMember.memberId, memberId),
 						),
 					)
 					.limit(1),
@@ -251,8 +240,8 @@ export const make = Effect.gen(function* () {
 						yield* query((db) =>
 							db
 								.insert(projectMember)
-								.values({ workspaceId, projectId: row.id, personId: creatorId })
-								.onConflictDoNothing({ target: [projectMember.projectId, projectMember.personId] }),
+								.values({ workspaceId, projectId: row.id, memberId: creatorId })
+								.onConflictDoNothing({ target: [projectMember.projectId, projectMember.memberId] }),
 						);
 						yield* addBot(workspaceId, row.id, leadBotId);
 						return row;
@@ -269,13 +258,13 @@ export const make = Effect.gen(function* () {
 						// gone, is refused without its lead being added to its bots. Locked,
 						// as `removeBot` locks it, so a bot is not taken out of the project
 						// between being found among its bots here and being made its lead.
-						const peopleMade = and(
+						const membersMade = and(
 							eq(project.id, projectId),
 							eq(project.workspaceId, workspaceId),
 							isNull(project.defaultOfBotId),
 						);
 						const [found] = yield* query((db) =>
-							db.select({ id: project.id }).from(project).where(peopleMade).limit(1).for("update"),
+							db.select({ id: project.id }).from(project).where(membersMade).limit(1).for("update"),
 						);
 						if (!found) {
 							return yield* new ProjectGone({ projectId });
@@ -286,7 +275,7 @@ export const make = Effect.gen(function* () {
 						// An UPDATE has no `on conflict`, so a taken slug arrives as a unique
 						// violation. The slug is the only unique column a change can touch.
 						const [row] = yield* queryCatching(
-							(db) => db.update(project).set(changes).where(peopleMade).returning(),
+							(db) => db.update(project).set(changes).where(membersMade).returning(),
 							(failure) =>
 								isUniqueViolation(failure) && changes.slug !== undefined
 									? new ProjectSlugTaken({ slug: changes.slug })
@@ -310,10 +299,10 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.asVoid),
 			),
 
-		addMember: (workspaceId, projectId, personId) =>
-			operation("addMember", addedOrAlreadyMember(workspaceId, projectId, personId)),
+		addMember: (workspaceId, projectId, memberId) =>
+			operation("addMember", addedOrAlreadyMember(workspaceId, projectId, memberId)),
 
-		join: (workspaceId, projectId, personId) =>
+		join: (workspaceId, projectId, memberId) =>
 			operation(
 				"join",
 				transaction(
@@ -334,20 +323,20 @@ export const make = Effect.gen(function* () {
 								.select({ id: projectMember.id })
 								.from(projectMember)
 								.where(
-									and(eq(projectMember.projectId, projectId), eq(projectMember.personId, personId)),
+									and(eq(projectMember.projectId, projectId), eq(projectMember.memberId, memberId)),
 								)
 								.limit(1),
 						);
 						if (already) return found;
 						if (found.visibility !== "public" || found.defaultOfBotId !== null) return undefined;
-						return (yield* addedOrAlreadyMember(workspaceId, projectId, personId))
+						return (yield* addedOrAlreadyMember(workspaceId, projectId, memberId))
 							? found
 							: undefined;
 					}),
 				),
 			),
 
-		removeMember: (workspaceId, projectId, personId) =>
+		removeMember: (workspaceId, projectId, memberId) =>
 			operation(
 				"removeMember",
 				transaction(
@@ -360,7 +349,7 @@ export const make = Effect.gen(function* () {
 								.select({ role: membership.role })
 								.from(membership)
 								.where(
-									and(eq(membership.workspaceId, workspaceId), eq(membership.personId, personId)),
+									and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId)),
 								)
 								.limit(1),
 						);
@@ -374,7 +363,7 @@ export const make = Effect.gen(function* () {
 									and(
 										eq(projectMember.workspaceId, workspaceId),
 										eq(projectMember.projectId, projectId),
-										eq(projectMember.personId, personId),
+										eq(projectMember.memberId, memberId),
 									),
 								)
 								.returning({ id: projectMember.id }),
@@ -413,33 +402,6 @@ export const make = Effect.gen(function* () {
 								),
 						);
 					}),
-				),
-			),
-
-		bots: (projectId, viewerId) =>
-			operation(
-				"bots",
-				query((db) =>
-					db
-						.select({
-							bot,
-							defaultProjectId: defaultProjectIdOf(bot.id),
-							pinned: pinnedBy(bot.id, viewerId),
-							createdBy: creatorOf(bot),
-						})
-						.from(projectBot)
-						.innerJoin(bot, eq(bot.id, projectBot.botId))
-						.where(eq(projectBot.projectId, projectId))
-						.orderBy(asc(bot.name)),
-				).pipe(
-					Effect.map((rows) =>
-						rows.map((row) => ({
-							...row.bot,
-							defaultProjectId: row.defaultProjectId,
-							pinned: row.pinned,
-							createdBy: row.createdBy,
-						})),
-					),
 				),
 			),
 	});

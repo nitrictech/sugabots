@@ -1,9 +1,9 @@
 import {
 	type ApprovalRequest,
+	type CurrentUser,
 	type ModelProvider,
 	type ProviderModel,
 	type Run,
-	type SignedInPerson,
 	streamEvent,
 } from "@sugabots/contracts";
 import { Conflict, Forbidden, InternalServerError } from "@sugabots/contracts/http";
@@ -622,10 +622,10 @@ describe("the sidebar", () => {
 	});
 });
 
-describe("someone else's private bot an administrator sees listed", () => {
+describe("someone else's personal bot an administrator sees listed", () => {
 	const theirs = {
 		...triager,
-		visibility: "private" as const,
+		visibility: "personal" as const,
 		createdBy: { id: juno.id, name: juno.name, email: juno.email, image: null },
 		permissions: {
 			...triager.permissions,
@@ -638,7 +638,7 @@ describe("someone else's private bot an administrator sees listed", () => {
 		client.api.bots.list.mockReturnValue(Effect.succeed([linear, theirs, personalAssistant]));
 		mount(`/suga/bots/${theirs.handle}`);
 
-		expect(await screen.findByText(/someone else's private bot/)).toBeDefined();
+		expect(await screen.findByText(/someone else's personal bot/)).toBeDefined();
 		expect(screen.getByRole("link", { name: "Open its settings" }).getAttribute("href")).toBe(
 			`/suga/bots/${theirs.handle}/settings`,
 		);
@@ -781,7 +781,7 @@ describe("a project's chats", () => {
 			Effect.succeed({ items: [run], nextCursor: null }),
 		);
 		updates.emit(
-			streamEvent("chat.item_changed", {
+			streamEvent("chat.nested_chat_changed", {
 				rootChatId: run.rootChatId,
 				chatId: run.chatId,
 			}),
@@ -855,8 +855,8 @@ describe("a project's chats", () => {
 });
 
 describe("a project's settings on a phone", () => {
-	it("goes back from its People and its Bots to its Settings, which they sit under", async () => {
-		for (const page of ["people", "bots"]) {
+	it("goes back from its Members and its Bots to its Settings, which they sit under", async () => {
+		for (const page of ["members", "bots"]) {
 			mount(`/suga/projects/sales/settings/${page}`);
 
 			const back = await screen.findByRole("link", { name: "Back to Settings" });
@@ -945,7 +945,7 @@ describe("starting a chat with a bot", () => {
 			}),
 		);
 
-		// The chat list is asked for again once the chat has started, wherever the person is.
+		// The chat list is asked for again once the chat has started, wherever the member is.
 		await waitFor(() =>
 			expect(client.api.chats.projectChats.mock.calls.length).toBeGreaterThan(chatsAsked),
 		);
@@ -996,26 +996,26 @@ describe("the settings navigation", () => {
 		expect(screen.getByText("Australia/Sydney")).toBeDefined();
 	});
 
-	it("leaves the roster uncounted while you are the only person in it", async () => {
+	it("leaves the roster uncounted while you are the only member in it", async () => {
 		onWideScreen();
 		client.api.workspaces.memberships.mockReturnValue(
 			Effect.succeed([
 				{
 					id: "0199a3a0-0000-7000-8000-0000000000d1",
 					role: "admin",
-					person: sam,
+					member: sam,
 					joinedAt: "2026-09-09T00:00:00.000Z",
 				},
 			]),
 		);
 		mount("/suga/settings");
 
-		// General counts the people too, so once it does the roster has answered.
-		await screen.findByText("Workspace with 1 person and 2 projects");
+		// General counts the members too, so once it does the roster has answered.
+		await screen.findByText("Workspace with 1 member and 2 projects");
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
 
-		// The one person is you. "1" tells nobody anything they did not know.
-		expect(within(rail).getByRole("link", { name: "People" })).toBeDefined();
+		// The one member is you. "1" tells nobody anything they did not know.
+		expect(within(rail).getByRole("link", { name: "Members" })).toBeDefined();
 	});
 
 	it("withholds the administrative sections from an editor", async () => {
@@ -1026,7 +1026,7 @@ describe("the settings navigation", () => {
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
 		// Waiting on a count waits on the answers the rail is drawn from, the
 		// caller's role among them, so what follows is a settled list.
-		await within(rail).findByRole("link", { name: "People, 2" });
+		await within(rail).findByRole("link", { name: "Members, 2" });
 
 		expect(within(rail).queryByRole("link", { name: "Models" })).toBeNull();
 		expect(within(rail).queryByRole("link", { name: "Web search" })).toBeNull();
@@ -1075,8 +1075,8 @@ describe("routes", () => {
 	});
 
 	it("sends somebody signed out to the sign-in page, remembering where they were going", async () => {
-		const destination = `${linearPage}?nestedChat=0199a3a0-0000-7000-8000-0000000000aa`;
-		const { router } = mount(destination, { person: null });
+		const destination = `${linearPage}?message=0199a3a0-0000-7000-8000-0000000000aa`;
+		const { router } = mount(destination, { member: null });
 
 		expect(await screen.findByRole("heading", { name: "Welcome to Sugabots" })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Continue with email" }));
@@ -1214,12 +1214,8 @@ describe("routes", () => {
 				return openrouter;
 			}),
 		);
-		client.api.modelProviders.discoverModels.mockReturnValue(
-			Effect.succeed({ added: 2, updated: 0, unchanged: 0 }),
-		);
-		client.api.modelProviders.updateModel.mockReturnValue(
-			Effect.succeed({ ...(large as ProviderModel), enabled: true }),
-		);
+		client.api.modelProviders.discoverModels.mockReturnValue(Effect.void);
+		client.api.modelProviders.updateModel.mockReturnValue(Effect.void);
 		client.api.bots.ensureAssistant.mockReturnValue(
 			Effect.succeed({ ...personalAssistant, model: "mistral/large" }),
 		);
@@ -1258,7 +1254,7 @@ describe("routes", () => {
 	});
 
 	it("asks somebody with an invitation to sign in first, keeping the invitation", async () => {
-		const { router } = mount("/invitations/an-invitation", { person: null });
+		const { router } = mount("/invitations/an-invitation", { member: null });
 
 		expect(await screen.findByText(/invited to a workspace/)).toBeDefined();
 		await waitFor(() => {
@@ -1281,8 +1277,8 @@ describe("routes", () => {
 	}
 
 	it("points an invitee's verification link back at the invitation", async () => {
-		client.auth.signUp.mockResolvedValue({ token: null, person: sam });
-		mount("/invitations/an-invitation", { person: null });
+		client.auth.signUp.mockResolvedValue({ token: null, member: sam });
+		mount("/invitations/an-invitation", { member: null });
 
 		await createAccount("Sam", "sam@example.com");
 
@@ -1302,10 +1298,9 @@ describe("routes", () => {
 				UserText.unchecked(
 					"Sign-up is by invitation only. Ask someone in a workspace to invite you.",
 				),
-				"SIGN_UP_CLOSED",
 			),
 		);
-		mount("/", { person: null });
+		mount("/", { member: null });
 		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
 
 		await createAccount("Eve", "eve@example.com");
@@ -1318,7 +1313,7 @@ describe("routes", () => {
 		client.auth.signIn.mockRejectedValue(
 			failureForStatus(403, UserText.unchecked("Email not verified"), "EMAIL_NOT_VERIFIED"),
 		);
-		mount("/", { person: null });
+		mount("/", { member: null });
 		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
 
 		fireEvent.change(await screen.findByLabelText("Email"), {
@@ -1333,9 +1328,9 @@ describe("routes", () => {
 	});
 
 	it("signs a new account in at once when no verification is needed", async () => {
-		client.auth.signUp.mockResolvedValue({ token: "a-session", person: sam });
+		client.auth.signUp.mockResolvedValue({ token: "a-session", member: sam });
 		const refresh = vi.fn().mockResolvedValue(undefined);
-		mount("/invitations/an-invitation", { person: null, refresh });
+		mount("/invitations/an-invitation", { member: null, refresh });
 
 		await createAccount("Sam", "sam@example.com");
 
@@ -1441,7 +1436,7 @@ describe("routes", () => {
 	it("awaits signing in and reports its failure", async () => {
 		client.auth.signIn.mockResolvedValue(undefined);
 		const refresh = vi.fn().mockRejectedValue(new Error("Offline"));
-		mount("/sign-in", { person: null, refresh });
+		mount("/sign-in", { member: null, refresh });
 		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
 		fireEvent.change(await screen.findByLabelText("Email"), {
 			target: { value: "sam@example.com" },
@@ -2033,28 +2028,28 @@ describe("workspace settings", () => {
 		expect((screen.getByLabelText("Model ID") as HTMLInputElement).value).toBe("local-model");
 	});
 
-	const openInvitePeoplePanel = async () => {
-		fireEvent.click(await screen.findByRole("button", { name: "Invite people" }));
-		return screen.findByRole("dialog", { name: "Invite people" });
+	const openInviteMembersPanel = async () => {
+		fireEvent.click(await screen.findByRole("button", { name: "Invite members" }));
+		return screen.findByRole("dialog", { name: "Invite members" });
 	};
 
 	it("dims the page behind a dialog a screen opens", async () => {
 		// The navigation drawer is a dialog too. While it wrapped the screens,
 		// Base UI read every dialog they opened as nested and dropped its
 		// backdrop, leaving the page behind undimmed and unblurred.
-		mount("/suga/settings/people");
-		const dialog = await openInvitePeoplePanel();
+		mount("/suga/settings/members");
+		const dialog = await openInviteMembersPanel();
 
 		expect(dialog.ownerDocument.querySelector('[data-slot="dialog-overlay"]')).not.toBeNull();
 	});
 
-	const junoPage = "/suga/settings/people/0199a3a0-0000-7000-8000-0000000000d2";
-	const samPage = "/suga/settings/people/0199a3a0-0000-7000-8000-0000000000d1";
+	const junoPage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d2";
+	const samPage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d1";
 
 	it("invites every address typed, with the role chosen", async () => {
 		client.api.workspaces.invite.mockReturnValue(Effect.succeed({ id: "an-invitation" }));
-		mount("/suga/settings/people");
-		const panel = await openInvitePeoplePanel();
+		mount("/suga/settings/members");
+		const panel = await openInviteMembersPanel();
 
 		fireEvent.change(within(panel).getByLabelText("Email addresses"), {
 			target: { value: "juno@example.com, kim@example.com" },
@@ -2079,7 +2074,9 @@ describe("workspace settings", () => {
 				}),
 			);
 		});
-		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Invite people" })).toBeNull());
+		await waitFor(() =>
+			expect(screen.queryByRole("dialog", { name: "Invite members" })).toBeNull(),
+		);
 	});
 
 	it("keeps only the addresses that were refused, saying why", async () => {
@@ -2089,8 +2086,8 @@ describe("workspace settings", () => {
 					? Effect.die(new Error("Offline"))
 					: Effect.succeed({ id: "an-invitation" }),
 		);
-		mount("/suga/settings/people");
-		const panel = await openInvitePeoplePanel();
+		mount("/suga/settings/members");
+		const panel = await openInviteMembersPanel();
 		const emails = within(panel).getByLabelText("Email addresses");
 		fireEvent.change(emails, { target: { value: "juno@example.com kim@example.com" } });
 
@@ -2100,8 +2097,8 @@ describe("workspace settings", () => {
 		expect((emails as HTMLInputElement).value).toBe("kim@example.com");
 	});
 
-	it("lists each person with their role, and opens their page", async () => {
-		const { router } = mount("/suga/settings/people");
+	it("lists each member with their role, and opens their page", async () => {
+		const { router } = mount("/suga/settings/members");
 
 		const row = await screen.findByRole("link", { name: new RegExp(juno.name) });
 		expect(row.textContent).toContain("Editor");
@@ -2130,14 +2127,14 @@ describe("workspace settings", () => {
 		mount(junoPage);
 
 		const toggle = await screen.findByRole("switch", { name: `${juno.name} is in Suga-Team` });
-		// Disabled until the project's people have loaded.
+		// Disabled until the project's members have loaded.
 		await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false));
 		fireEvent.click(toggle);
 
 		await waitFor(() =>
 			expect(client.api.projects.addMember).toHaveBeenCalledWith({
 				params: { projectId: projects[0]?.id },
-				payload: { personId: juno.id },
+				payload: { memberId: juno.id },
 			}),
 		);
 	});
@@ -2158,7 +2155,7 @@ describe("workspace settings", () => {
 				params: { workspace: workspace.id, membershipId: "0199a3a0-0000-7000-8000-0000000000d2" },
 			});
 		});
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/people"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/members"));
 	});
 
 	it("offers leaving on your own page, and no way to change your own role", async () => {
@@ -2181,7 +2178,7 @@ describe("workspace settings", () => {
 	});
 
 	it("lists an invitation that has not been accepted, and can withdraw it", async () => {
-		mount("/suga/settings/people");
+		mount("/suga/settings/members");
 
 		expect(await screen.findByText("dana@example.com")).toBeDefined();
 		fireEvent.click(
@@ -2197,7 +2194,7 @@ describe("workspace settings", () => {
 
 	it("sends an invitation again without retyping it", async () => {
 		client.api.workspaces.invite.mockReturnValue(Effect.succeed({ id: "an-invitation" }));
-		mount("/suga/settings/people");
+		mount("/suga/settings/members");
 
 		await screen.findByText("dana@example.com");
 		fireEvent.click(screen.getByRole("button", { name: "Resend" }));
@@ -2213,12 +2210,12 @@ describe("workspace settings", () => {
 
 	it("shows an editor who holds what, and no way to change it", async () => {
 		apiAnswers({ role: "editor" });
-		mount("/suga/settings/people");
+		mount("/suga/settings/members");
 
 		expect(
 			(await screen.findByRole("link", { name: new RegExp(juno.name) })).textContent,
 		).toContain("Editor");
-		expect(screen.queryByRole("button", { name: "Invite people" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Invite members" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
 		cleanup();
 
@@ -2296,9 +2293,9 @@ describe("settings on a phone", () => {
 		);
 		expect(
 			within(settings)
-				.getByRole("link", { name: /^People/ })
+				.getByRole("link", { name: /^Members/ })
 				.getAttribute("href"),
-		).toBe("/suga/settings/people");
+		).toBe("/suga/settings/members");
 	});
 
 	it("lists Notifications under your account, and leads from it back there", async () => {
@@ -2399,11 +2396,11 @@ describe("your account", () => {
 			history: createMemoryHistory({ initialEntries: ["/suga/settings/account"] }),
 		});
 		const queries = createQueryClient();
-		const signedInAs = (signedIn: SignedInPerson) => (
+		const signedInAs = (signedIn: CurrentUser) => (
 			<TestApp
 				router={router}
 				queries={queries}
-				session={{ person: signedIn, error: undefined, refresh: vi.fn() }}
+				session={{ member: signedIn, error: undefined, refresh: vi.fn() }}
 			/>
 		);
 		const { rerender } = render(signedInAs(sam));
@@ -2416,9 +2413,7 @@ describe("your account", () => {
 
 	it("puts your name back, and says why, when the change is refused", async () => {
 		const refusal = "That name can't be used.";
-		client.auth.updateName.mockRejectedValue(
-			failureForStatus(400, UserText.unchecked(refusal), "INVALID_NAME"),
-		);
+		client.auth.updateName.mockRejectedValue(failureForStatus(400, UserText.unchecked(refusal)));
 		mount("/suga/settings/account");
 
 		const name = await screen.findByRole("textbox", { name: "Name" });
@@ -2435,9 +2430,9 @@ describe("project settings", () => {
 	if (!suga) throw new Error("fixture");
 	const projectPage = `/suga/projects/${suga.slug}/settings`;
 	const botsPage = `${projectPage}/bots`;
-	const peoplePage = `${projectPage}/people`;
+	const membersPage = `${projectPage}/members`;
 	const samInProject = {
-		personId: sam.id,
+		memberId: sam.id,
 		name: sam.name,
 		email: sam.email,
 		image: null,
@@ -2446,7 +2441,7 @@ describe("project settings", () => {
 	};
 	const junoInProject = {
 		...samInProject,
-		personId: juno.id,
+		memberId: juno.id,
 		name: juno.name,
 		email: juno.email,
 		removable: true,
@@ -2482,15 +2477,15 @@ describe("project settings", () => {
 
 	it("adds somebody from the workspace", async () => {
 		client.api.projects.addMember.mockReturnValue(Effect.void);
-		mount(peoplePage);
+		mount(membersPage);
 
-		open(await screen.findByRole("button", { name: "Add people" }));
+		open(await screen.findByRole("button", { name: "Add members" }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: sam.name }));
 
 		await waitFor(() =>
 			expect(client.api.projects.addMember).toHaveBeenCalledWith({
 				params: { projectId: suga.id },
-				payload: { personId: sam.id },
+				payload: { memberId: sam.id },
 			}),
 		);
 	});
@@ -2500,7 +2495,7 @@ describe("project settings", () => {
 			Effect.succeed([samInProject, junoInProject]),
 		);
 		client.api.projects.removeMember.mockReturnValue(Effect.void);
-		mount(peoplePage);
+		mount(membersPage);
 
 		fireEvent.click(await screen.findByRole("button", { name: `Remove ${juno.name}` }));
 
@@ -2513,7 +2508,7 @@ describe("project settings", () => {
 
 		await waitFor(() =>
 			expect(client.api.projects.removeMember).toHaveBeenCalledWith({
-				params: { projectId: suga.id, personId: juno.id },
+				params: { projectId: suga.id, memberId: juno.id },
 			}),
 		);
 	});
@@ -2523,7 +2518,7 @@ describe("project settings", () => {
 		client.api.projects.listMembers.mockImplementation(() =>
 			Effect.succeed([samInProject, junoInProject]),
 		);
-		mount(peoplePage);
+		mount(membersPage);
 
 		expect(await screen.findByRole("button", { name: `Remove ${juno.name}` })).toBeDefined();
 		expect(screen.queryByRole("button", { name: `Leave ${suga.name}` })).toBeNull();
@@ -2536,7 +2531,7 @@ describe("project settings", () => {
 			Effect.succeed([samInProject, junoInProject]),
 		);
 		client.api.projects.leave.mockReturnValue(Effect.void);
-		mount(peoplePage);
+		mount(membersPage);
 
 		fireEvent.click(await screen.findByRole("button", { name: `Leave ${suga.name}` }));
 		expect(screen.queryByRole("button", { name: `Remove ${juno.name}` })).toBeNull();
@@ -2553,9 +2548,9 @@ describe("project settings", () => {
 		client.api.projects.listMembers.mockImplementation(() =>
 			Effect.succeed([samInProject, junoInProject]),
 		);
-		mount(peoplePage);
+		mount(membersPage);
 
-		open(await screen.findByRole("button", { name: "Add people" }));
+		open(await screen.findByRole("button", { name: "Add members" }));
 
 		expect(
 			await screen.findByRole("menuitem", {
@@ -2571,9 +2566,9 @@ describe("project settings", () => {
 		expect(await within(await screen.findByRole("main")).findByText(linear.name)).toBeDefined();
 		cleanup();
 
-		mount(peoplePage);
+		mount(membersPage);
 		expect(await within(await screen.findByRole("main")).findByText(sam.name)).toBeDefined();
-		expect(screen.queryByRole("button", { name: "Add people" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Add members" })).toBeNull();
 		expect(screen.queryByRole("button", { name: /^Remove / })).toBeNull();
 		cleanup();
 
@@ -2623,11 +2618,10 @@ describe("the app's badge", () => {
 			output: null,
 			status: "awaiting_approval",
 			error: null,
-			writeOrDelete: true,
 			atOffset: 0,
 			startedAt: "2026-09-18T09:00:00.000Z",
 			finishedAt: null,
-			approval: { status: "pending", decidedByName: null, decidedAt: null },
+			approval: { status: "pending", approvers: "chat", decidedByName: null, decidedAt: null },
 		},
 		bot: {
 			kind: "bot",
@@ -2679,7 +2673,7 @@ describe("the app's badge", () => {
 		});
 	}
 
-	/** `count` approvals wait on the person, as the API counts them. */
+	/** `count` approvals wait on the member, as the API counts them. */
 	function approvalsWaiting(count: number) {
 		client.api.chats.attention.mockReturnValue(
 			Effect.succeed({

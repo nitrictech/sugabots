@@ -1,5 +1,9 @@
 import { Schema } from "effect";
-import { providerStatusSchema, providerUrlSchema } from "./model-providers.ts";
+import {
+	providerStatusSchema,
+	providerTestResultSchema,
+	providerUrlSchema,
+} from "./model-providers.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
@@ -135,11 +139,9 @@ export const searchProviderResponseSchema = Schema.Struct({
 export const webAccessSchema = Schema.Struct({ enabled: Schema.Boolean });
 
 export const searchProviderTestResultSchema = Schema.Struct({
-	reachable: Schema.Boolean,
-	latencyMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	...providerTestResultSchema.fields,
 	/** How many results the test query returned, when it was reachable. */
 	results: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-	error: Schema.optional(Schema.String),
 });
 
 export type SearchProviderTestResult = typeof searchProviderTestResultSchema.Type;

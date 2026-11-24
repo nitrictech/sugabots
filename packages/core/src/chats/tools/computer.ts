@@ -16,6 +16,7 @@ import { type BrowserSession, browserSession, browserTools } from "./browser/bro
 import {
 	type AttachToReply,
 	COPY_FILE_TO_COMPUTER_TOOL,
+	type ComputerAtPlace,
 	copyFileToComputerTool,
 	diskNote,
 	networkNote,
@@ -40,7 +41,7 @@ import { HOST_REQUEST_TOOL, hostRequestTool } from "./host-request/tool.ts";
  * `run_command`, `read_file`, `write_file`, `copy_file_to_computer` and
  * `share_file`, and the `browser_` tools of a browser the bot drives there
  * (see `browser/browser.ts`), and `request_host`, whose calls wait
- * for a person, to reach a host the computer may not. A bot working in
+ * for a member, to reach a host the computer may not. A bot working in
  * another project's chat uses that project's computer, not its own. Offered
  * to every turn, and usable while the bot uses computers, the turn works in a
  * project, and the workspace has an enabled computer provider, looked up on
@@ -60,20 +61,20 @@ export interface Interface {
 export interface Offered {
 	/** The tools that run when called. */
 	readonly tools: ToolSet;
-	/** The tools whose calls wait for a person to allow them first: who is in `tools/approvers.ts`. */
+	/** The tools whose calls wait for a member to allow them first: who is in `tools/approvers.ts`. */
 	readonly requests: Readonly<Record<string, Request>>;
 	/** Calls to the tools and the requests are refused when this is false. */
 	readonly usable: boolean;
 	/** What the model is told of the computer with the turn, as it may change between turns. */
 	readonly note: string | undefined;
 	/** The computer and the bot's place in it, while the tools are usable, for other tools that work there. */
-	readonly workspace: (TurnComputer & { readonly place: Place }) | undefined;
+	readonly atPlace: ComputerAtPlace | undefined;
 	/** Whether the computer's provider signs its requests in, outside it. */
 	readonly signsIn: boolean;
 }
 
 /**
- * A tool whose calls wait for a person to allow them, unless `refusal` names
+ * A tool whose calls wait for a member to allow them, unless `refusal` names
  * a reason nobody could: such a call is refused without asking anyone.
  */
 export interface Request {
@@ -158,7 +159,7 @@ export const make = Effect.gen(function* () {
 						}),
 						usable: false,
 						note: NO_COMPUTER_NOTE,
-						workspace: undefined,
+						atPlace: undefined,
 						signsIn: false,
 					};
 				}
@@ -214,7 +215,7 @@ export const make = Effect.gen(function* () {
 					note: [networkNote(reach), diskNote(disk)]
 						.filter((line) => line !== undefined)
 						.join("\n\n"),
-					workspace: { open: openComputer, run, place },
+					atPlace: { open: openComputer, run, place },
 					signsIn: computers.forAccess(provider.access).capabilities.credentials !== "none",
 				};
 			}),
@@ -256,14 +257,14 @@ const NEVER_RUN: RunEffect<never> = () =>
 	Promise.reject(new Error("The computer tools aren't usable"));
 
 const NO_COMPUTER_NOTE =
-	"You have no computer in this turn, so calls to the computer tools are refused. If the chat needs one, say so: a workspace admin can enable a computer provider and let you use one.";
+	"You have no computer in this turn, so calls to the computer tools are refused. If the chat needs one, say so: someone who manages this project's computer can turn on your computer use.";
 
 /** A turn that may use the computer of the project it works in. */
 export interface Turn {
 	readonly workspaceId: string;
 	/** The project whose computer the turn uses; none for a turn that works in no project. */
 	readonly projectId: string | null;
-	/** Whether an admin let the turn's bot use computers. */
+	/** Whether the turn's bot's computer use is on. */
 	readonly usesComputer: boolean;
 	/** Holds the computer's lease while the turn runs. */
 	readonly turnId: string;
@@ -271,15 +272,15 @@ export interface Turn {
 	readonly botId: string;
 	/** The bot's colour, which its desktop is drawn in. */
 	readonly color: BotColor;
-	/** Whether the bot browses so people watching its desktop can follow. */
+	/** Whether the bot browses so members watching its desktop can follow. */
 	readonly naturalBrowsing: boolean;
 	/** Whether the bot's model takes images, which results then may carry. */
 	readonly acceptsImages: boolean;
 	/**
-	 * Attaches a file to the turn's reply, where people can be shown it. Given
+	 * Attaches a file to the turn's reply, where members can be shown it. Given
 	 * only for a turn in a chat (`project_chat`), because a chat serves
-	 * the files in it to its project's people; a run, collaboration or
-	 * automation feed has no page that shows a reply's files. Without it, the
+	 * the files in it to its project's members; a run or automation feed has
+	 * no page that shows a reply's files. Without it, the
 	 * turn has no `share_file`.
 	 */
 	readonly attach?: AttachToReply;
@@ -293,7 +294,7 @@ export const none: Interface = {
 			requests: {},
 			usable: false,
 			note: undefined,
-			workspace: undefined,
+			atPlace: undefined,
 			signsIn: false,
 		}),
 };

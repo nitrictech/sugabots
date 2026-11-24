@@ -1,7 +1,15 @@
 import { DisplayName } from "@sugabots/errors";
 import { Effect } from "effect";
+import type { ModelRegistry } from "../model-providers/dialects/index.ts";
 import type { ModelProviderStore } from "../model-providers/model-provider-store.ts";
 import { Models } from "./models.ts";
+
+/** A model registry that fills nothing in, for a test about something else. */
+export const emptyRegistry: ModelRegistry = {
+	complete: (model) => model,
+	cost: () => undefined,
+	version: "empty",
+};
 
 /** `access` as the provider offering the model, under test names. */
 export const resolvedModel = (

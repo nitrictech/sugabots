@@ -3,19 +3,23 @@ export * as ComputerProviderSetup from "./computer-provider-setup.ts";
 import type {
 	ComputerProvider,
 	ComputerProviderSettings,
-	ComputerProviderTestResult,
 	ComputerProviderUpdate,
 	NewComputerProvider,
+	ProviderTestResult,
 } from "@sugabots/contracts";
 import { COMPUTER_IMAGE } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { Clock, Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
 import { serviceOperations, transaction } from "../database/database.ts";
 import { Egress } from "../providers/network/egress.ts";
-import { requireAllowedUrl, type UrlNotAllowed } from "../providers/tested-configuration.ts";
+import {
+	requireAllowedUrl,
+	timedTest,
+	type UrlNotAllowed,
+} from "../providers/tested-configuration.ts";
 import type { UserFacing } from "../user-message.ts";
 import { toComputerProvider } from "./computer-provider-reads.ts";
 import { ComputerProviderStore } from "./computer-provider-store.ts";
@@ -103,7 +107,7 @@ export interface Interface {
 		workspace: string;
 		providerId: string;
 	}) => Effect.Effect<
-		ComputerProviderTestResult,
+		ProviderTestResult,
 		AuthorizationDenied | ComputerProviderNotFound,
 		CurrentActor.Service
 	>;
@@ -164,7 +168,7 @@ export const make = Effect.gen(function* () {
 					// Checked as it will be stored, with the usual address filled in.
 					yield* requireAllowedUrls(ComputerProviderStore.withUsualAddress(provider.settings));
 					return toComputerProvider(
-						yield* providers.create(workspaceId, { createdById: actor.personId, provider }),
+						yield* providers.create(workspaceId, { createdById: actor.memberId, provider }),
 					);
 				}),
 			),
@@ -259,27 +263,23 @@ export const make = Effect.gen(function* () {
 							error: userText`Add the provider's settings before testing`,
 						};
 					}
-					const started = yield* Clock.currentTimeMillis;
-					const failure = yield* computers.forAccess(configured.access).check.pipe(
-						Effect.as(undefined),
-						Effect.catchTag("ComputerUnavailable", () =>
-							Effect.succeed(
-								userText`The provider didn't answer, or refused the key. Check its address and key.`,
+					const tested = yield* timedTest(
+						computers.forAccess(configured.access).check.pipe(
+							Effect.as({}),
+							Effect.catchTag("ComputerUnavailable", () =>
+								Effect.succeed({
+									error: userText`The provider didn't answer, or refused the key. Check its address and key.`,
+								}),
 							),
 						),
 					);
-					const latencyMs = (yield* Clock.currentTimeMillis) - started;
 					yield* providers.recordTest(
 						workspaceId,
 						providerId,
 						configured.configurationUpdatedAt,
-						failure,
+						tested.error,
 					);
-					return {
-						reachable: failure === undefined,
-						latencyMs,
-						...(failure ? { error: failure } : {}),
-					};
+					return tested;
 				}),
 			),
 	});

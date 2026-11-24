@@ -76,7 +76,7 @@ export type Part = "shape" | "eyes";
  * its name written over it, and a few avatars drawn at random, with Customise
  * for its colour, head and eyes, which open at the right in place of the
  * models. At the right the models it can think with, the suggested first,
- * then each provider's. It is public unless made private, and starts by
+ * then each provider's. It is public unless made personal, and starts by
  * asking its creator what it's for in its first chat.
  */
 export function NewBotDialog({ onCreated }: { onCreated: (bot: Bot) => Promise<void> }) {
@@ -109,7 +109,7 @@ export function NewBotDialog({ onCreated }: { onCreated: (bot: Bot) => Promise<v
 		event.preventDefault();
 		if (!trimmedName || !model) return;
 		try {
-			// Made without a prompt, a bot starts by interviewing its creator.
+			// Made without instructions, a bot starts by interviewing its creator.
 			const bot = await create.mutateAsync({ name: trimmedName, model, visibility, ...avatar });
 			await onCreated(bot);
 		} catch {
@@ -830,7 +830,7 @@ function ProviderMark({ model }: { model: OfferedModel }) {
 	);
 }
 
-/** Whether the new bot is public, for everyone in the workspace, or private, for its creator alone. */
+/** Whether the new bot is public, for everyone in the workspace, or personal, for its creator alone. */
 function VisibilityChoice({
 	value,
 	onChange,
@@ -843,7 +843,7 @@ function VisibilityChoice({
 			label="Who can see it"
 			options={[
 				{ value: "public", label: "Public" },
-				{ value: "private", label: "Only me" },
+				{ value: "personal", label: "Only me" },
 			]}
 			value={value}
 			onChange={onChange}

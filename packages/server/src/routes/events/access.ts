@@ -1,6 +1,6 @@
 export * as StreamAccess from "./access.ts";
 
-import { chatStream, type EventStream, personStream, workspaceStream } from "@sugabots/contracts";
+import { chatStream, type EventStream, memberStream, workspaceStream } from "@sugabots/contracts";
 import { Authorization } from "@sugabots/core/authorization/authorization";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Visibility } from "@sugabots/core/authorization/visibility";
@@ -17,7 +17,7 @@ import { Context, Effect, Layer } from "effect";
  * resource — the same `Authorization` and the same `Visibility`, so a
  * demotion that closes a REST route closes the stream with it.
  *
- * Each function answers, for the current actor, with the stream to subscribe
+ * Each function answers, for the current principal, with the stream to subscribe
  * to, or `undefined` when they may not have it. A chat's events go on that
  * chat's own stream, and a workspace stream carries what its lists need
  * (`ChatEventStream` in core decides both).
@@ -28,10 +28,10 @@ export interface Interface {
 		workspaceRef: string,
 	): Effect.Effect<EventStream | undefined, never, CurrentActor.Service>;
 	chat(chatId: string): Effect.Effect<EventStream | undefined, never, CurrentActor.Service>;
-	/** The current actor's own stream, which nobody else may have. */
+	/** The current principal's own stream, which nobody else may have. */
 	me(): Effect.Effect<EventStream | undefined, never, CurrentActor.Service>;
 	/**
-	 * Whether the current actor is in `audience`, by `Visibility`'s rules, and
+	 * Whether the current principal is in `audience`, by `Visibility`'s rules, and
 	 * so may hear what a workspace stream says of the chat it is for: they
 	 * reach the chat.
 	 */
@@ -63,7 +63,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		me: () => Effect.map(CurrentActor.Service, ({ personId }) => personStream(personId)),
+		me: () => Effect.map(CurrentActor.Service, ({ memberId }) => memberStream(memberId)),
 
 		hears: (audience) =>
 			operation(

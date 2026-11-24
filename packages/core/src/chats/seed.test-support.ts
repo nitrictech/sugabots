@@ -7,7 +7,6 @@ import {
 	automationFeed,
 	automationRun,
 	chat,
-	collaboration,
 	projectChat,
 	systemChat,
 } from "../database/schema.ts";
@@ -16,8 +15,8 @@ import { defaultProjectIdOf } from "../workspaces/bots/bot.ts";
 /**
  * A chat as fixtures write it straight into the database, as the
  * tests and the demo do: what every kind has, and what its kind's own table
- * holds. A run's and a collaboration's kind rows are their `run` and
- * `collaboration` rows, given whole but for the chat they name.
+ * holds. A run's kind row is its `run` row, given whole but for the chat it
+ * names.
  */
 type ChatSeed = {
 	id?: string;
@@ -30,7 +29,6 @@ type ChatSeed = {
 type KindSeed =
 	| ({
 			kind: "project_chat";
-			archivedAt?: Date | null;
 			resolvedAt?: Date | null;
 			startedById: string;
 	  } & (
@@ -45,11 +43,7 @@ type KindSeed =
 			systemBotKey: SystemBotKey;
 			servedChatId: string;
 	  }
-	| { kind: "run"; run: Omit<typeof automationRun.$inferInsert, "chatId" | "workspaceId"> }
-	| {
-			kind: "collaboration";
-			collaboration: Omit<typeof collaboration.$inferInsert, "chatId">;
-	  };
+	| { kind: "run"; run: Omit<typeof automationRun.$inferInsert, "chatId" | "workspaceId"> };
 
 /**
  * Writes `seed` as one statement, its chat and its kind's row
@@ -97,7 +91,5 @@ function kindRowOf(db: Executor, chatId: string, seed: ChatSeed) {
 			});
 		case "run":
 			return db.insert(automationRun).values({ ...seed.run, chatId, workspaceId });
-		case "collaboration":
-			return db.insert(collaboration).values({ ...seed.collaboration, chatId });
 	}
 }

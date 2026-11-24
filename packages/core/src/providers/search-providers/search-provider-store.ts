@@ -11,6 +11,7 @@ import { Secrets } from "../../secrets/secrets.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import type { SearchProviderAccess } from "./search-provider-access.ts";
+import { searchProviderRowOf } from "./search-provider-reads.ts";
 
 /**
  * The only writer of `search_provider`: a workspace's one search provider.
@@ -59,11 +60,6 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("SearchProviderStore");
 	const cipher = yield* Secrets.Service;
-
-	const load = (workspaceId: string) =>
-		query((db) =>
-			db.select().from(searchProvider).where(eq(searchProvider.workspaceId, workspaceId)).limit(1),
-		).pipe(Effect.map(([row]) => row));
 
 	/** The provider access, or nothing when the built-in provider needs a key the row lacks. */
 	const toAccess = (row: SearchProviderRow): SearchProviderAccess | undefined => {
@@ -217,13 +213,15 @@ export const make = Effect.gen(function* () {
 		access: (workspaceId) =>
 			operation(
 				"access",
-				Effect.map(load(workspaceId), (row) => (row ? toAccess(row) : undefined)),
+				Effect.map(searchProviderRowOf(workspaceId), (row) => (row ? toAccess(row) : undefined)),
 			),
 
 		resolve: (workspaceId) =>
 			operation(
 				"resolve",
-				Effect.map(load(workspaceId), (row) => (row?.enabled ? toAccess(row) : undefined)),
+				Effect.map(searchProviderRowOf(workspaceId), (row) =>
+					row?.enabled ? toAccess(row) : undefined,
+				),
 			),
 	});
 });

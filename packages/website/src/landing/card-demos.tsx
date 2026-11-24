@@ -129,7 +129,7 @@ export function ApprovalDemo() {
 }
 
 /** The bots' exchange. */
-const handoffMessages: readonly { from: ChatBot; time: string; text: string }[] = [
+const collaborationMessages: readonly { from: ChatBot; time: string; text: string }[] = [
 	{
 		from: cast.growthDesk,
 		time: "6:08",
@@ -144,7 +144,7 @@ const handoffMessages: readonly { from: ChatBot; time: string; text: string }[] 
 ];
 
 /** Growth Desk and Pricing Analyst's own exchange, as the app shows a collaboration. */
-export function HandoffDemo() {
+export function CollaborationDemo() {
 	return (
 		<div className={cn(demoArea, "overflow-hidden")}>
 			<div className="flex items-center gap-2 border-b border-landing-line px-4 py-2.5 sm:px-5">
@@ -152,7 +152,7 @@ export function HandoffDemo() {
 					{[cast.growthDesk, cast.pricingAnalyst].map((bot) => (
 						<span key={bot.name} className="-mr-1.75">
 							<StillBotFace
-								{...bot.look}
+								{...bot.avatar}
 								ring={{ color: "var(--color-landing-page)", width: 2 }}
 								className="block size-5"
 							/>
@@ -164,7 +164,7 @@ export function HandoffDemo() {
 				</span>
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col justify-end gap-3 p-4 sm:px-5">
-				{handoffMessages.map((message) => (
+				{collaborationMessages.map((message) => (
 					<MessageRow
 						key={message.text}
 						author={message.from}
@@ -260,7 +260,7 @@ export function ModelsDemo() {
 							: "border-transparent bg-transparent",
 					)}
 				>
-					<StillBotFace {...choice.bot.look} className="size-7.5" />
+					<StillBotFace {...choice.bot.avatar} className="size-7.5" />
 					<span className="flex min-w-0 flex-1 flex-col gap-px">
 						<span className="truncate text-sm font-semibold text-landing-text">
 							{choice.bot.name}

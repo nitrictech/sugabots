@@ -3,34 +3,34 @@ export * as PersonalAssistants from "./personal-assistants.ts";
 import { Context, Effect, Layer } from "effect";
 import { serviceOperations, transaction } from "../../database/database.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
-import type { PersonFacingBotRow } from "./bot.ts";
+import type { MemberFacingBotRow } from "./bot.ts";
 import { BotStore } from "./bot-store.ts";
 
 /**
- * Making somebody's Personal Assistant, for the operations that let a person
- * into a workspace. They decide who that is, so this takes any `personId` and
+ * Making somebody's Personal Assistant, for the operations that let a member
+ * into a workspace. They decide who that is, so this takes any `memberId` and
  * asks no actor; it is never handed to a route.
  */
 export interface Interface {
 	/**
-	 * Makes `personId`'s Personal Assistant, only if it is missing. A new one
+	 * Makes `memberId`'s Personal Assistant, only if it is missing. A new one
 	 * starts on the workspace's default model, or on none while the workspace
 	 * offers none; an existing one with no model is given that default.
 	 */
 	readonly provision: (input: {
 		workspaceId: string;
-		personId: string;
-	}) => Effect.Effect<PersonFacingBotRow>;
+		memberId: string;
+	}) => Effect.Effect<MemberFacingBotRow>;
 	/**
 	 * {@link Interface.provision} on `model`, which the workspace must offer. An
 	 * existing assistant moves to `model` only when the workspace does not
-	 * offer the one it runs on, so a model its person chose stays.
+	 * offer the one it runs on, so a model its member chose stays.
 	 */
 	readonly provisionWithModel: (input: {
 		workspaceId: string;
-		personId: string;
+		memberId: string;
 		model: string;
-	}) => Effect.Effect<PersonFacingBotRow, ModelProviderStore.ModelNotEnabled>;
+	}) => Effect.Effect<MemberFacingBotRow, ModelProviderStore.ModelNotEnabled>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -45,39 +45,39 @@ export const make = Effect.gen(function* () {
 	const isOffered = (workspaceId: string, model: string | null) =>
 		model === null ? Effect.succeed(false) : modelProviders.isEnabled(workspaceId, model);
 
-	const provision = (workspaceId: string, personId: string, model?: string) =>
+	const provision = (workspaceId: string, memberId: string, model?: string) =>
 		Effect.gen(function* () {
 			return yield* bots.provisionPersonalAssistant({
 				workspaceId,
-				personId,
+				memberId,
 				model: model ?? (yield* modelProviders.defaultModel(workspaceId)),
 			});
 		});
 
-	/** Moves `personId`'s `assistant` onto `model`. Only its model changes, so none of `update`'s refusals can happen. */
+	/** Moves `memberId`'s `assistant` onto `model`. Only its model changes, so none of `update`'s refusals can happen. */
 	const moveOnto = (
-		person: { workspaceId: string; personId: string },
-		assistant: PersonFacingBotRow,
+		member: { workspaceId: string; memberId: string },
+		assistant: MemberFacingBotRow,
 		model: string,
-	) => bots.update(person.workspaceId, assistant.id, { model }, person.personId).pipe(Effect.orDie);
+	) => bots.update(member.workspaceId, assistant.id, { model }, member.memberId).pipe(Effect.orDie);
 
 	return Service.of({
-		provision: ({ workspaceId, personId }) =>
+		provision: ({ workspaceId, memberId }) =>
 			operation(
 				"provision",
 				transaction(
 					Effect.gen(function* () {
-						const assistant = yield* provision(workspaceId, personId);
+						const assistant = yield* provision(workspaceId, memberId);
 						if (assistant.model !== null) return assistant;
 						const model = yield* modelProviders.defaultModel(workspaceId);
 						return model === undefined
 							? assistant
-							: yield* moveOnto({ workspaceId, personId }, assistant, model);
+							: yield* moveOnto({ workspaceId, memberId }, assistant, model);
 					}),
 				),
 			),
 
-		provisionWithModel: ({ workspaceId, personId, model }) =>
+		provisionWithModel: ({ workspaceId, memberId, model }) =>
 			operation(
 				"provisionWithModel",
 				transaction(
@@ -85,9 +85,9 @@ export const make = Effect.gen(function* () {
 						if (!(yield* isOffered(workspaceId, model))) {
 							return yield* new ModelProviderStore.ModelNotEnabled({ model });
 						}
-						const assistant = yield* provision(workspaceId, personId, model);
+						const assistant = yield* provision(workspaceId, memberId, model);
 						if (yield* isOffered(workspaceId, assistant.model)) return assistant;
-						return yield* moveOnto({ workspaceId, personId }, assistant, model);
+						return yield* moveOnto({ workspaceId, memberId }, assistant, model);
 					}),
 				),
 			),

@@ -6,19 +6,14 @@ import {
 	mentionsEveryone,
 	type NotificationContent,
 	type NotificationLevel,
-	notifiesPeople,
+	notifiesMembers,
 	type QuietHours,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { type AnyColumn, and, eq, isNull, ne, type SQL, sql } from "drizzle-orm";
+import { type AnyColumn, and, eq, isNull, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
-import {
-	chatStandingFor,
-	computerProjectStandingFor,
-	mayDecideToolCall,
-	reachesChatFor,
-} from "../authorization/access.ts";
+import { chatStandingFor, mayDecideToolCall, reachesChatFor } from "../authorization/access.ts";
 import type { BotFacts } from "../authorization/permissions.ts";
 import { findRunBot } from "../chats/automations/execution.ts";
 import { approversOf } from "../chats/tools/approvers.ts";
@@ -28,11 +23,11 @@ import {
 	automationRun,
 	bot,
 	chatParticipant,
+	member,
 	membership,
 	message,
 	notificationOverride,
 	notificationSettings,
-	person,
 	placedChat,
 	project,
 	toolCall,
@@ -42,7 +37,7 @@ import {
 import { approvalPath, chatPath } from "../server-settings/web-app-paths.ts";
 
 /**
- * Who is notified of what, decided as Slack decides it: by why the person
+ * Who is notified of what, decided as Slack decides it: by why the member
  * would care (they were mentioned, a bot replied to them or failed to, they
  * take part in the chat, it waits on their approval, an automation of
  * theirs ran, or it is just activity), by the level they chose for the bot it
@@ -50,13 +45,13 @@ import { approvalPath, chatPath } from "../server-settings/web-app-paths.ts";
  * in their quiet hours. Their tabs hold back what they are looking at.
  */
 
-/** A notification for one person. */
+/** A notification for one member. */
 export interface Addressed {
-	personId: string;
+	memberId: string;
 	notification: NotificationContent;
 }
 
-/** Why a person would want to hear of something. */
+/** Why a member would want to hear of something. */
 export type Reason =
 	| "mention"
 	| "reply"
@@ -66,13 +61,13 @@ export type Reason =
 	| "automation"
 	| "activity";
 
-/** The level a person has before choosing one: mentions, and what else concerns them. */
+/** The level a member has before choosing one: mentions, and what else concerns them. */
 export const DEFAULT_LEVEL: NotificationLevel = "mentions";
 
-/** Whether a person hears of a bot's reply to them failing, before they choose. */
+/** Whether a member hears of a bot's reply to them failing, before they choose. */
 export const DEFAULT_TURN_FAILURES = true;
 
-/** Which of a person's automations' runs they hear the end of, before they choose. */
+/** Which of a member's automations' runs they hear the end of, before they choose. */
 export const DEFAULT_AUTOMATION_RUNS: AutomationRunNotifications = "failures";
 
 /** Whether somebody at `level` hears of something they would care about for `reason`. */
@@ -88,7 +83,7 @@ function levelAdmits(level: NotificationLevel, reason: Reason): boolean {
 }
 
 /** Whether `at` falls in `quietHours`, read on a wall clock in their time zone. */
-export function inQuietHours(quietHours: QuietHours, at: Date): boolean {
+function inQuietHours(quietHours: QuietHours, at: Date): boolean {
 	const from = minutesOfDay(quietHours.from);
 	const to = minutesOfDay(quietHours.to);
 	if (from === to) return false;
@@ -117,7 +112,7 @@ interface WrittenMessage {
 	chatId: string;
 	messageId: string;
 	author:
-		| { kind: "person"; personId: string }
+		| { kind: "member"; memberId: string }
 		| { kind: "bot"; botId: string }
 		| { kind: "automation" };
 	authorName: string;
@@ -126,16 +121,15 @@ interface WrittenMessage {
 	fileNames: readonly string[];
 	/** The titles of the files an automation's result shows, which stand in for its text when it has none. */
 	fileTitles: readonly string[];
-	/** The person whose message it answers, who hears of it as of a reply in Slack. */
+	/** The member whose message it answers, who hears of it as of a reply in Slack. */
 	repliesTo: string | null;
-	/** The automation run it is the result of, and that run's own chat, when it is one. */
-	resultOf: { runId: string; chatId: string } | null;
+	/** The chat of the automation run it is the result of, when it is one. */
+	resultOf: { chatId: string } | null;
 }
 
 /**
  * The notifications a finished message sends. Only chats, a bot's or a
- * project's, notify: automation runs, collaborations and system bots'
- * chats are bots' work, which reaches people through what they post in
+ * project's, notify: automation runs and system bots' chats are bots' work, which reaches members through what they post in
  * those. An automation's result in its automation's feed notifies those it mentions,
  * which is how its bot asks for somebody.
  */
@@ -152,32 +146,29 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 	const place = yield* placeOf(db, written.chatId);
 	if (!place) return [];
 	const automationResult = place.kind === "automation_feed" ? written.resultOf : null;
-	if (!automationResult && !notifiesPeople(place.kind)) return [];
-	if (automationResult && (yield* postedElsewhere(db, automationResult.runId, written.chatId))) {
-		return [];
-	}
+	if (!automationResult && !notifiesMembers(place.kind)) return [];
 	const mentioned = new Set(mentionedHandles(written.content));
 	const { author, authorName } = written;
-	// Only a person's `@here` or `@channel`: a bot's would let whatever it read or was asked to say page the whole project.
-	const addressesEveryone = author.kind === "person" && mentionsEveryone(written.content);
+	// Only a member's `@here` or `@channel`: a bot's would let whatever it read or was asked to say page the whole project.
+	const addressesEveryone = author.kind === "member" && mentionsEveryone(written.content);
 	// A bot's chat, in its default project, is that bot's; in a project's chat, what a bot posts is.
 	const botId = place.botId ?? (author.kind === "bot" ? author.botId : null);
-	const reaching = yield* peopleReaching(db, place, botId, now);
-	return reaching.flatMap((person): Addressed[] => {
-		if (author.kind === "person" && person.id === author.personId) return [];
+	const reaching = yield* membersReaching(db, place, botId, now);
+	return reaching.flatMap((member): Addressed[] => {
+		if (author.kind === "member" && member.id === author.memberId) return [];
 		const reason: Reason =
-			addressesEveryone || mentioned.has(handleFromName(person.name))
+			addressesEveryone || mentioned.has(handleFromName(member.name))
 				? "mention"
-				: person.id === written.repliesTo
+				: member.id === written.repliesTo
 					? "reply"
-					: person.participant
+					: member.participant
 						? "participant"
 						: "activity";
 		if (automationResult && reason !== "mention") return [];
-		if (!wants(person, reason, now)) return [];
+		if (!wants(member, reason, now)) return [];
 		return [
 			{
-				personId: person.id,
+				memberId: member.id,
 				notification: {
 					title:
 						reason === "mention"
@@ -199,21 +190,7 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 	});
 });
 
-/** Whether the run `runId` posted its result in a chat besides `chatId`. */
-const postedElsewhere = Effect.fn("Notifications.postedElsewhere")(function* (
-	db: Executor,
-	runId: string,
-	chatId: string,
-) {
-	const [elsewhere] = yield* db
-		.select({ id: message.id })
-		.from(message)
-		.where(and(eq(message.runId, runId), ne(message.chatId, chatId)))
-		.limit(1);
-	return elsewhere !== undefined;
-});
-
-/** The notifications a bot's finished reply sends, as a reply to the person whose message it answers. */
+/** The notifications a bot's finished reply sends, as a reply to the member whose message it answers. */
 export const forReply = Effect.fn("Notifications.forReply")(function* (
 	db: Executor,
 	completed: { chatId: string; turnId: string; messageId: string; content: string },
@@ -231,17 +208,17 @@ export const forReply = Effect.fn("Notifications.forReply")(function* (
 			content: completed.content,
 			fileNames: [],
 			fileTitles: [],
-			repliesTo: answering.personId,
+			repliesTo: answering.memberId,
 			resultOf: null,
 		},
 		now,
 	);
 });
 
-/** The bot taking the turn, and the person whose message it answers, when a person wrote it. */
+/** The bot taking the turn, and the member whose message it answers, when a member wrote it. */
 const answeredBy = Effect.fn("Notifications.answeredBy")(function* (db: Executor, turnId: string) {
 	const [answering] = yield* db
-		.select({ personId: message.authorPersonId, botId: bot.id, botName: bot.name })
+		.select({ memberId: message.authorMemberId, botId: bot.id, botName: bot.name })
 		.from(turn)
 		.innerJoin(bot, eq(bot.id, turn.botId))
 		.innerJoin(message, eq(message.id, turn.triggerMessageId))
@@ -250,7 +227,7 @@ const answeredBy = Effect.fn("Notifications.answeredBy")(function* (db: Executor
 });
 
 /**
- * The notifications a turn waiting for approvals sends: to each person who
+ * The notifications a turn waiting for approvals sends: to each member who
  * may decide one, naming and linking to only the calls they may decide.
  */
 export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
@@ -270,18 +247,15 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 	const [first] = calls;
 	if (!first) return [];
 	const runBot = yield* findRunBot(db, waiting.chatId);
-	const reaching = yield* peopleReaching(db, place, first.botId, now);
+	const reaching = yield* membersReaching(db, place, first.botId, now);
 	const addressed: Addressed[] = [];
-	for (const person of reaching) {
-		if (!wants(person, "approval", now)) continue;
-		const decidable = yield* callsDecidableBy(db, waiting.chatId, person.id, calls, {
-			turnBotId: first.botId,
-			runBot,
-		});
+	for (const member of reaching) {
+		if (!wants(member, "approval", now)) continue;
+		const decidable = yield* callsDecidableBy(db, waiting.chatId, member.id, calls, runBot);
 		const [firstDecidable] = decidable;
 		if (!firstDecidable) continue;
 		addressed.push({
-			personId: person.id,
+			memberId: member.id,
 			notification: {
 				title: `${first.botName} needs your approval`,
 				body:
@@ -298,7 +272,7 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 });
 
 /**
- * The notification a bot's reply failing sends, to the person whose message
+ * The notification a bot's reply failing sends, to the member whose message
  * it was answering, unless the turn will run again.
  */
 export const forFailedReply = Effect.fn("Notifications.forFailedReply")(function* (
@@ -307,20 +281,20 @@ export const forFailedReply = Effect.fn("Notifications.forFailedReply")(function
 	now: Date,
 ) {
 	const place = yield* placeOf(db, failed.chatId);
-	if (!place || !notifiesPeople(place.kind)) return [];
+	if (!place || !notifiesMembers(place.kind)) return [];
 	const answering = yield* answeredBy(db, failed.turnId);
-	if (!answering?.personId) return [];
-	const reaching = yield* peopleReaching(db, place, place.botId ?? answering.botId, now);
+	if (!answering?.memberId) return [];
+	const reaching = yield* membersReaching(db, place, place.botId ?? answering.botId, now);
 	return reaching
 		.filter(
-			(person) =>
-				person.id === answering.personId &&
-				(person.turnFailures ?? DEFAULT_TURN_FAILURES) &&
-				wants(person, "failure", now),
+			(member) =>
+				member.id === answering.memberId &&
+				(member.turnFailures ?? DEFAULT_TURN_FAILURES) &&
+				wants(member, "failure", now),
 		)
 		.map(
-			(person): Addressed => ({
-				personId: person.id,
+			(member): Addressed => ({
+				memberId: member.id,
 				notification: {
 					title: `${answering.botName} couldn't finish its reply`,
 					body: failed.userMessage,
@@ -333,8 +307,8 @@ export const forFailedReply = Effect.fn("Notifications.forFailedReply")(function
 });
 
 /**
- * The notifications an automation run ending sends: to the person who made the
- * automation and the person who started the run, as they chose to hear of its
+ * The notifications an automation run ending sends: to the member who made the
+ * automation and the member who started the run, as they chose to hear of its
  * runs. A cancelled run sends none, since somebody stopped it on purpose.
  */
 export const forAutomationRun = Effect.fn("Notifications.forAutomationRun")(function* (
@@ -362,19 +336,19 @@ export const forAutomationRun = Effect.fn("Notifications.forAutomationRun")(func
 	if (!place) return [];
 	const owners = new Set([
 		run.createdById,
-		run.trigger.kind === "manual" ? run.trigger.requestedByPersonId : null,
+		run.trigger.kind === "manual" ? run.trigger.requestedByMemberId : null,
 	]);
-	const reaching = yield* peopleReaching(db, place, run.botId, now);
+	const reaching = yield* membersReaching(db, place, run.botId, now);
 	return reaching
-		.filter((person) => {
-			if (!owners.has(person.id)) return false;
-			const chosen = person.automationRuns ?? DEFAULT_AUTOMATION_RUNS;
+		.filter((member) => {
+			if (!owners.has(member.id)) return false;
+			const chosen = member.automationRuns ?? DEFAULT_AUTOMATION_RUNS;
 			const hears = chosen === "all" || (chosen === "failures" && failed);
-			return hears && wants(person, "automation", now);
+			return hears && wants(member, "automation", now);
 		})
 		.map(
-			(person): Addressed => ({
-				personId: person.id,
+			(member): Addressed => ({
+				memberId: member.id,
 				notification: {
 					title: failed ? `${run.automationName} failed` : `${run.automationName} finished`,
 					body: failed
@@ -415,39 +389,32 @@ const placeOf = Effect.fn("Notifications.placeOf")(function* (db: Executor, chat
 	const [row] = yield* db
 		.select({
 			kind: placedChat.kind,
-			/** A collaboration's is the project of the chat it was opened from. */
-			projectId: sql<string | null>`coalesce(${chat.projectId}, ${placedChat.projectId})`,
+			projectId: placedChat.projectId,
 			botId: placedChat.botId,
 			workspaceId: placedChat.workspaceId,
 			rootChatId: sql<string>`coalesce(${placedChat.rootChatId}, ${placedChat.id})`,
 			title: sql<string>`coalesce(${chat.title}, ${placedChat.title})`,
-			/** Null outside a project people made: a bot's chat is reached through the bot. */
+			/** Null outside a project members made: a bot's chat is reached through the bot. */
 			projectSlug: project.slug,
 			workspaceSlug: workspace.slug,
 		})
 		.from(placedChat)
 		.leftJoin(chat, eq(chat.id, placedChat.rootChatId))
-		.leftJoin(
-			project,
-			and(
-				eq(project.id, sql`coalesce(${chat.projectId}, ${placedChat.projectId})`),
-				isNull(project.defaultOfBotId),
-			),
-		)
+		.leftJoin(project, and(eq(project.id, placedChat.projectId), isNull(project.defaultOfBotId)))
 		.innerJoin(workspace, eq(workspace.id, placedChat.workspaceId))
 		.where(eq(placedChat.id, chatId))
 		.limit(1);
 	return row;
 });
 
-type Person = Effect.Success<ReturnType<typeof peopleReaching>>[number];
+type Member = Effect.Success<ReturnType<typeof membersReaching>>[number];
 
 /**
  * Everybody who reaches the place, with the level they chose for `botId`, the
- * bot it is about, else for the project, else their own: the people who
+ * bot it is about, else for the project, else their own: the members who
  * reach the chat.
  */
-const peopleReaching = Effect.fn("Notifications.peopleReaching")(function* (
+const membersReaching = Effect.fn("Notifications.membersReaching")(function* (
 	db: Executor,
 	place: Place,
 	botId: string | null,
@@ -457,10 +424,10 @@ const peopleReaching = Effect.fn("Notifications.peopleReaching")(function* (
 	const projectLevel = alias(notificationOverride, "project_level");
 	return yield* db
 		.select({
-			id: person.id,
-			name: person.name,
+			id: member.id,
+			name: member.name,
 			participant: exists(
-				sql`select 1 from ${chatParticipant} where ${chatParticipant.chatId} = ${place.rootChatId} and ${chatParticipant.personId} = ${person.id}`,
+				sql`select 1 from ${chatParticipant} where ${chatParticipant.chatId} = ${place.rootChatId} and ${chatParticipant.memberId} = ${member.id}`,
 			),
 			// A project muted for a while quiets every bot in it, whatever level the bot has.
 			level: sql<NotificationLevel | null>`coalesce(${mutedOf(projectLevel, now)}, ${mutedOf(botLevel, now)}, ${botLevel.level}, ${projectLevel.level}, ${notificationSettings.level})`,
@@ -470,33 +437,26 @@ const peopleReaching = Effect.fn("Notifications.peopleReaching")(function* (
 			automationRuns: notificationSettings.automationRuns,
 		})
 		.from(membership)
-		.innerJoin(person, eq(person.id, membership.personId))
-		.leftJoin(notificationSettings, eq(notificationSettings.personId, person.id))
+		.innerJoin(member, eq(member.id, membership.memberId))
+		.leftJoin(notificationSettings, eq(notificationSettings.memberId, member.id))
 		.leftJoin(
 			botLevel,
 			and(
-				eq(botLevel.personId, person.id),
+				eq(botLevel.memberId, member.id),
 				botId === null ? sql`false` : eq(botLevel.botId, botId),
 			),
 		)
 		.leftJoin(
 			projectLevel,
 			and(
-				eq(projectLevel.personId, person.id),
+				eq(projectLevel.memberId, member.id),
 				place.projectId === null ? sql`false` : eq(projectLevel.projectId, place.projectId),
 			),
 		)
 		.where(
 			and(
 				eq(membership.workspaceId, place.workspaceId),
-				reachesChatFor(
-					{
-						kind: sql`${place.kind}`,
-						rootChatId: sql`${place.rootChatId}::uuid`,
-						projectId: sql`${place.projectId}::uuid`,
-					},
-					person.id,
-				),
+				reachesChatFor({ projectId: sql`${place.projectId}::uuid` }, member.id),
 			),
 		);
 });
@@ -510,36 +470,29 @@ function exists(subquery: SQL): SQL<boolean> {
 	return sql<boolean>`exists (${subquery})`;
 }
 
-/** Whether `person` would be notified now of something they care about for `reason`. */
-function wants(person: Person, reason: Reason, now: Date): boolean {
-	if (person.pausedUntil && person.pausedUntil > now) return false;
-	if (person.quietHours && inQuietHours(person.quietHours, now)) return false;
-	return levelAdmits(person.level ?? DEFAULT_LEVEL, reason);
+/** Whether `member` would be notified now of something they care about for `reason`. */
+function wants(member: Member, reason: Reason, now: Date): boolean {
+	if (member.pausedUntil && member.pausedUntil > now) return false;
+	if (member.quietHours && inQuietHours(member.quietHours, now)) return false;
+	return levelAdmits(member.level ?? DEFAULT_LEVEL, reason);
 }
 
 /**
- * The calls among `calls`, all raised by one turn of `turnBotId`, in the
- * run `runBot` does if any, that `personId` may decide, in their order:
- * none unless they reach the chat, then each that `mayDecideToolCall`
- * lets them decide. Their
- * standing in the computer's project is loaded only when a call asks to
- * change the computer.
+ * The calls among `calls`, in the run `runBot` does if any, that `memberId`
+ * may decide, in their order: none unless they reach the chat, then each that
+ * `mayDecideToolCall` lets them decide.
  */
 const callsDecidableBy = Effect.fn("Notifications.callsDecidableBy")(function* (
 	db: Executor,
 	chatId: string,
-	personId: string,
+	memberId: string,
 	calls: ReadonlyArray<PendingCall>,
-	turn: { turnBotId: string; runBot: BotFacts | undefined },
+	runBot: BotFacts | undefined,
 ) {
-	const reached = yield* chatStandingFor(db, chatId, personId);
+	const reached = yield* chatStandingFor(db, chatId, memberId);
 	if (!reached) return [];
-	const asksForComputer = calls.some((call) => approversOf(call.tool) === "computer-managers");
-	const computerProject = asksForComputer
-		? yield* computerProjectStandingFor(db, chatId, turn.turnBotId, personId)
-		: undefined;
 	return calls.filter((call) =>
-		mayDecideToolCall(reached.standing, computerProject, turn.runBot, approversOf(call.tool)),
+		mayDecideToolCall(reached.standing, runBot, approversOf(call.tool)),
 	);
 });
 

@@ -11,22 +11,18 @@
  * "schedule", "document" and "routine", are left to the reader, as is
  * "summary", which is plain English as often as it is the retired summary.
  * So are banned synonyms that are everyday words or another system's own:
- * "user" (HTTP's user agent, a user message), "member" (a project member),
- * "workspace bot" and "internal bot" (any bot in the workspace, and a made-up
- * project's name), "done" and "archived" alone (only their names for a chat's
- * state are checked), "activity" (the workflow engine's word for a step),
- * "streaming" and "reasoning" (the model providers' and the event stream's),
- * "template" and "snapshot" (E2B's and Playwright's), "volume" (Docker's),
- * "VNC" (the desktop's protocol), "callback", "endpoint" and "hook" (OAuth's,
- * HTTP's, and React's and better-auth's hooks), "sender" (an email's),
- * "condition" (a query's), "system prompt" and "function call" (a model
- * provider's API), "health check" (the server's health address),
- * "organisation" (GitHub's), "spec", "routing", "dispatch" and "busy". So are
- * "item" (a list's, a menu's and a chat's timeline's), "marker" and "badge"
- * (a list's and a day's markers; a count badge), "seen", "subject", "app"
- * (the web app, a GitHub app), "look" and "icon" (a file's, a button's) and
- * "sidebar": only their compound names for a nested chat, an attention mark,
- * a chat's status, a tool source and a mark are checked.
+ * "user" (HTTP's user agent, a user message, the current user), "workspace
+ * bot" and "internal bot" (any bot in the workspace, and a made-up project's
+ * name), "done" and "archived" alone (only their names for a chat's state are
+ * checked), "activity" (the workflow engine's word for a step), "streaming"
+ * and "reasoning" (the model providers' and the event stream's), "snapshot"
+ * (Playwright's), "VNC" (the desktop's protocol), "callback", "endpoint" and
+ * "hook" (OAuth's, HTTP's, and React's and better-auth's hooks), "sender" (an
+ * email's), "condition" (a query's), "system prompt" and "function call" (a
+ * model provider's API), "organisation" (GitHub's), "routing", "dispatch",
+ * "seen", "app" (the web app, a GitHub app), "scope", "context" and "sandbox"
+ * (turn bounds'; OAuth's scopes, React's contexts, a browser's sandbox): only
+ * "approval app", a tool source's old compound name, is checked.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -45,29 +41,24 @@ interface CheckedWord {
 	readonly keptIn?: readonly RegExp[];
 }
 
-/** Migrations by their names, which keep the words they were written with. */
-const MIGRATION_NAME = /\b\d{14}_[a-z0-9_]+/g;
-
 /** The glossary's Retired terms: words for things that no longer exist. */
 const RETIRED_WORDS: readonly CheckedWord[] = [
 	{
 		word: "pod",
 		plural: "pods",
 		replacement: "project, or the bot",
-		// Migrations by their names, and Apple's iPod.
-		otherMeanings: /\b\d{14}_[a-z0-9_]+|iPod/g,
+		// Apple's iPod.
+		otherMeanings: /iPod/g,
 	},
 	{ word: "crew", plural: "crews", replacement: "the project's bots" },
 	{
 		word: "channel",
 		plural: "channels",
 		replacement: "project",
-		// Others' channels: Slack's, and its `@channel`, which a person writes to
-		// mention everyone in a chat; the browser's MessageChannel; the
-		// Postgres notification channel; Xfce's settings channels. And
-		// migrations by their names.
+		// Others' channels: Slack's `@channel`, which a member writes to mention
+		// everyone in a chat, and the Postgres notification channel.
 		otherMeanings:
-			/@channel|"here", "channel"|handle: "channel"|name: "Channel"|\[\["channel", "reviewer"\]\]|`here` or `channel`|"here and channel"|Slack's channel|per channel\.|MessageChannel|NOTIFY_CHANNEL|notification channel|perchannel|\b\d{14}_[a-z0-9_]+/g,
+			/@channel|"here", "channel"|handle: "channel"|name: "Channel"|\[\["channel", "reviewer"\]\]|`here` or `channel`|"here and channel"|NOTIFY_CHANNEL|notification channel/g,
 		keptIn: [
 			// A colour's red, green and blue channels.
 			/^docker\/computer\/sugabots-desktop-look$/,
@@ -107,10 +98,10 @@ const RETIRED_WORDS: readonly CheckedWord[] = [
 		word: "agent",
 		plural: "agents",
 		replacement: "bot",
-		// Others' agents: the HTTP user agent, coding agents and their
-		// AGENTS.md, crawlers and AI agents generally, and SSH's and GPG's.
+		// Others' agents: the HTTP user agent, coding agents, crawlers and AI
+		// agents generally, and SSH's and GPG's.
 		otherMeanings:
-			/user[-_ ]?agents?|AGENTS\.md|AI agents?|your[- ]agent|(?:ssh|gpg)-agent|SSH and GPG agents/gi,
+			/user[-_ ]?agents?|AI agents?|your[- ]agent|(?:ssh|gpg)-agent|SSH and GPG agents/gi,
 		keptIn: [
 			// undici's Agent, the connection pool requests are sent through.
 			/^packages\/core\/src\/providers\/network\/egress(\.test)?\.ts$/,
@@ -123,11 +114,11 @@ const RETIRED_WORDS: readonly CheckedWord[] = [
 	{
 		word: "inbox",
 		plural: "inboxes",
-		replacement: "the Personal Assistant, which tells a person what needs their attention",
+		replacement: "the Personal Assistant, which tells a member what needs their attention",
 		// An email inbox: the one a sign-up link is sent to, and the ones bots
-		// in examples sort. And migrations by their names.
+		// in examples sort.
 		otherMeanings:
-			/(?:in|[Ss]ort|[Ss]orts|[Ss]orting) (?:its|the) inbox|(?:support|shared) inbox|inbox sweep|Inbox (?:Sorter|Manager|triage)|inboxSorter|read_inbox|\b\d{14}_[a-z0-9_]+/g,
+			/(?:in|[Ss]ort|[Ss]orts|[Ss]orting) (?:its|the) inbox|(?:support|shared) inbox|inbox sweep|Inbox (?:Sorter|Manager|triage)|inboxSorter|read_inbox/g,
 	},
 	{
 		word: "direct message",
@@ -138,32 +129,23 @@ const RETIRED_WORDS: readonly CheckedWord[] = [
 
 /** Banned synonyms: words for something the glossary names otherwise. */
 const BANNED_SYNONYMS: readonly CheckedWord[] = [
-	// People and the workspace
+	// Members and the workspace
 	{ word: "tenant", plural: "tenants", bannedFor: "Workspace", replacement: "workspace" },
 	{
-		word: "workspace member",
-		plural: "workspace members",
-		bannedFor: "Person",
-		replacement: "membership, or a person in the workspace",
+		word: "person",
+		plural: "persons",
+		bannedFor: "Member",
+		replacement: "member",
+		// PostHog's own setting for the profiles it keeps of a site's visitors,
+		// and "personal" in capitals, which the acronym-led form would match.
+		otherMeanings: /person_profiles|PERSONAL_/g,
 	},
+	{ word: "people", plural: "people", bannedFor: "Member", replacement: "members" },
 	{
 		word: "session user",
 		plural: "session users",
-		bannedFor: "Person",
-		replacement: "signed-in person",
-	},
-	{
-		word: "current user",
-		plural: "current users",
-		bannedFor: "Signed-in person",
-		replacement: "signed-in person",
-	},
-	{ word: "snooze", plural: "snoozed", bannedFor: "Notification pause", replacement: "pause" },
-	{
-		word: "do not disturb",
-		plural: "do not disturb",
-		bannedFor: "Notification pause",
-		replacement: "notification pause, or quiet hours",
+		bannedFor: "Member",
+		replacement: "current user",
 	},
 	{
 		word: "transfer ownership",
@@ -179,48 +161,34 @@ const BANNED_SYNONYMS: readonly CheckedWord[] = [
 		bannedFor: "Invitation",
 		replacement: "invitation",
 	},
-	{
-		word: "invite link",
-		plural: "invite links",
-		bannedFor: "Referral link",
-		replacement: "referral link",
-	},
-	{
-		word: "onboarding",
-		plural: "onboardings",
-		bannedFor: "Workspace setup",
-		replacement: "workspace setup, or a bot's interview",
-		// A customer's onboarding, in the showcase's made-up chats.
-		otherMeanings: /onboarding call/g,
-	},
-	{
-		word: "log in",
-		plural: "logged in",
-		bannedFor: "Sign in",
-		replacement: "sign in",
-		// GitHub's login, which names an account there.
-		otherMeanings: /BOT_LOGIN/g,
-		// Signing in to a computer's desktop, which is the desktop's own login.
-		keptIn: [/^packages\/server\/src\/http\/desktop-viewer(\.test)?\.ts$/],
-	},
-	{
-		word: "log out",
-		plural: "logged out",
-		bannedFor: "Sign out",
-		replacement: "sign out",
-		// lucide's icon of that name.
-		otherMeanings: /\bLogOut\b/g,
-	},
 	{ word: "sysadmin", plural: "sysadmins", bannedFor: "Operator", replacement: "operator" },
 
 	// Bots
+	{ word: "shared bot", plural: "shared bots", bannedFor: "Public bot", replacement: "public bot" },
 	{
-		word: "personal bot",
-		plural: "personal bots",
+		word: "unlisted bot",
+		plural: "unlisted bots",
 		bannedFor: "Private bot",
 		replacement: "private bot",
 	},
-	{ word: "shared bot", plural: "shared bots", bannedFor: "Public bot", replacement: "public bot" },
+	{
+		word: "invite-only bot",
+		plural: "invite-only bots",
+		bannedFor: "Private bot",
+		replacement: "private bot",
+	},
+	{
+		word: "hidden bot",
+		plural: "hidden bots",
+		bannedFor: "Personal bot",
+		replacement: "personal bot",
+	},
+	{
+		word: "secret bot",
+		plural: "secret bots",
+		bannedFor: "Personal bot",
+		replacement: "personal bot",
+	},
 	{
 		word: "background bot",
 		plural: "background bots",
@@ -232,12 +200,6 @@ const BANNED_SYNONYMS: readonly CheckedWord[] = [
 		plural: "llm providers",
 		bannedFor: "Model provider",
 		replacement: "model provider",
-	},
-	{
-		word: "model trial",
-		plural: "model trials",
-		bannedFor: "Model test",
-		replacement: "model test",
 	},
 	{
 		word: "native tool",
@@ -256,48 +218,18 @@ const BANNED_SYNONYMS: readonly CheckedWord[] = [
 	{
 		word: "preset",
 		plural: "presets",
-		bannedFor: "Built-in provider",
-		replacement: "built-in provider, or built-in connector",
+		bannedFor: "Built-in connector",
+		replacement: "built-in connector",
 		// Others' presets: Biome's rules and ffmpeg's encoder speed.
 		otherMeanings: /"preset": "recommended"|"-preset",/g,
 	},
 	{
-		word: "provider catalog",
-		plural: "provider catalogs",
-		bannedFor: "Built-in provider",
-		replacement: "built-in providers",
-	},
-	{
 		word: "catalog entry",
 		plural: "catalog entries",
-		bannedFor: "Built-in provider",
-		replacement: "built-in provider, or built-in connector",
+		bannedFor: "Built-in connector",
+		replacement: "built-in connector",
 		// A tool that tool search can find, in the turn's catalog of them.
 		otherMeanings: /CatalogEntry/g,
-	},
-	{
-		word: "model sync",
-		plural: "model syncs",
-		bannedFor: "Model discovery",
-		replacement: "model discovery",
-	},
-	{
-		word: "custom endpoint",
-		plural: "custom endpoints",
-		bannedFor: "Custom model provider",
-		replacement: "custom model provider",
-	},
-	{
-		word: "deferred tool",
-		plural: "deferred tools",
-		bannedFor: "Tool search",
-		replacement: "tool search",
-	},
-	{
-		word: "token limit",
-		plural: "token limits",
-		bannedFor: "Context window",
-		replacement: "context window",
 	},
 
 	// Projects and chats
@@ -306,27 +238,16 @@ const BANNED_SYNONYMS: readonly CheckedWord[] = [
 		plural: "threads",
 		bannedFor: "Chat",
 		replacement: "chat",
-		otherMeanings: MIGRATION_NAME,
+		// A web forum's, and GitHub's comments on a pull request's code.
+		otherMeanings: /forum thread|review thread|reviewThreadId/g,
 	},
-	{
-		word: "conversation",
-		plural: "conversations",
-		bannedFor: "Chat",
-		replacement: "chat",
-		otherMeanings: MIGRATION_NAME,
-	},
+	{ word: "conversation", plural: "conversations", bannedFor: "Chat", replacement: "chat" },
 	{ word: "default bot", plural: "default bots", bannedFor: "Lead bot", replacement: "lead bot" },
 	{
 		word: "home project",
 		plural: "home projects",
 		bannedFor: "Default project",
 		replacement: "default project",
-	},
-	{
-		word: "pending message",
-		plural: "pending messages",
-		bannedFor: "Queued message",
-		replacement: "queued message",
 	},
 	{ word: "mark done", plural: "marked done", bannedFor: "Resolved", replacement: "mark resolved" },
 	{
@@ -348,81 +269,50 @@ const BANNED_SYNONYMS: readonly CheckedWord[] = [
 		bannedFor: "Collaboration",
 		replacement: "collaboration",
 	},
+	{
+		word: "kickoff message",
+		plural: "kickoff messages",
+		bannedFor: "Brief",
+		replacement: "brief",
+	},
+	{ word: "handover note", plural: "handover notes", bannedFor: "Brief", replacement: "brief" },
 	{ word: "decider", plural: "deciders", bannedFor: "Approver", replacement: "approver" },
-	{
-		word: "details sidebar",
-		plural: "details sidebars",
-		bannedFor: "Details panel",
-		replacement: "details panel",
-	},
-	{
-		word: "info panel",
-		plural: "info panels",
-		bannedFor: "Details panel",
-		replacement: "details panel",
-	},
-	{ word: "topic name", plural: "topic names", bannedFor: "Chat title", replacement: "chat title" },
 	{ word: "chat type", plural: "chat types", bannedFor: "Chat kind", replacement: "chat kind" },
-	// A nested chat by its old name: the `?item=` it opened by, `markItemRead`,
-	// `ItemPanel` and `ItemChatPage`.
-	{ word: "item chat", plural: "item chats", bannedFor: "Nested chat", replacement: "nested chat" },
 	{
-		word: "item panel",
-		plural: "item panels",
-		bannedFor: "Nested chat",
-		replacement: "nested chat panel",
+		word: "read state",
+		plural: "read states",
+		bannedFor: "Read cursor",
+		replacement: "read cursor",
 	},
-	{
-		word: "item page",
-		plural: "item pages",
-		bannedFor: "Nested chat",
-		replacement: "nested chat page",
-	},
-	{
-		word: "item read",
-		plural: "items read",
-		bannedFor: "Nested chat",
-		replacement: "nested chat read",
-	},
-	{ word: "sub chat", plural: "sub chats", bannedFor: "Nested chat", replacement: "nested chat" },
-	{ word: "subchat", plural: "subchats", bannedFor: "Nested chat", replacement: "nested chat" },
 	{
 		word: "read receipt",
 		plural: "read receipts",
-		bannedFor: "Read state",
-		replacement: "read state",
-	},
-	{
-		word: "listed chat activity",
-		plural: "listed chat activities",
-		bannedFor: "Chat status",
-		replacement: "chat status",
-	},
-	{
-		word: "project marker",
-		plural: "project markers",
-		bannedFor: "Attention mark",
-		replacement: "attention mark",
-	},
-	{
-		word: "chat marker",
-		plural: "chat markers",
-		bannedFor: "Attention mark",
-		replacement: "attention mark",
+		bannedFor: "Read cursor",
+		replacement: "read cursor",
 	},
 
 	// A project's resources
 	{
+		word: "sealed address",
+		plural: "sealed addresses",
+		bannedFor: "Page address",
+		replacement: "page address",
+	},
+	{
+		word: "share link",
+		plural: "share links",
+		bannedFor: "Page address",
+		replacement: "page address",
+	},
+	{
 		word: "connection",
 		plural: "connections",
 		bannedFor: "Connector",
-		replacement: "connector, or a provider's provider access",
-		// Other connections: a socket's, an HTTP request's and its `Connection`
-		// header, a WebSocket's, a database's and its pool's, the event
-		// stream's, and the computer providers' SDKs' own. And migrations by
-		// their names.
+		replacement: "connector",
+		// Other connections: a socket's, an HTTP request's, a WebSocket's, the
+		// event stream's, a database's, and the computer providers' SDKs' own.
 		otherMeanings:
-			/closeAllConnections|max_connections|maxConnections|connectionString|connection string|pg-connection-string|proxy-connection|\$connection_upgrade|proxy_set_header Connection|"Connection",|ProviderConnectionLost|CONNECTION_DROPPED|ConnectionConfig|connectionConfig|ConnectionOpts|Connections Sugabots makes|viewer's connection|per connection|No connection to|connection never made|dead connection|same connection|(?:[Cc]heck|lost|dropped|refused|open|first|desktop viewer's|hidden page's) (?:the |your )?connection|connection (?:drops|dropped|refused|ended|open|could be made|is made|to (?:one|any other host|the browser|\$\{)|holds the computer awake|pool)|(?:A|a) connection (?:to|holds)|One connection|ended a connection|held connection|\b\d{14}_[a-z0-9_]+/g,
+			/closeAllConnections|ProviderConnectionLost|ConnectionConfig|connectionConfig|ConnectionOpts|Connections Sugabots makes|viewer's connection|per connection|No connection to|connection never made|dead connection|same connection|(?:[Cc]heck|lost|dropped|refused|open|first|desktop viewer's|hidden page's) (?:the |your )?connection|connection (?:drops|dropped|refused|ended|open|could be made|is made|to (?:one|any other host|the browser|the event stream|\$\{)|holds the computer awake|pool)|(?:A|a) connection (?:to|holds)|direct connection/g,
 		keptIn: [
 			// A model request's socket, made, refused or dropped.
 			/^packages\/core\/src\/providers\/models\/request-failures\.ts$/,
@@ -433,11 +323,10 @@ const BANNED_SYNONYMS: readonly CheckedWord[] = [
 			/^packages\/workflow\//,
 			/^packages\/core\/src\/accounting\/usage\.ts$/,
 			/^packages\/core\/src\/providers\/network\//,
-			/^packages\/server\/src\/(?:auth\/authentication|workflows)\.ts$/,
+			/^packages\/server\/src\/auth\/authentication\.ts$/,
 			/^packages\/sdk\/src\/events(?:\.test)?\.ts$/,
 			/^packages\/docs\/content\/(?:configuration|deploy-with-docker)\.mdx$/,
 			/^packages\/website\/scripts\/capture\/environment\.ts$/,
-			/^packages\/web\/vite\.config\.ts$/,
 			/^\.env\.example$/,
 			/^compose\.yml$/,
 			/^docker\//,
@@ -510,40 +399,10 @@ const BANNED_SYNONYMS: readonly CheckedWord[] = [
 	{ word: "ad-hoc run", plural: "ad-hoc runs", bannedFor: "Manual run", replacement: "manual run" },
 	{ word: "run now", plural: "run now", bannedFor: "Manual run", replacement: "start a run" },
 	{
-		word: "connector look",
-		plural: "connector looks",
-		bannedFor: "Mark",
-		replacement: "mark, or a marked connector",
-	},
-	{
 		word: "approval app",
 		plural: "approval apps",
 		bannedFor: "Tool source",
 		replacement: "tool source",
-	},
-	{
-		word: "home directory",
-		plural: "home directories",
-		bannedFor: "Home folder",
-		replacement: "home folder",
-	},
-	{
-		word: "take control",
-		plural: "took control",
-		bannedFor: "Computer take over",
-		replacement: "take over",
-	},
-	{
-		word: "remote control",
-		plural: "remote controls",
-		bannedFor: "Computer take over",
-		replacement: "take over",
-	},
-	{
-		word: "internet access",
-		plural: "internet access",
-		bannedFor: "Web access",
-		replacement: "web access",
 	},
 	{
 		word: "tool permission",
@@ -680,7 +539,8 @@ const SKIPPED_PATHS: readonly RegExp[] = [
  * `podId`, `isPod`, `PodComputers`, `pod_id` and `POD_ID`, but not `tripod`
  * or `podcast`. A word of several, such as "main chat", is matched with its
  * parts apart or joined as an identifier joins them: `main chat`, `main-chat`,
- * `mainChat`, `MainChat` and `MAIN_CHAT`.
+ * `mainChat`, `MainChat` and `MAIN_CHAT`. One led by an acronym is matched
+ * with the acronym in capitals too: `MCP tool`, `MCPTool` and `LLM provider`.
  */
 function wordPattern({ word, plural }: CheckedWord): RegExp {
 	const forms = (casing: (part: string) => string, joinings: (part: string) => string[]) =>
@@ -699,11 +559,16 @@ function wordPattern({ word, plural }: CheckedWord): RegExp {
 		(part) => part.toUpperCase(),
 		(part) => [`[ _-]?${part.toUpperCase()}`],
 	);
+	const acronymLed = forms(
+		(part) => part.toUpperCase(),
+		(part) => [`[ _-]${part}`, `[ _-]?${capitalise(part)}`],
+	);
 	return new RegExp(
 		[
 			`(?<![A-Za-z])(?:${lower})(?![a-z])`,
 			`(?<![A-Z])(?:${capitalised})(?![a-z])`,
 			`(?<![A-Za-z])(?:${upper})(?![A-Za-z])`,
+			`(?<![A-Za-z])(?:${acronymLed})(?![a-z])`,
 		].join("|"),
 		"g",
 	);

@@ -4,15 +4,15 @@ import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { PersonResolver } from "../../http/app.test-support.ts";
-import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
+import type { MemberResolver } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy, signedInWith } from "../../http/app.test-support.ts";
 
 /**
  * Creating a workspace and moving it to another time zone, over doubles of
  * `Membership` and `WorkspaceTimeZone`. What they store is their own tests'.
  */
 
-const resolvePerson: PersonResolver = async () => ({
+const resolveMember: MemberResolver = async () => ({
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Ada",
 	email: "ada@example.com",
@@ -29,10 +29,10 @@ const created: Workspace = {
 
 const createWith = (create: Membership.Interface["create"], payload: unknown) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolvePerson), unimplemented(Membership.Service, { create })),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(Membership.Service, { create })),
 	).request("/workspaces", {
 		method: "POST",
-		headers: { authorization: "Bearer token", "content-type": "application/json" },
+		headers: { ...signedInWith("token"), "content-type": "application/json" },
 		body: JSON.stringify(payload),
 	});
 
@@ -78,10 +78,10 @@ describe("creating a workspace", () => {
 
 const changeWith = (change: WorkspaceTimeZone.Interface["change"], payload: unknown) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolvePerson), unimplemented(WorkspaceTimeZone.Service, { change })),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(WorkspaceTimeZone.Service, { change })),
 	).request("/workspaces/nitric/time-zone", {
 		method: "PUT",
-		headers: { authorization: "Bearer token", "content-type": "application/json" },
+		headers: { ...signedInWith("token"), "content-type": "application/json" },
 		body: JSON.stringify(payload),
 	});
 

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Browser, BrowserContext, Route } from "playwright";
-import { click, closePanel, drawCursor, openNewChat, write } from "./app.ts";
+import { click, drawCursor, openNewChat, write } from "./app.ts";
 import type { Backdrop } from "./backdrops.ts";
 import { signedInContext, WORKSPACE } from "./browser.ts";
 import { type Environment, REPO, step } from "./environment.ts";
@@ -12,8 +12,8 @@ import { type Chrome, chromes, openStage, type Stage } from "./stage.ts";
 /**
  * The demo under the hero. Kestrel Freight was charged twice: from Support's
  * handover chat, Anita starts a chat asking Ticket Desk to refund it. Ticket Desk
- * offers to find out why too, hands that to Billing Engineer, asks before it
- * refunds, and Support's people pick it up from there.
+ * offers to find out why too, asks Billing Engineer, asks before it
+ * refunds, and Support's members pick it up from there.
  *
  * Nothing calls a model. The bots' replies, and the teammates who answer as
  * she goes, are played by `packages/demo/src/showcase/stage.ts` on the
@@ -73,7 +73,7 @@ const SCENES: Scene[] = [
 	},
 	{
 		about:
-			"Ticket Desk offers to find out why it happened too, and Anita says yes. It finds both charges in Stripe and hands the why to Billing Engineer, which Anita looks in on.",
+			"Ticket Desk offers to find out why it happened too, and Anita says yes. It finds both charges in Stripe and asks Billing Engineer why, which answers in the chat.",
 		async play(stage) {
 			await stage.app
 				.getByText("Want me to ask Billing Engineer")
@@ -81,15 +81,8 @@ const SCENES: Scene[] = [
 				.waitFor({ timeout: 20_000 });
 			await stage.page.waitForTimeout(2000);
 			await write(stage, SAYS.goAhead);
-			const collaboration = stage.app.getByRole("button", {
-				name: /^Open Collaboration: Ticket Desk and Billing Engineer/,
-			});
-			await collaboration.waitFor({ timeout: 30_000 });
-			await stage.page.waitForTimeout(1600);
-			await click(stage, collaboration);
-			await stage.app.getByText("Found it.").first().waitFor({ timeout: 30_000 });
+			await stage.app.getByText("Found it.").first().waitFor({ timeout: 60_000 });
 			await stage.page.waitForTimeout(3200);
-			await closePanel(stage);
 		},
 	},
 	{

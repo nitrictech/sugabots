@@ -53,7 +53,7 @@ import { ModelChoiceList } from "./ModelChoiceList.tsx";
 import { API_FORMATS, BackToModels, ProviderTile } from "./ProviderSettings.tsx";
 
 /**
- * The providers most people connect, listed whether or not they are, each
+ * The providers most members connect, listed whether or not they are, each
  * with Connect until it is. Other providers are listed once connected.
  */
 const POPULAR_BUILT_INS: readonly BuiltInProviderId[] = [
@@ -236,9 +236,11 @@ function subLine(state: ProviderState, provider: ModelProvider): string {
 	return credentialLine(provider);
 }
 
-/** What a connected provider is connected with. */
+/** What a connected provider is connected with, and whose subscription it signs in with. */
 function credentialLine(provider: ModelProvider): string {
-	if (builtInSignsIn(provider.builtIn)) return "Signed in";
+	if (provider.signedIn) {
+		return provider.signedInAs ? `Signed in as ${provider.signedInAs.name}` : "Signed in";
+	}
 	if (provider.hasApiKey) return "API key set";
 	return "No key needed";
 }
@@ -545,7 +547,7 @@ function BuiltInStep({
 		if (!ready) return;
 		setError(undefined);
 		try {
-			// A seeded subscription provider, like ChatGPT, already exists; its page is where the person
+			// A seeded subscription provider, like ChatGPT, already exists; its page is where the member
 			// signs in, which is what switches it on.
 			if (signsIn && existing) {
 				await onAdded(existing);

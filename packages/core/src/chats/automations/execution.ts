@@ -8,11 +8,10 @@ import {
 	automation,
 	automationRun,
 	bot,
-	chatRead,
 	message,
 	placedChat,
+	readCursor,
 } from "../../database/schema.ts";
-import { lineageOf } from "../store/tree.ts";
 
 /**
  * A run as the API describes it, listed in the chat `rootChatId`,
@@ -46,34 +45,22 @@ export const resultPosted = (runId: SQLWrapper) =>
 	sql<boolean>`exists (select 1 from ${message} where ${message.runId} = ${runId})`;
 
 /**
- * The automation run a chat belongs to, found through its ancestors, as a
- * scalar subquery: a collaboration an automation's bot starts is part of the run.
+ * A column of the automation run whose chat is `chatId`, as a scalar
+ * subquery. Null for any other chat.
  */
-export const runIdOf = (chatId: SQLWrapper) => sql<string | null>`(
-	select execution.id
-	from ${automationRun} execution
-	join ${lineageOf(chatId)} as lineage on lineage.id = execution.chat_id
-	limit 1
+export const runColumnOf = (chatId: SQLWrapper, column: "id" | "bot_id") => sql<string | null>`(
+	select chat_run.${sql.raw(column)}
+	from ${automationRun} chat_run
+	where chat_run.chat_id = ${chatId}
 )`;
 
 export const findRunId = Effect.fn("Run.findRunId")(function* (db: Executor, chatId: string) {
 	const rows = yield* db.execute<{ id: string | null }>(
-		sql`select ${runIdOf(sql`${chatId}`)} as id`,
+		sql`select ${runColumnOf(sql`${chatId}`, "id")} as id`,
 		"objects",
 	);
 	return rows[0]?.id ?? undefined;
 });
-
-/**
- * The bot doing the automation run a chat belongs to (see `runIdOf`), as
- * a scalar subquery; null for a chat outside a run.
- */
-export const runBotIdOf = (chatId: SQLWrapper) => sql<string | null>`(
-	select execution.bot_id
-	from ${automationRun} execution
-	join ${lineageOf(chatId)} as lineage on lineage.id = execution.chat_id
-	limit 1
-)`;
 
 /**
  * What who decides a run's approvals is decided from about the bot doing
@@ -87,7 +74,7 @@ export const runBotFactsOf = (chatId: SQLWrapper) => sql<BotFacts | null>`(
 		'assistantOf', run_bot.assistant_of
 	)
 	from ${bot} run_bot
-	where run_bot.id = ${runBotIdOf(chatId)}
+	where run_bot.id = ${runColumnOf(chatId, "bot_id")}
 )`;
 
 /** The bot doing the run the chat `chatId` belongs to, as `runBotFactsOf` reads it; undefined outside a run. */
@@ -108,8 +95,8 @@ export const findRunBot = Effect.fn("Run.findRunBot")(function* (db: Executor, c
  * Lock order: only settlement, in a transaction of its own after the events
  * that trigger it commit, and a transaction admitting work into the run
  * (`automationAcceptsWork`) take this lock, both before any row they lock.
- * Settlement skips the running turns, collaborations and waiting lane
- * requests another transaction holds; that transaction's own events settle
+ * Settlement skips the running turns and waiting lane requests another
+ * transaction holds; that transaction's own events settle
  * the run again.
  */
 export const lockAutomationSettlement = (runId: string) =>
@@ -124,7 +111,7 @@ export const lockAutomationSettlement = (runId: string) =>
  * chat `chatId` belongs to, if any, as `lockAutomationSettlement` does, and
  * returns the run's id.
  */
-const lockAutomationSettlementOf = Effect.fn("Run.lockAutomationSettlementOf")(function* (
+export const lockAutomationSettlementOf = Effect.fn("Run.lockAutomationSettlementOf")(function* (
 	chatId: string,
 ) {
 	const runId = yield* query((db) => findRunId(db, chatId));
@@ -162,32 +149,27 @@ export const automationAcceptsWork = Effect.fn("Run.automationAcceptsWork")(func
 });
 
 /**
- * Whether the automation `of` names is failing, as a value for a query over
- * it: it paused itself after its runs kept failing, or it is enabled and its
- * latest run failed. One paused by hand is not failing, whatever its last run
- * did. `latestRunState` is the state of its latest run, null before it has
- * one: a column of `latestRunOf` where a query joins it, else looked up. The
- * lists, the sidebar, the details panel and the Personal Assistant all count
- * failing automations by this.
+ * Whether the automation is failing, as a value for a query over
+ * `automation`: it paused itself after its runs kept failing, or it is
+ * enabled and its latest run failed. One paused by hand is not failing,
+ * whatever its last run did. `latestRunState` is the state of its latest
+ * run, null before it has one: a column of `latestRunOf` where a query joins
+ * it, else looked up. The lists, the sidebar, the details panel and the
+ * Personal Assistant all count failing automations by this.
  */
 export function automationFailing(
-	of: typeof automation = automation,
-	latestRunState: SQLWrapper = latestRunStateOf(of.id),
+	latestRunState: SQLWrapper = latestRunStateOf(automation.id),
 ): SQL<boolean> {
-	return sql<boolean>`(${of.pausedAfterFailuresAt} is not null or (${of.state} = 'enabled' and coalesce(${latestRunState} = 'failed', false)))`;
+	return sql<boolean>`(${automation.pausedAfterFailuresAt} is not null or (${automation.state} = 'enabled' and coalesce(${latestRunState} = 'failed', false)))`;
 }
 
 /**
- * Whether the automation `of` names is failing (see `automationFailing`) and
- * `personId` has not opened its feed since its latest run ended: what marks it
- * for them until they look.
+ * Whether the automation is failing (see `automationFailing`) and `memberId`
+ * has not opened its feed since its latest run ended: what marks it for them
+ * until they look.
  */
-export function unseenAutomationFailure(
-	personId: string,
-	of: typeof automation = automation,
-	latestRunState?: SQLWrapper,
-): SQL<boolean> {
-	return sql<boolean>`(${automationFailing(of, latestRunState)} and ${latestRunUnseenBy(of.id, personId)})`;
+export function unseenAutomationFailure(memberId: string): SQL<boolean> {
+	return sql<boolean>`(${automationFailing()} and ${latestRunUnseenBy(automation.id, memberId)})`;
 }
 
 /**
@@ -224,7 +206,7 @@ export function listStatusColumns(latest: ReturnType<typeof latestRunOf>) {
 			acceptedAt: latest.acceptedAt,
 			posted: latest.posted,
 		},
-		failing: automationFailing(automation, latest.state),
+		failing: automationFailing(latest.state),
 	};
 }
 
@@ -247,17 +229,17 @@ export function toListStatus(row: {
 }
 
 /**
- * Whether `personId` has not opened the feed of the automation `automationId`
+ * Whether `memberId` has not opened the feed of the automation `automationId`
  * since its latest run ended, as a value for a query; false while it has no
  * run that ended. Opening the feed reads it through its newest run's end.
  */
-function latestRunUnseenBy(automationId: SQLWrapper, personId: string): SQL<boolean> {
+function latestRunUnseenBy(automationId: SQLWrapper, memberId: string): SQL<boolean> {
 	return sql<boolean>`coalesce((
 		select ${automationRun.finishedAt} is not null and not exists (
-			select 1 from ${chatRead} join ${placedChat} on ${placedChat.id} = ${chatRead.chatId}
+			select 1 from ${readCursor} join ${placedChat} on ${placedChat.id} = ${readCursor.chatId}
 			where ${placedChat.automationId} = ${automationId}
-				and ${chatRead.personId} = ${personId}
-				and ${chatRead.readThrough} >= ${automationRun.finishedAt}
+				and ${readCursor.memberId} = ${memberId}
+				and ${readCursor.readThrough} >= ${automationRun.finishedAt}
 		)
 		from ${automationRun}
 		where ${automationRun.automationId} = ${automationId}

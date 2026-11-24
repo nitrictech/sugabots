@@ -17,7 +17,7 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 /**
- * Every project the person could be in: those they are in, then the public
+ * Every project the member could be in: those they are in, then the public
  * ones they could join, each by name and what it's for, with Join or Open.
  * A + makes another.
  */

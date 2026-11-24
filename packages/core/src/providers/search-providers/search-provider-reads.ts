@@ -6,11 +6,15 @@ import { query } from "../../database/database.ts";
 import { type SearchProviderRow, searchProvider } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
 
-/** The workspace's search provider, or nothing when it has none. */
-export const searchProviderOf = (workspaceId: string) =>
+/** The row of the workspace's search provider, or nothing when it has none. */
+export const searchProviderRowOf = (workspaceId: string) =>
 	query((db) =>
 		db.select().from(searchProvider).where(eq(searchProvider.workspaceId, workspaceId)).limit(1),
-	).pipe(Effect.map(([row]) => row && toSearchProvider(row)));
+	).pipe(Effect.map(([row]) => row));
+
+/** The workspace's search provider, or nothing when it has none. */
+export const searchProviderOf = (workspaceId: string) =>
+	Effect.map(searchProviderRowOf(workspaceId), (row) => row && toSearchProvider(row));
 
 export function toSearchProvider(row: SearchProviderRow): SearchProvider {
 	const builtIn = searchBuiltInProvider(row.builtIn);

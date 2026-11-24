@@ -25,7 +25,7 @@ export interface Interface {
 	 * workspace runs it on, so it takes `workspace.providers.manage`.
 	 *
 	 * That model also becomes the workspace's default and every system bot's:
-	 * it is the one model the person setting the workspace up has chosen, and
+	 * it is the one model the member setting the workspace up has chosen, and
 	 * the system bots have to run on something.
 	 *
 	 * The first time, it records when the workspace's setup was completed.
@@ -68,7 +68,7 @@ export const make = Effect.gen(function* () {
 									and(
 										eq(bot.id, botId),
 										eq(bot.workspaceId, resolved),
-										eq(bot.createdById, actor.personId),
+										eq(bot.createdById, actor.memberId),
 										isNull(bot.systemBotKey),
 									),
 								)
@@ -103,7 +103,7 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([Authorization.layer, ModelProviderStore.layer, BotStore.layer]),
 );
 
-/** The bot named is not one this person may finish workspace setup with. */
+/** The bot named is not one this member may finish workspace setup with. */
 export class NotReadyToFinish extends Data.TaggedError("NotReadyToFinish") implements UserFacing {
 	get userMessage() {
 		return userText`Finish creating your bot first`;

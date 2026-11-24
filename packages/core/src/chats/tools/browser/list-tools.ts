@@ -9,7 +9,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { COMPUTER_IMAGE } from "@sugabots/contracts";
 
-/** Tools bots aren't offered: arbitrary code, and resizing a window people are watching. */
+/** Tools bots aren't offered: arbitrary code, and resizing a window members are watching. */
 const LEFT_OUT = new Set(["browser_run_code_unsafe", "browser_resize"]);
 
 const client = new Client({ name: "sugabots-list-tools", version: "1" });

@@ -1,4 +1,4 @@
-import type { BotParticipant, Message, SignedInPerson } from "@sugabots/contracts";
+import type { BotParticipant, CurrentUser, Message } from "@sugabots/contracts";
 import { quotedPreview } from "@sugabots/contracts";
 import { cn } from "cn";
 import { type CSSProperties, type RefObject, useLayoutEffect, useRef, useState } from "react";
@@ -6,14 +6,13 @@ import { useChatDraft, useReplyDraft } from "@/lib/chat-draft.ts";
 import {
 	useChatEvents,
 	useChatNotices,
-	usePeopleTyping,
+	useMembersTyping,
 	useTypingSignal,
 } from "@/lib/chat-events.ts";
 import { useChat } from "@/lib/chat-query.ts";
 import {
 	type ChatLocation,
 	placeBot,
-	useChatHistory,
 	useChatMessages,
 	useMarkReadWhileSeen,
 	useOptimisticChatItems,
@@ -42,7 +41,7 @@ import { FileDropTarget } from "./FileDropTarget.tsx";
 import { useListedProjectChat } from "./listed-project-chat.ts";
 import { mentionableIn } from "./mentions.tsx";
 import { useMessageSending } from "./message-sending.ts";
-import { opensBeside, useNestedChatOpening } from "./nested-chat-opening.ts";
+import { useRunOpening } from "./run-opening.ts";
 import type { Staged, StagedChange } from "./staged.ts";
 
 /** The narrowest the chat may be dragged beside what is staged large. */
@@ -56,10 +55,8 @@ export function ChatPane({
 	chatLocation,
 	chatId,
 	signedIn,
-	nestedChatId,
 	focusMessageId,
 	place,
-	onNestedChatChange,
 	staged,
 	onStagedChange,
 }: {
@@ -67,12 +64,10 @@ export function ChatPane({
 	chatLocation: ChatLocation;
 	/** The chat shown. */
 	chatId: string;
-	signedIn: SignedInPerson;
-	nestedChatId?: string;
+	signedIn: CurrentUser;
 	/** A message to jump to and point out, such as the mention it was opened from. */
 	focusMessageId?: string;
 	place: ChatPlace;
-	onNestedChatChange: (nestedChatId: string | undefined) => void;
 	/** Open large beside the chat, in place of any sidebar. */
 	staged?: Staged;
 	onStagedChange: StagedChange;
@@ -85,7 +80,6 @@ export function ChatPane({
 	const openAutomations = (view: AutomationsView = { kind: "list" }) =>
 		onStagedChange({ kind: "automations", view });
 	const messages = useChatMessages(chatId);
-	const history = useChatHistory(chatId);
 	const opened = useChat(chatId);
 	const details = opened.data;
 	useChatEvents(chatId);
@@ -95,7 +89,7 @@ export function ChatPane({
 	const [replyingTo, setReplyingTo] = useReplyDraft(signedIn.id, chatId);
 	const attachments = useComposerAttachments(chatId);
 	useTypingSignal(chatId, draft);
-	const peopleTyping = usePeopleTyping(chatId, signedIn.id);
+	const membersTyping = useMembersTyping(chatId, signedIn.id);
 
 	const headerBox = useRef<HTMLDivElement>(null);
 	const messageColumn = useRef<HTMLDivElement>(null);
@@ -111,13 +105,10 @@ export function ChatPane({
 	const items = mergeChatItems(messages.items, optimistic, details?.messages ?? []);
 	const shownMessages = messagesIn(items);
 
-	const openNestedChat = useNestedChatOpening({
-		nestedChatId,
-		loaded: details !== undefined,
+	const openRun = useRunOpening({
 		items,
 		owner: chatLocation,
 		feedOfAutomationId: details?.automation?.id,
-		onNestedChatChange,
 	});
 	const position = useChatLogPosition({
 		messages,
@@ -127,7 +118,7 @@ export function ChatPane({
 	});
 	useMarkReadWhileSeen(chatId, items.at(-1), position.latestInView);
 	const recipients = useChatRecipients({
-		personId: signedIn.id,
+		memberId: signedIn.id,
 		chatId,
 		choosesBots: choosesBotsIn(details),
 		projectBots: details?.projectBots,
@@ -186,10 +177,9 @@ export function ChatPane({
 		if (message.author.kind === "automation_trigger") return;
 		setReplyingTo({ id: message.id, author: message.author, preview: quotedPreview(message) });
 	}
-	const nestedChatOpen = opensBeside(nestedChatId, history.entries);
 	// A chat's Details float as cards under the header's button; from a tablet up the chat makes way for them.
 	const floatingDetails =
-		place.kind === "own" && place.detailsOpen && !staged && !nestedChatOpen && !details.automation;
+		place.kind === "own" && place.detailsOpen && !staged && !details.automation;
 
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
@@ -243,6 +233,33 @@ export function ChatPane({
 						messages={messages}
 						columnRef={messageColumn}
 						underHeader={headerOverChat}
+						footer={
+							<ChatFooter
+								chatLocation={chatLocation}
+								details={details}
+								signedIn={signedIn}
+								chatName={bot?.name ?? projectChat.name}
+								draft={draft}
+								onDraftChange={setDraft}
+								replyingTo={replyingTo}
+								onReplyingToChange={setReplyingTo}
+								attachments={attachments}
+								audience={draftAudience({
+									draft,
+									chatKind: details.chat.kind,
+									mentionable,
+									projectBots: details.projectBots,
+									lead: leadOf(chatLocation, details),
+									leadHasModel,
+									chosen: recipients.answering,
+									replyingTo,
+								})}
+								recipients={recipients}
+								sending={sending}
+								resolveFailed={chatResolved.failed}
+								typers={typersAfter(shownMessages, membersTyping)}
+							/>
+						}
 						intro={
 							<ChatIntro
 								chatLocation={chatLocation}
@@ -262,7 +279,7 @@ export function ChatPane({
 							viewerWriting={draft.trim() !== ""}
 							pointedOut={position.pointedOut}
 							previews={!staged}
-							onOpenNestedChat={openNestedChat}
+							onOpenRun={openRun}
 							onOpenFile={openFile}
 							onOpenDesktop={openDesktop}
 							onReply={replyTo}
@@ -275,31 +292,6 @@ export function ChatPane({
 						)}
 						<ChatNotices notices={notices} />
 					</ChatLog>
-					<ChatFooter
-						chatLocation={chatLocation}
-						details={details}
-						signedIn={signedIn}
-						chatName={bot?.name ?? projectChat.name}
-						draft={draft}
-						onDraftChange={setDraft}
-						replyingTo={replyingTo}
-						onReplyingToChange={setReplyingTo}
-						attachments={attachments}
-						audience={draftAudience({
-							draft,
-							chatKind: details.chat.kind,
-							mentionable,
-							projectBots: details.projectBots,
-							lead: leadOf(chatLocation, details),
-							leadHasModel,
-							chosen: recipients.answering,
-							replyingTo,
-						})}
-						recipients={recipients}
-						sending={sending}
-						resolveFailed={chatResolved.failed}
-						typers={typersAfter(shownMessages, peopleTyping)}
-					/>
 				</FileDropTarget>
 			</div>
 			<ChatBeside
@@ -310,11 +302,6 @@ export function ChatPane({
 				place={place}
 				staged={staged}
 				onStagedChange={onStagedChange}
-				nestedChatId={nestedChatId}
-				entries={history.entries}
-				onNestedChatChange={onNestedChatChange}
-				onOpenNestedChat={openNestedChat}
-				onOpenFile={openFile}
 				onOpenAutomations={openAutomations}
 				shownMessages={shownMessages}
 				projectChatName={projectChat.name}

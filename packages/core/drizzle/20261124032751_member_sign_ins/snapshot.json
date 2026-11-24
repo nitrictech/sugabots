@@ -1,0 +1,244 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "bb34fccd-42d2-44bf-91da-ed0316a8ab02",
+  "prevIds": [
+    "f488d7b2-7b93-4430-8b4a-2f184ee600ce"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "connector",
+        "signed_in_by_id"
+      ],
+      "writes": [
+        "s|col|public.connector.signed_in_by_id",
+        "n|col|public.connector.signed_in_by_id",
+        "e|col|public.connector.signed_in_by_id"
+      ],
+      "reads": [
+        "n|tbl|public.connector",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "connector",
+        "installed_by_id"
+      ],
+      "writes": [
+        "s|col|public.connector.installed_by_id",
+        "n|col|public.connector.installed_by_id",
+        "e|col|public.connector.installed_by_id"
+      ],
+      "reads": [
+        "n|tbl|public.connector",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "model_provider",
+        "signed_in_by_id"
+      ],
+      "writes": [
+        "s|col|public.model_provider.signed_in_by_id",
+        "n|col|public.model_provider.signed_in_by_id",
+        "e|col|public.model_provider.signed_in_by_id"
+      ],
+      "reads": [
+        "n|tbl|public.model_provider",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "connector"
+      ],
+      "writes": [
+        "s|fk|public.connector.connector_signed_in_by_id_member_id_fkey",
+        "n|fk|public.connector.connector_signed_in_by_id_member_id_fkey",
+        "e|fk|public.connector.connector_signed_in_by_id_member_id_fkey",
+        "n|con|public.connector.connector_signed_in_by_id_member_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.connector",
+        "n|sch|public",
+        "n|tbl|public.member",
+        "n|sch|public",
+        "n|col|public.connector.signed_in_by_id",
+        "n|col|public.member.id",
+        "e|uniqueness|public.member.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "connector"
+      ],
+      "writes": [
+        "s|fk|public.connector.connector_installed_by_id_member_id_fkey",
+        "n|fk|public.connector.connector_installed_by_id_member_id_fkey",
+        "e|fk|public.connector.connector_installed_by_id_member_id_fkey",
+        "n|con|public.connector.connector_installed_by_id_member_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.connector",
+        "n|sch|public",
+        "n|tbl|public.member",
+        "n|sch|public",
+        "n|col|public.connector.installed_by_id",
+        "n|col|public.member.id",
+        "e|uniqueness|public.member.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "model_provider"
+      ],
+      "writes": [
+        "s|fk|public.model_provider.model_provider_signed_in_by_id_member_id_fkey",
+        "n|fk|public.model_provider.model_provider_signed_in_by_id_member_id_fkey",
+        "e|fk|public.model_provider.model_provider_signed_in_by_id_member_id_fkey",
+        "n|con|public.model_provider.model_provider_signed_in_by_id_member_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.model_provider",
+        "n|sch|public",
+        "n|tbl|public.member",
+        "n|sch|public",
+        "n|col|public.model_provider.signed_in_by_id",
+        "n|col|public.member.id",
+        "e|uniqueness|public.member.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connector",
+        "name": "signed_in_by_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connector",
+        "name": "installed_by_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "model_provider",
+        "name": "signed_in_by_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connector",
+        "name": "connector_signed_in_by_id_member_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "signed_in_by_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "member",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connector",
+        "name": "connector_installed_by_id_member_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "installed_by_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "member",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "model_provider",
+        "name": "model_provider_signed_in_by_id_member_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "signed_in_by_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "member",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    }
+  ]
+}

@@ -16,17 +16,17 @@ import { ModelProviderStore } from "../../providers/model-providers/model-provid
 import type { UserFacing } from "../../user-message.ts";
 import type { LeadsProjects } from "../projects/project-leads.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
-import { personFacingBot, systemBots, visiblePersonFacingBots } from "./bot-reads.ts";
+import { memberFacingBot, systemBots, visibleMemberFacingBots } from "./bot-reads.ts";
 import { BotStore } from "./bot-store.ts";
 import { PersonalAssistants } from "./personal-assistants.ts";
 
 /**
- * A workspace's bots: those people make, each person's Personal Assistant,
+ * A workspace's bots: those members make, each member's Personal Assistant,
  * and the system bots it sets up once. Whatever a bot runs on has to be a
  * model the workspace offers.
  */
 export interface Interface {
-	/** The bots the current actor sees, by name: those they reach, and every private one for an admin. */
+	/** The bots the current actor sees, by name: those they reach, and every personal one for an admin. */
 	readonly list: (input: {
 		workspace: string;
 	}) => Effect.Effect<Bot[], AuthorizationDenied, CurrentActor.Service>;
@@ -50,7 +50,7 @@ export interface Interface {
 	/**
 	 * The actor's Personal Assistant, made on `model` when they have none. An
 	 * existing one moves onto `model` when it has no model or runs on one the
-	 * workspace no longer offers, so a model its person chose stays. Without
+	 * workspace no longer offers, so a model its member chose stays. Without
 	 * `model`, one with no model is given the workspace's default.
 	 */
 	readonly ensureAssistant: (input: {
@@ -74,7 +74,7 @@ export interface Interface {
 		| BotStore.BotGone
 		| BotStore.SystemBotImmutable
 		| LeadsProjects
-		| AssistantStaysPrivate
+		| AssistantVisibilityFixed
 		| AssistantInstructionsManaged
 		| AssistantManaged,
 		CurrentActor.Service
@@ -119,7 +119,7 @@ export const make = Effect.gen(function* () {
 
 	/** The bot as `actor` is shown it, with whether they pinned it. */
 	const shown = (row: schema.BotRow, actor: Actor) =>
-		Effect.flatMap(personFacingBot(row.id, actor), (bot) =>
+		Effect.flatMap(memberFacingBot(row.id, actor), (bot) =>
 			bot ? Effect.succeed(bot) : Effect.fail(new ResourceHidden({ resource: "bot" })),
 		);
 
@@ -132,7 +132,7 @@ export const make = Effect.gen(function* () {
 						input.workspace,
 						"workspace.read",
 					);
-					return yield* visiblePersonFacingBots(workspaceId, actor);
+					return yield* visibleMemberFacingBots(workspaceId, actor);
 				}),
 			),
 
@@ -142,7 +142,7 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { workspaceId, actor } = yield* authorization.workspace(workspace, "bot.create");
 					yield* modelProviders.requireEnabled(workspaceId, bot.model);
-					const made = yield* bots.create(workspaceId, { createdById: actor.personId, bot });
+					const made = yield* bots.create(workspaceId, { createdById: actor.memberId, bot });
 					return yield* shown(made, actor);
 				}),
 			),
@@ -154,7 +154,7 @@ export const make = Effect.gen(function* () {
 					const { bot, actor } = yield* authorization.bot(botId, "bot.read");
 					yield* bots.setPinned({
 						workspaceId: bot.workspaceId,
-						personId: actor.personId,
+						memberId: actor.memberId,
 						botId: bot.id,
 						pinned,
 					});
@@ -170,11 +170,11 @@ export const make = Effect.gen(function* () {
 						workspace,
 						"workspace.read",
 					);
-					const person = { workspaceId, personId: actor.personId };
+					const member = { workspaceId, memberId: actor.memberId };
 					const assistant =
 						model === undefined
-							? yield* personalAssistants.provision(person)
-							: yield* personalAssistants.provisionWithModel({ ...person, model });
+							? yield* personalAssistants.provision(member)
+							: yield* personalAssistants.provisionWithModel({ ...member, model });
 					return yield* shown(assistant, actor);
 				}),
 			),
@@ -196,7 +196,7 @@ export const make = Effect.gen(function* () {
 						yield* modelProviders.requireEnabled(bot.workspaceId, changes.model);
 					}
 					return yield* shown(
-						yield* bots.update(bot.workspaceId, bot.id, changes, actor.personId),
+						yield* bots.update(bot.workspaceId, bot.id, changes, actor.memberId),
 						actor,
 					);
 				}),
@@ -217,7 +217,7 @@ export const make = Effect.gen(function* () {
 							ProjectComputers.lockWithoutComputer(defaultProject),
 						);
 					});
-					yield* bots.remove(bot.workspaceId, bot.id, actor.personId, destroyComputer);
+					yield* bots.remove(bot.workspaceId, bot.id, actor.memberId, destroyComputer);
 				}),
 			),
 
@@ -263,11 +263,16 @@ export const layer = layerNoDeps.pipe(
 	]),
 );
 
-/** What a Personal Assistant's person may change of it: its name and its look. */
-const ASSISTANT_LOOK: ReadonlySet<keyof BotUpdate> = new Set(["name", "color", "eyes", "shape"]);
+/** What a Personal Assistant's member may change of it: its name and its avatar. */
+const ASSISTANT_NAME_AND_AVATAR_FIELDS: ReadonlySet<keyof BotUpdate> = new Set([
+	"name",
+	"color",
+	"eyes",
+	"shape",
+]);
 
 /**
- * Refuses `changes` to a Personal Assistant that change more than its look:
+ * Refuses `changes` to a Personal Assistant that change more than its name and avatar:
  * Sugabots manages the rest of it. Its connectors are changed apart.
  */
 const requireAssistantAvatarOnly = (changes: BotUpdate) =>
@@ -275,11 +280,12 @@ const requireAssistantAvatarOnly = (changes: BotUpdate) =>
 		const changed = (Object.keys(changes) as (keyof BotUpdate)[]).filter(
 			(field) => changes[field] !== undefined,
 		);
-		// A Personal Assistant is always its person's alone.
-		if (changed.includes("visibility")) return yield* new AssistantStaysPrivate();
-		// What a Personal Assistant is told is Sugabots', not its person's.
-		if (changed.includes("prompt")) return yield* new AssistantInstructionsManaged();
-		if (changed.some((field) => !ASSISTANT_LOOK.has(field))) return yield* new AssistantManaged();
+		// A Personal Assistant is always its member's alone.
+		if (changed.includes("visibility")) return yield* new AssistantVisibilityFixed();
+		// What a Personal Assistant is told is Sugabots', not its member's.
+		if (changed.includes("instructions")) return yield* new AssistantInstructionsManaged();
+		if (changed.some((field) => !ASSISTANT_NAME_AND_AVATAR_FIELDS.has(field)))
+			return yield* new AssistantManaged();
 	});
 
 /** A bot update that names nothing to change. */
@@ -299,16 +305,16 @@ export class AssistantInstructionsManaged
 	}
 }
 
-/** Sugabots manages a Personal Assistant: its person changes only its name, its look and its connectors. */
+/** Sugabots manages a Personal Assistant: its member changes only its name, its avatar and its connectors. */
 export class AssistantManaged extends Data.TaggedError("AssistantManaged") implements UserFacing {
 	get userMessage() {
-		return userText`Only a Personal Assistant's name, look and connectors can be changed`;
+		return userText`Only a Personal Assistant's name, avatar and connectors can be changed`;
 	}
 }
 
-/** A Personal Assistant is only ever its person's, so it can't be made public. */
-export class AssistantStaysPrivate
-	extends Data.TaggedError("AssistantStaysPrivate")
+/** A Personal Assistant is only ever its member's, so it can't be made public. */
+export class AssistantVisibilityFixed
+	extends Data.TaggedError("AssistantVisibilityFixed")
 	implements UserFacing
 {
 	get userMessage() {

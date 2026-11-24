@@ -10,7 +10,7 @@ import { Minus } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useBots } from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { botSettingsLink, projectBotsLink, projectPeopleLink, projectsLink } from "@/lib/links.ts";
+import { botSettingsLink, projectBotsLink, projectMembersLink, projectsLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { projectHeadcount } from "@/lib/project-headcount.ts";
 import {
@@ -31,7 +31,7 @@ import { BotMenuItem, LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
@@ -54,21 +54,21 @@ import {
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 
-/** Which of a project's settings pages is open: its own, its people, or its bots. */
-export type ProjectSettingsSection = "general" | "people" | "bots";
+/** Which of a project's settings pages is open: its own, its members, or its bots. */
+export type ProjectSettingsSection = "general" | "members" | "bots";
 
 /** The title of each of a project's settings pages. */
 const SECTION_TITLES = {
 	general: "Settings",
-	people: "People",
+	members: "Members",
 	bots: "Bots",
 } as const satisfies Record<ProjectSettingsSection, string>;
 
 /**
  * One project's settings, as pages of its own beside its chats: its own,
- * its lead bot among them, with its people and its bots each a page under
+ * its lead bot among them, with its members and its bots each a page under
  * it. Its computer and connectors are pages of the project's own. Only
- * public bots can be added, and a bot made private leaves its projects,
+ * public bots can be added, and a bot made personal leaves its projects,
  * unless it leads one.
  */
 export function ProjectSettingsPage({
@@ -110,11 +110,11 @@ function ProjectSettingsSectionContent({
 	section: ProjectSettingsSection;
 }) {
 	switch (section) {
-		case "people":
+		case "members":
 			return (
 				<SettingsPage
 					description={`Who is in ${project.name}.`}
-					headerAction={project.permissions.managePeople && <AddPeopleButton project={project} />}
+					headerAction={project.permissions.manageMembers && <AddMembersButton project={project} />}
 				>
 					<Members project={project} />
 				</SettingsPage>
@@ -148,7 +148,7 @@ function ProjectDetails({ project }: { project: Project }) {
 		leaveForPage(router.buildLocation(projectsLink()).href);
 	}
 
-	const headcount = projectHeadcount({ people: project.memberCount, bots: project.botCount });
+	const headcount = projectHeadcount({ members: project.memberCount, bots: project.botCount });
 
 	return (
 		<SettingsPage
@@ -161,7 +161,7 @@ function ProjectDetails({ project }: { project: Project }) {
 			{may.rename && (
 				<SettingsGroup
 					label="Lead bot"
-					note="Answers the project's chats unless people mention another bot, and reads those that mention only people."
+					note="Answers the project's chats unless members mention another bot, and reads those that mention only members."
 				>
 					<SettingsControlRow label="Lead bot">
 						<LeadBotPicker
@@ -174,10 +174,10 @@ function ProjectDetails({ project }: { project: Project }) {
 			)}
 			<SettingsGroup>
 				<SettingsRow
-					label="People"
+					label="Members"
 					trailing={<SettingsValue>{project.memberCount}</SettingsValue>}
 					chevron
-					render={<Link {...projectPeopleLink(project)} />}
+					render={<Link {...projectMembersLink(project)} />}
 				/>
 				<SettingsRow
 					label="Bots"
@@ -210,7 +210,7 @@ function ProjectDetails({ project }: { project: Project }) {
 						sub={
 							project.visibility === "public"
 								? "Listed for everyone in the workspace to join"
-								: "Only people added to it can see it"
+								: "Only members added to it can see it"
 						}
 						trailing={
 							<Toggle
@@ -339,7 +339,7 @@ function ProjectBots({ project }: { project: Project }) {
 }
 
 /*
- * The people in the project. Anyone in the workspace can be added; the label
+ * The members in the project. Anyone in the workspace can be added; the label
  * after a name is their standing in the workspace, since a project has no
  * roles of its own. Administrators are in every project, so who can be taken
  * out, and whether you may leave, is the API's answer.
@@ -352,23 +352,23 @@ function Members({ project }: { project: Project }) {
 	const navigate = useNavigate();
 	const [removing, setRemoving] = useState<ProjectMember>();
 	const session = useSession();
-	const roleOf = (personId: string) =>
-		memberships.data?.find((membership) => membership.person.id === personId)?.role;
-	const isYou = (personId: string) => personId === session.person?.id;
+	const roleOf = (memberId: string) =>
+		memberships.data?.find((membership) => membership.member.id === memberId)?.role;
+	const isYou = (memberId: string) => memberId === session.member?.id;
 	const mayTakeOut = (member: ProjectMember) =>
-		isYou(member.personId)
+		isYou(member.memberId)
 			? project.permissions.leave
-			: project.permissions.managePeople && member.removable;
-	const leaving = removing !== undefined && isYou(removing.personId);
+			: project.permissions.manageMembers && member.removable;
+	const leaving = removing !== undefined && isYou(removing.memberId);
 	const pending = leaving ? leave : remove;
 
 	async function takeOut(member: ProjectMember) {
-		const isLeaving = isYou(member.personId);
+		const isLeaving = isYou(member.memberId);
 		try {
 			if (isLeaving) {
 				await leave.mutateAsync();
 			} else {
-				await remove.mutateAsync({ personId: member.personId, member: false });
+				await remove.mutateAsync({ memberId: member.memberId, member: false });
 			}
 		} catch {
 			return;
@@ -385,21 +385,21 @@ function Members({ project }: { project: Project }) {
 	} else {
 		rows = members.data?.map((member) => (
 			<SettingsRow
-				key={member.personId}
-				icon={<PersonAvatar person={member} size={24} />}
+				key={member.memberId}
+				icon={<MemberAvatar member={member} size={24} />}
 				label={member.name}
 				trailing={
 					<>
 						<SettingsValue>
-							{isYou(member.personId)
+							{isYou(member.memberId)
 								? "You"
 								: // Said once the workspace roster has answered, not guessed before it.
-									memberships.data && workspaceRoleLabel(roleOf(member.personId))}
+									memberships.data && workspaceRoleLabel(roleOf(member.memberId))}
 						</SettingsValue>
 						{mayTakeOut(member) && (
 							<IconButton
 								variant="destructive"
-								label={isYou(member.personId) ? `Leave ${project.name}` : `Remove ${member.name}`}
+								label={isYou(member.memberId) ? `Leave ${project.name}` : `Remove ${member.name}`}
 								disabled={remove.isPending || leave.isPending}
 								onClick={() => setRemoving(member)}
 							>
@@ -423,7 +423,7 @@ function Members({ project }: { project: Project }) {
 				title={
 					leaving
 						? `Leave ${project.name}?`
-						: `Remove ${removing?.name ?? "this person"} from ${project.name}?`
+						: `Remove ${removing?.name ?? "this member"} from ${project.name}?`
 				}
 				description={
 					leaving
@@ -442,22 +442,22 @@ function Members({ project }: { project: Project }) {
 }
 
 /**
- * Add people, beside the People title: a menu of the workspace's people who
+ * Add members, beside the Members title: a menu of the workspace's members who
  * aren't in the project yet, each added as they are picked. Why an add failed is
  * said under the button.
  */
-function AddPeopleButton({ project }: { project: Project }) {
+function AddMembersButton({ project }: { project: Project }) {
 	const members = useProjectMembers(project.id);
 	const memberships = useMemberships(project.workspaceId);
 	const invite = usePlaceProjectMember(project.id);
-	const inProject = new Set(members.data?.map((member) => member.personId));
+	const inProject = new Set(members.data?.map((member) => member.memberId));
 	const invitable =
-		memberships.data?.filter((membership) => !inProject.has(membership.person.id)) ?? [];
+		memberships.data?.filter((membership) => !inProject.has(membership.member.id)) ?? [];
 	return (
 		<div className="flex flex-col items-end gap-2">
 			<DropdownMenu>
 				<SettingsAddButton disabled={invite.isPending} render={<DropdownMenuTrigger />}>
-					Add people
+					Add members
 				</SettingsAddButton>
 				<DropdownMenuContent align="end" className="min-w-52">
 					{memberships.isPending ? (
@@ -467,14 +467,14 @@ function AddPeopleButton({ project }: { project: Project }) {
 					) : (
 						invitable.map((membership) => (
 							<DropdownMenuItem
-								key={membership.person.id}
-								onClick={() => invite.mutate({ personId: membership.person.id, member: true })}
+								key={membership.member.id}
+								onClick={() => invite.mutate({ memberId: membership.member.id, member: true })}
 							>
 								{/* Hidden from the name, or the initials would read as part of it. */}
 								<span aria-hidden>
-									<PersonAvatar person={membership.person} size={22} />
+									<MemberAvatar member={membership.member} size={22} />
 								</span>
-								<span className="min-w-0 flex-1 truncate">{membership.person.name}</span>
+								<span className="min-w-0 flex-1 truncate">{membership.member.name}</span>
 							</DropdownMenuItem>
 						))
 					)}

@@ -3,15 +3,17 @@ import {
 	type ConnectorTool,
 	type ConnectorToolSetting,
 	type ConnectorWithTools,
-	type NamedPerson,
+	type NamedMember,
 	toolAccessCountsOf,
 } from "@sugabots/contracts";
 import { and, asc, eq, getColumns, type SQL, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
-import { namedPersonColumns } from "../../chats/store/participants.ts";
+import { namedMemberColumns } from "../../chats/store/participants.ts";
 import { query } from "../../database/database.ts";
-import { type ConnectorRow, connector, membership, person } from "../../database/schema.ts";
+import { type ConnectorRow, connector, member, membership } from "../../database/schema.ts";
 import type { Secrets } from "../../secrets/secrets.ts";
+import { membershipOf } from "../../workspaces/membership/member-reads.ts";
 import { configurationStatus } from "../tested-configuration.ts";
 import { isSignedIn, signInExpired, toolsOf } from "./connector-store.ts";
 import * as GitHub from "./github/github.ts";
@@ -41,7 +43,7 @@ const listedRow = { ...columnsBesideTools, tools: toolsWithoutDescriptions };
 export const connectorsIn = (workspaceId: string, projectId: string, cipher: Secrets.Interface) =>
 	listedRows(and(eq(connector.workspaceId, workspaceId), eq(connector.projectId, projectId))).pipe(
 		Effect.map((rows) =>
-			rows.map(({ row, connectedBy }) => toConnector(row, connectedBy, cipher).connector),
+			rows.map(({ row, ...members }) => toConnector(row, members, cipher).connector),
 		),
 	);
 
@@ -61,27 +63,41 @@ export const connectorIn = (
 	).pipe(
 		Effect.map(([found]): ConnectorWithTools | undefined => {
 			if (!found) return undefined;
-			const { connector: listed, tools } = toConnector(found.row, found.connectedBy, cipher);
+			const { connector: listed, tools } = toConnector(found.row, found, cipher);
 			return { ...listed, tools };
 		}),
 	);
 
+/** The member a connector signs in as, beside whoever added it. */
+const signer = alias(member, "signer");
+const signerMembership = alias(membership, "signer_membership");
+
+/** Whoever made its OAuth sign-in, or installed its GitHub app on their own account; a connector has one or neither. */
+const signedInAsId = sql`coalesce(${connector.signedInById}, ${connector.installedById})`;
+
+/**
+ * Connectors with whoever added each, and whoever each signs in as, while they
+ * are still in the workspace.
+ */
 function listedRows(where: SQL | undefined) {
 	return query((db) =>
 		db
 			.select({
 				row: listedRow,
-				connectedBy: namedPersonColumns,
+				connectedBy: namedMemberColumns,
+				signedInAs: { id: signer.id, name: signer.name, email: signer.email, image: signer.image },
 			})
 			.from(connector)
+			.leftJoin(membership, membershipOf(connector.workspaceId, connector.createdById))
+			.leftJoin(member, eq(member.id, membership.memberId))
 			.leftJoin(
-				membership,
+				signerMembership,
 				and(
-					eq(membership.workspaceId, connector.workspaceId),
-					eq(membership.personId, connector.createdById),
+					eq(signerMembership.workspaceId, connector.workspaceId),
+					eq(signerMembership.memberId, signedInAsId),
 				),
 			)
-			.leftJoin(person, eq(person.id, membership.personId))
+			.leftJoin(signer, eq(signer.id, signerMembership.memberId))
 			.where(where)
 			.orderBy(asc(connector.createdAt)),
 	);
@@ -89,7 +105,7 @@ function listedRows(where: SQL | undefined) {
 
 function toConnector(
 	row: ListedRow,
-	connectedBy: NamedPerson | null,
+	{ connectedBy, signedInAs }: { connectedBy: NamedMember | null; signedInAs: NamedMember | null },
 	cipher: Secrets.Interface,
 ): { connector: Connector; tools: ConnectorToolSetting[] } {
 	const tools = toolsOf(row).map((tool) => ({
@@ -122,6 +138,7 @@ function toConnector(
 			toolCounts: toolAccessCountsOf(tools),
 			lastTestError: row.lastTestError,
 			connectedBy,
+			signedInAs,
 			createdAt: row.createdAt.toISOString(),
 		},
 	};

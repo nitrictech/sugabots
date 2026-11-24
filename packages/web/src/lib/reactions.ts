@@ -1,9 +1,9 @@
 import type {
 	ChatDetails,
 	ChatMessagesPage,
+	CurrentUser,
 	Message,
 	MessageReaction,
-	SignedInPerson,
 } from "@sugabots/contracts";
 import {
 	type InfiniteData,
@@ -15,7 +15,7 @@ import {
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 
-/** One person's emoji on a message, and whether they are adding it or taking it back. */
+/** One member's emoji on a message, and whether they are adding it or taking it back. */
 interface ReactionChange {
 	message: Message;
 	emoji: string;
@@ -31,7 +31,7 @@ interface ReactionChange {
  * again, is only taken while nothing newer has changed the message: another of
  * the user's reactions, or the chat's event saying what the message has.
  */
-export function useReactions(signedIn: SignedInPerson) {
+export function useReactions(signedIn: CurrentUser) {
 	const queries = useQueryClient();
 	const mutation = useMutation({
 		mutationKey: REACTION_MUTATION_KEY,
@@ -47,12 +47,12 @@ export function useReactions(signedIn: SignedInPerson) {
 			// what this changes; it is called off here and made again once this is settled.
 			const interrupted = await cancelMessageLoads(queries, message);
 			const before = message.reactions ?? [];
-			const person = { id: signedIn.id, name: signedIn.name, at: new Date().toISOString() };
+			const member = { id: signedIn.id, name: signedIn.name, at: new Date().toISOString() };
 			const change = changeReactions(
 				queries,
 				message,
 				reacting
-					? withReaction(before, emoji, person)
+					? withReaction(before, emoji, member)
 					: withoutReaction(before, emoji, signedIn.id),
 			);
 			return { before, change, interrupted };
@@ -76,7 +76,7 @@ export function useReactions(signedIn: SignedInPerson) {
 			}
 		},
 	});
-	/** Whether the signed-in person has `emoji` on the message, counting what they have asked for and is still being sent. */
+	/** Whether the current user has `emoji` on the message, counting what they have asked for and is still being sent. */
 	const reacted = (message: Message, emoji: string) =>
 		lastSentChange(queries, message, emoji)?.reacting ?? hasReacted(message, emoji, signedIn.id);
 	return {
@@ -90,7 +90,7 @@ export function useReactions(signedIn: SignedInPerson) {
 	};
 }
 
-/** Marks the person's reaction requests in the mutation cache, for `lastSentChange` to find. */
+/** Marks the member's reaction requests in the mutation cache, for `lastSentChange` to find. */
 const REACTION_MUTATION_KEY = ["reaction"];
 
 /**
@@ -117,7 +117,7 @@ function lastSentChange(
 }
 
 /**
- * How many times each message's reactions have been changed by the signed-in person or an
+ * How many times each message's reactions have been changed by the current user or an
  * event since the page loaded, so an answer can tell whether it is still the
  * newest word on them. Answers themselves do not count.
  */
@@ -143,12 +143,12 @@ function isLatestChange(messageId: string, change: number): boolean {
 	return changesByMessage.get(messageId) === change;
 }
 
-/** Whether the person is among those who reacted to the message with `emoji`. */
-function hasReacted(message: Message, emoji: string, personId: string): boolean {
+/** Whether the member is among those who reacted to the message with `emoji`. */
+function hasReacted(message: Message, emoji: string, memberId: string): boolean {
 	return (
 		message.reactions?.some(
 			(reaction) =>
-				reaction.emoji === emoji && reaction.people.some((person) => person.id === personId),
+				reaction.emoji === emoji && reaction.members.some((member) => member.id === memberId),
 		) ?? false
 	);
 }
@@ -214,14 +214,14 @@ function setMessageReactions(
 function withReaction(
 	reactions: MessageReaction[],
 	emoji: string,
-	person: MessageReaction["people"][number],
+	member: MessageReaction["members"][number],
 ): MessageReaction[] {
 	if (!reactions.some((reaction) => reaction.emoji === emoji)) {
-		return [...reactions, { emoji, people: [person] }];
+		return [...reactions, { emoji, members: [member] }];
 	}
 	return reactions.map((reaction) =>
-		reaction.emoji === emoji && !reaction.people.some(({ id }) => id === person.id)
-			? { ...reaction, people: [...reaction.people, person] }
+		reaction.emoji === emoji && !reaction.members.some(({ id }) => id === member.id)
+			? { ...reaction, members: [...reaction.members, member] }
 			: reaction,
 	);
 }
@@ -229,13 +229,13 @@ function withReaction(
 function withoutReaction(
 	reactions: MessageReaction[],
 	emoji: string,
-	personId: string,
+	memberId: string,
 ): MessageReaction[] {
 	return reactions
 		.map((reaction) =>
 			reaction.emoji === emoji
-				? { ...reaction, people: reaction.people.filter(({ id }) => id !== personId) }
+				? { ...reaction, members: reaction.members.filter(({ id }) => id !== memberId) }
 				: reaction,
 		)
-		.filter((reaction) => reaction.people.length > 0 || (reaction.bots?.length ?? 0) > 0);
+		.filter((reaction) => reaction.members.length > 0 || (reaction.bots?.length ?? 0) > 0);
 }

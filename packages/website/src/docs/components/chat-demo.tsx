@@ -1,7 +1,7 @@
 import { RotateCcwIcon } from "lucide-react";
 import { Children, type ReactNode, useState } from "react";
 import { type CastName, cast } from "@/cast";
-import { ChatCollaboration, ChatMessage, ChatText } from "@/components/chat";
+import { ChatMessage, ChatText } from "@/components/chat";
 import { MotionDemoCard, Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { Button } from "@/components/ui/button";
 
@@ -10,21 +10,14 @@ const LINE_STAGGER_S = 0.55;
 
 interface SayProps {
 	from: CastName;
-	/** Another bot this bot's message asked, shown as the collaboration line under its words. */
-	collaboratesWith?: CastName;
 	children: ReactNode;
 }
 
 /** One message in a `Chat`, said by a member of the docs' cast. */
-export function Say({ from, collaboratesWith, children }: SayProps) {
-	const author = cast[from];
-	const collaborator = collaboratesWith ? cast[collaboratesWith] : undefined;
+export function Say({ from, children }: SayProps) {
 	return (
-		<ChatMessage author={author}>
+		<ChatMessage author={cast[from]}>
 			<ChatText>{children}</ChatText>
-			{author.kind === "bot" && collaborator?.kind === "bot" && (
-				<ChatCollaboration from={author.look} to={collaborator} status="Done" />
-			)}
 		</ChatMessage>
 	);
 }

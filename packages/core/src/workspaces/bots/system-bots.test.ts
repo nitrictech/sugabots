@@ -1,8 +1,8 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { noComputers } from "../../computers/testing.ts";
-import { bot, membership, person, workspace } from "../../database/schema.ts";
+import { bot, member, membership, workspace } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -15,7 +15,7 @@ import { BotStore } from "./bot-store.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => {
 	let bots: Promised<BotStore.Interface>;
-	let administrationAs: (personId: string) => Promised<BotAdministration.Interface>;
+	let administrationAs: (memberId: string) => Promised<BotAdministration.Interface>;
 	/** The administration as the administrator of both workspaces. */
 	let administration: Promised<BotAdministration.Interface>;
 	let workspaceId: string;
@@ -48,7 +48,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 		const [space, other] = made;
 		const [somebody] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
 				.returning(),
 		);
@@ -59,8 +59,8 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 		administration = administrationAs(creatorId);
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId, personId: creatorId, role: "admin" },
-				{ workspaceId: otherWorkspaceId, personId: creatorId, role: "admin" },
+				{ workspaceId, memberId: creatorId, role: "admin" },
+				{ workspaceId: otherWorkspaceId, memberId: creatorId, role: "admin" },
 			]),
 		);
 	});
@@ -75,67 +75,19 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 		);
 
 	it("gives a workspace one of each, with no model", async () => {
-		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
+		await bots.createSystemBots({ workspaceId, createdById: creatorId });
 
 		expect(await placed()).toEqual([{ key: "compact", model: null }]);
 	});
 
-	it("creates nothing more when run again", async () => {
-		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
-		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
-
-		expect(await placed()).toHaveLength(1);
-	});
-
-	it("does not put a chosen model back to unset when run again", async () => {
-		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
-		await bots.setSystemBotModel(workspaceId, "compact", "chosen-model");
-
-		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
-
-		const [compaction] = await onDatabase((db) =>
-			db
-				.select({ model: bot.model })
-				.from(bot)
-				.where(and(eq(bot.workspaceId, workspaceId), eq(bot.systemBotKey, "compact"))),
-		);
-		expect(compaction?.model).toBe("chosen-model");
-	});
-
 	it("gives each workspace its own set", async () => {
-		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
-		await bots.ensureSystemBots({ workspaceId: otherWorkspaceId, createdById: creatorId });
+		await bots.createSystemBots({ workspaceId, createdById: creatorId });
+		await bots.createSystemBots({ workspaceId: otherWorkspaceId, createdById: creatorId });
 		await bots.setSystemBotModel(workspaceId, "compact", "one-workspace-only");
 
 		const listed = await administration.systemBots({ workspace: otherWorkspaceId });
 		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
 			{ key: "compact", model: null },
 		]);
-	});
-
-	it("reports a workspace with no rows as one that is not set up", async () => {
-		const listed = await administration.systemBots({ workspace: workspaceId });
-
-		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
-			{ key: "compact", model: null },
-		]);
-	});
-
-	it("refuses a second Compaction bot in the same workspace", async () => {
-		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
-
-		await expect(
-			onDatabase((db) =>
-				db.insert(bot).values({
-					workspaceId,
-					name: "Second Compaction",
-					handle: "second-compaction",
-					systemBotKey: "compact",
-					color: "purple",
-					eyes: "square",
-					model: null,
-				}),
-			),
-		).rejects.toThrow();
 	});
 });

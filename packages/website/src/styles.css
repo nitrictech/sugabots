@@ -108,7 +108,7 @@
 	--ring: var(--color-zinc-400);
 	--brand: var(--color-indigo-600);
 	--brand-foreground: var(--color-white);
-	/* The app's link colour, for the demo chats' collaboration lines. */
+	/* The app's link colour, as the demo chats show links. */
 	--link: #4f5bd5;
 }
 

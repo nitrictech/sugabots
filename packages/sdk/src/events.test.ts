@@ -2,7 +2,6 @@ import { streamEvent } from "@sugabots/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { isApiFailure } from "./errors.ts";
 import { createEventsApi } from "./events.ts";
-import { memoryTokenStore } from "./tokens.ts";
 
 /**
  * The client end of a stream. The API is not involved: `fetch` is replaced by
@@ -61,9 +60,6 @@ function scripted(...responses: (string | number)[]) {
 					headers: { "content-type": "text/event-stream" },
 				});
 			}
-			if (scene === 204) {
-				return new Response(null, { status: 204 });
-			}
 			return new Response(JSON.stringify({ message: "no" }), {
 				status: scene,
 			});
@@ -78,8 +74,8 @@ function scripted(...responses: (string | number)[]) {
 	return { fetch, calls };
 }
 
-function events(fetch: typeof globalThis.fetch, token = "t0") {
-	return createEventsApi({ baseUrl: BASE, tokens: memoryTokenStore(token), fetch, retryMs: 1 });
+function events(fetch: typeof globalThis.fetch) {
+	return createEventsApi({ baseUrl: BASE, fetch, retryMs: 1 });
 }
 
 /** Reads `count` events, then closes the stream. */
@@ -95,26 +91,15 @@ async function take(stream: AsyncIterable<{ type: string }>, count: number) {
 }
 
 describe("requests", () => {
-	it("asks for the right route with the bearer token", async () => {
+	it("asks for the right route with the session cookie", async () => {
 		const { fetch, calls } = scripted(frame({ event: "chat.created", id: 1 }));
 		const stream = events(fetch).workspace("w1");
 
 		await take(stream, 1);
 
 		expect(calls[0]?.url).toBe(`${BASE}/workspaces/w1/events`);
-		expect(calls[0]?.headers.get("authorization")).toBe("Bearer t0");
 		expect(calls[0]?.headers.get("accept")).toBe("text/event-stream");
-		expect(calls[0]?.credentials).toBe("omit");
-	});
-
-	it("includes browser cookies when no bearer store is supplied", async () => {
-		const { fetch, calls } = scripted(frame({ event: "chat.created", id: 1 }));
-		const stream = createEventsApi({ baseUrl: BASE, fetch }).workspace("w1");
-
-		await take(stream, 1);
-
 		expect(calls[0]?.credentials).toBe("include");
-		expect(calls[0]?.headers.get("authorization")).toBeNull();
 	});
 
 	it("escapes an id rather than pasting it into the path", async () => {
@@ -195,7 +180,7 @@ describe("parsing", () => {
 				},
 				status: "completed",
 				error: null,
-				writeOrDelete: false,
+				approval: null,
 				atOffset: 0,
 				startedAt: "2026-10-06T02:50:51.000Z",
 				finishedAt: "2026-10-06T02:50:51.027Z",
@@ -231,12 +216,7 @@ describe("resume", () => {
 	it("backs off when successful responses keep ending without events", async () => {
 		vi.useFakeTimers();
 		const { fetch, calls } = scripted("", "", 401);
-		const stream = createEventsApi({
-			baseUrl: BASE,
-			tokens: memoryTokenStore(),
-			fetch,
-			retryMs: 100,
-		}).workspace("w1");
+		const stream = createEventsApi({ baseUrl: BASE, fetch, retryMs: 100 }).workspace("w1");
 		const finished = expect(take(stream, 1)).rejects.toMatchObject({ _tag: "Unauthorized" });
 
 		try {
@@ -314,13 +294,6 @@ describe("resume", () => {
 });
 
 describe("failure", () => {
-	it("ends permanently when the server returns 204", async () => {
-		const { fetch, calls } = scripted(204, frame({ event: "message.created", id: 1 }));
-
-		expect(await take(events(fetch).chat("c1"), 1)).toEqual([]);
-		expect(calls).toHaveLength(1);
-	});
-
 	it("rejects a successful response that is not an event stream", async () => {
 		const fetch = vi.fn(async () => Response.json({ status: "ok" })) as typeof globalThis.fetch;
 
@@ -337,7 +310,7 @@ describe("failure", () => {
 		expect(calls).toHaveLength(2);
 	});
 
-	it("gives up when the token is refused, rather than retrying forever", async () => {
+	it("gives up when the session is refused, rather than retrying forever", async () => {
 		const { fetch, calls } = scripted(401);
 
 		const failure = await take(events(fetch).chat("c1"), 1).catch((error: unknown) => error);
@@ -376,16 +349,5 @@ describe("closing", () => {
 		}
 
 		expect(seen).toHaveLength(1);
-	});
-
-	it("stops reconnecting once the caller's signal aborts", async () => {
-		const abort = new AbortController();
-		const { fetch, calls } = scripted(frame({ event: "message.created", id: 1 }));
-
-		for await (const _event of events(fetch).chat("c1", { signal: abort.signal })) {
-			abort.abort();
-		}
-
-		expect(calls).toHaveLength(1);
 	});
 });

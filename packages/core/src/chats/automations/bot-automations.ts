@@ -29,7 +29,7 @@ import type { AutomationStore } from "./store.ts";
 
 /**
  * The automations of the project a bot is working in, as it reads and changes
- * them in a chat there, for the person whose message it is answering
+ * them in a chat there, for the member whose message it is answering
  * and with their permissions: in its own chats, its default project's, which
  * are its own. It cannot act for nobody: a turn answering another bot, or an
  * automation's run, is refused.
@@ -97,7 +97,7 @@ export const make = Effect.gen(function* () {
 		);
 
 	/**
-	 * Runs `work` as the person the bot is answering, who may not manage the
+	 * Runs `work` as the member the bot is answering, who may not manage the
 	 * project's automations unless it lets them.
 	 */
 	const forAsker = <A, E>(
@@ -188,7 +188,7 @@ export const layer = Layer.suspend(() => layerNoDeps.pipe(Layer.provide(Automati
 
 /**
  * The bot, the project it is working in, whose automations it reads and
- * changes, and the person whose message it is answering, if a person asked.
+ * changes, and the member whose message it is answering, if a member asked.
  */
 export interface Bot {
 	readonly botId: string;
@@ -279,6 +279,6 @@ export class MayNotManageAutomations
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`The person asking may not do that: only those who manage this project's automations (for a bot's own, its creator or an admin) can have them set up or changed.`;
+		return userText`The member asking may not do that: only those who manage this project's automations (for a bot's own, its creator or an admin) can have them set up or changed.`;
 	}
 }

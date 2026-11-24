@@ -5,13 +5,13 @@ import {
 	computerHostSchema,
 	computerNetworkSettingsSchema,
 	computerProviderSchema,
-	computerProviderTestResultSchema,
 	computerProviderUpdateSchema,
 	computerTemplateSchema,
 	newComputerHostSchema,
 	newComputerProviderSchema,
 	projectComputerDiskSchema,
 } from "../../computer-providers.ts";
+import { providerTestResultSchema } from "../../model-providers.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict, refused } from "../errors.ts";
@@ -63,10 +63,10 @@ export class ComputerProvidersApi extends HttpApiGroup.make("computerProviders")
 		}),
 		HttpApiEndpoint.post("test", `${root}/:providerId/test`, {
 			params: provider,
-			success: computerProviderTestResultSchema,
+			success: providerTestResultSchema,
 			error: refused,
 		}),
-		/** How full the disks of the computers of the projects the person reaches are, of those measured. */
+		/** How full the disks of the computers of the projects the member reaches are, of those measured. */
 		HttpApiEndpoint.get("disks", disks, {
 			params: workspace,
 			success: Schema.Array(projectComputerDiskSchema),

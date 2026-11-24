@@ -9,11 +9,11 @@ import { query, serviceOperations } from "../../database/database.ts";
 import { bot, chat } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import type { FloorControl } from "../floor/floor-control.ts";
-import { madeByPeople } from "../store/participants.ts";
+import { madeByMembers } from "../store/participants.ts";
 import { Chats } from "./chats.ts";
 
 /**
- * What a bot does to chats for the person whose message it is answering, with
+ * What a bot does to chats for the member whose message it is answering, with
  * their permissions: moves work that came up in one chat to a chat of
  * its own, one of a bot's chats, and marks a chat resolved. It cannot act for nobody: a
  * turn answering another bot, or an automation's run, is refused.
@@ -45,22 +45,22 @@ export const make = Effect.gen(function* () {
 				asAsker(
 					bot.askerId,
 					Effect.gen(function* () {
-						const host = input.withHandle
+						const chatBot = input.withHandle
 							? yield* botWithHandle(bot.workspaceId, input.withHandle)
 							: { id: bot.botId, name: undefined };
-						if (!host) return yield* new NoBotWithHandle();
+						if (!chatBot) return yield* new NoBotWithHandle();
 						const started = yield* chats.startBriefedChat({
 							workspaceId: bot.workspaceId,
-							botId: host.id,
+							botId: chatBot.id,
 							briefingBotId: bot.botId,
 							title: input.title,
 							brief: input.brief,
 						});
-						const otherBot = host.id === bot.botId ? undefined : host.name;
+						const otherBot = chatBot.id === bot.botId ? undefined : chatBot.name;
 						return {
 							id: started.id,
 							title: started.title,
-							...(otherBot && { with: otherBot, withBotId: host.id }),
+							...(otherBot && { with: otherBot, withBotId: chatBot.id }),
 						};
 					}),
 				),
@@ -74,7 +74,7 @@ export const make = Effect.gen(function* () {
 						Effect.flatMap(chatKind(bot.workspaceId, chatId), (kind) =>
 							Effect.fail(
 								kind !== undefined && kind !== "project_chat"
-									? new NotAChat()
+									? new NotAProjectChat()
 									: new ChatHiddenFromAsker(),
 							),
 						),
@@ -93,13 +93,13 @@ export const layerNoDeps = Layer.effect(Service, make);
  */
 export const layer = Layer.suspend(() => layerNoDeps.pipe(Layer.provide(Chats.layer)));
 
-/** The bot, where it is, and the person it acts for, if any. */
+/** The bot, where it is, and the member it acts for, if any. */
 export interface Bot {
 	readonly botId: string;
 	readonly workspaceId: string;
 	/**
-	 * Whose permissions it acts with: the person whose message it is
-	 * answering or, to mark its own chat resolved, the person a bot's brief
+	 * Whose permissions it acts with: the member whose message it is
+	 * answering or, to mark its own chat resolved, the member a bot's brief
 	 * started that chat for. None when nobody asked.
 	 */
 	readonly askerId: string | null;
@@ -122,7 +122,7 @@ const botWithHandle = (workspaceId: string, handle: string) =>
 				.from(bot)
 				.where(
 					and(
-						madeByPeople,
+						madeByMembers,
 						eq(bot.workspaceId, workspaceId),
 						sql`lower(${bot.handle}) = lower(${handle.trim().replace(/^@/, "")})`,
 					),
@@ -149,9 +149,9 @@ const chatKind = (workspaceId: string, chatId: string) =>
 export type Refused =
 	| NobodyAsked
 	| NoBotWithHandle
-	| NotAChat
+	| NotAProjectChat
 	| ChatHiddenFromAsker
-	| Chats.HostUnavailable
+	| Chats.BotUnavailable
 	| FloorControl.BotHasNoModel;
 
 export class NoBotWithHandle extends Data.TaggedError("NoBotWithHandle") implements UserFacing {
@@ -160,9 +160,9 @@ export class NoBotWithHandle extends Data.TaggedError("NoBotWithHandle") impleme
 	}
 }
 
-export class NotAChat extends Data.TaggedError("NotAChat") implements UserFacing {
+export class NotAProjectChat extends Data.TaggedError("NotAProjectChat") implements UserFacing {
 	get userMessage() {
-		return userText`Only a project's chat can be marked resolved, not an automation's feed or a collaboration.`;
+		return userText`Only a project's chat can be marked resolved, not an automation's feed or a run.`;
 	}
 }
 
@@ -171,6 +171,6 @@ export class ChatHiddenFromAsker
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`The person this turn acts for can no longer see this chat, so it can't be marked resolved for them.`;
+		return userText`The member this turn acts for can no longer see this chat, so it can't be marked resolved for them.`;
 	}
 }

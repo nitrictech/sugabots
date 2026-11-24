@@ -37,7 +37,7 @@ const SHOTS: Shot[] = [
 		name: "project-chat",
 		backdrop: { form: "swoop", family: "silver" },
 		async prepare(stage) {
-			// Growth's chat, where its people talk with each other and with its bots.
+			// Growth's chat, where its members talk with each other and with its bots.
 			await openProject(stage, "growth", "Pipeline");
 			await stage.app.getByText("Brightwater signed!").waitFor();
 		},

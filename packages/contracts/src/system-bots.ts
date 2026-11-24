@@ -17,7 +17,7 @@ import {
  *
  * It is addressed by `key`, not by id. There is exactly one of each per
  * workspace, so the key is the address, and a route keyed by it cannot be
- * pointed at a bot people talk to by mistake.
+ * pointed at a bot members talk to by mistake.
  */
 export const systemBotSchema = Schema.Struct({
 	key: systemBotKeySchema,

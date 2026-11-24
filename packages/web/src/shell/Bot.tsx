@@ -15,7 +15,7 @@ import type { Ref } from "react";
  *
  * It takes its colour as a prop rather than from an ancestor. That is
  * deliberate: the right panel is a sibling of the main pane rather than a
- * child, a collaboration shows two bots of different colours side by side,
+ * child, a chat shows bots of different colours one after another,
  * and a list shows a different bot on every row. Anything that leaned on an
  * ancestor for the colour would be wrong in at least one of those places.
  */

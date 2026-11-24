@@ -21,39 +21,39 @@ import {
 	bot,
 	chat,
 	chatParticipant,
-	chatRead,
-	collaboration,
 	message,
 	messageReaction,
 	placedChat,
 	project,
 	projectChat,
+	readCursor,
 	systemChat,
 } from "../../database/schema.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
+import type { StoredMessagePart } from "../sql.ts";
 import { loadFileParts, toFilePart } from "./file-parts.ts";
 import {
 	authorRow,
-	type PersonIdentity,
-	personAuthor,
-	personColumns,
+	automationResultOf,
+	type MemberIdentity,
+	memberAuthor,
+	memberColumns,
 	quotedMessageColumns,
 	reactionColumns,
+	toMember,
 	toMessage,
-	toPerson,
 	toReactions,
 	toReplyTo,
 	withReplyTo,
 } from "./participants.ts";
 
 /**
- * The only writer of `chat` and of each kind's own table, except a
- * collaboration's and a run's, which their stores write in the same
- * transaction as the chat; of `chat_participant` and
- * `chat_read`; and of the messages posted into chats. A
+ * The only writer of `chat` and of each kind's own table, except a run's,
+ * which its store writes in the same transaction as the chat; of `chat_participant` and
+ * `read_cursor`; and of the messages posted into chats. A
  * turn's reply is the exception: it is `TurnStore`'s while the turn
  * writes it.
  *
@@ -62,16 +62,17 @@ import {
  */
 export interface Interface {
 	/**
-	 * Starts a chat in the project, called `title`, with `startedById` in it,
-	 * and in a bot's default project the bot too, and announces it.
+	 * Starts a chat in the project, called `title`, with `startedById` and the
+	 * project's lead bot in it, and announces it. In a bot's default project
+	 * the lead bot is that bot.
 	 */
 	readonly startChat: (placement: NewChat) => Effect.Effect<schema.PlacedChatRow>;
 	/**
-	 * Starts a chat in the bot's default project `projectId` for the person
+	 * Starts a chat in the bot's default project `projectId` for the member
 	 * `startedById`, with them and the bot in it. Its first message is `brief`,
 	 * written by the bot `briefingBotId`, which may be the chat's own bot;
 	 * announced so the chat's bot takes its turn on the brief. Dies on a
-	 * project people made, which has no bot of its own to brief.
+	 * project members made, which has no bot of its own to brief.
 	 */
 	readonly startBriefedChat: (
 		input: NewChat & { briefingBotId: string; brief: string },
@@ -99,19 +100,19 @@ export interface Interface {
 		leadBotId: string,
 	) => Effect.Effect<schema.PlacedChatRow>;
 	/**
-	 * Posts a person's message with the files they attach, making them a
+	 * Posts a member's message with the files they attach, making them a
 	 * participant, and announces it. Posting a message again with the same
 	 * `id` returns the one already posted, unchanged and unannounced; an `id`
 	 * already used by a different message, or the same text with other files,
 	 * fails, and so does quoting a message that is not in the chat.
-	 * Fails with `UploadsNotFound`, posting nothing, when an attachment is not
+	 * Fails with `UnsentAttachmentsNotFound`, posting nothing, when an attachment is not
 	 * one of the author's unsent uploads in the chat.
 	 */
 	readonly post: (input: {
-		/** The id the person's client chose, which makes sending it again safe to detect. */
+		/** The id the member's client chose, which makes sending it again safe to detect. */
 		id: string;
 		chatId: string;
-		author: PersonIdentity;
+		author: MemberIdentity;
 		/** May be empty when the message carries files. */
 		content: string;
 		/** Ids of the author's uploads to attach. */
@@ -120,22 +121,10 @@ export interface Interface {
 		replyTo?: string;
 	}) => Effect.Effect<
 		Posted | AlreadyPosted,
-		MessageIdConflict | ReplyTargetNotFound | ChatFileStore.UploadsNotFound
+		MessageIdConflict | ReplyTargetNotFound | ChatFileStore.UnsentAttachmentsNotFound
 	>;
 	/** Brings bots into the chat, announcing the ones who were not there yet. */
 	readonly addBots: (chatId: string, botIds: readonly string[]) => Effect.Effect<void>;
-	/**
-	 * Opens a collaboration's chat in `parent`'s workspace, with both
-	 * bots in it and the brief as its first message, written by the asking
-	 * bot. The caller writes its `collaboration` row in the same transaction.
-	 */
-	readonly openCollaboration: (input: {
-		parent: Pick<schema.PlacedChatRow, "workspaceId">;
-		askingBotId: string;
-		collaboratorId: string;
-		title: string;
-		brief: string;
-	}) => Effect.Effect<{ chatId: string; briefMessageId: string }>;
 	/**
 	 * Opens an automation run's chat, with the bot in it. The caller
 	 * writes its `run` row in the same transaction.
@@ -172,31 +161,31 @@ export interface Interface {
 		title: string;
 	}) => Effect.Effect<string>;
 	/**
-	 * Records that `personId` has read the chat `chatId` up to
+	 * Records that `memberId` has read the chat `chatId` up to
 	 * its newest finished message, and tells its watchers when that moved
 	 * them on. Never moves past a reply still being written, which is not yet
 	 * read, so it is news once it is done, however much was written after it
 	 * began. Never moves anyone back.
 	 */
-	readonly markRead: (personId: string, chatId: string) => Effect.Effect<void>;
+	readonly markRead: (memberId: string, chatId: string) => Effect.Effect<void>;
 	/**
-	 * Records that `personId` has read an automation run or collaboration as a
-	 * nested chat, by its own chat `nestedChatId`: that chat up
-	 * to when it began, or up to when a run ended once it has. The
-	 * chat it is listed in, and what was written in the nested chat since,
-	 * stay as they were. Tells the nested chat's watchers when that moved them on.
-	 * Never moves anyone back, and does nothing for any other chat.
+	 * Records that `memberId` has read an automation run as a nested chat, by
+	 * its own chat `nestedChatId`: that chat up to when the run began, or up
+	 * to when it ended once it has. The chat it is listed in, and what was
+	 * written in the run's chat since, stay as they were. Tells the run
+	 * chat's watchers when that moved them on. Never moves anyone back, and
+	 * does nothing for any other chat.
 	 */
-	readonly markNestedChatRead: (personId: string, nestedChatId: string) => Effect.Effect<void>;
+	readonly markNestedChatRead: (memberId: string, nestedChatId: string) => Effect.Effect<void>;
 	/**
-	 * Adds the person's reaction to a finished message, and announces what the
+	 * Adds the member's reaction to a finished message, and announces what the
 	 * message has now. A reaction already there changes nothing and is not
 	 * announced. A new emoji past `MAX_REACTION_EMOJI_PER_MESSAGE` fails.
 	 */
 	readonly addReaction: (
 		reaction: Reaction,
 	) => Effect.Effect<MessageReaction[], MessageNotFinished | TooManyReactionEmoji>;
-	/** Takes the person's reaction back, announcing it as `addReaction` does, if it was there. */
+	/** Takes the member's reaction back, announcing it as `addReaction` does, if it was there. */
 	readonly removeReaction: (reaction: Reaction) => Effect.Effect<MessageReaction[]>;
 }
 
@@ -216,21 +205,11 @@ interface RunResult {
 	readonly files: readonly WrittenFilePart[];
 }
 
-/** The run `run` as the result posted from it links to it. */
-function resultOf(run: RunPosting): NonNullable<Message["automationResultOf"]> {
-	return {
-		runId: run.id,
-		chatId: run.chatId,
-		automationId: run.automationId,
-		automationName: run.automationName,
-	};
-}
-
-/** One person's emoji on a message in a chat. */
+/** One member's emoji on a message in a chat. */
 export interface Reaction {
 	readonly chatId: string;
 	readonly messageId: string;
-	readonly personId: string;
+	readonly memberId: string;
 	readonly emoji: string;
 }
 
@@ -308,39 +287,23 @@ export const make = Effect.gen(function* () {
 					.limit(1),
 			);
 			if (!author) return yield* Effect.die(new Error("An automation run's bot is gone"));
-			const { content } = input.result;
-			const created = yield* query((db) =>
-				db
-					.insert(message)
-					.values({
-						chatId: input.chatId,
-						authorBotId: input.run.botId,
-						runId: input.run.id,
-						kind: "text",
-						status: "complete",
-						parts: [
-							...(content === "" ? [] : [{ type: "text" as const, text: content }]),
-							...input.result.files,
-						],
-						content,
-					})
-					.returning(),
-			).pipe(Effect.flatMap(writtenRow("message")));
-			const now = yield* DateTime.nowAsDate;
-			const placed = yield* query((db) =>
-				db
-					.update(chat)
-					.set({ updatedAt: now })
-					.where(eq(chat.id, input.chatId))
-					.returning({ workspaceId: chat.workspaceId }),
-			).pipe(Effect.flatMap(writtenRow("chat")));
+			const created = yield* insertTextMessage(
+				{
+					chatId: input.chatId,
+					authorBotId: input.run.botId,
+					runId: input.run.id,
+					content: input.result.content,
+				},
+				input.result.files,
+			);
+			const placed = yield* touchChat(input.chatId);
 			yield* emit([
 				ChatEvent.MessagePosted({
 					chatId: input.chatId,
 					workspaceId: placed.workspaceId,
 					message: {
 						...toMessage(created, authorRow(null, author)),
-						automationResultOf: resultOf(input.run),
+						automationResultOf: automationResultOf(input.run),
 					},
 				}),
 			]);
@@ -348,38 +311,38 @@ export const make = Effect.gen(function* () {
 		});
 
 	/**
-	 * Moves how far `personId` has read `chatId` on to `at`, a timestamp
+	 * Moves how far `memberId` has read `chatId` on to `at`, a timestamp
 	 * as text, and tells the chat's watchers. Never moves anyone back.
 	 */
 	const readThrough = Effect.fn("ChatStore.readThrough")(function* (
-		personId: string,
+		memberId: string,
 		chatId: string,
 		at: string,
 	) {
 		const through = sql`${at}::timestamptz`;
 		const [moved] = yield* query((db) =>
 			db
-				.insert(chatRead)
-				.values({ personId, chatId, readThrough: through })
+				.insert(readCursor)
+				.values({ memberId, chatId, readThrough: through })
 				.onConflictDoUpdate({
-					target: [chatRead.personId, chatRead.chatId],
+					target: [readCursor.memberId, readCursor.chatId],
 					set: { readThrough: through },
-					setWhere: lt(chatRead.readThrough, through),
+					setWhere: lt(readCursor.readThrough, through),
 				})
 				.returning({
-					readThrough: chatRead.readThrough,
-					readAt: chatRead.updatedAt,
+					readThrough: readCursor.readThrough,
+					readAt: readCursor.updatedAt,
 				}),
 		);
 		if (!moved) return;
 		const reader = yield* query((db) =>
-			db.query.person.findFirst({ where: { id: personId }, ...personColumns }),
+			db.query.member.findFirst({ where: { id: memberId }, ...memberColumns }),
 		);
 		if (!reader) return;
 		yield* emit([
 			ChatEvent.ChatRead({
 				chatId,
-				person: toPerson(reader),
+				member: toMember(reader),
 				readThrough: moved.readThrough,
 				readAt: moved.readAt,
 			}),
@@ -387,7 +350,7 @@ export const make = Effect.gen(function* () {
 	});
 
 	/**
-	 * Starts a project's chat, with the person who started it in it, and the
+	 * Starts a project's chat, with the member who started it in it, and the
 	 * project's lead bot, which answers it by default: in a bot's default
 	 * project, the bot.
 	 */
@@ -416,7 +379,7 @@ export const make = Effect.gen(function* () {
 			if (!led) return yield* Effect.die(new Error("The chat's project no longer exists"));
 			yield* query((db) =>
 				db.insert(chatParticipant).values([
-					{ chatId: created.id, personId: input.startedById },
+					{ chatId: created.id, memberId: input.startedById },
 					{ chatId: created.id, botId: led.leadBotId },
 				]),
 			);
@@ -470,30 +433,22 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						// One bot per chat: the briefing bot writes the first message without joining.
 						const created = yield* insertProjectChat(input);
-						const hostBotId = created.botId;
-						if (!hostBotId) {
+						const briefedBotId = created.botId;
+						if (!briefedBotId) {
 							return yield* Effect.die(
 								new Error(`Project ${input.projectId} is not a bot's default project`),
 							);
 						}
-						const brief = yield* query((db) =>
-							db
-								.insert(message)
-								.values({
-									chatId: created.id,
-									authorBotId: input.briefingBotId,
-									kind: "text",
-									status: "complete",
-									parts: [{ type: "text", text: input.brief }],
-									content: input.brief,
-								})
-								.returning(),
-						).pipe(Effect.flatMap(writtenRow("message")));
+						const brief = yield* insertTextMessage({
+							chatId: created.id,
+							authorBotId: input.briefingBotId,
+							content: input.brief,
+						});
 						yield* emit([
 							ChatEvent.BriefedChatStarted({
 								workspaceId: created.workspaceId,
 								chatId: created.id,
-								hostBotId,
+								briefedBotId,
 								briefMessageId: brief.id,
 							}),
 						]);
@@ -574,13 +529,13 @@ export const make = Effect.gen(function* () {
 						const [existing] = yield* query((db) =>
 							db.select().from(message).where(eq(message.id, input.id)).limit(1),
 						);
-						const author = personAuthor(input.author);
+						const author = memberAuthor(input.author);
 						if (existing) {
 							const attached =
 								(yield* query((db) => loadFileParts(db, [existing.id]))).get(existing.id) ?? [];
 							if (
 								existing.chatId !== input.chatId ||
-								existing.authorPersonId !== input.author.id ||
+								existing.authorMemberId !== input.author.id ||
 								existing.content !== input.content ||
 								(existing.replyToMessageId ?? undefined) !== input.replyTo ||
 								!sameIds(
@@ -598,33 +553,18 @@ export const make = Effect.gen(function* () {
 						}
 						const replyTo = yield* quotedIn(input.chatId, input.replyTo);
 						if (input.replyTo && !replyTo) return yield* new ReplyTargetNotFound();
-						const created = yield* query((db) =>
-							db
-								.insert(message)
-								.values({
-									id: input.id,
-									chatId: input.chatId,
-									authorPersonId: input.author.id,
-									kind: "text",
-									status: "complete",
-									parts: input.content === "" ? [] : [{ type: "text", text: input.content }],
-									content: input.content,
-									replyToMessageId: input.replyTo,
-								})
-								.returning(),
-						).pipe(Effect.flatMap(writtenRow("message")));
-						const now = yield* DateTime.nowAsDate;
-						const placed = yield* query((db) =>
-							db
-								.update(chat)
-								.set({ updatedAt: now })
-								.where(eq(chat.id, input.chatId))
-								.returning({ workspaceId: chat.workspaceId }),
-						).pipe(Effect.flatMap(writtenRow("chat")));
+						const created = yield* insertTextMessage({
+							id: input.id,
+							chatId: input.chatId,
+							authorMemberId: input.author.id,
+							content: input.content,
+							replyToMessageId: input.replyTo,
+						});
+						const placed = yield* touchChat(input.chatId);
 						yield* query((db) =>
 							db
 								.insert(chatParticipant)
-								.values({ chatId: input.chatId, personId: input.author.id })
+								.values({ chatId: input.chatId, memberId: input.author.id })
 								.onConflictDoNothing(),
 						);
 						const attached =
@@ -674,40 +614,6 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		openCollaboration: (input) =>
-			operation(
-				"openCollaboration",
-				transaction(
-					Effect.gen(function* () {
-						const opened = yield* insertChat({
-							workspaceId: input.parent.workspaceId,
-							kind: "collaboration",
-							title: input.title,
-						});
-						yield* query((db) =>
-							db.insert(chatParticipant).values([
-								{ chatId: opened.id, botId: input.askingBotId },
-								{ chatId: opened.id, botId: input.collaboratorId },
-							]),
-						);
-						const brief = yield* query((db) =>
-							db
-								.insert(message)
-								.values({
-									chatId: opened.id,
-									authorBotId: input.askingBotId,
-									kind: "text",
-									status: "complete",
-									parts: [{ type: "text", text: input.brief }],
-									content: input.brief,
-								})
-								.returning(),
-						).pipe(Effect.flatMap(writtenRow("message")));
-						return { chatId: opened.id, briefMessageId: brief.id };
-					}),
-				),
-			),
-
 		openRun: (input) =>
 			operation(
 				"openRun",
@@ -729,19 +635,11 @@ export const make = Effect.gen(function* () {
 		postAutomationTrigger: (input) =>
 			operation(
 				"postAutomationTrigger",
-				query((db) =>
-					db
-						.insert(message)
-						.values({
-							chatId: input.chatId,
-							automationTrigger: input.trigger,
-							kind: "text",
-							status: "complete",
-							parts: [{ type: "text", text: input.content }],
-							content: input.content,
-						})
-						.returning(),
-				).pipe(Effect.flatMap(writtenRow("message"))),
+				insertTextMessage({
+					chatId: input.chatId,
+					automationTrigger: input.trigger,
+					content: input.content,
+				}),
 			),
 
 		openAutomationFeed: (owned, leadBotId) =>
@@ -833,7 +731,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		markRead: (personId, chatId) =>
+		markRead: (memberId, chatId) =>
 			operation(
 				"markRead",
 				transaction(
@@ -860,23 +758,9 @@ export const make = Effect.gen(function* () {
 									eq(automationFeed.automationId, automationRun.automationId),
 								)
 								.where(eq(automationFeed.chatId, chatId));
-							// A collaboration starts while its asking reply is written, so after the
-							// time that reply is stamped with; reading the chat reads it too,
-							// once that reply is done.
-							const newestCollaboration = db
-								.select({ at: sql`max(${collaboration.createdAt})` })
-								.from(collaboration)
-								.where(
-									and(
-										eq(collaboration.rootChatId, chatId),
-										sql`${collaboration.createdAt} < coalesce((${oldestStreaming}), 'infinity')`,
-									),
-								);
 							return db
 								.select({
-									at: sql<
-										string | null
-									>`greatest(max(${message.createdAt}), (${newestRun}), (${newestCollaboration}))::text`,
+									at: sql<string | null>`greatest(max(${message.createdAt}), (${newestRun}))::text`,
 								})
 								.from(message)
 								.where(
@@ -888,39 +772,32 @@ export const make = Effect.gen(function* () {
 								);
 						});
 						if (!newest?.at) return;
-						yield* readThrough(personId, chatId, newest.at);
+						yield* readThrough(memberId, chatId, newest.at);
 					}),
 				),
 			),
 
-		markNestedChatRead: (personId, nestedChatId) =>
+		markNestedChatRead: (memberId, nestedChatId) =>
 			operation(
 				"markNestedChatRead",
 				transaction(
 					Effect.gen(function* () {
-						// As text, which keeps the microseconds a `Date` would drop.
-						const [readUpTo] = yield* query((db) => {
-							// Through when a run ended, so one opened while it ran is news again once it ends.
-							const runEnd = db
+						// Through when a run ended, so one opened while it ran is news
+						// again once it ends. As text, which keeps the microseconds a
+						// `Date` would drop.
+						const [readUpTo] = yield* query((db) =>
+							db
 								.select({
-									at: sql`coalesce(${automationRun.finishedAt}, ${automationRun.acceptedAt})`,
+									at: sql<
+										string | null
+									>`coalesce(${automationRun.finishedAt}, ${automationRun.acceptedAt})::text`,
 								})
 								.from(automationRun)
-								.where(eq(automationRun.chatId, nestedChatId));
-							const collaborationStart = db
-								.select({ at: sql`${collaboration.createdAt}` })
-								.from(collaboration)
-								.where(eq(collaboration.chatId, nestedChatId));
-							return db
-								.select({
-									at: sql<string | null>`coalesce((${runEnd}), (${collaborationStart}))::text`,
-								})
-								.from(chat)
-								.where(eq(chat.id, nestedChatId))
-								.limit(1);
-						});
+								.where(eq(automationRun.chatId, nestedChatId))
+								.limit(1),
+						);
 						if (!readUpTo?.at) return;
-						yield* readThrough(personId, nestedChatId, readUpTo.at);
+						yield* readThrough(memberId, nestedChatId, readUpTo.at);
 					}),
 				),
 			),
@@ -930,7 +807,7 @@ export const make = Effect.gen(function* () {
 				"addReaction",
 				transaction(
 					Effect.gen(function* () {
-						// Locked, so two people adding new emoji at once cannot both pass the limit.
+						// Locked, so two members adding new emoji at once cannot both pass the limit.
 						const [target] = yield* query((db) =>
 							db
 								.select({ status: message.status })
@@ -954,7 +831,7 @@ export const make = Effect.gen(function* () {
 								.insert(messageReaction)
 								.values({
 									messageId: reaction.messageId,
-									personId: reaction.personId,
+									memberId: reaction.memberId,
 									emoji: reaction.emoji,
 								})
 								.onConflictDoNothing()
@@ -976,7 +853,7 @@ export const make = Effect.gen(function* () {
 								.where(
 									and(
 										eq(messageReaction.messageId, reaction.messageId),
-										eq(messageReaction.personId, reaction.personId),
+										eq(messageReaction.memberId, reaction.memberId),
 										eq(messageReaction.emoji, reaction.emoji),
 									),
 								)
@@ -1014,6 +891,40 @@ export const lockMessageId = (messageId: string) =>
 	);
 
 /** The message `messageId` in `chatId`, as a reply quotes it, or nothing when it is not there. */
+/**
+ * Writes a finished message of `content`, its parts being that text, unless
+ * it is empty, and then `moreParts`.
+ */
+const insertTextMessage = (
+	values: Omit<typeof message.$inferInsert, "status" | "parts" | "content"> & { content: string },
+	moreParts: readonly StoredMessagePart[] = [],
+) =>
+	query((db) =>
+		db
+			.insert(message)
+			.values({
+				...values,
+				status: "complete",
+				parts: [
+					...(values.content === "" ? [] : [{ type: "text" as const, text: values.content }]),
+					...moreParts,
+				],
+			})
+			.returning(),
+	).pipe(Effect.flatMap(writtenRow("message")));
+
+/** Marks the chat `chatId` as changed now, returning its workspace. */
+const touchChat = (chatId: string) =>
+	Effect.flatMap(DateTime.nowAsDate, (now) =>
+		query((db) =>
+			db
+				.update(chat)
+				.set({ updatedAt: now })
+				.where(eq(chat.id, chatId))
+				.returning({ workspaceId: chat.workspaceId }),
+		).pipe(Effect.flatMap(writtenRow("chat"))),
+	);
+
 const quotedIn = (chatId: string, messageId: string | null | undefined) =>
 	messageId
 		? query((db) =>

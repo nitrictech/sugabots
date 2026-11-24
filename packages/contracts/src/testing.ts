@@ -7,14 +7,14 @@ import {
 	type ConnectorWithTools,
 	toolAccessCountsOf,
 } from "./connectors.ts";
-import type { PersonParticipant } from "./messages.ts";
+import type { MemberParticipant } from "./messages.ts";
 
 /**
- * A person as the API shows them, for tests and stories. The handle is derived
+ * A member as the API shows them, for tests and stories. The handle is derived
  * from the name, as the server derives it; the email is made from the handle
  * unless given; and they have no photo unless given one.
  */
-export function testPerson({
+export function testMember({
 	id,
 	name,
 	email,
@@ -24,9 +24,9 @@ export function testPerson({
 	name: string;
 	email?: string;
 	image?: string | null;
-}): PersonParticipant {
+}): MemberParticipant {
 	const handle = handleFromName(name);
-	return { kind: "person", id, name, email: email ?? `${handle}@example.com`, handle, image };
+	return { kind: "member", id, name, email: email ?? `${handle}@example.com`, handle, image };
 }
 
 /** A connector for tests and stories, with every tool in full, as the server holds it. */
@@ -52,10 +52,7 @@ export type TestAutomationTrigger = AutomationTrigger extends infer T
 		: never
 	: never;
 
-/**
- * An automation's triggers, numbered by `automationId`: the first has the automation's
- * own id, as a trigger moved from when automations had one does.
- */
+/** An automation's triggers, numbered from `automationId`: the first takes the automation's own id. */
 export function automationTriggers(
 	automationId: string,
 	...triggers: TestAutomationTrigger[]
@@ -79,7 +76,7 @@ export function listedChat(
 ): ListedChat {
 	return {
 		chat,
-		lastMessage: null,
+		lastMessageAt: null,
 		participants: [],
 		messageCount: 1,
 		unreadMessages: 0,

@@ -1,0 +1,207 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "f488d7b2-7b93-4430-8b4a-2f184ee600ce",
+  "prevIds": [
+    "0b684a66-5e16-4bfa-b7d4-7c581da3359c"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_view",
+      "statementTarget": [
+        "view",
+        "public",
+        "placed_chat"
+      ],
+      "writes": [
+        "s|view|public.placed_chat",
+        "n|view|public.placed_chat",
+        "e|view|public.placed_chat",
+        "n|rel|public.placed_chat",
+        "n|type|public.placed_chat"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "collaboration"
+      ],
+      "writes": [
+        "s|tbl|public.collaboration",
+        "n|tbl|public.collaboration",
+        "e|tbl|public.collaboration",
+        "n|rel|public.collaboration",
+        "n|type|public.collaboration"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "chat"
+      ],
+      "writes": [
+        "s|ck|public.chat.chat_kind_valid"
+      ],
+      "reads": [
+        "n|tbl|public.chat",
+        "n|sch|public",
+        "n|col|public.chat.kind",
+        "e|col|public.chat.kind"
+      ],
+      "sqlHash": "87e31432d3ce55f6"
+    },
+    {
+      "statementType": "create_view",
+      "statementTarget": [
+        "view",
+        "public",
+        "placed_chat"
+      ],
+      "writes": [
+        "s|view|public.placed_chat",
+        "n|view|public.placed_chat",
+        "e|view|public.placed_chat",
+        "n|rel|public.placed_chat",
+        "n|type|public.placed_chat"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"collaboration\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"parent_chat_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"parent_message_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"turn_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"chat_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"collaborator_bot_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"brief\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"status\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"answer\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"at_offset\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"kind\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"collaboration\",\"root_chat_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"collaboration_parent_message_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"collaboration_chat_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"collaboration_collaborator_created_at_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"collaboration_turn_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"collaboration_root_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"collaboration\",\"collaboration_parent_thread_id_thread_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"collaboration\",\"collaboration_parent_message_id_message_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"collaboration\",\"collaboration_turn_id_turn_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"collaboration\",\"collaboration_collaborator_agent_id_agent_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"collaboration\",\"collaboration_root_conversation_id_conversation_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"collaboration\",\"collaboration_chat_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"collaboration\",\"collaboration_pkey\"]"
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"chat\",\"chat_kind_valid\"]",
+      "set": {
+        "value": "\"kind\" in ('project_chat', 'run', 'automation_feed', 'system_chat')"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "views\u0000[\"public\",\"placed_chat\"]",
+      "set": {
+        "definition": "select\n\tc.id, c.workspace_id, c.kind, c.title, c.created_at, c.updated_at,\n\tcoalesce(p.default_of_bot_id, sc.bot_id) as bot_id,\n\tp.id as project_id,\n\tcase c.kind\n\t\twhen 'run' then rf.chat_id\n\t\twhen 'system_chat' then null\n\t\telse c.id\n\tend as root_chat_id,\n\tsc.served_chat_id as parent_chat_id,\n\tcc.started_by_id,\n\tsc.system_bot_key,\n\tcc.resolved_at,\n\tf.automation_id\nfrom \"chat\" c\nleft join \"project_chat\" cc on cc.chat_id = c.id\nleft join \"run\" r on r.chat_id = c.id\nleft join \"automation_feed\" rf on rf.automation_id = r.automation_id\nleft join \"automation_feed\" f on f.chat_id = c.id\nleft join \"automation\" a on a.id = coalesce(r.automation_id, f.automation_id)\nleft join \"project\" p on p.id = coalesce(cc.project_id, a.project_id)\nleft join \"system_chat\" sc on sc.chat_id = c.id"
+      }
+    }
+  ]
+}

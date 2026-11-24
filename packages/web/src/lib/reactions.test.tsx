@@ -18,14 +18,13 @@ const message: Message = {
 	id: "0199a3a0-0000-7000-8000-0000000007a1",
 	chatId: "0199a3a0-0000-7000-8000-0000000007a2",
 	author: {
-		kind: "person",
+		kind: "member",
 		id: sam.id,
 		name: sam.name,
 		email: sam.email,
 		handle: "sam",
 		image: null,
 	},
-	kind: "text",
 	status: "complete",
 	parts: [{ type: "text", text: "Ship it?" }],
 	content: "Ship it?",
@@ -58,7 +57,9 @@ describe("reacting to a message", () => {
 		});
 		await waitFor(() => expect(client.api.chats.react).toHaveBeenCalledTimes(1));
 		act(() =>
-			answerAdd([{ emoji: "👍", people: [{ id: sam.id, name: sam.name, at: message.createdAt }] }]),
+			answerAdd([
+				{ emoji: "👍", members: [{ id: sam.id, name: sam.name, at: message.createdAt }] },
+			]),
 		);
 
 		const request = { params: { messageId: message.id, emoji: "👍" } };
@@ -69,7 +70,7 @@ describe("reacting to a message", () => {
 
 	it("shows what the server kept when taking back a reaction it just added is refused", async () => {
 		const thumbsUp: MessageReaction[] = [
-			{ emoji: "👍", people: [{ id: sam.id, name: sam.name, at: message.createdAt }] },
+			{ emoji: "👍", members: [{ id: sam.id, name: sam.name, at: message.createdAt }] },
 		];
 		const withReactions = (reactions: MessageReaction[]) => ({
 			...chatDetails(triager),

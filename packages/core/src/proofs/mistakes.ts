@@ -15,7 +15,7 @@
 import { OperationContract } from "@sugabots/contracts/operations";
 import { Context, Effect, Layer, Schema } from "effect";
 import { defineOperation } from "../operations/operation.ts";
-import type { BotForAsker, PersonSession, Principal } from "../principal.ts";
+import type { BotForAsker, MemberSession, Principal } from "../principal.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { defineProof, type Named, named, type Proof } from "./proof.ts";
 
@@ -167,21 +167,21 @@ export const approvalMistakes = named("tool call", "other tool call", (toolCall,
 	}),
 );
 
-declare const personOnly: (principal: PersonSession) => Effect.Effect<void>;
+declare const memberOnly: (principal: MemberSession) => Effect.Effect<void>;
 declare const botForAsker: BotForAsker;
 
-// A `PersonSession`-only operation called with a `BotForAsker`.
+// A `MemberSession`-only operation called with a `BotForAsker`.
 // @ts-expect-error
-export const botAsPerson = personOnly(botForAsker);
+export const botAsMember = memberOnly(botForAsker);
 
 // Building a `Principal` literal.
 // @ts-expect-error
-export const forged: PersonSession = { _tag: "PersonSession", person: "someone" };
+export const forged: MemberSession = { _tag: "MemberSession", member: "someone" };
 
-declare const session: PersonSession;
-// A spread copy of a principal, with another person.
+declare const session: MemberSession;
+// A spread copy of a principal, with another member.
 // @ts-expect-error
-export const copied: PersonSession = { ...session, person: "someone else" };
+export const copied: MemberSession = { ...session, member: "someone else" };
 
 class CurrentRequest extends Context.Service<CurrentRequest, { readonly id: string }>()(
 	"@sugabots/core/mistakes/CurrentRequest",

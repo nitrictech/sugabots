@@ -60,8 +60,8 @@ const about = (chatId: string, title: string): NotificationContent => ({
 	chatId,
 });
 
-/** The person's own event stream, carrying `events` and then ending. */
-function personStream(...events: ReturnType<typeof streamEvent>[]) {
+/** The member's own event stream, carrying `events` and then ending. */
+function memberStream(...events: ReturnType<typeof streamEvent>[]) {
 	client.events.me.mockReturnValue({
 		async *[Symbol.asyncIterator]() {
 			yield* events;
@@ -70,8 +70,8 @@ function personStream(...events: ReturnType<typeof streamEvent>[]) {
 	});
 }
 
-it("shows a notification about a chat none of the person's tabs is looking at", async () => {
-	personStream(streamEvent("notification", about(release, "Scout in Release notes")));
+it("shows a notification about a chat none of the member's tabs is looking at", async () => {
+	memberStream(streamEvent("notification", about(release, "Scout in Release notes")));
 
 	renderHook(useNotificationsInThisBrowser);
 
@@ -79,7 +79,7 @@ it("shows a notification about a chat none of the person's tabs is looking at", 
 });
 
 it("holds back a notification about a chat another of their tabs is looking at, until it looks away", async () => {
-	personStream(
+	memberStream(
 		streamEvent("presence", { clientId: otherTab, chatId: release, sequence: 2 }),
 		streamEvent("notification", about(release, "Held back")),
 		streamEvent("notification", about(crypto.randomUUID(), "Elsewhere")),

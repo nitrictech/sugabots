@@ -3,7 +3,7 @@
 ## Run from source
 
 This runs PostgreSQL in Docker and the web app and API directly on your
-machine. The application is a React web app, a Hono API, and PostgreSQL.
+machine. The application is a React web app, an API built on Effect's HttpApi, and PostgreSQL.
 
 ### 1. Install the prerequisites
 
@@ -174,12 +174,12 @@ bun run check           # lint, typecheck, and test
 bun run build           # build all packages
 bun run format          # apply Biome formatting fixes
 bun run db:studio       # inspect the database with Drizzle Studio
-bun run build:computer  # build the computer image, as sugabots-sandbox:dev
+bun run build:computer  # build the computer image, as sugabots-computer:dev
 ```
 
 Computers are made from the published image their tag names on its registry,
 so a local build under the published name is never used. To try one, set the
-OpenSandbox provider's image to `sugabots-sandbox:dev` in the workspace's
+OpenSandbox provider's image to `sugabots-computer:dev` in the workspace's
 settings. Projects' computers move to it once idle.
 
 The API exports traces and logs to any OTLP/HTTP collector set by the tracing
@@ -194,7 +194,7 @@ lines in `.env` (see `.env.example`). For local development,
 | `packages/contracts` | Portable API schemas and shared wire types                                     |
 | `packages/core`      | Domain services, database schema and migrations, and the durable workflows     |
 | `packages/server`    | HTTP API, authentication, configuration, and process composition               |
-| `packages/workflow`  | The workflow engines (in memory, and single-runner on Postgres) and activities |
+| `packages/workflow`  | The workflow engine (single-runner on Postgres) and activities                 |
 | `packages/sdk`       | Typed API, authentication, and reconnecting SSE client                         |
 | `packages/web`       | React and Vite web app                                                         |
 | `packages/docs`      | The docs pages, which the website publishes and bots read                      |

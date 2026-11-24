@@ -129,7 +129,7 @@ export function issueTools({ connected, repositorySchema, onRepository, sign }: 
 				repository: repositorySchema,
 				on: Schema.Literals(["issue", "pull_request", "comment", "code_comment"]).annotate({
 					description:
-						"What to react to: comment is one in an issue's or pull request's chat, code_comment one on a pull request's code",
+						"What to react to: comment is one on an issue or pull request as a whole, code_comment one on a pull request's code",
 				}),
 				number: Schema.optional(issueOrPullRequestNumberSchema),
 				commentId: Schema.optional(commentIdSchema),
@@ -189,7 +189,7 @@ export function issueTools({ connected, repositorySchema, onRepository, sign }: 
 
 const commentKindSchema = Schema.Literals(["comment", "code_comment"]).annotate({
 	description:
-		"code_comment for a comment on a pull request's code; comment for one in an issue's or pull request's chat",
+		"code_comment for a comment on a pull request's code; comment for one on an issue or pull request as a whole",
 });
 
 const labelsSchema = Schema.Array(

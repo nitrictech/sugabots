@@ -28,7 +28,7 @@ function hmac(algorithm: "sha256" | "sha512", content: string, secret = SECRET) 
 	return createHmac(algorithm, secret).update(content);
 }
 
-describe("secrets people send", () => {
+describe("secrets members send", () => {
 	it.each<[string, WebhookAuth, Record<string, string>]>([
 		["bearer", { kind: "bearer" }, { Authorization: `Bearer ${SECRET}` }],
 		["API key", { kind: "api_key", header: "X-API-Key" }, { "X-API-Key": SECRET }],
@@ -203,35 +203,6 @@ describe("Stripe's signatures", () => {
 
 describe("delivery ids", () => {
 	const bearer: WebhookAuth = { kind: "bearer" };
-
-	it("preserves automatic detection for triggers without an explicit setting", () => {
-		for (const header of [
-			"Idempotency-Key",
-			"Linear-Delivery",
-			"X-GitHub-Delivery",
-			"X-Shopify-Webhook-Id",
-			"Svix-Id",
-			"Webhook-Id",
-		]) {
-			expect(deliveryIdOf(bearer, undefined, delivery({ [header]: "delivery-1" }))).toBe(
-				"delivery-1",
-			);
-		}
-		expect(deliveryIdOf(bearer, undefined, delivery({}, '{"event_id":"event-1"}'))).toBe("event-1");
-		expect(
-			deliveryIdOf(bearer, undefined, delivery({}, '{"object":"event","id":"stripe-1"}')),
-		).toBe("stripe-1");
-	});
-
-	it("does not automatically store an API key as a delivery ID", () => {
-		expect(
-			deliveryIdOf(
-				{ kind: "api_key", header: "SVIX-ID" },
-				undefined,
-				delivery({ "Svix-Id": SECRET, "Webhook-Id": "delivery-1" }),
-			),
-		).toBe("delivery-1");
-	});
 
 	it("reads a generic webhook's from the header it names, in any case", () => {
 		expect(deliveryIdOf(bearer, "X-Request-Id", delivery({ "x-request-id": "req-1" }))).toBe(

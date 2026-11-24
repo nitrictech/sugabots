@@ -1,7 +1,8 @@
 import type { ProviderStatus } from "@sugabots/contracts";
+import type { UserText } from "@sugabots/errors";
 import { type SQL, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
-import { Data, Effect } from "effect";
+import { Clock, Data, Effect } from "effect";
 import type { UserFacing } from "../user-message.ts";
 import type { Egress, EgressRefused } from "./network/egress.ts";
 
@@ -60,3 +61,21 @@ export class UrlNotAllowed
 		return this.refusal.userMessage;
 	}
 }
+
+/** How a test went, with what else it found: `error` is why it failed, if it did. */
+type Tested<Found extends { error?: UserText }> = Omit<Found, "error"> & {
+	reachable: boolean;
+	latencyMs: number;
+	error?: UserText;
+};
+
+/** Runs `test`, which answers with why it failed, if it did, timing how long it took. */
+export const timedTest = <Found extends { error?: UserText }, E, R>(
+	test: Effect.Effect<Found, E, R>,
+): Effect.Effect<Tested<Found>, E, R> =>
+	Effect.gen(function* () {
+		const started = yield* Clock.currentTimeMillis;
+		const found = yield* test;
+		const latencyMs = (yield* Clock.currentTimeMillis) - started;
+		return { ...found, reachable: found.error === undefined, latencyMs };
+	});

@@ -49,8 +49,6 @@ interface Keeping {
 	toolCallId: string;
 }
 
-/** A result with images for the model, such as a screenshot, which the tool's `toModelOutput` gives it as image parts. */
-
 /** What the model is given in place of `output`, or `undefined` when `output` is short enough to give whole. */
 const longResultFor = (
 	output: unknown,

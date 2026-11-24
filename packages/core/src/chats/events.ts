@@ -1,13 +1,13 @@
 import type {
-	CollaborationPart,
 	FilePart,
+	MemberParticipant,
 	Message,
 	MessageReaction,
-	PersonParticipant,
 	ToolCallPart,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { Data } from "effect";
+import type { TurnReason } from "./sql.ts";
 import type { Turns } from "./turns/turns.ts";
 
 /**
@@ -15,14 +15,14 @@ import type { Turns } from "./turns/turns.ts";
  *
  * The stores emit these through `DomainEvents` in the transaction that wrote
  * them; `ChatEventStream` decides what a watching client is told. An event carries
- * the ids involved and what changed, plus what the feed would otherwise have
- * to query back, such as a finished reply's content. A tool call or
- * collaboration is carried whole, as the chat shows it, because clients
- * replace the part rather than patch it. An event the workspace's lists hear
- * of carries its chat, so only people who reach the chat are told.
+ * the ids involved and what changed, plus what the chat event stream would otherwise have
+ * to query back, such as a finished reply's content. A tool call is carried
+ * whole, as the chat shows it, because clients replace the part rather than
+ * patch it. An event the workspace's lists hear
+ * of carries its chat, so only members who reach the chat are told.
  */
 export type ChatEvent = Data.TaggedEnum<{
-	/** A message was posted whole: a person's, or an automation run's result. */
+	/** A message was posted whole: a member's, or an automation run's result. */
 	MessagePosted: {
 		readonly chatId: string;
 		readonly workspaceId: string;
@@ -66,6 +66,7 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly botId: string;
 		readonly messageId: string;
 		readonly content: string;
+		readonly finishedAt: Date;
 		/** The prompt's size, and the window it was read with. */
 		readonly contextTokens: number | undefined;
 		readonly contextCapacity: number;
@@ -81,9 +82,8 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly chatId: string;
 		readonly workspaceId: string;
 		readonly turnId: string;
-		readonly botId: string;
 	};
-	/** The turn parked until people decide the tool approvals it asked for. */
+	/** The turn parked until members decide the tool approvals it asked for. */
 	TurnSuspended: {
 		readonly chatId: string;
 		readonly workspaceId: string;
@@ -99,21 +99,22 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly turnId: string;
 		readonly botId: string;
 		readonly messageId: string;
-		/** What people are told went wrong. */
+		/** What members are told went wrong. */
 		readonly userMessage: UserText;
 		readonly willRetry: boolean;
 	};
 	/** The turn was cancelled, or found stopped and ended as cancelled, keeping the reply written so far. */
-	TurnCancelled: {
+	TurnInterrupted: {
 		readonly chatId: string;
 		readonly workspaceId: string;
 		readonly turnId: string;
 		readonly botId: string;
 		readonly messageId: string;
 		readonly content: string;
+		readonly finishedAt: Date;
 	};
-	/** Somebody asked a running turn to stop, or its automation run ended. */
-	TurnCancelRequested: {
+	/** A running turn was asked to stop, because its automation run ended. */
+	TurnInterruptRequested: {
 		readonly chatId: string;
 		readonly turnId: string;
 	};
@@ -128,38 +129,27 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly outcome: Turns.Ended;
 	};
 	/**
-	 * A turn's workflow in the chat finished and freed its
-	 * lane, so it no longer keeps the chat busy.
+	 * The workflow of the bot `botId`'s turn on `triggerMessageId` in the chat
+	 * finished and freed its lane, so it no longer keeps the chat busy.
 	 */
-	LaneReleased: { readonly chatId: string };
-	/** A reply called a tool: the call is running, or waiting for a person to approve it. */
+	LaneReleased: {
+		readonly chatId: string;
+		readonly botId: string;
+		readonly triggerMessageId: string;
+		readonly reason: TurnReason;
+	};
+	/** A reply called a tool: the call is running, or waiting for a member to approve it. */
 	ToolCallStarted: ToolCallChange;
-	/** A person allowed or denied a call, which the lists hear of, since it no longer waits on anyone. */
+	/** A member allowed or denied a call, which the lists hear of, since it no longer waits on anyone. */
 	ToolCallDecided: ToolCallChange & { readonly workspaceId: string };
 	/** An allowed call began running. */
 	ToolCallExecuting: ToolCallChange;
 	/** The call returned, failed, or was abandoned with its turn. */
 	ToolCallFinished: ToolCallChange;
-	/** A bot opened a chat for a collaborator, and briefed it there. */
-	CollaborationOpened: CollaborationChange & {
-		readonly workspaceId: string;
-		readonly collaboratorBotId: string;
-		/** The brief, the first message in the collaboration's chat. */
-		readonly briefMessageId: string;
-	};
-	/** The asking turn stopped waiting; the answer will resume it instead. */
-	CollaborationStoppedWaiting: CollaborationChange;
-	/** The collaborator's reply was recorded as the answer. */
-	CollaborationAnswered: CollaborationChange & AskerResume;
-	/**
-	 * The collaboration ended unanswered: the automation run it worked for ended,
-	 * or the collaborator's turn ended without an answer.
-	 */
-	CollaborationFailed: CollaborationChange & AskerResume;
-	/** `person` read further into the chat, at `readAt`: every message created up to `readThrough`. */
+	/** `member` read further into the chat, at `readAt`: every message created up to `readThrough`. */
 	ChatRead: {
 		readonly chatId: string;
-		readonly person: PersonParticipant;
+		readonly member: MemberParticipant;
 		readonly readThrough: Date;
 		readonly readAt: Date;
 	};
@@ -169,13 +159,13 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly chatId: string;
 	};
 	/**
-	 * A bot started the chat `chatId` for the person it was answering,
-	 * with the bot `hostBotId`, whose first message is the brief it works from.
+	 * A bot started the chat `chatId` for the member it was answering,
+	 * with the bot `briefedBotId`, whose first message is the brief it works from.
 	 */
 	BriefedChatStarted: {
 		readonly workspaceId: string;
 		readonly chatId: string;
-		readonly hostBotId: string;
+		readonly briefedBotId: string;
 		readonly briefMessageId: string;
 	};
 	/** Somebody started or renamed the project's chat `chatId`. */
@@ -188,7 +178,7 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly workspaceId: string;
 		readonly chatId: string;
 	};
-	/** The compaction bot replaced the chat's older history with a summary for its bots. */
+	/** The Compaction bot compacted the chat's history for its bots. */
 	ChatCompacted: {
 		readonly workspaceId: string;
 		readonly chatId: string;
@@ -201,11 +191,11 @@ export type ChatEvent = Data.TaggedEnum<{
 	};
 	/**
 	 * An automation run was told to end, and the work still going on in its
-	 * chats was cancelled: waiting turns, pending approvals, collaborations.
+	 * chat `chatId` was cancelled: waiting turns and pending approvals.
 	 */
 	AutomationWorkCancelled: {
 		readonly workspaceId: string;
-		readonly chatIds: readonly string[];
+		readonly chatId: string;
 	};
 	/** An automation run finished, failed, or was cancelled. */
 	RunSettled: {
@@ -222,25 +212,4 @@ export interface ToolCallChange {
 	readonly chatId: string;
 	readonly messageId: string;
 	readonly toolCall: ToolCallPart;
-}
-
-/**
- * A collaboration made in the reply `parentMessageId`, as it stands after the
- * change. Its own chat is `collaboration.chatId`.
- */
-export interface CollaborationChange {
-	readonly parentChatId: string;
-	readonly parentMessageId: string;
-	readonly collaboration: CollaborationPart;
-}
-
-/** Whether a collaboration's end is owed to the bot that asked, in a turn of its own. */
-interface AskerResume {
-	/**
-	 * The asking bot, when its turn stopped waiting and so nothing is reading
-	 * how the collaboration ended. Null while the asking tool still waits, and
-	 * when the automation run the collaboration worked for ended, which takes no
-	 * more turns.
-	 */
-	readonly askerToResume: string | null;
 }

@@ -1,6 +1,6 @@
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
-import { PersonAvatar } from "./avatar.tsx";
+import { MemberAvatar } from "./avatar.tsx";
 
 /** A photo drawn inline, so the story needs nothing from the network. */
 const PHOTO = `data:image/svg+xml;utf8,${encodeURIComponent(
@@ -8,10 +8,10 @@ const PHOTO = `data:image/svg+xml;utf8,${encodeURIComponent(
 )}`;
 
 const meta = preview.meta({
-	title: "Controls/PersonAvatar",
-	component: PersonAvatar,
+	title: "Controls/MemberAvatar",
+	component: MemberAvatar,
 	tags: ["ai-generated"],
-	args: { person: { name: "Rowan Ellis", email: "rowan@example.com" } },
+	args: { member: { name: "Rowan Ellis", email: "rowan@example.com" } },
 });
 
 /** Initials on a grey disc at each size the app uses: rows, lists, the sidebar, a page's hero. */
@@ -19,7 +19,7 @@ export const Sizes = meta.story({
 	render: (args) => (
 		<div className="flex items-center gap-4">
 			{[22, 30, 32, 36, 46, 88].map((size) => (
-				<PersonAvatar key={size} {...args} size={size} />
+				<MemberAvatar key={size} {...args} size={size} />
 			))}
 		</div>
 	),
@@ -32,9 +32,9 @@ export const Sizes = meta.story({
 export const Initials = meta.story({
 	render: () => (
 		<div className="flex gap-4">
-			<PersonAvatar person={{ name: "Mara", email: "mara@example.com" }} size={36} />
-			<PersonAvatar person={{ name: "Jay Young", email: "jay@example.com" }} size={36} />
-			<PersonAvatar person={{ name: "Sam de la Park", email: "sam@example.com" }} size={36} />
+			<MemberAvatar member={{ name: "Mara", email: "mara@example.com" }} size={36} />
+			<MemberAvatar member={{ name: "Jay Young", email: "jay@example.com" }} size={36} />
+			<MemberAvatar member={{ name: "Sam de la Park", email: "sam@example.com" }} size={36} />
 		</div>
 	),
 	play: async ({ canvas }) => {
@@ -45,7 +45,7 @@ export const Initials = meta.story({
 
 /** A photo fills the disc in place of the initials. */
 export const WithPhoto = meta.story({
-	args: { person: { name: "Rowan Ellis", email: "rowan@example.com", image: PHOTO }, size: 46 },
+	args: { member: { name: "Rowan Ellis", email: "rowan@example.com", image: PHOTO }, size: 46 },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByTitle("Rowan Ellis").querySelector("img")).not.toBeNull();
 	},

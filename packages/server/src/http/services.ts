@@ -28,11 +28,11 @@ import type { StreamAccess } from "../routes/events/access.ts";
 
 /**
  * Everything the routes may ask core for. Each is a service of operations or a view whose
- * every method requires the current actor and authorizes them, or the event
+ * every method requires the current principal and authorizes them, or the event
  * streams' `StreamAccess`, which does the same for an event stream. The exception
  * is `Automations.Webhooks`, which nobody signs in to call: the automation's secret
- * admits the run instead; and `Automations.ConnectorEvents`, which an
- * integration's signed delivery admits. `Accounts` is here for the referral link; its
+ * admits the run instead; and `Automations.ConnectorEvents`, which a
+ * GitHub app's signed delivery admits. `Accounts` is here for the referral link; its
  * `admit` is better-auth's, for somebody who has no account yet.
  *
  * `apiLayer` requires these and nothing else from core, so a route yielding a

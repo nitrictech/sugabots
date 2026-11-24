@@ -7,40 +7,40 @@ import {
 	type WorkspacePermission,
 } from "../../../authorization/permissions.ts";
 import { type Executor, query, type RunEffect } from "../../../database/database.ts";
-import { chatParticipant, membership, person } from "../../../database/schema.ts";
+import { chatParticipant, member, membership } from "../../../database/schema.ts";
 
-export const WORKSPACE_ACCESS_TOOL = "workspace_access";
+export const WORKSPACE_ROLE_TOOL = "workspace_role";
 
-/** Enough people to go to; a large workspace's every admin would only be noise. */
+/** Enough members to go to; a large workspace's every admin would only be noise. */
 const MAX_HELPERS = 5;
 
-interface PersonAccess {
+interface MemberRole {
 	name: string;
 	handle: string;
 	/** `none` for someone in the chat who has since left the workspace. */
 	role: WorkspaceRole | "none";
 }
 
-export type WorkspaceAccessResult =
+export type WorkspaceRoleResult =
 	| {
-			person: PersonAccess;
+			member: MemberRole;
 			/**
-			 * Who can change what the person may do, the owner first: the owner and
+			 * Who can change what the member may do, the owner first: the owner and
 			 * admins for anyone else, the owner alone for an admin, and nobody for
 			 * the owner.
 			 */
-			canHelp: PersonAccess[];
+			canHelp: MemberRole[];
 			/** Whether there are more admins than are listed. */
 			more: boolean;
 	  }
 	| { refused: string };
 
 /**
- * The `workspace_access` tool: a person's role, and who can change it. Only
- * for people in this chat, so a bot learns no more about the workspace's
- * people than someone needs to be pointed at the right person.
+ * The `workspace_role` tool: a member's role, and who can change it. Only
+ * for members taking part in this chat, so a bot learns no more about the workspace's
+ * members than someone needs to be pointed at the right member.
  */
-export function workspaceAccessTool({
+export function workspaceRoleTool({
 	chatId,
 	workspaceId,
 	run,
@@ -51,14 +51,14 @@ export function workspaceAccessTool({
 }) {
 	return tool({
 		description:
-			"Look up a person's role in this workspace, and who can change what they may do: the owner and admins, or for an admin the owner alone; nobody can change the owner's. Use it when someone can't do something, a setting or tool seems missing for them, or they ask who to ask. What each role may do is in the docs.",
+			"Look up a member's role in this workspace, and who can change what they may do: the owner and admins, or for an admin the owner alone; nobody can change the owner's. Use it when someone can't do something, a setting or tool seems missing for them, or they ask who to ask. What each role may do is in the docs.",
 		inputSchema: Schema.Struct({
-			person: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
-				description: "The handle of a person in this chat, like @sam",
+			member: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
+				description: "The handle of a member in this chat, like @sam",
 			}),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-		execute: async ({ person }): Promise<WorkspaceAccessResult> =>
-			run(query((db) => lookUpAccess(db, { chatId, workspaceId, handle: person }))),
+		execute: async ({ member }): Promise<WorkspaceRoleResult> =>
+			run(query((db) => lookUpAccess(db, { chatId, workspaceId, handle: member }))),
 	});
 }
 
@@ -66,37 +66,37 @@ const lookUpAccess = Effect.fn("WorkspaceAccess.lookUpAccess")(function* (
 	db: Executor,
 	{ chatId, workspaceId, handle }: { chatId: string; workspaceId: string; handle: string },
 ) {
-	const people = yield* db
-		.select({ name: person.name, role: membership.role })
+	const members = yield* db
+		.select({ name: member.name, role: membership.role })
 		.from(chatParticipant)
-		.innerJoin(person, eq(person.id, chatParticipant.personId))
+		.innerJoin(member, eq(member.id, chatParticipant.memberId))
 		.leftJoin(
 			membership,
-			and(eq(membership.personId, person.id), eq(membership.workspaceId, workspaceId)),
+			and(eq(membership.memberId, member.id), eq(membership.workspaceId, workspaceId)),
 		)
 		.where(eq(chatParticipant.chatId, chatId))
 		.orderBy(asc(chatParticipant.createdAt));
 	const asked = handle.trim().replace(/^@/, "").toLowerCase();
-	const found = people.find((candidate) => handleFromName(candidate.name) === asked);
+	const found = members.find((candidate) => handleFromName(candidate.name) === asked);
 	if (!found) {
-		const handles = people.map((candidate) => `@${handleFromName(candidate.name)}`);
+		const handles = members.map((candidate) => `@${handleFromName(candidate.name)}`);
 		return {
-			refused: `Nobody in this chat has the handle @${asked}. The people here are: ${handles.join(", ") || "nobody"}.`,
+			refused: `Nobody in this chat has the handle @${asked}. The members here are: ${handles.join(", ") || "nobody"}.`,
 		};
 	}
 	const changedBy = rolesThatChange(found.role);
-	if (changedBy.length === 0) return { person: personAccess(found), canHelp: [], more: false };
+	if (changedBy.length === 0) return { member: memberAccess(found), canHelp: [], more: false };
 	const helpers = yield* db
-		.select({ name: person.name, role: membership.role })
+		.select({ name: member.name, role: membership.role })
 		.from(membership)
-		.innerJoin(person, eq(person.id, membership.personId))
+		.innerJoin(member, eq(member.id, membership.memberId))
 		.where(and(eq(membership.workspaceId, workspaceId), inArray(membership.role, changedBy)))
 		.orderBy(sql`${membership.role} = 'owner' desc`, asc(membership.createdAt))
 		// One more than is returned, to tell whether there are more.
 		.limit(MAX_HELPERS + 1);
 	return {
-		person: personAccess(found),
-		canHelp: helpers.slice(0, MAX_HELPERS).map(personAccess),
+		member: memberAccess(found),
+		canHelp: helpers.slice(0, MAX_HELPERS).map(memberAccess),
 		more: helpers.length > MAX_HELPERS,
 	};
 });
@@ -114,10 +114,10 @@ function permissionToChange(role: WorkspaceRole | null): WorkspacePermission | u
 		case "admin":
 			return "workspace.admins.manage";
 		default:
-			return "workspace.people.manage";
+			return "workspace.members.manage";
 	}
 }
 
-function personAccess({ name, role }: { name: string; role: WorkspaceRole | null }): PersonAccess {
+function memberAccess({ name, role }: { name: string; role: WorkspaceRole | null }): MemberRole {
 	return { name, handle: handleFromName(name), role: role ?? "none" };
 }

@@ -17,7 +17,7 @@ import type {
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 const PERMISSIONS: ProjectPermissions = {
 	rename: true,
-	managePeople: true,
+	manageMembers: true,
 	manageBots: true,
 	leave: false,
 	join: false,
@@ -43,7 +43,7 @@ export const BOT_PERMISSIONS: BotPermissions = {
 };
 
 /**
- * A project the viewer is in, so the workspace's list counts its people and
+ * A project the viewer is in, so the workspace's list counts its members and
  * bots: the viewer alone, as the stories' members list answers, and
  * `botCount`, as many as `projectsWithBots` adds to it.
  */
@@ -90,7 +90,7 @@ function bot(
 		eyes,
 		shape,
 		model: "claude-sonnet-4-20250514",
-		prompt: "",
+		instructions: "",
 		disabledTools: [],
 		usesComputer: false,
 		naturalBrowsing: false,
@@ -113,7 +113,7 @@ export const oncall = bot("On-call", "rose", "dot", "hexagon");
 /** The viewer's Personal Assistant. */
 export const chief = bot("Chief", "purple", "wink", "blob", {
 	assistant: true,
-	visibility: "private",
+	visibility: "personal",
 });
 
 export const revenue = project("a1", "Revenue", "green", growthDesk, 3);

@@ -2,13 +2,13 @@ export * as Files from "./files.ts";
 
 import {
 	type FileAuthor,
-	type FileSummary,
-	type FileVersionSummary,
+	type ListedFile,
+	type ListedFileVersion,
+	type ListedMessageFile,
+	type ListedWrittenFile,
 	MAX_FILE_CONTENT_CHARACTERS,
-	type MessageFileSummary,
 	type WrittenFile,
 	type WrittenFileKind,
-	type WrittenFileSummary,
 } from "@sugabots/contracts";
 import { and, desc, eq, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -22,7 +22,13 @@ import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
 import { Visibility } from "../authorization/visibility.ts";
 import { BlobStore } from "../blob-store/blob-store.ts";
-import { query, serviceOperations, transaction, writtenRow } from "../database/database.ts";
+import {
+	type Executor,
+	query,
+	serviceOperations,
+	transaction,
+	writtenRow,
+} from "../database/database.ts";
 import {
 	type BotRow,
 	blobDeletion,
@@ -31,18 +37,18 @@ import {
 	type FileVersionRow,
 	file,
 	fileVersion,
+	member,
 	message,
-	person,
 	placedChat,
 	WRITTEN_FILE_KINDS,
 } from "../database/schema.ts";
 import { Ids, isUuid } from "../ids/ids.ts";
 
 /**
- * Reading files, for people. A file is reached through the chat it
- * was uploaded or made in: a project's by the people in the project, a bot's
- * by whoever reaches the bot. One made in a collaboration or an automation's
- * run belongs to the chat that was opened from. Only a file a bot
+ * Reading files, for members. A file is reached through the chat it
+ * was uploaded or made in: a project's by the members in the project, a bot's
+ * by whoever reaches the bot. One made in an automation's run belongs to the
+ * automation's feed, which lists the run. Only a file a bot
  * wrote is read here, with its versions; a file on a message is read through
  * its chat (see `chats/chats/chat-files.ts`). Deleting a
  * written file takes changing the project or the bot.
@@ -54,7 +60,7 @@ export interface Interface {
 	 */
 	readonly listInProject: (input: {
 		projectId: string;
-	}) => Effect.Effect<FileSummary[], AuthorizationDenied, CurrentActor.Service>;
+	}) => Effect.Effect<ListedFile[], AuthorizationDenied, CurrentActor.Service>;
 	/** The written file at its current version. */
 	readonly get: (
 		at: InFile,
@@ -62,11 +68,11 @@ export interface Interface {
 	/** What the written file is, without reading its content. */
 	readonly summary: (
 		at: InFile,
-	) => Effect.Effect<WrittenFileSummary, AuthorizationDenied, CurrentActor.Service>;
+	) => Effect.Effect<ListedWrittenFile, AuthorizationDenied, CurrentActor.Service>;
 	/** Its versions, newest first. */
 	readonly versions: (
 		at: InFile,
-	) => Effect.Effect<FileVersionSummary[], AuthorizationDenied, CurrentActor.Service>;
+	) => Effect.Effect<ListedFileVersion[], AuthorizationDenied, CurrentActor.Service>;
 	readonly getVersion: (
 		at: InFile & { version: number },
 	) => Effect.Effect<WrittenFile, AuthorizationDenied, CurrentActor.Service>;
@@ -82,13 +88,13 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
  * from it; in a project's chat, every file written in the project;
  * and in its own chat or automation feed, every file written in its own chats
  * and feeds, which whoever reaches the bot sees. Never the files it wrote
- * elsewhere, which the people of the chat it is working in may not
+ * elsewhere, which those who reach the chat it is working in may not
  * see. Every change names the version it was based on and is refused with
  * `Stale` if another landed first, so one writer never silently overwrites
  * another.
  */
 export interface AuthoringInterface {
-	readonly list: (by: BotInChat) => Effect.Effect<WrittenFileSummary[]>;
+	readonly list: (by: BotInChat) => Effect.Effect<ListedWrittenFile[]>;
 	readonly read: (by: BotInChat, fileId: string) => Effect.Effect<WrittenFile, NotFound>;
 	readonly create: (
 		by: BotInChat,
@@ -167,7 +173,9 @@ export const make = Effect.gen(function* () {
 		summary: ({ fileId }) =>
 			operation(
 				"summary",
-				Effect.map(inReachedChat(fileId), ({ found }) => toSummary(found.file, found.creator)),
+				Effect.map(inReachedChat(fileId), ({ found }) =>
+					toListedWrittenFile(found.file, found.creator),
+				),
 			),
 
 		versions: ({ fileId }) =>
@@ -283,7 +291,7 @@ const makeAuthoring = Effect.gen(function* () {
 			operation(
 				"list",
 				Effect.flatMap(chatOf(by.chatId), (working) =>
-					writtenSummariesWhere(reachedByBot(working)),
+					listedWrittenFilesWhere(reachedByBot(working)),
 				),
 			),
 
@@ -392,7 +400,7 @@ export const authoringLayer = Layer.effect(Authoring, makeAuthoring);
 
 /**
  * Version `version` of a written file, read without asking who wants it:
- * only for a caller that has already authorized the read, as a sealed page
+ * only for a caller that has already authorized the read, as an encrypted page
  * address has (see `pages.ts`). `undefined` when there is no such file or
  * version.
  */
@@ -413,7 +421,7 @@ interface StoredContent {
 }
 
 const CONTENT_TYPES: Record<WrittenFileKind, string> = {
-	document: "text/markdown; charset=utf-8",
+	markdown: "text/markdown; charset=utf-8",
 	html: "text/html; charset=utf-8",
 };
 
@@ -490,12 +498,7 @@ const writtenFileWhere = (
 	Effect.gen(function* () {
 		if (!isUuid(fileId)) return undefined;
 		const [row] = yield* query((db) => {
-			const select = db
-				.select({ file, creator: { id: bot.id, name: bot.name } })
-				.from(file)
-				.innerJoin(placedChat, eq(placedChat.id, file.chatId))
-				.innerJoin(madeInChat, chatOfMadeIn)
-				.leftJoin(bot, eq(bot.id, file.createdByBotId))
+			const select = writtenFilesWithCreator(db)
 				.where(and(eq(file.id, fileId), isWritten, scope))
 				.limit(1);
 			return options.lock ? select.for("update", { of: file }) : select;
@@ -505,10 +508,19 @@ const writtenFileWhere = (
 
 const writtenFileWithId = (fileId: string) => writtenFileWhere(fileId, undefined);
 
+/** Files with the chat each was made in and the bot that made it, for a scope to narrow. */
+const writtenFilesWithCreator = (db: Executor) =>
+	db
+		.select({ file, creator: { id: bot.id, name: bot.name } })
+		.from(file)
+		.innerJoin(placedChat, eq(placedChat.id, file.chatId))
+		.innerJoin(madeInChat, chatOfMadeIn)
+		.leftJoin(bot, eq(bot.id, file.createdByBotId));
+
 /**
  * The chat a file was made in, joined beside `placedChat`,
- * the chat it was made in: that chat itself, or for a
- * collaboration or an automation's run, the one it was opened from.
+ * the chat it was made in: that chat itself, or for an automation's run, the
+ * automation's feed, which lists it.
  */
 const madeInChat = alias(placedChat, "made_in_chat");
 const chatOfMadeIn = eq(madeInChat.id, sql`coalesce(${placedChat.rootChatId}, ${placedChat.id})`);
@@ -533,7 +545,7 @@ const reachedByBot = (working: WorkingChat | undefined): SQL => {
 	);
 };
 
-/** The chat `chatId` is in: itself, or the one it was opened from. */
+/** The chat `chatId` is in: itself, or for a run, the automation's feed. */
 const chatOf = (chatId: string) =>
 	Effect.map(
 		query((db) =>
@@ -552,33 +564,26 @@ const fileReachedBy = (by: BotInChat, fileId: string, options: { lock?: boolean 
 		writtenFileWhere(fileId, reachedByBot(working), options),
 	);
 
-const writtenSummariesWhere = (scope: SQL | undefined) =>
+const listedWrittenFilesWhere = (scope: SQL | undefined) =>
 	Effect.map(
 		query((db) =>
-			db
-				.select({ file, creator: { id: bot.id, name: bot.name } })
-				.from(file)
-				.innerJoin(placedChat, eq(placedChat.id, file.chatId))
-				.innerJoin(madeInChat, chatOfMadeIn)
-				.leftJoin(bot, eq(bot.id, file.createdByBotId))
-				.where(and(isWritten, scope))
-				.orderBy(desc(file.updatedAt)),
+			writtenFilesWithCreator(db).where(and(isWritten, scope)).orderBy(desc(file.updatedAt)),
 		),
-		(rows) => rows.map((row) => toSummary(asWritten(row.file), authorOf(row.creator))),
+		(rows) => rows.map((row) => toListedWrittenFile(asWritten(row.file), authorOf(row.creator))),
 	);
 
 /**
- * A file on a message that people can open from a list: a sent upload or a
- * bot's attachment, in a chat itself rather than in a collaboration
- * or a run opened from one, as only a chat's files are served.
+ * A file on a message that members can open from a list: a sent attachment or a
+ * bot's attachment, in a chat itself rather than in a run listed in one, as
+ * only a chat's files are served.
  */
 const isListedMessageFile = and(
-	inArray(file.kind, ["upload", "bot_attachment"]),
+	inArray(file.kind, ["attachment", "bot_attachment"]),
 	isNotNull(file.messageId),
 	eq(file.chatId, madeInChat.id),
 );
 
-/** The files people see listed where `scope` holds: those bots wrote, and those on messages, newest change first. */
+/** The files members see listed where `scope` holds: those bots wrote, and those on messages, newest change first. */
 const listedWhere = (scope: SQL | undefined) =>
 	Effect.map(
 		query((db) =>
@@ -586,7 +591,7 @@ const listedWhere = (scope: SQL | undefined) =>
 				.select({
 					file,
 					creator: { id: bot.id, name: bot.name },
-					uploader: person.name,
+					uploader: member.name,
 				})
 				.from(file)
 				.innerJoin(placedChat, eq(placedChat.id, file.chatId))
@@ -594,52 +599,56 @@ const listedWhere = (scope: SQL | undefined) =>
 				.leftJoin(message, eq(message.id, file.messageId))
 				// The bot that wrote it, or that attached it to its reply.
 				.leftJoin(bot, eq(bot.id, sql`coalesce(${file.createdByBotId}, ${message.authorBotId})`))
-				.leftJoin(person, eq(person.id, file.uploaderId))
+				.leftJoin(member, eq(member.id, file.uploaderId))
 				.where(and(or(isWritten, isListedMessageFile), scope))
 				.orderBy(desc(file.updatedAt)),
 		),
 		(rows) =>
 			rows.map(
-				({ file: row, creator, uploader }): FileSummary =>
+				({ file: row, creator, uploader }): ListedFile =>
 					isWrittenKind(row.kind)
-						? toSummary(asWritten(row), authorOf(creator))
-						: toMessageFileSummary(row, row.kind === "upload" ? uploader : (creator?.name ?? null)),
+						? toListedWrittenFile(asWritten(row), authorOf(creator))
+						: toListedMessageFile(
+								row,
+								row.kind === "attachment" ? uploader : (creator?.name ?? null),
+							),
 			),
 	);
 
-const toMessageFileSummary = (row: FileRow, sentBy: string | null): MessageFileSummary => ({
+const toListedMessageFile = (row: FileRow, author: string | null): ListedMessageFile => ({
 	id: row.id,
 	chatId: row.chatId,
-	kind: row.kind === "upload" ? "upload" : "attachment",
+	kind: row.kind === "attachment" ? "attachment" : "bot_attachment",
 	// A file on a message always has a name, type and size, by `file_source_valid`.
 	name: row.name ?? "",
 	contentType: row.contentType ?? "",
 	size: row.size ?? 0,
-	sentBy,
+	author,
 	createdAt: row.createdAt.toISOString(),
 	updatedAt: row.updatedAt.toISOString(),
 });
 
+/** Versions with the bot that wrote each, for a condition to narrow. */
+const versionsWithAuthor = (db: Executor) =>
+	db
+		.select({ version: fileVersion, author: { id: bot.id, name: bot.name } })
+		.from(fileVersion)
+		.leftJoin(bot, eq(bot.id, fileVersion.authorBotId));
+
 const versionsOf = (fileId: string) =>
 	Effect.map(
 		query((db) =>
-			db
-				.select({ version: fileVersion, author: { id: bot.id, name: bot.name } })
-				.from(fileVersion)
-				.leftJoin(bot, eq(bot.id, fileVersion.authorBotId))
+			versionsWithAuthor(db)
 				.where(eq(fileVersion.fileId, fileId))
 				.orderBy(desc(fileVersion.number)),
 		),
-		(rows) => rows.map((row) => toVersionSummary(row.version, authorOf(row.author))),
+		(rows) => rows.map((row) => toListedFileVersion(row.version, authorOf(row.author))),
 	);
 
 const versionRow = (fileId: string, number: number) =>
 	Effect.map(
 		query((db) =>
-			db
-				.select({ version: fileVersion, author: { id: bot.id, name: bot.name } })
-				.from(fileVersion)
-				.leftJoin(bot, eq(bot.id, fileVersion.authorBotId))
+			versionsWithAuthor(db)
 				.where(and(eq(fileVersion.fileId, fileId), eq(fileVersion.number, number)))
 				.limit(1),
 		),
@@ -652,7 +661,7 @@ const atVersionIn = (blobs: BlobStore.Interface) => (found: FoundFile, number: n
 		const version = yield* versionRow(found.file.id, number);
 		if (!version) return undefined;
 		// A row is never without its blob, as a write puts the blob first. A store
-		// that can't be reached is an infrastructure fault, which a person's
+		// that can't be reached is an infrastructure fault, which a member's
 		// request answers as a server error and a bot's tool as a failed call.
 		const stored = yield* blobs.get(versionKey(found.file.id, version.id)).pipe(Effect.orDie);
 		const content = yield* Stream.mkString(Stream.decodeText(stored.stream)).pipe(Effect.orDie);
@@ -709,7 +718,7 @@ const botNamed = (botId: string) =>
 		([row]) => authorOf(row ?? null),
 	);
 
-const toSummary = (row: WrittenFileRow, creator: FileAuthor): WrittenFileSummary => ({
+const toListedWrittenFile = (row: WrittenFileRow, creator: FileAuthor): ListedWrittenFile => ({
 	id: row.id,
 	chatId: row.chatId,
 	kind: row.kind,
@@ -720,7 +729,7 @@ const toSummary = (row: WrittenFileRow, creator: FileAuthor): WrittenFileSummary
 	updatedAt: row.updatedAt.toISOString(),
 });
 
-const toVersionSummary = (row: FileVersionRow, author: FileAuthor): FileVersionSummary => ({
+const toListedFileVersion = (row: FileVersionRow, author: FileAuthor): ListedFileVersion => ({
 	number: row.number,
 	author,
 	createdAt: row.createdAt.toISOString(),
@@ -732,7 +741,7 @@ const toWrittenFile = (
 	author: FileAuthor,
 	content: string,
 ): WrittenFile => ({
-	...toSummary(found.file, found.creator),
+	...toListedWrittenFile(found.file, found.creator),
 	content,
-	shownVersion: toVersionSummary(version, author),
+	shownVersion: toListedFileVersion(version, author),
 });

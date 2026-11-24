@@ -68,14 +68,14 @@ export interface Interface {
 	/** `false` when the automation has no such trigger. */
 	readonly removeTrigger: (scope: Scope, triggerId: string) => Effect.Effect<boolean>;
 	/**
-	 * Replaces a webhook trigger's secret with `sealed`, a secret sealed with
-	 * `Credentials`, or null for none. `false` when there is no such webhook
+	 * Replaces a webhook trigger's secret with `encrypted`, encrypted with
+	 * `Secrets`, or null for none. `false` when there is no such webhook
 	 * trigger on the automation.
 	 */
 	readonly replaceWebhookSecret: (
 		scope: Scope,
 		triggerId: string,
-		sealed: string | null,
+		encrypted: string | null,
 	) => Effect.Effect<boolean>;
 	/**
 	 * The routine due soonest at `now`, of an enabled automation, with its
@@ -129,7 +129,7 @@ export interface Interface {
 	 */
 	readonly settle: (runId: string, settled: Settled) => Effect.Effect<boolean>;
 	/**
-	 * Records a run that has not ended as failed, telling people
+	 * Records a run that has not ended as failed, telling members
 	 * `userMessage`, and announces it, pausing its automation as `settle` does.
 	 * Does nothing once the run has ended.
 	 */
@@ -350,14 +350,14 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		replaceWebhookSecret: (scope, triggerId, sealed) =>
+		replaceWebhookSecret: (scope, triggerId, encrypted) =>
 			operation(
 				"replaceWebhookSecret",
 				Effect.map(
 					query((db) =>
 						db
 							.update(automationTrigger)
-							.set({ secretEncrypted: sealed })
+							.set({ secretEncrypted: encrypted })
 							.where(and(ofAutomation(scope, triggerId), eq(automationTrigger.kind, "webhook")))
 							.returning({ id: automationTrigger.id }),
 					),
@@ -539,7 +539,7 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-/** What an automation is: its name, what it tells the bot, where its result goes, and whether it runs. */
+/** What an automation is: its name, what it tells the bot, and whether it runs. */
 export type Definition = Pick<schema.AutomationRow, "name" | "instructions" | "state">;
 
 /** What one of an automation's triggers is, and what it keeps beside that: a webhook's secret, a routine's next time. */
@@ -588,13 +588,11 @@ export function endingAfter(
 /** How the run is already ending, if something has started ending it. */
 export function endingOf(run: schema.RunRow): Turns.Ended | undefined {
 	if (run.pendingTerminalState === "cancelled") return { state: "cancelled" };
-	if (run.pendingTerminalState === "failed") {
-		// `pending_terminal_error` is nullable in the schema; a failure recorded
-		// without one reads as having stopped unexpectedly.
-		return { state: "failed", error: run.pendingTerminalError ?? RUN_STOPPED_UNEXPECTEDLY };
+	if (run.pendingTerminalState === "failed" && run.pendingTerminalError !== null) {
+		return { state: "failed", error: run.pendingTerminalError };
 	}
 	return undefined;
 }
 
-/** What people are told about a run whose workflow failed; the cause goes only to the logs. */
+/** What members are told about a run whose workflow failed; the cause goes only to the logs. */
 export const RUN_STOPPED_UNEXPECTEDLY = userText`The automation run stopped unexpectedly`;

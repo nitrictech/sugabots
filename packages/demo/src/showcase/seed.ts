@@ -17,9 +17,9 @@ import { layer as databaseLayer, query } from "@sugabots/core/database/database"
 import {
 	automationTrigger,
 	bot as botTable,
+	member,
 	modelProvider,
 	modelRequest,
-	person,
 	project,
 	providerModel,
 	workspace,
@@ -34,7 +34,6 @@ import { Secrets } from "@sugabots/core/secrets/secrets";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
 import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
-import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
 import { ProjectStore } from "@sugabots/core/workspaces/projects/project-store";
@@ -56,7 +55,7 @@ import {
 import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
 
 /**
- * Showcase seed: Fieldnote, a small company with the people, projects and
+ * Showcase seed: Fieldnote, a small company with the members, projects and
  * bots the website's screenshots and demo video show. Run it with
  * `bun run db:seed:showcase`, against a migrated database.
  *
@@ -64,11 +63,11 @@ import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
  * Anita owns the workspace; sign in as her.
  *
  * Anita made every bot. The team's bots are public, each added to the
- * project whose work it does and pinned for that project's people; her own
+ * project whose work it does and pinned for that project's members; her own
  * two are private. The chats come already written (see
- * `chats.ts`): people talking in the projects' chats and the
- * bots they mention answering there, chats people started with a bot, a
- * collaboration, a file, and automation runs. Support's chat holds only the
+ * `chats.ts`): members talking in the projects' chats and the
+ * bots they mention answering there, chats members started with a bot, a
+ * file, and automation runs. Support's chat holds only the
  * morning's handover, where the demo's story starts (see `stage.ts`). Each
  * project's bots get its connectors too, signed out.
  *
@@ -81,7 +80,7 @@ import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
  * knows they are there.
  *
  * Its automations show as on but are held a year from running, since they would
- * otherwise run on schedule and fail without a model.
+ * otherwise run on their timetables and fail without a model.
  *
  * Every step is idempotent, so it can be run again over its own data.
  */
@@ -89,10 +88,10 @@ import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
 const PASSWORD = "showcase";
 const WORKSPACE = { name: "Fieldnote", slug: "fieldnote" };
 
-type PersonKey = "anita" | "gary" | "lorraine" | "doreen" | "rob";
+type MemberKey = "anita" | "gary" | "lorraine" | "doreen" | "rob";
 
-/** Anita owns the workspace, which puts her in every project people made. */
-const OWNER: PersonKey = "anita";
+/** Anita owns the workspace, which puts her in every project members made. */
+const OWNER: MemberKey = "anita";
 
 /**
  * A face from Unsplash, free to use under the Unsplash License, cropped to it
@@ -101,7 +100,7 @@ const OWNER: PersonKey = "anita";
 const unsplashPortrait = (photo: string) =>
 	`https://images.unsplash.com/${photo}?w=256&h=256&fit=crop&crop=faces&auto=format`;
 
-const PEOPLE: Record<PersonKey, { name: string; email: string; image: string }> = {
+const MEMBERS: Record<MemberKey, { name: string; email: string; image: string }> = {
 	// Pargat Dhillon, unsplash.com/photos/lUwb63aNXoM
 	anita: {
 		name: "Anita Bhatt",
@@ -138,7 +137,7 @@ type ProjectKey = "growth" | "support" | "engineering";
 
 const PROJECTS: Record<
 	ProjectKey,
-	{ name: string; color: ProjectColor; members: readonly PersonKey[] }
+	{ name: string; color: ProjectColor; members: readonly MemberKey[] }
 > = {
 	growth: { name: "Growth", color: "green", members: ["gary", "lorraine"] },
 	support: { name: "Support", color: "blue", members: ["lorraine", "doreen"] },
@@ -204,13 +203,13 @@ const OPENROUTER_CLAUDE: ModelChoice = {
 
 interface SeedBot {
 	name: string;
-	/** The project a public bot is in; a private bot, only Anita's, is in none. */
-	project: ProjectKey | "private";
+	/** The project a public bot is in; a personal bot, only Anita's, is in none. */
+	project: ProjectKey | "personal";
 	color: BotColor;
 	eyes: BotEyes;
 	shape: BotShape;
 	description: string;
-	prompt: string;
+	instructions: string;
 	/** In order of preference; the first is what the ledger's history is on. */
 	models: readonly [ModelChoice, ...ModelChoice[]];
 	usesComputer?: boolean;
@@ -226,7 +225,7 @@ const BOTS: readonly SeedBot[] = [
 		eyes: "pill",
 		shape: "leaf",
 		description: "Answers pricing and renewal questions for the sales team.",
-		prompt:
+		instructions:
 			"You help Fieldnote's sales team answer customers about pricing, renewals and discounts. Keep replies short and ready to send. When a discount or a custom quote comes up, ask Pricing Analyst to check the margin before you agree to anything.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 34,
@@ -238,7 +237,7 @@ const BOTS: readonly SeedBot[] = [
 		eyes: "square",
 		shape: "hexagon",
 		description: "Checks discounts against margin and drafts quotes.",
-		prompt:
+		instructions:
 			"You check proposed discounts against Fieldnote's margins and draft quotes. List tiers are Team at $24 per seat a month and Business at $48, with annual plans at 15% off. Never let gross margin fall below 70%. Say plainly whether a deal clears and give the quote number when you draft one.",
 		models: [OPENAI_MINI, CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 12,
@@ -250,7 +249,7 @@ const BOTS: readonly SeedBot[] = [
 		eyes: "arc",
 		shape: "blob",
 		description: "Drafts replies, posts and invites.",
-		prompt:
+		instructions:
 			"You write for Fieldnote: customer replies, launch posts, newsletters and event invites. Plain, warm and short. Offer one draft, not three, and say what you'd cut if it needs to be shorter.",
 		models: [CHATGPT, CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 22,
@@ -262,8 +261,8 @@ const BOTS: readonly SeedBot[] = [
 		eyes: "dot",
 		shape: "circle",
 		description: "Works the support queue and handles refunds.",
-		prompt:
-			"You work Fieldnote's support queue. Find the customer, read their history, and either answer or hand the ticket to the right person in the project. Refunds go through Stripe: before you issue one, state the customer, the amount and the reason. When a billing problem needs explaining, ask Billing Engineer why it happened.",
+		instructions:
+			"You work Fieldnote's support queue. Find the customer, read their history, and either answer or hand the ticket to the right member in the project. Refunds go through Stripe: before you issue one, state the customer, the amount and the reason. When a billing problem needs explaining, ask Billing Engineer why it happened.",
 		models: [CLAUDE_HAIKU, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 41,
 	},
@@ -274,8 +273,8 @@ const BOTS: readonly SeedBot[] = [
 		eyes: "pill",
 		shape: "squircle",
 		description: "Triage, reminders and quick jobs.",
-		prompt:
-			"You sort the support inbox. Label each email as bug, billing, how-to or sales, flag anything urgent, and post a short list of what needs a person today.",
+		instructions:
+			"You sort the support inbox. Label each email as bug, billing, how-to or sales, flag anything urgent, and post a short list of what needs a member today.",
 		models: [GEMINI_FLASH, CLAUDE_HAIKU, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 28,
 	},
@@ -286,7 +285,7 @@ const BOTS: readonly SeedBot[] = [
 		eyes: "square",
 		shape: "antenna",
 		description: "Digs into billing bugs on its computer.",
-		prompt:
+		instructions:
 			"You find out why billing went wrong for a customer. Reproduce it on your computer against the billing code, run the tests, and say plainly what caused it and what fixes it. Open a pull request with the fix, and write the incident up for the team.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		usesComputer: true,
@@ -299,7 +298,7 @@ const BOTS: readonly SeedBot[] = [
 		eyes: "wink",
 		shape: "octagon",
 		description: "Reviews pull requests and runs the tests on its computer.",
-		prompt:
+		instructions:
 			"You review Fieldnote's pull requests. Check out the branch on your computer, run the tests, and reply with what fails, what's risky and what you'd change. Lead with the one thing that matters most.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		usesComputer: true,
@@ -312,7 +311,7 @@ const BOTS: readonly SeedBot[] = [
 		eyes: "arc",
 		shape: "drop",
 		description: "Reads the long stuff so you don't have to.",
-		prompt:
+		instructions:
 			"You read papers, docs, changelogs and long chats for the engineering team, and summarise what matters for Fieldnote. Quote the source for every claim. Use your computer to try code samples before recommending them.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		usesComputer: true,
@@ -320,24 +319,24 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Journal",
-		project: "private",
+		project: "personal",
 		color: "teal",
 		eyes: "dot",
 		shape: "pebble",
 		description: "Private notes that stay private.",
-		prompt:
+		instructions:
 			"You keep Anita's private work journal. When she writes, file it under the day, and when she asks, remind her what she noted before. Never suggest sharing anything from here.",
 		models: [OLLAMA_LLAMA],
 		requestsPerWeekday: 6,
 	},
 	{
 		name: "Trip Planner",
-		project: "private",
+		project: "personal",
 		color: "sky",
 		eyes: "pill",
 		shape: "dome",
 		description: "Plans trips and keeps the bookings in one place.",
-		prompt:
+		instructions:
 			"You plan Anita's work trips: flights, hotels near the venue, and a day-by-day plan. Keep every booking reference in one list she can find again.",
 		models: [GEMINI_FLASH, CLAUDE_HAIKU, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 3,
@@ -370,7 +369,7 @@ const AUTOMATIONS: readonly { bot: string; automation: NewAutomation }[] = [
 		automation: {
 			name: "Morning queue",
 			instructions:
-				"Go through the tickets that came in overnight. Answer what you can and list what needs a person, oldest first.",
+				"Go through the tickets that came in overnight. Answer what you can and list what needs a member, oldest first.",
 			triggers: [weekly(["mon", "tue", "wed", "thu", "fri"], [minutes(8, 30)])],
 		},
 	},
@@ -412,24 +411,24 @@ const AUTOMATIONS: readonly { bot: string; automation: NewAutomation }[] = [
 ];
 
 /**
- * What the projects' people said in their chats, and what the bots they
+ * What the projects' members said in their chats, and what the bots they
  * mentioned answered there. Times are on the morning of the day they happen
  * (see `chats.ts`). Support's chat has only the morning's handover,
  * where the demo's story starts.
  */
-const PROJECT_CHATS: readonly ProjectChatScene<PersonKey>[] = [
+const PROJECT_CHATS: readonly ProjectChatScene<MemberKey>[] = [
 	{
 		project: "growth",
 		chat: "Pipeline",
 		messages: [
 			{
 				at: { time: "9:02" },
-				from: { person: "lorraine" },
+				from: { member: "lorraine" },
 				parts: [{ text: "Morning! Pipeline review has moved to 2pm today." }],
 			},
 			{
 				at: { time: "10:40" },
-				from: { person: "lorraine" },
+				from: { member: "lorraine" },
 				parts: [{ text: "@copywriter Can you draft a short post announcing invoices in AUD?" }],
 			},
 			{
@@ -444,13 +443,13 @@ const PROJECT_CHATS: readonly ProjectChatScene<PersonKey>[] = [
 			},
 			{
 				at: { time: "10:52" },
-				from: { person: "gary" },
+				from: { member: "gary" },
 				parts: [{ text: "Brightwater signed! Quote's accepted, 40 seats annual." }],
 				reactions: [{ emoji: "🎉", by: ["lorraine", "anita"] }],
 			},
 			{
 				at: { time: "10:55" },
-				from: { person: "lorraine" },
+				from: { member: "lorraine" },
 				parts: [{ text: "Great work. I'll book their onboarding call for next week." }],
 			},
 		],
@@ -461,13 +460,13 @@ const PROJECT_CHATS: readonly ProjectChatScene<PersonKey>[] = [
 		messages: [
 			{
 				at: { time: "9:40" },
-				from: { person: "rob" },
+				from: { member: "rob" },
 				parts: [{ text: "The new export queue is live on staging." }],
 				reactions: [{ emoji: "🚀", by: ["gary"] }],
 			},
 			{
 				at: { time: "10:20" },
-				from: { person: "rob" },
+				from: { member: "rob" },
 				parts: [
 					{
 						text: "@code-reviewer Can you review PR #482 before I merge? It moves the export job onto the new queue.",
@@ -486,7 +485,7 @@ const PROJECT_CHATS: readonly ProjectChatScene<PersonKey>[] = [
 			},
 			{
 				at: { time: "10:31" },
-				from: { person: "rob" },
+				from: { member: "rob" },
 				parts: [{ text: "Good catch on the timeout. Fixing both now." }],
 			},
 		],
@@ -497,7 +496,7 @@ const PROJECT_CHATS: readonly ProjectChatScene<PersonKey>[] = [
 		messages: [
 			{
 				at: { time: "8:41" },
-				from: { person: "doreen" },
+				from: { member: "doreen" },
 				parts: [
 					{
 						text: "Morning queue's in. Brightline can't sign in since the SSO change, so I'm taking that one.",
@@ -506,7 +505,7 @@ const PROJECT_CHATS: readonly ProjectChatScene<PersonKey>[] = [
 			},
 			{
 				at: { time: "8:44" },
-				from: { person: "lorraine" },
+				from: { member: "lorraine" },
 				parts: [
 					{
 						text: "Thanks. Kestrel Freight says they were charged twice on 3 Oct, so that needs a refund today.",
@@ -518,16 +517,16 @@ const PROJECT_CHATS: readonly ProjectChatScene<PersonKey>[] = [
 ];
 
 /**
- * Chats people started with a bot. Anyone who can see the bot can read them
+ * Chats members started with a bot. Anyone who can see the bot can read them
  * and join in, as Lorraine does in Gary's.
  */
-const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
+const BOT_CHATS: readonly BotChatScene<MemberKey>[] = [
 	{
 		bot: "Growth Desk",
 		messages: [
 			{
 				at: { time: "9:12" },
-				from: { person: "gary" },
+				from: { member: "gary" },
 				parts: [{ text: "Fernhill Outfitters replied about pricing. Can you draft the answer?" }],
 			},
 			{
@@ -536,25 +535,25 @@ const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 				from: { bot: "Growth Desk" },
 				parts: [
 					{
-						text: "Drafted. Their usage is up 40% since March, so I've led with Business:\n\n> Hi Dana, thanks for coming back to us. With 32 people now using Fieldnote every week, Business is the better fit: SSO, audit logs and priority support at $48 a seat, or $40.80 on an annual plan. Happy to walk your team through it this week.\n\nWant me to send it from the shared inbox?",
+						text: "Drafted. Their usage is up 40% since March, so I've led with Business:\n\n> Hi Dana, thanks for coming back to us. With 32 members now using Fieldnote every week, Business is the better fit: SSO, audit logs and priority support at $48 a seat, or $40.80 on an annual plan. Happy to walk your team through it this week.\n\nWant me to send it from the shared inbox?",
 					},
 				],
 				reactions: [{ emoji: "👍", by: ["anita", "lorraine"] }],
 			},
 			{
 				at: { time: "9:15" },
-				from: { person: "lorraine" },
+				from: { member: "lorraine" },
 				replyTo: "fernhill-draft",
 				parts: [{ text: "Hold it until I've spoken to their team tomorrow." }],
 			},
 			{
 				at: { time: "9:16" },
-				from: { person: "gary" },
+				from: { member: "gary" },
 				parts: [{ text: "Makes sense. I'll leave it in drafts." }],
 			},
 			{
 				at: { time: "9:20" },
-				from: { person: "anita" },
+				from: { member: "anita" },
 				parts: [
 					{
 						text: "Before Lorraine's call, can you pull together what we know about Fernhill? Seats, usage, anything open.",
@@ -617,14 +616,14 @@ const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 						},
 					},
 					{
-						text: "Here's Fernhill at a glance:\n\n| | Now | In March |\n|---|---|---|\n| Weekly active people | 32 | 23 |\n| Seats on Team | 25 | 25 |\n| Monthly spend | $500 | $500 |\n\n**Open deal:** *Fernhill: Business upgrade*, $13,824 a year at list, at the *Proposal* stage with Lorraine.\n\n**Worth knowing before the call:**\n\n1. They're 7 people over their 25 Team seats, so they already hit the seat limit most weeks.\n2. Dana Whitfield, their operations lead, decides. Their CFO, Marcus Ng, joined the last two calls.\n3. Their site says they opened two stores in Wellington this spring, which lines up with the jump in usage.\n\nIf they push back on Business, 30 seats on Team at `$20/seat` keeps them at $600 a month.",
+						text: "Here's Fernhill at a glance:\n\n| | Now | In March |\n|---|---|---|\n| Weekly active members | 32 | 23 |\n| Seats on Team | 25 | 25 |\n| Monthly spend | $500 | $500 |\n\n**Open deal:** *Fernhill: Business upgrade*, $13,824 a year at list, at the *Proposal* stage with Lorraine.\n\n**Worth knowing before the call:**\n\n1. They're 7 members over their 25 Team seats, so they already hit the seat limit most weeks.\n2. Dana Whitfield, their operations lead, decides. Their CFO, Marcus Ng, joined the last two calls.\n3. Their site says they opened two stores in Wellington this spring, which lines up with the jump in usage.\n\nIf they push back on Business, 30 seats on Team at `$20/seat` keeps them at $600 a month.",
 					},
 				],
 				reactions: [{ emoji: "🙌", by: ["anita"] }],
 			},
 			{
 				at: { time: "9:24" },
-				from: { person: "lorraine" },
+				from: { member: "lorraine" },
 				replyTo: "fernhill-brief",
 				parts: [
 					{
@@ -667,7 +666,7 @@ const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 			},
 			{
 				at: { time: "9:27" },
-				from: { person: "anita" },
+				from: { member: "anita" },
 				parts: [
 					{
 						text: "Good catch. Lorraine, lead with SSO tomorrow, and offer the annual price if they commit before the end of the month.",
@@ -677,12 +676,12 @@ const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 			},
 			{
 				at: { time: "9:28" },
-				from: { person: "lorraine" },
+				from: { member: "lorraine" },
 				parts: [{ text: "Will do 👌" }],
 			},
 			{
 				at: { time: "9:31" },
-				from: { person: "anita" },
+				from: { member: "anita" },
 				parts: [{ text: "Update the draft so it mentions Okta, and keep it short." }],
 			},
 			{
@@ -690,13 +689,13 @@ const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 				from: { bot: "Growth Desk" },
 				parts: [
 					{
-						text: "Updated:\n\n> Hi Dana, thanks for coming back to us. Business includes Okta SSO, so your store teams can sign in with the accounts they already have. With 32 people on Fieldnote each week it's $48 a seat, or $40.80 on an annual plan if you go ahead before the end of the month.\n\nIt's still in drafts until Lorraine's call.",
+						text: "Updated:\n\n> Hi Dana, thanks for coming back to us. Business includes Okta SSO, so your store teams can sign in with the accounts they already have. With 32 members on Fieldnote each week it's $48 a seat, or $40.80 on an annual plan if you go ahead before the end of the month.\n\nIt's still in drafts until Lorraine's call.",
 					},
 				],
 			},
 			{
 				at: { time: "9:40" },
-				from: { person: "gary" },
+				from: { member: "gary" },
 				parts: [{ text: "Long shot, but do we know when their current plan renews?" }],
 			},
 			{
@@ -719,7 +718,7 @@ const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 			},
 			{
 				at: { time: "9:44" },
-				from: { person: "anita" },
+				from: { member: "anita" },
 				parts: [{ text: "Perfect, thanks. That's everything we need for tomorrow." }],
 			},
 		],
@@ -729,34 +728,22 @@ const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 		messages: [
 			{
 				at: { time: "10:02" },
-				from: { person: "gary" },
+				from: { member: "gary" },
 				parts: [{ text: "Brightwater Supply wants 25% off the annual tier. Can we do it?" }],
 			},
 			{
 				at: { time: "10:04" },
 				from: { bot: "Growth Desk" },
 				parts: [
-					{ text: "I'll check the margin with Pricing Analyst." },
 					{
-						collaboration: {
-							with: "Pricing Analyst",
-							title: "Margin check for Brightwater Supply",
-							brief:
-								"Brightwater Supply wants 25% off the annual Business tier for 40 seats. Does that clear our 70% margin floor? If it does, draft the quote.",
-							answer:
-								"It clears. 25% off list puts Business at $36 a seat, which leaves a 72% gross margin at 40 seats. I've drafted quote Q-1182: 40 seats, annual, $17,280 a year.",
-							answeredAt: { time: "10:04" },
-						},
-					},
-					{
-						text: "Yes. At 25% off, Business comes to $36 a seat and still clears our margin floor. Pricing Analyst has drafted quote Q-1182 for 40 seats at $17,280 a year. Want me to send it to Brightwater?",
+						text: "Yes. At 25% off, Business comes to $36 a seat, which still clears our 70% margin floor at 40 seats. I've drafted quote Q-1182 for 40 seats at $17,280 a year. Want me to send it to Brightwater?",
 					},
 				],
 				reactions: [{ emoji: "🎉", by: ["gary"] }],
 			},
 			{
 				at: { time: "10:06" },
-				from: { person: "lorraine" },
+				from: { member: "lorraine" },
 				parts: [{ text: "Nice. Send it, and copy me in." }],
 			},
 		],
@@ -766,7 +753,7 @@ const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 		messages: [
 			{
 				at: { time: "11:05" },
-				from: { person: "gary" },
+				from: { member: "gary" },
 				parts: [{ text: "What changed in Postgres 18 that matters for us?" }],
 			},
 			{
@@ -780,7 +767,7 @@ const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 			},
 			{
 				at: { time: "11:12" },
-				from: { person: "gary" },
+				from: { member: "gary" },
 				parts: [
 					{
 						text: "Can you compare pg-boss, Graphile Worker and pgmq for the export queue? One page is plenty.",
@@ -805,7 +792,7 @@ const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 		messages: [
 			{
 				at: { time: "8:05" },
-				from: { person: "anita" },
+				from: { member: "anita" },
 				parts: [
 					{
 						text: "Big day: Brightwater pricing and the Kestrel refund. Remind me to check in on Doreen's SSO ticket.",
@@ -828,7 +815,7 @@ const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 		messages: [
 			{
 				at: { time: "11:02" },
-				from: { person: "rob" },
+				from: { member: "rob" },
 				parts: [
 					{
 						text: "The nightly export took 3 hours last night instead of the usual 40 minutes. Can you find out why?",
@@ -1002,7 +989,7 @@ const AUTOMATION_RUNS: readonly AutomationRun[] = [
 		scheduledAt: { time: "8:00", day: "previous weekday" },
 		finishedAt: { time: "8:03", day: "previous weekday" },
 		result:
-			"Two renewals at risk this month:\n\n- **Fernhill Outfitters** (14 Jan): usage up, but they're 7 over their seats. Offer Business before renewal.\n- **Parcel & Co** (22 Jan): weekly active people down from 12 to 5. Worth a check-in call.",
+			"Two renewals at risk this month:\n\n- **Fernhill Outfitters** (14 Jan): usage up, but they're 7 over their seats. Offer Business before renewal.\n- **Parcel & Co** (22 Jan): weekly active members down from 12 to 5. Worth a check-in call.",
 	},
 	{
 		bot: "Growth Desk",
@@ -1018,7 +1005,7 @@ const AUTOMATION_RUNS: readonly AutomationRun[] = [
 		scheduledAt: { time: "8:30", day: "previous weekday" },
 		finishedAt: { time: "8:32", day: "previous weekday" },
 		result:
-			"Morning queue: 4 new tickets overnight.\n\n- Answered 3 how-to questions (exports, seat changes, SSO setup)\n- Oakridge: asking about invoices in AUD. Needs a person\n\nOldest waiting: Oakridge, 9 hours.",
+			"Morning queue: 4 new tickets overnight.\n\n- Answered 3 how-to questions (exports, seat changes, SSO setup)\n- Oakridge: asking about invoices in AUD. Needs a member\n\nOldest waiting: Oakridge, 9 hours.",
 	},
 	{
 		bot: "Ticket Desk",
@@ -1026,7 +1013,7 @@ const AUTOMATION_RUNS: readonly AutomationRun[] = [
 		scheduledAt: { time: "8:30" },
 		finishedAt: { time: "8:33" },
 		result:
-			"Morning queue: 7 new tickets overnight.\n\n- Answered 4 how-to questions (exports, SSO setup, seat changes)\n- Kestrel Freight: charged twice on 3 Oct. Needs a refund\n- Brightline: can't sign in since the SSO change. Handed to Doreen\n- Oakridge: still waiting on AUD invoices. Needs a person\n\nOldest waiting: Oakridge, 33 hours.",
+			"Morning queue: 7 new tickets overnight.\n\n- Answered 4 how-to questions (exports, SSO setup, seat changes)\n- Kestrel Freight: charged twice on 3 Oct. Needs a refund\n- Brightline: can't sign in since the SSO change. Handed to Doreen\n- Oakridge: still waiting on AUD invoices. Needs a member\n\nOldest waiting: Oakridge, 33 hours.",
 	},
 	{
 		bot: "Growth Desk",
@@ -1038,8 +1025,7 @@ const AUTOMATION_RUNS: readonly AutomationRun[] = [
 	},
 ];
 
-/** The projects' MCP servers, signed out: sign in to one in Settings to use it for real. */
-/** Linear's own connector tools, so its connector's permissions look as they do when signed in for real. */
+/** Linear's own connector tools, so its tool access looks as it does when signed in for real. */
 const LINEAR_READING = [
 	"list_issues",
 	"get_issue",
@@ -1104,6 +1090,7 @@ function connectorTool(name: string, { readOnly }: { readOnly: boolean }) {
 	};
 }
 
+/** The projects' MCP servers, signed out: sign in to one in Settings to use it for real. */
 const CONNECTORS: readonly SeedConnector[] = [
 	{
 		project: "growth",
@@ -1192,8 +1179,8 @@ const seed = Effect.gen(function* () {
 		return yield* Effect.die(new Error("The showcase seed cannot run in production."));
 	}
 
-	const people = yield* Effect.forEach(
-		Object.entries(PEOPLE) as [PersonKey, (typeof PEOPLE)[PersonKey]][],
+	const members = yield* Effect.forEach(
+		Object.entries(MEMBERS) as [MemberKey, (typeof MEMBERS)[MemberKey]][],
 		([key, seed]) =>
 			Effect.gen(function* () {
 				const id = yield* ensureAccount({
@@ -1201,40 +1188,40 @@ const seed = Effect.gen(function* () {
 					email: seed.email,
 					password: PASSWORD,
 				});
-				yield* query((db) => db.update(person).set({ image: seed.image }).where(eq(person.id, id)));
+				yield* query((db) => db.update(member).set({ image: seed.image }).where(eq(member.id, id)));
 				return [key, id] as const;
 			}),
-	).pipe(Effect.map((entries) => Object.fromEntries(entries) as Record<PersonKey, string>));
+	).pipe(Effect.map((entries) => Object.fromEntries(entries) as Record<MemberKey, string>));
 
-	const workspaceId = yield* ensureWorkspace(people[OWNER]);
+	const workspaceId = yield* ensureWorkspace(members[OWNER]);
 	yield* WorkspaceSetup.recordSetUp(workspaceId);
 	yield* Effect.forEach(
-		(Object.keys(PEOPLE) as PersonKey[]).filter((key) => key !== OWNER),
+		(Object.keys(MEMBERS) as MemberKey[]).filter((key) => key !== OWNER),
 		(key) =>
 			joinWorkspace({
 				workspaceId,
-				ownerId: people[OWNER],
-				email: PEOPLE[key].email,
-				personId: people[key],
+				ownerId: members[OWNER],
+				email: MEMBERS[key].email,
+				memberId: members[key],
 			}),
 		{ discard: true },
 	);
 
-	yield* ensureProviders(workspaceId, people[OWNER]);
+	yield* ensureProviders(workspaceId, members[OWNER]);
 	const offered = yield* offeredModels(workspaceId);
 	const botIds = yield* Effect.forEach(BOTS, (bot) =>
 		Effect.map(
 			ensureBot({
 				workspaceId,
-				createdById: people[OWNER],
+				createdById: members[OWNER],
 				bot,
 				model: chooseModel(bot, offered),
 			}),
 			(id) => [bot.name, id] as const,
 		),
 	).pipe(Effect.map((entries) => new Map(entries)));
-	const projectIds = yield* ensureProjects(workspaceId, people, botIds);
-	yield* placeBots({ workspaceId, people, projectIds, botIds });
+	const projectIds = yield* ensureProjects(workspaceId, members, botIds);
+	yield* placeBots({ workspaceId, members, projectIds, botIds });
 
 	yield* Effect.forEach(
 		AUTOMATIONS,
@@ -1245,19 +1232,19 @@ const seed = Effect.gen(function* () {
 				: Effect.die(new Error(`No bot is named ${bot}`));
 		},
 		{ discard: true },
-	).pipe(CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(people[OWNER])));
+	).pipe(CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(members[OWNER])));
 	yield* holdScheduledAutomations(workspaceId);
 
 	yield* ensureConnectors({
 		workspaceId,
 		projectIds,
-		createdById: people[OWNER],
+		createdById: members[OWNER],
 		connectors: CONNECTORS,
 	});
 	const chats = yield* ensureChats(
 		{
 			workspaceId,
-			people,
+			members,
 			projectIds,
 			botIds,
 			botModels: new Map(BOTS.map((bot) => [bot.name, chooseModel(bot, offered)])),
@@ -1267,10 +1254,10 @@ const seed = Effect.gen(function* () {
 
 	const ledgerRows = yield* fillLedger({ workspaceId, botIds });
 
-	console.log(`workspace ${WORKSPACE.slug}, owned by ${PEOPLE[OWNER].email}`);
+	console.log(`workspace ${WORKSPACE.slug}, owned by ${MEMBERS[OWNER].email}`);
 	console.log(
-		`people: ${Object.values(PEOPLE)
-			.map((person) => person.email)
+		`members: ${Object.values(MEMBERS)
+			.map((member) => member.email)
 			.join(", ")} (password: ${PASSWORD})`,
 	);
 	console.log(
@@ -1302,7 +1289,7 @@ const ensureWorkspace = (ownerId: string) =>
 				},
 			})
 			.pipe(
-				CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(ownerId)),
+				CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(ownerId)),
 				Effect.map((created) => created.id),
 				Effect.catchTag("SlugTaken", () =>
 					Effect.flatMap(
@@ -1324,7 +1311,7 @@ const joinWorkspace = (input: {
 	workspaceId: string;
 	ownerId: string;
 	email: string;
-	personId: string;
+	memberId: string;
 }) =>
 	Effect.gen(function* () {
 		const membership = yield* Membership.Service;
@@ -1334,7 +1321,7 @@ const joinWorkspace = (input: {
 					workspace: input.workspaceId,
 					invitation: { email: input.email, role: "editor", resend },
 				})
-				.pipe(CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(input.ownerId)));
+				.pipe(CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(input.ownerId)));
 		const invitation = yield* invite(false).pipe(
 			Effect.catchTag("AlreadyInvited", () => invite(true)),
 			Effect.catchTag("AlreadyInWorkspace", () => Effect.succeed(undefined)),
@@ -1344,25 +1331,19 @@ const joinWorkspace = (input: {
 		yield* membership
 			.accept({ invitationId: invitation.id })
 			.pipe(
-				CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(input.personId)),
+				CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(input.memberId)),
 				Effect.orDie,
 			);
 	});
 
-/**
- * The projects with their members, by key, each led by the first of its bots,
- * and the owner's Personal Assistant, which a workspace made before
- * assistants existed lacks.
- */
+/** The projects with their members, by key, each led by the first of its bots. */
 const ensureProjects = (
 	workspaceId: string,
-	people: Record<PersonKey, string>,
+	memberIds: Record<MemberKey, string>,
 	botIds: ReadonlyMap<string, string>,
 ) =>
 	Effect.gen(function* () {
 		const projectStore = yield* ProjectStore.Service;
-		const personalAssistants = yield* PersonalAssistants.Service;
-		yield* personalAssistants.provision({ workspaceId, personId: people[OWNER] });
 		const projects = yield* Effect.forEach(
 			Object.entries(PROJECTS) as [ProjectKey, (typeof PROJECTS)[ProjectKey]][],
 			([key, { name, color, members }]) =>
@@ -1372,7 +1353,7 @@ const ensureProjects = (
 					if (!leadBotId)
 						return yield* Effect.die(new Error(`Project ${key} has no bot to lead it`));
 					const projectId = yield* projectStore
-						.create(workspaceId, { creatorId: people[OWNER], name, slug: key, color, leadBotId })
+						.create(workspaceId, { creatorId: memberIds[OWNER], name, slug: key, color, leadBotId })
 						.pipe(
 							Effect.map((created) => created.id),
 							Effect.catchTag("ProjectSlugTaken", () => projectIdBySlug(workspaceId, key)),
@@ -1380,7 +1361,7 @@ const ensureProjects = (
 						);
 					yield* Effect.forEach(
 						members,
-						(member) => projectStore.addMember(workspaceId, projectId, people[member]),
+						(member) => projectStore.addMember(workspaceId, projectId, memberIds[member]),
 						{ discard: true },
 					);
 					return [key, projectId] as const;
@@ -1401,12 +1382,12 @@ const projectIdBySlug = (workspaceId: string, slug: string) =>
 	);
 
 /**
- * Adds each public bot to its project, and pins it for the project's people.
+ * Adds each public bot to its project, and pins it for the project's members.
  * Anita made them all, so they are already pinned for her.
  */
 const placeBots = (input: {
 	workspaceId: string;
-	people: Record<PersonKey, string>;
+	members: Record<MemberKey, string>;
 	projectIds: Record<ProjectKey, string>;
 	botIds: ReadonlyMap<string, string>;
 }) =>
@@ -1415,7 +1396,7 @@ const placeBots = (input: {
 		const bots = yield* BotStore.Service;
 		for (const bot of BOTS) {
 			const botId = input.botIds.get(bot.name);
-			if (bot.project === "private" || !botId) continue;
+			if (bot.project === "personal" || !botId) continue;
 			yield* projects
 				.addBot(input.workspaceId, input.projectIds[bot.project], botId)
 				.pipe(Effect.orDie);
@@ -1424,7 +1405,7 @@ const placeBots = (input: {
 				(member) =>
 					bots.setPinned({
 						workspaceId: input.workspaceId,
-						personId: input.people[member],
+						memberId: input.members[member],
 						botId,
 						pinned: true,
 					}),
@@ -1516,12 +1497,12 @@ const ensureBot = (input: {
 				createdById: input.createdById,
 				bot: {
 					name: bot.name,
-					visibility: bot.project === "private" ? "private" : "public",
+					visibility: bot.project === "personal" ? "personal" : "public",
 					color: bot.color,
 					eyes: bot.eyes,
 					shape: bot.shape,
 					description: bot.description,
-					prompt: bot.prompt,
+					instructions: bot.instructions,
 					model: input.model,
 					usesComputer: bot.usesComputer ?? false,
 				},
@@ -1540,12 +1521,7 @@ const ensureBot = (input: {
 		);
 		if (!existing) return yield* Effect.die(new Error(`${bot.name} was not made`));
 		yield* bots
-			.update(
-				input.workspaceId,
-				existing.id,
-				{ model: input.model, shape: bot.shape },
-				input.createdById,
-			)
+			.update(input.workspaceId, existing.id, { model: input.model }, input.createdById)
 			.pipe(Effect.orDie);
 		return existing.id;
 	});
@@ -1726,7 +1702,6 @@ seed.pipe(
 		Layer.mergeAll(
 			Authentication.layer,
 			Membership.layer,
-			PersonalAssistants.layer,
 			ProjectStore.layer,
 			BotStore.layer,
 			ModelProviderStore.layer,

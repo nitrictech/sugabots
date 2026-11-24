@@ -280,14 +280,12 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
-
-export const layer = layerNoDeps;
+export const layer = Layer.effect(Service, make);
 
 type Provider = Pick<ComputerProviderRow, "settings" | "apiKeyEncrypted" | "enabled">;
 
 /** How to reach a provider configured with `settings` and `apiKey`; nothing while it lacks a setting it needs. */
-export function accessOf(
+function accessOf(
 	settings: ComputerProviderSettings,
 	apiKey: Redacted.Redacted<string>,
 ): Computers.ProviderAccess | undefined {
@@ -356,7 +354,6 @@ export function addressesIn(settings: ComputerProviderSettings): string[] {
 	return addresses.filter((address) => address !== undefined);
 }
 
-/** OpenSandbox at the address it's usually at, when none is given. */
 /** How the provider's computers reach the internet, by its settings or the default. */
 export function networkModeIn(settings: ComputerProviderSettings): ComputerNetworkMode {
 	return settings.networkMode ?? COMPUTER_NETWORK_MODE_DEFAULT;
@@ -373,6 +370,7 @@ function sizeIn(
 	};
 }
 
+/** OpenSandbox at the address it's usually at, when none is given. */
 export function withUsualAddress(settings: ComputerProviderSettings): ComputerProviderSettings {
 	if (settings.builtIn !== "opensandbox" || settings.serverUrl) return settings;
 	return { ...settings, serverUrl: computerBuiltInProvider(settings.builtIn).baseUrl };

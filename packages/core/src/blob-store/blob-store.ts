@@ -41,11 +41,9 @@ export interface Interface {
 	/** Removes what is stored under `key`, if anything is. */
 	readonly delete: (key: Key) => Effect.Effect<void, Failure>;
 	/**
-	 * Every blob under `prefix`, at any depth, ordered by key. `chats/a`
-	 * covers `chats/a/files/1` but not `chats/ab`.
+	 * Removes every blob under `prefix`, at any depth. `chats/a` covers
+	 * `chats/a/files/1` but not `chats/ab`.
 	 */
-	readonly list: (prefix: Key) => Effect.Effect<readonly Entry[], Failure>;
-	/** Removes every blob under `prefix`, matched as `list` matches it. */
 	readonly deletePrefix: (prefix: Key) => Effect.Effect<void, Failure>;
 }
 
@@ -125,12 +123,6 @@ export class Rejected extends Data.TaggedError("BlobStoreRejected")<{
 
 /** How any method can fail other than with `NotFound`. */
 export type Failure = Unavailable | Rejected;
-
-export interface Entry {
-	key: Key;
-	contentType: string;
-	size: number;
-}
 
 /**
  * The key naming `segments` as a path. A segment must be non-empty and contain

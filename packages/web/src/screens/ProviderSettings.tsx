@@ -291,8 +291,8 @@ function NamedBotFace({ bot, size }: { bot: Bot; size: number }) {
 	);
 }
 
-/** The bots people talk to among `bots` on `modelId`. */
-function personFacingBotsOn(bots: readonly Bot[], modelId: string): Bot[] {
+/** The bots members talk to among `bots` on `modelId`. */
+function memberFacingBotsOn(bots: readonly Bot[], modelId: string): Bot[] {
 	return bots.filter((bot) => bot.model === modelId);
 }
 
@@ -936,7 +936,7 @@ interface StrandedModel {
 /** The provider's offered models that bots would be left on if it went off. */
 function strandedModelsOf(provider: ModelProvider, workspaceBots: readonly Bot[]): StrandedModel[] {
 	return offeredModelsOf(provider).flatMap((model) => {
-		const bots = personFacingBotsOn(workspaceBots, model.modelId);
+		const bots = memberFacingBotsOn(workspaceBots, model.modelId);
 		return bots.length > 0 ? [{ model, bots }] : [];
 	});
 }
@@ -1230,7 +1230,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 	async function switchOff(model: ProviderModel) {
 		setCheckingUsage(true);
 		const latest = await usage.latest().finally(() => setCheckingUsage(false));
-		const strandsBots = personFacingBotsOn(latest, model.modelId).length > 0;
+		const strandsBots = memberFacingBotsOn(latest, model.modelId).length > 0;
 		if (strandsBots || holdersOf(model.modelId) !== undefined) {
 			setMovingOff(model);
 			return;
@@ -1273,7 +1273,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 					/>
 				)}
 				{shown.map((model) => {
-					const bots = personFacingBotsOn(usage.bots, model.modelId);
+					const bots = memberFacingBotsOn(usage.bots, model.modelId);
 					const used = bots.length === 0 ? "Not used yet" : countOf(bots.length, "bot", "bots");
 					const who = large ? makerLabel(makerOf(model) ?? provider.name) : used;
 					const held = model.enabled ? holdersOf(model.modelId) : undefined;
@@ -1325,7 +1325,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 					<MoveBotsDialog
 						provider={provider}
 						model={movingOff}
-						bots={personFacingBotsOn(usage.bots, movingOff.modelId)}
+						bots={memberFacingBotsOn(usage.bots, movingOff.modelId)}
 						held={holdersOf(movingOff.modelId)}
 						done={() => setMovingOff(undefined)}
 					/>

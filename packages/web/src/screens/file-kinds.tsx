@@ -33,10 +33,10 @@ interface WrittenFileKindView {
 }
 
 export const FILE_KINDS: Record<WrittenFileKind, WrittenFileKindView> = {
-	document: {
-		label: FILE_KIND_LABELS.document,
+	markdown: {
+		label: FILE_KIND_LABELS.markdown,
 		Icon: FileText,
-		file: { ...FILE_KIND_DOWNLOADS.document, contentOf: (content) => content },
+		file: { ...FILE_KIND_DOWNLOADS.markdown, contentOf: (content) => content },
 		// A preview, not the document: wide enough for its tables.
 		cardWidth: "max-w-160",
 		Inline: DocumentPreview,
@@ -89,7 +89,7 @@ function DocumentPreview({
 
 /**
  * A page running in place, so a chart or a form works right in the chat. One
- * taller than the frame is clipped until the person asks to see it all.
+ * taller than the frame is clipped until the member asks to see it all.
  */
 function LivePage({
 	title,
@@ -107,7 +107,7 @@ function LivePage({
 	const tall = pageHeight > FIT_HEIGHT_PX.max;
 	function collapse() {
 		setExpanded(false);
-		// Clipping a long page could leave the person far below it.
+		// Clipping a long page could leave the member far below it.
 		figure.current?.scrollIntoView({ block: "nearest" });
 	}
 	return (

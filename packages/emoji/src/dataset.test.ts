@@ -12,7 +12,7 @@ describe("emoji dataset", () => {
 		expect(generated).toEqual(dataset);
 	});
 
-	it("finds an emoji by the shortcode people type", () => {
+	it("finds an emoji by the shortcode members type", () => {
 		expect(emojiNamed(dataset.emojis, "thinking")?.emoji).toBe("🤔");
 		expect(emojiNamed(dataset.emojis, "+1")?.emoji).toBe("👍️");
 		expect(findByShortcode(dataset.emojis, "thin")[0]?.emoji).toBe("🤔");

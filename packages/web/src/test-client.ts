@@ -52,7 +52,7 @@ export const client = {
 			update: vi.fn(),
 			remove: vi.fn(),
 			listMembers: vi.fn(),
-			listPeople: vi.fn(),
+			listMembersReaching: vi.fn(),
 			addMember: vi.fn(),
 			removeMember: vi.fn(),
 			leave: vi.fn(),

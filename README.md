@@ -9,12 +9,12 @@
   <img alt="" src="packages/avatars/assets/bot-crowd.svg" width="376">
 </p>
 
-Sugabots is a self-hosted workspace where people and bots work together.
+Sugabots is a self-hosted workspace where members and bots work together.
 Create bots, bring them into projects with your team, and run chats that can use
 built-in tools and MCP connectors.
 
 <p align="center">
-  <img alt="A Sugabots project where two people and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/project-chat-mac.webp" width="800">
+  <img alt="A Sugabots project where two members and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/project-chat-mac.webp" width="800">
 </p>
 
 Everything stays in your own database. Bots use the model providers you choose,
@@ -40,7 +40,7 @@ It sets Sugabots up in a new `sugabots` folder and starts it. Then open <http://
 
 ## Host it for your team
 
-To use Sugabots with other people, run it somewhere they can reach.
+To use Sugabots with other members, run it somewhere they can reach.
 [Deploy with Docker](https://sugabots.ai/docs/deploy-with-docker) walks through
 a server of your own or a hosting platform.
 
@@ -48,7 +48,7 @@ a server of your own or a hosting platform.
 
 ### Projects
 
-A project is a long-running piece of work shared by a group of people and their bots. Everyone in it
+A project is a long-running piece of work shared by a group of members and their bots. Everyone in it
 sees the same chats, results and approvals, so nobody has to forward an answer
 or explain what a bot already did.
 
@@ -83,12 +83,12 @@ Bots run code, use software and browse the web on a computer of their own, or th
 
 - **GitHub**: bots read their repositories, push branches, and open pull
   requests once someone allows it.
-- **Files**: what people upload and bots make is kept for the team to open
+- **Files**: what members upload and bots make is kept for the team to open
   and review.
-- **Usage and costs**: see what every bot, model and team costs, day by day.
+- **Usage and costs**: see what every bot and model costs, day by day.
 - **Web search**: bots search the web and read pages, through Exa, Brave Search,
   Tavily or your own SearXNG server.
-- **Roles**: owners, admins, members and viewers, with public and private bots and projects
+- **Roles**: owners, admins, editors and viewers, with public and personal bots, and public and private projects
   deciding who sees what.
 - **Personal Assistant**: everyone gets an assistant of their own that nobody
   else can talk to, admins included.

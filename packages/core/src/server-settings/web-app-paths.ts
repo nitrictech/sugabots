@@ -1,7 +1,7 @@
 /**
  * Paths in the web app, from its root, for the links core writes into
  * notifications, emails and what bots are told. Each must name a route in
- * `packages/web/src/router.tsx`; prefix one with `ServerSettings`.s `webAppUrl`
+ * `packages/web/src/router.tsx`; prefix one with `ServerSettings`' `webAppUrl`
  * for a link that leaves the app.
  */
 
@@ -19,11 +19,11 @@ export const projectPath = (workspaceSlug: string, projectSlug: string) =>
 export const botPath = (workspaceSlug: string, botHandle: string) =>
 	`/${workspaceSlug}/bots/${botHandle}`;
 
-/** A bot, by its handle, or a project people made, by its slug. */
+/** A bot, by its handle, or a project members made, by its slug. */
 type PagePlace = { workspaceSlug: string } & ({ botHandle: string } | { projectSlug: string });
 
 /**
- * The page of a bot, by its handle, or of a project people made, by its slug;
+ * The page of a bot, by its handle, or of a project members made, by its slug;
  * a bot's default project is shown on the bot's page.
  */
 const ownerPagePath = (place: PagePlace) =>
@@ -32,7 +32,7 @@ const ownerPagePath = (place: PagePlace) =>
 		: projectPath(place.workspaceSlug, place.projectSlug);
 
 /**
- * The automations page of a bot, by its handle, or of a project people made,
+ * The automations page of a bot, by its handle, or of a project members made,
  * by its slug: a bot's own automations are its default project's, shown on
  * the bot's page. With `automationId`, that automation on it.
  */
@@ -46,11 +46,18 @@ export const botSettingsPath = (workspaceSlug: string, botHandle: string) =>
 	`${botPath(workspaceSlug, botHandle)}/settings`;
 
 /**
- * The Connectors page of a bot, by its handle, or of a project people made,
+ * The Connectors page of a bot, by its handle, or of a project members made,
  * by its slug: the services it is connected to. A bot's are its default
  * project's, shown on the bot's page.
  */
 export const connectorsPagePath = (place: PagePlace) => `${ownerPagePath(place)}/connectors`;
+
+/** Where an invitation's email link opens the web app. */
+export const invitationPath = (invitationId: string) =>
+	`/invitations/${encodeURIComponent(invitationId)}`;
+
+/** Where a referral link opens the web app. */
+export const referralPath = (code: string) => `/join/${encodeURIComponent(code)}`;
 
 export const searchSettingsPath = (workspaceSlug: string) => `/${workspaceSlug}/settings/search`;
 
@@ -59,7 +66,7 @@ export const approvalPath = (workspaceSlug: string, toolCallId: string) =>
 
 /**
  * Where the chat `chatId` opens: in its project, or as a
- * bot's chat. `projectSlug` is null outside a project people made.
+ * bot's chat. `projectSlug` is null outside a project members made.
  */
 export const chatPath = (
 	place: { workspaceSlug: string; projectSlug: string | null },

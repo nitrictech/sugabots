@@ -1,23 +1,26 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { EgressRefused } from "../network/egress.ts";
-import { parseExaText, type SearchRequest, searchBackend, searchEndpoint } from "./backends.ts";
+import { providerSearch, type SearchRequest, searchEndpoint } from "./provider-search.ts";
 import type { SearchProviderAccess } from "./search-provider-access.ts";
 
 type FakeFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 const at = new Date("2026-09-14T00:00:00.000Z");
 
-/** The provider access's backend, answering as a promise. */
-function backend(access: Omit<SearchProviderAccess, "configurationUpdatedAt">, fetch: FakeFetch) {
-	const search = searchBackend(
+/** Searching with the provider access, answering as a promise. */
+function searchWith(
+	access: Omit<SearchProviderAccess, "configurationUpdatedAt">,
+	fetch: FakeFetch,
+) {
+	const search = providerSearch(
 		{ ...access, configurationUpdatedAt: at },
 		fetch as typeof globalThis.fetch,
 	);
 	return (request: SearchRequest) => Effect.runPromise(search(request));
 }
 
-describe("the Brave backend", () => {
+describe("searching with Brave", () => {
 	it("asks Brave with the key and maps its results", async () => {
 		const fetch = vi.fn<FakeFetch>(async () =>
 			Response.json({
@@ -26,7 +29,7 @@ describe("the Brave backend", () => {
 						{
 							title: "Sugabots",
 							url: "https://example.com/sugabots",
-							description: "A workspace for people and bots.",
+							description: "A workspace for members and bots.",
 							page_age: "2026-09-01T00:00:00",
 						},
 						{ title: "Bare", url: "https://example.com/bare" },
@@ -35,7 +38,7 @@ describe("the Brave backend", () => {
 			}),
 		);
 
-		const outcome = await backend(
+		const outcome = await searchWith(
 			{ builtIn: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "brave-key" },
 			fetch,
 		)({ query: "open bots", count: 5 });
@@ -46,7 +49,7 @@ describe("the Brave backend", () => {
 				{
 					title: "Sugabots",
 					url: "https://example.com/sugabots",
-					snippet: "A workspace for people and bots.",
+					snippet: "A workspace for members and bots.",
 					published: "2026-09-01T00:00:00",
 				},
 				{ title: "Bare", url: "https://example.com/bare", snippet: "", published: null },
@@ -60,7 +63,7 @@ describe("the Brave backend", () => {
 	it("reports a refused key and a body it cannot read as reasons", async () => {
 		const unauthorised = vi.fn<FakeFetch>(async () => new Response("no", { status: 401 }));
 		expect(
-			await backend(
+			await searchWith(
 				{ builtIn: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "x" },
 				unauthorised,
 			)({ query: "q", count: 1 }),
@@ -68,7 +71,7 @@ describe("the Brave backend", () => {
 
 		const odd = vi.fn<FakeFetch>(async () => Response.json({ hello: "world" }));
 		expect(
-			await backend(
+			await searchWith(
 				{ builtIn: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "x" },
 				odd,
 			)({
@@ -79,7 +82,7 @@ describe("the Brave backend", () => {
 
 		const broken = vi.fn<FakeFetch>(async () => Response.json({ web: { results: "nope" } }));
 		expect(
-			await backend(
+			await searchWith(
 				{ builtIn: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "x" },
 				broken,
 			)({ query: "q", count: 1 }),
@@ -97,7 +100,7 @@ describe("the Brave backend", () => {
 				}),
 		);
 
-		const outcome = await backend(
+		const outcome = await searchWith(
 			{
 				builtIn: "brave",
 				baseUrl: "https://api.search.brave.com/res/v1",
@@ -112,7 +115,7 @@ describe("the Brave backend", () => {
 	});
 });
 
-describe("the Exa backend", () => {
+describe("searching with Exa", () => {
 	it("posts the query with the key and joins highlights into the snippet", async () => {
 		const fetch = vi.fn<FakeFetch>(async () =>
 			Response.json({
@@ -121,14 +124,14 @@ describe("the Exa backend", () => {
 						title: "Sugabots",
 						url: "https://example.com/sugabots",
 						publishedDate: "2026-09-01T00:00:00.000Z",
-						highlights: ["People and bots", "in projects."],
+						highlights: ["Members and bots", "in projects."],
 					},
 					{ title: null, url: "https://example.com/untitled" },
 				],
 			}),
 		);
 
-		const outcome = await backend(
+		const outcome = await searchWith(
 			{ builtIn: "exa", baseUrl: "https://api.exa.ai", apiKey: "exa-key" },
 			fetch,
 		)({
@@ -142,7 +145,7 @@ describe("the Exa backend", () => {
 				{
 					title: "Sugabots",
 					url: "https://example.com/sugabots",
-					snippet: "People and bots in projects.",
+					snippet: "Members and bots in projects.",
 					published: "2026-09-01T00:00:00.000Z",
 				},
 				{
@@ -175,7 +178,7 @@ describe("the Exa backend", () => {
 			),
 		);
 
-		const outcome = await backend(
+		const outcome = await searchWith(
 			{ builtIn: "exa", baseUrl: "https://api.exa.ai" },
 			fetch,
 		)({ query: "q", count: 1 });
@@ -188,7 +191,7 @@ describe("the Exa backend", () => {
 	});
 });
 
-describe("the Tavily backend", () => {
+describe("searching with Tavily", () => {
 	it("posts the query as a bearer and maps its results", async () => {
 		const fetch = vi.fn<FakeFetch>(async () =>
 			Response.json({
@@ -203,7 +206,7 @@ describe("the Tavily backend", () => {
 			}),
 		);
 
-		const outcome = await backend(
+		const outcome = await searchWith(
 			{ builtIn: "tavily", baseUrl: "https://api.tavily.com", apiKey: "tvly-key" },
 			fetch,
 		)({ query: "open bots", count: 3 });
@@ -229,7 +232,7 @@ describe("the Tavily backend", () => {
 		const fetch = vi.fn<FakeFetch>(async () => new Response("", { status: 401 }));
 
 		expect(
-			await backend(
+			await searchWith(
 				{ builtIn: "tavily", baseUrl: "https://api.tavily.com", apiKey: "x" },
 				fetch,
 			)({
@@ -240,7 +243,7 @@ describe("the Tavily backend", () => {
 	});
 });
 
-describe("the SearXNG backend", () => {
+describe("searching with SearXNG", () => {
 	it("asks for JSON and cuts the results to the count asked for", async () => {
 		const fetch = vi.fn<FakeFetch>(async () =>
 			Response.json({
@@ -252,7 +255,7 @@ describe("the SearXNG backend", () => {
 			}),
 		);
 
-		const outcome = await backend(
+		const outcome = await searchWith(
 			{ builtIn: "searxng", baseUrl: "http://searx.local:8080/" },
 			fetch,
 		)({
@@ -276,7 +279,7 @@ describe("the SearXNG backend", () => {
 		const fetch = vi.fn<FakeFetch>(async () => new Response("", { status: 403 }));
 
 		expect(
-			await backend(
+			await searchWith(
 				{ builtIn: "searxng", baseUrl: "http://searx.local:8080" },
 				fetch,
 			)({
@@ -295,7 +298,7 @@ describe("the SearXNG backend", () => {
 		});
 
 		expect(
-			await backend(
+			await searchWith(
 				{ builtIn: "searxng", baseUrl: "http://searx.local:8080" },
 				fetch,
 			)({
@@ -315,7 +318,7 @@ describe("the SearXNG backend", () => {
 		});
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
-		const result = await backend(
+		const result = await searchWith(
 			{ builtIn: "searxng", baseUrl: "http://searx.local:8080" },
 			fetch,
 		)({ query: "q", count: 1 });
@@ -349,8 +352,8 @@ describe("where a search goes", () => {
 	});
 });
 
-describe("reading Exa's free endpoint", () => {
-	it("turns its text blocks into results", () => {
+describe("Exa's free endpoint", () => {
+	it("turns the text blocks its search tool answers with into results", async () => {
 		const text = [
 			"Title: Nitric is a multi-language framework ...",
 			"URL: https://github.com/nitrictech/nitric",
@@ -371,21 +374,53 @@ describe("reading Exa's free endpoint", () => {
 			"An open source universal backend framework.",
 		].join("\n");
 
-		expect(parseExaText(text)).toEqual([
-			{
-				title: "Nitric is a multi-language framework ...",
-				url: "https://github.com/nitrictech/nitric",
-				snippet:
-					"Nitric is a multi-language framework for cloud applications. Effortless backends with infrastructure from code.",
-				published: null,
-			},
-			{
-				title: "Open Source Backend Framework",
-				url: "https://nitric.io/framework",
-				snippet: "An open source universal backend framework.",
-				published: "2026-01-02T00:00:00.000Z",
-			},
-		]);
-		expect(parseExaText("")).toEqual([]);
+		const outcome = await searchWith(
+			{ builtIn: "exa", baseUrl: "https://api.exa.ai" },
+			mcpServerAnswering(text),
+		)({ query: "nitric", count: 5 });
+
+		expect(outcome).toEqual({
+			ok: true,
+			results: [
+				{
+					title: "Nitric is a multi-language framework ...",
+					url: "https://github.com/nitrictech/nitric",
+					snippet:
+						"Nitric is a multi-language framework for cloud applications. Effortless backends with infrastructure from code.",
+					published: null,
+				},
+				{
+					title: "Open Source Backend Framework",
+					url: "https://nitric.io/framework",
+					snippet: "An open source universal backend framework.",
+					published: "2026-01-02T00:00:00.000Z",
+				},
+			],
+		});
 	});
 });
+
+/**
+ * A fake of Exa's free MCP endpoint, whose search tool answers `text`:
+ * JSON answers to the session's requests, and nothing to its notifications.
+ */
+function mcpServerAnswering(text: string): FakeFetch {
+	return async (_input, init) => {
+		if (init?.method !== "POST") return new Response(null, { status: 405 });
+		const request = JSON.parse(String(init.body)) as {
+			id?: number;
+			method: string;
+			params?: { protocolVersion?: string };
+		};
+		if (request.id === undefined) return new Response(null, { status: 202 });
+		const result =
+			request.method === "initialize"
+				? {
+						protocolVersion: request.params?.protocolVersion,
+						capabilities: { tools: {} },
+						serverInfo: { name: "exa", version: "1" },
+					}
+				: { content: [{ type: "text", text }] };
+		return Response.json({ jsonrpc: "2.0", id: request.id, result });
+	};
+}

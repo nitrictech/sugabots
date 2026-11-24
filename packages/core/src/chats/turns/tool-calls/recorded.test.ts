@@ -32,7 +32,7 @@ const noFiles: Pick<ChatFileStore.Interface, "write"> = {
 
 function fakeCalls(): Pick<ToolCallStore.Interface, "open" | "close"> {
 	return {
-		open: vi.fn(({ atOffset, tool, input, writeOrDelete }) =>
+		open: vi.fn(({ atOffset, tool, input }) =>
 			Effect.succeed({
 				type: "tool_call" as const,
 				id: callId,
@@ -40,8 +40,8 @@ function fakeCalls(): Pick<ToolCallStore.Interface, "open" | "close"> {
 				input: input as never,
 				output: null,
 				status: "running" as const,
+				approval: null,
 				error: null,
-				writeOrDelete: writeOrDelete ?? false,
 				atOffset,
 				startedAt: "2026-09-14T00:00:00.000Z",
 				finishedAt: null,
@@ -92,6 +92,7 @@ describe("a recorded tool", () => {
 				from,
 				replyLength: () => 9,
 				noteToolCall: (call) => Effect.sync(() => void noted.push(call)),
+				markActed: () => Effect.void,
 			},
 		);
 
@@ -128,6 +129,7 @@ describe("a recorded tool", () => {
 				from,
 				replyLength: () => 0,
 				noteToolCall: (call) => Effect.sync(() => void noted.push(call)),
+				markActed: () => Effect.void,
 				writeOrDelete: true,
 			},
 		);
@@ -151,12 +153,20 @@ describe("a recorded tool", () => {
 					throw new Error("upstream said no");
 				},
 			}),
-			{ calls, files: noFiles, run, from, replyLength: () => 0, noteToolCall: () => Effect.void },
+			{
+				calls,
+				files: noFiles,
+				run,
+				from,
+				replyLength: () => 0,
+				noteToolCall: () => Effect.void,
+				markActed: () => Effect.void,
+			},
 		);
 
 		const output = await probe.execute?.({}, callOptions);
 
-		// What was thrown goes to the logs, not to people or the model.
+		// What was thrown goes to the logs, not to members or the model.
 		expect(output).toEqual({ status: "failed", error: "The tool failed before it finished." });
 		expect(calls.close).toHaveBeenCalledWith(callId, {
 			error: "The tool failed before it finished.",
@@ -182,6 +192,7 @@ describe("a recorded tool", () => {
 				from,
 				replyLength: () => 0,
 				noteToolCall: () => Effect.void,
+				markActed: () => Effect.void,
 				approval: {
 					approvals: {
 						beginExecution: () =>
@@ -236,7 +247,15 @@ describe("a recorded tool with a long result", () => {
 		const probe = recorded(
 			"probe",
 			tool({ inputSchema: jsonSchema({}), execute: async () => output }),
-			{ calls, files, run, from, replyLength: () => 0, noteToolCall: () => Effect.void },
+			{
+				calls,
+				files,
+				run,
+				from,
+				replyLength: () => 0,
+				noteToolCall: () => Effect.void,
+				markActed: () => Effect.void,
+			},
 		);
 		const given = (await probe.execute?.({}, callOptions)) as LongResult;
 		return { given, calls };

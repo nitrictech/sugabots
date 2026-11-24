@@ -13,7 +13,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { person, project, workspace } from "../workspaces/sql.ts";
+import { member, project, workspace } from "../workspaces/sql.ts";
 import type { DiskUsage } from "./computer-disk.ts";
 import type { Computers } from "./computers.ts";
 
@@ -46,7 +46,7 @@ export const computerProvider = pgTable(
 		managedResources: jsonb("managed_resources").$type<ComputerManagedResources>(),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
-		createdById: uuid("created_by_id").references(() => person.id, { onDelete: "set null" }),
+		createdById: uuid("created_by_id").references(() => member.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
@@ -63,7 +63,7 @@ export type ComputerProviderRow = typeof computerProvider.$inferSelect;
 type ComputerManagedResources = {
 	readonly builtIn: "e2b";
 	/** The last build of its template that Sugabots started, by E2B's ids for it. */
-	readonly templateBuild: { readonly templateId: string; readonly buildId: string };
+	readonly templateBuild: Computers.TemplateBuild;
 };
 
 /**
@@ -120,10 +120,8 @@ export const computer = pgTable(
 	],
 );
 
-export type ComputerRow = typeof computer.$inferSelect;
-
 /**
- * A turn using a computer, or a person viewing its desktop, which keeps it
+ * A turn using a computer, or a member viewing its desktop, which keeps it
  * from sleeping. The holder renews it while it uses the computer and
  * deletes it when done; one left behind by a process that stopped simply
  * expires.
@@ -161,7 +159,7 @@ export const allowedHost = pgTable(
 			.references(() => workspace.id, { onDelete: "cascade" }),
 		host: text("host").notNull(),
 		/** Who added it, or approved the request for it. */
-		addedById: uuid("added_by_id").references(() => person.id, { onDelete: "set null" }),
+		addedById: uuid("added_by_id").references(() => member.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [compositePrimaryKey({ columns: [table.workspaceId, table.host] })],
@@ -178,7 +176,7 @@ export const projectAllowedHost = pgTable(
 		workspaceId: uuid("workspace_id").notNull(),
 		projectId: uuid("project_id").notNull(),
 		host: text("host").notNull(),
-		addedById: uuid("added_by_id").references(() => person.id, { onDelete: "set null" }),
+		addedById: uuid("added_by_id").references(() => member.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
@@ -203,7 +201,7 @@ export const blockedHost = pgTable(
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
 		host: text("host").notNull(),
-		blockedById: uuid("blocked_by_id").references(() => person.id, { onDelete: "set null" }),
+		blockedById: uuid("blocked_by_id").references(() => member.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [compositePrimaryKey({ columns: [table.workspaceId, table.host] })],

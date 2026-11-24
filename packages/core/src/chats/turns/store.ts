@@ -41,7 +41,6 @@ import {
 	RUN_ENDED,
 	runsAgainAfterFailure,
 	TURN_CANCELLED,
-	TURN_STOPPED_UNEXPECTEDLY,
 	TurnEvent,
 	type TurnState,
 	transition,
@@ -95,9 +94,9 @@ export interface Interface {
 	/** The files the turn's reply carries, in the order attached. */
 	readonly replyFiles: (turn: ReplyTurn) => Effect.Effect<readonly FilePart[]>;
 	/**
-	 * Parks the turn with this model transcript until people decide the tool
+	 * Parks the turn with this model transcript until members decide the tool
 	 * approvals it asked for. `false` when the turn is no longer running,
-	 * somebody asked it to stop, or its automation run takes no more turns.
+	 * was asked to stop, or its automation run takes no more turns.
 	 */
 	readonly suspend: (
 		turn: ReplyTurn,
@@ -110,7 +109,7 @@ export interface Interface {
 		completion: TurnCompletion,
 	) => Effect.Effect<void>;
 	/**
-	 * Records the run as failed, telling people `userMessage`, and returns
+	 * Records the run as failed, telling members `userMessage`, and returns
 	 * whether the turn runs again: only if `mayRunAgain` and
 	 * `runsAgainAfterFailure` both allow it.
 	 */
@@ -122,7 +121,7 @@ export interface Interface {
 	/**
 	 * Completes an optional turn whose bot chose not to answer: its empty
 	 * reply is taken back, and the bot reacts 👀 to the message it read, so
-	 * people see it was read.
+	 * members see it was read.
 	 */
 	readonly staySilent: (turn: ReplyTurn, completion: TurnCompletion) => Effect.Effect<void>;
 	/** Stops the run short, keeping the reply written so far. */
@@ -132,19 +131,19 @@ export interface Interface {
 		contextTokens: number | undefined,
 	) => Effect.Effect<void>;
 	readonly failSystemBotTurn: (turnId: string, userMessage: UserText) => Effect.Effect<void>;
-	/** isCancellationRequested reports whether somebody asked the turn to stop, or it is gone. */
-	readonly isCancellationRequested: (turnId: string) => Effect.Effect<boolean>;
+	/** isInterruptRequested reports whether the turn was asked to stop, as when its automation run ended, or it is gone. */
+	readonly isInterruptRequested: (turnId: string) => Effect.Effect<boolean>;
 	/** Records a turn waiting for approvals as cancelled. Does nothing once it stopped waiting. */
 	readonly cancelWaiting: (request: {
 		botId: string;
 		triggerMessageId: string;
 	}) => Effect.Effect<void>;
 	/**
-	 * Ends the active turn the workflow execution `owner` runs, which will not
+	 * Ends the active turn the workflow execution `executionId` runs, which will not
 	 * run it again. `undefined` if there is none.
 	 */
 	readonly abandon: (
-		owner: string,
+		executionId: string,
 		outcome: { status: "failed" | "cancelled"; userMessage: UserText },
 	) => Effect.Effect<Ended | undefined>;
 	/**
@@ -173,7 +172,11 @@ export const make = Effect.gen(function* () {
 	const toolCalls = yield* ToolCallStore.Service;
 	const files = yield* ChatFileStore.Service;
 
-	/** Writes the state the lifecycle decided, plus what else the command records. */
+	/**
+	 * Writes the state the lifecycle decided, plus what else the command
+	 * records, and answers the time it wrote it at: when the turn finished, if
+	 * `next` ends it.
+	 */
 	const write = (
 		turnId: string,
 		next: TurnState,
@@ -186,8 +189,8 @@ export const make = Effect.gen(function* () {
 					.update(turn)
 					.set({
 						status: next.status,
-						owner: next.owner,
-						cancelRequested: next.cancelRequested,
+						executionId: next.executionId,
+						interruptRequested: next.interruptRequested,
 						runs: next.runs,
 						error: next.status === "failed" ? next.userMessage : null,
 						finishedAt: next.status === "running" || next.status === "waiting" ? null : now,
@@ -196,15 +199,16 @@ export const make = Effect.gen(function* () {
 					})
 					.where(eq(turn.id, turnId)),
 			);
+			return now;
 		});
 
 	/**
 	 * Ends the reply and the unfinished tool calls of a turn the lifecycle
-	 * ended mid-run, telling people `userMessage` of the calls, and announces
+	 * ended mid-run, telling members `userMessage` of the calls, and announces
 	 * how it ended. A system bot's turn has no reply, so there is nothing to
 	 * announce.
 	 */
-	const endRun = (turnId: string, state: TurnState, userMessage: UserText) =>
+	const endRun = (turnId: string, state: TurnState, userMessage: UserText, finishedAt: Date) =>
 		Effect.gen(function* () {
 			const ended = endedAs(state);
 			const [reply] = yield* query((db) =>
@@ -229,7 +233,7 @@ export const make = Effect.gen(function* () {
 			}
 			yield* toolCalls.abandonUnfinished([turnId], userMessage);
 			if (reply) {
-				yield* emit([endAnnouncement({ turnId, ...reply }, ended)]);
+				yield* emit([endAnnouncement({ turnId, finishedAt, ...reply }, ended)]);
 			}
 			return ended;
 		});
@@ -265,7 +269,7 @@ export const make = Effect.gen(function* () {
 	 */
 	const reopen = (
 		existing: { id: string; state: TurnState },
-		owner: string | null,
+		executionId: string | null,
 	): Effect.Effect<
 		{ _tag: "Reopened"; followUp: FollowUp | undefined } | NotRunnable,
 		never,
@@ -287,19 +291,27 @@ export const make = Effect.gen(function* () {
 			);
 			const decided = transition(
 				existing.state,
-				TurnEvent.Reopen({ owner, uncertainWriteOrDelete: uncertainWriteOrDelete !== undefined }),
+				TurnEvent.Reopen({
+					executionId,
+					uncertainWriteOrDelete: uncertainWriteOrDelete !== undefined,
+				}),
 			);
 			if (decided._tag === "Refused") return notRunnable(decided.reason);
-			yield* write(existing.id, decided.state);
+			const writtenAt = yield* write(existing.id, decided.state);
 			if (decided.followUp?._tag !== "End") {
 				return { _tag: "Reopened", followUp: decided.followUp };
 			}
-			const ended = yield* endRun(existing.id, decided.state, decided.followUp.userMessage);
+			const ended = yield* endRun(
+				existing.id,
+				decided.state,
+				decided.followUp.userMessage,
+				writtenAt,
+			);
 			return notRunnable(decided.followUp.userMessage, ended);
 		});
 
 	const insertTurn = (
-		request: SystemBotTurnRequest & Partial<Pick<ReplyTurnRequest, "reason" | "owner">>,
+		request: SystemBotTurnRequest & Partial<Pick<ReplyTurnRequest, "reason" | "executionId">>,
 	) =>
 		Effect.gen(function* () {
 			const startedAt = yield* DateTime.nowAsDate;
@@ -310,7 +322,7 @@ export const make = Effect.gen(function* () {
 						chatId: request.chatId,
 						botId: request.botId,
 						triggerMessageId: request.triggerMessageId,
-						owner: request.owner ?? null,
+						executionId: request.executionId ?? null,
 						runs: 1,
 						status: "running",
 						reason: request.reason,
@@ -333,8 +345,8 @@ export const make = Effect.gen(function* () {
 					TurnEvent.Abandon({ status: "cancelled", userMessage: RUN_ENDED }),
 				);
 			if (!existing || decided?._tag !== "Next") return notRunnable(reason);
-			yield* write(existing.id, decided.state);
-			return notRunnable(reason, yield* endRun(existing.id, decided.state, RUN_ENDED));
+			const writtenAt = yield* write(existing.id, decided.state);
+			return notRunnable(reason, yield* endRun(existing.id, decided.state, RUN_ENDED, writtenAt));
 		});
 
 	const announceStart = (request: ReplyTurnRequest, turnId: string, reply: Message) =>
@@ -375,7 +387,6 @@ export const make = Effect.gen(function* () {
 							const replyValues = {
 								chatId: request.chatId,
 								authorBotId: request.botId,
-								kind: "text" as const,
 								status: "writing" as const,
 								parts: [],
 								content: "",
@@ -404,7 +415,7 @@ export const make = Effect.gen(function* () {
 							yield* announceStart(request, turnId, reply);
 							return { _tag: "Opened", turnId, reply, checkpoint: undefined };
 						}
-						const reopened = yield* reopen(existing, request.owner);
+						const reopened = yield* reopen(existing, request.executionId);
 						if (reopened._tag === "NotRunnable") return reopened;
 						if (reopened.followUp?._tag === "Resume") {
 							const [parked] = yield* query((db) =>
@@ -570,7 +581,6 @@ export const make = Effect.gen(function* () {
 								chatId: reply.chatId,
 								workspaceId: reply.workspaceId,
 								turnId: locked.id,
-								botId: reply.botId,
 							}),
 							ChatEvent.ReactionsChanged({
 								chatId: reply.chatId,
@@ -593,7 +603,11 @@ export const make = Effect.gen(function* () {
 						);
 						if (locked?.decided._tag !== "Next") return;
 						yield* writeReply(reply, draft, "complete");
-						yield* write(locked.id, locked.decided.state, measurementColumns(completion));
+						const finishedAt = yield* write(
+							locked.id,
+							locked.decided.state,
+							measurementColumns(completion),
+						);
 						yield* emit([
 							ChatEvent.TurnCompleted({
 								chatId: reply.chatId,
@@ -602,6 +616,7 @@ export const make = Effect.gen(function* () {
 								botId: reply.botId,
 								messageId: reply.messageId,
 								content: draft.content,
+								finishedAt,
 								contextTokens: completion.contextTokens,
 								contextCapacity: completion.contextCapacity,
 								readKeptFrom: completion.readKeptFrom,
@@ -649,16 +664,17 @@ export const make = Effect.gen(function* () {
 						const locked = yield* lockAndTransition(eq(turn.id, reply.turnId), TurnEvent.Cancel());
 						if (locked?.decided._tag !== "Next") return;
 						yield* writeReply(reply, draft, "cancelled");
-						yield* write(locked.id, locked.decided.state);
+						const finishedAt = yield* write(locked.id, locked.decided.state);
 						yield* toolCalls.abandonUnfinished([locked.id], TURN_CANCELLED);
 						yield* emit([
-							ChatEvent.TurnCancelled({
+							ChatEvent.TurnInterrupted({
 								chatId: reply.chatId,
 								workspaceId: reply.workspaceId,
 								turnId: locked.id,
 								botId: locked.botId,
 								messageId: reply.messageId,
 								content: draft.content,
+								finishedAt,
 							}),
 						]);
 					}),
@@ -692,13 +708,13 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		isCancellationRequested: (turnId) =>
+		isInterruptRequested: (turnId) =>
 			operation(
-				"isCancellationRequested",
+				"isInterruptRequested",
 				Effect.map(
 					query((db) =>
 						db
-							.select({ requested: turn.cancelRequested })
+							.select({ requested: turn.interruptRequested })
 							.from(turn)
 							.where(eq(turn.id, turnId))
 							.limit(1),
@@ -715,27 +731,32 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const locked = yield* lockAndTransition(onTrigger(request), TurnEvent.CancelWaiting());
 						if (locked?.decided._tag !== "Next") return;
-						yield* write(locked.id, locked.decided.state);
+						const writtenAt = yield* write(locked.id, locked.decided.state);
 						if (locked.decided.followUp?._tag === "End") {
-							yield* endRun(locked.id, locked.decided.state, locked.decided.followUp.userMessage);
+							yield* endRun(
+								locked.id,
+								locked.decided.state,
+								locked.decided.followUp.userMessage,
+								writtenAt,
+							);
 						}
 					}),
 				),
 			),
 
-		abandon: (owner, outcome) =>
+		abandon: (executionId, outcome) =>
 			operation(
 				"abandon",
 				transaction(
 					Effect.gen(function* () {
 						const owned = and(
-							eq(turn.owner, owner),
+							eq(turn.executionId, executionId),
 							inArray(turn.status, [...ACTIVE_TURN_STATUSES]),
 						);
 						const locked = yield* lockAndTransition(owned, TurnEvent.Abandon(outcome));
 						if (locked?.decided._tag !== "Next") return undefined;
-						yield* write(locked.id, locked.decided.state);
-						return yield* endRun(locked.id, locked.decided.state, outcome.userMessage);
+						const writtenAt = yield* write(locked.id, locked.decided.state);
+						return yield* endRun(locked.id, locked.decided.state, outcome.userMessage, writtenAt);
 					}),
 				),
 			),
@@ -771,25 +792,25 @@ export const make = Effect.gen(function* () {
 								.where(and(under, eq(turn.status, "running")))
 								.for("update", { skipLocked: true }),
 						);
-						const ownersToTell = yield* Effect.forEach([...waiting, ...running], (row) =>
+						const executionsToTell = yield* Effect.forEach([...waiting, ...running], (row) =>
 							Effect.gen(function* () {
 								const decided = transition(stateOf(row), TurnEvent.AutomationEnded());
 								if (decided._tag === "Refused") return [];
-								yield* write(row.id, decided.state);
+								const writtenAt = yield* write(row.id, decided.state);
 								if (decided.followUp?._tag === "AnnounceCancelRequest") {
 									yield* emit([
-										ChatEvent.TurnCancelRequested({
+										ChatEvent.TurnInterruptRequested({
 											chatId: row.chatId,
 											turnId: row.id,
 										}),
 									]);
 								}
 								if (decided.followUp?._tag !== "End") return [];
-								yield* endRun(row.id, decided.state, decided.followUp.userMessage);
-								return row.owner ? [row.owner] : [];
+								yield* endRun(row.id, decided.state, decided.followUp.userMessage, writtenAt);
+								return row.executionId ? [row.executionId] : [];
 							}),
 						);
-						return ownersToTell.flat();
+						return executionsToTell.flat();
 					}),
 				),
 			),
@@ -824,7 +845,6 @@ export interface ReplyTurn {
 	readonly chatId: string;
 	readonly workspaceId: string;
 	readonly botId: string;
-	readonly reason: TurnReason | undefined;
 	readonly messageId: string;
 }
 
@@ -834,9 +854,9 @@ interface ReplyTurnRequest {
 	readonly triggerMessageId: string;
 	/** The bot's model, already resolved: a turn is never opened without one. */
 	readonly model: string;
-	readonly reason: TurnReason | undefined;
+	readonly reason: TurnReason;
 	/** The workflow execution running the turn. */
-	readonly owner: string;
+	readonly executionId: string;
 	/** Who the reply is shown as. */
 	readonly author: ParticipantRow;
 }
@@ -873,11 +893,10 @@ const PlacedPart = Schema.Struct({ id: Schema.String, atOffset: Schema.Int });
 
 /**
  * The reply as the segment has it so far: the text, and where in that text the
- * bot made each collaboration and tool call. Stored as parts in that order.
+ * bot made each tool call. Stored as parts in that order.
  */
 export const ReplyDraft = Schema.Struct({
 	content: Schema.String,
-	collaborations: Schema.Array(PlacedPart),
 	toolCalls: Schema.Array(PlacedPart),
 });
 export type ReplyDraft = typeof ReplyDraft.Type;
@@ -898,27 +917,23 @@ const SdkModelMessage = Schema.declare(
 		(typeof value.content === "string" || Array.isArray(value.content)),
 );
 
-const OptionalCount = Schema.optional(Schema.Int);
-
-/**
- * A call the suspended turn waits on, and what it must still match to run
- * (see `ToolCallStore.ApprovalBinding`). A connector's call is stored
- * flat, untagged, as checkpoints were before built-in tools asked for approval.
- */
-const CheckpointApproval = Schema.Union([
+/** What an approved call must still match when it runs (see `ToolCallStore.ApprovalBinding`). */
+const ApprovalBinding = Schema.Union([
 	Schema.Struct({
-		approvalId: Schema.String,
-		tool: Schema.String,
+		kind: Schema.Literal("connector"),
 		connectorId: Schema.String,
 		connectorRevision: Schema.Int,
 		remoteToolName: Schema.String,
 	}),
-	Schema.Struct({
-		approvalId: Schema.String,
-		tool: Schema.String,
-		builtIn: Schema.Literal(true),
-	}),
+	Schema.Struct({ kind: Schema.Literal("built-in") }),
 ]);
+
+/** A call the suspended turn waits on, and what it must still match to run. */
+const CheckpointApproval = Schema.Struct({
+	approvalId: Schema.String,
+	tool: Schema.String,
+	binding: ApprovalBinding,
+});
 
 /** Everything a suspended turn needs to continue once its approvals are decided. */
 export const TurnCheckpoint = Schema.Struct({
@@ -937,9 +952,9 @@ export const TurnCheckpoint = Schema.Struct({
 	}),
 	reply: ReplyDraft,
 	/** The model requests made before the turn suspended, which cap the steps a resumed segment has left. */
-	modelRequests: OptionalCount,
+	modelRequests: Schema.Int,
 	/** The prompt's size at the turn's first model request, which a resumed segment keeps. */
-	contextTokens: OptionalCount,
+	contextTokens: Schema.optional(Schema.Int),
 });
 export type TurnCheckpoint = typeof TurnCheckpoint.Type;
 
@@ -976,8 +991,8 @@ function onTrigger(request: { botId: string; triggerMessageId: string }) {
 const stateColumns = {
 	id: turn.id,
 	status: turn.status,
-	owner: turn.owner,
-	cancelRequested: turn.cancelRequested,
+	executionId: turn.executionId,
+	interruptRequested: turn.interruptRequested,
 	runs: turn.runs,
 	writeOrDeleteStarted: turn.writeOrDeleteStarted,
 	error: turn.error,
@@ -986,33 +1001,31 @@ const stateColumns = {
 
 function stateOf(row: {
 	status: TurnState["status"];
-	owner: string | null;
-	cancelRequested: boolean;
+	executionId: string | null;
+	interruptRequested: boolean;
 	runs: number;
 	writeOrDeleteStarted: boolean;
 	error: UserText | null;
 	checkpointed: boolean;
 }): TurnState {
 	const facts = {
-		owner: row.owner,
-		cancelRequested: row.cancelRequested,
+		executionId: row.executionId,
+		interruptRequested: row.interruptRequested,
 		runs: row.runs,
 		checkpointed: row.checkpointed,
 		writeOrDeleteStarted: row.writeOrDeleteStarted,
 	};
-	return row.status === "failed"
-		? // `error` is nullable in the schema; a failed turn written without one
-			// reads as having stopped unexpectedly.
-			{ ...facts, status: "failed", userMessage: row.error ?? TURN_STOPPED_UNEXPECTEDLY }
-		: { ...facts, status: row.status };
+	if (row.status !== "failed") return { ...facts, status: row.status };
+	if (row.error === null) throw new Error("A failed turn has no error, which the schema forbids");
+	return { ...facts, status: "failed", userMessage: row.error };
 }
 
-/** Locks the turn found by `condition`, and reads its state and chat. */
+/** Locks the turn found by `condition`, and reads its state and bot. */
 const lockedTurn = (condition: SQL | undefined) =>
 	Effect.map(
 		query((db) =>
 			db
-				.select({ ...stateColumns, chatId: turn.chatId, botId: turn.botId })
+				.select({ ...stateColumns, botId: turn.botId })
 				.from(turn)
 				.where(condition)
 				.limit(1)
@@ -1021,17 +1034,16 @@ const lockedTurn = (condition: SQL | undefined) =>
 		([row]) =>
 			row && {
 				id: row.id,
-				chatId: row.chatId,
 				botId: row.botId,
 				state: stateOf(row),
 			},
 	);
 
-function notRunnable(reason: string, ended?: Ended): NotRunnable {
+export function notRunnable(reason: string, ended?: Ended): NotRunnable {
 	return { _tag: "NotRunnable", reason, ended };
 }
 
-/** How people are told a turn ended mid-run. */
+/** How members are told a turn ended mid-run. */
 function endAnnouncement(
 	reply: {
 		turnId: string;
@@ -1040,6 +1052,7 @@ function endAnnouncement(
 		botId: string;
 		messageId: string;
 		content: string;
+		finishedAt: Date;
 	},
 	ended: Ended,
 ): ChatEvent {
@@ -1053,34 +1066,23 @@ function endAnnouncement(
 				userMessage: ended.error,
 				willRetry: false,
 			})
-		: ChatEvent.TurnCancelled(reply);
+		: ChatEvent.TurnInterrupted(reply);
 }
 
-/** The stored parts of a reply: its text, split around the collaborations and tool calls it made. */
+/** The stored parts of a reply: its text, split around the tool calls it made. */
 function replyParts(reply: ReplyDraft): StoredMessagePart[] {
-	if (!reply.content && reply.collaborations.length === 0 && reply.toolCalls.length === 0) {
+	if (!reply.content && reply.toolCalls.length === 0) {
 		return [];
 	}
-	const placed: Array<
-		Extract<StoredMessagePart, { type: "collaboration" | "tool_call" }> & { atOffset: number }
-	> = [
-		...reply.collaborations.map(({ id, atOffset }) => ({
-			type: "collaboration" as const,
-			collaborationId: id,
-			atOffset,
-		})),
-		...reply.toolCalls.map(({ id, atOffset }) => ({
-			type: "tool_call" as const,
-			toolCallId: id,
-			atOffset,
-		})),
-	];
+	const placed = reply.toolCalls.map(({ id, atOffset }) => ({
+		type: "tool_call" as const,
+		toolCallId: id,
+		atOffset,
+	}));
 	return messagePartsFor(reply.content, placed)
-		.map((part): StoredMessagePart => {
-			if (part.type === "text") return part;
-			if (part.type === "collaboration")
-				return { type: "collaboration", collaborationId: part.collaborationId };
-			return { type: "tool_call", toolCallId: part.toolCallId };
-		})
+		.map(
+			(part): StoredMessagePart =>
+				part.type === "text" ? part : { type: "tool_call", toolCallId: part.toolCallId },
+		)
 		.filter((part) => part.type !== "text" || part.text !== "");
 }

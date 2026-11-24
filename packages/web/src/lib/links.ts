@@ -15,12 +15,12 @@ import { linkOptions } from "@tanstack/react-router";
 type ProjectRef = Pick<Project, "slug">;
 type BotRef = Pick<Bot, "handle">;
 
-/** Every project the person could open or join. */
+/** Every project the member could open or join. */
 export function projectsLink() {
 	return linkOptions({ from: "/$workspace", to: "./projects" });
 }
 
-/** Every bot the person reaches. */
+/** Every bot the member reaches. */
 export function botsLink() {
 	return linkOptions({ from: "/$workspace", to: "./bots" });
 }
@@ -108,11 +108,11 @@ export function projectSettingsLink(project: ProjectRef) {
 	});
 }
 
-/** The people in a project, a page of its settings. */
-export function projectPeopleLink(project: ProjectRef) {
+/** The members in a project, a page of its settings. */
+export function projectMembersLink(project: ProjectRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./projects/$project/settings/people",
+		to: "./projects/$project/settings/members",
 		params: { project: project.slug },
 	});
 }
@@ -239,9 +239,9 @@ export function projectConnectorLink(project: ProjectRef, connector: Pick<Connec
 	});
 }
 
-/** What a chat's address keeps open beside it. */
+/** What a chat's address opens with it: one of its runs as the page, or a file open large. */
 export interface ChatLinkSearch {
-	nestedChat?: string;
+	nestedChatPage?: string;
 	file?: string;
 }
 
@@ -277,9 +277,9 @@ export function chatByIdLink(chatId: string, search: ChatLinkSearch = {}) {
 }
 
 /**
- * A chat where it belongs: a project's chat, or a
- * bot's chat, with `nestedChat` open beside it, or `file` open large. Called
- * with either, it is either; a caller holding one or the other branches.
+ * A chat where it belongs: a project's chat, or a bot's chat, with
+ * `nestedChatPage` as the page, or `file` open large. Called with either, it
+ * is either; a caller holding one or the other branches.
  */
 export function chatLink(
 	place: { project: ProjectRef; chatId: string },
@@ -316,11 +316,11 @@ export function botComputerLink(bot: BotRef) {
 	});
 }
 
-/** A person's page among the workspace's people, by their membership's id. */
-export function personSettingsLink(membership: { id: string }) {
+/** A member's page among the workspace's members, by their membership's id. */
+export function memberSettingsLink(membership: { id: string }) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/people/$membership",
+		to: "./settings/members/$membership",
 		params: { membership: membership.id },
 	});
 }

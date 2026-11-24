@@ -12,28 +12,28 @@ export const JOIN_PROJECT_TOOL = "join_project";
 export const ADD_BOT_TO_PROJECT_TOOL = "add_bot_to_project";
 export const PIN_BOT_TOOL = "pin_bot";
 
-/** What the assistant is told of something it did for its person, or why it couldn't. */
+/** What the assistant is told of something it did for its member, or why it couldn't. */
 type ActedResult = { done: AssistantGuide.Place } | { refused: string };
 
 /**
- * The `workspace_guide` tool, a Personal Assistant's view of its person's
+ * The `workspace_guide` tool, a Personal Assistant's view of its member's
  * workspace: its projects, the bots they can reach with what each is for,
  * and what is waiting on them.
  */
 export function workspaceGuideTool({
 	guide,
-	person,
+	member,
 	run,
 }: {
 	guide: Pick<AssistantGuide.Interface, "guide">;
-	person: AssistantGuide.Person;
+	member: AssistantGuide.Member;
 	run: RunEffect;
 }) {
 	return tool({
 		description:
-			"See the workspace as your person does: its projects, the bots they can reach with what each is for, and what is waiting on them (approvals, unread mentions, failing automations), each with its link.",
+			"See the workspace as your member does: its projects, the bots they can reach with what each is for, and what is waiting on them (approvals, unread mentions, failing automations), each with its link.",
 		inputSchema: noInputSchema,
-		execute: (): Promise<AssistantGuide.Guide> => run(guide.guide(person)),
+		execute: (): Promise<AssistantGuide.Guide> => run(guide.guide(member)),
 	});
 }
 
@@ -46,17 +46,17 @@ const nameSchema = (description: string, maxLength = NAME_MAX_LENGTH) =>
 	});
 
 /**
- * The things a Personal Assistant does in the workspace for its person, each
+ * The things a Personal Assistant does in the workspace for its member, each
  * of which waits for them to approve it: they change the workspace, or what
- * other people see.
+ * other members see.
  */
 export function assistantRequests({
 	guide,
-	person,
+	member,
 	run,
 }: {
 	guide: Omit<AssistantGuide.Interface, "guide">;
-	person: AssistantGuide.Person;
+	member: AssistantGuide.Member;
 	run: RunEffect;
 }): Record<string, Request> {
 	const acted = (work: Effect.Effect<AssistantGuide.Place, AssistantGuide.Refused>) =>
@@ -71,7 +71,7 @@ export function assistantRequests({
 		[CREATE_PROJECT_TOOL]: asked(
 			tool({
 				description:
-					"Make a project for your person, with them in it, led by a public bot of their choosing, which answers its chats unless another bot is mentioned. Public projects are listed for anyone in the workspace to join; private ones only for the people added.",
+					"Make a project for your member, with them in it, led by a public bot of their choosing, which answers its chats unless another bot is mentioned. Public projects are listed for anyone in the workspace to join; private ones only for the members added.",
 				inputSchema: Schema.Struct({
 					name: nameSchema("What the project is called, like Launch.", PROJECT_NAME_MAX_LENGTH),
 					lead: nameSchema("The handle of the public bot to lead it, like @support."),
@@ -81,40 +81,40 @@ export function assistantRequests({
 						}),
 					),
 					private: Schema.optional(
-						Schema.Boolean.annotate({ description: "Only people added can find it." }),
+						Schema.Boolean.annotate({ description: "Only members added can find it." }),
 					),
 				}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-				execute: (project): Promise<ActedResult> => acted(guide.createProject(person, project)),
+				execute: (project): Promise<ActedResult> => acted(guide.createProject(member, project)),
 			}),
 		),
 		[JOIN_PROJECT_TOOL]: asked(
 			tool({
-				description: "Put your person in a public project, by its address from workspace_guide.",
+				description: "Put your member in a public project, by its address from workspace_guide.",
 				inputSchema: Schema.Struct({
 					project: nameSchema("The project's address, like launch."),
 				}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-				execute: ({ project }): Promise<ActedResult> => acted(guide.joinProject(person, project)),
+				execute: ({ project }): Promise<ActedResult> => acted(guide.joinProject(member, project)),
 			}),
 		),
 		[ADD_BOT_TO_PROJECT_TOOL]: asked(
 			tool({
 				description:
-					"Add a public bot to a project your person is in, so people there can mention it.",
+					"Add a public bot to a project your member is in, so members there can mention it.",
 				inputSchema: Schema.Struct({
 					project: nameSchema("The project's address, like launch."),
 					bot: nameSchema("The bot's handle, like @support."),
 				}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-				execute: (target): Promise<ActedResult> => acted(guide.addBotToProject(person, target)),
+				execute: (target): Promise<ActedResult> => acted(guide.addBotToProject(member, target)),
 			}),
 		),
 		[PIN_BOT_TOOL]: asked(
 			tool({
-				description: "Pin a bot to your person's sidebar, or unpin it.",
+				description: "Pin a bot to your member's sidebar, or unpin it.",
 				inputSchema: Schema.Struct({
 					bot: nameSchema("The bot's handle, like @support."),
 					pinned: Schema.Boolean.annotate({ description: "False to unpin it." }),
 				}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-				execute: (target): Promise<ActedResult> => acted(guide.pinBot(person, target)),
+				execute: (target): Promise<ActedResult> => acted(guide.pinBot(member, target)),
 			}),
 		),
 	};

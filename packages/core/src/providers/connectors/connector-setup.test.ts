@@ -10,8 +10,8 @@ import { Authorization } from "../../authorization/authorization.ts";
 import {
 	bot as botTable,
 	connector,
+	member,
 	membership,
-	person,
 	project,
 	workspace,
 } from "../../database/schema.ts";
@@ -126,15 +126,15 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connectors, against Postg
 
 	/**
 	 * An OAuth connector to `url` waiting on the sign-in whose state is
-	 * `state`, which `startedByPersonId`, by default the administrator, started.
+	 * `state`, which `startedByMemberId`, by default the administrator, started.
 	 */
-	const waitingOnSignIn = async (url: string, state: string, startedByPersonId = adminId) => {
+	const waitingOnSignIn = async (url: string, state: string, startedByMemberId = adminId) => {
 		const made = await connectors.create(workspaceId, projectId, adminId, {
 			name: `Signs in ${state}`,
 			url,
 			auth: "oauth",
 		});
-		await connectors.saveOauthRecord(workspaceId, made.id, { state, startedByPersonId });
+		await connectors.saveOauthRecord(workspaceId, made.id, { state, startedByMemberId });
 		return made;
 	};
 
@@ -156,7 +156,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connectors, against Postg
 		);
 		const [admin, editor] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values([
 					{ name: "Sam", email: `sam-${stamp}@example.com` },
 					{ name: "Kim", email: `kim-${stamp}@example.com` },
@@ -169,8 +169,8 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connectors, against Postg
 		editorId = editor.id;
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId, personId: adminId, role: "admin" },
-				{ workspaceId, personId: editorId, role: "editor" },
+				{ workspaceId, memberId: adminId, role: "admin" },
+				{ workspaceId, memberId: editorId, role: "editor" },
 			]),
 		);
 		const [bot] = await onDatabase((db) =>
@@ -376,7 +376,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connectors, against Postg
 			expect(await setup.completeOAuth({ callback })).toEqual({ failure });
 		});
 
-		it("does not finish for anybody but the person who started it", async () => {
+		it("does not finish for anybody but the member who started it", async () => {
 			const setup = await setupWith();
 			const made = await waitingOnSignIn(`${serverUrl}/open`, "state-other", editorId);
 

@@ -14,10 +14,10 @@ const compactorLook: AvatarParts = { color: "purple", eyes: "square" };
 
 /** Where a message ends up once the chat has been compacted. */
 type Band =
-	/** Older than what the first compaction summarises: left out of what the bot reads, but it can search for it. */
+	/** Older than what the first compaction condenses: left out of what the bot reads, but it can search for it. */
 	| "left-out"
-	/** Folded into the summary at the head of what the bot reads. */
-	| "summarised"
+	/** Folded into the condensed account at the head of what the bot reads. */
+	| "condensed"
 	/** Kept word for word. */
 	| "kept";
 
@@ -29,7 +29,7 @@ interface Line {
 }
 
 /**
- * Where the messages the bot reads word for word start, as the summary gives
+ * Where the messages the bot reads word for word start, as the condensed account gives
  * it: the day as well as the time, since long chats span days. Everything
  * before it can be searched.
  */
@@ -60,24 +60,24 @@ const lines: readonly Line[] = [
 		text: "Friday 15th to Monday 18th it is.",
 		band: "left-out",
 	},
-	{ from: "you", time: "17:48", text: "Can you find flights Friday after 5?", band: "summarised" },
+	{ from: "you", time: "17:48", text: "Can you find flights Friday after 5?", band: "condensed" },
 	{
 		from: "tripPlanner",
 		time: "17:52",
 		text: "Two options under €180 each: 17:55 and 18:40.",
-		band: "summarised",
+		band: "condensed",
 	},
 	{
 		from: "dad",
 		time: "18:10",
 		text: "18:40. Nobody is doing a 6am flight again.",
-		band: "summarised",
+		band: "condensed",
 	},
 	{
 		from: "tripPlanner",
 		time: "18:21",
 		text: "Holding the 18:40 for four. €220 left in the pot.",
-		band: "summarised",
+		band: "condensed",
 	},
 	{ from: "sam", time: "18:30", text: "Can I have a window seat?", band: "kept" },
 	{ from: "tripPlanner", time: "18:32", text: "Asked for a window seat for Sam.", band: "kept" },
@@ -90,7 +90,7 @@ const lines: readonly Line[] = [
 	},
 ];
 
-const summary = [
+const condensedAccount = [
 	"Decisions: On 14 May, Dad chose the 18:40 flight on Friday 15th, and Trip Planner held it for four.",
 	"Key facts: €220 left in the pot.",
 	`This covers the chat up to ${KEPT_FROM}. Anything it leaves out can be searched.`,
@@ -142,7 +142,7 @@ const steps: readonly Step[] = [
 	{
 		title: "Compacted",
 		caption:
-			"Trip Planner now rereads a short summary, then the latest messages word for word. Everyone still sees the whole chat.",
+			"Trip Planner now rereads a short condensed account, then the latest messages word for word. Everyone still sees the whole chat.",
 		said: 10,
 		contextUsed: 26,
 		compaction: "done",
@@ -150,7 +150,7 @@ const steps: readonly Step[] = [
 	{
 		title: "Looking further back",
 		caption:
-			"Mum's budget isn't in the summary, so Trip Planner searches the earlier messages and finds it.",
+			"Mum's budget isn't in the condensed account, so Trip Planner searches the earlier messages and finds it.",
 		said: 12,
 		contextUsed: 33,
 		compaction: "done",
@@ -165,7 +165,7 @@ const CONTEXT_LIMIT = 100;
 /** How long each step stays up while playing. */
 const STEP_MS = 3200;
 
-/** Steps through how a long chat gets compacted: what people see, and what the bot reads. */
+/** Steps through how a long chat gets compacted: what members see, and what the bot reads. */
 export function CompactionDemo() {
 	const [index, setIndex] = useState(0);
 	const [playing, setPlaying] = useState(false);
@@ -225,7 +225,7 @@ export function CompactionDemo() {
 			</div>
 
 			<div className="grid grid-cols-1 md:grid-cols-2 md:divide-x">
-				<PeopleView said={step.said} />
+				<MembersView said={step.said} />
 				<BotView step={step} />
 			</div>
 
@@ -242,8 +242,8 @@ function PanelTitle({ children }: { children: string }) {
 	);
 }
 
-/** The chat as people see it: every message, however long it gets. */
-function PeopleView({ said }: { said: number }) {
+/** The chat as members see it: every message, however long it gets. */
+function MembersView({ said }: { said: number }) {
 	return (
 		<div className="flex flex-col gap-3 p-4 sm:p-5">
 			<PanelTitle>What everyone sees</PanelTitle>
@@ -278,7 +278,7 @@ function BotView({ step }: { step: Step }) {
 			<CompactionStatus state={step.compaction} />
 			<div className="flex min-h-72 flex-col gap-1.5">
 				<AnimatePresence initial={false} mode="popLayout">
-					{compacted && <SummaryHead key="summary" />}
+					{compacted && <CondensedAccountHead key="condensed-account" />}
 					{read.map((line) => (
 						<motion.div
 							key={line.time}
@@ -306,8 +306,8 @@ function ReadLine({ line }: { line: Line }) {
 	);
 }
 
-/** The summary at the head of the bot's history. */
-function SummaryHead() {
+/** The condensed account at the head of the bot's history. */
+function CondensedAccountHead() {
 	return (
 		<motion.div
 			layout
@@ -317,8 +317,8 @@ function SummaryHead() {
 		>
 			<BotAvatar size="sm" {...compactorLook} />
 			<span className="flex flex-col gap-0.5 text-xs">
-				<span className="font-semibold">Summary</span>
-				{summary.map((paragraph) => (
+				<span className="font-semibold">Compacted history</span>
+				{condensedAccount.map((paragraph) => (
 					<span key={paragraph} className="text-muted-foreground text-pretty">
 						{paragraph}
 					</span>

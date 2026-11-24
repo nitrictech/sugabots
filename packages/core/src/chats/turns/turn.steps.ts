@@ -1,9 +1,4 @@
-import {
-	type CollaborationPart,
-	chatStream,
-	START_CHAT_TOOL,
-	streamEvent,
-} from "@sugabots/contracts";
+import { chatStream, START_CHAT_TOOL, streamEvent } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
 import type { ToolApprovalConfiguration, ToolSet } from "ai";
 import {
@@ -37,8 +32,6 @@ import { BotChats } from "../chats/bot-chats.ts";
 import { ChatEvent } from "../events.ts";
 import { assistantRequests } from "../tools/assistant/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
-import { Collaborations } from "../tools/collaborate/collaborations.ts";
-import { COLLABORATE_TOOL, collaborateTool } from "../tools/collaborate/tool.ts";
 import { ComputerTools, type Request } from "../tools/computer.ts";
 import { ConnectorTools, type OfferedTool } from "../tools/connectors.ts";
 import { FILE_TOOLS } from "../tools/files/tool.ts";
@@ -70,7 +63,7 @@ const MESSAGE_FLUSH_INTERVAL = Duration.seconds(1);
 /** ...and also whenever this much new text has arrived. */
 const MESSAGE_FLUSH_CHARACTERS = 500;
 /**
- * A running turn stops on `turn.cancel_requested`. The flag is also read this
+ * A running turn stops on `turn.interrupt_requested`. The flag is also read this
  * often, from the start, for a request made before the turn subscribed or
  * relayed from a process whose relay is down.
  */
@@ -94,7 +87,6 @@ type SegmentServices =
 	| TurnExecution.Service
 	| TurnStore.Service
 	| ToolCallStore.Service
-	| Collaborations.Service
 	| Files.Authoring
 	| ApprovedToolCalls.Service
 	| BotAdministration.Service
@@ -137,9 +129,16 @@ export const turnStepsLayer = Layer.effect(
 				).pipe(Effect.provideContext(services)),
 			cancelWaiting: (stored) => turns.cancelWaiting(stored),
 			announceReleased: (stored) =>
-				transaction(emit([ChatEvent.LaneReleased({ chatId: stored.chatId })])).pipe(
-					Effect.provideContext(services),
-				),
+				transaction(
+					emit([
+						ChatEvent.LaneReleased({
+							chatId: stored.chatId,
+							botId: stored.botId,
+							triggerMessageId: stored.triggerMessageId,
+							reason: stored.reason,
+						}),
+					]),
+				).pipe(Effect.provideContext(services)),
 		});
 	}),
 );
@@ -164,7 +163,7 @@ export const runSegment = (
 
 const finished: SegmentOutcome = { _tag: "Finished" };
 
-const emptyReply: ReplyDraft = { content: "", collaborations: [], toolCalls: [] };
+const emptyReply: ReplyDraft = { content: "", toolCalls: [] };
 
 type StreamOutcome =
 	| { kind: "completed"; contextTokens: number | undefined }
@@ -187,9 +186,10 @@ type TurnFailure =
 	| ApprovalForUnknownTool
 	| ReplyWithoutAnswer;
 
-class TurnCancelled extends Data.TaggedError("TurnCancelled") {
+/** The turn was asked to stop, as when its automation run ended. */
+class StopRequested extends Data.TaggedError("StopRequested") {
 	override get message() {
-		return "Turn cancelled";
+		return "Turn asked to stop";
 	}
 }
 class TurnTimedOut extends Data.TaggedError("TurnTimedOut") implements UserFacing {
@@ -232,7 +232,7 @@ class TurnStoppedUnexpectedly
 		return TURN_STOPPED_UNEXPECTEDLY;
 	}
 }
-/** The model asked a person to approve a tool this turn does not offer for approval. */
+/** The model asked a member to approve a tool this turn does not offer for approval. */
 class ApprovalForUnknownTool
 	extends Data.TaggedError("ApprovalForUnknownTool")<{ readonly tool: string }>
 	implements UserFacing
@@ -258,8 +258,8 @@ class ReplyWithoutAnswer extends Data.TaggedError("ReplyWithoutAnswer") implemen
 /**
  * Streams the model's reply into the response message and records how it ended.
  *
- * The writing half may be interrupted: by a person cancelling, by the time
- * limit, or by the server shutting down. The recording half may not, or the
+ * The writing half may be interrupted: by its automation run ending, by the
+ * time limit, or by the server shutting down. The recording half may not, or the
  * turn would be left `running` and the message `writing` forever. Hence the
  * mask: only the stream runs interruptibly, and whatever exit it produces is
  * written back before the fibre yields to the interrupt.
@@ -270,14 +270,13 @@ const generateReply = (
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
 			const turns = yield* TurnStore.Service;
-			const collaborations = yield* Collaborations.Service;
 			const replyTurn = replyTurnOf(prepared);
 			const reply = yield* Ref.make<ReplyDraft>(prepared.checkpoint?.reply ?? emptyReply);
 			const streamed = yield* Effect.exit(restore(streamReply(prepared, reply)));
 			const draft = yield* Ref.get(reply);
 
 			/**
-			 * Logs the failure and records what people are told of it; the turn
+			 * Logs the failure and records what members are told of it; the turn
 			 * runs again only while that is safe and could help. A reply without
 			 * an answer does not: running it again would repeat every tool call it
 			 * made. Nor does a model request that would fail the same way again,
@@ -333,26 +332,7 @@ const generateReply = (
 					yield* turns.staySilent(replyTurn, completion);
 					return finished;
 				}
-				// One transaction: the answer must be readable by the time anyone
-				// hears the turn completed, or the asking bot wakes to nothing
-				// and gives up waiting for an answer that lands a moment later.
-				yield* transaction(
-					Effect.gen(function* () {
-						// `answer` runs in a savepoint of this transaction, so a
-						// defect in it rolls back only what it wrote, and catching it here
-						// still lets the reply complete.
-						if (prepared.context.chat.parentChatId) {
-							yield* collaborations
-								.answer({ chatId: prepared.context.chat.id, answer: draft.content })
-								.pipe(
-									Effect.catchCause((cause) =>
-										Effect.logError("Delivering a collaboration answer failed", cause),
-									),
-								);
-						}
-						yield* turns.complete(replyTurn, draft, completion);
-					}),
-				);
+				yield* turns.complete(replyTurn, draft, completion);
 				return finished;
 			}
 
@@ -361,7 +341,7 @@ const generateReply = (
 			const expected = Cause.findErrorOption(cause);
 			if (Option.isNone(expected)) yield* Effect.logError("A turn's stream died", cause);
 			const failure = Option.getOrElse(expected, () => new TurnStoppedUnexpectedly());
-			if (failure instanceof TurnCancelled) {
+			if (failure instanceof StopRequested) {
 				return yield* Effect.as(turns.cancel(replyTurn, draft), finished);
 			}
 			return yield* failed(failure);
@@ -379,8 +359,8 @@ const logTurnFailure = (prepared: PreparedTurn, why: string) =>
  * Streams the reply into `reply`, publishing deltas and saving the text so far
  * as it goes, until the model finishes or something stops it.
  *
- * Three things run alongside the stream and race it: a poll for a person
- * asking to cancel, a periodic save of the reply so far, and the time limit.
+ * Three things run alongside the stream and race it: a poll for the turn's
+ * automation run ending, a periodic save of the reply so far, and the time limit.
  * Whichever ends first, however it ends, interrupts the others, and closing
  * the scope aborts the model's request and the tools it is running.
  */
@@ -395,7 +375,7 @@ const streamReply = (
 	| ApprovedToolChanged
 	| ApprovalForUnknownTool
 	| ReplyWithoutAnswer
-	| TurnCancelled,
+	| StopRequested,
 	SegmentServices | Database
 > =>
 	Effect.scoped(
@@ -407,7 +387,6 @@ const streamReply = (
 			const computerTools = yield* ComputerTools.Service;
 			const turns = yield* TurnStore.Service;
 			const toolCalls = yield* ToolCallStore.Service;
-			const collaborations = yield* Collaborations.Service;
 			const authoring = yield* Files.Authoring;
 			const approvals = yield* ApprovedToolCalls.Service;
 			const bots = yield* BotAdministration.Service;
@@ -416,7 +395,6 @@ const streamReply = (
 			const serverSettings = yield* ServerSettings.Service;
 			const botChats = yield* BotChats.Service;
 			const assistantGuide = yield* AssistantGuide.Service;
-			const signal = yield* Effect.abortSignal;
 
 			// One writer at a time: the periodic save, the on-size save and a tool
 			// marking the reply must not interleave, or an older draft could land
@@ -452,7 +430,7 @@ const streamReply = (
 				color: prepared.context.bot.color,
 				naturalBrowsing: prepared.context.bot.naturalBrowsing,
 				acceptsImages: prepared.context.bot.acceptsImages,
-				// A chat serves the files in it, so only there can people be shown one.
+				// A chat serves the files in it, so only there can members be shown one.
 				...(prepared.context.chat.kind === "project_chat" && {
 					attach: (file) => turns.attachFile(replyTurnOf(prepared), file),
 				}),
@@ -470,29 +448,24 @@ const streamReply = (
 						botId: prepared.context.bot.id,
 						chatId: prepared.context.chat.id,
 						files,
-						workspace: computer.usable ? computer.workspace : undefined,
+						computer: computer.usable ? computer.atPlace : undefined,
 						computerSignsIn: computer.signsIn,
 					},
 				),
 				(opened) => Effect.promise(() => opened.close()),
 			);
-			const noteCollaboration = (collaboration: Pick<CollaborationPart, "id" | "atOffset">) =>
-				Ref.update(reply, (draft) => ({
-					...draft,
-					collaborations: [...draft.collaborations, collaboration],
-				})).pipe(Effect.andThen(Effect.provideContext(saveReply, context)));
 			const { assistantOf } = prepared.context.bot;
-			// A Personal Assistant asks its person before any call that may change
+			// A Personal Assistant asks its member before any call that may change
 			// something, whatever its connectors allow without asking.
 			const offeredTools =
 				assistantOf === null ? connectors.tools : askingBeforeChanges(connectors.tools);
-			// A Personal Assistant knows and acts on its person's workspace only
+			// A Personal Assistant knows and acts on its member's workspace only
 			// while it answers them.
 			const assistant =
 				assistantOf !== null && prepared.context.askerId === assistantOf
 					? (() => {
-							const person: AssistantGuide.Person = {
-								personId: assistantOf,
+							const member: AssistantGuide.Member = {
+								memberId: assistantOf,
 								workspaceId: prepared.context.chat.workspaceId,
 								workspaceSlug: prepared.context.workspaceSlug,
 							};
@@ -508,56 +481,37 @@ const streamReply = (
 								}),
 								refusal: () => undefined,
 							};
-							// The bot it asks acts with that bot's own connectors and computer.
-							const collaborates: Request = {
-								tool: collaborateTool({
-									from: {
-										chatId: prepared.context.chat.id,
-										botId: prepared.context.bot.id,
-										turnId: prepared.turnId,
-										messageId: prepared.responseMessage.id,
-									},
-									collaborations,
-									bus: events,
-									run: runInTurn,
-									replyLength: () => Ref.getUnsafe(reply).content.length,
-									noteCollaboration,
-									signal,
-								}),
-								refusal: () => undefined,
-							};
-							// A chat it starts, or a bot it asks, is seen by others, so it waits for its person too.
+							// A chat it starts is seen by others, so it waits for its member too.
 							const requests: Record<string, Request> = {
-								...assistantRequests({ guide: assistantGuide, person, run: runInTurn }),
+								...assistantRequests({ guide: assistantGuide, member, run: runInTurn }),
 								[START_CHAT_TOOL]: startsChats,
-								[COLLABORATE_TOOL]: collaborates,
 							};
-							return { guide: assistantGuide, person, requests };
+							return { guide: assistantGuide, member, requests };
 						})()
 					: undefined;
-			// The built-in tools whose calls wait for a person to allow them.
+			// The built-in tools whose calls wait for a member to allow them.
 			const builtInRequests = {
 				...(computer.usable ? computer.requests : {}),
 				...assistant?.requests,
 			};
 			const approvalBoundTools = new Set<string>();
-			for (const binding of prepared.checkpoint?.approvals ?? []) {
-				if ("builtIn" in binding) {
-					if (!builtInRequests[binding.tool]) {
-						return yield* new ApprovedToolChanged({ tool: binding.tool });
+			for (const { tool, binding } of prepared.checkpoint?.approvals ?? []) {
+				if (binding.kind === "built-in") {
+					if (!builtInRequests[tool]) {
+						return yield* new ApprovedToolChanged({ tool });
 					}
 					continue;
 				}
-				const offered = offeredTools[binding.tool];
+				const offered = offeredTools[tool];
 				if (
 					!offered ||
 					offered.connectorId !== binding.connectorId ||
 					offered.connectorRevision !== binding.connectorRevision ||
 					offered.remoteToolName !== binding.remoteToolName
 				) {
-					return yield* new ApprovedToolChanged({ tool: binding.tool });
+					return yield* new ApprovedToolChanged({ tool });
 				}
-				approvalBoundTools.add(binding.tool);
+				approvalBoundTools.add(tool);
 			}
 			const toolApproval: ToolApprovalConfiguration<ToolSet, unknown> = {
 				...callToolApproval(offeredTools),
@@ -573,7 +527,6 @@ const streamReply = (
 				),
 			};
 			const { tools, catalog } = toolsForTurn(prepared, {
-				collaborations,
 				authoring,
 				calls: toolCalls,
 				approvals,
@@ -587,12 +540,10 @@ const streamReply = (
 				webAppUrl: serverSettings.webAppUrl,
 				automations,
 				chats: botChats,
-				bus: events,
 				run: runInTurn,
 				...(assistant && { assistant }),
 				reply: {
 					length: () => Ref.getUnsafe(reply).content.length,
-					noteCollaboration,
 					noteToolCall: ({ id, atOffset }) =>
 						Ref.update(reply, (draft) => ({
 							...draft,
@@ -601,16 +552,15 @@ const streamReply = (
 								: [...draft.toolCalls, { id, atOffset }],
 						})).pipe(Effect.andThen(Effect.provideContext(saveReply, context))),
 				},
-				signal,
 			});
 
-			const { workspaceSlug, project: projectPeopleMade } = prepared.context;
+			const { workspaceSlug, project: projectMembersMade } = prepared.context;
 			const botConnectorsPageUrl = `${serverSettings.webAppUrl}${connectorsPagePath({ workspaceSlug, botHandle: prepared.context.bot.handle })}`;
 			// The turn's connectors are its bot's default project's and, in a
-			// project people made, that project's, which the chat is in.
+			// project members made, that project's, which the chat is in.
 			const connectorsPageUrlOf = (projectId: string) =>
-				projectPeopleMade && projectId !== prepared.context.bot.defaultProjectId
-					? `${serverSettings.webAppUrl}${connectorsPagePath({ workspaceSlug, projectSlug: projectPeopleMade.slug })}`
+				projectMembersMade && projectId !== prepared.context.bot.defaultProjectId
+					? `${serverSettings.webAppUrl}${connectorsPagePath({ workspaceSlug, projectSlug: projectMembersMade.slug })}`
 					: botConnectorsPageUrl;
 			const environment: TurnEnvironment = {
 				now,
@@ -676,8 +626,8 @@ const streamReply = (
 				// so the first segment's prompt is the one measured.
 				const contextTokens = prepared.checkpoint?.contextTokens ?? finished.contextTokens;
 				if (finished.approvalRequests.length === 0) {
-					const { content, collaborations } = yield* Ref.get(reply);
-					const answered = content.trim() !== "" || collaborations.length > 0;
+					const { content } = yield* Ref.get(reply);
+					const answered = content.trim() !== "";
 					// Files the bot shared answer as words do. Looked up only when nothing else answered.
 					const carriesFiles = Effect.map(
 						turns.replyFiles(replyTurnOf(prepared)),
@@ -747,17 +697,11 @@ const streamReply = (
 					approvals: pending,
 					checkpoint: {
 						messages: [...segmentMessages, ...finished.responseMessages],
-						approvals: pending.map(({ approvalId, tool, binding }) =>
-							binding.kind === "connector"
-								? {
-										approvalId,
-										tool,
-										connectorId: binding.connectorId,
-										connectorRevision: binding.connectorRevision,
-										remoteToolName: binding.remoteToolName,
-									}
-								: { approvalId, tool, builtIn: true as const },
-						),
+						approvals: pending.map(({ approvalId, tool, binding }) => ({
+							approvalId,
+							tool,
+							binding,
+						})),
 						modelInput,
 						reply: suspendedReply,
 						modelRequests: (prepared.checkpoint?.modelRequests ?? 0) + finished.modelRequests,
@@ -767,16 +711,14 @@ const streamReply = (
 			});
 
 			// Suspended so each check reads the flag again rather than replaying one answer.
-			const cancelChecks = Effect.suspend(() =>
-				turns.isCancellationRequested(prepared.turnId),
-			).pipe(
+			const cancelChecks = Effect.suspend(() => turns.isInterruptRequested(prepared.turnId)).pipe(
 				Effect.repeat({
 					schedule: Schedule.spaced(CANCELLATION_CHECK_INTERVAL),
 					until: (requested) => requested,
 				}),
 			);
-			const cancelWatch = Effect.raceFirst(cancelRequested(events, prepared), cancelChecks).pipe(
-				Effect.andThen(Effect.fail(new TurnCancelled())),
+			const cancelWatch = Effect.raceFirst(interruptRequested(events, prepared), cancelChecks).pipe(
+				Effect.andThen(Effect.fail(new StopRequested())),
 			);
 			const periodicSave = saveReply.pipe(
 				Effect.repeat(Schedule.spaced(MESSAGE_FLUSH_INTERVAL)),
@@ -802,11 +744,7 @@ const saveReplySoFar = (
 	Effect.gen(function* () {
 		const draft = yield* Ref.get(reply);
 		const saved = yield* Ref.get(lastSaved);
-		if (
-			draft.content === saved.content &&
-			draft.collaborations.length === saved.collaborations.length &&
-			draft.toolCalls.length === saved.toolCalls.length
-		) {
+		if (draft.content === saved.content && draft.toolCalls.length === saved.toolCalls.length) {
 			return;
 		}
 		yield* turns.saveReply(replyTurn, draft);
@@ -861,12 +799,13 @@ const consumeDeltas = (
 		yield* publishPending;
 	});
 
-/** Waits for `turn.cancel_requested` on this turn. Never succeeds if the bus closes first. */
-function cancelRequested(events: Pick<EventBus.Interface, "subscribe">, prepared: PreparedTurn) {
+/** Waits for `turn.interrupt_requested` on this turn. Never succeeds if the bus closes first. */
+function interruptRequested(events: Pick<EventBus.Interface, "subscribe">, prepared: PreparedTurn) {
 	return Effect.promise(async (signal) => {
 		const stream = chatStream(prepared.context.chat.id);
 		for await (const { event } of events.subscribe(stream, { signal })) {
-			if (event.type === "turn.cancel_requested" && event.turnId === prepared.turnId) return true;
+			if (event.type === "turn.interrupt_requested" && event.turnId === prepared.turnId)
+				return true;
 		}
 		return false;
 	}).pipe(Effect.flatMap((requested) => (requested ? Effect.void : Effect.never)));
@@ -892,7 +831,7 @@ const publishDelta = (
 	).pipe(Effect.catchCause((cause) => Effect.logError("Publishing a message delta failed", cause)));
 
 /**
- * `tools` with every one that may change something asking a person first,
+ * `tools` with every one that may change something asking a member first,
  * whatever its connector allows, as a Personal Assistant's do.
  */
 function askingBeforeChanges(

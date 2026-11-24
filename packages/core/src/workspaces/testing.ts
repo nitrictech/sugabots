@@ -9,18 +9,18 @@ import {
 
 /**
  * `service` with its methods returning promises, each run against the test
- * database as the person `personId`.
+ * database as the member `memberId`.
  */
-export const onPostgresAs = (personId: string) =>
+export const onPostgresAs = (memberId: string) =>
 	promising<CurrentActor.Service | TestInfrastructure>((effect) =>
 		runOnPostgres(
-			effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(personId))),
+			effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(memberId))),
 		),
 	);
 
 /**
  * `service`, built by `layer` over the test infrastructure, with its methods
- * returning promises and called as the person the returned function is given.
+ * returning promises and called as the member the returned function is given.
  * Call it from `beforeAll`, so a file whose cases skip without a database
  * never connects.
  */
@@ -33,7 +33,7 @@ export async function servedOnPostgresAs<
 >(
 	service: Context.Key<Identifier, Shape>,
 	layer: Layer.Layer<Identifier, never, TestInfrastructure>,
-): Promise<(personId: string) => Promised<Shape>> {
+): Promise<(memberId: string) => Promised<Shape>> {
 	const served = await runOnPostgres(Effect.provide(service, layer));
-	return (personId) => onPostgresAs(personId)(served);
+	return (memberId) => onPostgresAs(memberId)(served);
 }

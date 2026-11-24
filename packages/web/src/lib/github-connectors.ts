@@ -12,7 +12,7 @@ import { client } from "@/api.ts";
 
 /**
  * Leaves for GitHub to make the project its own GitHub App, owned by
- * `organization` or by the person; GitHub comes back to install it.
+ * `organization` or by the member; GitHub comes back to install it.
  */
 export function useMakeGitHubApp(projectId: string) {
 	return useMutation({

@@ -12,7 +12,7 @@ import { refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 /**
- * The signed-in person's notifications: what they are notified about, and
+ * The current user's notifications: what they are notified about, and
  * which chat they are looking at.
  */
 const place = { kind: notificationPlaceKindSchema, id: uuidSchema };

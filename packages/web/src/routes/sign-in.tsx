@@ -47,7 +47,7 @@ function SignInRoute() {
 	const { invitation, passwordChanged, returnTo = "/" } = signInRoute.useSearch();
 	const navigate = useNavigate();
 
-	if (session.person) {
+	if (session.member) {
 		return invitation !== undefined ? (
 			<Navigate to="/invitations/$id" params={{ id: invitation }} replace />
 		) : (
@@ -71,7 +71,7 @@ function SignInRoute() {
 	);
 }
 
-/** `$code` is from a person's referral link; the API decides whether it still works. */
+/** `$code` is from a member's referral link; the API decides whether it still works. */
 export const joinRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/join/$code",
@@ -84,7 +84,7 @@ function JoinRoute() {
 	const { code } = joinRoute.useParams();
 	const navigate = useNavigate();
 
-	if (session.person) return <Navigate to="/" replace />;
+	if (session.member) return <Navigate to="/" replace />;
 
 	return (
 		<SignIn
@@ -136,7 +136,7 @@ export const invitationRoute = createRoute({
 	beforeLoad: ({ context, params }) => {
 		// An invitation is accepted as somebody. Sign in first, and come back:
 		// the id rides along so the link is not lost on the way.
-		if (context.person === null) {
+		if (context.member === null) {
 			throw redirect({ to: "/sign-in", search: { invitation: params.id } });
 		}
 	},

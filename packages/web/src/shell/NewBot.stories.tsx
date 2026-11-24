@@ -133,7 +133,7 @@ export const NoModelYet = meta.story({
 
 /**
  * The + opens the chosen look's colour, head and eyes; the bot is made as it
- * is shown, without a prompt, so it starts by asking what it's for.
+ * is shown, without instructions, so it starts by asking what it's for.
  */
 export const MadeAsShown = meta.story({
 	beforeEach({ msw }) {
@@ -160,7 +160,9 @@ export const MadeAsShown = meta.story({
 				model: "claude-sonnet",
 			}),
 		]);
-		await expect(created).toEqual([expect.not.objectContaining({ prompt: expect.anything() })]);
+		await expect(created).toEqual([
+			expect.not.objectContaining({ instructions: expect.anything() }),
+		]);
 	},
 });
 

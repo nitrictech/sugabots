@@ -21,7 +21,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sugabots}
       POSTGRES_DB: ${POSTGRES_DB:-sugabots}
     ports:
-      # 5436 to stay clear of a default Postgres and of sweet's 5435.
+      # 5436 to stay clear of a default Postgres and other local ones.
       - "127.0.0.1:${POSTGRES_PORT:-5436}:5432"
     restart: unless-stopped
     volumes:
@@ -30,7 +30,6 @@ services:
       # mount goes at /var/lib/postgresql, NOT the /data path 17 and earlier
       # used. An 18 image refuses to start against the old layout.
       - sugabots_postgres_data:/var/lib/postgresql
-      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
         - CMD-SHELL

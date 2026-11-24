@@ -8,8 +8,13 @@ import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { PersonResolver } from "../../http/app.test-support.ts";
-import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
+import type { MemberResolver } from "../../http/app.test-support.ts";
+import {
+	createTestApp,
+	identifiedBy,
+	sessionTokenIn,
+	signedInWith,
+} from "../../http/app.test-support.ts";
 
 /**
  * The search provider routes over doubles of `SearchProviderSetup`: what each
@@ -20,10 +25,10 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000002";
 const root = `/workspaces/${WORKSPACE_ID}/search-provider`;
-const headers = { authorization: "Bearer good-token", "content-type": "application/json" };
+const headers = { ...signedInWith("good-token"), "content-type": "application/json" };
 
-const resolvePerson: PersonResolver = async (requestHeaders) =>
-	requestHeaders.get("authorization") === "Bearer good-token"
+const resolveMember: MemberResolver = async (requestHeaders) =>
+	sessionTokenIn(requestHeaders) === "good-token"
 		? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 		: null;
 
@@ -42,7 +47,7 @@ const brave: SearchProvider = {
 
 const app = (search: Partial<SearchProviderSetup.Interface>) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolvePerson), unimplemented(SearchProviderSetup.Service, search)),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(SearchProviderSetup.Service, search)),
 	);
 
 describe("a workspace's search provider", () => {
@@ -53,11 +58,11 @@ describe("a workspace's search provider", () => {
 		expect(await response.json()).toEqual({ provider: null });
 	});
 
-	it("sets a built-in provider as the person asking", async () => {
+	it("sets a built-in provider as the member asking", async () => {
 		let askedAs: string | undefined;
 		const replace = vi.fn<SearchProviderSetup.Interface["replace"]>(() =>
-			Effect.map(CurrentActor.Service, ({ personId }) => {
-				askedAs = personId;
+			Effect.map(CurrentActor.Service, ({ memberId }) => {
+				askedAs = memberId;
 				return brave;
 			}),
 		);

@@ -21,11 +21,11 @@
 	--rail: light-dark(var(--color-zinc-100), var(--color-black));
 	/* The chat list column, and the grouped rows in settings. */
 	--list: light-dark(var(--color-zinc-50), var(--color-zinc-900));
-	/* The column beside a chat: Details, or a collaboration or run. */
+	/* The column beside a chat: Details, or an automation's panel. */
 	--aside: light-dark(#ffffff, var(--color-zinc-950));
 	/* Behind a page opened beside a chat, such as a file. */
 	--stage: light-dark(var(--color-zinc-100), var(--color-zinc-900));
-	/* Another person's message bubble. */
+	/* Another member's message bubble. */
 	--bubble: light-dark(var(--color-zinc-100), var(--color-zinc-900));
 	/* The composer, one rounded line under a chat. */
 	--composer: light-dark(var(--color-zinc-50), var(--color-zinc-800));
@@ -145,11 +145,11 @@
 	--drop-veil: light-dark(rgba(255, 255, 255, 0.8), rgba(10, 10, 10, 0.8));
 	--drop-target: light-dark(rgba(241, 241, 243, 0.7), rgba(23, 23, 26, 0.6));
 
-	/* A person with no photo: initials on a grey disc. */
-	--person-avatar: light-dark(#e4e4e7, #26262a);
-	--person-avatar-foreground: light-dark(#3f3f46, #ededed);
+	/* A member with no photo: initials on a grey disc. */
+	--member-avatar: light-dark(#e4e4e7, #26262a);
+	--member-avatar-foreground: light-dark(#3f3f46, #ededed);
 
-	/* The colours people's names are set in within a chat, one picked for each person: a hue's 700 when light, its 400 when dark. */
+	/* The colours members' names are set in within a chat, one picked for each member: a hue's 700 when light, its 400 when dark. */
 	--name-1: light-dark(oklch(52.5% 0.223 3.958), oklch(71.8% 0.202 349.761)); /* pink */
 	--name-2: light-dark(oklch(48.8% 0.243 264.376), oklch(70.7% 0.165 254.624)); /* blue */
 	--name-3: light-dark(oklch(50.8% 0.118 165.612), oklch(76.5% 0.177 163.223)); /* emerald */
@@ -241,8 +241,8 @@
 	--color-file-badge-foreground: var(--file-badge-foreground);
 	--color-drop-veil: var(--drop-veil);
 	--color-drop-target: var(--drop-target);
-	--color-person-avatar: var(--person-avatar);
-	--color-person-avatar-foreground: var(--person-avatar-foreground);
+	--color-member-avatar: var(--member-avatar);
+	--color-member-avatar-foreground: var(--member-avatar-foreground);
 	--color-name-1: var(--name-1);
 	--color-name-2: var(--name-2);
 	--color-name-3: var(--name-3);
@@ -670,7 +670,6 @@
 @theme {
 	--animate-rise: rise 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 	--animate-cards-in: cards-in 240ms cubic-bezier(0.2, 0.6, 0.2, 1) both;
-	--animate-sheet-up: sheet-up 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 
 	@keyframes rise {
 		from {
@@ -692,15 +691,6 @@
 		to {
 			opacity: 1;
 			transform: none;
-		}
-	}
-
-	@keyframes sheet-up {
-		from {
-			transform: translateY(100%);
-		}
-		to {
-			transform: translateY(0);
 		}
 	}
 }
@@ -810,7 +800,7 @@
 	}
 }
 
-/* A bot typing, or a collaboration still talking: three dots that rise in turn. */
+/* A bot typing: three dots that rise in turn. */
 .typing-dots {
 	display: inline-flex;
 	flex: none;

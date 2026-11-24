@@ -8,9 +8,10 @@ import { userText } from "@sugabots/errors";
 import { Effect } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSignedInPerson } from "../../auth/middleware.ts";
+import { asCurrentUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
+import { refuseHead, webAppReturn } from "../../http/web-app-return.ts";
 
 const connectorErrors = {
 	...refusals,
@@ -36,64 +37,56 @@ export const gitHubConnectorRoutes = HttpApiBuilder.group(
 				if (outcome.kind === "next") {
 					return HttpServerResponse.redirect(outcome.url, { status: 302 });
 				}
-				const back = new URL(webAppUrl);
-				back.pathname = `${back.pathname.replace(/\/$/, "")}${GITHUB_SETUP_RETURN_PATH}`;
-				if (outcome.at) {
-					back.searchParams.set("workspace", outcome.at.workspaceId);
-					back.searchParams.set("project", outcome.at.projectId);
+				const back = { webAppUrl, path: GITHUB_SETUP_RETURN_PATH, at: outcome.at };
+				if (outcome.kind === "done") {
+					return webAppReturn({ ...back, outcome: { connector: outcome.connectorId } });
 				}
-				if (outcome.kind === "done") back.searchParams.set("connector", outcome.connectorId);
-				if (outcome.kind === "failed") back.searchParams.set("github_error", outcome.failure);
-				return HttpServerResponse.redirect(back.toString(), { status: 302 });
+				return webAppReturn({ ...back, outcome: { github_error: outcome.failure } });
 			};
-			// A HEAD must not spend the one-time code a GET would.
-			const headRefused = Effect.succeed(
-				HttpServerResponse.empty({ status: 405, headers: { allow: "GET" } }),
-			);
 			return handlers
 				.handle("start", ({ params, payload }) =>
 					gitHubApps
 						.start({ projectId: params.projectId, organization: payload.organization })
-						.pipe(asSignedInPerson, asHttpError(connectorErrors)),
+						.pipe(asCurrentUser, asHttpError(connectorErrors)),
 				)
 				.handle("installUrl", ({ params }) =>
 					gitHubApps.installUrl(params).pipe(
 						Effect.map((url) => ({ url })),
-						asSignedInPerson,
+						asCurrentUser,
 						asHttpError(connectorErrors),
 					),
 				)
 				.handle("reachableRepositories", ({ params }) =>
 					connectors
 						.reachableRepositories(params)
-						.pipe(asSignedInPerson, asHttpError(connectorErrors)),
+						.pipe(asCurrentUser, asHttpError(connectorErrors)),
 				)
 				.handle("repositories", ({ params }) =>
-					connectors.repositories(params).pipe(asSignedInPerson, asHttpError(connectorErrors)),
+					connectors.repositories(params).pipe(asCurrentUser, asHttpError(connectorErrors)),
 				)
 				.handle("addRepository", ({ params, payload }) =>
 					connectors
 						.addRepository({ ...params, repository: payload.repository })
-						.pipe(asSignedInPerson, asHttpError(connectorErrors)),
+						.pipe(asCurrentUser, asHttpError(connectorErrors)),
 				)
 				.handle("removeRepository", ({ params, payload }) =>
 					connectors
 						.removeRepository({ ...params, repository: payload.repository })
-						.pipe(asSignedInPerson, asHttpError(connectorErrors)),
+						.pipe(asCurrentUser, asHttpError(connectorErrors)),
 				)
 				.handleRaw("gitHubAppMade", ({ request, query }) =>
 					request.method === "HEAD"
-						? headRefused
+						? Effect.succeed(refuseHead)
 						: gitHubApps
 								.made({ code: query.code, state: query.state })
-								.pipe(Effect.map(redirect), asSignedInPerson),
+								.pipe(Effect.map(redirect), asCurrentUser),
 				)
 				.handleRaw("gitHubAppInstalled", ({ request, query }) =>
 					request.method === "HEAD"
-						? headRefused
+						? Effect.succeed(refuseHead)
 						: gitHubApps
 								.installed({ installationId: query.installation_id, state: query.state })
-								.pipe(Effect.map(redirect), asSignedInPerson),
+								.pipe(Effect.map(redirect), asCurrentUser),
 				);
 		}),
 );

@@ -10,7 +10,7 @@ import {
 	MESSAGE_PREVIEW_CHARACTERS,
 	mentionPattern,
 	mentionsEveryone,
-	mentionsOnlyPeople,
+	mentionsOnlyMembers,
 	messagePartsFor,
 	messagePreview,
 	messageSchema,
@@ -20,7 +20,7 @@ import {
 	reactionEmojiSchema,
 	textWithoutNarration,
 } from "./messages.ts";
-import { testPerson } from "./testing.ts";
+import { testMember } from "./testing.ts";
 
 const ID = "0199a3a0-0000-7000-8000-000000000001";
 
@@ -33,7 +33,7 @@ const placedChat = {
 	rootChatId: ID,
 	kind: "project_chat",
 	title: "Release notes",
-	status: "done",
+	working: false,
 	parentChatId: null,
 	resolvedAt: null,
 	createdAt: "2026-09-11T00:00:00.000Z",
@@ -68,17 +68,17 @@ describe("chat contracts", () => {
 		);
 	});
 
-	it("keeps person and bot participants distinct", () => {
+	it("keeps member and bot participants distinct", () => {
 		expect(
 			Schema.decodeSync(participantSchema)({
-				kind: "person",
+				kind: "member",
 				id: ID,
 				name: "Sam",
 				email: "sam@example.com",
 				handle: "sam",
 				image: null,
 			}),
-		).toMatchObject({ kind: "person", name: "Sam" });
+		).toMatchObject({ kind: "member", name: "Sam" });
 		expect(
 			Schema.decodeUnknownResult(participantSchema)({
 				kind: "bot",
@@ -99,8 +99,7 @@ describe("chat contracts", () => {
 		const message = {
 			id: ID,
 			chatId: ID,
-			author: testPerson({ id: ID, name: "Sam" }),
-			kind: "text",
+			author: testMember({ id: ID, name: "Sam" }),
 			status: "complete",
 			parts: [
 				{ type: "text", text: "Release " },
@@ -123,7 +122,7 @@ describe("chat contracts", () => {
 		}
 	});
 
-	it("places collaborations and tool calls in the text at their offsets", () => {
+	it("places tool calls in the text at their offsets", () => {
 		const toolCall = {
 			type: "tool_call" as const,
 			id: ID,
@@ -132,29 +131,19 @@ describe("chat contracts", () => {
 			output: { title: "Example" },
 			status: "completed" as const,
 			error: null,
-			writeOrDelete: false,
+			approval: null,
 			atOffset: 8,
 			startedAt: "2026-09-14T00:00:00.000Z",
 			finishedAt: "2026-09-14T00:00:01.000Z",
 		};
-		const collaboration = {
-			type: "collaboration" as const,
-			id: "0199a3a0-0000-7000-8000-000000000002",
-			botId: ID,
-			botName: "Helper",
-			chatId: ID,
-			brief: "Look",
-			status: "answered" as const,
-			answer: "Seen",
-			atOffset: 8,
-		};
+		const second = { ...toolCall, id: "0199a3a0-0000-7000-8000-000000000002" };
 
-		const parts = messagePartsFor("Looking. Found it.", [toolCall, collaboration]);
+		const parts = messagePartsFor("Looking. Found it.", [toolCall, second]);
 
 		expect(parts).toEqual([
 			{ type: "text", text: "Looking." },
 			toolCall,
-			collaboration,
+			second,
 			{ type: "text", text: " Found it." },
 		]);
 	});
@@ -206,20 +195,20 @@ describe("mentionsEveryone", () => {
 	);
 });
 
-describe("mentionsOnlyPeople", () => {
-	const known = { botHandles: new Set(["reviewer"]), peopleHandles: new Set(["sam"]) };
+describe("mentionsOnlyMembers", () => {
+	const known = { botHandles: new Set(["reviewer"]), membersHandles: new Set(["sam"]) };
 
 	it.each([[["sam"]], [["here"]], [["sam", "backlog"]]])(
-		"reads %j as addressing only people",
+		"reads %j as addressing only members",
 		(handles) => {
-			expect(mentionsOnlyPeople(handles, known)).toBe(true);
+			expect(mentionsOnlyMembers(handles, known)).toBe(true);
 		},
 	);
 
 	it.each([[[]], [["backlog"]], [["reviewer"]], [["sam", "reviewer"]], [["channel", "reviewer"]]])(
-		"does not read %j as addressing only people",
+		"does not read %j as addressing only members",
 		(handles) => {
-			expect(mentionsOnlyPeople(handles, known)).toBe(false);
+			expect(mentionsOnlyMembers(handles, known)).toBe(false);
 		},
 	);
 });
@@ -243,16 +232,6 @@ describe("textWithoutNarration", () => {
 				{ type: "text", text: "It is paid." },
 			]),
 		).toBe("It is paid.");
-	});
-
-	it("keeps words before a collaboration, which the chat shows", () => {
-		expect(
-			textWithoutNarration([
-				{ type: "text", text: "Asking Finance. " },
-				{ type: "collaboration", collaborationId: ID },
-				{ type: "text", text: "They say it is paid." },
-			]),
-		).toBe("Asking Finance. They say it is paid.");
 	});
 });
 

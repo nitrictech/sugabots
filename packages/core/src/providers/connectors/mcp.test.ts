@@ -110,11 +110,7 @@ describe("listing a server's tools", () => {
 	});
 
 	it("reports a server that is not there in its own words, keeping the network's for the logs", async () => {
-		const found = await listServerTools(
-			{ url: "http://127.0.0.1:9/mcp", headers: {} },
-			fetch,
-			2_000,
-		);
+		const found = await listServerTools({ url: "http://127.0.0.1:9/mcp", headers: {} }, fetch);
 
 		expect(found).toMatchObject({
 			ok: false,

@@ -38,7 +38,7 @@ export const PICK_AN_EVENT_NOTE = "Pick at least one thing for it to run on.";
 
 /**
  * The repository and events groups, for an automation in the project
- * `projectId`, a bot's default one or one people made, called `ownerName`.
+ * `projectId`, a bot's default one or one members made, called `ownerName`.
  * Its GitHub app's repositories are the ones to choose from.
  */
 export function RepositoryGroups({

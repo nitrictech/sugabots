@@ -1,13 +1,9 @@
-import { EVENT_VERSION, type EventType, type StreamEvent } from "@sugabots/contracts";
+import { EVENT_VERSION } from "@sugabots/contracts";
 import { Duration, Effect, Layer, ManagedRuntime } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it, vi } from "vitest";
 import { EventPruning } from "./prune.ts";
 import { EventStore } from "./store.ts";
-
-function rawEvent(type: EventType, data: Record<string, unknown> = {}): StreamEvent {
-	return { ...data, v: EVENT_VERSION, type };
-}
 
 /**
  * Running the layer starts the sweep on a test clock, which `passes` moves on;
@@ -86,7 +82,7 @@ describe("pruning", () => {
 
 	it("survives a store that throws, so a failed sweep cannot take the API down", async () => {
 		const store = EventStore.inMemory();
-		await store.append("chat:c1", rawEvent("message.created"));
+		store.record("chat:c1", { v: EVENT_VERSION, type: "message.created" });
 		const prune = vi.spyOn(store, "prune").mockRejectedValue(new Error("connection lost"));
 
 		const { runtime, passes } = pruning(store);

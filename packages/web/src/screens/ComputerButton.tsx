@@ -16,7 +16,7 @@ export const CHAT_HEADER_CONTAINER = "@container/chat-header";
  * The way into the bot's computer desktop from the top of its chat, there
  * at any time, so it opens to say how to get one when the workspace or the
  * bot has none. While the bot is using the desktop it says so in the bot's
- * colour, with a pulse, so people notice there's something to watch.
+ * colour, with a pulse, so members notice there's something to watch.
  * Otherwise it is its icon, with its name beside it while the header is wide
  * enough; on a phone, only the icon, round on glass.
  */

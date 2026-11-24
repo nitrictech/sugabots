@@ -107,7 +107,7 @@ export function AutomationsPage({
  * is set up, which says when it runs, once that is loaded.
  */
 type ShownAutomation = Omit<ListedAutomation, "status"> & {
-	/** Missing for an automation whose runs the person may not read. */
+	/** Missing for an automation whose runs the member may not read. */
 	status?: ListedAutomation["status"];
 	bot: Bot;
 	definition: Automation | undefined;
@@ -118,7 +118,7 @@ type ShownAutomation = Omit<ListedAutomation, "status"> & {
  * undefined until they are loaded, each with how it stands for whoever may
  * read its runs. A bot's come with its chats; somebody who manages the
  * automations of a bot they do not reach, as an administrator does another
- * person's private bot, reads them as they are set up, as a project's are,
+ * member's personal bot, reads them as they are set up, as a project's are,
  * each run by its lead bot.
  */
 export function useListedAutomations(owner: ResourceOwner): {

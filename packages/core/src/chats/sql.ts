@@ -4,7 +4,6 @@ import type {
 	AutomationTriggerAuthor,
 	AutomationTriggerKind,
 	ChatKind,
-	CollaborationStatus,
 	JsonValue,
 	MessageStatus,
 	RunState,
@@ -33,7 +32,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { bot, person, project, workspace } from "../workspaces/sql.ts";
+import { bot, member, project, workspace } from "../workspaces/sql.ts";
 
 /**
  * Work a project's lead bot does on its own, in the project, on its computer
@@ -56,7 +55,7 @@ export const automation = pgTable(
 		 * somebody turns it on again or pauses it by hand.
 		 */
 		pausedAfterFailuresAt: timestamp("paused_after_failures_at", { withTimezone: true }),
-		createdById: uuid("created_by_id").references(() => person.id, { onDelete: "set null" }),
+		createdById: uuid("created_by_id").references(() => member.id, { onDelete: "set null" }),
 		/** Set when a bot working in the project made it, at `createdById`'s request. */
 		createdByBotId: uuid("created_by_bot_id").references(() => bot.id, { onDelete: "set null" }),
 		deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -99,7 +98,7 @@ export const automationTrigger = pgTable(
 			.generatedAlwaysAs(sql`settings->>'kind'`)
 			.notNull(),
 		settings: jsonb("settings").$type<AutomationTriggerSettings>().notNull(),
-		/** A webhook's secret, sealed with `Credentials`: checking a signature needs the secret itself. */
+		/** A webhook's secret, encrypted by `Secrets` for that one use: checking a signature needs the secret itself. */
 		secretEncrypted: text("secret_encrypted"),
 		/** When a routine next runs its automation; null while the automation is paused. */
 		nextScheduledAt: timestamp("next_scheduled_at", { withTimezone: true }),
@@ -128,7 +127,7 @@ export const automationTrigger = pgTable(
 );
 
 /**
- * The kinds of chat people open and post in: a project's chat (a
+ * The kinds of chat members open and post in: a project's chat (a
  * bot's chats being its default project's) and an automation's feed. The
  * others are opened from one of these.
  */
@@ -138,11 +137,10 @@ export const OPENABLE_CHAT_KINDS = [
 ] as const satisfies readonly ChatKind[];
 
 /**
- * A project's chat, a collaboration, an automation run or feed, or a system
- * bot's chat: what every kind has. What makes each kind what it is
- * lives in the kind's own table, keyed by the same id (`project_chat`,
- * `collaboration`, `run`, `automation_feed`, `system_chat`), and `placedChat`
- * reads them back together.
+ * A project's chat, an automation run or feed, or a system bot's chat: what
+ * every kind has. What makes each kind what it is lives in the kind's own
+ * table, keyed by the same id (`project_chat`, `run`, `automation_feed`,
+ * `system_chat`), and `placedChat` reads them back together.
  *
  * Every chat has exactly the kind row its kind says. A kind row can
  * only name a chat of its kind (each references `(id, kind)`), the
@@ -167,7 +165,7 @@ export const chat = pgTable(
 	(table) => [
 		check(
 			"chat_kind_valid",
-			sql`${table.kind} in ('project_chat', 'collaboration', 'run', 'automation_feed', 'system_chat')`,
+			sql`${table.kind} in ('project_chat', 'run', 'automation_feed', 'system_chat')`,
 		),
 		// What each kind table points at, so a kind row only names a chat of its kind.
 		uniqueIndex("chat_id_kind_idx").on(table.id, table.kind),
@@ -211,10 +209,10 @@ export const projectChat = pgTable(
 		 * until something new is posted in it or it is reopened.
 		 */
 		resolvedAt: timestamp("resolved_at", { withTimezone: true }),
-		/** The person who started it. */
+		/** The member who started it. */
 		startedById: uuid("started_by_id")
 			.notNull()
-			.references(() => person.id, { onDelete: "restrict" }),
+			.references(() => member.id, { onDelete: "restrict" }),
 	},
 	(table) => [
 		chatOfKind(table, "project_chat_chat_fkey"),
@@ -355,7 +353,7 @@ export const automationRun = pgTable(
 			"run_pending_terminal_valid",
 			sql`(${table.pendingTerminalState} is null and ${table.pendingTerminalError} is null)
 				or (${table.state} = 'running' and ${table.pendingTerminalState} = 'cancelled' and ${table.pendingTerminalError} is null)
-				or (${table.state} = 'running' and ${table.pendingTerminalState} = 'failed')`,
+				or (${table.state} = 'running' and ${table.pendingTerminalState} = 'failed' and ${table.pendingTerminalError} is not null)`,
 		),
 		uniqueIndex("run_chat_idx").on(table.chatId),
 		// A trigger's retry of a delivery or an occurrence lands on the run it started.
@@ -377,18 +375,18 @@ export const chatParticipant = pgTable(
 		chatId: uuid("chat_id")
 			.notNull()
 			.references(() => chat.id, { onDelete: "cascade" }),
-		personId: uuid("person_id").references(() => person.id, { onDelete: "cascade" }),
+		memberId: uuid("member_id").references(() => member.id, { onDelete: "cascade" }),
 		botId: uuid("bot_id").references(() => bot.id, { onDelete: "cascade" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
 		check(
 			"chat_participant_one_identity",
-			sql`num_nonnulls(${table.personId}, ${table.botId}) = 1`,
+			sql`num_nonnulls(${table.memberId}, ${table.botId}) = 1`,
 		),
-		uniqueIndex("chat_participant_person_idx")
-			.on(table.chatId, table.personId)
-			.where(sql`${table.personId} is not null`),
+		uniqueIndex("chat_participant_member_idx")
+			.on(table.chatId, table.memberId)
+			.where(sql`${table.memberId} is not null`),
 		uniqueIndex("chat_participant_bot_idx")
 			.on(table.chatId, table.botId)
 			.where(sql`${table.botId} is not null`),
@@ -396,12 +394,12 @@ export const chatParticipant = pgTable(
 );
 
 /**
- * Why a bot was given a turn: a person mentioned it or replied to it, it was the default,
- * it leads a project whose chat got a message mentioning only people (`optional`: it
- * may stay silent),
- * it was asked to collaborate, an automation ran, a collaboration it stopped
- * waiting on ended, it opened its setup interview, or a bot started its chat
- * for a person and briefed it.
+ * Why a bot was given a turn: a member mentioned it or replied to it, it was the default,
+ * it leads a project whose chat got a message mentioning only members (`optional`: it
+ * may stay silent), another bot's message mentioned it to ask for its help
+ * (`collaboration`: it is that bot's helper), an automation ran, the bots it
+ * asked for help have all answered (`hand_back`), it opened its setup
+ * interview, or a bot started its chat for a member and briefed it.
  */
 export type TurnReason =
 	| "mention"
@@ -411,7 +409,7 @@ export type TurnReason =
 	| "collaboration"
 	// An automation ran, whatever started it: a routine, a trigger or somebody by hand.
 	| "automation"
-	| "resume"
+	| "hand_back"
 	| "interview"
 	| "brief";
 
@@ -435,14 +433,14 @@ export const turn = pgTable(
 			.references((): AnyPgColumn => message.id, { onDelete: "cascade" }),
 		/**
 		 * The workflow execution running this turn, including while it is
-		 * suspended. A resumed turn must be resumed by its owner.
+		 * suspended. A suspended turn resumes only in that execution.
 		 */
-		owner: text("owner"),
+		executionId: text("execution_id"),
 		status: text("status").$type<TurnStatus>().notNull(),
 		model: text("model").notNull(),
 		contextTokens: integer("context_tokens"),
 		contextCapacity: integer("context_capacity"),
-		cancelRequested: boolean("cancel_requested").notNull().default(false),
+		interruptRequested: boolean("interrupt_requested").notNull().default(false),
 		/**
 		 * Runs since the turn last got anywhere: started, retried or resumed, and
 		 * back to zero when it stops to wait for approvals. A turn that keeps
@@ -467,6 +465,7 @@ export const turn = pgTable(
 		index("turn_active_idx")
 			.on(table.status, table.startedAt)
 			.where(sql`${table.status} = 'running'`),
+		check("turn_failure_has_error", sql`${table.status} <> 'failed' or ${table.error} is not null`),
 	],
 );
 
@@ -477,10 +476,9 @@ export const message = pgTable(
 		chatId: uuid("chat_id")
 			.notNull()
 			.references(() => chat.id, { onDelete: "cascade" }),
-		authorPersonId: uuid("author_person_id").references(() => person.id, { onDelete: "restrict" }),
+		authorMemberId: uuid("author_member_id").references(() => member.id, { onDelete: "restrict" }),
 		authorBotId: uuid("author_bot_id").references(() => bot.id, { onDelete: "cascade" }),
 		automationTrigger: jsonb("automation_trigger").$type<AutomationTriggerAuthor>(),
-		kind: text("kind").$type<"text">().notNull(),
 		status: text("status").$type<MessageStatus>().notNull(),
 		parts: jsonb("parts").$type<StoredMessagePart[]>().notNull(),
 		content: text("content").notNull(),
@@ -499,13 +497,11 @@ export const message = pgTable(
 	(table) => [
 		check(
 			"message_one_author",
-			sql`num_nonnulls(${table.authorPersonId}, ${table.authorBotId}, ${table.automationTrigger}) = 1`,
+			sql`num_nonnulls(${table.authorMemberId}, ${table.authorBotId}, ${table.automationTrigger}) = 1`,
 		),
 		index("message_chat_created_at_idx").on(table.chatId, table.createdAt),
-		// A run's result is posted once in each chat it goes to.
-		uniqueIndex("message_run_idx")
-			.on(table.runId, table.chatId)
-			.where(sql`${table.runId} is not null`),
+		// A run's result is posted once, in its automation's feed.
+		uniqueIndex("message_run_idx").on(table.runId).where(sql`${table.runId} is not null`),
 		// What a bot's search_history tool matches against. Stemmed so "hotels"
 		// finds "hotel"; unstemmed as well, so a word the English rules drop or
 		// change (German "was", French "hôtels") still matches as written; and
@@ -526,7 +522,7 @@ export const message = pgTable(
 );
 
 /**
- * One emoji reaction to a message, by a person or by a bot. Each adds each
+ * One emoji reaction to a message, by a member or by a bot. Each adds each
  * emoji at most once. A bot reacts only with 👀, to a message it read on an
  * optional turn and chose not to answer.
  */
@@ -537,16 +533,16 @@ export const messageReaction = pgTable(
 		messageId: uuid("message_id")
 			.notNull()
 			.references(() => message.id, { onDelete: "cascade" }),
-		personId: uuid("person_id").references(() => person.id, { onDelete: "cascade" }),
+		memberId: uuid("member_id").references(() => member.id, { onDelete: "cascade" }),
 		botId: uuid("bot_id").references(() => bot.id, { onDelete: "cascade" }),
 		emoji: text("emoji").notNull(),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
-		check("message_reaction_one_reactor", sql`num_nonnulls(${table.personId}, ${table.botId}) = 1`),
-		uniqueIndex("message_reaction_message_person_emoji_idx")
-			.on(table.messageId, table.personId, table.emoji)
-			.where(sql`${table.personId} is not null`),
+		check("message_reaction_one_reactor", sql`num_nonnulls(${table.memberId}, ${table.botId}) = 1`),
+		uniqueIndex("message_reaction_message_member_emoji_idx")
+			.on(table.messageId, table.memberId, table.emoji)
+			.where(sql`${table.memberId} is not null`),
 		uniqueIndex("message_reaction_message_bot_emoji_idx")
 			.on(table.messageId, table.botId, table.emoji)
 			.where(sql`${table.botId} is not null`),
@@ -554,80 +550,19 @@ export const messageReaction = pgTable(
 );
 
 /**
- * A message's parts as stored. A collaboration is kept by reference: its status and
- * answer live on the `collaboration` row and are composed in on read, so the reply's
- * writer and the collaborator's completing turn never write the same row. A tool
- * call is kept by reference for the same reason in the other direction: its
- * output lands on the `tool_call` row without rewriting the reply's parts. A
- * file on an automation run's posted result is kept whole: it names the
- * version the run wrote, which never changes.
+ * A message's parts as stored. A tool call is kept by reference: its output
+ * lands on the `tool_call` row without rewriting the reply's parts. A file on
+ * an automation run's posted result is kept whole: it names the version the
+ * run wrote, which never changes.
  */
 export type StoredMessagePart =
 	| { type: "text"; text: string }
-	| { type: "collaboration"; collaborationId: string }
 	| { type: "tool_call"; toolCallId: string }
 	| { type: "written_file"; fileId: string; kind: WrittenFileKind; title: string; version: number };
 
 /**
- * One bot asking another for help mid-reply, and the collaboration's own
- * chat, where the collaborator answers. The reply is `parentMessage`,
- * in `parentChatId`. See `tools/collaborate/collaborations.ts`.
- */
-export const collaboration = pgTable(
-	"collaboration",
-	{
-		id: primaryKey(),
-		/** The collaboration's own chat, where the collaborator answers. */
-		chatId: uuid("chat_id").notNull(),
-		kind: kindOf("collaboration"),
-		/** The chat it was asked from, where the asking reply is. */
-		parentChatId: uuid("parent_chat_id")
-			.notNull()
-			.references(() => chat.id, { onDelete: "cascade" }),
-		/**
-		 * The chat people opened that it hangs under: its parent's, or
-		 * the parent itself, for the first collaboration asked from it.
-		 */
-		rootChatId: uuid("root_chat_id")
-			.notNull()
-			.references((): AnyPgColumn => chat.id, { onDelete: "cascade" }),
-		parentMessageId: uuid("parent_message_id")
-			.notNull()
-			.references(() => message.id, { onDelete: "cascade" }),
-		/** The asking bot's turn, which bounds collaborations per turn. */
-		turnId: uuid("turn_id")
-			.notNull()
-			.references(() => turn.id, { onDelete: "cascade" }),
-		collaboratorBotId: uuid("collaborator_bot_id")
-			.notNull()
-			.references(() => bot.id, { onDelete: "cascade" }),
-		brief: text("brief").notNull(),
-		status: text("status").$type<CollaborationStatus>().notNull().default("waiting"),
-		answer: text("answer"),
-		/** Where in the reply's text the call was made. */
-		atOffset: integer("at_offset").notNull(),
-		createdAt: stamp("created_at"),
-		updatedAt: updatedStamp("updated_at"),
-	},
-	(table) => [
-		foreignKey({
-			columns: [table.chatId, table.kind],
-			foreignColumns: [chat.id, chat.kind],
-			name: "collaboration_chat_fkey",
-		}).onDelete("cascade"),
-		index("collaboration_parent_message_idx").on(table.parentMessageId),
-		uniqueIndex("collaboration_chat_idx").on(table.chatId),
-		index("collaboration_root_idx").on(table.rootChatId),
-		index("collaboration_collaborator_created_at_idx").on(table.collaboratorBotId, table.createdAt),
-		index("collaboration_turn_idx").on(table.turnId),
-	],
-);
-
-export type CollaborationRow = typeof collaboration.$inferSelect;
-
-/**
- * One call a bot's reply made to a built-in tool: what it was given, what
- * came back, and where in the reply it happened. See `tools/calls/store.ts`.
+ * One call a bot's reply made to a tool: what it was given, what came back,
+ * and where in the reply it happened. See `turns/tool-calls/store.ts`.
  *
  * `chat_id` is here as well as on the message so the table can be
  * filtered by chat without a join. `input` and `output` are truncated to
@@ -654,7 +589,7 @@ export const toolCall = pgTable(
 		approvalId: text("approval_id"),
 		approvalStatus: text("approval_status").$type<ToolApprovalStatus>(),
 		approvalReason: text("approval_reason"),
-		decidedById: uuid("decided_by_id").references(() => person.id, { onDelete: "set null" }),
+		decidedById: uuid("decided_by_id").references(() => member.id, { onDelete: "set null" }),
 		decidedAt: timestamp("decided_at", { withTimezone: true }),
 		connectorId: uuid("connector_id"),
 		connectorRevision: integer("connector_revision"),
@@ -686,43 +621,43 @@ export type ToolCallRow = typeof toolCall.$inferSelect;
 
 /**
  * What a bot reads in place of a long chat's older messages, written by the
- * Compaction bot. The bot reads `summary`, then every message from `keptFrom` on word
- * for word. The summary covers the messages from `historyStartsAt` to `keptFrom`;
+ * Compaction bot. The bot reads `condensed`, then every message from `keptFrom` on word
+ * for word. The condensed account covers the messages from `historyStartsAt` to `keptFrom`;
  * anything earlier is left out, and the bot searches for it when it needs it.
  */
 export const chatCompaction = pgTable("compaction", {
 	chatId: uuid("chat_id")
 		.primaryKey()
 		.references(() => chat.id, { onDelete: "cascade" }),
-	summary: text("summary").notNull(),
+	condensed: text("condensed").notNull(),
 	historyStartsAt: timestamp("history_starts_at", { withTimezone: true }).notNull(),
 	keptFrom: timestamp("kept_from", { withTimezone: true }).notNull(),
 	updatedAt: updatedStamp("updated_at"),
 });
 
 /**
- * How far one person has read a chat: every message there up to
+ * A member's read cursor in a chat: every message there up to
  * `readThrough` has been on their screen. No row means they never opened it.
  *
  * A message is stamped when its transaction begins, so one that began before
  * a read was recorded and committed after it counts as read. The window is a
  * transaction long, and the next message moves the chat on.
  */
-export const chatRead = pgTable(
-	"chat_read",
+export const readCursor = pgTable(
+	"read_cursor",
 	{
 		id: primaryKey(),
 		chatId: uuid("chat_id")
 			.notNull()
 			.references(() => chat.id, { onDelete: "cascade" }),
-		personId: uuid("person_id")
+		memberId: uuid("member_id")
 			.notNull()
-			.references(() => person.id, { onDelete: "cascade" }),
+			.references(() => member.id, { onDelete: "cascade" }),
 		readThrough: timestamp("read_through", { withTimezone: true }).notNull(),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
-	(table) => [uniqueIndex("chat_read_person_chat_idx").on(table.personId, table.chatId)],
+	(table) => [uniqueIndex("read_cursor_member_chat_idx").on(table.memberId, table.chatId)],
 );
 
 /**
@@ -739,20 +674,20 @@ export const placedChat = pgView("placed_chat", {
 	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
 	/**
 	 * The bot it is with: the bot whose default project a chat, an
-	 * automation's feed or a run is in, the collaborator, or the system bot.
-	 * Null in a project people made.
+	 * automation's feed or a run is in, or the system bot. Null in a project
+	 * members made.
 	 */
 	botId: uuid("bot_id"),
 	/** The project a chat, an automation's feed or a run is in: the automation's. */
 	projectId: uuid("project_id"),
 	/**
-	 * The chat people open that it is in: its own id on a project's
-	 * chat and an automation's feed; the one it hangs under on a collaboration; the automation's feed on a run.
+	 * The chat members open that it is in: its own id on a project's
+	 * chat and an automation's feed; the automation's feed on a run.
 	 * Null on a system bot's chat, which serves one rather than
 	 * belonging to one.
 	 */
 	rootChatId: uuid("root_chat_id"),
-	/** What it was opened under: the asking chat of a collaboration, the served one of a system bot's. */
+	/** What it was opened under: the chat a system bot's serves. */
 	parentChatId: uuid("parent_chat_id"),
 	/** Who started a project's chat. */
 	startedById: uuid("started_by_id"),
@@ -762,22 +697,20 @@ export const placedChat = pgView("placed_chat", {
 	automationId: uuid("automation_id"),
 }).as(sql`select
 	c.id, c.workspace_id, c.kind, c.title, c.created_at, c.updated_at,
-	coalesce(p.default_of_bot_id, co.collaborator_bot_id, sc.bot_id) as bot_id,
+	coalesce(p.default_of_bot_id, sc.bot_id) as bot_id,
 	p.id as project_id,
 	case c.kind
-		when 'collaboration' then co.root_chat_id
 		when 'run' then rf.chat_id
 		when 'system_chat' then null
 		else c.id
 	end as root_chat_id,
-	coalesce(co.parent_chat_id, sc.served_chat_id) as parent_chat_id,
+	sc.served_chat_id as parent_chat_id,
 	cc.started_by_id,
 	sc.system_bot_key,
 	cc.resolved_at,
 	f.automation_id
 from ${chat} c
 left join ${projectChat} cc on cc.chat_id = c.id
-left join ${collaboration} co on co.chat_id = c.id
 left join ${automationRun} r on r.chat_id = c.id
 left join ${automationFeed} rf on rf.automation_id = r.automation_id
 left join ${automationFeed} f on f.chat_id = c.id

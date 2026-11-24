@@ -147,7 +147,7 @@ describe.for(implementations.filter(({ skip }) => !skip))("blob store, on $name"
 		);
 	});
 
-	it("lists and deletes a prefix's blobs at any depth, and no neighbour's", async () => {
+	it("deletes a prefix's blobs at any depth, and no neighbour's", async () => {
 		const folder = `${aFolder()}_x`;
 		const prefix = BlobStore.key("tests", folder);
 		const near = BlobStore.key("tests", folder, "a");
@@ -157,14 +157,10 @@ describe.for(implementations.filter(({ skip }) => !skip))("blob store, on $name"
 		const wildcard = BlobStore.key("tests", folder.replace("_", "z"), "a");
 		for (const key of [deep, near, extended, wildcard]) await blobs.put(key, text(key));
 
-		expect(await blobs.list(prefix)).toEqual([
-			{ key: near, contentType: "text/plain; charset=utf-8", size: near.length },
-			{ key: deep, contentType: "text/plain; charset=utf-8", size: deep.length },
-		]);
-
 		await blobs.deletePrefix(prefix);
 
-		expect(await blobs.list(prefix)).toEqual([]);
+		await expect(blobs.get(near)).rejects.toBeInstanceOf(BlobStore.NotFound);
+		await expect(blobs.get(deep)).rejects.toBeInstanceOf(BlobStore.NotFound);
 		await expect(blobs.get(extended)).resolves.toBeDefined();
 		await expect(blobs.get(wildcard)).resolves.toBeDefined();
 	});
@@ -182,9 +178,8 @@ describe.for(implementations.filter(({ skip }) => !skip))("blob store, on $name"
 
 		await blobs.put(child, text("child"));
 		await blobs.delete(parent);
-		await expect(blobs.list(parent)).resolves.toEqual([
-			{ key: child, contentType: "text/plain; charset=utf-8", size: 5 },
-		]);
+		await expect(blobs.get(parent)).rejects.toBeInstanceOf(BlobStore.NotFound);
+		await expect(blobs.get(child)).resolves.toBeDefined();
 	});
 });
 

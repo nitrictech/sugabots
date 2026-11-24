@@ -5,7 +5,7 @@ import type { GitHubAppOwner } from "../../../database/schema.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
 
 /**
- * GitHub's REST API, as a workspace's own GitHub App calls it: made from a
+ * GitHub's REST API, as a project's own GitHub App calls it: made from a
  * manifest, signing requests about itself with its private key, and working
  * on each account it is installed on through that installation's tokens,
  * which last an hour and carry only the repositories and permissions each
@@ -19,7 +19,7 @@ interface AppIdentity {
 }
 
 /** One of a GitHub App's installations: an account it reaches. */
-export interface Installation {
+interface Installation {
 	readonly id: number;
 	/** The login of the organization or user whose repositories it reaches. */
 	readonly account: string;
@@ -34,7 +34,7 @@ export const API_URL = "https://api.github.com";
 export const WEB_URL = "https://github.com";
 
 /**
- * What a workspace's app may be given at install; an app's permissions can
+ * What a project's app may be given at install; an app's permissions can
  * later be changed only by its owner, on GitHub. Each token asks for less.
  * Without `workflows`, GitHub refuses a push that changes
  * `.github/workflows`, so a bot can't write CI that runs with the
@@ -62,7 +62,7 @@ export const READ_PERMISSIONS: Permissions = {
 };
 
 /**
- * The events a workspace's app is sent, chosen when it is made because an
+ * The events a project's app is sent, chosen when it is made because an
  * app's events can later be changed only by its owner, on GitHub. Each is
  * covered by a read side of {@link APP_PERMISSIONS}.
  */
@@ -108,7 +108,7 @@ export function appManifest(input: {
 	};
 }
 
-/** Where the browser posts a manifest: the person's own account, or an organization they own. */
+/** Where the browser posts a manifest: the member's own account, or an organization they own. */
 export function newAppUrl(organization: string | undefined, state: string) {
 	const url = new URL(
 		organization
@@ -119,7 +119,7 @@ export function newAppUrl(organization: string | undefined, state: string) {
 	return url.toString();
 }
 
-/** Where a person installs the app; GitHub then sends them to its setup URL with `state`. */
+/** Where a member installs the app; GitHub then sends them to its setup URL with `state`. */
 export function installAppUrl(slug: string, state: string) {
 	const url = new URL(`${WEB_URL}/apps/${encodeURIComponent(slug)}/installations/new`);
 	url.searchParams.set("state", state);
@@ -155,17 +155,40 @@ export const madeApp = (http: EgressHttpClient, code: string) =>
 
 const FoundInstallation = Schema.Struct({
 	id: Schema.Int,
-	account: Schema.Struct({ login: Schema.String }),
+	/** `type` is `User` for a GitHub user's own account, or `Organization`. */
+	account: Schema.Struct({ login: Schema.String, type: Schema.String }),
 });
 
-/** The app's installation `installationId`; a failure when it is another app's. */
+/**
+ * The app's installation `installationId`, and whether its account is a
+ * GitHub user's own rather than an organization's; a failure when it is
+ * another app's.
+ */
 export const installation = (http: EgressHttpClient, app: AppIdentity, installationId: number) =>
 	appJwt(app).pipe(
 		Effect.flatMap((bearer) =>
 			call(http, "GET", `/app/installations/${installationId}`, { bearer }),
 		),
 		Effect.flatMap(decoded(FoundInstallation)),
-		Effect.map((found): Installation => ({ id: found.id, account: found.account.login })),
+		Effect.map((found): Installation & { readonly onUserAccount: boolean } => ({
+			id: found.id,
+			account: found.account.login,
+			onUserAccount: found.account.type === "User",
+		})),
+	);
+
+/** GitHub's status for an installation that isn't there, which uninstalling leaves as wanted. */
+const NOT_FOUND_STATUS = 404;
+
+/** Uninstalls the app's installation `installationId`; one already uninstalled is done. */
+export const uninstall = (http: EgressHttpClient, app: AppIdentity, installationId: number) =>
+	appJwt(app).pipe(
+		Effect.flatMap((bearer) =>
+			send(http, "DELETE", `/app/installations/${installationId}`, { bearer }),
+		),
+		Effect.flatMap((response) =>
+			response.status === NOT_FOUND_STATUS ? Effect.void : Effect.asVoid(answerOf(response)),
+		),
 	);
 
 const AccessToken = Schema.Struct({ token: Schema.String, expires_at: Schema.String });
@@ -210,7 +233,11 @@ const Repositories = Schema.Struct({
 
 /** At most this many of an installation's repositories are listed, to pick from. */
 const MAX_LISTED_REPOSITORIES = 1_000;
-const PAGE_SIZE = 100;
+/** GitHub's largest page. */
+export const PAGE_SIZE = 100;
+
+/** The login GitHub gives the app whose slug is `slug`, for what it does itself. */
+export const appLogin = (slug: string) => `${slug}[bot]`;
 
 interface Repository {
 	readonly id: number;
@@ -414,8 +441,8 @@ export const comment = (
 	}).pipe(Effect.flatMap(decoded(Comment)), Effect.map(madeComment));
 
 /**
- * A comment's kind, each with its own ids: one in an issue's or pull
- * request's chat, or one on a pull request's code.
+ * A comment's kind, each with its own ids: one on an issue or pull request
+ * as a whole, or one on a pull request's code.
  */
 export type CommentKind = "comment" | "code_comment";
 
@@ -429,8 +456,8 @@ const FoundComment = Schema.Struct({
 
 /**
  * Who wrote a comment, by login, undefined for a deleted account; and the
- * chat it is in, by its first comment's id, which for a comment on code
- * that answers another is that other's.
+ * review thread it is in, by its first comment's id, which for a comment on
+ * code that answers another is that other's.
  */
 export const findComment = (
 	http: EgressHttpClient,
@@ -443,7 +470,7 @@ export const findComment = (
 		Effect.flatMap(decoded(FoundComment)),
 		Effect.map((found) => ({
 			author: found.user?.login,
-			chatId: found.in_reply_to_id ?? request.commentId,
+			reviewThreadId: found.in_reply_to_id ?? request.commentId,
 		})),
 	);
 
@@ -638,7 +665,7 @@ export const reviewPullRequest = (
 	);
 };
 
-/** Replies in the chat of `commentId`, a comment on pull request `number`'s code. */
+/** Replies in the review thread `commentId` starts, a comment on pull request `number`'s code. */
 export const replyToCodeComment = (
 	http: EgressHttpClient,
 	token: string,
@@ -819,7 +846,7 @@ export function redactedBasicAuthorization(credential: GitCredential) {
 
 /**
  * GitHub refused a request or couldn't be reached. `reason` is GitHub's own
- * words, for the logs and for the bot whose call it was; people are told
+ * words, for the logs and for the bot whose call it was; members are told
  * only that GitHub refused.
  */
 export class GitHubRequestFailed
@@ -839,6 +866,6 @@ export class GitHubRequestFailed
 	get userMessage() {
 		return this.isRetryable
 			? userText`We couldn't reach GitHub. Try again in a few minutes.`
-			: userText`GitHub refused the workspace's sign-in. A workspace admin can check it in the workspace's Git settings.`;
+			: userText`GitHub refused the project's sign-in. Someone who manages the project can check its GitHub connector in the project's settings.`;
 	}
 }

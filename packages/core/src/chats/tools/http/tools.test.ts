@@ -10,6 +10,7 @@ import {
 	createEgressHttpClients,
 } from "../../../providers/network/egress.ts";
 import { ConnectorTools } from "../connectors.ts";
+import { NO_TURN } from "../testing.ts";
 
 /**
  * An HTTP connector's method tools against a server in this process,
@@ -181,12 +182,3 @@ describe("an HTTP connector's tools", () => {
 		expect(received).toHaveLength(1);
 	});
 });
-
-const NO_TURN = {
-	turnId: "t",
-	botId: "a",
-	chatId: "0199a3a0-0000-7000-8000-000000000001",
-	files: { read: () => Effect.die(new Error("No chat files in this test")) },
-	workspace: undefined,
-	computerSignsIn: false,
-};

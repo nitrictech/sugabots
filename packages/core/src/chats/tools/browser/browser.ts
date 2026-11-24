@@ -8,6 +8,7 @@ import { Data, Effect } from "effect";
 import { Computers } from "../../../computers/computers.ts";
 import type { UserFacing } from "../../../user-message.ts";
 import type { Place, TurnComputer } from "../computer/tools.ts";
+import type { Failed } from "../failed.ts";
 import { type Image, withImages } from "../images.ts";
 import playwrightTools from "./playwright-tools.json" with { type: "json" };
 
@@ -15,7 +16,7 @@ import playwrightTools from "./playwright-tools.json" with { type: "json" };
  * The browser tools: Playwright MCP's, run in the computer of the project the
  * turn works in by a browser of the bot's own in each chat, on the
  * bot's own desktop there, so
- * people watching see what it does. The tools are offered from the list the
+ * members watching see what it does. The tools are offered from the list the
  * image's server was built with; the browser starts on the first call.
  */
 
@@ -23,11 +24,6 @@ import playwrightTools from "./playwright-tools.json" with { type: "json" };
 interface BrowserResult {
 	text: string;
 	images?: readonly Image[];
-}
-
-interface Failed {
-	status: "failed";
-	error: UserText;
 }
 
 /** A desktop and browser for one bot in one chat, started on first use. */
@@ -43,11 +39,10 @@ export interface BrowserSession {
 }
 
 const SCREENSHOT_TOOL = "browser_take_screenshot";
-const IMAGE_BEFORE_PASSWORDS = userText`This computer's image is from before desktops had passwords. Upgrade it under Computer in its project's settings, or in its bot's settings if it's a bot's own computer, to open its desktop.`;
 const NO_BROWSER = userText`This computer's image has no desktop or browser. Its image needs sugabots-desktop, as Sugabots' default image has.`;
 
 /** A bot in a chat, whose desktop there is drawn in the bot's colour. */
-export interface BotInChat {
+interface BotInChat {
 	readonly chatId: string;
 	readonly botId: string;
 	readonly color: BotColor;
@@ -56,7 +51,7 @@ export interface BotInChat {
 /** A bot browsing in a chat, in the way it was set to. */
 interface BotBrowsing extends BotInChat {
 	/**
-	 * Whether it browses so people watching can follow: a cursor that moves to
+	 * Whether it browses so members watching can follow: a cursor that moves to
 	 * what it clicks, smooth scrolling, and typing at a typing pace. Slower.
 	 */
 	readonly naturalBrowsing: boolean;
@@ -68,7 +63,7 @@ function sessionName(turn: { chatId: string; botId: string }) {
 }
 
 /** A bot's desktop in a chat, running: where viewers reach it. */
-export interface Desktop {
+interface Desktop {
 	/** The server a viewer may click and type through. */
 	readonly control: VncServer;
 	/** The server a viewer may only watch through. */
@@ -78,12 +73,12 @@ export interface Desktop {
 /** One of a desktop's VNC servers, which takes a WebSocket on its port. */
 interface VncServer {
 	readonly port: number;
-	/** What it asks for: Sugabots' to know, never a person's. */
+	/** What it asks for: Sugabots' to know, never a member's. */
 	readonly password: string;
 }
 
 /** A bot's browser in a chat, running on its desktop. */
-export interface Browser {
+interface Browser {
 	/** Where its Playwright MCP server is. */
 	readonly browserPort: number;
 	/** Whether it had to start, so its tabs from before are gone. */
@@ -92,23 +87,20 @@ export interface Browser {
 
 /**
  * Starts the bot's desktop in the chat, without its browser, or finds it
- * running: what a person opening the desktop needs.
+ * running: what a member opening the desktop needs.
  */
 export const startDesktop = (computer: Computers.Computer, place: Place, turn: BotInChat) =>
-	Effect.flatMap(desktopCommand(computer, place, turn, "desktop"), (reported) =>
-		reported.watch === undefined ||
-		reported.password === undefined ||
-		reported.watchPassword === undefined
-			? Effect.fail(new DesktopUnavailable({ reason: IMAGE_BEFORE_PASSWORDS }))
-			: Effect.succeed<Desktop>({
-					control: { port: reported.viewer, password: reported.password },
-					watch: { port: reported.watch, password: reported.watchPassword },
-				}),
+	Effect.map(
+		desktopCommand(computer, place, turn, "desktop"),
+		(reported): Desktop => ({
+			control: { port: reported.viewer, password: reported.password },
+			watch: { port: reported.watch, password: reported.watchPassword },
+		}),
 	);
 
 /**
  * Starts the bot's browser in the chat, on its desktop, or finds them
- * running: what the bot's browser calls need. A person who opened the
+ * running: what the bot's browser calls need. A member who opened the
  * desktop first meets the same desktop, and the same browser if the dock
  * started it.
  */
@@ -145,16 +137,25 @@ const desktopCommand = (
 				.map((pair) => pair.split("=")),
 		);
 		const viewer = Number(reported.viewer);
-		if (ran.exitCode !== 0 || !Number.isInteger(viewer)) {
+		const watch = Number(reported.watch);
+		const password = reported.password;
+		const watchPassword = reported["watch-password"];
+		if (
+			ran.exitCode !== 0 ||
+			!Number.isInteger(viewer) ||
+			!Number.isInteger(watch) ||
+			password === undefined ||
+			watchPassword === undefined
+		) {
 			return yield* new DesktopUnavailable({ reason: NO_BROWSER });
 		}
 		return {
 			viewer,
-			watch: reported.watch === undefined ? undefined : Number(reported.watch),
+			watch,
 			browser: reported.browser === undefined ? undefined : Number(reported.browser),
 			started: reported.started === "yes",
-			password: reported.password,
-			watchPassword: reported["watch-password"],
+			password,
+			watchPassword,
 		};
 	});
 
@@ -235,8 +236,8 @@ const RUN_CODE_TOOL = "browser_run_code_unsafe";
 
 /**
  * Has the browser's MCP server act naturally for the rest of this session,
- * the turn's, in `accent`. Images from before Playwright drew a cursor
- * refuse it, and the bot browses as it otherwise would.
+ * the turn's, in `accent`. Browsing naturally only helps members watching, so
+ * when the server refuses it the bot browses plainly rather than failing.
  */
 async function browseNaturally(client: Client, accent: string) {
 	await client
@@ -306,7 +307,7 @@ function naturalBrowsingCode(accent: string) {
 		return pressSequentially.call(this, text, { delay, ...options });
 	};
 	const fill = Locator.fill;
-	// Clicks into the field and types, as a person would.
+	// Clicks into the field and types, as a member would.
 	Locator.fill = async function (value, options = {}) {
 		if (!natural(this) || value === "") return fill.call(this, value, options);
 		await this.click(options);
@@ -325,7 +326,7 @@ function cursorOptions(accent: string) {
 		style: {
 			point: `width: 28px; height: 28px; border-radius: 50%; border: 3px solid ${accent}; background: ${accent}40`,
 			highlight: `outline: 2px solid ${accent}cc; border-radius: 4px`,
-			// Playwright's name for the action, such as getByRole('button'), which means nothing to people watching.
+			// Playwright's name for the action, such as getByRole('button'), which means nothing to members watching.
 			title: "display: none",
 		},
 	};

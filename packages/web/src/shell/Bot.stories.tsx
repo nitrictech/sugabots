@@ -99,7 +99,7 @@ export const Shapes = meta.story({
 	},
 });
 
-/** Stacked overlaps ringed faces, as a collaboration line does: each ring follows its head's shape. */
+/** Stacked overlaps ringed faces, as a row of participants does: each ring follows its head's shape. */
 export const Stacked = meta.story({
 	render: () => (
 		<div className="flex rounded-panel bg-panel p-4">

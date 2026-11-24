@@ -88,7 +88,7 @@ function secretLabel(auth: WebhookAuth): string {
 export interface WebhookDraft {
 	auth: WebhookAuth;
 	/** Where a generic webhook's delivery id is, or null for none. */
-	deliveryIdHeader: string | null | undefined;
+	deliveryIdHeader: string | null;
 	/** Blank for none, so the address alone runs it. */
 	secret: string;
 	/** What a call must meet to run it; none runs every call. */
@@ -207,7 +207,7 @@ export function WebhookGroups({
 	auth: WebhookAuth;
 	filter: readonly WebhookFilterTest[];
 	onChangeAuth: (auth: WebhookAuth) => void;
-	deliveryIdHeader: string | null | undefined;
+	deliveryIdHeader: string | null;
 	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
 	onChangeFilter: (filter: WebhookFilterTest[]) => Promise<unknown>;
 }) {
@@ -247,7 +247,7 @@ export function WebhookGroups({
 					<SettingsControlRow label={secretLabel(auth)}>
 						{!canManage && (
 							<span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-								Set by people who manage automations
+								Set by members who manage automations
 							</span>
 						)}
 					</SettingsControlRow>
@@ -274,7 +274,7 @@ function AuthRows({
 }: {
 	auth: WebhookAuth;
 	onChange: (auth: WebhookAuth) => void;
-	deliveryIdHeader: string | null | undefined;
+	deliveryIdHeader: string | null;
 	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
 }) {
 	return (
@@ -321,31 +321,16 @@ function AuthRows({
 					onCommit={(username) => onChange({ ...auth, username })}
 				/>
 			)}
-			{!isSource(auth.kind) &&
-				(deliveryIdHeader === undefined ? (
-					<SettingsMenuRow
-						label="Delivery ID"
-						value="automatic"
-						options={[
-							{ value: "automatic", label: "Automatic detection" },
-							{ value: "header", label: "Use a header" },
-							{ value: "none", label: "Every call runs" },
-						]}
-						onChange={(choice) => {
-							if (choice === "header") onChangeDeliveryIdHeader(DEFAULT_DELIVERY_ID_HEADER);
-							if (choice === "none") onChangeDeliveryIdHeader(null);
-						}}
-					/>
-				) : (
-					<CommittedFieldRow
-						key={deliveryIdHeader}
-						label="Delivery ID header"
-						value={deliveryIdHeader ?? ""}
-						placeholder="None: every call runs"
-						allowEmpty
-						onCommit={(header) => onChangeDeliveryIdHeader(header === "" ? null : header)}
-					/>
-				))}
+			{!isSource(auth.kind) && (
+				<CommittedFieldRow
+					key={deliveryIdHeader}
+					label="Delivery ID header"
+					value={deliveryIdHeader ?? ""}
+					placeholder="None: every call runs"
+					allowEmpty
+					onCommit={(header) => onChangeDeliveryIdHeader(header === "" ? null : header)}
+				/>
+			)}
 		</>
 	);
 }
@@ -454,7 +439,7 @@ function SecretGroup({
 	address: TriggerAddress;
 	auth: WebhookAuth;
 	onChangeAuth: (auth: WebhookAuth) => void;
-	deliveryIdHeader: string | null | undefined;
+	deliveryIdHeader: string | null;
 	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
 	/** Blank when the automation has none. */
 	savedSecret: string;

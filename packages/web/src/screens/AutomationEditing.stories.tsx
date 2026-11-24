@@ -69,14 +69,17 @@ const churnReport = placed(3, "Weekly churn report", accountManager, scheduled("
 });
 const incidentIntake = placed(4, "Incident intake", oncall, {
 	kind: "webhook",
+	deliveryIdHeader: null,
 	auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
 });
 const slackMentions = placed(6, "Slack mentions", accountManager, {
 	kind: "webhook",
+	deliveryIdHeader: null,
 	auth: { kind: "slack" },
 });
 const signups = placed(7, "New signup triage", linearHandler, {
 	kind: "webhook",
+	deliveryIdHeader: null,
 	auth: { kind: "basic", username: "sugabots" },
 });
 const standups = placed(8, "Standup notes", oncall, {
@@ -106,7 +109,7 @@ const quarterClose = placed(9, "Quarter close", accountManager, {
 const releaseWatch = placed(11, "Release watch", oncall, [
 	scheduled("0 9 * * 1-5"),
 	scheduled("0 17 * * 5"),
-	{ kind: "webhook", auth: { kind: "bearer" } },
+	{ kind: "webhook", deliveryIdHeader: null, auth: { kind: "bearer" } },
 ]);
 const GITHUB_CONNECTOR_ID = "0199b0f2-6a4e-7c1d-9a52-3c5e1f2d4b6a";
 const pullRequestReviews = placed(10, "Pull request reviews", oncall, {
@@ -144,6 +147,7 @@ const projectRepositories = [
 					email: "sam.rivera@example.com",
 					image: null,
 				},
+				signedInAs: null,
 				createdAt: "2026-10-05T09:30:00.000Z",
 			},
 		]),
@@ -449,9 +453,7 @@ export const Webhook = meta.story({
 			await dialog.findByText(new RegExp(`/webhooks/triggers/${incidentIntake.automation.id}$`)),
 		).toBeInTheDocument();
 		await expect(dialog.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
-		await expect(
-			dialog.getByRole("button", { name: "Delivery ID: Automatic detection" }),
-		).toBeInTheDocument();
+		await expect(dialog.getByLabelText("Delivery ID header")).toBeInTheDocument();
 		await expect(dialog.getByLabelText("Header")).toHaveValue("X-Signature");
 		const secret = await dialog.findByLabelText("Signing secret");
 		await expect(secret).toHaveValue("whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u");

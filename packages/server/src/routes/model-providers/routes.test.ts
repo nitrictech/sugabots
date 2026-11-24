@@ -9,8 +9,13 @@ import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { PersonResolver } from "../../http/app.test-support.ts";
-import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
+import type { MemberResolver } from "../../http/app.test-support.ts";
+import {
+	createTestApp,
+	identifiedBy,
+	sessionTokenIn,
+	signedInWith,
+} from "../../http/app.test-support.ts";
 
 /**
  * The model provider routes over doubles of `ModelProviderSetup`: what each
@@ -22,10 +27,10 @@ const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000002";
 const PROVIDER_ID = "0199a3a0-0000-7000-8000-000000000003";
 const root = `/workspaces/${WORKSPACE_ID}/model-providers`;
-const headers = { authorization: "Bearer good-token", "content-type": "application/json" };
+const headers = { ...signedInWith("good-token"), "content-type": "application/json" };
 
-const resolvePerson: PersonResolver = async (requestHeaders) =>
-	requestHeaders.get("authorization") === "Bearer good-token"
+const resolveMember: MemberResolver = async (requestHeaders) =>
+	sessionTokenIn(requestHeaders) === "good-token"
 		? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 		: null;
 
@@ -43,21 +48,22 @@ const groq: ModelProvider = {
 	customHeaders: [],
 	lastTestError: null,
 	connectedBy: null,
+	signedInAs: null,
 	createdAt: "2026-09-09T00:00:00.000Z",
 	models: [],
 };
 
 const app = (providers: Partial<ModelProviderSetup.Interface>) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolvePerson), unimplemented(ModelProviderSetup.Service, providers)),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(ModelProviderSetup.Service, providers)),
 	);
 
 describe("model provider routes", () => {
-	it("adds a built-in provider as the person asking", async () => {
+	it("adds a built-in provider as the member asking", async () => {
 		let askedAs: string | undefined;
 		const create = vi.fn<ModelProviderSetup.Interface["create"]>(() =>
-			Effect.map(CurrentActor.Service, ({ personId }) => {
-				askedAs = personId;
+			Effect.map(CurrentActor.Service, ({ memberId }) => {
+				askedAs = memberId;
 				return groq;
 			}),
 		);

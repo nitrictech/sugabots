@@ -1,11 +1,11 @@
 import {
 	type FileAuthor,
-	type FileSummary,
-	type FileVersionSummary,
 	isMessageFile,
-	type MessageFileSummary,
+	type ListedFile,
+	type ListedFileVersion,
+	type ListedMessageFile,
+	type ListedWrittenFile,
 	type WrittenFile,
-	type WrittenFileSummary,
 } from "@sugabots/contracts";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
@@ -115,7 +115,7 @@ export function FileListView({
 	children,
 }: {
 	owner: ResourceOwner;
-	files: readonly FileSummary[] | Loading;
+	files: readonly ListedFile[] | Loading;
 	/** The file open beside the list, which its row marks. */
 	selectedId?: string;
 	now: Date;
@@ -200,7 +200,7 @@ function ListedFileRow({
 	now,
 }: {
 	owner: ResourceOwner;
-	file: FileSummary;
+	file: ListedFile;
 	selected: boolean;
 	now: Date;
 }) {
@@ -219,7 +219,7 @@ function WrittenFileRow({
 	now,
 }: {
 	owner: ResourceOwner;
-	file: WrittenFileSummary;
+	file: ListedWrittenFile;
 	selected: boolean;
 	now: Date;
 }) {
@@ -254,8 +254,8 @@ function WrittenFileRow({
  * A file sent on a message: its name, size, who sent it and when. It opens
  * where the chat serves it, as the message's own link does.
  */
-function MessageFileRow({ file, now }: { file: MessageFileSummary; now: Date }) {
-	const sentBy = file.sentBy ?? (file.kind === "upload" ? "Someone who left" : REMOVED_BOT);
+function MessageFileRow({ file, now }: { file: ListedMessageFile; now: Date }) {
+	const author = file.author ?? (file.kind === "attachment" ? "Someone who left" : REMOVED_BOT);
 	return (
 		<FileRow
 			look="list"
@@ -267,7 +267,7 @@ function MessageFileRow({ file, now }: { file: MessageFileSummary; now: Date }) 
 				</IconTile>
 			}
 			title={file.name}
-			subtitle={[fileSizeLabel(file.size), sentBy].join(", ")}
+			subtitle={[fileSizeLabel(file.size), author].join(", ")}
 			trailing={<ListTime at={file.updatedAt} now={now} />}
 		/>
 	);
@@ -354,7 +354,7 @@ export function FileStageView({
 	owner: ResourceOwner;
 	file: WrittenFile | Loading;
 	/** Newest first. */
-	versions: readonly FileVersionSummary[];
+	versions: readonly ListedFileVersion[];
 	now: Date;
 	onVersionChange: (version: number | undefined) => void;
 	onClose: CloseStage;
@@ -456,7 +456,7 @@ function VersionPicker({
 	onVersionChange,
 }: {
 	file: WrittenFile;
-	versions: readonly FileVersionSummary[];
+	versions: readonly ListedFileVersion[];
 	now: Date;
 	onVersionChange: (version: number | undefined) => void;
 }) {
@@ -506,13 +506,13 @@ function VersionPicker({
 interface Group {
 	/** "Today", "Earlier this week", then the month: "October", with its year when not this one. */
 	label: string;
-	files: FileSummary[];
+	files: ListedFile[];
 }
 
 const WEEK_MS = 7 * 24 * 60 * 60_000;
 
 /** The files, newest first, under when each was last updated: today, this week, then by month. */
-function byWhen(files: readonly FileSummary[], now: Date): Group[] {
+function byWhen(files: readonly ListedFile[], now: Date): Group[] {
 	const groups: Group[] = [];
 	for (const file of files) {
 		const updated = new Date(file.updatedAt);

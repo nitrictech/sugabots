@@ -10,9 +10,9 @@ import { recordingIds, removeWorkVolumes } from "../../computers/testing.ts";
 import {
 	allowedHost,
 	bot as botTable,
+	member,
 	membership,
 	message,
-	person,
 	workspace,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
@@ -63,14 +63,14 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 		);
 		const [owner] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values({ name: "Sam", email: `tools-${suffix}@example.com` })
 				.returning(),
 		);
 		if (!space || !owner) throw new Error("fixture");
 		ownerId = owner.id;
 		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId: space.id, personId: owner.id }),
+			db.insert(membership).values({ workspaceId: space.id, memberId: owner.id }),
 		);
 		workspaceId = space.id;
 		// A bot's computer is its default project's, which comes with the bot.
@@ -102,7 +102,7 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 						serverUrl: env.OPENSANDBOX_URL,
 						// The local build of the default image, for its browser:
 						// `bun run build:computer` first.
-						image: "sugabots-sandbox:dev",
+						image: "sugabots-computer:dev",
 						networkMode: "allowed-hosts-only",
 					},
 					enabled: true,
@@ -164,8 +164,8 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 		async () => {
 			const tools = await toolsFor("turn-1", "chat-a", botId);
 
-			expect(await run(tools, "pwd")).toBe(`${Computers.WORKSPACE_DIRECTORY}/chats/chat-a`);
-			expect(await run(tools, "echo $HOME")).toBe(`${Computers.WORKSPACE_DIRECTORY}/bots/bot-1`);
+			expect(await run(tools, "pwd")).toBe(`${Computers.WORK_DIRECTORY}/chats/chat-a`);
+			expect(await run(tools, "echo $HOME")).toBe(`${Computers.WORK_DIRECTORY}/bots/bot-1`);
 		},
 		SLOW,
 	);
@@ -217,8 +217,7 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 					.insert(message)
 					.values({
 						chatId: where.id,
-						authorPersonId: ownerId,
-						kind: "text",
+						authorMemberId: ownerId,
 						status: "complete",
 						parts: [],
 						content: "",

@@ -6,7 +6,7 @@ import { Session } from "../middleware.ts";
 
 /**
  * What the workspace's models cost. Admin only: it shows every bot's usage,
- * private bots and Personal Assistants included.
+ * personal bots and Personal Assistants included.
  */
 export class UsageApi extends HttpApiGroup.make("usage")
 	.add(

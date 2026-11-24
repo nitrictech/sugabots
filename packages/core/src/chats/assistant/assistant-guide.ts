@@ -5,7 +5,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { reachesProjectFor } from "../../authorization/access.ts";
-import { AuthenticatedPersonId, CurrentActor } from "../../authorization/current-actor.ts";
+import { AuthenticatedMemberId, CurrentActor } from "../../authorization/current-actor.ts";
 import { query, serviceOperations } from "../../database/database.ts";
 import { automation, project } from "../../database/schema.ts";
 import { ServerSettings } from "../../server-settings/server-settings.ts";
@@ -24,29 +24,29 @@ import { automationFailing } from "../automations/execution.ts";
 import { ChatView } from "../chats/chat-view.ts";
 
 /**
- * What a Personal Assistant knows of its person's workspace, and what it does
- * there for them. Everything runs as the person, so it reads only what they
- * reach and does only what they may: the assistant can do what its person
+ * What a Personal Assistant knows of its member's workspace, and what it does
+ * there for them. Everything runs as the member, so it reads only what they
+ * reach and does only what they may: the assistant can do what its member
  * can, and no more.
  */
 export interface Interface {
-	/** The workspace as `person` sees it, and what is waiting on them. */
-	readonly guide: (person: Person) => Effect.Effect<Guide>;
-	/** Makes a project with `person` in it, led by the public bot with the handle `lead`. */
+	/** The workspace as `member` sees it, and what is waiting on them. */
+	readonly guide: (member: Member) => Effect.Effect<Guide>;
+	/** Makes a project with `member` in it, led by the public bot with the handle `lead`. */
 	readonly createProject: (
-		person: Person,
+		member: Member,
 		project: { name: string; lead: string; description?: string; private?: boolean },
 	) => Effect.Effect<Place, Refused>;
-	/** Puts `person` in the public project `project`, by its address. */
-	readonly joinProject: (person: Person, project: string) => Effect.Effect<Place, Refused>;
+	/** Puts `member` in the public project `project`, by its address. */
+	readonly joinProject: (member: Member, project: string) => Effect.Effect<Place, Refused>;
 	/** Adds the public bot `bot`, by its handle, to the project `project`. */
 	readonly addBotToProject: (
-		person: Person,
+		member: Member,
 		target: { project: string; bot: string },
 	) => Effect.Effect<Place, Refused>;
-	/** Pins the bot `bot` to `person`'s sidebar, or unpins it. */
+	/** Pins the bot `bot` to `member`'s sidebar, or unpins it. */
 	readonly pinBot: (
-		person: Person,
+		member: Member,
 		target: { bot: string; pinned: boolean },
 	) => Effect.Effect<Place, Refused>;
 }
@@ -62,47 +62,52 @@ export const make = Effect.gen(function* () {
 	const view = yield* ChatView.Service;
 	const { webAppUrl } = yield* ServerSettings.Service;
 
-	/** `path` from the web app's root, as a link the person can follow. */
+	/** `path` from the web app's root, as a link the member can follow. */
 	const linkTo = (path: string) => `${webAppUrl}${path}`;
 
-	/** Runs `work` as the person, who is talking to their assistant. */
-	const asPerson = <A, E, R>(person: Person, work: Effect.Effect<A, E, R>) =>
-		work.pipe(CurrentActor.provide(AuthenticatedPersonId.vouchedFor(person.personId)));
+	/** Runs `work` as the member, who is talking to their assistant. */
+	const asMember = <A, E, R>(member: Member, work: Effect.Effect<A, E, R>) =>
+		work.pipe(CurrentActor.provide(AuthenticatedMemberId.vouchedFor(member.memberId)));
 
-	// Exactly the address and handle the person approved: a looser match, such as
+	// Exactly the address and handle the member approved: a looser match, such as
 	// by name, could act on a project or bot they didn't mean.
-	const projectAt = (person: Person, address: string) =>
-		Effect.flatMap(projectAdministration.list({ workspace: person.workspaceId }), (listed) => {
+	const projectAt = (member: Member, address: string) =>
+		Effect.flatMap(projectAdministration.list({ workspace: member.workspaceId }), (listed) => {
 			const wanted = address.trim().replace(/^#/, "");
 			const found = listed.find((project) => project.slug === wanted);
 			return found ? Effect.succeed(found) : Effect.fail(new NothingNamed({ what: "project" }));
 		});
 
-	const botWithHandle = (person: Person, handle: string) =>
-		Effect.flatMap(bots.list({ workspace: person.workspaceId }), (listed) => {
+	const botWithHandle = (member: Member, handle: string) =>
+		Effect.flatMap(bots.list({ workspace: member.workspaceId }), (listed) => {
 			const wanted = handle.trim().replace(/^@/, "");
 			const found = listed.find((bot) => bot.handle === wanted && !bot.assistant);
 			return found ? Effect.succeed(found) : Effect.fail(new NothingNamed({ what: "bot" }));
 		});
 
 	return Service.of({
-		guide: (person) =>
+		guide: (member) =>
 			operation(
 				"guide",
-				asPerson(
-					person,
+				asMember(
+					member,
 					Effect.gen(function* () {
-						const workspace = person.workspaceId;
+						const workspace = member.workspaceId;
 						const projects = yield* projectAdministration.list({ workspace });
-						// The person's own Personal Assistant is among the bots they reach, but is
+						// The member's own Personal Assistant is among the bots they reach, but is
 						// no bot to suggest to them: it is only named for its failing automations.
 						const reachedBots = yield* bots.list({ workspace });
 						const workspaceBots = reachedBots.filter((bot) => !bot.assistant);
 						const handleOf = new Map(workspaceBots.map((bot) => [bot.id, `@${bot.handle}`]));
-						const leadHandleOf = (botId: string | null) => (botId && handleOf.get(botId)) ?? null;
-						// As things stand, not since the person last looked: reading a
+						const leadHandleOf = (botId: string) => {
+							const handle = handleOf.get(botId);
+							// A lead is a public bot, which everyone in the workspace reaches.
+							if (!handle) throw new Error("A project's lead bot is out of its member's reach");
+							return handle;
+						};
+						// As things stand, not since the member last looked: reading a
 						// failed run's chat doesn't mend the automation. By the
-						// project each is in, which the person reaches.
+						// project each is in, which the member reaches.
 						const failing = yield* query((db) =>
 							db
 								.select({
@@ -117,14 +122,14 @@ export const make = Effect.gen(function* () {
 										eq(automation.workspaceId, workspace),
 										isNull(automation.deletedAt),
 										automationFailing(),
-										reachesProjectFor(project.id, person.personId),
+										reachesProjectFor(project.id, member.memberId),
 									),
 								)
 								.groupBy(project.id, project.defaultOfBotId),
 						);
 						const unreadMentions = yield* view.unreadMentions(workspace, LISTED_ITEMS);
 						const approvals = yield* view.approvals(workspace);
-						const { workspaceSlug } = person;
+						const { workspaceSlug } = member;
 						return {
 							projects: projects.map((project) => ({
 								name: project.name,
@@ -140,7 +145,7 @@ export const make = Effect.gen(function* () {
 								handle: `@${bot.handle}`,
 								link: linkTo(botPath(workspaceSlug, bot.handle)),
 								description: bot.description,
-								private: bot.visibility === "private",
+								personal: bot.visibility === "personal",
 								pinned: bot.pinned,
 								youCanTalkToIt: bot.permissions.talk,
 							})),
@@ -192,77 +197,77 @@ export const make = Effect.gen(function* () {
 						} satisfies Guide;
 					}),
 				).pipe(
-					// Anything the person can't reach is left out above, so a refusal here
-					// is the person having left the workspace mid-turn.
+					// Anything the member can't reach is left out above, so a refusal here
+					// is the member having left the workspace mid-turn.
 					Effect.catch((denied) =>
 						Effect.die(
-							new Error(`The assistant's person cannot read the workspace: ${denied._tag}`),
+							new Error(`The assistant's member cannot read the workspace: ${denied._tag}`),
 						),
 					),
 				),
 			),
 
-		createProject: (person, project) =>
+		createProject: (member, project) =>
 			operation(
 				"createProject",
-				asPerson(
-					person,
+				asMember(
+					member,
 					Effect.gen(function* () {
-						const lead = yield* botWithHandle(person, project.lead);
+						const lead = yield* botWithHandle(member, project.lead);
 						const made = yield* projectAdministration.create({
-							workspace: person.workspaceId,
+							workspace: member.workspaceId,
 							name: project.name,
 							description: project.description ?? null,
 							visibility: project.private ? "private" : "public",
 							leadBotId: lead.id,
 						});
-						return { name: made.name, link: linkTo(projectPath(person.workspaceSlug, made.slug)) };
+						return { name: made.name, link: linkTo(projectPath(member.workspaceSlug, made.slug)) };
 					}),
 				),
 			),
 
-		joinProject: (person, address) =>
+		joinProject: (member, address) =>
 			operation(
 				"joinProject",
-				asPerson(
-					person,
+				asMember(
+					member,
 					Effect.gen(function* () {
-						const found = yield* projectAt(person, address);
+						const found = yield* projectAt(member, address);
 						const joined = yield* projectAdministration.join({ projectId: found.id });
 						return {
 							name: joined.name,
-							link: linkTo(projectPath(person.workspaceSlug, joined.slug)),
+							link: linkTo(projectPath(member.workspaceSlug, joined.slug)),
 						};
 					}),
 				),
 			),
 
-		addBotToProject: (person, target) =>
+		addBotToProject: (member, target) =>
 			operation(
 				"addBotToProject",
-				asPerson(
-					person,
+				asMember(
+					member,
 					Effect.gen(function* () {
-						const project = yield* projectAt(person, target.project);
-						const bot = yield* botWithHandle(person, target.bot);
+						const project = yield* projectAt(member, target.project);
+						const bot = yield* botWithHandle(member, target.bot);
 						yield* projectAdministration.addBot({ projectId: project.id, botId: bot.id });
 						return {
 							name: project.name,
-							link: linkTo(projectPath(person.workspaceSlug, project.slug)),
+							link: linkTo(projectPath(member.workspaceSlug, project.slug)),
 						};
 					}),
 				),
 			),
 
-		pinBot: (person, target) =>
+		pinBot: (member, target) =>
 			operation(
 				"pinBot",
-				asPerson(
-					person,
+				asMember(
+					member,
 					Effect.gen(function* () {
-						const bot = yield* botWithHandle(person, target.bot);
+						const bot = yield* botWithHandle(member, target.bot);
 						yield* bots.setPinned({ botId: bot.id, pinned: target.pinned });
-						return { name: bot.name, link: linkTo(botPath(person.workspaceSlug, bot.handle)) };
+						return { name: bot.name, link: linkTo(botPath(member.workspaceSlug, bot.handle)) };
 					}),
 				),
 			),
@@ -282,9 +287,9 @@ export const layer = Layer.suspend(() =>
 	),
 );
 
-/** The person a Personal Assistant works for, in their workspace. */
-export interface Person {
-	readonly personId: string;
+/** The member a Personal Assistant works for, in their workspace. */
+export interface Member {
+	readonly memberId: string;
 	readonly workspaceId: string;
 	readonly workspaceSlug: string;
 }
@@ -298,7 +303,7 @@ export interface Place {
 /** The most of each kind of waiting item the guide lists. */
 const LISTED_ITEMS = 10;
 
-/** The workspace as the assistant's person sees it. */
+/** The workspace as the assistant's member sees it. */
 export interface Guide {
 	readonly projects: ReadonlyArray<{
 		name: string;
@@ -307,15 +312,15 @@ export interface Guide {
 		description: string | null;
 		private: boolean;
 		youAreIn: boolean;
-		/** The lead bot's handle; null until somebody chooses one. */
-		lead: string | null;
+		/** The lead bot's handle. */
+		lead: string;
 	}>;
 	readonly bots: ReadonlyArray<{
 		name: string;
 		handle: string;
 		link: string;
 		description: string | null;
-		private: boolean;
+		personal: boolean;
 		pinned: boolean;
 		youCanTalkToIt: boolean;
 	}>;
@@ -327,7 +332,7 @@ export interface Guide {
 }
 
 /**
- * How many automations are failing in one place the person reaches: a bot's
+ * How many automations are failing in one place the member reaches: a bot's
  * own, named by the bot, or a project's, named by the project.
  */
 type FailingAutomations = ({ bot: string } | { project: string }) & {
@@ -335,7 +340,7 @@ type FailingAutomations = ({ bot: string } | { project: string }) & {
 	link: string;
 };
 
-/** Why something the assistant did for its person was refused, in words it can pass on. */
+/** Why something the assistant did for its member was refused, in words it can pass on. */
 export type Refused =
 	| AuthorizationDenied
 	| NothingNamed
@@ -345,7 +350,7 @@ export type Refused =
 	| ProjectStore.BotNotPublic
 	| ProjectAdministration.NotInWorkspace;
 
-/** No project or bot the person can see has the address or handle the assistant gave. */
+/** No project or bot the member can see has the address or handle the assistant gave. */
 export class NothingNamed
 	extends Data.TaggedError("NothingNamed")<{ readonly what: "project" | "bot" }>
 	implements UserFacing

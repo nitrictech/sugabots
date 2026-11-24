@@ -25,7 +25,7 @@ export const AUTOMATION_TOOLS = [
 
 /**
  * Whether a turn has the automation tools, for the automations of the project
- * it is in. A Personal Assistant has none: its automations are its person's to
+ * it is in. A Personal Assistant has none: its automations are its member's to
  * manage. Switched off as {@link AUTOMATIONS_KEY}, they are there but refused.
  */
 export function hasAutomationTools<
@@ -45,7 +45,7 @@ export const AUTOMATION_TOOL_WRITES_OR_DELETES: Record<(typeof AUTOMATION_TOOLS)
 type Refusal = { refused: string };
 
 /**
- * A timezone as people say it: "Sydney time" for `Australia/Sydney`, "New
+ * A timezone as members say it: "Sydney time" for `Australia/Sydney`, "New
  * York time" for `America/New_York`, and "UTC" as itself.
  */
 export function spokenTimeZone(timeZone: string): string {
@@ -57,21 +57,21 @@ export function spokenTimeZone(timeZone: string): string {
 const name = Schema.Trim.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_AUTOMATION_NAME_CHARACTERS),
-).annotate({ description: "A short name people will recognise, such as Morning standup." });
+).annotate({ description: "A short name members will recognise, such as Morning standup." });
 
 const instructions = Schema.Trim.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_AUTOMATION_INSTRUCTIONS_CHARACTERS),
 ).annotate({
 	description:
-		"What you will do each time it runs, written to yourself as the person would ask you in the chat.",
+		"What you will do each time it runs, written to yourself as the member would ask you in the chat.",
 });
 
 /**
  * The automation tools: a bot lists, sets up and changes the automations of the
- * project it is working in, its own in its own chats, for the person whose
+ * project it is working in, its own in its own chats, for the member whose
  * message it is answering. Routines are cron expressions in
- * `timeZone`, the workspace's, which their descriptions name as people say it.
+ * `timeZone`, the workspace's, which their descriptions name as members say it.
  */
 export function automationTools({
 	bot,
@@ -105,13 +105,13 @@ export function automationTools({
 	return {
 		[LIST_AUTOMATIONS_TOOL]: tool({
 			description:
-				"List the automations of the project this chat is in (in your own chats, your own): the jobs its lead bot does without being asked, with what starts each (its routines, webhooks or repository events), and whether it is paused. Check here before setting up an automation, so you change one that exists rather than make a second.",
+				"List the automations of the project this chat is in (in your own chats, your own): the work its lead bot does without being asked, with what starts each (its routines, webhooks or repository events), and whether it is paused. Check here before setting up an automation, so you change one that exists rather than make a second.",
 			inputSchema: noInputSchema,
 			execute: () =>
 				answer(Effect.map(automations.list(bot), (listed) => ({ automations: listed }))),
 		}),
 		[CREATE_AUTOMATION_TOOL]: tool({
-			description: `Set up an automation in the project this chat is in, which its lead bot (in your own chats, you) runs: a job done on a timetable without being asked, such as a 9am standup or a weekly report. Only when the person asks for one, or agrees to one you suggest. Routines run in ${zone}. When it is set up, tell them when it runs and link its name to the settingsUrl you get back, where they can change or remove it.`,
+			description: `Set up an automation in the project this chat is in, which its lead bot (in your own chats, you) runs: work done on a timetable without being asked, such as a 9am standup or a weekly report. Only when the member asks for one, or agrees to one you suggest. Routines run in ${zone}. When it is set up, tell them when it runs and link its name to the settingsUrl you get back, where they can change or remove it.`,
 			inputSchema: Schema.Struct({ name, instructions, routineExpression }).pipe(
 				Schema.toStandardSchemaV1,
 				Schema.toStandardJSONSchemaV1,

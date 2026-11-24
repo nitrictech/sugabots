@@ -1,13 +1,11 @@
-import { connectorToolKey, connectorToolWritesOrDeletes } from "@sugabots/contracts";
-import { asSchema, type Tool } from "ai";
+import type { Tool } from "ai";
 import {
 	type AugmentationName,
 	augmentationToolsFor,
 	type connectorAugmentations,
 } from "../../providers/connectors/augmentations.ts";
 import type { ConnectorTarget } from "../../providers/connectors/connector-target.ts";
-import { toolAccessOf } from "../../providers/connectors/tool-access.ts";
-import type { OfferedTool } from "./connectors.ts";
+import { type OfferedTool, offeredTool } from "./connectors.ts";
 import { linearAugmentationTools } from "./linear/tools.ts";
 import type { UploadSide } from "./signed-upload/tool.ts";
 
@@ -38,20 +36,7 @@ export function offerAugmentationTools(
 				augmentationToolBuilders[augmentation];
 			const tool = builders[described.name]?.(target, side);
 			if (!tool) throw new Error(`No builder for ${augmentation}'s ${described.name}`);
-			const inputSchema = asSchema(tool.inputSchema).jsonSchema;
-			if ("then" in inputSchema) throw new Error(`The ${described.name} tool's schema isn't ready`);
-			const offered: OfferedTool = {
-				tool,
-				handle: target.handle,
-				description: typeof tool.description === "string" ? tool.description : "",
-				inputSchema,
-				writeOrDelete: connectorToolWritesOrDeletes(described),
-				access: toolAccessOf(target.toolAccess, described),
-				connectorId: target.connectorId,
-				connectorRevision: target.configurationRevision,
-				remoteToolName: described.name,
-			};
-			return [connectorToolKey(target.handle, described.name), offered];
+			return offeredTool(target, described, tool);
 		}),
 	);
 }

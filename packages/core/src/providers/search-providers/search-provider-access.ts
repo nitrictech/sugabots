@@ -1,6 +1,6 @@
 import type { BuiltInSearchProviderId } from "@sugabots/contracts";
 
-/** What the `web_search` backend needs to call the workspace's search service. */
+/** What `web_search` needs to call the workspace's search provider. */
 export interface SearchProviderAccess {
 	builtIn: BuiltInSearchProviderId;
 	baseUrl: string;

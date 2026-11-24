@@ -54,8 +54,6 @@ export interface RequestEndpoint {
 }
 
 export interface ProviderDialect {
-	/** Named in tests and in what a person is told. */
-	readonly name: string;
 	/**
 	 * The URL discovery is confined to, given the base URL without its
 	 * trailing slash; the base URL itself when absent. The HTTP client is
@@ -131,6 +129,29 @@ export const dataListing = Schema.Struct({
 		encode: SchemaGetter.forbiddenEncoding,
 	}),
 );
+
+/**
+ * An optional field read leniently: a value of the wrong type is read as
+ * absent rather than failing the model it describes.
+ */
+export const lenientOptional = <S extends Schema.Top>(schema: S) =>
+	Schema.optional(schema).pipe(Schema.catchDecoding(() => Effect.succeedSome(undefined)));
+
+/** What a model's listing says it can do, as the capabilities this API names. */
+export function capabilitiesFrom(features: {
+	readonly tools: boolean;
+	readonly thinking: boolean;
+	readonly inputs: readonly string[];
+	readonly outputs: readonly string[];
+}): ProviderModelCapability[] {
+	const capabilities: ProviderModelCapability[] = [];
+	if (features.tools) capabilities.push("tools");
+	if (features.thinking) capabilities.push("thinking");
+	if (features.inputs.includes("image")) capabilities.push("vision");
+	if (features.inputs.includes("audio")) capabilities.push("audio");
+	if (features.outputs.includes("image")) capabilities.push("images");
+	return capabilities;
+}
 
 /** What a provider calls each capability, in the word this API uses for it. */
 export type CapabilityVocabulary = Record<string, ProviderModelCapability>;

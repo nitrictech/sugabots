@@ -49,6 +49,7 @@ function connector(
 			email: "rowan@example.com",
 			image: null,
 		},
+		signedInAs: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 		...over,
 	};
@@ -246,7 +247,7 @@ const meta = preview.meta({
 	render: () => <StoryApp path={pagePath(linear)} />,
 });
 
-/** Opens the connector's Individual tools, as a person would. */
+/** Opens the connector's Individual tools, as a member would. */
 async function openIndividualTools() {
 	await userEvent.click(await screen.findByRole("button", { name: /^Individual tools/ }));
 	await screen.findByRole("heading", { name: "Individual tools", level: 2 });

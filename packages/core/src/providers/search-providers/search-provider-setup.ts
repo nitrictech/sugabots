@@ -8,15 +8,15 @@ import type {
 } from "@sugabots/contracts";
 import { searchBuiltInProvider } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { Clock, Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { serviceOperations } from "../../database/database.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { Egress } from "../network/egress.ts";
-import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
-import { searchBackend, searchEndpoint } from "./backends.ts";
+import { requireAllowedUrl, timedTest, type UrlNotAllowed } from "../tested-configuration.ts";
+import { providerSearch, searchEndpoint } from "./provider-search.ts";
 import { searchProviderOf, toSearchProvider } from "./search-provider-reads.ts";
 import { SearchProviderStore } from "./search-provider-store.ts";
 
@@ -117,7 +117,7 @@ export const make = Effect.gen(function* () {
 						provider.baseUrl ?? searchBuiltInProvider(provider.builtIn).baseUrl,
 					);
 					return toSearchProvider(
-						yield* providers.replace(workspaceId, { createdById: actor.personId, provider }),
+						yield* providers.replace(workspaceId, { createdById: actor.memberId, provider }),
 					);
 				}),
 			),
@@ -162,19 +162,18 @@ export const make = Effect.gen(function* () {
 							error: userText`Add an API key before testing`,
 						};
 					}
-					const started = yield* Clock.currentTimeMillis;
-					const outcome = yield* searchBackend(
-						access,
-						egress.providers.for({ baseUrl: searchEndpoint(access) }),
-					)({ query: TEST_QUERY, count: 3 });
-					const latencyMs = (yield* Clock.currentTimeMillis) - started;
-					const error = outcome.ok ? undefined : outcome.reason;
-					yield* providers.recordTest(workspaceId, access.configurationUpdatedAt, error);
-					return {
-						reachable: outcome.ok,
-						latencyMs,
-						...(outcome.ok ? { results: outcome.results.length } : { error }),
-					};
+					const tested = yield* timedTest(
+						providerSearch(
+							access,
+							egress.providers.for({ baseUrl: searchEndpoint(access) }),
+						)({ query: TEST_QUERY, count: 3 }).pipe(
+							Effect.map((outcome) =>
+								outcome.ok ? { results: outcome.results.length } : { error: outcome.reason },
+							),
+						),
+					);
+					yield* providers.recordTest(workspaceId, access.configurationUpdatedAt, tested.error);
+					return tested;
 				}),
 			),
 	});

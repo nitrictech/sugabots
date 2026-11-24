@@ -1,12 +1,12 @@
 import {
 	chatNotificationTag,
+	memberUpdateEventSchema,
 	type NotificationContent,
 	type NotificationLevel,
 	type NotificationPreferences,
 	type NotificationSettings,
 	PRESENCE_LIFETIME_MS,
 	type Presence,
-	personUpdateEventSchema,
 } from "@sugabots/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
@@ -18,13 +18,13 @@ import { MUTE_LENGTHS, type MuteLength } from "@/lib/notification-choices.ts";
 
 /*
  * Browser notifications, shown by Sugabots' open tabs as Slack's web app
- * shows them: what the person chose to be notified about, turning them on in
+ * shows them: what the member chose to be notified about, turning them on in
  * this browser, and telling the server which chat this tab shows, so
  * it does not notify them of what they are reading.
  */
 
 /**
- * Set in a browser whose notifications the person turned on, so they can turn
+ * Set in a browser whose notifications the member turned on, so they can turn
  * them off here without taking back the browser's permission.
  */
 const TURNED_ON_KEY = "sugabots-notifications-on";
@@ -39,7 +39,7 @@ export function useNotificationSettings() {
 }
 
 /**
- * Changes some of the person's notification preferences. The API takes them
+ * Changes some of the member's notification preferences. The API takes them
  * all at once, so the rest are sent as last saved. Changes are sent one at a
  * time, in the order made, each once the one before has been saved, so a quick
  * second change never sends the first one's old value back. Only for a page
@@ -69,7 +69,7 @@ export function useChangeNotificationPreferences() {
 	return (change: Partial<NotificationPreferences>) => update.mutate(change);
 }
 
-/** Where a level applies in place of the person's own: a project, or a bot. */
+/** Where a level applies in place of the member's own: a project, or a bot. */
 export type NotificationPlace = { kind: "project"; id: string } | { kind: "bot"; id: string };
 
 /** Sets the level for a place, or with null goes back to the one above it. */
@@ -207,7 +207,7 @@ function writeTurnedOn(on: boolean) {
 }
 
 /**
- * Shows the signed-in person's notifications from this tab, while their
+ * Shows the current user's notifications from this tab, while their
  * notifications are on in this browser, except those about a chat one
  * of their tabs is looking at, and opens what a clicked one is about here.
  */
@@ -220,7 +220,7 @@ export function useNotificationsInThisBrowser() {
 		const looking: LookingTabs = new Map();
 		void (async () => {
 			for await (const event of stream) {
-				const parsed = Schema.decodeUnknownResult(personUpdateEventSchema)(event);
+				const parsed = Schema.decodeUnknownResult(memberUpdateEventSchema)(event);
 				if (parsed._tag === "Failure") continue;
 				const update = parsed.success;
 				if (update.type === "presence") {
@@ -242,7 +242,7 @@ export function useNotificationsInThisBrowser() {
 }
 
 /**
- * The chat each of the person's tabs is looking at, if any, from any
+ * The chat each of the member's tabs is looking at, if any, from any
  * browser or device, by tab: as of its latest report, and until when that
  * counts if the tab says no more.
  */
@@ -254,7 +254,7 @@ function rememberLooking(tabs: LookingTabs, { clientId, chatId, sequence }: Pres
 	tabs.set(clientId, { chatId, sequence, until: now + PRESENCE_LIFETIME_MS });
 }
 
-/** Whether one of the person's tabs is looking at what `notification` is about. */
+/** Whether one of the member's tabs is looking at what `notification` is about. */
 function someTabLooksAt(tabs: LookingTabs, { chatId }: NotificationContent, now: number): boolean {
 	return [...tabs.values()].some((tab) => tab.chatId === chatId && tab.until > now);
 }
@@ -285,7 +285,7 @@ function showFromThisTab(notification: NotificationContent, open: (path: string)
 /** The notifications this tab is showing, by tag, so it can close them. */
 const shownByThisTab = new Map<string, Notification>();
 
-/** Tells this tab apart from the person's others, for as long as it is open. */
+/** Tells this tab apart from the member's others, for as long as it is open. */
 const TAB_ID = uuidv4();
 
 /** How many presence reports this tab has made. */
@@ -293,7 +293,7 @@ let presenceReports = 0;
 
 /**
  * The chat this tab is looking at, known here at once, before its
- * report comes back over the person's stream.
+ * report comes back over the member's stream.
  */
 let lookingHere: string | null = null;
 
@@ -304,7 +304,7 @@ function reportPresence(chatId: string | null) {
 		client.api.notifications.reportPresence({
 			payload: { clientId: TAB_ID, chatId, sequence: presenceReports },
 		}),
-		// Best effort: a lost report only means one notification the person did not need.
+		// Best effort: a lost report only means one notification the member did not need.
 	).catch(() => {});
 }
 
@@ -313,7 +313,7 @@ const PRESENCE_INTERVAL_MS = PRESENCE_LIFETIME_MS / 3;
 
 /**
  * Tells the server this tab shows `chatId` while the tab has focus,
- * so the person is not notified of what they are reading, and closes the
+ * so the member is not notified of what they are reading, and closes the
  * notifications already shown for it.
  */
 export function usePresence(chatId: string | undefined) {
@@ -393,7 +393,7 @@ export function levelChosenFor(
 	return settings[field][id] ?? null;
 }
 
-/** The level a place follows when none is chosen for it: the person's own. */
+/** The level a place follows when none is chosen for it: the member's own. */
 export function levelAbove(settings: NotificationSettings): NotificationLevel {
 	return settings.level;
 }

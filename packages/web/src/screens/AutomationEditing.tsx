@@ -39,7 +39,7 @@ export function NewAutomation({ owner }: { owner: ResourceOwner }) {
 	if (!resourcePermissions(owner).manageAutomations) {
 		return (
 			<EmptyState title="No automation can be made here">
-				Only people who manage {ownerName(owner)} can make one.
+				Only members who manage {ownerName(owner)} can make one.
 			</EmptyState>
 		);
 	}
@@ -73,7 +73,7 @@ export function NewAutomation({ owner }: { owner: ResourceOwner }) {
  * One of `owner`'s automations as its own page: how it is set up, under its
  * breadcrumb, with whether it runs and Start a run at the top. Somebody who
  * manages its automations without reaching the bot, as an administrator does
- * another person's private bot, changes it the same way, but how it ran is
+ * another member's personal bot, changes it the same way, but how it ran is
  * not theirs to read.
  */
 export function AutomationSetup({

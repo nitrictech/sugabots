@@ -7,6 +7,7 @@ import {
 	type OAuthTokens,
 	UnauthorizedError,
 } from "@ai-sdk/mcp";
+import { causesOf } from "../causes.ts";
 import type { EgressHttpClient } from "../network/egress.ts";
 
 /**
@@ -28,8 +29,8 @@ export interface OAuthRecord {
 	/** Of a sign-in under way. */
 	codeVerifier?: string;
 	state?: string;
-	/** Who started the sign-in under way, the only person who may finish it. */
-	startedByPersonId?: string;
+	/** Who started the sign-in under way, the only member who may finish it. */
+	startedByMemberId?: string;
 	/**
 	 * When the authorization server last refused the tokens and no one was
 	 * there to sign in again, as an ISO timestamp. Cleared by the next tokens.
@@ -40,7 +41,12 @@ export interface OAuthRecord {
 /** Where a connector's record lives, and the clock its changes are stamped by. */
 interface OAuthStorage {
 	load(): Promise<OAuthRecord | undefined>;
-	save(record: OAuthRecord): Promise<void>;
+	/**
+	 * `signedInById` comes with the tokens a sign-in has just been issued, as
+	 * the member who finished it. Tokens saved without it are refreshed ones of
+	 * the sign-in already there.
+	 */
+	save(record: OAuthRecord, signedInById?: string): Promise<void>;
 	now(): Promise<Date>;
 }
 
@@ -54,7 +60,9 @@ interface OAuthProviderOptions {
 	 * sign-in, since nobody could finish it: it drops the tokens, records
 	 * the rejection, and throws {@link SignInRequired}.
 	 */
-	startedByPersonId?: string;
+	startedByMemberId?: string;
+	/** Who is finishing a sign-in, as whom the tokens it is issued sign in. */
+	finishedByMemberId?: string;
 }
 
 /** The SDK's provider, plus the authorization URL it was asked to send the browser to. */
@@ -64,7 +72,7 @@ interface StoredOAuthProvider extends OAuthClientProvider {
 
 export function storedOAuthProvider(
 	storage: OAuthStorage,
-	{ redirectUrl, clientName, startedByPersonId }: OAuthProviderOptions,
+	{ redirectUrl, clientName, startedByMemberId, finishedByMemberId }: OAuthProviderOptions,
 ): StoredOAuthProvider {
 	let cached: OAuthRecord | undefined;
 	let authorizationUrl: URL | undefined;
@@ -72,9 +80,9 @@ export function storedOAuthProvider(
 		cached ??= (await storage.load()) ?? {};
 		return cached;
 	};
-	const change = async (patch: Partial<OAuthRecord>) => {
+	const change = async (patch: Partial<OAuthRecord>, signedInById?: string) => {
 		cached = { ...(await record()), ...patch };
-		await storage.save(cached);
+		await storage.save(cached, signedInById);
 	};
 
 	return {
@@ -96,7 +104,8 @@ export function storedOAuthProvider(
 		authorizationServerInformation: async () => (await record()).authorizationServer,
 		saveAuthorizationServerInformation: (authorizationServer) => change({ authorizationServer }),
 		tokens: async () => (await record()).tokens,
-		saveTokens: (tokens) => change({ tokens, signInRejectedAt: undefined }),
+		// Only an authorization code is exchanged while a sign-in finishes, so these are its tokens.
+		saveTokens: (tokens) => change({ tokens, signInRejectedAt: undefined }, finishedByMemberId),
 		codeVerifier: async () => {
 			const verifier = (await record()).codeVerifier;
 			if (!verifier) throw new Error("No sign-in is under way for this connector");
@@ -105,16 +114,16 @@ export function storedOAuthProvider(
 		saveCodeVerifier: (codeVerifier) => change({ codeVerifier }),
 		// The SDK asks for a state only once the tokens it holds, refreshed or not,
 		// won't do. Refusing here, before anything is saved, leaves a sign-in a
-		// person has under way alone.
+		// member has under way alone.
 		state: async () => {
-			if (startedByPersonId === undefined) {
+			if (startedByMemberId === undefined) {
 				const rejectedAt = await storage.now();
 				await change({ tokens: undefined, signInRejectedAt: rejectedAt.toISOString() });
 				throw new SignInRequired();
 			}
 			return randomBytes(24).toString("base64url");
 		},
-		saveState: (state) => change({ state, startedByPersonId }),
+		saveState: (state) => change({ state, startedByMemberId }),
 		storedState: async () => (await record()).state,
 		redirectToAuthorization: (url) => {
 			authorizationUrl = url;
@@ -179,7 +188,8 @@ export type SignInStartFailure = "registration_unsupported" | "unreachable" | "u
  * which is the only way Sugabots registers, or no server answered at all.
  */
 export function signInStartFailure(cause: unknown): SignInStartFailure {
-	for (let current = cause; current instanceof Error; current = current.cause) {
+	for (const current of causesOf(cause)) {
+		if (!(current instanceof Error)) break;
 		if (/does not support dynamic client registration/.test(current.message)) {
 			return "registration_unsupported";
 		}
@@ -192,7 +202,7 @@ export function signInStartFailure(cause: unknown): SignInStartFailure {
 }
 
 /**
- * The authorization server refused the connector's tokens, and only a person
+ * The authorization server refused the connector's tokens, and only a member
  * signing in again can fix it.
  */
 export class SignInRequired extends Error {
@@ -204,10 +214,9 @@ export class SignInRequired extends Error {
 
 /** Whether a failure, or what caused it, means the connector needs signing in again rather than fixing. */
 export function needsSignIn(cause: unknown): boolean {
-	for (let current = cause; current instanceof Error; current = current.cause) {
-		if (current instanceof SignInRequired || current instanceof UnauthorizedError) return true;
-	}
-	return false;
+	return causesOf(cause).some(
+		(current) => current instanceof SignInRequired || current instanceof UnauthorizedError,
+	);
 }
 
 /** Providers backed by the connector table, one per connector asked for. */

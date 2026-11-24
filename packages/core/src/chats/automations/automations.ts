@@ -16,7 +16,11 @@ import type {
 	WebhookAuth,
 	WebhookFilterTest,
 } from "@sugabots/contracts";
-import { MAX_AUTOMATION_TRIGGERS, webhookSecretLongEnough } from "@sugabots/contracts";
+import {
+	DEFAULT_DELIVERY_ID_HEADER,
+	MAX_AUTOMATION_TRIGGERS,
+	webhookSecretLongEnough,
+} from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
@@ -27,6 +31,7 @@ import type * as schema from "../../database/schema.ts";
 import { automation, automationTrigger, connector } from "../../database/schema.ts";
 import type { RepositoryActivity } from "../../providers/connectors/github/github-events.ts";
 import { Secrets } from "../../secrets/secrets.ts";
+import type { InvalidCursor } from "../cursor.ts";
 import { ChatStore } from "../store/store.ts";
 import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
 import {
@@ -50,7 +55,7 @@ import {
 	WebhookDeliveryIdHeaderRejected,
 	WebhookSecretTooShort,
 } from "./automation.ts";
-import { type InvalidRunCursor, makeView } from "./automation-view.ts";
+import { makeView } from "./automation-view.ts";
 import { makeWebhooks } from "./automation-webhooks.ts";
 import { makeConnectorEvents } from "./connector-events.ts";
 import { type InvalidRoutineSchedule, nextOccurrence } from "./schedule.ts";
@@ -58,8 +63,8 @@ import { AutomationStore } from "./store.ts";
 import { type Delivery, generateSecret } from "./webhook-auth.ts";
 
 /**
- * The automations people define in a project, and running one when asked,
- * as the current actor with the permission they have in the project. The
+ * The automations members define in a project, and running one when asked,
+ * as the principal with the permission they have in the project. The
  * project's lead bot does each run, in a chat of its own in the
  * project. A bot's own automations are its default project's.
  *
@@ -69,12 +74,12 @@ import { type Delivery, generateSecret } from "./webhook-auth.ts";
  */
 export interface Interface {
 	/**
-	 * Defines an automation in a project, as made by the actor or, with
-	 * `madeByBotId`, by that bot, working in the project, at the actor's
+	 * Defines an automation in a project, as made by the principal or, with
+	 * `madeByBotId`, by that bot, working in the project, at the principal's
 	 * request, returning the secrets made for its webhook triggers.
 	 */
 	readonly create: (
-		owner: { projectId: string; madeByBotId?: string },
+		project: { projectId: string; madeByBotId?: string },
 		input: NewAutomation,
 	) => Effect.Effect<
 		Defined,
@@ -192,7 +197,7 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Runs the automation now, for the actor: opens its chat, posts the
+	 * Runs the automation now, for the principal: opens its chat, posts the
 	 * trigger, and queues the run. Asking again with the same `requestId`
 	 * returns that run again, as a duplicate.
 	 */
@@ -210,7 +215,7 @@ export interface Interface {
 	 * The project's automations, by name, each with how it stands for
 	 * whoever may read its runs.
 	 */
-	readonly list: (owner: {
+	readonly list: (project: {
 		projectId: string;
 	}) => Effect.Effect<ListedAutomationDefinition[], AuthorizationDenied, CurrentActor.Service>;
 	/**
@@ -218,9 +223,9 @@ export interface Interface {
 	 * removed automations' included.
 	 */
 	readonly listProjectRuns: (
-		owner: { projectId: string },
+		project: { projectId: string },
 		page?: RunPageQuery,
-	) => Effect.Effect<RunPage, AuthorizationDenied | InvalidRunCursor, CurrentActor.Service>;
+	) => Effect.Effect<RunPage, AuthorizationDenied | InvalidCursor, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Automations") {}
@@ -228,7 +233,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 /**
  * Runs a webhook trigger's caller asks for. Nobody signs in to call one:
  * proving it holds the trigger's secret, the way the trigger's auth says, is
- * what admits the run, so this asks for no actor, and is the one automation
+ * what admits the run, so this asks for no principal, and is the one automation
  * operation a route calls without one.
  */
 export interface WebhooksInterface {
@@ -259,7 +264,7 @@ export class Webhooks extends Context.Service<Webhooks, WebhooksInterface>()(
 /**
  * Runs connector automations for what happened at their connectors' services.
  * The service's signature on the delivery is what admits it, checked before
- * this is asked, so this asks for no actor.
+ * this is asked, so this asks for no principal.
  */
 export interface ConnectorEventsInterface {
 	/**
@@ -289,7 +294,7 @@ export const make = Effect.gen(function* () {
 
 	/**
 	 * What a routine is written as: when it runs next while the automation
-	 * runs. Worked out while it is paused too, so a schedule that cannot run is
+	 * runs. Worked out while it is paused too, so a timetable that cannot run is
 	 * refused now rather than when the automation is enabled again.
 	 */
 	const routineValues = (input: RoutineInput, state: AutomationState) =>
@@ -313,12 +318,12 @@ export const make = Effect.gen(function* () {
 		});
 
 	/**
-	 * What `input` writes for a trigger of the project `owner`'s automation, given
+	 * What `input` writes for a trigger of `project`'s automation, given
 	 * the trigger it rewrites, if any, and whether the automation runs: a
 	 * routine's next time while it does, and a webhook's secret.
 	 */
 	const triggerValues = (
-		owner: { id: string; workspaceId: string },
+		project: { id: string; workspaceId: string },
 		input: AutomationTriggerInput,
 		current: schema.AutomationTriggerRow | undefined,
 		state: AutomationState,
@@ -355,7 +360,7 @@ export const make = Effect.gen(function* () {
 					};
 				}
 				case "github": {
-					const settings = yield* inProjectsConnector(owner, input);
+					const settings = yield* inProjectsConnector(project, input);
 					return { values: { ...NO_SECRET, settings, nextScheduledAt: null }, secret: null };
 				}
 			}
@@ -419,26 +424,23 @@ export const make = Effect.gen(function* () {
 				"create",
 				transaction(
 					Effect.gen(function* () {
-						const { project: owner, actor } = yield* authorization.project(
-							projectId,
-							"automation.manage",
-						);
+						const { project, actor } = yield* authorization.project(projectId, "automation.manage");
 						const state = input.state ?? "enabled";
 						const written = yield* Effect.forEach(input.triggers, (trigger) =>
-							triggerValues(owner, trigger, undefined, state),
+							triggerValues(project, trigger, undefined, state),
 						);
 						const row = yield* store.create({
-							workspaceId: owner.workspaceId,
-							projectId: owner.id,
-							createdById: actor.personId,
+							workspaceId: project.workspaceId,
+							projectId: project.id,
+							createdById: actor.memberId,
 							createdByBotId: madeByBotId ?? null,
 							name: input.name,
 							instructions: input.instructions,
 							state,
 						});
 						const scope = {
-							workspaceId: owner.workspaceId,
-							projectId: owner.id,
+							workspaceId: project.workspaceId,
+							projectId: project.id,
 							automationId: row.id,
 						};
 						const triggers = yield* store.addTriggers(
@@ -619,13 +621,10 @@ export const make = Effect.gen(function* () {
 				"run",
 				transaction(
 					Effect.gen(function* () {
-						const { project: owner, actor } = yield* authorization.project(
-							projectId,
-							"automation.run",
-						);
+						const { project, actor } = yield* authorization.project(projectId, "automation.run");
 						const accepted = yield* acceptTrigger({
-							workspaceId: owner.workspaceId,
-							projectId: owner.id,
+							workspaceId: project.workspaceId,
+							projectId: project.id,
 							automationId,
 							triggerId: null,
 							triggerIdentity: requestId,
@@ -633,7 +632,7 @@ export const make = Effect.gen(function* () {
 								kind: "manual",
 								requestId,
 								requestedAt: DateTime.formatIso(yield* DateTime.now),
-								requestedByPersonId: actor.personId,
+								requestedByMemberId: actor.memberId,
 							},
 						});
 						if (accepted.duplicate) return accepted;
@@ -663,7 +662,6 @@ export const connectorEventsLayer = Layer.effect(ConnectorEvents, makeConnectorE
 	Layer.provide([AutomationStore.layer, ChatStore.layer]),
 );
 
-export { InvalidRunCursor } from "./automation-view.ts";
 /** Accepts the runs of automations' routines as they fall due. */
 export { layer as schedulerLayer } from "./scheduler.ts";
 /** The automation workflow's steps. */
@@ -734,7 +732,7 @@ const triggerIn = (scope: Scope, triggerId: string) =>
  * since GitHub's names ignore case.
  */
 const inProjectsConnector = (
-	owner: { id: string; workspaceId: string },
+	project: { id: string; workspaceId: string },
 	trigger: GitHubTrigger,
 ): Effect.Effect<
 	Extract<schema.AutomationTriggerSettings, { kind: "github" }>,
@@ -748,8 +746,8 @@ const inProjectsConnector = (
 				.from(connector)
 				.where(
 					and(
-						eq(connector.projectId, owner.id),
-						eq(connector.workspaceId, owner.workspaceId),
+						eq(connector.projectId, project.id),
+						eq(connector.workspaceId, project.workspaceId),
 						eq(connector.id, trigger.connectorId),
 					),
 				)
@@ -787,7 +785,7 @@ function webhookCheck(
 ): Effect.Effect<
 	{
 		auth: WebhookAuth;
-		deliveryIdHeader: string | null | undefined;
+		deliveryIdHeader: string | null;
 		filter: readonly WebhookFilterTest[] | undefined;
 		secretEncrypted: string | null;
 		secret: string | null;
@@ -799,7 +797,9 @@ function webhookCheck(
 	const deliveryIdHeader =
 		input.deliveryIdHeader !== undefined
 			? input.deliveryIdHeader
-			: currentSettings?.deliveryIdHeader;
+			: currentSettings
+				? currentSettings.deliveryIdHeader
+				: DEFAULT_DELIVERY_ID_HEADER;
 	const deliveryHeader = deliveryIdHeader?.toLowerCase();
 	if (
 		deliveryHeader === "authorization" ||

@@ -1,10 +1,11 @@
 import { Schema, Struct } from "effect";
-import { namedPersonSchema } from "./api.ts";
+import { namedMemberSchema } from "./api.ts";
 import { handleSchema } from "./bots.ts";
 import {
 	headerNameSchema,
 	isClientOwnedHeader,
 	providerStatusSchema,
+	providerTestResultSchema,
 	providerUrlSchema,
 } from "./model-providers.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
@@ -13,7 +14,7 @@ import { uuidSchema } from "./uuid.ts";
 /**
  * Connectors: the MCP servers, HTTP endpoints and GitHub app a bot uses.
  *
- * A connector is one bot's: a URL, a secret entered once and sealed or an
+ * A connector is one bot's: a URL, a secret entered once and stored encrypted, or an
  * OAuth sign-in, and the tools the server was found to offer. The bot gets
  * those tools, as far as each tool's `access` allows. Remote servers over
  * Streamable HTTP only; nothing here spawns a process.
@@ -31,18 +32,18 @@ const connectorToolSchema = Schema.Struct({
 export type ConnectorTool = typeof connectorToolSchema.Type;
 
 /**
- * How the server is signed in to. `header`: a secret the admin pasted, sent in
- * a header. `oauth`: the server signed the workspace in itself and issued
- * tokens, which are refreshed as they expire.
- */
-/**
- * An MCP server; one of the workspace's GitHub accounts, whose tools are
- * Sugabots' own; or an HTTP endpoint, whose tools are a request per method
- * under its address.
+ * An MCP server; a GitHub account the project's own GitHub App is installed
+ * on, whose tools are Sugabots' own; or an HTTP endpoint, whose tools are a
+ * request per method under its address.
  */
 const connectorKindSchema = Schema.Literals(["mcp", "github", "http"]);
 export type ConnectorKind = typeof connectorKindSchema.Type;
 
+/**
+ * How the server is signed in to. `header`: a secret someone who manages the
+ * connector pasted, sent in a header. `oauth`: the server signed the project
+ * in itself and issued tokens, which are refreshed as they expire.
+ */
 const connectorAuthSchema = Schema.Literals(["header", "oauth"]);
 export type ConnectorAuth = typeof connectorAuthSchema.Type;
 
@@ -50,7 +51,7 @@ export type ConnectorAuth = typeof connectorAuthSchema.Type;
  * What the bot may do with one of a connector's tools.
  *
  * - `allow`: each call runs straight away.
- * - `ask`: each call waits for a person to allow it.
+ * - `ask`: each call waits for a member to allow it.
  * - `off`: bots can't use the tool.
  */
 export const connectorAccesses = ["off", "ask", "allow"] as const;
@@ -109,8 +110,8 @@ export const CONNECTOR_SIGN_IN_RETURN_PATH = "/connectors/oauth/return";
  *
  * - `missing_state`: the callback carried no `state`.
  * - `unknown_state`: no connector is waiting on that `state`.
- * - `not_allowed`: somebody other than the person who started the sign-in
- *   returned from it, or that person may no longer manage the project's
+ * - `not_allowed`: somebody other than the member who started the sign-in
+ *   returned from it, or that member may no longer manage the project's
  *   connectors.
  * - `refused`: the authorization server refused, or sent no code.
  * - `not_completed`: exchanging the code for tokens failed.
@@ -131,7 +132,7 @@ export const connectorSchema = Schema.Struct({
 	/** The project it belongs to; a bot's are its default project's. */
 	projectId: uuidSchema,
 	name: Schema.String,
-	/** Prefixes the server's tool names for the model: `exa.web_search_exa`. */
+	/** Prefixes the server's tool names for the model: `exa__web_search_exa`. */
 	handle: handleSchema,
 	kind: connectorKindSchema,
 	/** The MCP server's address; for GitHub, the page of the account its app is installed on, or of the app until it is. */
@@ -160,7 +161,13 @@ export const connectorSchema = Schema.Struct({
 	toolCounts: toolAccessCountsSchema,
 	lastTestError: Schema.NullOr(Schema.String),
 	/** Whoever added it, while they are still in the workspace. */
-	connectedBy: Schema.NullOr(namedPersonSchema),
+	connectedBy: Schema.NullOr(namedMemberSchema),
+	/**
+	 * The member it signs in as, while they are still in the workspace: who
+	 * made its OAuth sign-in, or, for GitHub, who installed its app on their
+	 * own GitHub account. Null for a key, or an app installed on an organization.
+	 */
+	signedInAs: Schema.NullOr(namedMemberSchema),
 	createdAt: isoTimestampSchema,
 });
 
@@ -262,11 +269,9 @@ export const connectorUpdateSchema = Schema.Struct({
 export type ConnectorUpdate = typeof connectorUpdateSchema.Type;
 
 export const connectorTestResultSchema = Schema.Struct({
-	reachable: Schema.Boolean,
-	latencyMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	...providerTestResultSchema.fields,
 	/** How many tools the server listed, when it answered. */
 	tools: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-	error: Schema.optional(Schema.String),
 });
 
 export type ConnectorTestResult = typeof connectorTestResultSchema.Type;

@@ -3,7 +3,7 @@ import type { ConnectorTool } from "@sugabots/contracts";
 /**
  * An HTTP connector's tools, one per method, each a request under its
  * address. They are Sugabots' own, like GitHub's, so every HTTP connector
- * has the same ones: reads run, other requests wait for a person, and
+ * has the same ones: reads run, other requests wait for a member, and
  * deletes are off until someone chooses otherwise.
  */
 export const HTTP_CONNECTOR_TOOLS: readonly ConnectorTool[] = [

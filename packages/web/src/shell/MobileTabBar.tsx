@@ -5,7 +5,7 @@ import { House, ShieldCheck } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { useSession } from "@/lib/session.ts";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 
 /** The phone's three places, along the foot of the screen, in their order there. */
@@ -22,7 +22,7 @@ export function MobileTabBar() {
 	const tab = useMobileTab();
 	const typing = useTyping();
 	const { waitingApprovals } = useAttentionCounts();
-	const { person: signedIn } = useSession();
+	const { member: signedIn } = useSession();
 	if (typing) return null;
 	return (
 		<nav
@@ -66,13 +66,13 @@ export function MobileTabBar() {
 					current={tab === "you"}
 					icon={
 						signedIn ? (
-							<PersonAvatar
-								person={signedIn}
+							<MemberAvatar
+								member={signedIn}
 								size={24}
 								className={cn(tab === "you" && "ring-2 ring-foreground")}
 							/>
 						) : (
-							<span className="size-6 rounded-full bg-person-avatar" />
+							<span className="size-6 rounded-full bg-member-avatar" />
 						)
 					}
 					label="You"

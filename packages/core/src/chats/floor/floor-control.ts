@@ -1,16 +1,19 @@
 export * as FloorControl from "./floor-control.ts";
 
+import { helpersAskedBy, mentionedHandles } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
+import { eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
-import { query, serviceOperations, transaction } from "../../database/database.ts";
+import { type Database, query, serviceOperations, transaction } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
+import { message } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import type { ChatEvent } from "../events.ts";
 import { ChatStore } from "../store/store.ts";
 import { Turns } from "../turns/turns.ts";
-import { type FloorMessage, floorOf, loadFloorScope } from "./floor.ts";
+import { type FloorMessage, floorOf, loadFloorScope, loadRepliedTurn } from "./floor.ts";
 
-/** Who speaks after a person's message, in a chat of any type. */
+/** Who speaks after a message, in a chat of any type. */
 export interface Interface {
 	/**
 	 * Decides who speaks after the committed message `committed` (see
@@ -22,9 +25,11 @@ export interface Interface {
 	 */
 	readonly giveFloor: (committed: FloorMessage) => Effect.Effect<void, BotHasNoModel>;
 	/**
-	 * Asks for the collaborator's turn when a collaboration opens, for the
-	 * asking bot's when a collaboration ends after it stopped waiting, and
-	 * for the bot's in a chat another bot started and briefed it in.
+	 * Asks for the turns bots' messages give (GLOSSARY.md's "Collaboration"):
+	 * a helper's for each bot a completed reply asks for help (see
+	 * `helpersAskedBy`), on that reply; the asking bot's hand-back on it once
+	 * every one of its helpers' turns has ended; and the bot's, in a chat
+	 * another bot started and briefed it in.
 	 */
 	readonly handler: DomainEvents.Handler<ChatEvent>;
 }
@@ -66,43 +71,122 @@ export const make = Effect.gen(function* () {
 			),
 		);
 
+	/**
+	 * Asks for the hand-back of the bot that wrote `askingMessageId`, once it
+	 * is owed (see `Turns.handBackOwed`). The asking message is locked first,
+	 * so of two helpers' turns ending at once, the second sees the first's end.
+	 * `endedHelperBotId` is the helper whose turn the caller's transaction ended.
+	 */
+	const handBackIfOwed = (askingMessageId: string, endedHelperBotId?: string) =>
+		Effect.gen(function* () {
+			const [asking] = yield* query((db) =>
+				db
+					.select({ chatId: message.chatId, botId: message.authorBotId })
+					.from(message)
+					.where(eq(message.id, askingMessageId))
+					.for("no key update"),
+			);
+			const askingBotId = asking?.botId;
+			if (!askingBotId) return;
+			const owed = yield* query((db) =>
+				Turns.handBackOwed(
+					db,
+					{ chatId: asking.chatId, messageId: askingMessageId, botId: askingBotId },
+					endedHelperBotId,
+				),
+			);
+			if (!owed) return;
+			yield* turns.ask({
+				chatId: asking.chatId,
+				botId: askingBotId,
+				triggerMessageId: askingMessageId,
+				reason: "hand_back",
+			});
+		});
+
+	/**
+	 * After the bot `botId`'s reply `messageId` completed: a helper's may owe
+	 * the bot that asked it its hand-back, and any other may ask for help.
+	 */
+	const afterReply = (reply: {
+		chatId: string;
+		turnId: string;
+		botId: string;
+		messageId: string;
+		content: string;
+	}) =>
+		Effect.gen(function* () {
+			const replied = yield* query((db) => loadRepliedTurn(db, reply.turnId));
+			if (!replied) return;
+			if (replied.reason === "collaboration") {
+				yield* handBackIfOwed(replied.triggerMessageId, reply.botId);
+			}
+			const mentioned = mentionedHandles(reply.content);
+			const helpers = helpersAskedBy({
+				chatKind: replied.chatKind,
+				authorBotId: reply.botId,
+				mayAsk: replied.reason !== "collaboration",
+				mentionedBotIds: replied.modelledBots.flatMap((bot) =>
+					mentioned.includes(bot.handle) ? [bot.id] : [],
+				),
+				alreadyAsked: yield* query((db) => Turns.botsAskedBefore(db, reply.messageId)),
+			});
+			if (helpers.length === 0) return;
+			yield* chats.addBots(reply.chatId, helpers);
+			for (const botId of helpers) {
+				yield* turns.ask({
+					chatId: reply.chatId,
+					botId,
+					triggerMessageId: reply.messageId,
+					reason: "collaboration",
+				});
+			}
+		});
+
+	/** After the bot `botId`'s turn `turnId` ended without completing: a helper's may owe a hand-back. */
+	const afterTurnEnded = (ended: { turnId: string; botId: string }) =>
+		Effect.gen(function* () {
+			const replied = yield* query((db) => loadRepliedTurn(db, ended.turnId));
+			if (replied?.reason !== "collaboration") return;
+			yield* handBackIfOwed(replied.triggerMessageId, ended.botId);
+		});
+
 	return Service.of({
 		giveFloor,
 		handler: (events) =>
-			Effect.forEach(
-				events,
-				(event): Effect.Effect<unknown> => {
-					switch (event._tag) {
-						case "CollaborationOpened":
-							return turns.ask({
-								chatId: event.collaboration.chatId,
-								botId: event.collaboratorBotId,
-								triggerMessageId: event.briefMessageId,
-								reason: "collaboration",
-							});
-						// The brief is a bot's message, which gives nobody the floor by itself.
-						case "BriefedChatStarted":
-							return turns.ask({
-								chatId: event.chatId,
-								botId: event.hostBotId,
-								triggerMessageId: event.briefMessageId,
-								reason: "brief",
-							});
-						case "CollaborationAnswered":
-						case "CollaborationFailed":
-							return event.askerToResume
-								? turns.ask({
-										chatId: event.parentChatId,
-										botId: event.askerToResume,
-										triggerMessageId: event.parentMessageId,
-										reason: "resume",
-									})
-								: Effect.void;
-						default:
-							return Effect.void;
-					}
-				},
-				{ discard: true },
+			operation(
+				"handler",
+				Effect.forEach(
+					events,
+					(event): Effect.Effect<unknown, never, Database> => {
+						switch (event._tag) {
+							case "TurnCompleted":
+								return afterReply(event);
+							case "TurnFailed":
+								// A turn that runs again has not ended.
+								return event.willRetry ? Effect.void : afterTurnEnded(event);
+							case "TurnInterrupted":
+								return afterTurnEnded(event);
+							// A helper's turn that never opened ends with its lane, as does
+							// one that ended while another helper's lane was still held.
+							case "LaneReleased":
+								return event.reason === "collaboration"
+									? handBackIfOwed(event.triggerMessageId)
+									: Effect.void;
+							// The brief is a bot's message, which gives nobody the floor by itself.
+							case "BriefedChatStarted":
+								return turns.ask({
+									chatId: event.chatId,
+									botId: event.briefedBotId,
+									triggerMessageId: event.briefMessageId,
+									reason: "brief",
+								});
+							default:
+								return Effect.void;
+						}
+					},
+					{ discard: true },
+				),
 			),
 	});
 });

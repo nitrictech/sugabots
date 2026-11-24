@@ -55,7 +55,7 @@ export const Hero = meta.story({
 				</span>
 			}
 			title="Nitric"
-			description="4 people"
+			description="4 members"
 		>
 			<SettingsGroup label="Workspace">
 				<SettingsRow label="Name" trailing={<SettingsValue>Nitric</SettingsValue>} />
@@ -190,7 +190,7 @@ export const RadioList = meta.story({
 /** RowAlert says why something failed as a row of the group, among its rows. */
 export const RowAlert = meta.story({
 	render: () => (
-		<SettingsPage title="People">
+		<SettingsPage title="Members">
 			<SettingsGroup label="Role">
 				<SettingsRow label="Role" trailing={<SettingsValue>Editor</SettingsValue>} />
 				<SettingsRowAlert>The role could not be changed. Try again.</SettingsRowAlert>

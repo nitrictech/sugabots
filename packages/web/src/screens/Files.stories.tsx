@@ -1,9 +1,9 @@
 import type {
-	FileVersionSummary,
-	MessageFileSummary,
+	ListedFileVersion,
+	ListedMessageFile,
+	ListedWrittenFile,
 	ToolCallPart,
 	WrittenFile,
-	WrittenFileSummary,
 } from "@sugabots/contracts";
 import { PAGE_CONTENT_POLICY } from "@sugabots/contracts/file-pages";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -20,10 +20,10 @@ import { PagesFromContentOrigin } from "./HtmlFrame.tsx";
 const now = new Date("2026-10-01T09:30:00.000Z");
 const writer = { botId: growthDesk.id, name: growthDesk.name };
 
-const plan: WrittenFileSummary = {
+const plan: ListedWrittenFile = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
 	chatId: "0199a3a0-0000-7000-8000-0000000000e1",
-	kind: "document",
+	kind: "markdown",
 	title: "Q4 outreach plan",
 	version: 3,
 	createdBy: writer,
@@ -31,7 +31,7 @@ const plan: WrittenFileSummary = {
 	updatedAt: "2026-10-01T08:10:00.000Z",
 };
 
-const dashboard: WrittenFileSummary = {
+const dashboard: ListedWrittenFile = {
 	id: "0199a3a0-0000-7000-8000-0000000000f2",
 	chatId: "0199a3a0-0000-7000-8000-0000000000e1",
 	kind: "html",
@@ -42,19 +42,19 @@ const dashboard: WrittenFileSummary = {
 	updatedAt: "2026-09-24T12:00:00.000Z",
 };
 
-const brief: MessageFileSummary = {
+const brief: ListedMessageFile = {
 	id: "0199a3a0-0000-7000-8000-0000000000f3",
 	chatId: "0199a3a0-0000-7000-8000-0000000000e1",
-	kind: "upload",
+	kind: "attachment",
 	name: "Account list.csv",
 	contentType: "text/csv",
 	size: 48_200,
-	sentBy: "Kim Lee",
+	author: "Kim Lee",
 	createdAt: "2026-10-01T07:55:00.000Z",
 	updatedAt: "2026-10-01T08:00:00.000Z",
 };
 
-const versions: FileVersionSummary[] = [
+const versions: ListedFileVersion[] = [
 	{ number: 3, author: writer, createdAt: "2026-10-01T08:10:00.000Z" },
 	{ number: 2, author: writer, createdAt: "2026-09-30T15:00:00.000Z" },
 	{ number: 1, author: writer, createdAt: "2026-09-29T07:00:00.000Z" },
@@ -75,7 +75,7 @@ const planContent = `# Q4 outreach plan
 | Pricing page still in review | Kim |
 `;
 
-const atVersion = (summary: WrittenFileSummary, number: number, content: string): WrittenFile => ({
+const atVersion = (summary: ListedWrittenFile, number: number, content: string): WrittenFile => ({
 	...summary,
 	content,
 	shownVersion: versions.find((version) => version.number === number) ?? {
@@ -287,7 +287,7 @@ export const DocumentOnAPhone = meta.story({
 	globals: { viewport: { value: "mobile1" } },
 });
 
-const written = (tool: string, file: WrittenFileSummary): ToolCallPart => ({
+const written = (tool: string, file: ListedWrittenFile): ToolCallPart => ({
 	type: "tool_call",
 	id: `0199a3a0-0000-7000-8000-0000000003${file.id.slice(-2)}`,
 	tool,
@@ -301,7 +301,7 @@ const written = (tool: string, file: WrittenFileSummary): ToolCallPart => ({
 	},
 	status: "completed",
 	error: null,
-	writeOrDelete: true,
+	approval: null,
 	atOffset: 0,
 	startedAt: "2026-10-01T08:10:00.000Z",
 	finishedAt: "2026-10-01T08:10:01.000Z",
@@ -360,7 +360,7 @@ function QueryPreview({ children }: { children: ReactNode }) {
 	return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
-const asWritten = (summary: WrittenFileSummary, title = summary.title): FileAsWritten => ({
+const asWritten = (summary: ListedWrittenFile, title = summary.title): FileAsWritten => ({
 	fileId: summary.id,
 	kind: summary.kind,
 	title,

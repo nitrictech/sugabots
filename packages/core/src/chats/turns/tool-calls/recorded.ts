@@ -30,7 +30,7 @@ export interface RecordingOptions {
 		writeOrDelete: boolean;
 	}) => Effect.Effect<void>;
 	/** Marks the write/delete boundary, after approval and before dispatch. */
-	markActed?: () => Effect.Effect<void>;
+	markActed: () => Effect.Effect<void>;
 	/** Whether the tool may change something at the other end. Built-in tools do not. */
 	writeOrDelete?: boolean;
 	approval?: {
@@ -45,7 +45,7 @@ interface ToolFailedResult {
 	error: UserText;
 }
 
-/** What people, and the model, are told of a tool that threw. */
+/** What members, and the model, are told of a tool that threw. */
 const TOOL_THREW = userText`The tool failed before it finished.`;
 
 const RESULT_NOT_GIVEN = userText`The tool finished, but its result could not be given to you.`;
@@ -97,7 +97,6 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 							sdkToolCallId: callOptions.toolCallId,
 							tool: key,
 							input,
-							atOffset,
 							binding: approval.binding,
 						})
 						.pipe(
@@ -116,13 +115,13 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 			await run(noteToolCall({ id: opened.id, atOffset, writeOrDelete }));
 			let output: unknown;
 			try {
-				if (writeOrDelete && markActed) await run(markActed());
+				if (writeOrDelete) await run(markActed());
 				output = await execute(input, callOptions);
 				await run(calls.close(opened.id, { output }));
 			} catch (cause) {
 				// A tool with a failure worth explaining returns it as its result. A
 				// throw is a fault in the tool or its connector: what was thrown
-				// goes to the logs, and people are told only that the call failed.
+				// goes to the logs, and members are told only that the call failed.
 				await run(Effect.logError(`Tool ${key} threw`, cause));
 				await run(calls.close(opened.id, { error: TOOL_THREW }));
 				return { status: "failed", error: TOOL_THREW } satisfies ToolFailedResult;

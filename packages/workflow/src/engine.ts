@@ -12,15 +12,11 @@ import {
 	SqlRunnerStorage,
 } from "effect/unstable/cluster";
 import { SqlClient } from "effect/unstable/sql";
-import { WorkflowEngine } from "effect/unstable/workflow";
 
 /**
- * Effect's own workflow engines. Workflow code depends only on Effect's
- * workflow API, so which engine runs it is configuration.
+ * The engine the server runs workflows on. Workflow code depends only on
+ * Effect's workflow API; tests run workflows on Effect's `WorkflowEngine.layerMemory`.
  */
-
-/** Everything in this process's memory, surviving nothing. For tests. */
-export const memory: Layer.Layer<WorkflowEngine.WorkflowEngine> = WorkflowEngine.layerMemory;
 
 /**
  * Effect's cluster engine inside this process, durable in the database behind
@@ -57,9 +53,6 @@ export const singleRunnerWith = <R = never, E = never>(options: {
 		),
 	);
 };
-
-/** The single runner, waiting up to 30 seconds for a predecessor to let go of the host lock. */
-export const singleRunner = singleRunnerWith({ hostLockWait: Duration.seconds(30) });
 
 /** The two keys of the host lock; the two-key form cannot collide with the cluster's own shard locks. */
 const HOST_LOCK = [0x5ab0_7a1c, 1] as const;

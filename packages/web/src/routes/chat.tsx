@@ -1,5 +1,5 @@
-import type { SignedInPerson } from "@sugabots/contracts";
-import { Link, useLocation } from "@tanstack/react-router";
+import type { CurrentUser } from "@sugabots/contracts";
+import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { MessageSquareOff } from "lucide-react";
 import { type ReactNode, Suspense } from "react";
@@ -9,7 +9,6 @@ import { ownerLinkOptions } from "@/lib/resource-owner.tsx";
 import { useSession } from "@/lib/session.ts";
 import { backToOwner } from "@/screens/ChatHeader.tsx";
 import type { StagedChange } from "@/screens/staged.ts";
-import { useLeave } from "@/ui/back-button.tsx";
 import { buttonStyles } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
@@ -46,12 +45,12 @@ export function RoutedChat({
 }: {
 	found: ChatLocation;
 	chatId: string;
-	signedIn: SignedInPerson;
+	signedIn: CurrentUser;
 	search: ChatSearch;
 	navigate: (change: SearchChange) => void;
 }) {
 	const searchProps = useChatSearchProps(search, navigate);
-	// A run or collaboration a notification names is the page itself, with the way back to where it is.
+	// A run a notification names is the page itself, with the way back to where it is.
 	if (search.nestedChatPage) {
 		return (
 			<NestedChatPage
@@ -70,9 +69,6 @@ export function RoutedChat({
 						Open chat
 					</Link>
 				}
-				onOpenNestedChat={(nestedChatPage) =>
-					navigate({ search: (previous) => ({ ...previous, nestedChatPage }) })
-				}
 			/>
 		);
 	}
@@ -81,19 +77,13 @@ export function RoutedChat({
 
 /**
  * What a chat's address keeps open with it, as its page's props: the
- * nested chat beside it, the message jumped to and what is open large, each changed
- * through `navigate`.
+ * message jumped to and what is open large, changed through `navigate`.
  */
 function useChatSearchProps(search: ChatSearch, navigate: (change: SearchChange) => void) {
-	const onNestedChatChange = useNestedChatChange((nestedChat, replace) =>
-		navigate({ search: (previous) => ({ ...previous, nestedChat }), replace }),
-	);
 	const onStagedChange: StagedChange = (staged, how) =>
 		navigate({ search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }), ...how });
 	return {
-		nestedChatId: search.nestedChat,
 		focusMessageId: search.message,
-		onNestedChatChange,
 		staged: stagedOf(search),
 		onStagedChange,
 	};
@@ -108,9 +98,9 @@ export function ChatScreen<Place>({
 	children,
 }: {
 	place: { found: Place | undefined; isPending: boolean; error: unknown };
-	children: (found: Place, signedIn: SignedInPerson) => ReactNode;
+	children: (found: Place, signedIn: CurrentUser) => ReactNode;
 }) {
-	const { person: signedIn } = useSession();
+	const { member: signedIn } = useSession();
 
 	if (isPending) return null;
 	if (!found) {
@@ -134,27 +124,4 @@ export function ChatScreen<Place>({
 		// own, React would hide the sidebar with it while it loads.
 		<Suspense fallback={null}>{children(found, signedIn)}</Suspense>
 	);
-}
-
-/**
- * Opens a run or collaboration over its chat, or closes it, with `go`,
- * which names it in the address. On a phone a nested chat covers its root chat
- * as a page of its own, so closing one shows the chat: back to it
- * when that is the page behind, else the root chat in its place, as
- * when the nested chat was opened from a notification. Opening the chat as a page
- * after the nested chat would have its own Back return to it.
- */
-function useNestedChatChange(go: (nestedChat: string | undefined, replace: boolean) => void) {
-	const { leaveFor } = useLeave();
-	const { pathname } = useLocation();
-	return (nestedChat: string | undefined) => {
-		if (nestedChat !== undefined || matchesMedia(SIDE_BY_SIDE)) {
-			go(nestedChat, false);
-			return;
-		}
-		leaveFor(
-			(page) => page.pathname === pathname && page.search.nestedChat === undefined,
-			() => go(undefined, true),
-		);
-	};
 }

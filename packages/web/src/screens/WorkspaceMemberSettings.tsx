@@ -30,7 +30,7 @@ import {
 } from "@/lib/workspace.ts";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
@@ -57,28 +57,28 @@ import {
 import { Toggle } from "@/ui/toggle.tsx";
 
 /**
- * The people in a workspace and the invitations still out, each person a
+ * The members in a workspace and the invitations still out, each member a
  * click into their own page: their role, the projects they are in, and removing
- * them. Whoever may manage people gets the controls, over administrators
+ * them. Whoever may manage members gets the controls, over administrators
  * only when they may manage those too; everybody else reads the same pages
  * without them. The API decides either way.
  */
-export function WorkspacePeopleSettings({
+export function WorkspaceMemberSettings({
 	workspaceId,
 	canManage,
 	canManageAdmins,
 	canHandOverOwnership,
-	currentPersonId,
+	currentUserId,
 	selectedMembershipId,
 }: {
 	workspaceId: string;
-	/** `workspace.people.manage`, as the API resolved it. */
+	/** `workspace.members.manage`, as the API resolved it. */
 	canManage: boolean;
 	/** `workspace.admins.manage`: making, unmaking and removing administrators. */
 	canManageAdmins: boolean;
 	/** `workspace.ownership.handOver`: handing the workspace to somebody else. */
 	canHandOverOwnership: boolean;
-	currentPersonId?: string;
+	currentUserId?: string;
 	selectedMembershipId?: string;
 }) {
 	const memberships = useMemberships(workspaceId);
@@ -88,20 +88,20 @@ export function WorkspacePeopleSettings({
 		const membership = memberships.data?.find((one) => one.id === selectedMembershipId);
 		if (!membership) {
 			return (
-				<EmptyState page="min" title="No such person here">
+				<EmptyState page="min" title="No such member here">
 					They may have left the workspace, or been removed from it.
 				</EmptyState>
 			);
 		}
 		return (
-			<PersonPage
+			<MemberPage
 				key={membership.id}
 				workspaceId={workspaceId}
 				membership={membership}
 				canManage={canManage}
 				canManageAdmins={canManageAdmins}
 				canHandOverOwnership={canHandOverOwnership}
-				isYou={membership.person.id === currentPersonId}
+				isYou={membership.member.id === currentUserId}
 			/>
 		);
 	}
@@ -111,7 +111,7 @@ export function WorkspacePeopleSettings({
 			workspaceId={workspaceId}
 			canManage={canManage}
 			canManageAdmins={canManageAdmins}
-			currentPersonId={currentPersonId}
+			currentUserId={currentUserId}
 			memberships={memberships}
 		/>
 	);
@@ -131,53 +131,53 @@ function Roster({
 	workspaceId,
 	canManage,
 	canManageAdmins,
-	currentPersonId,
+	currentUserId,
 	memberships,
 }: {
 	workspaceId: string;
 	canManage: boolean;
 	canManageAdmins: boolean;
-	currentPersonId?: string;
+	currentUserId?: string;
 	memberships: ReturnType<typeof useMemberships>;
 }) {
-	const backToPeople = useBackToHere("People");
+	const backToMembers = useBackToHere("Members");
 	const invitations = useWorkspaceInvitations(workspaceId);
 	const [inviting, setInviting] = useState(false);
 
 	return (
 		<SettingsPage
-			title="People"
+			title="Members"
 			description="Everyone in the workspace. Add them to projects to work together there."
 			headerAction={
 				canManage && (
-					<SettingsAddButton onClick={() => setInviting(true)}>Invite people</SettingsAddButton>
+					<SettingsAddButton onClick={() => setInviting(true)}>Invite members</SettingsAddButton>
 				)
 			}
 		>
 			{memberships.isPending ? (
-				<p className="m-0 text-xs text-muted-foreground">Loading people…</p>
+				<p className="m-0 text-xs text-muted-foreground">Loading members…</p>
 			) : memberships.error ? (
-				<Alert>People could not be loaded. Reload this page to try again.</Alert>
+				<Alert>Members could not be loaded. Reload this page to try again.</Alert>
 			) : (
-				<SettingsGroup label="People">
+				<SettingsGroup label="Members">
 					{memberships.data?.map((membership) => (
 						<SettingsRow
 							key={membership.id}
-							icon={<PersonAvatar person={membership.person} size={24} />}
+							icon={<MemberAvatar member={membership.member} size={24} />}
 							label={
-								membership.person.id === currentPersonId
-									? `${membership.person.name} (you)`
-									: membership.person.name
+								membership.member.id === currentUserId
+									? `${membership.member.name} (you)`
+									: membership.member.name
 							}
-							sub={membership.person.email}
+							sub={membership.member.email}
 							trailing={<SettingsValue>{workspaceRoleLabel(membership.role)}</SettingsValue>}
 							chevron
 							render={
 								<Link
 									from="/$workspace"
-									to="./settings/people/$membership"
+									to="./settings/members/$membership"
 									params={{ membership: membership.id }}
-									state={backToPeople}
+									state={backToMembers}
 								/>
 							}
 						/>
@@ -192,7 +192,7 @@ function Roster({
 				/>
 			)}
 			<Dialog open={inviting} onOpenChange={setInviting}>
-				<InvitePeopleDialog
+				<InviteMembersDialog
 					workspaceId={workspaceId}
 					canManageAdmins={canManageAdmins}
 					done={() => setInviting(false)}
@@ -222,7 +222,7 @@ function Invitations({
 				<SettingsRow
 					key={invitation.id}
 					icon={
-						<PersonAvatar person={{ name: invitation.email, email: invitation.email }} size={32} />
+						<MemberAvatar member={{ name: invitation.email, email: invitation.email }} size={32} />
 					}
 					label={invitation.email}
 					sub={resent.has(invitation.id) ? "Sent again" : invitationTimes(invitation, new Date())}
@@ -282,7 +282,7 @@ function expiryText(leftMs: number): string {
 	return `expires in ${countOf(Math.floor(leftMs / DAY_MS), "day", "days")}`;
 }
 
-function PersonPage({
+function MemberPage({
 	workspaceId,
 	membership,
 	canManage,
@@ -307,8 +307,8 @@ function PersonPage({
 	const [confirming, setConfirming] = useState(false);
 	const [transferring, setTransferring] = useState(false);
 	const back = useBackTarget({
-		label: "People",
-		render: <Link from="/$workspace" to="./settings/$section" params={{ section: "people" }} />,
+		label: "Members",
+		render: <Link from="/$workspace" to="./settings/$section" params={{ section: "members" }} />,
 	});
 	const role = membership.role;
 	const isOwner = role === "owner";
@@ -330,14 +330,14 @@ function PersonPage({
 		}
 		setConfirming(false);
 		if (!isYou) {
-			// Back to People, or People in their page's place, so Back never returns to
+			// Back to Members, or Members in their page's place, so Back never returns to
 			// somebody no longer here.
 			leaveForPage(
 				router.buildLocation(
 					linkOptions({
 						from: "/$workspace",
 						to: "./settings/$section",
-						params: { section: "people" },
+						params: { section: "members" },
 					}),
 				).href,
 			);
@@ -347,9 +347,9 @@ function PersonPage({
 	return (
 		<SettingsPage
 			back={<PageBackLink {...back} />}
-			hero={<PersonAvatar person={membership.person} size={44} />}
-			title={membership.person.name}
-			description={membership.person.email}
+			hero={<MemberAvatar member={membership.member} size={44} />}
+			title={membership.member.name}
+			description={membership.member.email}
 		>
 			<SettingsGroup
 				label="Role"
@@ -364,7 +364,7 @@ function PersonPage({
 					trailing={
 						mayManageThem ? (
 							<SegmentedControl
-								label={`Role for ${membership.person.name}`}
+								label={`Role for ${membership.member.name}`}
 								options={roleOptions(canManageAdmins)}
 								value={role}
 								onChange={(next) => updateRole.mutate({ membershipId: membership.id, role: next })}
@@ -391,8 +391,8 @@ function PersonPage({
 						<ProjectMembershipRow
 							key={project.id}
 							project={project}
-							personId={membership.person.id}
-							name={membership.person.name}
+							memberId={membership.member.id}
+							name={membership.member.name}
 							canManage={canManage && !administersWorkspace(role)}
 						/>
 					))}
@@ -410,7 +410,7 @@ function PersonPage({
 					note="The owner decides who administers the workspace, and is the only one who can hand it on."
 				>
 					<SettingsRow
-						label={`Make ${membership.person.name} the owner`}
+						label={`Make ${membership.member.name} the owner`}
 						chevron
 						onClick={() => setTransferring(true)}
 					/>
@@ -431,8 +431,8 @@ function PersonPage({
 			<DeleteDialog
 				open={transferring}
 				onOpenChange={setTransferring}
-				title={`Make ${membership.person.name} the owner?`}
-				description={`You stay on as an admin. Only ${membership.person.name} can decide who else administers the workspace, or hand it back to you.`}
+				title={`Make ${membership.member.name} the owner?`}
+				description={`You stay on as an admin. Only ${membership.member.name} can decide who else administers the workspace, or hand it back to you.`}
 				confirmLabel="Transfer"
 				pending={transfer.isPending}
 				error={transfer.error ? failureMessage(transfer.error) : undefined}
@@ -446,7 +446,7 @@ function PersonPage({
 			<DeleteDialog
 				open={confirming}
 				onOpenChange={setConfirming}
-				title={isYou ? "Leave this workspace?" : `Remove ${membership.person.name}?`}
+				title={isYou ? "Leave this workspace?" : `Remove ${membership.member.name}?`}
 				description={
 					isYou
 						? "You leave every project in it, and your Personal Assistant and its chats are deleted. Getting back in means somebody inviting you again."
@@ -461,24 +461,24 @@ function PersonPage({
 	);
 }
 
-/** One project, with whether this person is on its roster and a switch to change that. */
+/** One project, with whether this member is on its roster and a switch to change that. */
 function ProjectMembershipRow({
 	project,
-	personId,
+	memberId,
 	name,
 	canManage,
 }: {
 	project: Project;
-	personId: string;
+	memberId: string;
 	name: string;
 	canManage: boolean;
 }) {
-	// The list of projects counts people only where the viewer may list them, and the roster is
+	// The list of projects counts members only where the viewer may list them, and the roster is
 	// asked for only there, since anywhere else the API refuses it.
 	const members = useProjectMembers(project.memberCount === undefined ? undefined : project.id);
 	const place = usePlaceProjectMember(project.id);
-	const inProject = members.data?.some((member) => member.personId === personId) ?? false;
-	const headcount = projectHeadcount({ people: project.memberCount, bots: project.botCount });
+	const inProject = members.data?.some((member) => member.memberId === memberId) ?? false;
+	const headcount = projectHeadcount({ members: project.memberCount, bots: project.botCount });
 
 	return (
 		<SettingsRow
@@ -490,7 +490,7 @@ function ProjectMembershipRow({
 					label={`${name} is in ${project.name}`}
 					checked={inProject}
 					disabled={!canManage || members.isPending || place.isPending}
-					onChange={(member) => place.mutate({ personId, member })}
+					onChange={(member) => place.mutate({ memberId, member })}
 				/>
 			}
 		/>
@@ -498,7 +498,7 @@ function ProjectMembershipRow({
 }
 
 /** Emails separated by commas, spaces or new lines, each asked in with the same role. */
-function InvitePeopleDialog({
+function InviteMembersDialog({
 	workspaceId,
 	canManageAdmins,
 	done,
@@ -533,7 +533,7 @@ function InvitePeopleDialog({
 
 	return (
 		<DialogForm onSubmit={submit}>
-			<DialogFormHeader title="Invite people" />
+			<DialogFormHeader title="Invite members" />
 			<DialogFormBody>
 				<label htmlFor={emailsId} className="sr-only">
 					Email addresses

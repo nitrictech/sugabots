@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Exit, Fiber, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Database, query } from "../database/database.ts";
-import { computer, person, workspace } from "../database/schema.ts";
+import { computer, member, workspace } from "../database/schema.ts";
 import {
 	closeDatabase,
 	holdTransaction,
@@ -159,7 +159,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			);
 			const [owner] = await onDatabase((db) =>
 				db
-					.insert(person)
+					.insert(member)
 					.values({ name: "Sam", email: `pausing-${suffix}@example.com` })
 					.returning(),
 			);

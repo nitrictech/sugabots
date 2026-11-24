@@ -1,19 +1,17 @@
 import {
-	connectorToolKey,
-	connectorToolWritesOrDeletes,
 	headerNameSchema,
 	headerValueSchema,
 	isClientOwnedHeader,
 	MAX_URL_CHARACTERS,
 } from "@sugabots/contracts";
-import { type UserText, userText } from "@sugabots/errors";
-import { asSchema, type Tool, tool } from "ai";
+import { userText } from "@sugabots/errors";
+import { type Tool, tool } from "ai";
 import { Schema } from "effect";
 import type { ConnectorTarget } from "../../../providers/connectors/connector-target.ts";
 import { HTTP_CONNECTOR_TOOLS } from "../../../providers/connectors/http-tools.ts";
-import { toolAccessOf } from "../../../providers/connectors/tool-access.ts";
 import { type EgressHttpClient, EgressRefused } from "../../../providers/network/egress.ts";
-import type { OfferedTool } from "../connectors.ts";
+import { type OfferedTool, offeredTool } from "../connectors.ts";
+import { type Failed, failed } from "../failed.ts";
 import { readUpTo } from "../web-fetch/fetch-page.ts";
 
 const TIMEOUT_MS = 30_000;
@@ -88,19 +86,8 @@ export function httpTools(
 				};
 			},
 		});
-		const inputSchema = asSchema(found.inputSchema).jsonSchema;
-		if ("then" in inputSchema) throw new Error(`The ${described.name} tool's schema isn't ready`);
-		offered[connectorToolKey(target.handle, described.name)] = {
-			tool: found,
-			handle: target.handle,
-			description: typeof found.description === "string" ? found.description : "",
-			inputSchema,
-			writeOrDelete: connectorToolWritesOrDeletes(described),
-			access: toolAccessOf(target.toolAccess, described),
-			connectorId: target.connectorId,
-			connectorRevision: target.configurationRevision,
-			remoteToolName: described.name,
-		};
+		const [key, offeredAs] = offeredTool(target, described, found);
+		offered[key] = offeredAs;
 	}
 	return offered;
 }
@@ -143,7 +130,7 @@ function urlUnder(baseUrl: string, { path, query = {} }: HttpRequest): string {
 }
 
 /** Why the model may not send one of `headers`: the connector's own secret, or one the client owns. */
-function refusedHeader(
+export function refusedHeader(
 	headers: Record<string, string> = {},
 	secretHeader: string | undefined,
 ): Failed | undefined {
@@ -169,10 +156,3 @@ function redactor(secret: string | undefined): (text: string) => string {
 	const token = secret.slice(secret.lastIndexOf(" ") + 1);
 	return (text) => text.replaceAll(secret, REDACTED).replaceAll(token, REDACTED);
 }
-
-interface Failed {
-	readonly status: "failed";
-	readonly error: UserText;
-}
-
-const failed = (error: UserText): Failed => ({ status: "failed", error });

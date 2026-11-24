@@ -2,7 +2,7 @@ import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import { ProjectAdministration } from "@sugabots/core/workspaces/projects/project-administration";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSignedInPerson } from "../../auth/middleware.ts";
+import { asCurrentUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -14,67 +14,67 @@ export const projectRoutes = HttpApiBuilder.group(ServerApi, "projects", (handle
 			.handle("list", ({ params }) =>
 				projects
 					.list({ workspace: params.workspace })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
 			.handle("create", ({ params, payload }) =>
 				projects
 					.create({ workspace: params.workspace, ...payload })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
 			.handle("update", ({ params, payload }) =>
 				projects
 					.update({ projectId: params.projectId, changes: payload })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
 			.handle("remove", ({ params }) =>
 				projects
 					.remove({ projectId: params.projectId })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
 			.handle("listMembers", ({ params }) =>
 				projects
 					.members({ projectId: params.projectId })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
-			.handle("listPeople", ({ params }) =>
+			.handle("listMembersReaching", ({ params }) =>
 				projects
-					.peopleReaching({ projectId: params.projectId })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.membersReaching({ projectId: params.projectId })
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
 			.handle("addMember", ({ params, payload }) =>
 				projects
-					.addMember({ projectId: params.projectId, personId: payload.personId })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.addMember({ projectId: params.projectId, memberId: payload.memberId })
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
 			.handle("removeMember", ({ params }) =>
 				projects
-					.removeMember({ projectId: params.projectId, personId: params.personId })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.removeMember({ projectId: params.projectId, memberId: params.memberId })
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
 			.handle("leave", ({ params }) =>
 				projects
 					.leave({ projectId: params.projectId })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
 			.handle("join", ({ params }) =>
 				projects
 					.join({ projectId: params.projectId })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
 			.handle("listBots", ({ params }) =>
 				projects
 					.bots({ projectId: params.projectId })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
 			.handle("addBot", ({ params, payload }) =>
 				projects
 					.addBot({ projectId: params.projectId, botId: payload.botId })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			)
 			.handle("removeBot", ({ params }) =>
 				projects
 					.removeBot({ projectId: params.projectId, botId: params.botId })
-					.pipe(asSignedInPerson, asHttpError(projectErrors)),
+					.pipe(asCurrentUser, asHttpError(projectErrors)),
 			);
 	}),
 );

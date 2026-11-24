@@ -4,7 +4,6 @@ import { type UserText, userText } from "@sugabots/errors";
 import { Schema } from "effect";
 import { createParser } from "eventsource-parser";
 import { failureFromResponse } from "./errors.ts";
-import type { TokenStore } from "./tokens.ts";
 
 /**
  * Live updates, as an async iterable that reconnects.
@@ -13,8 +12,7 @@ import type { TokenStore } from "./tokens.ts";
  * for await (const event of client.events.chat(chatId)) { … }
  * ```
  *
- * Not `EventSource`: it cannot send an `Authorization` header for bearer
- * clients. It needs a `fetch` whose response body streams.
+ * It needs a `fetch` whose response body streams.
  *
  * A dropped connection is the normal case, not an error: the server hangs up
  * every thirty minutes on purpose. The loop below reconnects with
@@ -24,11 +22,6 @@ import type { TokenStore } from "./tokens.ts";
  * the consumer reloads what it shows.
  */
 
-export interface EventStreamOptions {
-	/** Ends the stream. Without one, iterate with `break` or call `close`. */
-	signal?: AbortSignal;
-}
-
 export interface EventStream extends AsyncIterable<StreamEvent> {
 	/** Ends the stream. The iterator finishes; it does not throw. */
 	close(): void;
@@ -36,16 +29,15 @@ export interface EventStream extends AsyncIterable<StreamEvent> {
 
 export interface EventsApi {
 	/** Chats, unread counts, bots and projects across one workspace. */
-	workspace(workspaceId: string, options?: EventStreamOptions): EventStream;
-	/** One chat's messages, turns, tool calls and collaborations. */
-	chat(chatId: string, options?: EventStreamOptions): EventStream;
-	/** What is for the signed-in person alone, such as their notifications. */
-	me(options?: EventStreamOptions): EventStream;
+	workspace(workspaceId: string): EventStream;
+	/** One chat's messages, turns and tool calls. */
+	chat(chatId: string): EventStream;
+	/** What is for the current user alone, such as their notifications. */
+	me(): EventStream;
 }
 
 interface EventsApiOptions {
 	baseUrl: string;
-	tokens?: TokenStore;
 	fetch?: typeof globalThis.fetch;
 	/** Backoff between reconnects, for tests. */
 	retryMs?: number;
@@ -63,22 +55,20 @@ const MAX_EVENT_CHARS = 1024 * 1024;
 
 export function createEventsApi({
 	baseUrl,
-	tokens,
 	fetch = globalThis.fetch,
 	retryMs = RETRY_MS,
 }: EventsApiOptions): EventsApi {
-	const open = (path: string, options: EventStreamOptions | undefined): EventStream =>
-		createEventStream({ url: `${baseUrl}${path}`, tokens, fetch, retryMs, ...options });
+	const open = (path: string): EventStream =>
+		createEventStream({ url: `${baseUrl}${path}`, fetch, retryMs });
 
 	return {
-		workspace: (workspaceId, options) =>
-			open(`/workspaces/${encodeURIComponent(workspaceId)}/events`, options),
-		chat: (chatId, options) => open(`/chats/${encodeURIComponent(chatId)}/events`, options),
-		me: (options) => open("/me/events", options),
+		workspace: (workspaceId) => open(`/workspaces/${encodeURIComponent(workspaceId)}/events`),
+		chat: (chatId) => open(`/chats/${encodeURIComponent(chatId)}/events`),
+		me: () => open("/me/events"),
 	};
 }
 
-interface StreamContext extends EventStreamOptions, Pick<EventsApiOptions, "tokens"> {
+interface StreamContext {
 	url: string;
 	fetch: typeof globalThis.fetch;
 	retryMs: number;
@@ -86,9 +76,7 @@ interface StreamContext extends EventStreamOptions, Pick<EventsApiOptions, "toke
 
 function createEventStream(context: StreamContext): EventStream {
 	const closing = new AbortController();
-	const signal = context.signal
-		? AbortSignal.any([context.signal, closing.signal])
-		: closing.signal;
+	const { signal } = closing;
 
 	async function* iterate(): AsyncGenerator<StreamEvent> {
 		let attempt = 0;
@@ -97,10 +85,6 @@ function createEventStream(context: StreamContext): EventStream {
 		while (!signal.aborted) {
 			try {
 				const connection = await connect(context, lastEventId, signal);
-				if (!connection) {
-					return;
-				}
-
 				for await (const message of connection) {
 					attempt = 0;
 
@@ -119,7 +103,7 @@ function createEventStream(context: StreamContext): EventStream {
 				if (signal.aborted) {
 					return;
 				}
-				// The token is gone, or the resource is: reconnecting cannot
+				// The session is gone, or the resource is: reconnecting cannot
 				// help, and a silent retry loop would hide it. Anything else —
 				// a dropped socket, a restart, a 503, a rate limit — is worth
 				// waiting out.
@@ -166,25 +150,19 @@ interface Message {
 
 /** One connection: everything it delivers, until the server or the client ends it. */
 async function connect(
-	{ url, tokens, fetch }: StreamContext,
+	{ url, fetch }: StreamContext,
 	lastEventId: string | undefined,
 	signal: AbortSignal,
-): Promise<AsyncGenerator<Message> | undefined> {
-	const token = tokens?.get();
-
+): Promise<AsyncGenerator<Message>> {
 	const response = await fetch(url, {
 		signal,
-		credentials: tokens ? "omit" : "include",
+		credentials: "include",
 		headers: {
 			accept: "text/event-stream",
-			...(token ? { authorization: `Bearer ${token}` } : {}),
 			...(lastEventId ? { "last-event-id": lastEventId } : {}),
 		},
 	});
 
-	if (response.status === 204) {
-		return undefined;
-	}
 	if (!response.ok) {
 		throw new StreamRefused(
 			failureFromResponse(await response.json().catch(() => undefined), response.status),

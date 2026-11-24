@@ -25,8 +25,8 @@ import {
 const ALICE = "0199a3a0-0000-7000-8000-00000000a11c";
 const BOB = "0199a3a0-0000-7000-8000-00000000b0b0";
 
-const actor = (workspaceRole: WorkspaceRole | undefined, personId = ALICE): Actor => ({
-	personId,
+const actor = (workspaceRole: WorkspaceRole | undefined, memberId = ALICE): Actor => ({
+	memberId,
 	workspaceRole,
 });
 
@@ -36,17 +36,17 @@ const publicBotBy = (createdById: string | null): BotFacts => ({
 	assistantOf: null,
 });
 
-const privateBotBy = (createdById: string): BotFacts => ({
-	visibility: "private",
+const personalBotBy = (createdById: string): BotFacts => ({
+	visibility: "personal",
 	createdById,
 	assistantOf: null,
 });
 
-/** A Personal Assistant, which the workspace makes rather than its person. */
-const assistantOf = (personId: string): BotFacts => ({
-	visibility: "private",
+/** A Personal Assistant, which the workspace makes rather than its member. */
+const assistantOf = (memberId: string): BotFacts => ({
+	visibility: "personal",
 	createdById: null,
-	assistantOf: personId,
+	assistantOf: memberId,
 });
 
 /**
@@ -60,7 +60,7 @@ const WORKSPACE_PERMISSIONS = Object.keys({
 	"workspace.read": true,
 	"workspace.update": true,
 	"workspace.providers.manage": true,
-	"workspace.people.manage": true,
+	"workspace.members.manage": true,
 	"workspace.admins.manage": true,
 	"workspace.ownership.handOver": true,
 	"workspace.delete": true,
@@ -191,7 +191,7 @@ const MANAGING_A_BOT: BotPermission[] = [
 ];
 
 /**
- * What a person may do with their Personal Assistant besides use it: change its
+ * What a member may do with their Personal Assistant besides use it: change its
  * look and connectors, manage and run its automations, and decide what it and
  * its computer ask.
  */
@@ -205,7 +205,7 @@ const OWNING_AN_ASSISTANT: BotPermission[] = [
 	"approval.decide",
 ];
 
-/** Everything that concerns a bot's automations, which on a Personal Assistant are its person's alone. */
+/** Everything that concerns a bot's automations, which on a Personal Assistant are its member's alone. */
 const AUTOMATIONS: Array<BotPermission & ProjectPermission> = [
 	"automation.read",
 	"automation.manage",
@@ -294,16 +294,16 @@ describe("a bot's default project", () => {
 		for (const role of ["owner", "admin", "editor", "viewer"] as const) {
 			expect(mayInProject(actor(role), "project.read", publicOne)).toBe(true);
 		}
-		const privateOne = defaultProjectOf(privateBotBy(BOB));
-		expect(mayInProject(actor("editor", BOB), "project.read", privateOne)).toBe(true);
-		expect(mayInProject(actor("editor"), "project.read", privateOne)).toBe(false);
+		const personalOne = defaultProjectOf(personalBotBy(BOB));
+		expect(mayInProject(actor("editor", BOB), "project.read", personalOne)).toBe(true);
+		expect(mayInProject(actor("editor"), "project.read", personalOne)).toBe(false);
 		const assistants = defaultProjectOf(assistantOf(BOB));
 		expect(mayInProject(actor("editor", BOB), "project.read", assistants)).toBe(true);
 		expect(mayInProject(actor("owner"), "project.read", assistants)).toBe(false);
 	});
 
-	it("lets an admin manage what a private bot's default project holds, but not see its chats", () => {
-		const privateOne = defaultProjectOf(privateBotBy(BOB));
+	it("lets an admin manage what a personal bot's default project holds, but not see its chats", () => {
+		const personalOne = defaultProjectOf(personalBotBy(BOB));
 		const managed: ProjectPermission[] = [
 			"connector.read",
 			"connector.manage",
@@ -314,7 +314,7 @@ describe("a bot's default project", () => {
 			"computer.request.decide",
 		];
 		for (const permission of PROJECT_PERMISSIONS) {
-			expect(mayInProject(actor("admin"), permission, privateOne)).toBe(
+			expect(mayInProject(actor("admin"), permission, personalOne)).toBe(
 				managed.includes(permission),
 			);
 		}
@@ -336,7 +336,7 @@ describe("a bot's default project", () => {
 			const permissions = projectPermissions(actor(role, BOB), { ...own, isPublic: true });
 			expect(permissions).toMatchObject({
 				rename: false,
-				managePeople: false,
+				manageMembers: false,
 				manageBots: false,
 				leave: false,
 				join: false,
@@ -354,21 +354,21 @@ describe("reaching a bot", () => {
 		},
 	);
 
-	it("lets only its creator reach a private bot, not an admin", () => {
-		expect(reachesBot(actor("editor", BOB), privateBotBy(BOB))).toBe(true);
-		expect(reachesBot(actor("editor"), privateBotBy(BOB))).toBe(false);
-		expect(reachesBot(actor("admin"), privateBotBy(BOB))).toBe(false);
-		expect(reachesBot(actor("owner"), privateBotBy(BOB))).toBe(false);
+	it("lets only its creator reach a personal bot, not an admin", () => {
+		expect(reachesBot(actor("editor", BOB), personalBotBy(BOB))).toBe(true);
+		expect(reachesBot(actor("editor"), personalBotBy(BOB))).toBe(false);
+		expect(reachesBot(actor("admin"), personalBotBy(BOB))).toBe(false);
+		expect(reachesBot(actor("owner"), personalBotBy(BOB))).toBe(false);
 	});
 
-	it("lets only its person reach a Personal Assistant", () => {
+	it("lets only its member reach a Personal Assistant", () => {
 		expect(reachesBot(actor("viewer"), assistantOf(ALICE))).toBe(true);
 		expect(reachesBot(actor("owner", BOB), assistantOf(ALICE))).toBe(false);
 	});
 
 	it("lets nobody outside the workspace reach any bot, even one they made", () => {
 		expect(reachesBot(actor(undefined), publicBotBy(ALICE))).toBe(false);
-		expect(reachesBot(actor(undefined), privateBotBy(ALICE))).toBe(false);
+		expect(reachesBot(actor(undefined), personalBotBy(ALICE))).toBe(false);
 		expect(reachesBot(actor(undefined), assistantOf(ALICE))).toBe(false);
 	});
 });
@@ -385,7 +385,7 @@ describe("bot actions", () => {
 
 	it.each(BOT_PERMISSIONS)("an editor may %s on a bot they made", (permission) => {
 		expect(mayOnBot(actor("editor"), permission, publicBotBy(ALICE))).toBe(true);
-		expect(mayOnBot(actor("editor"), permission, privateBotBy(ALICE))).toBe(true);
+		expect(mayOnBot(actor("editor"), permission, personalBotBy(ALICE))).toBe(true);
 	});
 
 	it.each(BOT_PERMISSIONS)("an admin may %s on a public bot somebody else made", (permission) => {
@@ -393,17 +393,20 @@ describe("bot actions", () => {
 	});
 
 	it.each(BOT_PERMISSIONS)(
-		"an admin may %s on another person's private bot only to manage it",
+		"an admin may %s on another member's personal bot only to manage it",
 		(permission) => {
-			expect(mayOnBot(actor("admin"), permission, privateBotBy(BOB))).toBe(
+			expect(mayOnBot(actor("admin"), permission, personalBotBy(BOB))).toBe(
 				MANAGING_A_BOT.includes(permission),
 			);
 		},
 	);
 
-	it.each(BOT_PERMISSIONS)("an editor may not %s on another person's private bot", (permission) => {
-		expect(mayOnBot(actor("editor"), permission, privateBotBy(BOB))).toBe(false);
-	});
+	it.each(BOT_PERMISSIONS)(
+		"an editor may not %s on another member's personal bot",
+		(permission) => {
+			expect(mayOnBot(actor("editor"), permission, personalBotBy(BOB))).toBe(false);
+		},
+	);
 
 	it.each(BOT_PERMISSIONS)("a viewer may %s on a public bot only to view it", (permission) => {
 		expect(mayOnBot(actor("viewer"), permission, publicBotBy(BOB))).toBe(
@@ -418,7 +421,7 @@ describe("bot actions", () => {
 	});
 
 	it.each(BOT_PERMISSIONS)(
-		"its person may %s on their Personal Assistant only to use it, change its look, connectors and automations, or decide what it asks",
+		"its member may %s on their Personal Assistant only to use it, change its look, connectors and automations, or decide what it asks",
 		(permission) => {
 			expect(mayOnBot(actor("editor"), permission, assistantOf(ALICE))).toBe(
 				USING_A_BOT.includes(permission) || OWNING_AN_ASSISTANT.includes(permission),
@@ -427,7 +430,7 @@ describe("bot actions", () => {
 	);
 
 	it.each(AUTOMATIONS)(
-		"lets its person %s for their Personal Assistant's automations, whatever their role",
+		"lets its member %s for their Personal Assistant's automations, whatever their role",
 		(permission) => {
 			const assistants = { isMember: false, defaultOf: assistantOf(ALICE) };
 			for (const role of WORKSPACE_ROLES) {
@@ -437,7 +440,7 @@ describe("bot actions", () => {
 	);
 
 	it.each(AUTOMATIONS)(
-		"lets no administrator %s for another person's Personal Assistant's automations",
+		"lets no administrator %s for another member's Personal Assistant's automations",
 		(permission) => {
 			const assistants = { isMember: false, defaultOf: assistantOf(ALICE) };
 			for (const role of ["owner", "admin"] as const) {
@@ -446,7 +449,7 @@ describe("bot actions", () => {
 		},
 	);
 
-	it("lets only its person decide what their Personal Assistant's runs ask, whatever their role", () => {
+	it("lets only its member decide what their Personal Assistant's runs ask, whatever their role", () => {
 		for (const role of WORKSPACE_ROLES) {
 			expect(mayOnBot(actor(role), "approval.automation.decide", assistantOf(ALICE))).toBe(true);
 		}
@@ -480,7 +483,7 @@ describe("what the API tells a client", () => {
 			projectPermissions(actor("admin"), { isMember: true, defaultOf: null, isPublic: false }),
 		).toEqual({
 			rename: true,
-			managePeople: true,
+			manageMembers: true,
 			manageBots: true,
 			leave: false,
 			join: false,
@@ -503,7 +506,7 @@ describe("what the API tells a client", () => {
 			projectPermissions(actor("editor"), { isMember: true, defaultOf: null, isPublic: true }),
 		).toEqual({
 			rename: false,
-			managePeople: true,
+			manageMembers: true,
 			manageBots: true,
 			leave: true,
 			join: false,
@@ -527,7 +530,7 @@ describe("what the API tells a client", () => {
 				projectPermissions(actor(role), { isMember: false, defaultOf: null, isPublic: true }),
 			).toEqual({
 				rename: false,
-				managePeople: false,
+				manageMembers: false,
 				manageBots: false,
 				leave: false,
 				join: true,
@@ -575,8 +578,8 @@ describe("what the API tells a client", () => {
 		});
 	});
 
-	it("lets an admin manage another person's private bot without talking to it", () => {
-		expect(botPermissions(actor("admin"), privateBotBy(BOB))).toEqual({
+	it("lets an admin manage another member's personal bot without talking to it", () => {
+		expect(botPermissions(actor("admin"), personalBotBy(BOB))).toEqual({
 			update: true,
 			delete: true,
 			talk: false,
@@ -598,8 +601,8 @@ describe("what the API tells a client", () => {
 		(role) => {
 			for (const bot of [
 				publicBotBy(BOB),
-				privateBotBy(BOB),
-				privateBotBy(ALICE),
+				personalBotBy(BOB),
+				personalBotBy(ALICE),
 				assistantOf(ALICE),
 			]) {
 				expect(botPermissions(actor(role), bot).resources).toEqual(
@@ -610,7 +613,7 @@ describe("what the API tells a client", () => {
 		},
 	);
 
-	it("lets a person change their Personal Assistant but not delete it", () => {
+	it("lets a member change their Personal Assistant but not delete it", () => {
 		const resolved = botPermissions(actor("editor"), assistantOf(ALICE));
 		expect(resolved).toMatchObject({
 			update: true,

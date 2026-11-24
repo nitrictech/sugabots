@@ -1,11 +1,28 @@
-import type { CalendarSchedule } from "@sugabots/contracts";
+import type { CalendarSchedule, RoutineSchedule } from "@sugabots/contracts";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	InvalidRoutineSchedule,
 	latestMissedAndNextOccurrence,
-	upcomingOccurrences,
+	nextOccurrence,
 } from "./schedule.ts";
+
+/** The schedule's next `count` runs after `from`, each found after the one before. */
+const upcomingOccurrences = (
+	schedule: RoutineSchedule,
+	timezone: string,
+	from: Date,
+	count = 1,
+): Effect.Effect<Date[], InvalidRoutineSchedule> =>
+	Effect.gen(function* () {
+		const dates: Date[] = [];
+		let after = from;
+		for (let found = 0; found < count; found++) {
+			after = yield* nextOccurrence(schedule, timezone, after);
+			dates.push(after);
+		}
+		return dates;
+	});
 
 describe("Routine schedules", () => {
 	it("calculates minute-precision occurrences in the selected timezone", async () => {

@@ -18,12 +18,11 @@ const OWNERS: Record<string, readonly string[]> = {
 	message: ["core/src/chats/store/store.ts", "core/src/chats/turns/store.ts"],
 	// A bot that stays silent on an optional turn reacts 👀 as its turn ends.
 	messageReaction: ["core/src/chats/store/store.ts", "core/src/chats/turns/store.ts"],
-	collaboration: ["core/src/chats/tools/collaborate/store.ts"],
 	automation: ["core/src/chats/automations/store.ts"],
 	automationTrigger: ["core/src/chats/automations/store.ts"],
 	automationRun: ["core/src/chats/automations/store.ts"],
 	chatCompaction: ["core/src/chats/compaction/store.ts"],
-	chatRead: ["core/src/chats/store/store.ts"],
+	readCursor: ["core/src/chats/store/store.ts"],
 	turn: ["core/src/chats/turns/store.ts"],
 	toolCall: ["core/src/chats/turns/tool-calls/store.ts"],
 };

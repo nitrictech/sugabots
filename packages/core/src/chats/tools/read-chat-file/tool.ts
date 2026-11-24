@@ -63,7 +63,7 @@ export type ReadChatFileResult =
 
 /**
  * The `read_chat_file` tool: reads part of a file in this chat, such as a
- * file a person attached or a tool result too large to have been given whole,
+ * file a member attached or a tool result too large to have been given whole,
  * by line or by searching it, or shows an image to a model that takes them.
  * Offered on every turn, so the tools a chat sends change only when its
  * bot's model does.
@@ -80,7 +80,7 @@ export function readChatFileTool({
 	run: RunEffect<never>;
 }) {
 	return tool({
-		description: `Read a file in this chat: one a person attached, or a tool result too large to have been given to you whole, which named its file and how to read on. For a text file, returns up to ${DEFAULT_LINES} lines from \`offset\`, each after its line number, with the file's total lines and, when there is more, the line to continue from. Give \`pattern\` to get only the lines containing it instead.${acceptsImages ? ` A ${SHOWN_IMAGE_FORMATS} image is shown to you instead.` : ""}`,
+		description: `Read a file in this chat: one a member attached, or a tool result too large to have been given to you whole, which named its file and how to read on. For a text file, returns up to ${DEFAULT_LINES} lines from \`offset\`, each after its line number, with the file's total lines and, when there is more, the line to continue from. Give \`pattern\` to get only the lines containing it instead.${acceptsImages ? ` A ${SHOWN_IMAGE_FORMATS} image is shown to you instead.` : ""}`,
 		inputSchema: Schema.Struct({
 			file: Schema.String.check(Schema.isUUID()).annotate({ description: "The file's id." }),
 			offset: Schema.optional(

@@ -2,7 +2,6 @@ import { posix } from "node:path";
 import {
 	headerNameSchema,
 	headerValueSchema,
-	isClientOwnedHeader,
 	MAX_ATTACHMENT_BYTES,
 	MAX_URL_CHARACTERS,
 } from "@sugabots/contracts";
@@ -13,11 +12,14 @@ import type { RunEffect } from "../../../database/database.ts";
 import type { ChatFileStore } from "../../../files/chat-file-store.ts";
 import { type EgressHttpClients, EgressRefused } from "../../../providers/network/egress.ts";
 import {
+	type ComputerAtPlace,
 	inComputer,
-	MAX_SHARED_FILE_BYTES,
-	type Place,
-	type TurnComputer,
+	MAX_SHARED_FILE_MEGABYTES,
+	megabytes,
+	readSharableFile,
 } from "../computer/tools.ts";
+import { type Failed, failed } from "../failed.ts";
+import { refusedHeader } from "../http/tools.ts";
 import { unreadableFileRefusal } from "../read-chat-file/tool.ts";
 
 /** Longer than a signed URL lives, which is a minute for Linear's. */
@@ -27,18 +29,10 @@ const TIMEOUT_MS = 60_000;
 const MAX_REFUSAL_CHARACTERS = 1_000;
 
 const MAX_CHAT_FILE_MEGABYTES = MAX_ATTACHMENT_BYTES / (1024 * 1024);
-const MAX_COMPUTER_FILE_MEGABYTES = MAX_SHARED_FILE_BYTES / (1024 * 1024);
 
 type Source = { kind: "chat"; fileId: string } | { kind: "computer"; path: string };
 
 type UploadResult = { status: "uploaded"; bytes: number } | Failed;
-
-interface Failed {
-	status: "failed";
-	error: UserText;
-}
-
-const failed = (error: UserText): Failed => ({ status: "failed", error });
 
 /** A service's signed upload address, and what its upload tool tells the model. */
 export interface SignedUpload {
@@ -53,7 +47,7 @@ export interface UploadSide {
 	readonly chatId: string;
 	readonly files: Pick<ChatFileStore.Interface, "read">;
 	/** Undefined when the turn has no computer, so a path is refused. */
-	readonly computer: (TurnComputer & { readonly place: Place }) | undefined;
+	readonly computer: ComputerAtPlace | undefined;
 	readonly upload: EgressHttpClients;
 	readonly run: RunEffect<never>;
 }
@@ -71,7 +65,7 @@ export function signedUploadTool(
 	{ chatId, files, computer, upload, run }: UploadSide,
 ): Tool {
 	return tool({
-		description: `Upload a file to a signed upload URL. ${service.howTo} Give the file in this chat by its id, from the line that names it, or a file in the computer by its path. Pass the URL and every header you were given exactly as given; the file's bytes are sent as they are. Files up to ${MAX_CHAT_FILE_MEGABYTES} MB from the chat or ${MAX_COMPUTER_FILE_MEGABYTES} MB from the computer.`,
+		description: `Upload a file to a signed upload URL. ${service.howTo} Give the file in this chat by its id, from the line that names it, or a file in the computer by its path. Pass the URL and every header you were given exactly as given; the file's bytes are sent as they are. Files up to ${MAX_CHAT_FILE_MEGABYTES} MB from the chat or ${MAX_SHARED_FILE_MEGABYTES} MB from the computer.`,
 		inputSchema: Schema.Struct({
 			file: Schema.optional(
 				Schema.String.check(Schema.isUUID()).annotate({
@@ -101,9 +95,8 @@ export function signedUploadTool(
 					userText`That isn't the service's upload address. Use the signed URL it gave you, as given.`,
 				);
 			}
-			if (Object.keys(headers).some(isClientOwnedHeader)) {
-				return failed(userText`One of those headers is set by Sugabots itself. Leave it out.`);
-			}
+			const refusal = refusedHeader(headers, undefined);
+			if (refusal) return refusal;
 			const content =
 				source.kind === "chat"
 					? await run(chatFileContent(files, chatId, source.fileId), {
@@ -163,20 +156,14 @@ async function computerFileContent(
 ): Promise<Uint8Array | Failed> {
 	if (!computer)
 		return failed(userText`This bot has no computer, so only files in the chat can be uploaded.`);
-	const tooLarge = (sizeBytes: number) =>
-		failed(
-			userText`The file is ${megabytes(sizeBytes)} MB; files up to ${MAX_COMPUTER_FILE_MEGABYTES} MB from the computer can be uploaded.`,
-		);
 	const absolutePath = posix.resolve(computer.place.folder, path);
 	const read = await inComputer(computer, abortSignal, (opened) =>
-		Effect.gen(function* () {
-			// Its size alone first, so a file too large is never read.
-			const { sizeBytes } = yield* opened.readFile(absolutePath, 0);
-			if (sizeBytes > MAX_SHARED_FILE_BYTES) return tooLarge(sizeBytes);
-			const whole = yield* opened.readFile(absolutePath, MAX_SHARED_FILE_BYTES);
-			if (whole.sizeBytes > MAX_SHARED_FILE_BYTES) return tooLarge(whole.sizeBytes);
-			return { content: whole.content };
-		}),
+		readSharableFile(
+			opened,
+			absolutePath,
+			(sizeBytes) =>
+				userText`The file is ${megabytes(sizeBytes)} MB; files up to ${MAX_SHARED_FILE_MEGABYTES} MB from the computer can be uploaded.`,
+		),
 	);
 	return "content" in read ? read.content : read;
 }
@@ -216,8 +203,4 @@ async function put(
 	return failed(
 		userText`The upload was refused with HTTP ${response.status}: ${UserText.unchecked(said)}`,
 	);
-}
-
-function megabytes(bytes: number): number {
-	return Math.round(bytes / 104_857.6) / 10;
 }

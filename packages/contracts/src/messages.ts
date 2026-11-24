@@ -15,6 +15,7 @@ import {
 import { type Bot, botColorSchema, botEyesSchema, botShapeSchema } from "./bots.ts";
 import { emailSchema } from "./email.ts";
 import { FILE_WRITING_TOOLS, fileWrittenSchema } from "./files.ts";
+import { anyJsonSchema } from "./json.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
@@ -24,26 +25,19 @@ export const MAX_CHAT_HISTORY_LIMIT = 100;
 
 /**
  * What kind of chat it is: a project's chat (a bot's chats being
- * its default project's), a collaboration a bot asked for, an automation's run
- * or feed, or a system bot's chat.
+ * its default project's), an automation's run or feed, or a system bot's chat.
  */
-const chatKindSchema = Schema.Literals([
-	"project_chat",
-	"collaboration",
-	"run",
-	"automation_feed",
-	"system_chat",
-]);
+const chatKindSchema = Schema.Literals(["project_chat", "run", "automation_feed", "system_chat"]);
 
 export type ChatKind = typeof chatKindSchema.Type;
 
 /**
- * Whether ordinary messages in a chat of `kind` notify people: only a
+ * Whether ordinary messages in a chat of `kind` notify members: only a
  * chat's, not an automation feed's or those of the chats bots work
  * in. One exception: an automation's result posted only in its feed notifies
- * the people it mentions, which the notifications check separately.
+ * the members it mentions, which the notifications check separately.
  */
-export const notifiesPeople = (kind: ChatKind): kind is "project_chat" => kind === "project_chat";
+export const notifiesMembers = (kind: ChatKind): kind is "project_chat" => kind === "project_chat";
 
 export const chatHistoryQuerySchema = Schema.Struct({
 	cursor: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
@@ -57,32 +51,26 @@ export const chatHistoryQuerySchema = Schema.Struct({
 export type ChatHistoryQuery = typeof chatHistoryQuerySchema.Type;
 
 /**
- * A chat of any kind, with where it is placed: its project, its bot,
- * the chat people open that it is in, and the one it was opened under.
+ * A chat of any kind, with where it is placed: its project, its bot, and
+ * the chat members open that it is in.
  */
 export const placedChatSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
 	/** The project it is in; only a project's own chats are in one. */
 	projectId: Schema.NullOr(uuidSchema),
-	/** The bot it is with; null in a project people made. */
+	/** The bot it is with; null in a project members made. */
 	botId: Schema.NullOr(uuidSchema),
 	/**
-	 * The chat people open that it is in: its own id on a bot's chat,
-	 * a project's chat and an automation's feed; the
-	 * one it hangs under on a collaboration; the automation's feed on a run.
+	 * The chat members open that it is in: its own id on a bot's chat,
+	 * a project's chat and an automation's feed; the automation's feed on a run.
 	 * Null on a system bot's chat.
 	 */
 	rootChatId: Schema.NullOr(uuidSchema),
 	kind: chatKindSchema,
 	title: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_CHAT_TITLE_CHARACTERS)),
-	/** `running` while a turn is queued or in progress in it. */
-	status: Schema.Literals(["running", "done"]),
-	/**
-	 * The chat this one was opened under: the asking chat of a
-	 * collaboration, which holds the card for it, or the one a system bot serves.
-	 */
-	parentChatId: Schema.NullOr(uuidSchema),
+	/** True while a bot's turn is queued or working in it. */
+	working: Schema.Boolean,
 	/** When somebody marked the chat resolved; null while it is open, and on any other kind. */
 	resolvedAt: Schema.NullOr(isoTimestampSchema),
 	createdAt: isoTimestampSchema,
@@ -91,17 +79,17 @@ export const placedChatSchema = Schema.Struct({
 
 export type PlacedChat = typeof placedChatSchema.Type;
 
-export const personParticipantSchema = Schema.Struct({
-	kind: Schema.Literal("person"),
+export const memberParticipantSchema = Schema.Struct({
+	kind: Schema.Literal("member"),
 	id: uuidSchema,
 	name: Schema.String,
 	email: emailSchema,
-	/** Derived from the name; how the person is mentioned. */
+	/** Derived from the name; how the member is mentioned. */
 	handle: Schema.String,
 	image: Schema.NullOr(Schema.String),
 });
 
-export type PersonParticipant = typeof personParticipantSchema.Type;
+export type MemberParticipant = typeof memberParticipantSchema.Type;
 
 export const botParticipantSchema = Schema.Struct({
 	kind: Schema.Literal("bot"),
@@ -128,12 +116,12 @@ export function botParticipantOf(bot: Bot): BotParticipant {
 	};
 }
 
-export const participantSchema = Schema.Union([personParticipantSchema, botParticipantSchema]);
+export const participantSchema = Schema.Union([memberParticipantSchema, botParticipantSchema]);
 
 export type Participant = typeof participantSchema.Type;
 
 const messageAuthorSchema = Schema.Union([
-	personParticipantSchema,
+	memberParticipantSchema,
 	botParticipantSchema,
 	automationTriggerAuthorSchema,
 ]);
@@ -181,8 +169,8 @@ export function mentionPattern(handle: string, ...more: string[]): string {
 /**
  * Handles that address everyone in a chat instead of one participant,
  * as `@here` and `@channel` do in Slack. Nothing tells who is active, so
- * both reach everyone who can see the chat. They address people, never
- * a bot, so a message whose only mentions are these mentions only people, and
+ * both reach everyone who can see the chat. They address members, never
+ * a bot, so a message whose only mentions are these mentions only members, and
  * follows the floor's rule for that (see `decideFloor`): in a project's chat
  * the lead bot may still take a turn it can decline.
  */
@@ -200,20 +188,20 @@ export function mentionsEveryone(content: string): boolean {
 }
 
 /**
- * Whether a message's mentioned `handles` address only people: at least one
- * is a person's or `@here`/`@channel`, and none is a bot's. A handle that is
+ * Whether a message's mentioned `handles` address only members: at least one
+ * is a member's or `@here`/`@channel`, and none is a bot's. A handle that is
  * nobody's, as when a name is written out rather than picked, is only text
  * and counts for neither. A bot replying wherever it is not named keeps out
- * of such a message, as it is meant for the people.
+ * of such a message, as it is meant for the members.
  */
-export function mentionsOnlyPeople(
+export function mentionsOnlyMembers(
 	handles: readonly string[],
-	known: { botHandles: ReadonlySet<string>; peopleHandles: ReadonlySet<string> },
+	known: { botHandles: ReadonlySet<string>; membersHandles: ReadonlySet<string> },
 ): boolean {
-	const mentionsPeople = handles.some(
-		(handle) => isGroupMentionHandle(handle) || known.peopleHandles.has(handle),
+	const mentionsMembers = handles.some(
+		(handle) => isGroupMentionHandle(handle) || known.membersHandles.has(handle),
 	);
-	return mentionsPeople && !handles.some((handle) => known.botHandles.has(handle));
+	return mentionsMembers && !handles.some((handle) => known.botHandles.has(handle));
 }
 
 /** `content` without its mentions, the text around them kept as it is. */
@@ -232,41 +220,6 @@ export function mentionedHandles(content: string): string[] {
 	return [...found];
 }
 
-/**
- * How a collaboration stands. `waiting`: the asking bot's turn is blocked
- * on the answer. `pending`: it gave up waiting and will be resumed when the
- * answer arrives. `answered` and `failed` are final.
- */
-export const collaborationStatusSchema = Schema.Literals([
-	"waiting",
-	"pending",
-	"answered",
-	"failed",
-]);
-
-export type CollaborationStatus = typeof collaborationStatusSchema.Type;
-
-/**
- * One bot asking another for help, in the middle of a reply. Sits between
- * the text parts at the point the bot made the call; the collaborator answers
- * in `chatId`, a chat of its own under this one.
- */
-export const collaborationPartSchema = Schema.Struct({
-	type: Schema.Literal("collaboration"),
-	id: uuidSchema,
-	/** The collaborator. */
-	botId: uuidSchema,
-	botName: Schema.String,
-	/** The chat the collaborator answers in. */
-	chatId: uuidSchema,
-	brief: Schema.String,
-	status: collaborationStatusSchema,
-	answer: Schema.NullOr(Schema.String),
-	/** How many characters of the reply's text had been written when the call was made. */
-	atOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-});
-
-export type CollaborationPart = typeof collaborationPartSchema.Type;
 /**
  * How a tool call stands. `running` while the tool executes; `completed` with
  * its output, or `failed` with the error the model was shown, once it returns.
@@ -288,8 +241,7 @@ export type ToolApprovalStatus = typeof toolApprovalStatusSchema.Type;
  * Who may decide a tool call's approval: `chat`, those who decide
  * approvals in the chat it was raised in; `computer-managers`, for a
  * bot's request to change the computer its turn works on, such as what it may
- * reach, those who manage that computer's project: the chat's project,
- * or in a collaboration the collaborating bot's default project.
+ * reach, those who manage that computer's project, the chat's project.
  */
 const toolApproversSchema = Schema.Literals(["chat", "computer-managers"]);
 
@@ -300,9 +252,7 @@ export type ToolApprovers = typeof toolApproversSchema.Type;
  * recursive message-part types built on it stay within TypeScript's
  * instantiation depth.
  */
-export const jsonValueSchema = Schema.Unknown.check(
-	Schema.makeFilter(Schema.is(Schema.Json), { expected: "a JSON value" }),
-).pipe(
+export const jsonValueSchema = anyJsonSchema.pipe(
 	Schema.decodeTo(
 		Schema.Union([
 			Schema.String,
@@ -318,8 +268,8 @@ export const jsonValueSchema = Schema.Unknown.check(
 export type JsonValue = typeof jsonValueSchema.Type;
 
 /**
- * One call a bot made to a built-in tool, in the middle of a reply. Sits
- * between the text parts at the point the call was made, like a collaboration.
+ * One call a bot made to a tool, in the middle of a reply. Sits
+ * between the text parts at the point the call was made.
  * `input` and `output` are whatever the tool took and returned, truncated by
  * the server when large.
  */
@@ -332,21 +282,16 @@ export const toolCallPartSchema = Schema.Struct({
 	/** Null until the tool returns, and after it fails. */
 	output: Schema.NullOr(jsonValueSchema),
 	status: toolCallStatusSchema,
-	/** Present only when the call passed through approval: a write/delete connector tool call, or a request a person decides. */
-	approval: Schema.optional(
-		Schema.NullOr(
-			Schema.Struct({
-				status: toolApprovalStatusSchema,
-				/** Absent: `chat`. */
-				approvers: Schema.optional(toolApproversSchema),
-				decidedByName: Schema.NullOr(Schema.String),
-				decidedAt: Schema.NullOr(isoTimestampSchema),
-			}),
-		),
+	/** Null unless the call asked for approval: a write/delete connector tool call, or a request a member decides. */
+	approval: Schema.NullOr(
+		Schema.Struct({
+			status: toolApprovalStatusSchema,
+			approvers: toolApproversSchema,
+			decidedByName: Schema.NullOr(Schema.String),
+			decidedAt: Schema.NullOr(isoTimestampSchema),
+		}),
 	),
 	error: Schema.NullOr(Schema.String),
-	/** Whether the tool may have changed something at the other end. */
-	writeOrDelete: Schema.Boolean,
 	/** How many characters of the reply's text had been written when the call was made. */
 	atOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	startedAt: isoTimestampSchema,
@@ -355,16 +300,16 @@ export const toolCallPartSchema = Schema.Struct({
 
 export type ToolCallPart = typeof toolCallPartSchema.Type;
 
-/** The tool a bot starts a chat with, for the person it is answering. */
+/** The tool a bot starts a chat with, for the member it is answering. */
 export const START_CHAT_TOOL = "start_chat";
 
 /** A chat a bot started with `start_chat`: what the tool returns, and what the chat links to. */
 export const botStartedChatSchema = Schema.Struct({
 	id: uuidSchema,
 	title: Schema.String,
-	/** The bot it is with, by name, when that is another bot. */
+	/** The bot it is with, by name, when that is another bot; absent when it is the bot that started it. */
 	with: Schema.optional(Schema.String),
-	/** That bot's id, which the chat finds it by. Absent from chats started before it was recorded. */
+	/** That bot's id, which the chat finds it by; present exactly when `with` is. */
 	withBotId: Schema.optional(uuidSchema),
 });
 
@@ -418,7 +363,6 @@ export function filesWrittenBy(
 
 const messagePartSchema = Schema.Union([
 	textPartSchema,
-	collaborationPartSchema,
 	toolCallPartSchema,
 	filePartSchema,
 	writtenFilePartSchema,
@@ -488,14 +432,14 @@ export function isAttached(part: MessagePart): part is AttachedPart {
 	return part.type === "file" || part.type === "written_file";
 }
 
-/** The collaborations and tool calls in a message, as they were placed in its text. */
+/** The tool calls in a message, as they were placed in its text. */
 export function placedParts(message: { parts: readonly MessagePart[] }): PlacedPart[] {
 	return message.parts.filter((part): part is PlacedPart => "atOffset" in part);
 }
 
 /**
- * The parts of a message whose text is `content` and whose collaborations and
- * tool calls happened at the given offsets: text, a placed part, more text.
+ * The parts of a message whose text is `content` and whose tool calls
+ * happened at the given offsets: text, a placed part, more text.
  * Shared by the server, which stores it, and the client, which rebuilds it as
  * text streams in.
  */
@@ -591,13 +535,13 @@ const reactorSchema = Schema.Struct({
 });
 
 /**
- * One emoji on a message, with the people who reacted with it and the bots,
+ * One emoji on a message, with the members who reacted with it and the bots,
  * each earliest first. A bot reacts only with 👀, to a message it read and
  * chose not to answer.
  */
 const messageReactionSchema = Schema.Struct({
 	emoji: reactionEmojiSchema,
-	people: Schema.mutable(Schema.Array(reactorSchema)),
+	members: Schema.mutable(Schema.Array(reactorSchema)),
 	/** Absent when no bot reacted with it. */
 	bots: Schema.optional(Schema.mutable(Schema.Array(reactorSchema))),
 });
@@ -610,7 +554,6 @@ export const messageSchema = Schema.Struct({
 	id: uuidSchema,
 	chatId: uuidSchema,
 	author: messageAuthorSchema,
-	kind: Schema.Literal("text"),
 	status: messageStatusSchema,
 	parts: Schema.mutable(Schema.Array(messagePartSchema)),
 	content: Schema.String,
@@ -620,10 +563,10 @@ export const messageSchema = Schema.Struct({
 	automationResultOf: Schema.optional(automationResultOfSchema),
 	/** The message this one quotes and answers, in the same chat. */
 	replyTo: Schema.optional(messageReplyToSchema),
-	/** People's and bots' reactions, in the order each emoji was first used. Absent when there are none. */
+	/** Members' and bots' reactions, in the order each emoji was first used. Absent when there are none. */
 	reactions: Schema.optional(messageReactionsSchema),
 	createdAt: isoTimestampSchema,
-	/** When the bot's turn that wrote this reply ended. Absent on people's messages and replies still being written. */
+	/** When the bot's turn that wrote this reply ended. Absent on members' messages and replies still being written. */
 	finishedAt: Schema.optional(isoTimestampSchema),
 })
 	.check(
@@ -638,11 +581,11 @@ export const messageSchema = Schema.Struct({
 export type Message = typeof messageSchema.Type;
 
 /**
- * How far a person has read a chat: every message created at or before
+ * How far a member has read a chat: every message created at or before
  * `readThrough`, as of `readAt`. Recorded only for a chat.
  */
 export const chatReadSchema = Schema.Struct({
-	person: personParticipantSchema,
+	member: memberParticipantSchema,
 	readThrough: isoTimestampSchema,
 	/** When they last read further. */
 	readAt: isoTimestampSchema,
@@ -653,16 +596,16 @@ export type ChatRead = typeof chatReadSchema.Type;
 /** A chat as it is read: where it is, a page of its messages, and who is in it. */
 export const chatDetailsSchema = Schema.Struct({
 	chat: placedChatSchema,
-	capabilities: Schema.optional(
+	/** What this member may decide of the approvals the chat raises. */
+	permissions: Schema.optional(
 		Schema.Struct({
 			approveToolCalls: Schema.Boolean,
 			/**
-			 * The bots in the chat whose requests to change the computer their
-			 * turns work on this person may decide: those who manage that computer's
-			 * project, which is the chat's project, or in a collaboration the
-			 * collaborating bot's default project.
+			 * Whether this member may decide the bots' requests to change the
+			 * computer their turns work on: those who manage that computer's
+			 * project, the chat's.
 			 */
-			approveComputerRequestsOf: Schema.optional(Schema.Array(uuidSchema)),
+			approveComputerRequests: Schema.Boolean,
 		}),
 	),
 	automationRun: Schema.NullOr(runSchema),
@@ -685,11 +628,11 @@ export const chatDetailsSchema = Schema.Struct({
 	 */
 	projectBots: Schema.mutable(Schema.Array(botParticipantSchema)),
 	/**
-	 * The people who reach the project, whether or not they have written here:
-	 * with the chat's people, those a mention can name. In a project
-	 * people made, its members; in a bot's default project, whoever reaches the bot.
+	 * The members who reach the project, whether or not they have written here:
+	 * with the chat's participants, those a mention can name. In a project
+	 * members made, its members; in a bot's default project, whoever reaches the bot.
 	 */
-	peopleReachingProject: Schema.mutable(Schema.Array(personParticipantSchema)),
+	membersReachingProject: Schema.mutable(Schema.Array(memberParticipantSchema)),
 	messages: Schema.mutable(Schema.Array(messageSchema)),
 	olderMessagesCursor: Schema.NullOr(Schema.String),
 	/**
@@ -698,7 +641,7 @@ export const chatDetailsSchema = Schema.Struct({
 	 * asked for it on, waits for that turn. Null when no turn waits.
 	 */
 	queuedSince: Schema.NullOr(isoTimestampSchema),
-	/** How far each person who has opened the chat has read it, the caller included. */
+	/** How far each member who has opened the chat has read it, the caller included. */
 	reads: Schema.mutable(Schema.Array(chatReadSchema)),
 });
 

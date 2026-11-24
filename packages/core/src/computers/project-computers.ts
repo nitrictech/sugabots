@@ -46,8 +46,8 @@ const REGISTRY_TIMEOUT = Duration.seconds(5);
 /** How long after a computer fails to upgrade on its own before it is tried again. */
 const UPGRADE_RETRY = Duration.hours(1);
 /**
- * Clearing a filling disk stops once the workspace is less than this share
- * full, leaving room for the next turn's clones and installs.
+ * Clearing a filling disk stops once the work directory's disk is less than
+ * this share full, leaving room for the next turn's clones and installs.
  */
 const CLEARED_BELOW_SHARE = 0.7;
 
@@ -56,8 +56,8 @@ const CLEARED_BELOW_SHARE = 0.7;
  * computer, made the first time one of its bots needs it, then opened, and resumed, on
  * every later use. A turn using it holds a lease, and a computer no turn has
  * held for {@link IDLE_BEFORE_SLEEP} is asleep, so it stops costing compute.
- * A turn waiting for a person's approval has ended its run and holds no
- * lease, so nobody pays for a computer while a person is away.
+ * A turn waiting for a member's approval has ended its run and holds no
+ * lease, so nobody pays for a computer while a member is away.
  */
 export interface Interface {
 	/**
@@ -244,7 +244,6 @@ export const make = Effect.gen(function* () {
 			yield* computer.setNetwork({
 				reach,
 				credentials: fittedTo(at.capabilities.credentials, signedIn.credentials),
-				environment: at.capabilities.credentials === "none" ? {} : signedIn.environment,
 			});
 			if (signedIn.expiresAt === undefined) {
 				signInDue.delete(project.projectId);
@@ -710,7 +709,7 @@ export const make = Effect.gen(function* () {
 				),
 		);
 
-	/** Who holds a live lease on the computer: turns, and people watching a desktop. */
+	/** Who holds a live lease on the computer: turns, and members watching a desktop. */
 	const holders = (computerId: string) =>
 		Effect.gen(function* () {
 			const now = yield* DateTime.nowAsDate;
@@ -727,7 +726,7 @@ export const make = Effect.gen(function* () {
 	/** Fails while a turn is using the computer, which a reset or upgrade would pull out from under it. */
 	const requireIdle = (computerId: string) =>
 		Effect.flatMap(holders(computerId), ({ turns }) =>
-			turns > 0 ? Effect.fail(new ComputerInUse({ turns })) : Effect.void,
+			turns > 0 ? Effect.fail(new ComputerInUse()) : Effect.void,
 		);
 
 	/**
@@ -776,9 +775,9 @@ export const make = Effect.gen(function* () {
 						),
 				}),
 			);
-			const archivePath = `/tmp/sugabots-workspace-${yield* ids.random}.tgz`;
+			const archivePath = `/tmp/sugabots-work-${yield* ids.random}.tgz`;
 			const packed = yield* old.exec(
-				`cd ${Computers.WORKSPACE_DIRECTORY} && tar --exclude-vcs-ignores --exclude=./${posix.basename(SET_ASIDE_DIRECTORY)} -czf ${archivePath} .`,
+				`cd ${Computers.WORK_DIRECTORY} && tar --exclude-vcs-ignores --exclude=./${posix.basename(SET_ASIDE_DIRECTORY)} -czf ${archivePath} .`,
 				COPY_STEP,
 			);
 			if (packed.exitCode !== 0) {
@@ -802,7 +801,7 @@ export const make = Effect.gen(function* () {
 					computer.uploadFile(archivePath, archive).pipe(
 						Effect.andThen(
 							computer.exec(
-								`tar -xzf ${archivePath} -C ${Computers.WORKSPACE_DIRECTORY} && rm ${archivePath}`,
+								`tar -xzf ${archivePath} -C ${Computers.WORK_DIRECTORY} && rm ${archivePath}`,
 								COPY_STEP,
 							),
 						),
@@ -1153,7 +1152,7 @@ export const make = Effect.gen(function* () {
 						createdAt: row.createdAt,
 						lastUsedAt: row.lastUsedAt,
 						turnsUsing: using.turns,
-						peopleWatching: using.watching,
+						membersWatching: using.watching,
 						disk: measuredDiskOf(row),
 					};
 					const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
@@ -1347,7 +1346,7 @@ function imageIsBehind(madeFrom: string, configured: string, pinned: string | un
 
 type ComputerRow = typeof computerTable.$inferSelect;
 
-/** What holds a lease: a turn using the computer, or a person viewing its desktop. */
+/** What holds a lease: a turn using the computer, or a member viewing its desktop. */
 export interface Holder {
 	readonly kind: ComputerLeaseHolderKind;
 	readonly id: string;
@@ -1393,7 +1392,7 @@ type Status =
 			readonly createdAt: Date;
 			readonly lastUsedAt: Date;
 			readonly turnsUsing: number;
-			readonly peopleWatching: number;
+			readonly membersWatching: number;
 			/** Whether the enabled provider would make it from another image, or is another provider. */
 			readonly upgradeAvailable: boolean;
 			/** Its last measurement, if it has been measured. */
@@ -1419,10 +1418,7 @@ function imageOf(access: Computers.ProviderAccess): string {
 }
 
 /** A turn is using the computer, and resetting or upgrading it would pull it out from under the project. */
-export class ComputerInUse
-	extends Data.TaggedError("ComputerInUse")<{ turns: number }>
-	implements UserFacing
-{
+export class ComputerInUse extends Data.TaggedError("ComputerInUse") implements UserFacing {
 	get userMessage() {
 		return userText`A bot is using the computer right now. Try again when it has finished.`;
 	}

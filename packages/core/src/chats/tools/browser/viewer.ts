@@ -1,9 +1,9 @@
 export * as DesktopViewer from "./viewer.ts";
 
 import { userText } from "@sugabots/errors";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Context, Deferred, Duration, Effect, Layer, type Scope } from "effect";
-import { type AuthorizationDenied, computerProjectIdOf } from "../../../authorization/access.ts";
+import type { AuthorizationDenied } from "../../../authorization/access.ts";
 import { Authorization } from "../../../authorization/authorization.ts";
 import type { CurrentActor } from "../../../authorization/current-actor.ts";
 import { Visibility } from "../../../authorization/visibility.ts";
@@ -17,16 +17,15 @@ import { placeOf } from "../computer/tools.ts";
 import { DesktopUnavailable, startDesktop } from "./browser.ts";
 
 /**
- * A bot's desktop in a chat, opened by a person to watch and use: where
+ * A bot's desktop in a chat, opened by a member to watch and use: where
  * the browser it drives is shown, on the computer the bot works on there, the
- * chat's project's (in a collaboration, the bot's own default
- * project's). Anyone who can read the chat, see the bot and see that
+ * chat's project's. Anyone who can read the chat, see the bot and see that
  * computer may open it, while the bot takes part in the chat and uses
  * computers. Those holding `computer.desktop.use` in the computer's project
  * may click and type on it too; anyone else only watches. Opening it uses the
  * computer as a turn would, resuming it, or making it if the project has
  * none, and starts the desktop if it isn't running; the computer stays awake
- * while it is open, and while the person may still see it as it was opened
+ * while it is open, and while the member may still see it as it was opened
  * for them.
  */
 export interface Interface {
@@ -45,14 +44,14 @@ export interface Interface {
 }
 
 /**
- * The VNC server a person reaches the desktop through, and its password, for
+ * The VNC server a member reaches the desktop through, and its password, for
  * Sugabots to answer with on their behalf: they never see it.
  */
 export interface OpenDesktop {
 	readonly endpoint: Computers.Endpoint;
 	readonly password: string;
 	/**
-	 * Completes once the person may no longer see the desktop as it was opened
+	 * Completes once the member may no longer see the desktop as it was opened
 	 * for them: they no longer reach the chat or the bot, the bot left
 	 * the chat or stopped using its computer, or they could click and
 	 * type and no longer may. Checked every `ACCESS_CHECK_INTERVAL`; the
@@ -88,17 +87,13 @@ export const make = Effect.gen(function* () {
 					),
 				).pipe(Effect.map((rows) => rows.length > 0));
 
-	/**
-	 * The project whose computer the bot works on in the chat: the
-	 * chat's, or in a collaboration the bot's own default project, as a
-	 * turn's is chosen.
-	 */
-	const computerProjectOf = (chatId: string, botId: string) =>
+	/** The project whose computer the bot works on in the chat: the chat's. */
+	const computerProjectOf = (chatId: string) =>
 		operation(
 			"open",
 			query((db) =>
 				db
-					.select({ id: computerProjectIdOf(placedChat, sql`${botId}::uuid`) })
+					.select({ id: placedChat.projectId })
 					.from(placedChat)
 					.where(eq(placedChat.id, chatId))
 					.limit(1),
@@ -116,7 +111,7 @@ export const make = Effect.gen(function* () {
 			if (!(yield* takesPart(chat, botId))) {
 				return yield* new DesktopUnavailable({ reason: NOT_IN_THIS_CHAT });
 			}
-			const projectId = yield* computerProjectOf(chat.id, botId);
+			const projectId = yield* computerProjectOf(chat.id);
 			if (projectId === undefined) {
 				return yield* new DesktopUnavailable({ reason: NO_COMPUTER });
 			}
@@ -148,15 +143,15 @@ export const make = Effect.gen(function* () {
 				// The UI hides the desktop then too, but this is what stops a request
 				// from making a computer for a bot that a computer manager kept off.
 				if (!bot.usesComputer) return yield* new DesktopUnavailable({ reason: NO_COMPUTER });
-				const owner = {
+				const place = {
 					workspaceId: chat.workspaceId,
 					projectId: computerProject.project.id,
 				};
-				const provider = yield* providers.enabled(owner.workspaceId);
+				const provider = yield* providers.enabled(place.workspaceId);
 				if (!provider) return yield* new DesktopUnavailable({ reason: COMPUTERS_OFF });
 				const holder: ProjectComputers.Holder = { kind: "viewer", id: yield* ids.random };
 				yield* Effect.addFinalizer(() => projectComputers.release(holder));
-				const { computer } = yield* projectComputers.open(owner, provider, holder);
+				const { computer } = yield* projectComputers.open(place, provider, holder);
 				const turn = { chatId, botId, color: bot.color };
 				const desktop = yield* startDesktop(computer, placeOf(turn), turn);
 				// The watch server ignores input, so a viewer's mouse and keys never
@@ -200,7 +195,7 @@ export const layer = layerNoDeps.pipe(
 	]),
 );
 
-/** How often an open desktop checks its person may still see it. */
+/** How often an open desktop checks its member may still see it. */
 const ACCESS_CHECK_INTERVAL = Duration.seconds(10);
 
 const NOT_IN_THIS_CHAT = userText`This bot has no desktop in this chat.`;

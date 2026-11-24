@@ -16,7 +16,7 @@ import {
 import { listNames } from "@/lib/name-list.ts";
 
 /*
- * A routine's timetable as people pick and read it: every so many days, weeks
+ * A routine's timetable as members pick and read it: every so many days, weeks
  * or months, on some days, at some times. A routine stored as cron is read
  * into those parts where it says something they can say, and is otherwise
  * kept as written, by a name, until somebody picks a repeat in its place.

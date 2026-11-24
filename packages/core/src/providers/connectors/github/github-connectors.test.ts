@@ -89,7 +89,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 			user: { login: id === 30 ? BOT_LOGIN : "octocat" },
 		});
 	};
-	// Comment 41 on #5's code answers comment 40, which starts its chat.
+	// Comment 41 on #5's code answers comment 40, which starts its review thread.
 	const codeComments: Route = ({ method, path }) => {
 		if (method === "GET" && path === "/repos/acme/web/pulls/comments/41") {
 			return json({ user: { login: "octocat" }, in_reply_to_id: 40 });
@@ -99,7 +99,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 			: undefined;
 	};
 	// #23 has eight pages of comments, one on each, the eighth newest.
-	const longChat: Route = ({ path, search }) => {
+	const longIssue: Route = ({ path, search }) => {
 		if (path !== "/repos/acme/web/issues/23/comments") return undefined;
 		const page = Number(new URLSearchParams(search).get("page"));
 		const last = "https://api.github.com/repositories/101/issues/23/comments?per_page=100&page=8";
@@ -163,7 +163,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 		pullRequests,
 		issuesAndComments,
 		codeComments,
-		longChat,
+		longIssue,
 		searches,
 		jobLogs,
 	);
@@ -185,7 +185,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 
 	afterAll(closeDatabase);
 
-	const as = (personId: string) => onPostgresAs(personId)(connectors);
+	const as = (memberId: string) => onPostgresAs(memberId)(connectors);
 	const project = () => ({ workspaceId: fixture.workspaceId, projectId: fixture.projectId });
 
 	it("lists what the app reaches, for someone who manages the bot's connectors", async () => {
@@ -315,7 +315,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 		]);
 	});
 
-	it("replies to a comment on code in its chat, through the comment that starts it", async () => {
+	it("replies to a comment on code in its review thread, through the comment that starts it", async () => {
 		const connected = await runOnPostgres(connectors.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 
@@ -334,7 +334,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 		});
 	});
 
-	it("reads a long chat's first and newest comments, saying some between were left out", async () => {
+	it("reads a long issue's first and newest comments, saying some between were left out", async () => {
 		const connected = await runOnPostgres(connectors.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 

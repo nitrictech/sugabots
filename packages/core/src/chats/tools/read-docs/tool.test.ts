@@ -69,7 +69,7 @@ describe("read_docs", () => {
 	});
 
 	it("writes out what each role may do, where the website shows an interactive table", async () => {
-		const markdown = markdownOf(await read({ page: "people-and-roles", sections: ["Roles"] }));
+		const markdown = markdownOf(await read({ page: "members-and-roles", sections: ["Roles"] }));
 		expect(markdown).not.toContain("<RoleMatrix");
 		for (const ability of roleAbilities) expect(markdown).toContain(ability.label);
 	});

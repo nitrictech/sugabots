@@ -3,8 +3,14 @@ import { Turns } from "@sugabots/core/chats/turns/turns";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import type { PersonResolver } from "./app.test-support.ts";
-import { createTestApp, identifiedBy, serverSettingsWithWebAppAt } from "./app.test-support.ts";
+import type { MemberResolver } from "./app.test-support.ts";
+import {
+	createTestApp,
+	identifiedBy,
+	serverSettingsWithWebAppAt,
+	sessionTokenIn,
+	signedInWith,
+} from "./app.test-support.ts";
 import { MAX_JSON_BODY_BYTES } from "./validation.ts";
 
 const signedIn = {
@@ -14,13 +20,13 @@ const signedIn = {
 	image: null,
 };
 
-const resolvePerson: PersonResolver = async (headers) =>
-	headers.get("authorization") === "Bearer good-token" ? signedIn : null;
+const resolveMember: MemberResolver = async (headers) =>
+	sessionTokenIn(headers) === "good-token" ? signedIn : null;
 
-const app = createTestApp(identifiedBy(resolvePerson));
+const app = createTestApp(identifiedBy(resolveMember));
 
 describe("GET /health", () => {
-	it("answers without a token", async () => {
+	it("answers without a session", async () => {
 		const response = await app.request("/health");
 
 		expect(response.status).toBe(200);
@@ -38,59 +44,15 @@ describe("GET /health", () => {
 });
 
 describe("GET /me", () => {
-	it("returns the signed-in person behind the token", async () => {
-		const response = await app.request("/me", {
-			headers: { authorization: "Bearer good-token" },
-		});
+	it("returns the current user behind the session cookie", async () => {
+		const response = await app.request("/me", { headers: signedInWith("good-token") });
 
 		expect(response.status).toBe(200);
-		expect(Schema.decodeUnknownSync(meSchema)(await response.json()).person).toEqual(signedIn);
+		expect(Schema.decodeUnknownSync(meSchema)(await response.json()).member).toEqual(signedIn);
 	});
 
-	it("returns the signed-in person behind a Better Auth cookie when Authorization is absent", async () => {
-		const cookieApp = createTestApp(
-			identifiedBy(async (headers) =>
-				headers.get("cookie") === "better-auth.session_token=cookie-token" ? signedIn : null,
-			),
-		);
-
-		const response = await cookieApp.request("/me", {
-			headers: { cookie: "better-auth.session_token=cookie-token" },
-		});
-
-		expect(response.status).toBe(200);
-		expect(Schema.decodeUnknownSync(meSchema)(await response.json()).person).toEqual(signedIn);
-	});
-
-	it("does not fall back to a cookie when an invalid bearer token is present", async () => {
-		const cookieApp = createTestApp(
-			identifiedBy(async (headers) =>
-				headers.get("cookie") === "better-auth.session_token=cookie-token" ? signedIn : null,
-			),
-		);
-
-		const response = await cookieApp.request("/me", {
-			headers: {
-				authorization: "Bearer stale-token",
-				cookie: "better-auth.session_token=cookie-token",
-			},
-		});
-
-		expect(response.status).toBe(401);
-	});
-
-	it("rejects a token no session matches", async () => {
-		const response = await app.request("/me", {
-			headers: { authorization: "Bearer stale-token" },
-		});
-
-		expect(response.status).toBe(401);
-	});
-
-	it("ignores an authorization header that is not a bearer token", async () => {
-		const response = await app.request("/me", {
-			headers: { authorization: "Basic good-token" },
-		});
+	it("rejects a cookie no session matches", async () => {
+		const response = await app.request("/me", { headers: signedInWith("stale-token") });
 
 		expect(response.status).toBe(401);
 	});
@@ -148,20 +110,19 @@ describe("JSON body limit", () => {
 });
 
 describe("cors", () => {
-	it("allows the web origin to authenticate and resume an event stream", async () => {
-		const app = createTestApp(identifiedBy(resolvePerson));
+	it("allows the web origin to send its cookie and resume an event stream", async () => {
+		const app = createTestApp(identifiedBy(resolveMember));
 
 		const response = await app.request("/workspaces/example/events", {
 			method: "OPTIONS",
 			headers: {
 				origin: "http://localhost:5173",
 				"access-control-request-method": "GET",
-				"access-control-request-headers": "authorization,last-event-id",
+				"access-control-request-headers": "last-event-id",
 			},
 		});
 
 		expect(response.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
-		expect(response.headers.get("access-control-allow-headers")).toContain("authorization");
 		expect(response.headers.get("access-control-allow-headers")).toContain("last-event-id");
 		expect(response.headers.get("access-control-allow-credentials")).toBe("true");
 
@@ -178,10 +139,7 @@ describe("cookie request origins", () => {
 		Layer.mergeAll(
 			serverSettingsWithWebAppAt(trustedOrigin),
 			identifiedBy(async (headers) =>
-				headers.get("cookie") === "better-auth.session_token=cookie-token" ||
-				headers.get("authorization") === "Bearer good-token"
-					? signedIn
-					: null,
+				headers.get("cookie") === "better-auth.session_token=cookie-token" ? signedIn : null,
 			),
 			unimplemented(Turns.Controls, { decide: () => Effect.void }),
 		),
@@ -219,14 +177,4 @@ describe("cookie request origins", () => {
 			});
 		},
 	);
-
-	it("exempts a valid bearer-authenticated request from origin checks", async () => {
-		const response = await decideApproval({
-			authorization: "Bearer good-token",
-			cookie: "better-auth.session_token=stale-cookie",
-			origin: "https://attacker.example.com",
-		});
-
-		expect(response.status).toBe(202);
-	});
 });

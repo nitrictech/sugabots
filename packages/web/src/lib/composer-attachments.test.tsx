@@ -356,7 +356,7 @@ describe("useComposerAttachments", () => {
 		const refusal = new BadRequest({
 			message: userText`A file to send is no longer there. Remove it and attach it again`,
 			error: {
-				_tag: "UploadsNotFound",
+				_tag: "UnsentAttachmentsNotFound",
 				userMessage: userText`A file to send is no longer there. Remove it and attach it again`,
 				isRetryable: false,
 			},

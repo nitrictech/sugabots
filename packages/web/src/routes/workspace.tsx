@@ -59,7 +59,7 @@ export const shellRoute = createRoute({
 });
 
 /**
- * Where the workspace opens: the person's Personal Assistant's page, where
+ * Where the workspace opens: the member's Personal Assistant's page, where
  * something new is asked of it, made first if they have none. It is shown
  * here rather than at the assistant's own address, so the sidebar beside it
  * stays the workspace's.
@@ -74,7 +74,7 @@ export const workspaceIndexRoute = createRoute({
 function AssistantRoute() {
 	const { error } = useBots();
 	const assistant = useAssistant();
-	// The shell makes the assistant when the person has none; this shows whether that failed.
+	// The shell makes the assistant when the member has none; this shows whether that failed.
 	const ensureFailed = useEnsuringAssistantFailed();
 	if (assistant) {
 		return (

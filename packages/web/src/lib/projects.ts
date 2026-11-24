@@ -12,7 +12,7 @@ import { client } from "@/api.ts";
 import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
 /**
- * The projects this person sees: those they are in, which for an
+ * The projects this member sees: those they are in, which for an
  * administrator is every one, and the public ones they could join
  * (`isMember` tells them apart). Each one carries what they may do in it, as
  * the API resolves it.
@@ -108,19 +108,21 @@ export function useProjectMembers(projectId: string | undefined) {
 }
 
 /**
- * The people who reach the project: in a project people made, its members; in
+ * The members who reach the project: in a project members made, its members; in
  * a bot's default project, whoever reaches the bot.
  */
-export function usePeopleReachingProject(projectId: string) {
+export function useMembersReachingProject(projectId: string) {
 	return useQuery({
-		queryKey: ["project-people", projectId],
+		queryKey: ["project-members", projectId],
 		queryFn: ({ signal }) =>
-			Effect.runPromise(client.api.projects.listPeople({ params: { projectId } }), { signal }),
+			Effect.runPromise(client.api.projects.listMembersReaching({ params: { projectId } }), {
+				signal,
+			}),
 	});
 }
 
 /**
- * Adds a person in the workspace to a project, or takes them out. One mutation for both
+ * Adds a member in the workspace to a project, or takes them out. One mutation for both
  * directions because the caller is one list with an add and a remove on it.
  */
 export function usePlaceProjectMember(projectId: string) {
@@ -128,11 +130,11 @@ export function usePlaceProjectMember(projectId: string) {
 	const workspaceId = useWorkspace().workspace?.id;
 
 	return useMutation({
-		mutationFn: ({ personId, member }: { personId: string; member: boolean }) =>
+		mutationFn: ({ memberId, member }: { memberId: string; member: boolean }) =>
 			Effect.runPromise(
 				member
-					? client.api.projects.addMember({ params: { projectId }, payload: { personId } })
-					: client.api.projects.removeMember({ params: { projectId, personId } }),
+					? client.api.projects.addMember({ params: { projectId }, payload: { memberId } })
+					: client.api.projects.removeMember({ params: { projectId, memberId } }),
 			),
 		onSuccess: () => refreshMembership(queries, workspaceId, projectId),
 	});
@@ -163,7 +165,7 @@ export function useJoinProject() {
 
 /**
  * Fetches again what shows who is in the project `projectId`: the projects,
- * which count its people, its people, and who reaches it.
+ * which count its members, its members, and who reaches it.
  */
 function refreshMembership(
 	queries: QueryClient,
@@ -173,7 +175,7 @@ function refreshMembership(
 	return Promise.all([
 		queries.invalidateQueries({ queryKey: ["projects", workspaceId] }),
 		queries.invalidateQueries({ queryKey: ["project-members", projectId] }),
-		queries.invalidateQueries({ queryKey: ["project-people", projectId] }),
+		queries.invalidateQueries({ queryKey: ["project-members", projectId] }),
 	]);
 }
 

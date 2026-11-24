@@ -39,7 +39,7 @@ export type SidebarView = "settings" | "projects";
  * project's pages (the bot or project itself, a chat, its files or its
  * automations), the workspace narrowed to `IconRail` at the far left, and
  * beside it that bot's or project's own sidebar, `OwnerSidebar`. Everywhere
- * else: the person's Personal Assistant, the projects they are in, the bots
+ * else: the member's Personal Assistant, the projects they are in, the bots
  * they pinned, and you, Settings and Help at the foot. Its top is always left
  * clear for the button that puts it away, which sits over it while a chat is
  * open, so what is under it never moves; without `resizable`, its edge does
@@ -85,7 +85,7 @@ export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 				view={place.view}
 				workspace={workspace}
 				workspaces={workspaces ?? []}
-				signedIn={session.person ?? undefined}
+				signedIn={session.member ?? undefined}
 				settingsBack={place.inSettings ? undefined : backToPageLeft}
 				notificationSettings={notificationSettings}
 				onSignOut={() => void signOut()}
@@ -120,16 +120,16 @@ export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 	);
 }
 
-/** The bots the sidebar lists, besides the Personal Assistant: those the person pinned and may use. */
+/** The bots the sidebar lists, besides the Personal Assistant: those the member pinned and may use. */
 export function sidebarBots(bots: readonly Bot[]): Bot[] {
 	return bots.filter((bot) => bot.pinned && !bot.assistant && bot.permissions.talk);
 }
 
 /**
  * The bot or project whose pages the address is on, which the sidebar narrows
- * to beside: a bot the person talks to, or a project they are in. Someone
- * else's private bot, which an administrator only sees listed, and a project
- * the person has not joined, have none.
+ * to beside: a bot the member talks to, or a project they are in. Someone
+ * else's personal bot, which an administrator only sees listed, and a project
+ * the member has not joined, have none.
  */
 function useOwnerInView(place: SidebarPlace): ResourceOwner | undefined {
 	const { bots } = useBots();

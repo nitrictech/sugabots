@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 /**
- * A save the person waits on, such as a dialog's: whether one is in flight,
+ * A save the member waits on, such as a dialog's: whether one is in flight,
  * and why the last one failed, until the next begins. `save` runs `work` unless
  * a save is already in flight, and resolves to whether it succeeded; it never
  * rejects, since the failure is kept in `failure` to show.

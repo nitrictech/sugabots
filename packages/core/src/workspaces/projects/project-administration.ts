@@ -2,8 +2,8 @@ export * as ProjectAdministration from "./project-administration.ts";
 
 import {
 	type Bot,
+	type MemberParticipant,
 	newProjectSchema,
-	type PersonParticipant,
 	PROJECT_DESCRIPTION_MAX_LENGTH,
 	PROJECT_NAME_MAX_LENGTH,
 	type Project,
@@ -30,10 +30,10 @@ import { ProjectComputers } from "../../computers/project-computers.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { personFacingBotRow, toBot } from "../bots/bot.ts";
+import { projectBots } from "../bots/bot-reads.ts";
 import { projectSeenBy } from "./project.ts";
 import type { LeadsProjects } from "./project-leads.ts";
-import { peopleReachingProjectNamed, projectHeadcounts, projectMembers } from "./project-reads.ts";
+import { membersReachingProjectNamed, projectHeadcounts, projectMembers } from "./project-reads.ts";
 import { ProjectStore } from "./project-store.ts";
 
 /**
@@ -98,22 +98,22 @@ export interface Interface {
 		projectId: string;
 	}) => Effect.Effect<ProjectMember[], AuthorizationDenied, CurrentActor.Service>;
 	/**
-	 * The people who reach the project, by name, as a mention in its chats can
-	 * name them: in a project people made, its members; in a bot's default
+	 * The members who reach the project, by name, as a mention in its chats can
+	 * name them: in a project members made, its members; in a bot's default
 	 * project, which has none, whoever reaches the bot.
 	 */
-	readonly peopleReaching: (input: {
+	readonly membersReaching: (input: {
 		projectId: string;
-	}) => Effect.Effect<PersonParticipant[], AuthorizationDenied, CurrentActor.Service>;
-	/** Adds `personId` to the project. Adding somebody already in it changes nothing. */
+	}) => Effect.Effect<MemberParticipant[], AuthorizationDenied, CurrentActor.Service>;
+	/** Adds `memberId` to the project. Adding somebody already in it changes nothing. */
 	readonly addMember: (input: {
 		projectId: string;
-		personId: string;
+		memberId: string;
 	}) => Effect.Effect<void, AuthorizationDenied | NotInWorkspace, CurrentActor.Service>;
-	/** Takes `personId` out of the project. Refuses an administrator, who belongs to every one. */
+	/** Takes `memberId` out of the project. Refuses an administrator, who belongs to every one. */
 	readonly removeMember: (input: {
 		projectId: string;
-		personId: string;
+		memberId: string;
 	}) => Effect.Effect<
 		void,
 		AuthorizationDenied | AdministratorInEveryProject | NotInProject,
@@ -156,9 +156,9 @@ export const make = Effect.gen(function* () {
 	const projects = yield* ProjectStore.Service;
 	const projectComputers = yield* ProjectComputers.Service;
 
-	const takeOut = (project: schema.ProjectRow, personId: string) =>
+	const takeOut = (project: schema.ProjectRow, memberId: string) =>
 		Effect.gen(function* () {
-			const outcome = yield* projects.removeMember(project.workspaceId, project.id, personId);
+			const outcome = yield* projects.removeMember(project.workspaceId, project.id, memberId);
 			switch (outcome) {
 				case "removed":
 					return;
@@ -179,7 +179,7 @@ export const make = Effect.gen(function* () {
 						"workspace.read",
 					);
 					const listed = yield* query((db) =>
-						listedProjectStandingsFor(db, workspaceId, actor.personId),
+						listedProjectStandingsFor(db, workspaceId, actor.memberId),
 					);
 					// Counted only where the actor may list who is in the project, as its own lists would.
 					const headcountOf = yield* projectHeadcounts(
@@ -202,7 +202,7 @@ export const make = Effect.gen(function* () {
 						workspace,
 						"project.create",
 					);
-					// A bot the person can't see is answered as if it weren't there.
+					// A bot the member can't see is answered as if it weren't there.
 					yield* authorization.bot(input.leadBotId, "bot.read");
 					// Checked here, not only by the HTTP API, for callers such as the
 					// Personal Assistant that don't come through it.
@@ -216,7 +216,7 @@ export const make = Effect.gen(function* () {
 						givenSlug ?? slugify(details.name),
 					).pipe(Effect.mapError(() => new UnusableProjectName()));
 					const row = yield* projects.create(workspaceId, {
-						creatorId: actor.personId,
+						creatorId: actor.memberId,
 						slug,
 						...input,
 						...details,
@@ -269,31 +269,31 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		peopleReaching: ({ projectId }) =>
+		membersReaching: ({ projectId }) =>
 			operation(
-				"peopleReaching",
+				"membersReaching",
 				Effect.flatMap(authorization.project(projectId, "project.read"), ({ project }) =>
-					peopleReachingProjectNamed(project.id),
+					membersReachingProjectNamed(project.id),
 				),
 			),
 
-		addMember: ({ projectId, personId }) =>
+		addMember: ({ projectId, memberId }) =>
 			operation(
 				"addMember",
 				Effect.gen(function* () {
 					const { project } = yield* authorization.project(projectId, "project.members.manage");
-					if (!(yield* projects.addMember(project.workspaceId, project.id, personId))) {
+					if (!(yield* projects.addMember(project.workspaceId, project.id, memberId))) {
 						return yield* new NotInWorkspace();
 					}
 				}),
 			),
 
-		removeMember: ({ projectId, personId }) =>
+		removeMember: ({ projectId, memberId }) =>
 			operation(
 				"removeMember",
 				Effect.gen(function* () {
 					const { project } = yield* authorization.project(projectId, "project.members.manage");
-					return yield* takeOut(project, personId);
+					return yield* takeOut(project, memberId);
 				}),
 			),
 
@@ -302,7 +302,7 @@ export const make = Effect.gen(function* () {
 				"leave",
 				Effect.gen(function* () {
 					const { project, actor } = yield* authorization.project(projectId, "project.leave");
-					return yield* takeOut(project, actor.personId);
+					return yield* takeOut(project, actor.memberId);
 				}),
 			),
 
@@ -319,7 +319,7 @@ export const make = Effect.gen(function* () {
 					if (!projectPermissions(actor, { ...facts, isPublic }).join) {
 						return yield* new ResourceHidden({ resource: "project" });
 					}
-					const joined = yield* projects.join(project.workspaceId, project.id, actor.personId);
+					const joined = yield* projects.join(project.workspaceId, project.id, actor.memberId);
 					if (!joined) return yield* new ResourceHidden({ resource: "project" });
 					return projectSeenBy(joinedStanding(joined, actor));
 				}),
@@ -330,17 +330,7 @@ export const make = Effect.gen(function* () {
 				"bots",
 				Effect.gen(function* () {
 					const { project, actor } = yield* authorization.project(projectId, "project.read");
-					return (yield* projects.bots(project.id, actor.personId)).flatMap((row) => {
-						const bot = personFacingBotRow(row);
-						return bot
-							? [
-									toBot(
-										{ ...bot, defaultProjectId: row.defaultProjectId, createdBy: row.createdBy },
-										{ actor, pinned: row.pinned },
-									),
-								]
-							: [];
-					});
+					return yield* projectBots(project.id, actor);
 				}),
 			),
 
@@ -349,7 +339,7 @@ export const make = Effect.gen(function* () {
 				"addBot",
 				Effect.gen(function* () {
 					const { project } = yield* authorization.project(projectId, "project.bots.manage");
-					// A bot the person can't see is answered as if it weren't there.
+					// A bot the member can't see is answered as if it weren't there.
 					yield* authorization.bot(botId, "bot.read");
 					yield* projects.addBot(project.workspaceId, project.id, botId);
 				}),
@@ -361,7 +351,7 @@ export const make = Effect.gen(function* () {
 				Effect.flatMap(
 					authorization.project(projectId, "project.bots.manage"),
 					({ project, actor }) =>
-						projects.removeBot(project.workspaceId, project.id, botId, actor.personId),
+						projects.removeBot(project.workspaceId, project.id, botId, actor.memberId),
 				),
 			),
 	});
@@ -383,7 +373,7 @@ export class EmptyProjectUpdate
 	}
 }
 
-/** Administrators belong to every project people made, so nobody takes one out of it. */
+/** Administrators belong to every project members made, so nobody takes one out of it. */
 export class AdministratorInEveryProject
 	extends Data.TaggedError("AdministratorInEveryProject")
 	implements UserFacing
@@ -419,15 +409,15 @@ export class UnusableProjectName
 	}
 }
 
-/** Only a person in the project's workspace can be added to it. */
+/** Only a member in the project's workspace can be added to it. */
 export class NotInWorkspace extends Data.TaggedError("NotInWorkspace") implements UserFacing {
 	get userMessage() {
-		return userText`That person is not in this workspace`;
+		return userText`That member is not in this workspace`;
 	}
 }
 
 export class NotInProject extends Data.TaggedError("NotInProject") implements UserFacing {
 	get userMessage() {
-		return userText`That person is not in this project`;
+		return userText`That member is not in this project`;
 	}
 }

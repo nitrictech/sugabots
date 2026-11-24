@@ -41,7 +41,7 @@ import {
 
 /**
  * Right-clicking `children`, a project's or a bot's row in the sidebar, offers
- * what it notifies the person about, muting it among them, and, under More
+ * what it notifies the member about, muting it among them, and, under More
  * options, muting it for a while. Until
  * `settings` load, right-clicking does nothing; `children` stays the same
  * element either way, so the row isn't remounted when they arrive.
@@ -131,7 +131,7 @@ function MoreOptions({
 	);
 }
 
-/** A bell struck through, after the name of a project or bot the person muted, for good or for a while. */
+/** A bell struck through, after the name of a project or bot the member muted, for good or for a while. */
 export function MutedMark({
 	settings,
 	place,

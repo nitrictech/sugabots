@@ -7,4 +7,4 @@ import { apiBaseUrl } from "@/lib/api-url.ts";
  *
  * Browser sessions use an HttpOnly cookie that JavaScript cannot read.
  */
-export const client = createClient({ baseUrl: apiBaseUrl, authMode: "cookie" });
+export const client = createClient({ baseUrl: apiBaseUrl });

@@ -34,7 +34,7 @@ import { loadFailure } from "@/lib/query.ts";
 
 const KEY = "sugabots-workspace";
 
-/** Every workspace this person belongs to, in the order the API lists them. */
+/** Every workspace this member belongs to, in the order the API lists them. */
 export const workspacesQuery = queryOptions({
 	queryKey: ["workspaces"],
 	queryFn: ({ signal }) => Effect.runPromise(client.api.workspaces.list(), { signal }),
@@ -44,7 +44,7 @@ export function useWorkspaces() {
 	return useQuery(workspacesQuery);
 }
 
-/** The people in a workspace. Asks for nobody's roster until there is a workspace. */
+/** The members in a workspace. Asks for nobody's roster until there is a workspace. */
 export function useMemberships(workspaceId: string | undefined) {
 	return useQuery({
 		queryKey: ["workspaces", workspaceId, "memberships"],
@@ -171,7 +171,7 @@ export function useSendInvitation(workspaceId: string) {
 	});
 }
 
-/** An invitation that did not go out, and why, in words fit for people. */
+/** An invitation that did not go out, and why, in words fit for members. */
 export interface InvitationFailure {
 	email: string;
 	reason: string;
@@ -198,7 +198,7 @@ export async function sendInvitations(
 	return failures;
 }
 
-/** The invitations still outstanding, which the roster lists beside its people. */
+/** The invitations still outstanding, which the roster lists beside its members. */
 export function useWorkspaceInvitations(workspaceId: string) {
 	return useQuery({
 		queryKey: ["workspaces", workspaceId, "invites"],
@@ -221,7 +221,7 @@ export function useCancelWorkspaceInvitation(workspaceId: string) {
 
 /**
  * Leaving makes everything cached stale: every project, bot and chat on
- * screen belonged to a workspace this person is no longer in. So every query is
+ * screen belonged to a workspace this member is no longer in. So every query is
  * invalidated, and those on screen are fetched again.
  */
 export function useLeaveWorkspace(workspaceId: string) {
@@ -239,7 +239,7 @@ export function useLeaveWorkspace(workspaceId: string) {
  * Changing what somebody may do, and taking them out of the workspace.
  *
  * Both invalidate more than the roster: a role decides which projects somebody
- * reaches and what each project's `permissions` say, so when the person changed is
+ * reaches and what each project's `permissions` say, so when the member changed is
  * the one looking, everything scoped to them is stale. Invalidating on every
  * change rather than working out whether it was you keeps that correct for one
  * refetch nobody will notice.
@@ -256,11 +256,11 @@ function useMembershipChange<Input>(
 				queries.invalidateQueries({ queryKey: ["workspaces", workspaceId, "memberships"] }),
 				queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
 				queries.invalidateQueries({ queryKey: ["projects"] }),
-				// Making somebody an administrator or the owner puts them in every project people
-				// made. A private bot's default project, and someone else's Personal Assistant's,
+				// Making somebody an administrator or the owner puts them in every project members
+				// made. A personal bot's default project, and someone else's Personal Assistant's,
 				// are still reached only as their bot is.
 				queries.invalidateQueries({ queryKey: ["project-members"] }),
-				queries.invalidateQueries({ queryKey: ["project-people"] }),
+				queries.invalidateQueries({ queryKey: ["project-members"] }),
 				queries.invalidateQueries({ queryKey: ["bots"] }),
 			]),
 	});
@@ -279,7 +279,7 @@ export function useChangeRole(workspaceId: string) {
 	);
 }
 
-/** Hands the workspace to another person in it. The caller stays on as an administrator. */
+/** Hands the workspace to another member in it. The caller stays on as an administrator. */
 export function useHandOverOwnership(workspaceId: string) {
 	return useMembershipChange(workspaceId, (membershipId: string) =>
 		Effect.runPromise(
@@ -360,7 +360,7 @@ export function chooseWorkspace(workspaceId: string): void {
  * already decided it.
  *
  * Asked so that a control nobody can use is not *drawn* for them. Drawing it
- * and letting the request fail is worse than not drawing it: it teaches people
+ * and letting the request fail is worse than not drawing it: it teaches members
  * that things in this app sometimes do not work.
  *
  * Every answer is `false` while it is in flight, so the moment before the
@@ -384,7 +384,7 @@ const NOTHING_YET: WorkspacePermissions = {
 	createBots: false,
 	updateWorkspace: false,
 	manageProviders: false,
-	managePeople: false,
+	manageMembers: false,
 	chooseSystemModel: false,
 	manageUsage: false,
 	manageAdmins: false,

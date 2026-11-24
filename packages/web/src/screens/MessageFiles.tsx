@@ -24,7 +24,7 @@ import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
 export type FileUrlOf = (fileId: string) => string | undefined;
 
 /**
- * The files on a message, a person's or a bot's reply, under its words: its
+ * The files on a message, a member's or a bot's reply, under its words: its
  * images as pictures, each opening full size over the chat, then every other
  * file as a chip to download. A file not served yet shows without a link.
  */

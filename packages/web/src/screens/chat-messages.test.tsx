@@ -1,13 +1,12 @@
 import type {
 	BotParticipant,
-	CollaborationPart,
 	Connector,
+	CurrentUser,
 	Message,
 	MessagePart,
-	SignedInPerson,
 	ToolCallPart,
 } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import { testMember } from "@sugabots/contracts/testing";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -32,12 +31,12 @@ const host: BotParticipant = {
 	shape: "circle",
 };
 
-const signedIn: SignedInPerson = {
+const signedIn: CurrentUser = {
 	id: "0199a3a0-0000-7000-8000-0000000000b4",
 	name: "Rowan Ellis",
 	email: "rowan@example.com",
 	image: null,
-} as SignedInPerson;
+} as CurrentUser;
 
 let nextId = 0;
 
@@ -51,7 +50,7 @@ function toolCall(tool: string, over: Partial<ToolCallPart> = {}): ToolCallPart 
 		output: { found: 3 },
 		status: "completed",
 		error: null,
-		writeOrDelete: false,
+		approval: null,
 		atOffset: 0,
 		startedAt: "2026-09-18T09:00:00.000Z",
 		finishedAt: "2026-09-18T09:00:01.400Z",
@@ -65,7 +64,6 @@ function reply(parts: MessagePart[], over: Partial<Message> = {}): Message {
 		id: "0199a3a0-0000-7000-8000-0000000000c1",
 		chatId: CHAT,
 		author: host,
-		kind: "text",
 		status: "complete",
 		parts,
 		content,
@@ -93,12 +91,13 @@ function connector(handle: string, name: string, url: string): Connector {
 		toolCounts: { allow: 0, ask: 0, off: 0 },
 		lastTestError: null,
 		connectedBy: null,
+		signedInAs: null,
 		createdAt: "2026-09-18T08:00:00.000Z",
 	};
 }
 
-/** Someone else in the project, whom a person's `@here` or `@channel` would notify. */
-const jay = testPerson({ id: "0199a3a0-0000-7000-8000-0000000000d1", name: "Jay Park" });
+/** Someone else in the project, whom a member's `@here` or `@channel` would notify. */
+const jay = testMember({ id: "0199a3a0-0000-7000-8000-0000000000d1", name: "Jay Park" });
 
 /** Renders the chat, and returns `update` to redraw it as a live one would. */
 function show(
@@ -106,7 +105,6 @@ function show(
 	over: {
 		canApprove?: boolean;
 		participants?: BotParticipant[];
-		onOpenNestedChat?: (chatId: string) => void;
 	} = {},
 ) {
 	const queryClient = createQueryClient();
@@ -122,11 +120,13 @@ function show(
 				messages={shown}
 				typing={{ host, isRunning: false }}
 				participants={participants}
-				peopleReachingProject={[jay]}
+				membersReachingProject={[jay]}
 				chatKind="project_chat"
-				onOpenNestedChat={over.onOpenNestedChat ?? (() => undefined)}
 				dividers={false}
-				approvalCapabilities={{ approveToolCalls: over.canApprove ?? true }}
+				approvalPermissions={{
+					approveToolCalls: over.canApprove ?? true,
+					approveComputerRequests: over.canApprove ?? true,
+				}}
 			/>
 		</QueryClientProvider>
 	);
@@ -152,14 +152,14 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-describe("what people and bots write", () => {
-	it("renders Markdown from people and bots alike", async () => {
+describe("what members and bots write", () => {
+	it("renders Markdown from members and bots alike", async () => {
 		const asked = "Is **this** bold?";
 		const answered = "**Theo's bill** is high.\n\n- Look up plans\n- Draft a note";
 		show([
 			reply([{ type: "text", text: asked }], {
 				id: "0199a3a0-0000-7000-8000-0000000000c0",
-				author: testPerson({ id: signedIn.id, name: signedIn.name }),
+				author: testMember({ id: signedIn.id, name: signedIn.name }),
 				createdAt: "2026-09-18T09:00:00.000Z",
 			}),
 			reply([{ type: "text", text: answered }]),
@@ -205,11 +205,11 @@ describe("what people and bots write", () => {
 		expect(await screen.findByText("Issue Triager", { selector: "span" })).toBeDefined();
 	});
 
-	it("marks a person's @here and @channel as mentions of everyone, but not a bot's", async () => {
+	it("marks a member's @here and @channel as mentions of everyone, but not a bot's", async () => {
 		show([
 			reply([{ type: "text", text: "@here the deploy is out, @channel please check." }], {
 				id: "0199a3a0-0000-7000-8000-0000000000c0",
-				author: testPerson({ id: signedIn.id, name: signedIn.name }),
+				author: testMember({ id: signedIn.id, name: signedIn.name }),
 				createdAt: "2026-09-18T09:00:00.000Z",
 			}),
 			reply([{ type: "text", text: "Checked. @channel it is fine." }]),
@@ -293,54 +293,6 @@ describe("a reply arriving", () => {
 	});
 });
 
-describe("a reply that opens by asking another bot", () => {
-	const helper: BotParticipant = {
-		...host,
-		id: "0199a3a0-0000-7000-8000-0000000000b5",
-		name: "Sentry Scout",
-		handle: "sentry-scout",
-	};
-	const asked = (status: CollaborationPart["status"], answer: string | null = null) =>
-		reply([
-			{
-				type: "collaboration",
-				id: "0199a3a0-0000-7000-8000-0000000000c2",
-				botId: helper.id,
-				botName: helper.name,
-				chatId: "0199a3a0-0000-7000-8000-0000000000c3",
-				brief: "Check Sentry",
-				status,
-				answer,
-				atOffset: 0,
-			},
-			...(answer === null
-				? []
-				: [{ type: "text" as const, text: `Sentry Scout found ${answer}.` }]),
-		]);
-
-	it("puts the collaboration under the bot that asked, as a card", async () => {
-		show([asked("answered", "41 events")], { participants: [host, helper] });
-
-		const card = await screen.findByRole("region", {
-			name: `${host.name} asked ${helper.name} for help`,
-		});
-		const name = screen.getByText(host.name, { selector: "span" });
-		expect(name.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-	});
-
-	it("opens the collaboration beside the chat from its card", async () => {
-		const onOpenNestedChat = vi.fn();
-		show([asked("answered", "41 events")], { participants: [host, helper], onOpenNestedChat });
-
-		fireEvent.click(
-			await screen.findByRole("button", {
-				name: `Open Collaboration: ${host.name} and ${helper.name}`,
-			}),
-		);
-		expect(onOpenNestedChat).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-0000000000c3");
-	});
-});
-
 describe("a reply that wrote nothing but used tools", () => {
 	// A turn that called a tool and produced no text has no text part at all —
 	// `messagePartsFor` adds none when the content is empty. It still needs a
@@ -420,9 +372,9 @@ describe("a reply still being written", () => {
 						status: "awaiting_approval",
 						output: null,
 						finishedAt: null,
-						writeOrDelete: true,
 						approval: {
 							status: "pending",
+							approvers: "chat",
 							decidedByName: null,
 							decidedAt: null,
 						},
@@ -444,9 +396,9 @@ describe("a reply still being written", () => {
 						status: "awaiting_approval",
 						output: null,
 						finishedAt: null,
-						writeOrDelete: true,
 						approval: {
 							status: "allowed",
+							approvers: "chat",
 							decidedByName: "Rowan Ellis",
 							decidedAt: null,
 						},
@@ -468,9 +420,8 @@ describe("a write that needs approving", () => {
 		status: "awaiting_approval",
 		output: null,
 		finishedAt: null,
-		writeOrDelete: true,
 		input: { team: "Platform", title: "Checkout requests time out" },
-		approval: { status: "pending", decidedByName: null, decidedAt: null },
+		approval: { status: "pending", approvers: "chat", decidedByName: null, decidedAt: null },
 	});
 	const asking = reply([{ type: "text", text: "I want to open an issue." }, pending]);
 
@@ -522,9 +473,9 @@ describe("a write that needs approving", () => {
 					status: "awaiting_approval",
 					output: null,
 					finishedAt: null,
-					writeOrDelete: true,
 					approval: {
 						status: "denied",
+						approvers: "chat",
 						decidedByName: "Rowan Ellis",
 						decidedAt: null,
 					},

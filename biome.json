@@ -184,7 +184,6 @@
 		{
 			"includes": [
 				"packages/core/src/**/*.ts",
-				"packages/bot-loop/src/**/*.ts",
 				"!**/*.test.ts",
 				"!**/*.test-support.ts",
 				"!**/testing.ts",

@@ -22,14 +22,16 @@ const meta = preview.meta({
 	component: SidePanel,
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
-	args: { label: "Collaboration", onClose: fn(), children: null },
+	args: { label: "Overnight outbound", onClose: fn(), children: null },
 	render: (args) => (
 		<div className="relative flex h-screen bg-background">
 			<Chat />
 			<SidePanel {...args} className="bg-background">
 				<div className="flex flex-col gap-4 px-3.5 pb-4">
-					<PanelSection title="Answer">
-						<p className="m-0 text-sm">Linear Handler checked Sentry and opened an issue.</p>
+					<PanelSection title="Result">
+						<p className="m-0 text-sm">
+							Queued 38 leads. Six have replied; drafts are in the outbox.
+						</p>
 					</PanelSection>
 				</div>
 			</SidePanel>
@@ -42,16 +44,5 @@ export const Beside = meta.story({
 	play: async ({ canvas, args, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Close" }));
 		await expect(args.onClose).toHaveBeenCalledOnce();
-	},
-});
-
-/**
- * A collaboration on a phone: a sheet risen over the chat, which stays in
- * view above it and closes it when tapped. Beside the chat on a wide screen.
- */
-export const Sheet = meta.story({
-	args: { sheet: true },
-	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("complementary", { name: "Collaboration" })).toBeInTheDocument();
 	},
 });

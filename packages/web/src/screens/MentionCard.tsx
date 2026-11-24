@@ -1,21 +1,21 @@
 import { Popover } from "@base-ui/react/popover";
 import {
 	type BotParticipant,
-	type PersonParticipant,
+	type MemberParticipant,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import type { ReactElement } from "react";
 import { useBot } from "@/lib/bots.ts";
 import { useMemberships, useWorkspace } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { PopoverContent } from "@/ui/popover.tsx";
 import { TitleTag } from "@/ui/title-tag.tsx";
 import type { GroupMention, MentionTarget } from "./mentions.tsx";
 
 /**
- * A card saying whom a mention names: a person's face, name, role and handle;
- * a bot's, with what it does; or for `@here` and `@channel`, the people it
+ * A card saying whom a mention names: a member's face, name, role and handle;
+ * a bot's, with what it does; or for `@here` and `@channel`, the members it
  * would notify. A click or tap outside it closes it, and so does Escape, which
  * closes nothing else, so a panel the mention is in stays open.
  */
@@ -59,7 +59,7 @@ export function MentionCard({
 				) : target.kind === "bot" ? (
 					<BotCard bot={target} />
 				) : (
-					<PersonCard person={target} />
+					<MemberCard member={target} />
 				)}
 			</PopoverContent>
 		</Popover.Root>
@@ -91,26 +91,26 @@ function CardHeading({
 	);
 }
 
-function PersonCard({ person }: { person: PersonParticipant }) {
+function MemberCard({ member }: { member: MemberParticipant }) {
 	return (
 		<CardHeading
-			face={<PersonAvatar person={person} size={40} />}
+			face={<MemberAvatar member={member} size={40} />}
 			title={
 				<>
-					<span className="truncate">{person.name}</span>
-					<PersonRole personId={person.id} />
+					<span className="truncate">{member.name}</span>
+					<MemberRole memberId={member.id} />
 				</>
 			}
-			subtitle={`@${person.handle}`}
+			subtitle={`@${member.handle}`}
 		/>
 	);
 }
 
-/** The person's role in the workspace, once its memberships are loaded. */
-function PersonRole({ personId }: { personId: string }) {
+/** The member's role in the workspace, once its memberships are loaded. */
+function MemberRole({ memberId }: { memberId: string }) {
 	const { workspace } = useWorkspace();
 	const { data: memberships } = useMemberships(workspace?.id);
-	const role = memberships?.find((membership) => membership.person.id === personId)?.role;
+	const role = memberships?.find((membership) => membership.member.id === memberId)?.role;
 	if (!role) return null;
 	return <TitleTag>{workspaceRoleLabel(role)}</TitleTag>;
 }
@@ -145,27 +145,28 @@ function BotDescription({ botId }: { botId: string }) {
 }
 
 /**
- * How many rows a group mention's card has for its people: each person, up to
+ * How many rows a group mention's card has for its members: each member, up to
  * this many, else one fewer and a line counting the rest.
  */
-const MAX_PEOPLE_ROWS = 6;
+const MAX_MEMBERS_ROWS = 6;
 
 function GroupCard({ group }: { group: GroupMention }) {
-	const people = group.notifies;
-	const listed = people.length > MAX_PEOPLE_ROWS ? people.slice(0, MAX_PEOPLE_ROWS - 1) : people;
-	const others = people.length - listed.length;
+	const members = group.notifies;
+	const listed =
+		members.length > MAX_MEMBERS_ROWS ? members.slice(0, MAX_MEMBERS_ROWS - 1) : members;
+	const others = members.length - listed.length;
 	return (
 		<>
 			<Popover.Title className="m-0 font-semibold text-sm leading-snug">
 				@{group.handle}
 			</Popover.Title>
 			<ul aria-label="Notifies" className="m-0 mt-2.5 flex list-none flex-col gap-1.5 p-0">
-				{listed.map((person) => (
-					<li key={person.id} className="flex min-w-0 items-center gap-2 text-sm">
+				{listed.map((member) => (
+					<li key={member.id} className="flex min-w-0 items-center gap-2 text-sm">
 						<span aria-hidden className="flex">
-							<PersonAvatar person={person} size={20} />
+							<MemberAvatar member={member} size={20} />
 						</span>
-						<span className="truncate">{person.name}</span>
+						<span className="truncate">{member.name}</span>
 					</li>
 				))}
 			</ul>

@@ -7,7 +7,7 @@ import type { ToolCallPart } from "@sugabots/contracts";
  */
 
 /**
- * Whether the call is stopped until a person allows or denies it. An allowed
+ * Whether the call is stopped until a member allows or denies it. An allowed
  * call keeps `awaiting_approval` until its turn starts it, a moment later, but
  * waits on nobody.
  */

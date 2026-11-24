@@ -140,7 +140,7 @@ export function pullRequestTools({ connected, repositorySchema, onRepository, si
 		}),
 		comment_on_pull_request: tool({
 			description:
-				"Comment in a pull request's chat, such as to answer its reviewers or say what you changed. To comment on lines of its code, use review_pull_request; to answer a comment on its code, reply_to_code_comment.",
+				"Comment on a pull request as a whole, such as to answer its reviewers or say what you changed. To comment on lines of its code, use review_pull_request; to answer a comment on its code, reply_to_code_comment.",
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				number: pullRequestNumberSchema,
@@ -221,7 +221,7 @@ export function pullRequestTools({ connected, repositorySchema, onRepository, si
 		}),
 		reply_to_code_comment: tool({
 			description:
-				"Reply in the chat of a comment on a pull request's code, such as to say how you addressed it. Its commentId is in get_pull_request's codeComments.",
+				"Reply in the review thread of a comment on a pull request's code, such as to say how you addressed it. Its commentId is in get_pull_request's codeComments.",
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				number: pullRequestNumberSchema,

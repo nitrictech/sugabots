@@ -84,8 +84,8 @@ function ComputerGroup({ owner, shown }: { owner: ResourceOwner; shown: ProjectC
 	const busy = [
 		computer.turnsUsing > 0 &&
 			`${computer.turnsUsing === 1 ? "A bot is" : `${computer.turnsUsing} bots are`} using it`,
-		computer.peopleWatching > 0 &&
-			`${countOf(computer.peopleWatching, "person", "people")} watching`,
+		computer.membersWatching > 0 &&
+			`${countOf(computer.membersWatching, "member", "members")} watching`,
 	].filter(Boolean);
 	const inUse = computer.turnsUsing > 0;
 

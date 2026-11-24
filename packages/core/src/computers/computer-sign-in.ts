@@ -25,13 +25,11 @@ export class Service extends Context.Service<Service, Interface>()(
 /** Sign-ins for a project's computer, and when they must be replaced. */
 export interface SignedIn {
 	readonly credentials: readonly Computers.Credential[];
-	/** Placeholders that tell command-line tools they are signed in. */
-	readonly environment: Readonly<Record<string, string>>;
 	/** When the first of them stops working; undefined when none expire. */
 	readonly expiresAt: DateTime.Utc | undefined;
 }
 
-export const NOT_SIGNED_IN: SignedIn = { credentials: [], environment: {}, expiresAt: undefined };
+export const NOT_SIGNED_IN: SignedIn = { credentials: [], expiresAt: undefined };
 
 /** For a project whose computer is signed in to nothing. */
 export const none = Layer.succeed(Service, {

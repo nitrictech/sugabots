@@ -15,7 +15,7 @@ function call(tool: string, over: Partial<ToolCallPart> = {}): ToolCallPart {
 		output: { ok: true },
 		status: "completed",
 		error: null,
-		writeOrDelete: false,
+		approval: null,
 		atOffset: 0,
 		startedAt: "2026-09-14T00:00:00.000Z",
 		finishedAt: "2026-09-14T00:00:02.000Z",
@@ -32,7 +32,12 @@ const markedConnectors = new Map<string, MarkedConnector>([
 const waiting = {
 	status: "awaiting_approval" as const,
 	finishedAt: null,
-	approval: { status: "pending" as const, decidedByName: null, decidedAt: null },
+	approval: {
+		status: "pending" as const,
+		approvers: "chat" as const,
+		decidedByName: null,
+		decidedAt: null,
+	},
 };
 
 describe("a reply's tool line", () => {
@@ -74,7 +79,12 @@ describe("a reply's tool line", () => {
 
 	it("says which tool source was refused", () => {
 		const denied = {
-			approval: { status: "denied" as const, decidedByName: "Rowan", decidedAt: null },
+			approval: {
+				status: "denied" as const,
+				approvers: "chat" as const,
+				decidedByName: "Rowan",
+				decidedAt: null,
+			},
 		};
 		expect(
 			toolLineText(

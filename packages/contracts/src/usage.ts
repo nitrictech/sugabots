@@ -3,8 +3,8 @@ import { botColorSchema, botEyesSchema, botShapeSchema } from "./bots.ts";
 import { builtInProviderIdSchema } from "./built-in-providers.ts";
 
 /**
- * What a workspace's models cost over one month, estimated from each
- * provider's published prices.
+ * What a workspace's models cost over one month: each request's cost as its
+ * model provider reported it, or else an estimate from its model's price.
  *
  * Every amount is in US dollars. A request whose cost could not be known is
  * left out of every amount and counted in `unknownCostRequests` instead, so an
@@ -73,8 +73,8 @@ export const workspaceUsageSchema = Schema.Struct({
 	 */
 	systemBots: Schema.Struct(usageFields),
 	/**
-	 * What every person's Personal Assistant spent, together: each is its
-	 * person's alone, so none is named.
+	 * What every member's Personal Assistant spent, together: each is its
+	 * member's alone, so none is named.
 	 */
 	personalAssistants: Schema.Struct(usageFields),
 });

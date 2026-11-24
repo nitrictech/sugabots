@@ -2,7 +2,7 @@ import type { NewBot } from "@sugabots/contracts";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { noComputers } from "../../computers/testing.ts";
-import { bot, membership, person, workspace } from "../../database/schema.ts";
+import { bot, member, membership, workspace } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -16,7 +16,7 @@ import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 	let repository: Promised<BotStore.Interface>;
-	let administrationAs: (personId: string) => Promised<BotAdministration.Interface>;
+	let administrationAs: (memberId: string) => Promised<BotAdministration.Interface>;
 	let workspaceId: string;
 	let adminId: string;
 	let editorId: string;
@@ -35,8 +35,8 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 
 	const create = (createdById: string, input: NewBot) =>
 		repository.create(workspaceId, { createdById, bot: input });
-	const visibleTo = (personId: string) =>
-		administrationAs(personId).list({ workspace: workspaceId });
+	const visibleTo = (memberId: string) =>
+		administrationAs(memberId).list({ workspace: workspaceId });
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -47,20 +47,20 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 		workspaceId = space.id;
 		const [admin, editor] = await onDatabase((db) =>
 			db
-				.insert(person)
+				.insert(member)
 				.values([
 					{ name: "Ada", email: `ada-${stamp}@example.com` },
 					{ name: "Sam", email: `sam-${stamp}@example.com` },
 				])
 				.returning(),
 		);
-		if (!admin || !editor) throw new Error("person setup failed");
+		if (!admin || !editor) throw new Error("member setup failed");
 		adminId = admin.id;
 		editorId = editor.id;
 		await onDatabase((db) =>
 			db.insert(membership).values([
-				{ workspaceId, personId: adminId, role: "admin" },
-				{ workspaceId, personId: editorId, role: "editor" },
+				{ workspaceId, memberId: adminId, role: "admin" },
+				{ workspaceId, memberId: editorId, role: "editor" },
 			]),
 		);
 	});
@@ -72,23 +72,23 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 		expect((await visibleTo(editorId)).map(({ id }) => id)).toEqual([made.id]);
 	});
 
-	it("lists a private bot to its creator and to admins, and to nobody else", async () => {
+	it("lists a personal bot to its creator and to admins, and to nobody else", async () => {
 		const adminsOwn = await create(adminId, {
 			name: "Ledger",
 			model: "model",
-			visibility: "private",
+			visibility: "personal",
 		});
 		const editorsOwn = await create(editorId, {
 			name: "Diary",
 			model: "model",
-			visibility: "private",
+			visibility: "personal",
 		});
 
 		expect((await visibleTo(editorId)).map(({ id }) => id)).toEqual([editorsOwn.id]);
 		expect((await visibleTo(adminId)).map(({ id }) => id)).toEqual([editorsOwn.id, adminsOwn.id]);
 	});
 
-	it("pins a bot for the person who made it, and for nobody else", async () => {
+	it("pins a bot for the member who made it, and for nobody else", async () => {
 		const made = await create(editorId, { name: "Triage", model: "model" });
 
 		expect((await visibleTo(editorId)).find(({ id }) => id === made.id)?.pinned).toBe(true);
@@ -97,7 +97,7 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 
 	it("starts a bot made without a prompt on the interview", async () => {
 		const made = await create(adminId, { name: "Triage", model: "gpt-4o-mini" });
-		expect(made.prompt).toBe(INTERVIEW_PROMPT);
+		expect(made.instructions).toBe(INTERVIEW_PROMPT);
 	});
 
 	it("makes a bot nobody gave a shape a circle, and keeps the shape it's given", async () => {
@@ -185,11 +185,11 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 		expect(visible.map((one) => one.name)).toContain("Clearable");
 	});
 
-	it("lets every person's Personal Assistant have the same name", async () => {
-		const admins = await repository.provisionPersonalAssistant({ workspaceId, personId: adminId });
+	it("lets every member's Personal Assistant have the same name", async () => {
+		const admins = await repository.provisionPersonalAssistant({ workspaceId, memberId: adminId });
 		const editors = await repository.provisionPersonalAssistant({
 			workspaceId,
-			personId: editorId,
+			memberId: editorId,
 		});
 
 		expect(editors.name).toBe(admins.name);
@@ -203,7 +203,7 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 		).rejects.toBeInstanceOf(BotStore.SystemBotImmutable);
 	});
 
-	it("does not change a system bot as a bot people talk to", async () => {
+	it("does not change a system bot as a bot members talk to", async () => {
 		const system = await placeCompaction();
 		await expect(
 			repository.update(workspaceId, system.id, { model: "another" }, adminId),

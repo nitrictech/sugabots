@@ -1,4 +1,4 @@
-import type { Bot, PersonParticipant, Project } from "@sugabots/contracts";
+import type { Bot, MemberParticipant, Project } from "@sugabots/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import { CircleCheck, Monitor, PanelRight, RefreshCcw, RotateCcw } from "lucide-react";
@@ -12,7 +12,7 @@ import { useSidebarHiddenBesideChat } from "@/lib/sidebar-hidden.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { BotCrumb, CrumbSeparator } from "@/shell/BotCrumb.tsx";
 import { StageBack, type StageParent } from "@/shell/Stage.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { BACK_BUTTON, BackChevron, isPlainClick, useLeave } from "@/ui/back-button.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
@@ -32,7 +32,7 @@ export type BackTo =
 	| { to: "project"; project: Project }
 	/** A bot's chat goes back to its bot. */
 	| { to: "bot"; bot: Bot }
-	/** A page under a project's or a bot's Settings, such as a project's People, goes back to them. */
+	/** A page under a project's or a bot's Settings, such as a project's Members, goes back to them. */
 	| { to: "ownerSettings"; owner: ResourceOwner };
 
 /** Back to `owner`'s page: a project's, or a bot's. */
@@ -73,7 +73,7 @@ interface DetailsToggle {
 
 /**
  * The bar across the top of a bot's chat: a breadcrumb of the bot and the
- * chat's title, the faces of the people in it once there is more than one,
+ * chat's title, the faces of the members taking part once there is more than one,
  * Resolve, and, with `details`, the way into its Details: the cards button,
  * or the title, which is how a phone reaches them. A phone also has the way
  * into the bot's computer, which from a tablet up is a card in Details.
@@ -83,7 +83,7 @@ export function ChatHeader({
 	overChat,
 	title,
 	resolved,
-	people = [],
+	members = [],
 	chatId,
 	onOpenDesktop,
 	back,
@@ -97,8 +97,8 @@ export function ChatHeader({
 	title?: string;
 	/** Whether the chat is resolved, and how to mark it resolved or reopen it. */
 	resolved?: ResolvedToggle;
-	/** The people in the chat, whose faces show beside Resolve once there is more than one. */
-	people?: readonly PersonParticipant[];
+	/** The members taking part in the chat, whose faces show beside Resolve once there is more than one. */
+	members?: readonly MemberParticipant[];
 	chatId: string;
 	onOpenDesktop: () => void;
 }) {
@@ -177,7 +177,7 @@ export function ChatHeader({
 					<ChatComputer bot={bot} chatId={chatId} onOpen={openComputer} />
 				</span>
 			)}
-			{people.length > 1 && <PeopleInChat people={people} />}
+			{members.length > 1 && <MembersInChat members={members} />}
 			{resolved && (
 				<span className="contents max-md:hidden">
 					<ResolveButton {...resolved} />
@@ -257,7 +257,7 @@ function HeaderBar({
 }: {
 	back: BackTo;
 	parent?: StageParent;
-	/** Without the rule under it, over the chat, its messages running up to it. */
+	/** Without the rule under it, over the chat, its messages scrolling up under it out of sight. */
 	plain?: boolean;
 	/** What a phone shows after Back: a `HeaderBadge`. */
 	badge: ReactNode;
@@ -269,8 +269,8 @@ function HeaderBar({
 		<header
 			className={cn(
 				CHAT_HEADER_CONTAINER,
-				// Over the chat, which scrolls up under it: no bar of its own.
-				plain ? "md:border-b-0 md:bg-transparent" : "border-border border-b",
+				// Over the chat, which scrolls up under it: a solid bar with no rule.
+				plain ? "md:border-b-0 md:bg-background" : "border-border border-b",
 				sidebarHidden ? "md:pl-14" : "md:pl-6",
 				"relative flex h-13 shrink-0 items-center gap-3 pr-4 transition-all duration-300 ease-out max-md:h-auto max-md:border-b-0 max-md:bg-linear-to-b max-md:from-background max-md:from-80% max-md:to-transparent max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2",
 			)}
@@ -357,31 +357,31 @@ function BotFace({ bot }: { bot: Bot }) {
 }
 
 /**
- * The people in a bot's chat with more than one in it: their faces stacked,
+ * The members taking part in a bot's chat with more than one: their faces stacked,
  * which list them by name when clicked, the viewer among them as you.
  */
-function PeopleInChat({ people }: { people: readonly PersonParticipant[] }) {
-	const signedIn = useSession().person;
+function MembersInChat({ members }: { members: readonly MemberParticipant[] }) {
+	const signedIn = useSession().member;
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				render={
 					<button
 						type="button"
-						aria-label={`${people.length} people in this chat`}
+						aria-label={`${members.length} members taking part in this chat`}
 						className="focus-ring flex h-8 items-center gap-1.5 rounded-md px-1.5 text-muted-foreground text-xs transition-colors hover:bg-row-hover hover:text-foreground data-popup-open:bg-row-selected max-md:hidden"
 					>
-						<ParticipantFaces participants={people} shown={3} size={20} />
+						<ParticipantFaces participants={members} shown={3} size={20} />
 					</button>
 				}
 			/>
 			<DropdownMenuContent align="end" className="min-w-52">
-				{people.map((person) => (
-					<DropdownMenuItem key={person.id} closeOnClick={false}>
-						<PersonAvatar person={person} size={20} />
+				{members.map((member) => (
+					<DropdownMenuItem key={member.id} closeOnClick={false}>
+						<MemberAvatar member={member} size={20} />
 						<span className="min-w-0 flex-1 truncate">
-							{person.name}
-							{person.id === signedIn?.id && <span className="text-subtle-foreground"> (you)</span>}
+							{member.name}
+							{member.id === signedIn?.id && <span className="text-subtle-foreground"> (you)</span>}
 						</span>
 					</DropdownMenuItem>
 				))}
