@@ -8,10 +8,48 @@ export const MAX_ARTIFACT_CONTENT_CHARACTERS = 500_000;
 
 /**
  * What an artifact holds, which decides how it is shown: a `document` is
- * markdown, drawn as text; an `html` page runs in an isolated frame.
+ * markdown, drawn as text; a `slides` deck is markdown too, slide after slide,
+ * each laid out by one of a few layouts (see `slides-markdown.ts`); an `html`
+ * page runs in an isolated frame.
  */
-export const artifactKindSchema = Schema.Literals(["document", "html"]);
+export const artifactKindSchema = Schema.Literals(["document", "slides", "html"]);
 export type ArtifactKind = typeof artifactKindSchema.Type;
+
+/**
+ * The kinds people edit together, live, in one copy that bots change too
+ * (see `live-document.ts`). Each holds images of its own.
+ */
+const LIVE_ARTIFACT_KINDS = ["document", "slides"] as const satisfies readonly ArtifactKind[];
+export type LiveArtifactKind = (typeof LIVE_ARTIFACT_KINDS)[number];
+
+/** Whether `artifact` is of a kind people edit live. */
+export const isEditedLive = <A extends { readonly kind: ArtifactKind }>(
+	artifact: A,
+): artifact is A & { readonly kind: LiveArtifactKind } =>
+	(LIVE_ARTIFACT_KINDS as readonly ArtifactKind[]).includes(artifact.kind);
+
+/**
+ * What an editor joining a live artifact's WebSocket says it was built for,
+ * as the query of the address it opens: the number of the schema it holds
+ * (`LIVE_DOCUMENT_SCHEMA` in `live-document.ts`) and the kind of artifact
+ * whose nodes it holds. The sync layer deletes, for everyone, whatever an
+ * editor's schema cannot hold, so the API lets in only an editor built for
+ * the artifact's own.
+ */
+export const liveEditorQuerySchema = Schema.Struct({
+	schema: Schema.FiniteFromString.check(Schema.isInt()),
+	kind: Schema.Literals(LIVE_ARTIFACT_KINDS),
+});
+
+/**
+ * The code the API closes a live artifact's WebSocket with when the editor
+ * that opened it was built for another schema or kind than the artifact's
+ * (see `liveEditorQuerySchema`): HTTP's Conflict, among the codes WebSocket
+ * leaves to applications. A browser can't read why an upgrade was refused,
+ * nor tell a refusal from the API being down, but it can read this, so the
+ * editor stops and asks to be reloaded instead of connecting again.
+ */
+export const LIVE_EDITOR_REFUSED_CLOSE_CODE = 4409;
 
 export const artifactTitleSchema = Schema.Trim.check(
 	Schema.isMinLength(1),
@@ -23,7 +61,7 @@ export const artifactContentSchema = Schema.String.check(
 );
 
 /**
- * The kinds of image a `document` artifact keeps to show in it: those every
+ * The kinds of image a document or deck keeps to show in it: those every
  * browser draws, and none that can carry script, as SVG can.
  */
 export const artifactImageTypeSchema = Schema.Literals([
@@ -35,7 +73,7 @@ export const artifactImageTypeSchema = Schema.Literals([
 export type ArtifactImageType = typeof artifactImageTypeSchema.Type;
 
 /**
- * Which of the kinds a `document` keeps `bytes` are an image of, told by the
+ * Which of the kinds a document keeps `bytes` are an image of, told by the
  * signature each kind's files start with, or `undefined` when they start as
  * none of them. What a file is called or said to be doesn't change what its
  * bytes are, and a browser draws an image by its bytes.
@@ -73,14 +111,14 @@ function ascii(text: string): number[] {
 	return [...text].map((character) => character.charCodeAt(0));
 }
 
-/** The largest image a `document` artifact keeps, in bytes. */
+/** The largest image a document or deck keeps, in bytes. */
 export const MAX_ARTIFACT_IMAGE_BYTES = 10 * 1024 * 1024;
 
-/** The most a `document` artifact keeps of images in all, in bytes. */
+/** The most a document or deck keeps of images in all, in bytes. */
 export const MAX_ARTIFACT_IMAGES_BYTES = 50 * 1024 * 1024;
 
 /**
- * Where an image a `document` artifact keeps is served, under the API's base
+ * Where an image a document or deck keeps is served, under the API's base
  * path: the artifacts group's `image` endpoint, and the address the document
  * refers to the image by (see `http/artifact-images.ts`).
  */

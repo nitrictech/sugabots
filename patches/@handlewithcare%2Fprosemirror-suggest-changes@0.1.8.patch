@@ -1,5 +1,5 @@
 diff --git a/dist/commands.js b/dist/commands.js
-index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..64cafc00544b7456e966b054f5d41830588b5ffb 100644
+index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..c81f000b6c0a1b5745425f3d4c365b52f7f653de 100644
 --- a/dist/commands.js
 +++ b/dist/commands.js
 @@ -49,7 +49,7 @@ import { getSuggestionMarks } from "./utils.js";
@@ -11,3 +11,102 @@ index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..64cafc00544b7456e966b054f5d41830
              const addedRange = prevChar === " " && nextChar === " " ? 1 : 0;
              tr.deleteRange(deletionFrom, deletionTo + addedRange);
              return false;
+@@ -67,9 +67,9 @@ import { getSuggestionMarks } from "./utils.js";
+         return true;
+     });
+ }
+-function revertModifications(node, pos, tr) {
++function revertModifications(node, pos, tr, suggestionId) {
+     const { modification } = getSuggestionMarks(node.type.schema);
+-    const existingMods = node.marks.filter((mark)=>mark.type === modification);
++    const existingMods = node.marks.filter((mark)=>isModificationOf(modification, suggestionId, mark));
+     for (const mod of existingMods){
+         if (mod.attrs["type"] === "attr" && typeof mod.attrs["attrName"] === "string") {
+             tr.setNodeAttribute(pos, mod.attrs["attrName"], mod.attrs["previousValue"]);
+@@ -86,24 +86,36 @@ function revertModifications(node, pos, tr) {
+         }
+     }
+ }
++// Whether mark is a modification, and one of suggestion id's when an id is given.
++function isModificationOf(modification, id, mark) {
++    return mark.type === modification && (id === undefined || mark.attrs["id"] === id);
++}
++// A node can carry several modification marks, from different suggestions.
+ function modificationIsInSet(modification, id, marks) {
+-    const mark = modification.isInSet(marks);
+-    if (id === undefined) return mark;
+-    if (mark?.attrs["id"] === id) return mark;
+-    return undefined;
++    return marks.find((mark)=>isModificationOf(modification, id, mark));
++}
++// Removes the modification marks of the node at pos: every one, or only suggestion id's when an id is given.
++function removeModifications(node, pos, tr, modification, id) {
++    if (id !== undefined) {
++        for (const mark of node.marks){
++            if (isModificationOf(modification, id, mark)) tr.removeNodeMark(pos, mark);
++        }
++        return;
++    }
++    let prevLength;
++    do {
++        // https://github.com/ProseMirror/prosemirror/issues/1525
++        prevLength = tr.steps.length;
++        tr.removeNodeMark(pos, modification);
++    }while (tr.steps.length > prevLength);
+ }
+ function applyModificationsToTransform(node, tr, dir, suggestionId, from, to) {
+     const { modification } = getSuggestionMarks(node.type.schema);
+     const isModification = modificationIsInSet(modification, suggestionId, node.marks);
+     if (isModification) {
+-        let prevLength;
+-        do {
+-            // https://github.com/ProseMirror/prosemirror/issues/1525
+-            prevLength = tr.steps.length;
+-            tr.removeNodeMark(0, modification);
+-        }while (tr.steps.length > prevLength);
++        removeModifications(node, 0, tr, modification, suggestionId);
+         if (dir < 0) {
+-            revertModifications(node, 0, tr);
++            revertModifications(node, 0, tr, suggestionId);
+         }
+     }
+     node.descendants((child, pos)=>{
+@@ -117,14 +129,9 @@ function applyModificationsToTransform(node, tr, dir, suggestionId, from, to) {
+         if (!isModification) {
+             return true;
+         }
+-        let prevLength;
+-        do {
+-            // https://github.com/ProseMirror/prosemirror/issues/1525
+-            prevLength = tr.steps.length;
+-            tr.removeNodeMark(pos, modification);
+-        }while (tr.steps.length > prevLength);
++        removeModifications(child, pos, tr, modification, suggestionId);
+         if (dir < 0) {
+-            revertModifications(child, pos, tr);
++            revertModifications(child, pos, tr, suggestionId);
+         }
+         return true;
+     });
+@@ -193,7 +200,7 @@ export function applySuggestionsToRange(doc, from, to) {
+         const { deletion, insertion } = getSuggestionMarks(state.schema);
+         const tr = state.tr;
+         applySuggestionsToTransform(state.doc, tr, insertion, deletion, suggestionId, from, to);
+-        applyModificationsToTransform(tr.doc, tr, 1, undefined, from, to);
++        applyModificationsToTransform(tr.doc, tr, 1, suggestionId, from, to);
+         if (!tr.steps.length) return false;
+         tr.setMeta(suggestChangesKey, {
+             skip: true
+@@ -249,11 +256,11 @@ export function applySuggestionsToRange(doc, from, to) {
+         const { deletion, insertion } = getSuggestionMarks(state.schema);
+         const tr = state.tr;
+         applySuggestionsToTransform(state.doc, tr, deletion, insertion, suggestionId, from, to);
++        applyModificationsToTransform(tr.doc, tr, -1, suggestionId, from, to);
+         if (!tr.steps.length) return false;
+         tr.setMeta(suggestChangesKey, {
+             skip: true
+         });
+-        applyModificationsToTransform(tr.doc, tr, -1, undefined, from, to);
+         dispatch?.(tr);
+         return true;
+     };

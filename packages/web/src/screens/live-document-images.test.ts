@@ -31,7 +31,9 @@ const outside = "https://tracker.example/pixel.png";
 /** Where this API serves an image from, on an origin of its own. */
 const source = (ids: ArtifactImageIds) => `https://api.example.com/api/images/${ids.imageId}`;
 
-const schema = getSchema(liveDocumentExtensions({ undo: false, ownImages: { artifact, source } }));
+const schema = getSchema(
+	liveDocumentExtensions({ kind: "document", undo: false, ownImages: { artifact, source } }),
+);
 
 const imageAt = (src: string) =>
 	schema.node("image", { src, alt: `Chart at ${src}`, title: "Launch chart" });
@@ -119,7 +121,11 @@ describe("a link on an image in the editor", () => {
 	function editorHolding(html: string): Editor {
 		const editor = new Editor({
 			element: document.createElement("div"),
-			extensions: liveDocumentExtensions({ undo: true, ownImages: { artifact, source } }),
+			extensions: liveDocumentExtensions({
+				kind: "document",
+				undo: true,
+				ownImages: { artifact, source },
+			}),
 		});
 		editors.push(editor);
 		editor.commands.setContent(html);

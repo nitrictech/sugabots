@@ -1,7 +1,17 @@
 import { Popover } from "@base-ui/react/popover";
 import type { Pod } from "@sugabots/contracts";
-import { Check, Download, Link2, Lock, type LucideIcon, Users, X } from "lucide-react";
+import {
+	Check,
+	Download,
+	Link2,
+	Lock,
+	type LucideIcon,
+	Presentation,
+	Users,
+	X,
+} from "lucide-react";
 import { useState } from "react";
+import { downloadAsPowerPoint } from "@/lib/artifacts.ts";
 import { Button } from "@/ui/button.tsx";
 import { iconButtonClassName } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
@@ -16,6 +26,14 @@ export interface ExportOption {
 	Icon: LucideIcon;
 	onSave: () => void;
 }
+
+/** A deck saved as a PowerPoint file, which the API builds from its current, live state. */
+export const powerPointExport = (podId: string, artifactId: string): ExportOption => ({
+	label: "PowerPoint",
+	description: "Editable .pptx presentation",
+	Icon: Presentation,
+	onSave: () => downloadAsPowerPoint(podId, artifactId),
+});
 
 /**
  * Who can open an artifact and how to hand it on: its link, for the people

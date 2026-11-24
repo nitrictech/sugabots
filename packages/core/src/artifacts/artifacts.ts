@@ -9,6 +9,7 @@ import {
 	type ArtifactSummary,
 	type ArtifactVersionSummary,
 	imageTypeOf,
+	isEditedLive,
 	MAX_ARTIFACT_CONTENT_CHARACTERS,
 	MAX_ARTIFACT_IMAGE_BYTES,
 	MAX_ARTIFACT_IMAGES_BYTES,
@@ -34,12 +35,13 @@ import {
 import { Ids, isUuid } from "../ids/ids.ts";
 import { sizeForPeople, type UserFacing } from "../user-message.ts";
 import { LiveDocuments } from "./live.ts";
+import type { Blocked } from "./suggestions.ts";
 
 /**
  * Reading a pod's artifacts, for people, and keeping the images a document
- * shows. Seeing them takes `pod.read`, the same reach that shows the pod's
- * conversations; deleting one takes `pod.update`, held by those who manage
- * the pod.
+ * or deck shows. Seeing them takes `pod.read`, the same reach that shows the
+ * pod's conversations; deleting one takes `pod.update`, held by those who
+ * manage the pod.
  */
 export interface Interface {
 	readonly list: (
@@ -65,8 +67,8 @@ export interface Interface {
 		at: InArtifact,
 	) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
 	/**
-	 * Keeps `stream` as an image for a `document` artifact to show, and
-	 * answers the ids it is addressed by. Anyone who can read the document
+	 * Keeps `stream` as an image for a `document` or `slides` artifact to show,
+	 * and answers the ids it is addressed by. Anyone who can read the document
 	 * can, as anyone who can read it can edit it. The image's id is its bytes'
 	 * digest, so the same image kept again is kept once, and answers the same
 	 * ids. Keeping nothing, fails with `ImageTooLarge` past
@@ -85,8 +87,8 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * An image kept for a `document` artifact, for anyone who can read the
-	 * document. Fails with `ImageNotFound` for an id it keeps no image under.
+	 * An image kept for a `document` or `slides` artifact, for anyone who can
+	 * read it. Fails with `ImageNotFound` for an id it keeps no image under.
 	 */
 	readonly image: (
 		at: ArtifactImageIds,
@@ -105,12 +107,13 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
  * was based on and is refused with `Stale` if another landed first,
  * so one writer never silently overwrites another.
  *
- * A `document` people have opened in the editor is live (see `live.ts`): its
- * content is what the live document holds, an agent's change is made to that,
- * and the version the change writes is a snapshot of it, people's edits
- * included. A change made in a thread somebody started by asking for an edit
- * from inside the document writes nothing and is refused as `Suggested`: it
- * waits in the document for one of the people there to accept it.
+ * A `document` or `slides` deck people have opened in the editor is live
+ * (see `live.ts`): its content is what the live document holds, an agent's
+ * change is made to that, and the version the change writes is a snapshot of
+ * it, people's edits included. A change made in a thread somebody started by
+ * asking for an edit from inside the document writes nothing and is refused
+ * as `Suggested`: it waits in the document for one of the people there to
+ * accept it.
  */
 export interface AuthoringInterface {
 	readonly list: (by: AgentInPod) => Effect.Effect<ArtifactSummary[]>;
@@ -167,11 +170,11 @@ export const make = Effect.gen(function* () {
 			return found;
 		});
 
-	/** The `document` artifact, if the person may read it: who may, may edit it and its images. */
-	const readableDocument = (podId: string, artifactId: string) =>
+	/** The artifact edited live, if the person may read it: who may, may edit it and its images. */
+	const readableLiveArtifact = (podId: string, artifactId: string) =>
 		Effect.gen(function* () {
 			const { artifact: row } = yield* inReachedPod(podId, artifactId);
-			if (row.kind !== "document") return yield* new ResourceHidden({ resource: "artifact" });
+			if (!isEditedLive(row)) return yield* new ResourceHidden({ resource: "artifact" });
 			return row;
 		});
 
@@ -229,7 +232,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"uploadImage",
 				Effect.gen(function* () {
-					const document = yield* readableDocument(podId, artifactId);
+					const document = yield* readableLiveArtifact(podId, artifactId);
 					// Read whole, as its id is the digest of its bytes; never more than an image may be.
 					const chunks = yield* Stream.runCollect(
 						BlobStore.atMost(stream, MAX_ARTIFACT_IMAGE_BYTES),
@@ -265,7 +268,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"image",
 				Effect.gen(function* () {
-					yield* readableDocument(image.podId, image.artifactId);
+					yield* readableLiveArtifact(image.podId, image.artifactId);
 					return yield* blobs
 						.get(imageKey(image))
 						.pipe(
@@ -287,11 +290,11 @@ export const makeAuthoring = Effect.gen(function* () {
 
 	/** The artifact with what its live document holds, when it has one. */
 	const withLiveContent = (shown: Artifact) =>
-		shown.kind !== "document"
-			? Effect.succeed(shown)
-			: Effect.map(live.markdown(shown.id), (markdown) =>
+		isEditedLive(shown)
+			? Effect.map(live.markdown(shown.id), (markdown) =>
 					markdown === undefined ? shown : { ...shown, content: markdown },
-				);
+				)
+			: Effect.succeed(shown);
 
 	/** How people in a live document see the agent's change signed. */
 	const authorOfChange = (by: AgentInThread) =>
@@ -441,7 +444,7 @@ export const makeAuthoring = Effect.gen(function* () {
 					if (kind && kind !== before.artifact.kind) {
 						return yield* new KindFixed({ kind: before.artifact.kind });
 					}
-					if (before.artifact.kind === "document") {
+					if (isEditedLive(before.artifact)) {
 						// Checked again under the lock below. Here it keeps a stale write out of the live document.
 						if (baseVersion !== before.artifact.currentVersion) {
 							return yield* new Stale({ currentVersion: before.artifact.currentVersion });
@@ -482,12 +485,11 @@ export const makeAuthoring = Effect.gen(function* () {
 						if (baseVersion !== found.artifact.currentVersion) {
 							return yield* new Stale({ currentVersion: found.artifact.currentVersion });
 						}
-						const inLive =
-							found.artifact.kind === "document"
-								? yield* live.rewrite(found.artifact.id, yield* authorOfChange(by), (markdown) =>
-										replacedOnce(markdown, oldText, newText),
-									)
-								: undefined;
+						const inLive = isEditedLive(found.artifact)
+							? yield* live.rewrite(found.artifact.id, yield* authorOfChange(by), (markdown) =>
+									replacedOnce(markdown, oldText, newText),
+								)
+							: undefined;
 						yield* writtenOrNot(inLive);
 						const current =
 							inLive?.markdown ??
@@ -566,6 +568,7 @@ interface StoredContent {
 
 const CONTENT_TYPES: Record<ArtifactKind, string> = {
 	document: "text/markdown; charset=utf-8",
+	slides: "text/markdown; charset=utf-8",
 	html: "text/html; charset=utf-8",
 };
 
@@ -645,11 +648,14 @@ export class TooLarge extends Data.TaggedError("ArtifactTooLarge")<{
 export class Suggested extends Data.TaggedError("ArtifactChangeSuggested") {}
 
 /**
- * The change was to be a suggestion and couldn't be shown as one: what it
- * changes can't carry a suggestion's marks (`unmarkable`), as a code block can't.
+ * The change couldn't be made as asked, for a suggestion's sake, and none of
+ * it was made: it was to be a suggestion, and what it changes can't carry a
+ * suggestion's marks (`unmarkable`), as a code block can't; or it changes a
+ * slide whose new layout waits as a suggestion (`layoutPending`); or it
+ * changes the layout of a slide holding a suggestion (`suggestionPending`).
  */
 export class SuggestionBlocked extends Data.TaggedError("ArtifactSuggestionBlocked")<{
-	readonly blocked: "unmarkable";
+	readonly blocked: Blocked;
 }> {}
 
 /**

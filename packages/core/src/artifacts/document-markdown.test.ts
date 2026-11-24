@@ -1,7 +1,8 @@
+import type { LiveArtifactKind } from "@sugabots/contracts/artifacts";
 import {
 	liveDocumentFromMarkdown,
+	liveDocumentSchema,
 	markdownOfLiveDocument,
-	liveDocumentSchema as schema,
 } from "@sugabots/contracts/live-document-markdown";
 import type { Node } from "@tiptap/pm/model";
 import { describe, expect, it } from "vitest";
@@ -11,9 +12,11 @@ import { describe, expect, it } from "vitest";
  * `live.ts`): what bots read and write, and what every version keeps.
  */
 
+const schema = liveDocumentSchema("document");
+
 /** `text` as a live document, which must be one its schema holds. */
 function parsed(text: string): Node {
-	const document = liveDocumentFromMarkdown(text);
+	const document = liveDocumentFromMarkdown("document", text);
 	document.check();
 	return document;
 }
@@ -165,5 +168,90 @@ describe("a live document's markdown", () => {
 		expect(document.textContent).toBe(
 			'Before <img src="https://tracker.example/pixel.png"> and <b>bold</b> after.<table><tr><td>x</td></tr></table>',
 		);
+	});
+
+	it("keeps an empty heading, written as its marks", () => {
+		const document = schema.node("doc", null, [
+			schema.node("heading", { level: 2 }),
+			schema.node("paragraph", null, schema.text("Text")),
+		]);
+
+		expect(written(document)).toBe("##\n\nText");
+		expect(parsed(written(document)).eq(document)).toBe(true);
+	});
+
+	it("reads words that look like a rule, or like the underline of a heading, back as those words", () => {
+		const line = (text: string) => schema.node("paragraph", null, schema.text(text));
+		const overALine = (text: string) =>
+			schema.node("paragraph", null, [
+				schema.text("Over a line"),
+				schema.node("hardBreak"),
+				schema.text(text),
+			]);
+		const document = schema.node("doc", null, [
+			line("---"),
+			line("- - -"),
+			line("***"),
+			line("___"),
+			line("-"),
+			line("==="),
+			overALine("---"),
+			overALine("==="),
+			schema.node("bulletList", null, schema.node("listItem", null, line("---"))),
+		]);
+
+		expect(parsed(written(document)).eq(document)).toBe(true);
+	});
+});
+
+describe("markdown a live document's schema has no place for", () => {
+	/** Markdown each kind's markdown reader reads as nodes their schema can't hold as they are. */
+	const UNFITTING: [label: string, markdown: string][] = [
+		["a quote holding nothing", ">"],
+		["a numbered item holding nothing", "1."],
+		["a numbered item holding nothing after another", "1. Plan\n2. "],
+		["a task list", "- [ ] Book the room\n- [x] Send invites"],
+		["a task list with a task in a task", "- [ ] Book the room\n  - [x] Ask the venue"],
+		["a quote holding only a rule", "> ---"],
+		["a list item holding an empty quote", "- >"],
+		["bold code", "**`launch.ts`**"],
+		["code in a link", "[`launch.ts`](https://example.com/launch.ts)"],
+		["only a link's definition, which shows nothing", "[launch]: https://example.com/launch"],
+	];
+
+	const KINDS: LiveArtifactKind[] = ["document", "slides"];
+
+	it.each(
+		KINDS.flatMap((kind) =>
+			UNFITTING.map(([label, markdown]): [LiveArtifactKind, string, string] => [
+				kind,
+				label,
+				markdown,
+			]),
+		),
+	)("(%s) reads %s as content its schema holds, which reads back the same", (kind, _, markdown) => {
+		const read = liveDocumentFromMarkdown(kind, markdown);
+
+		read.check();
+		expect(liveDocumentFromMarkdown(kind, markdownOfLiveDocument(read)).eq(read)).toBe(true);
+	});
+
+	it("keeps a task's box as the characters it is", () => {
+		const items: string[] = [];
+		parsed("- [ ] Book the room\n- [x] Send invites").descendants((node) => {
+			if (node.type.name === "listItem") items.push(node.textContent);
+		});
+
+		expect(items).toEqual(["[ ] Book the room", "[x] Send invites"]);
+	});
+
+	it("keeps the address of a link around code, the mark of the two the schema can't hold together", () => {
+		const linked: string[] = [];
+		parsed("[`launch.ts`](https://example.com/launch.ts)").descendants((node) => {
+			if (node.isText)
+				linked.push(`${node.text}: ${node.marks.map((mark) => mark.attrs.href ?? mark.type.name)}`);
+		});
+
+		expect(linked).toEqual(["launch.ts: https://example.com/launch.ts"]);
 	});
 });

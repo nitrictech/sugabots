@@ -1,9 +1,11 @@
-import type {
-	Artifact,
-	ArtifactAuthor,
-	ArtifactSummary,
-	ArtifactVersionSummary,
-	Pod,
+import {
+	type Artifact,
+	type ArtifactAuthor,
+	type ArtifactSummary,
+	type ArtifactVersionSummary,
+	isEditedLive,
+	type LiveArtifactKind,
+	type Pod,
 } from "@sugabots/contracts";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
@@ -16,10 +18,18 @@ import {
 	History,
 	Maximize2,
 	Minimize2,
+	Play,
 	Trash2,
 	Upload,
 } from "lucide-react";
-import { type CSSProperties, type ReactNode, useCallback, useRef, useState } from "react";
+import {
+	type ComponentType,
+	type CSSProperties,
+	type ReactNode,
+	useCallback,
+	useRef,
+	useState,
+} from "react";
 import {
 	useArtifact,
 	useArtifacts,
@@ -47,14 +57,17 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
-import { ArtifactShare, type ExportOption } from "./ArtifactShare.tsx";
+import { ArtifactShare, type ExportOption, powerPointExport } from "./ArtifactShare.tsx";
 import { ARTIFACT_KINDS } from "./artifact-kinds.tsx";
-import { downloadAsWord, LiveDocument, type WordImport } from "./LiveDocument.tsx";
+import { LiveDeck, type Present } from "./LiveDeck.tsx";
+import { downloadAsWord, LiveDocument } from "./LiveDocument.tsx";
+import type { Editing, FileImport, LiveArtifact } from "./live-editor.tsx";
+import type { AskedBot } from "./live-editor-overlays.tsx";
 
 type Loading = "loading" | "failed";
 
 /**
- * The documents and pages a pod's bots have made, newest first, with the one
+ * The documents, decks and pages a pod's bots have made, newest first, with the one
  * chosen open beside them, at its current version or the one `version` names.
  */
 export function ArtifactsPage({
@@ -246,18 +259,31 @@ export function ArtifactStage({
 	const remove = useDeleteArtifact(pod.id);
 	const { user } = useSession();
 	// A function kept in state is set with one that returns it, or React would call it.
-	const [importWord, setImportWord] = useState<WordImport>();
+	const [importFile, setImportFile] = useState<FileImport>();
+	const [present, setPresent] = useState<Present>();
 	const [presenceSlot, setPresenceSlot] = useState<HTMLElement | null>(null);
 	const [statusSlot, setStatusSlot] = useState<HTMLElement | null>(null);
-	const onWordImport = useCallback(
-		(importer: WordImport | undefined) => setImportWord(() => importer),
+	const onImport = useCallback(
+		(importer: FileImport | undefined) => setImportFile(() => importer),
 		[],
 	);
-	// A document's current version is edited where it is read; an earlier version is only read.
-	const editing =
-		shown.data?.kind === "document" &&
+	const onPresent = useCallback(
+		(presenter: Present | undefined) => setPresent(() => presenter),
+		[],
+	);
+	// A document's or a deck's current version is edited where it is read; an earlier version is only read.
+	const edited =
+		shown.data &&
+		isEditedLive(shown.data) &&
 		shown.data.shownVersion.number === shown.data.version &&
-		user;
+		user
+			? {
+					artifact: shown.data,
+					as: { name: user.name, email: user.email, image: user.image },
+					Editor: LIVE_EDITORS[shown.data.kind],
+				}
+			: undefined;
+	const deck = edited?.artifact.kind === "slides";
 	async function deleteArtifact() {
 		try {
 			await remove.mutateAsync(artifactId);
@@ -276,28 +302,27 @@ export function ArtifactStage({
 			onVersionChange={onVersionChange}
 			onClose={onClose}
 			editor={
-				editing ? (
-					<LiveDocument
+				edited && (
+					<edited.Editor
 						workspaceId={pod.workspaceId}
-						podId={pod.id}
-						artifactId={artifactId}
-						title={shown.data?.title ?? ""}
-						as={{ name: editing.name, email: editing.email, image: editing.image }}
-						bot={shown.data?.createdBy ?? undefined}
-						onWordImport={onWordImport}
+						artifact={edited.artifact}
+						title={edited.artifact.title}
+						as={edited.as}
+						bot={edited.artifact.createdBy ?? undefined}
+						onPresent={onPresent}
+						onImport={onImport}
 						presenceSlot={presenceSlot}
 						statusSlot={statusSlot}
 					/>
-				) : undefined
+				)
 			}
 			presence={
-				editing ? <span ref={setPresenceSlot} className="flex items-center gap-2" /> : undefined
+				edited ? <span ref={setPresenceSlot} className="flex items-center gap-2" /> : undefined
 			}
-			status={editing ? <span ref={setStatusSlot} /> : undefined}
-			word={
-				editing
-					? { onDownload: () => downloadAsWord(pod.id, artifactId), onImport: importWord }
-					: undefined
+			status={edited ? <span ref={setStatusSlot} /> : undefined}
+			present={deck ? present : undefined}
+			officeFile={
+				edited ? officeFileOf(edited.artifact.kind, pod.id, artifactId, importFile) : undefined
 			}
 			deletion={
 				pod.permissions.deleteArtifacts
@@ -312,19 +337,81 @@ export function ArtifactStage({
 	);
 }
 
+/** What the stage gives the editor of an artifact people edit live, whatever its kind. */
+interface LiveEditing {
+	workspaceId: string;
+	artifact: LiveArtifact;
+	title: string;
+	as: Editing;
+	bot: AskedBot | undefined;
+	/** Given how to start presenting what is edited once the editor is up, for a kind that is presented. */
+	onPresent: (present: Present | undefined) => void;
+	/** Given how to replace what is edited with an office file's content once the editor is up. */
+	onImport: (importFile: FileImport | undefined) => void;
+	presenceSlot: HTMLElement | null;
+	statusSlot: HTMLElement | null;
+}
+
+/**
+ * The editor of each kind of artifact people edit live, which holds the
+ * schema of the kind of the artifact it is given.
+ */
+const LIVE_EDITORS: Record<LiveArtifactKind, ComponentType<LiveEditing>> = {
+	document: LiveDocument,
+	slides: LiveDeck,
+};
+
 const DELETE_DESCRIPTION =
 	"Every version goes with it, for everyone in the pod. Replies that showed it keep only its name. This can't be undone.";
 
 /** The file each kind of artifact is kept as, as an export says it. */
 const RAW_FILES = {
 	document: { label: "Markdown", description: "Plain-text .md file", Icon: FileCode },
+	slides: { label: "Markdown", description: "Plain-text .md file", Icon: FileCode },
 	html: { label: "Web page", description: ".html file that opens in a browser", Icon: FileText },
 } satisfies Record<Artifact["kind"], Omit<ExportOption, "onSave">>;
 
-/** A document being edited, as a Word file: saved as one, and replaced with one's content once the editor is up. */
-interface WordFile {
-	onDownload: () => void;
-	onImport: WordImport | undefined;
+/**
+ * What is being edited as the file of the office app made for its kind, a
+ * Word document for a document and a PowerPoint presentation for a deck:
+ * saved as one, which the API builds from its current version, and replaced
+ * with one's content once the editor is up.
+ */
+interface OfficeFile {
+	/** Saving it as one, a row of Share's exports. */
+	exported: ExportOption;
+	/** What the item of the ⋯ menu that replaces it with a file's content says. */
+	importLabel: string;
+	/** The files that item's picker offers. */
+	accept: string;
+	onImport: FileImport | undefined;
+}
+
+function officeFileOf(
+	kind: LiveArtifactKind,
+	podId: string,
+	artifactId: string,
+	onImport: FileImport | undefined,
+): OfficeFile {
+	if (kind === "slides") {
+		return {
+			exported: powerPointExport(podId, artifactId),
+			importLabel: "Import from PowerPoint (.pptx)",
+			accept: ".pptx",
+			onImport,
+		};
+	}
+	return {
+		exported: {
+			label: "Word",
+			description: "Editable .docx document",
+			Icon: FileType,
+			onSave: () => downloadAsWord(podId, artifactId),
+		},
+		importLabel: "Import from Word (.docx)",
+		accept: ".docx",
+		onImport,
+	};
 }
 
 /** Deleting what is shown, for those who may. */
@@ -344,7 +431,8 @@ export function ArtifactStageView({
 	editor,
 	presence,
 	status,
-	word,
+	present,
+	officeFile,
 	deletion,
 }: {
 	pod: Pod;
@@ -359,8 +447,10 @@ export function ArtifactStageView({
 	presence?: ReactNode;
 	/** Whether what is being edited is saved, after the title. */
 	status?: ReactNode;
-	/** Without it, the artifact has nothing to do with Word files. */
-	word?: WordFile;
+	/** Presents the deck being edited. Without it, there is no Present. */
+	present?: Present;
+	/** Without it, the artifact is neither saved as nor replaced with a Word or PowerPoint file. */
+	officeFile?: OfficeFile;
 	/** Newest first. */
 	versions: readonly ArtifactVersionSummary[];
 	now: Date;
@@ -371,7 +461,7 @@ export function ArtifactStageView({
 }) {
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const [fullScreen, setFullScreen] = useState(false);
-	const wordFile = useRef<HTMLInputElement>(null);
+	const importedFile = useRef<HTMLInputElement>(null);
 	const router = useRouter();
 	if (typeof artifact !== "object") {
 		return (
@@ -389,16 +479,7 @@ export function ArtifactStageView({
 	const link = () =>
 		new URL(router.buildLocation(artifactLink(pod, artifact.id)).href, window.location.origin).href;
 	const exports: ExportOption[] = [
-		...(word
-			? [
-					{
-						label: "Word",
-						description: "Editable .docx document",
-						Icon: FileType,
-						onSave: word.onDownload,
-					},
-				]
-			: []),
+		...(officeFile ? [officeFile.exported] : []),
 		{ ...RAW_FILES[artifact.kind], onSave: () => downloadArtifact(artifact) },
 	];
 	return (
@@ -423,6 +504,7 @@ export function ArtifactStageView({
 			actions={
 				<>
 					{presence}
+					{present && <PresentButton onClick={present} className="max-md:hidden" />}
 					{!editor && (
 						<VersionPicker
 							artifact={artifact}
@@ -431,7 +513,10 @@ export function ArtifactStageView({
 							onVersionChange={onVersionChange}
 						/>
 					)}
-					<ArtifactShare title={artifact.title} pod={pod} link={link} exports={exports} />
+					{/* On a phone, a deck's Share sits beside Present, under the title. */}
+					<span className={cn("contents", present && "max-md:hidden")}>
+						<ArtifactShare title={artifact.title} pod={pod} link={link} exports={exports} />
+					</span>
 					<span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border-strong max-md:hidden" />
 					<IconButton
 						label={fullScreen ? "Exit full screen" : "Full screen"}
@@ -446,7 +531,7 @@ export function ArtifactStageView({
 							<Maximize2 aria-hidden size={15} strokeWidth={1.75} />
 						)}
 					</IconButton>
-					{(editor || word?.onImport || deletion) && (
+					{(editor || officeFile?.onImport || deletion) && (
 						<MoreMenu variant="bar">
 							{editor && (
 								<DropdownMenuSub>
@@ -464,10 +549,10 @@ export function ArtifactStageView({
 									</DropdownMenuContent>
 								</DropdownMenuSub>
 							)}
-							{word?.onImport && (
-								<DropdownMenuItem onClick={() => wordFile.current?.click()}>
+							{officeFile?.onImport && (
+								<DropdownMenuItem onClick={() => importedFile.current?.click()}>
 									<Upload aria-hidden />
-									Import from Word (.docx)
+									{officeFile.importLabel}
 								</DropdownMenuItem>
 							)}
 							{deletion && (
@@ -482,6 +567,18 @@ export function ArtifactStageView({
 			}
 			onClose={onClose}
 		>
+			{present && (
+				<div className="flex gap-2 pb-3 md:hidden">
+					<PresentButton
+						onClick={present}
+						className="h-11 flex-1 justify-center rounded-md text-sm"
+					/>
+					{/* Its own button, made as large as Present's beside it. */}
+					<span className="flex flex-1 [&>button]:h-11 [&>button]:flex-1 [&>button]:justify-center [&>button]:rounded-md [&>button]:text-sm">
+						<ArtifactShare title={artifact.title} pod={pod} link={link} exports={exports} />
+					</span>
+				</div>
+			)}
 			{editor ?? (
 				<kind.Full
 					title={artifact.title}
@@ -489,16 +586,16 @@ export function ArtifactStageView({
 					at={{ podId: artifact.podId, artifactId: artifact.id, version: shown.number }}
 				/>
 			)}
-			{word?.onImport && (
+			{officeFile?.onImport && (
 				// Outside the menu, which is gone by the time the person has chosen a file.
 				<input
-					ref={wordFile}
+					ref={importedFile}
 					type="file"
-					accept=".docx"
+					accept={officeFile.accept}
 					hidden
 					onChange={(event) => {
 						const [file] = event.target.files ?? [];
-						if (file) void word.onImport?.(file);
+						if (file) void officeFile.onImport?.(file);
 						event.target.value = "";
 					}}
 				/>
@@ -515,6 +612,23 @@ export function ArtifactStageView({
 				/>
 			)}
 		</Stage>
+	);
+}
+
+/** Starts presenting the deck, beside its Share. */
+function PresentButton({ onClick, className }: { onClick: () => void; className?: string }) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			className={cn(
+				"focus-ring inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-border-strong bg-chip px-2.5 font-medium text-foreground text-xs transition-colors hover:bg-hover",
+				className,
+			)}
+		>
+			<Play aria-hidden size={13} className="fill-current" />
+			Present
+		</button>
 	);
 }
 

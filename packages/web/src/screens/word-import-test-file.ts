@@ -101,7 +101,7 @@ const CODE_LINES = [
 ];
 
 /** A plain PNG of one colour, so the file carries a real embedded image. */
-function png(width: number, height: number, [red, green, blue]: [number, number, number]) {
+export function png(width: number, height: number, [red, green, blue]: [number, number, number]) {
 	const row = Buffer.alloc(1 + width * 3);
 	for (let x = 0; x < width; x++) row.set([red, green, blue], 1 + x * 3);
 	const pixels = Buffer.concat(Array.from({ length: height }, () => row));

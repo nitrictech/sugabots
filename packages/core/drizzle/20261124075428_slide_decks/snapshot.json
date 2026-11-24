@@ -1,0 +1,39 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "be54f45f-59ab-4760-bc43-7b2ba2eabbc8",
+  "prevIds": [
+    "18e4ea6d-3b03-4357-af7e-8d0985183193",
+    "5a8fdc80-d7b6-42ac-8696-402a26151603"
+  ],
+  "footprints": [
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "artifact"
+      ],
+      "writes": [
+        "s|ck|public.artifact.artifact_kind_valid"
+      ],
+      "reads": [
+        "n|tbl|public.artifact",
+        "n|sch|public",
+        "n|col|public.artifact.kind",
+        "e|col|public.artifact.kind"
+      ],
+      "sqlHash": "454b218b68c4887f"
+    }
+  ],
+  "deltas": [
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"artifact\",\"artifact_kind_valid\"]",
+      "set": {
+        "value": "\"kind\" in ('document', 'slides', 'html')"
+      }
+    }
+  ]
+}

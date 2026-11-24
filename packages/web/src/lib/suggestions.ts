@@ -2,10 +2,13 @@ import { applySuggestion, revertSuggestion } from "@handlewithcare/prosemirror-s
 import {
 	SUGGESTED_DELETION,
 	SUGGESTED_INSERTION,
+	SUGGESTED_MODIFICATION,
 	type SuggestionBy,
 	suggestionBy,
 } from "@sugabots/contracts/live-document";
-import type { Node } from "@tiptap/pm/model";
+import { SLIDE } from "@sugabots/contracts/live-slides";
+import { isSlideLayout, type SlideLayout } from "@sugabots/contracts/slides-markdown";
+import type { Mark, Node } from "@tiptap/pm/model";
 import type { Command } from "@tiptap/pm/state";
 
 /*
@@ -25,6 +28,16 @@ export interface PendingSuggestion {
 	/** Where its marked content starts and ends in the document. */
 	from: number;
 	to: number;
+	/** What it would do to a deck's slides themselves, when it does anything to them. */
+	slides?: SlideChanges;
+}
+
+/** What a suggestion would do to whole slides of a deck: add one, remove one, or lay one out anew. */
+export interface SlideChanges {
+	adds: boolean;
+	removes: boolean;
+	/** The layout it would give a slide. */
+	layout: SlideLayout | undefined;
 }
 
 /** The suggestions waiting in the document, in the order they appear. */
@@ -54,21 +67,41 @@ export function pendingSuggestions(document: Node): PendingSuggestion[] {
 					mark.type.name === SUGGESTED_INSERTION ? joined(suggestion.adds, text) : suggestion.adds,
 				from: Math.min(suggestion.from, position),
 				to: Math.max(suggestion.to, position + node.nodeSize),
+				...(node.type.name === SLIDE ? { slides: slideChanges(suggestion.slides, mark) } : {}),
 			});
 		}
 	});
 	return [...pending.values()];
 }
 
+/** `changes` with what `mark`, on a slide, adds to them. */
+function slideChanges(changes: SlideChanges | undefined, mark: Mark): SlideChanges {
+	const { adds, removes, layout } = changes ?? { adds: false, removes: false, layout: undefined };
+	const laidOut: unknown = mark.attrs.attrName === "layout" ? mark.attrs.newValue : undefined;
+	return {
+		adds: adds || mark.type.name === SUGGESTED_INSERTION,
+		removes: removes || mark.type.name === SUGGESTED_DELETION,
+		layout: isSlideLayout(laidOut) ? laidOut : layout,
+	};
+}
+
 /**
- * Settles a suggestion. Accepting it removes what it proposed removing and
- * keeps what it proposed adding as ordinary content; rejecting it does the reverse.
+ * Settles the suggestion `suggestionId`, leaving every other one waiting as
+ * it is. Accepting it removes what it proposed removing and keeps what it
+ * proposed adding as ordinary content, and keeps the kind it proposed for a
+ * block or the layout for a slide; rejecting it does the reverse. Settling is
+ * never itself a suggestion, even in suggesting mode.
+ *
+ * The suggesting library is patched (`patches/` at the repository root) so
+ * that it settles only this suggestion's changes to blocks and slides: as
+ * published, it settles everyone's alongside, and rejects nothing that adds
+ * or removes no content.
  */
-export const settling = (suggestionId: string, how: "accept" | "reject"): Command =>
+export const settlingSuggestion = (suggestionId: string, how: "accept" | "reject"): Command =>
 	how === "accept" ? applySuggestion(suggestionId) : revertSuggestion(suggestionId);
 
 /** The marks a suggestion puts on content: adding it, removing it, or changing its kind or formatting. */
-const SUGGESTION_MARKS = new Set([SUGGESTED_INSERTION, SUGGESTED_DELETION, "modification"]);
+const SUGGESTION_MARKS = new Set([SUGGESTED_INSERTION, SUGGESTED_DELETION, SUGGESTED_MODIFICATION]);
 
 /** The character the suggesting library puts where a block was split or joined, which nobody sees. */
 const UNSEEN = "​";

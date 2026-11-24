@@ -1,22 +1,33 @@
-import { artifactImageTypeSchema } from "@sugabots/contracts";
+import {
+	type Artifact,
+	type ArtifactImageType,
+	artifactImageTypeSchema,
+	isEditedLive,
+	LIVE_EDITOR_REFUSED_CLOSE_CODE,
+	type LiveArtifactKind,
+	liveEditorQuerySchema,
+} from "@sugabots/contracts";
 import { API_BASE_PATH, type ArtifactImageIds } from "@sugabots/contracts/http";
 import { LIVE_DOCUMENT_SCHEMA } from "@sugabots/contracts/live-document";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { LiveDocuments } from "@sugabots/core/artifacts/live";
+import { POWERPOINT_CONTENT_TYPE, powerPointFileOf } from "@sugabots/core/artifacts/powerpoint";
 import { WORD_CONTENT_TYPE, wordFileOf } from "@sugabots/core/artifacts/word";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Installation } from "@sugabots/core/installation/installation";
-import { Data, Effect, Layer, Queue, Schema, Stream } from "effect";
+import { Data, Effect, Layer, Option, Queue, Schema, Stream } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Socket } from "effect/unstable/socket";
 import { Authentication } from "../auth/authentication.ts";
 import { storeOutagesAsDefects } from "./errors.ts";
 
 /**
- * A `document` artifact as people work on it: the WebSocket the web app's
- * editor opens, which joins the person to the artifact's live document for as
- * long as it stays open, and the document as a Word file. Anyone who can read
- * the artifact can edit it and download it.
+ * A `document` or `slides` artifact as people work on it: the WebSocket the
+ * web app's editor opens, which joins the person to the artifact's live
+ * document for as long as it stays open if the editor was built for the
+ * artifact's schema and kind, a document as a Word file, and a deck as a
+ * PowerPoint file. Anyone who can read the artifact can edit it and download
+ * it.
  */
 export const liveDocumentRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
@@ -27,7 +38,7 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 		const trusted = new Set((yield* Installation.Service).trustedOrigins);
 
 		/**
-		 * An image the document keeps, for its Word file: `undefined` when it
+		 * An image the document or deck keeps, for its file: `undefined` when it
 		 * keeps none under that id, or the one kept isn't of a kind a document
 		 * keeps, which the file shows as its words.
 		 */
@@ -49,10 +60,10 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 			);
 
 		/**
-		 * The document the request's path names, if whoever holds its session may
+		 * The artifact the request's path names, if whoever holds its session may
 		 * read it, and how to act as them.
 		 */
-		const requestedDocument = Effect.gen(function* () {
+		const requestedArtifact = Effect.gen(function* () {
 			const request = yield* HttpServerRequest.HttpServerRequest;
 			const holder = yield* authentication.identify(new Headers(request.headers));
 			if (!holder) return yield* new Refused({ status: 401 });
@@ -62,7 +73,6 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 				CurrentActor.AuthenticatedUserId.vouchedFor(holder.user.id),
 			);
 			const artifact = yield* artifacts.get({ podId, artifactId }).pipe(asHolder);
-			if (artifact.kind !== "document") return yield* new Refused({ status: 404 });
 			return { artifact, asHolder };
 		}).pipe(Effect.catchTags(refusedAsStatus));
 
@@ -76,14 +86,15 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 				if (!request.headers.origin || !trusted.has(request.headers.origin)) {
 					return HttpServerResponse.text("Untrusted origin", { status: 403 });
 				}
-				// An editor built for another schema would delete what it could not hold.
-				if (schemaOf(request.url) !== LIVE_DOCUMENT_SCHEMA) {
-					return HttpServerResponse.text("Reload to get the editor this document needs", {
-						status: 409,
-					});
+				const { artifact } = yield* requestedArtifact;
+				if (!isEditedLive(artifact)) return yield* new Refused({ status: 404 });
+				const socket = yield* request.upgrade;
+				// An editor built for another schema or another kind of artifact would delete what it could not hold.
+				if (!isBuiltFor(request.url, artifact.kind)) {
+					yield* refuseEditor(socket);
+					return HttpServerResponse.empty();
 				}
-				const { artifact } = yield* requestedDocument;
-				yield* edit(yield* request.upgrade, (outgoing) => live.join(artifact, outgoing));
+				yield* edit(socket, (outgoing) => live.join(artifact, outgoing));
 				return HttpServerResponse.empty();
 			}).pipe(
 				Effect.catchTag("DocumentRefused", refusal),
@@ -95,30 +106,67 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 			),
 		);
 
-		yield* router.add(
-			"GET",
-			`${API_BASE_PATH}/pods/:podId/artifacts/:artifactId/word`,
-			Effect.gen(function* () {
-				const { artifact, asHolder } = yield* requestedDocument;
-				// What people have typed, where the document is live; its last version otherwise.
-				const markdown = (yield* live.markdown(artifact.id)) ?? artifact.content;
-				const file = yield* wordFileOf(artifact, markdown, (image) =>
-					keptImage(image).pipe(asHolder),
-				);
-				return HttpServerResponse.uint8Array(file, { contentType: WORD_CONTENT_TYPE }).pipe(
-					HttpServerResponse.setHeader(
-						"content-disposition",
-						`attachment; filename*=UTF-8''${encodeURIComponent(`${artifact.title}.docx`)}`,
-					),
-				);
-			}).pipe(
-				// Reading the images asks again whether the person may read the document, as they may have been taken out of its pod meanwhile.
-				Effect.catchTags({ ...refusedAsStatus, ...storeOutagesAsDefects }),
-				Effect.catchTag("DocumentRefused", refusal),
-			),
-		);
+		for (const download of DOWNLOADS) {
+			yield* router.add(
+				"GET",
+				`${API_BASE_PATH}/pods/:podId/artifacts/:artifactId/${download.path}`,
+				Effect.gen(function* () {
+					const { artifact, asHolder } = yield* requestedArtifact;
+					if (artifact.kind !== download.kind) return yield* new Refused({ status: 404 });
+					// What people have typed, where the artifact is live; its last version otherwise.
+					const markdown = (yield* live.markdown(artifact.id)) ?? artifact.content;
+					const file = yield* download.fileOf(artifact, markdown, (image) =>
+						keptImage(image).pipe(asHolder),
+					);
+					return HttpServerResponse.uint8Array(file, { contentType: download.contentType }).pipe(
+						HttpServerResponse.setHeader(
+							"content-disposition",
+							`attachment; filename*=UTF-8''${encodeURIComponent(`${artifact.title}.${download.extension}`)}`,
+						),
+					);
+				}).pipe(
+					// Reading the images asks again whether the person may read the artifact, as they may have been taken out of its pod meanwhile.
+					Effect.catchTags({ ...refusedAsStatus, ...storeOutagesAsDefects }),
+					Effect.catchTag("DocumentRefused", refusal),
+				),
+			);
+		}
 	}),
 );
+
+/** A file a live artifact of one kind downloads as, built from its markdown and the images it keeps. */
+interface Download {
+	/** The last part of its address, after the artifact's. */
+	path: string;
+	kind: LiveArtifactKind;
+	contentType: string;
+	extension: string;
+	fileOf: <E, R>(
+		artifact: Pick<Artifact, "podId" | "id" | "title">,
+		markdown: string,
+		imageOf: (
+			image: ArtifactImageIds,
+		) => Effect.Effect<{ contentType: ArtifactImageType; bytes: Uint8Array } | undefined, E, R>,
+	) => Effect.Effect<Uint8Array, E, R>;
+}
+
+/** A document downloads as a Word file, and a deck as a PowerPoint file. */
+const DOWNLOADS: readonly Download[] = [
+	{
+		path: "word",
+		kind: "document",
+		contentType: WORD_CONTENT_TYPE,
+		extension: "docx",
+		fileOf: wordFileOf,
+	},
+	{
+		path: "powerpoint",
+		kind: "slides",
+		contentType: POWERPOINT_CONTENT_TYPE,
+		extension: "pptx",
+		fileOf: powerPointFileOf,
+	},
+];
 
 /** A refusal to read the document, as the status that says so: hidden as absent, so an id cannot be probed for. */
 const refusedAsStatus = {
@@ -128,9 +176,37 @@ const refusedAsStatus = {
 
 const isImageType = Schema.is(artifactImageTypeSchema);
 
-/** The schema the editor asking to join says it was built for, from the address it asked at. */
-const schemaOf = (url: string) =>
-	Number(new URL(url, "http://live.invalid").searchParams.get("schema"));
+/**
+ * Whether the editor asking to join says, in the address it asked at, that
+ * it was built for the schema live documents are kept in and for `kind`.
+ */
+const isBuiltFor = (url: string, kind: LiveArtifactKind) =>
+	Option.exists(
+		decodeLiveEditorQuery(Object.fromEntries(new URL(url, "http://live.invalid").searchParams)),
+		(builtFor) => builtFor.schema === LIVE_DOCUMENT_SCHEMA && builtFor.kind === kind,
+	);
+
+const decodeLiveEditorQuery = Schema.decodeUnknownOption(liveEditorQuerySchema);
+
+/**
+ * Closes the socket of an editor that must not join with the code that tells
+ * it to stop and be reloaded, which a browser can read, where it can't read
+ * why an upgrade was refused and would try again for ever.
+ */
+const refuseEditor = (socket: Socket.Socket) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			// Reading opens the socket, which nothing can be written to before.
+			yield* socket.reader;
+			const writer = yield* socket.writer;
+			yield* writer.write(
+				new Socket.CloseEvent(
+					LIVE_EDITOR_REFUSED_CLOSE_CODE,
+					"Reload to get the editor this artifact needs",
+				),
+			);
+		}),
+	).pipe(Effect.ignore);
 
 /** Why a request for a document gets no document, as the status that says so. */
 class Refused extends Data.TaggedError("DocumentRefused")<{

@@ -68,6 +68,22 @@
 	/* What a bot proposes in a document, and the text a request to it is about: the palette's one blue. */
 	--suggestion: light-dark(#2563eb, #60a5fa);
 
+	/*
+	 * A slide of a deck, which follows the theme as a document does, as a deck
+	 * keeps no colours of its own: its ground and words, the softer words under
+	 * a title, the faintest, its one accent, its rules, the tint behind a
+	 * table's header, and the shadow that lifts it off the page while edited.
+	 */
+	--slide-background: light-dark(#ffffff, #151518);
+	--slide-foreground: light-dark(#111113, #ededed);
+	--slide-sub: light-dark(#52525b, #a1a1aa);
+	--slide-faint: light-dark(#6b6b73, #808089);
+	--slide-accent: light-dark(#2563eb, #60a5fa);
+	--slide-rule: light-dark(#e4e4e7, #2e2e33);
+	--slide-tint: light-dark(#f4f4f5, #1c1c20);
+	--slide-shadow:
+		0 0 0 1px var(--border-strong), 0 16px 40px light-dark(rgb(0 0 0 / 0.08), rgb(0 0 0 / 0.35));
+
 	/* Hairlines, faintest first; `border-strong` edges a field or the composer. */
 	--border-subtle: light-dark(#f1f1f3, #1c1c1f);
 	--border: light-dark(#e4e4e7, #1c1c1f);
@@ -189,6 +205,9 @@
 	--color-disabled-foreground: var(--disabled-foreground);
 	--color-link: var(--link);
 	--color-suggestion: var(--suggestion);
+	--color-slide-background: var(--slide-background);
+	--color-slide-accent: var(--slide-accent);
+	--color-slide-rule: var(--slide-rule);
 	--color-soft-foreground: var(--soft-foreground);
 	--color-border-strong: var(--border-strong);
 	--color-border-dashed: var(--border-dashed);
@@ -958,7 +977,7 @@
 }
 
 /* The cells picked out by dragging across them. */
-.live-document .selectedCell {
+:is(.live-document, .live-deck) .selectedCell {
 	background: color-mix(in srgb, var(--suggestion) 12%, transparent);
 }
 
@@ -970,13 +989,13 @@
 	vertical-align: bottom;
 }
 
-.live-document img.ProseMirror-selectednode {
+:is(.live-document, .live-deck) img.ProseMirror-selectednode {
 	outline: 2px solid var(--suggestion);
 	outline-offset: 2px;
 }
 
 /* An image that isn't the document's own, which is never loaded: its words, in a dashed box. */
-.live-document img:not([src]) {
+:is(.live-document, .live-deck, .slide-drawing) img:not([src]) {
 	min-width: 1em;
 	min-height: 1em;
 	padding: 1px 6px;
@@ -986,19 +1005,19 @@
 }
 
 /* An image a suggestion would add, ringed in the suggestion's colour, or remove, faded and dashed. */
-.live-document ins[data-id] img {
+:is(.live-document, .live-deck, .slide-drawing) ins[data-id] img {
 	outline: 2px solid var(--suggestion);
 	outline-offset: 2px;
 }
 
-.live-document del[data-id] img {
+:is(.live-document, .live-deck, .slide-drawing) del[data-id] img {
 	opacity: 0.45;
 	outline: 2px dashed var(--subtle-foreground);
 	outline-offset: 2px;
 }
 
 /* Highlighted text in a document, in the warning colour, light enough to read through in either theme. */
-:is(.live-document, .message-markdown) mark {
+:is(.live-document, .live-deck, .slide-drawing, .message-markdown) mark {
 	padding: 0 2px;
 	border-radius: 2px;
 	background: color-mix(in srgb, var(--warning) 30%, transparent);
@@ -1006,7 +1025,7 @@
 }
 
 /* Someone else's caret in the document, in their colour, with their name above it. */
-.live-document .collaboration-carets__caret {
+:is(.live-document, .live-deck) .collaboration-carets__caret {
 	position: relative;
 	margin: 0 -1px;
 	border-right: 1px solid;
@@ -1015,7 +1034,7 @@
 	word-break: normal;
 }
 
-.live-document .collaboration-carets__label {
+:is(.live-document, .live-deck) .collaboration-carets__label {
 	position: absolute;
 	top: -1.4em;
 	left: -1px;
@@ -1029,14 +1048,14 @@
 }
 
 /* A suggestion in a document, a person's or a bot's: what it would add, and what it would remove, until somebody accepts or rejects it. */
-.live-document ins[data-id] {
+:is(.live-document, .live-deck, .slide-drawing) ins[data-id] {
 	border-radius: 2px;
 	background: color-mix(in srgb, var(--suggestion) 12%, transparent);
 	color: var(--suggestion);
 	text-decoration: none;
 }
 
-.live-document del[data-id] {
+:is(.live-document, .live-deck, .slide-drawing) del[data-id] {
 	color: var(--subtle-foreground);
 	text-decoration: line-through;
 }
@@ -1048,7 +1067,7 @@
 }
 
 /* The text a request for edits is about, while the person writes what to change. */
-.live-document .edit-target {
+:is(.live-document, .live-deck) .edit-target {
 	border-radius: 3px;
 	outline: 1.5px dashed var(--suggestion);
 	outline-offset: 2px;
@@ -1057,11 +1076,449 @@
 	box-decoration-break: clone;
 }
 /* What goes in an empty block of a document, said in its place until something is written there. */
-.live-document .is-empty::before {
+:is(.live-document, .live-deck) .is-empty::before {
 	content: attr(data-placeholder);
 	/* Out of the flow, so the caret sits at the start of the line and not after the words. */
 	float: left;
 	height: 0;
 	color: var(--subtle-foreground);
 	pointer-events: none;
+}
+
+/*
+ * A deck's slide, drawn the same wherever it shows: on the stage while the
+ * deck is edited (`screens/LiveDeck.tsx`), and read only in the strip of
+ * slides, in present mode and wherever a deck is only read
+ * (`screens/slide-drawing.tsx`). Everything on it is sized off its width, in
+ * a unit that is 16px on a slide 960px wide, so one set of styles draws it at
+ * any size. Its text is drawn at the step `--slide-fit` gives, the largest at
+ * which it fits. Each layout, and each part of a slide, sets the sizes of
+ * what it holds, in the unit.
+ */
+.live-deck section[data-slide],
+.slide-drawing {
+	container-type: inline-size;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] {
+	--slide-unit: 1.6667cqw;
+	--slide-text: calc(var(--slide-unit) * var(--slide-fit, 1));
+	--slide-text-size: 1.5;
+	--slide-text-color: var(--slide-foreground);
+	--slide-heading-size: 2.5;
+	--slide-heading-weight: 600;
+	--slide-heading-leading: 1.15;
+	--slide-heading-tracking: -0.01em;
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	gap: 2em;
+	aspect-ratio: 16 / 9;
+	/* In the unit alone, so the margins stay as the text steps down. */
+	padding: calc(4 * var(--slide-unit)) calc(5 * var(--slide-unit));
+	overflow-wrap: break-word;
+	background: var(--slide-background);
+	color: var(--slide-foreground);
+	font-family: var(--font-sans);
+	font-size: var(--slide-text);
+	line-height: 1.4;
+}
+
+/* A drawing clips what runs over; the stage lets the frame grow, so what runs over can still be edited. */
+.slide-drawing [data-slide-body] {
+	overflow: hidden;
+	/* The frame paints the slide, so it takes the corners its holder is rounded to. */
+	border-radius: inherit;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] :is(p, ul, ol, li, pre, th, td) {
+	font-size: calc(var(--slide-text-size) * var(--slide-text));
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] :is(p, ul, ol, pre, blockquote, table) {
+	margin: 0;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] p {
+	color: var(--slide-text-color);
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] :is(h1, h2, h3) {
+	margin: 0;
+	color: var(--slide-foreground);
+	font-size: calc(var(--slide-heading-size) * var(--slide-text));
+	font-weight: var(--slide-heading-weight);
+	line-height: var(--slide-heading-leading);
+	letter-spacing: var(--slide-heading-tracking);
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] :is(ul, ol) {
+	display: flex;
+	flex-direction: column;
+	gap: 0.7em;
+	padding-left: 1.2em;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] ul {
+	list-style: disc;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] ol {
+	list-style: decimal;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] li > :is(ul, ol) {
+	margin-top: 0.5em;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] blockquote {
+	padding-left: 0.9em;
+	border-left: 0.15em solid var(--slide-rule);
+	--slide-text-color: var(--slide-sub);
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] a {
+	color: inherit;
+	text-decoration: underline;
+	text-underline-offset: 0.15em;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] code {
+	padding: 0.1em 0.3em;
+	border-radius: 0.25em;
+	background: var(--slide-tint);
+	font-family: var(--font-mono);
+	font-size: 0.875em;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] pre {
+	padding: 0.6em 0.8em;
+	border-radius: 0.5em;
+	background: var(--slide-tint);
+	font-size: calc(0.75 * var(--slide-text-size) * var(--slide-text));
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] pre code {
+	padding: 0;
+	background: none;
+	font-size: inherit;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] img {
+	max-width: 100%;
+	height: auto;
+	border-radius: 0.5em;
+	vertical-align: bottom;
+}
+
+/* A table on a slide: a tinted header row, and a rule under each row. */
+:is(.live-deck, .slide-drawing) [data-slide-body] table {
+	width: 100%;
+	border-collapse: collapse;
+	table-layout: fixed;
+	line-height: 1.35;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] :is(th, td) {
+	--slide-text-size: 1.25;
+	padding: 0.7em 0.8em;
+	border-bottom: 1px solid var(--slide-rule);
+	text-align: left;
+	vertical-align: top;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] th {
+	--slide-text-color: var(--slide-sub);
+	padding-block: 0.6em;
+	background: var(--slide-tint);
+	font-weight: 600;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] tr > td:first-child {
+	font-weight: 500;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] :is(th, td) > * + * {
+	margin-top: 0.4em;
+}
+
+/* One of the two columns of a slide laid out in columns. */
+:is(.live-deck, .slide-drawing) [data-slide-column] {
+	--slide-text-size: 1.25;
+	--slide-heading-size: 1.375;
+	--slide-heading-leading: 1.2;
+	--slide-heading-tracking: 0;
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 0.9em;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-column] :is(ul, ol) {
+	gap: 0.6em;
+}
+
+/*
+ * Columns somebody proposes adding or removing, as while a new layout is
+ * suggested, sit in their slide as any column does, each marked as the
+ * suggestion's words are: the element saying so is no box of its own.
+ */
+:is(.live-deck, .slide-drawing)
+	[data-slide-body]
+	> :is(ins, del, [data-type="modification"]):has(> [data-slide-column]) {
+	/* biome-ignore lint/complexity/noImportantStyles: the suggesting library draws the element with its own inline `display: block`. */
+	display: contents !important;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] ins[data-id] > [data-slide-column] {
+	border-radius: 0.25em;
+	background: color-mix(in srgb, var(--suggestion) 12%, transparent);
+	color: var(--suggestion);
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-body] del[data-id] > [data-slide-column] {
+	color: var(--subtle-foreground);
+	text-decoration: line-through;
+}
+
+/* Title: a large title, and a subtitle under it, in the middle. */
+[data-slide][data-layout="title"] > [data-slide-body] {
+	--slide-heading-size: 3.75;
+	--slide-heading-weight: 700;
+	--slide-heading-leading: 1.1;
+	--slide-heading-tracking: -0.02em;
+	--slide-text-color: var(--slide-sub);
+	justify-content: safe center;
+	gap: 1.25em;
+}
+
+[data-slide][data-layout="title"] > [data-slide-body] :is(h1, h2, h3),
+[data-slide][data-layout="image"] > [data-slide-body] :is(h1, h2, h3) {
+	text-wrap: balance;
+}
+
+/* Section break: a short accent, a label, and a very large title, at the foot of the slide. */
+[data-slide][data-layout="section"] > [data-slide-body] {
+	--slide-heading-size: 4;
+	--slide-heading-weight: 700;
+	--slide-heading-leading: 1.05;
+	--slide-heading-tracking: -0.02em;
+	--slide-text-size: 1.25;
+	--slide-text-color: var(--slide-sub);
+	justify-content: safe flex-end;
+	gap: 1em;
+}
+
+[data-slide][data-layout="section"] > [data-slide-body]::before {
+	content: "";
+	flex: none;
+	width: 3em;
+	height: 0.3em;
+	border-radius: 0.15em;
+	background: var(--slide-accent);
+}
+
+[data-slide][data-layout="section"] > [data-slide-body] p {
+	font-weight: 500;
+}
+
+/* Quote: the quote large, and who said it under it, in the middle. */
+[data-slide][data-layout="quote"] > [data-slide-body] {
+	--slide-text-size: 1.25;
+	--slide-text-color: var(--slide-sub);
+	justify-content: safe center;
+	gap: 1.75em;
+	padding-inline: calc(7 * var(--slide-unit));
+}
+
+[data-slide][data-layout="quote"] > [data-slide-body] blockquote {
+	--slide-text-size: 2.5;
+	--slide-text-color: var(--slide-foreground);
+	padding: 0;
+	border: 0;
+	font-weight: 500;
+	line-height: 1.25;
+	letter-spacing: -0.01em;
+	text-wrap: balance;
+}
+
+/* Two columns: the title across the top, and the columns side by side under it, each heading ruled off. */
+[data-slide][data-layout="columns"] > [data-slide-body] {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	align-content: start;
+	gap: 2em 3.5em;
+}
+
+[data-slide][data-layout="columns"]
+	> [data-slide-body]
+	> :not([data-slide-column], :has(> [data-slide-column])) {
+	grid-column: 1 / -1;
+}
+
+[data-slide][data-layout="columns"] [data-slide-column] :is(h1, h2, h3) {
+	padding-bottom: 0.6em;
+	border-bottom: 1px solid var(--slide-rule);
+}
+
+/* Image and text: the title and its text on the left, in the middle, and the image filling the right. */
+[data-slide][data-layout="image"] > [data-slide-body] {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	grid-template-rows: 1fr auto auto 1fr;
+	gap: 0 3.5em;
+}
+
+[data-slide][data-layout="image"] > [data-slide-body] > :not([data-slide-column]) {
+	grid-column: 1;
+	grid-row: 2;
+	margin-bottom: calc(1.25 * var(--slide-text));
+}
+
+[data-slide][data-layout="image"] > [data-slide-body] > [data-slide-column] {
+	--slide-text-size: 1.375;
+	--slide-text-color: var(--slide-sub);
+	grid-column: 1;
+	grid-row: 3;
+	line-height: 1.5;
+}
+
+[data-slide][data-layout="image"] > [data-slide-body] > [data-slide-column] ~ [data-slide-column] {
+	position: relative;
+	grid-column: 2;
+	grid-row: 1 / -1;
+	align-items: center;
+	justify-content: center;
+}
+
+[data-slide][data-layout="image"] [data-slide-column] ~ [data-slide-column] img {
+	max-height: calc(25 * var(--slide-unit));
+	border-radius: 0.75em;
+}
+
+/* Table: a title, and the table under it. */
+[data-slide][data-layout="table"] > [data-slide-body] {
+	--slide-text-size: 1.25;
+}
+
+/*
+ * The deck in its editor: the slide on the stage, its frame lifted off the
+ * page and its notes under it. The other slides stay in the editor, hidden.
+ */
+.live-deck {
+	outline: none;
+}
+
+.live-deck section[data-slide] {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.live-deck section[data-slide].slide-elsewhere {
+	display: none;
+}
+
+.live-deck [data-slide-body] {
+	border-radius: 10px;
+	box-shadow: var(--slide-shadow);
+}
+
+/* What the stage puts under the frame (`deck-stage.ts`): a slide that runs over, and suggestions without room beside it. */
+.live-deck .slide-under {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.live-deck .slide-under:empty {
+	display: none;
+}
+
+.live-deck .slide-overflow {
+	margin: 0;
+	padding: 0 4px;
+	color: var(--warning);
+	font: 13px / 1.45 var(--font-sans);
+}
+
+.live-deck [data-speaker-notes] {
+	padding: 0 4px;
+	color: var(--soft-foreground);
+	font-size: 14px;
+	line-height: 1.5;
+}
+
+.live-deck [data-speaker-notes]::before {
+	content: "Speaker notes";
+	display: block;
+	margin-bottom: 2px;
+	color: var(--subtle-foreground);
+	font-size: 12px;
+}
+
+.live-deck [data-speaker-notes] p + p {
+	margin-top: 0.5em;
+}
+
+@media (width < 48rem) {
+	.live-deck [data-slide-body] {
+		border-radius: 8px;
+	}
+
+	.live-deck [data-speaker-notes] {
+		font-size: 16px;
+	}
+}
+
+/* A slide somebody proposes adding, ringed in the suggestion's colour, or removing, faded. */
+.live-deck ins[data-id]:has(> section[data-slide]) {
+	background: none;
+}
+
+.live-deck ins[data-id] > section[data-slide] > [data-slide-body] {
+	outline: 2px dashed var(--suggestion);
+	outline-offset: 4px;
+}
+
+.live-deck del[data-id]:has(> section[data-slide]) {
+	color: inherit;
+	text-decoration: none;
+}
+
+.live-deck del[data-id] > section[data-slide] > [data-slide-body] {
+	opacity: 0.5;
+}
+
+/* Where an empty image column's image goes: a dashed area that opens the picker, or takes an image dropped on it. */
+.live-deck .slide-add-image {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0.75em;
+	border: 1px dashed var(--border-dashed);
+	border-radius: 0.75em;
+	background: var(--slide-tint);
+	color: var(--slide-faint);
+	font: inherit;
+	font-size: calc(0.875 * var(--slide-text));
+	cursor: pointer;
+	transition: color 150ms;
+}
+
+.live-deck .slide-add-image:hover {
+	color: var(--slide-sub);
+}
+
+.live-deck .slide-add-image:focus-visible {
+	outline: 2px solid var(--suggestion);
+	outline-offset: 2px;
+}
+
+.live-deck .slide-add-image svg {
+	width: 2.25em;
+	height: 2.25em;
 }

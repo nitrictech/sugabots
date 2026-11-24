@@ -1,8 +1,5 @@
-import { type ArtifactImageType, imageTypeOf, MAX_ARTIFACT_IMAGE_BYTES } from "@sugabots/contracts";
 import type { Editor } from "@tiptap/core";
-
-/** Keeps an image for the document, answering the address the document shows it from. */
-export type KeepImage = (image: { type: ArtifactImageType; bytes: Uint8Array }) => Promise<string>;
+import { ImageNotKept, type KeepableImage, type KeepImage, keepableImage } from "./file-import.ts";
 
 /** What an import of a Word file brought in. */
 export interface WordImported {
@@ -11,17 +8,6 @@ export interface WordImported {
 	 * show, larger than it keeps, or linked from outside the file.
 	 */
 	imagesLeftOut: number;
-}
-
-/**
- * An image in the Word file couldn't be kept, as when the API couldn't be
- * reached or refused it, so nothing was imported. `cause` is why.
- */
-export class ImageNotKept extends Error {
-	constructor(cause: unknown) {
-		super("An image in the Word file could not be kept", { cause });
-		this.name = "ImageNotKept";
-	}
 }
 
 /**
@@ -49,7 +35,7 @@ export async function importWordFile(
 			convertImage: images.imgElement(async (image) => {
 				// Mammoth converts images one after another, and once one isn't kept nothing is imported.
 				if (notKept.length > 0) return { src: "" };
-				const keepable = await keepableImage(image);
+				const keepable = await keepableImageIn(image);
 				if (!keepable) {
 					imagesLeftOut++;
 					return { src: "" };
@@ -159,21 +145,18 @@ function pageBreaksForHorizontalLines(xml: string): string {
 }
 
 /**
- * An image in the file as the document would keep it, as the kind its bytes
- * are, whatever the file says it is, or `undefined` for one it doesn't keep:
- * of a kind it can't show, such as a Windows metafile, larger than it keeps,
- * or linked from outside the file, which can't be read.
+ * An image in the file as the document would keep it (`keepableImage`), or
+ * `undefined` for one it doesn't keep, which includes one linked from outside
+ * the file, which can't be read.
  */
-async function keepableImage(image: {
+async function keepableImageIn(image: {
 	readAsArrayBuffer: () => Promise<ArrayBuffer>;
-}): Promise<{ type: ArtifactImageType; bytes: Uint8Array } | undefined> {
+}): Promise<KeepableImage | undefined> {
 	const bytes = await image.readAsArrayBuffer().then(
 		(read) => new Uint8Array(read),
 		() => undefined,
 	);
-	if (!bytes || bytes.byteLength > MAX_ARTIFACT_IMAGE_BYTES) return undefined;
-	const type = imageTypeOf(bytes);
-	return type && { type, bytes };
+	return bytes && keepableImage(bytes);
 }
 
 /**

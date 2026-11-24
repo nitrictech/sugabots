@@ -50,25 +50,26 @@ export const builtInToolCatalog: readonly BuiltInToolEntry[] = [
 	{
 		key: "artifact_list",
 		name: "List artifacts",
-		description: "Lists the documents and HTML pages kept in the bot's pod.",
+		description: "Lists the documents, slide decks and HTML pages kept in the bot's pod.",
 		usesWeb: false,
 	},
 	{
 		key: "artifact_read",
 		name: "Read artifacts",
-		description: "Reads a document or HTML page kept in the bot's pod.",
+		description: "Reads a document, slide deck or HTML page kept in the bot's pod.",
 		usesWeb: false,
 	},
 	{
 		key: "artifact_write",
 		name: "Write artifacts",
-		description: "Makes a document or HTML page the pod keeps, or saves a new version of one.",
+		description:
+			"Makes a document, slide deck or HTML page the pod keeps, or saves a new version of one.",
 		usesWeb: false,
 	},
 	{
 		key: "artifact_edit",
 		name: "Edit artifacts",
-		description: "Changes part of a document or HTML page, as a new version.",
+		description: "Changes part of a document, slide deck or HTML page, as a new version.",
 		usesWeb: false,
 	},
 ];

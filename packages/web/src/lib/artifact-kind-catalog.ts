@@ -10,11 +10,13 @@ import type { ArtifactKind } from "@sugabots/contracts";
 /** What it is called beside its title, such as "Document". */
 export const ARTIFACT_KIND_LABELS: Record<ArtifactKind, string> = {
 	document: "Document",
+	slides: "Slides",
 	html: "Page",
 };
 
 /** How Download saves it: as `type`, ending in `.extension`. */
 export const ARTIFACT_KIND_FILES: Record<ArtifactKind, { extension: string; type: string }> = {
 	document: { extension: "md", type: "text/markdown" },
+	slides: { extension: "md", type: "text/markdown" },
 	html: { extension: "html", type: "text/html" },
 };

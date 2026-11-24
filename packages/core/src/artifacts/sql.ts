@@ -15,7 +15,8 @@ import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
 import { agent, pod, workspace } from "../workspaces/sql.ts";
 
 /**
- * Something an agent made for a pod to keep: a document or an HTML page.
+ * Something an agent made for a pod to keep: a document, a slide deck or an
+ * HTML page.
  * Its content is in `artifact_version`; `currentVersion` is the number of the
  * latest one, and a write names the version it started from so a stale write
  * is refused rather than overwriting a newer one.
@@ -42,7 +43,7 @@ export const artifact = pgTable(
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
-		check("artifact_kind_valid", sql`${table.kind} in ('document', 'html')`),
+		check("artifact_kind_valid", sql`${table.kind} in ('document', 'slides', 'html')`),
 		foreignKey({
 			columns: [table.podId, table.workspaceId],
 			foreignColumns: [pod.id, pod.workspaceId],

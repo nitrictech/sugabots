@@ -88,6 +88,17 @@ export async function uploadArtifactImage(
 export const artifactImageSource = (image: ArtifactImageIds): string =>
 	`${client.baseUrl}${artifactImagePath(image)}`;
 
+/**
+ * Saves a deck as a .pptx. The API builds the file from its own copy, which
+ * holds what everyone has typed.
+ */
+export function downloadAsPowerPoint(podId: string, artifactId: string) {
+	const link = document.createElement("a");
+	link.href = `${client.baseUrl}/pods/${podId}/artifacts/${artifactId}/powerpoint`;
+	link.download = "";
+	link.click();
+}
+
 /** Deletes one of the pod's artifacts, then refreshes the pod's list. */
 export function useDeleteArtifact(podId: string) {
 	const queries = useQueryClient();

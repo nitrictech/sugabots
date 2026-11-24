@@ -1,6 +1,7 @@
 import {
 	ARTIFACT_WRITING_TOOLS,
 	type Artifact,
+	type ArtifactKind,
 	type ArtifactSummary,
 	artifactContentSchema,
 	artifactKindSchema,
@@ -60,9 +61,10 @@ const baseVersionSchema = Schema.Int.check(Schema.isGreaterThan(0)).annotate({
 });
 
 /**
- * The tools an agent uses to keep documents and HTML pages in its pod, bound
- * to one turn. Refusals come back as results the model can act on: a stale
- * version tells it to read again, and an edit whose text isn't there once says so.
+ * The tools an agent uses to keep documents, slide decks and HTML pages in
+ * its pod, bound to one turn. Refusals come back as results the model can act
+ * on: a stale version tells it to read again, and an edit whose text isn't
+ * there once says so.
  *
  * A reply's writes to one artifact are one version: a change based on a
  * version this turn wrote is written over it, so a reply that edits a page
@@ -109,7 +111,7 @@ export function artifactTools({
 
 	return {
 		[ARTIFACT_LIST_TOOL]: tool({
-			description: "List the documents and HTML pages kept in this pod, newest first.",
+			description: "List the documents, slide decks and HTML pages kept in this pod, newest first.",
 			inputSchema: noInputSchema,
 			execute: async (): Promise<{ artifacts: ArtifactListing[] }> => ({
 				artifacts: (await run(authoring.list(by))).map(listing),
@@ -136,7 +138,7 @@ export function artifactTools({
 		}),
 
 		[ARTIFACT_WRITE_TOOL]: tool({
-			description: `Write an artifact the pod keeps, for work people will come back to: a plan, report, notes or a page. Without \`artifactId\` it creates one, with \`kind\` and \`title\`. With \`artifactId\` and \`baseVersion\` it replaces that artifact's whole content as a new version; pass them whenever you change an artifact that already exists, rather than making another, and use artifact_edit for a small change. ${KIND_RULES}`,
+			description: `Write an artifact the pod keeps, for work people will come back to: a plan, report, notes, a slide deck or a page. Without \`artifactId\` it creates one, with \`kind\` and \`title\`. With \`artifactId\` and \`baseVersion\` it replaces that artifact's whole content as a new version; pass them whenever you change an artifact that already exists, rather than making another, and use artifact_edit for a small change. ${KIND_RULES}`,
 			inputSchema: Schema.Struct({
 				artifactId: Schema.optional(
 					Schema.String.annotate({
@@ -216,7 +218,7 @@ const listing = (summary: ArtifactSummary): ArtifactListing => ({
 
 /** How each kind is written, for artifact_write to tell the model. */
 const KIND_RULES =
-	"A `document` is markdown with `#` headings. An `html` page is a complete HTML document, shown in the chat under your reply as well as on its own, so it suits charts, tables and small interactive tools. Make it responsive: it is shown in the chat, opened large beside it and on phones, from about 360px to 1200px wide, so use fluid widths with no fixed or maximum width of its own, let rows wrap or stack when narrow, and size charts and canvases to their container, redrawing when it resizes. It is drawn on the chat's own ground with the app's theme, so it looks part of the conversation: leave the page background transparent, add no outer card or border of your own, and colour it with the app's CSS variables, which follow light and dark mode: --foreground, --body-foreground, --muted-foreground, --subtle-foreground for text; --card, --panel, --chip, --hover for surfaces; --border, --border-strong; --primary, --link, --success-text, --destructive-text, --warning for accents; and --font-sans, --font-mono. It runs in an isolated frame with no network access except scripts from https://cdn.jsdelivr.net (such as Chart.js), so inline its CSS and embed its data.";
+	"A `document` is markdown with `#` headings. A `slides` deck is markdown too, one slide after another, with a line of `---` between each two and a blank line before and after it (without the blank line before, the line above becomes a heading). Start each slide with its layout, as `<!-- layout: bullets -->`, one of: `title` (the first slide: a `#` heading and an optional short line under it), `section` (a `##` heading opening a part of the talk, and an optional short line), `bullets` (a `##` heading and a short list), `columns` (a `##` heading, then two columns, each starting with `<!-- column -->` on its own line, holding a few lines or a short list), `image` (like `columns`, with the words in the first column and the second left for an image), `quote` (a `>` quote, and an optional line saying whose it is) or `table` (a `##` heading and one small table). End a slide with what the speaker says over it, if anything, as `<!-- notes: what to say -->`. Keep each slide to a heading and three to five short points; split anything longer across slides rather than filling one. An `html` page is a complete HTML document, shown in the chat under your reply as well as on its own, so it suits charts, tables and small interactive tools. Make it responsive: it is shown in the chat, opened large beside it and on phones, from about 360px to 1200px wide, so use fluid widths with no fixed or maximum width of its own, let rows wrap or stack when narrow, and size charts and canvases to their container, redrawing when it resizes. It is drawn on the chat's own ground with the app's theme, so it looks part of the conversation: leave the page background transparent, add no outer card or border of your own, and colour it with the app's CSS variables, which follow light and dark mode: --foreground, --body-foreground, --muted-foreground, --subtle-foreground for text; --card, --panel, --chip, --hover for surfaces; --border, --border-strong; --primary, --link, --success-text, --destructive-text, --warning for accents; and --font-sans, --font-mono. It runs in an isolated frame with no network access except scripts from https://cdn.jsdelivr.net (such as Chart.js), so inline its CSS and embed its data.";
 
 /** artifact_write's inputs that don't go together, and what to do instead. */
 const WRITE_REFUSALS = {
@@ -226,6 +228,23 @@ const WRITE_REFUSALS = {
 } as const;
 
 const refused = (reason: string): Refusal => ({ status: "refused", reason });
+
+/** Each kind, as a refusal names it. */
+const KIND_NAMES: Record<ArtifactKind, string> = {
+	document: "a `document`",
+	slides: "a `slides` deck",
+	html: "an `html` page",
+};
+
+/** Why a change to a live document couldn't be made as asked, and what to do instead. */
+const SUGGESTION_BLOCKED_REASONS: Record<Artifacts.SuggestionBlocked["blocked"], string> = {
+	unmarkable:
+		"This change has to be shown as a suggestion, and a suggestion can't be shown inside a code block. Say so, and ask them to change the code block themselves.",
+	layoutPending:
+		"A new layout suggested for a slide this change touches is waiting for somebody to accept or reject it, and nothing on that slide can change until then, so none of this change was made. Say so, and ask them to settle that suggestion first. The rest of the change can be made again without touching that slide.",
+	suggestionPending:
+		"A slide whose layout this change sets holds a suggestion waiting for somebody to accept or reject it, and its layout can't change until then, so none of this change was made. Say so, and ask them to settle the suggestions on that slide first. The rest of the change can be made again without changing that slide's layout.",
+};
 
 type AuthoringFailure =
 	| Artifacts.NotFound
@@ -251,8 +270,7 @@ function refusalFor(failure: AuthoringFailure): Refusal | Suggested {
 		case "ArtifactSuggestionBlocked":
 			return {
 				status: "refused",
-				reason:
-					"This change has to be shown as a suggestion, and a suggestion can't be shown inside a code block. Say so, and ask them to change the code block themselves.",
+				reason: SUGGESTION_BLOCKED_REASONS[failure.blocked],
 			};
 		case "ArtifactNotFound":
 			return { status: "refused", reason: "There is no artifact with that id in this pod." };
@@ -264,7 +282,7 @@ function refusalFor(failure: AuthoringFailure): Refusal | Suggested {
 		case "ArtifactKindFixed":
 			return {
 				status: "refused",
-				reason: `That artifact is ${failure.kind === "html" ? "an `html` page" : `a \`${failure.kind}\``} and stays one. Leave out \`artifactId\` to create a new artifact of another kind.`,
+				reason: `That artifact is ${KIND_NAMES[failure.kind]} and stays one. Leave out \`artifactId\` to create a new artifact of another kind.`,
 			};
 		case "ArtifactTooLarge":
 			return {

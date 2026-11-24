@@ -2,6 +2,7 @@ import { addSuggestionMarks } from "@handlewithcare/prosemirror-suggest-changes"
 import { Extension, type Extensions, Mark, type MarkConfig, mergeAttributes } from "@tiptap/core";
 import { Blockquote } from "@tiptap/extension-blockquote";
 import { Document } from "@tiptap/extension-document";
+import { Heading } from "@tiptap/extension-heading";
 import { Highlight } from "@tiptap/extension-highlight";
 import { Image, type ImageOptions } from "@tiptap/extension-image";
 import { isAllowedUri, Link } from "@tiptap/extension-link";
@@ -23,14 +24,29 @@ import {
 import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
 import { AddMarkStep, Mapping, RemoveMarkStep, ReplaceStep } from "@tiptap/pm/transform";
 import { StarterKit } from "@tiptap/starter-kit";
+import type { LiveArtifactKind } from "./artifacts.ts";
 import { LINE_BREAK_TAG, MARK_HTML_TAGS, type MarkWrittenAsHtml } from "./document-markdown.ts";
 import { type ArtifactImageIds, ownImageAt } from "./http/artifact-images.ts";
+import {
+	Deck,
+	SLIDE,
+	SLIDE_BODY,
+	SLIDE_COLUMN,
+	Slide,
+	SlideBody,
+	SlideColumn,
+	SPEAKER_NOTES,
+	SpeakerNotes,
+	slideMarkdownReaders,
+} from "./live-slides.ts";
 
 /*
  * What a live document holds, for the two places that hold one: the editor in
  * the web app and the API's copy that agents change. They sync node by node,
  * so anything one side's schema lacks is dropped on its way through. Both
- * build their schema from here.
+ * build their schema from here, for the kind of artifact the document is: a
+ * `document`'s blocks, or a `slides` deck's slides holding those same blocks
+ * (see `live-slides.ts`).
  */
 
 /** Marks content somebody proposes adding, which is not part of the document until it is accepted. */
@@ -39,8 +55,12 @@ export const SUGGESTED_INSERTION = "insertion";
 /** Marks content somebody proposes removing, which stays part of the document until that is accepted. */
 export const SUGGESTED_DELETION = "deletion";
 
-/** Marks a block whose kind or formatting somebody proposes changing. */
-const SUGGESTED_MODIFICATION = "modification";
+/**
+ * Marks a block whose kind or formatting somebody proposes changing, or a
+ * slide whose layout they do: what is proposed is what the block holds, and
+ * the mark keeps what it would replace.
+ */
+export const SUGGESTED_MODIFICATION = "modification";
 
 /*
  * The marks are the suggesting library's own, which its commands for making,
@@ -97,10 +117,15 @@ const SuggestionSchema = Extension.create({
 export const NODE_SUGGESTION = "suggestion";
 
 /**
- * The nodes a suggestion can add, remove or change whole: the blocks, and the
- * nodes in a line of text that aren't text, an image and a line break.
+ * The nodes a suggestion can add, remove or change whole: the blocks, a
+ * deck's slides and the parts of one, and the nodes in a line of text that
+ * aren't text, an image and a line break.
  */
 const NODES_SUGGESTED_WHOLE = [
+	SLIDE,
+	SLIDE_BODY,
+	SLIDE_COLUMN,
+	SPEAKER_NOTES,
 	"paragraph",
 	"heading",
 	"blockquote",
@@ -134,6 +159,21 @@ export function marksOfNodeSuggestion(node: Node): SuggestionMarkOnNode[] {
 
 /** Whether the node is of a kind that says its suggestion in an attribute. */
 export const saysNodeSuggestion = (node: Node) => !node.isText && NODE_SUGGESTION in node.attrs;
+
+/**
+ * Whether a suggestion waits on `node` itself or on anything in it. A slide
+ * holding one keeps its layout, whoever would change it, in the editor or
+ * through the API: a new layout replaces the blocks it moves, and a
+ * suggestion in one of them would be lost.
+ */
+export function holdsSuggestion(node: Node): boolean {
+	let holds = node.marks.some(isSuggestionMark);
+	node.descendants((child) => {
+		holds ||= child.marks.some(isSuggestionMark);
+		return !holds;
+	});
+	return holds;
+}
 
 /** The document with every node's attribute saying the suggestion marks the node has, to send. */
 export const suggestionsAsAttributes = (document: Node): Node =>
@@ -175,16 +215,65 @@ function everyNodeSayingSuggestion(
 const SUGGESTIONS_ON_CHILDREN = {
 	marks: [SUGGESTED_INSERTION, SUGGESTED_MODIFICATION, SUGGESTED_DELETION].join(" "),
 };
+
+/**
+ * A list item, as the standard one, read and written so that its markdown
+ * reads back as it was. An empty item in a bulleted list is written as its
+ * bullet alone, `-`: markdown reads a bullet followed only by a space as
+ * text, not as the start of a list. A task's box, `[ ]` or `[x]`, is read as
+ * the characters it is at the start of the item's words (see `TaskBoxAsText`),
+ * as a live document has no boxes to tick.
+ */
+const DocumentListItem = ListItem.extend({
+	parseMarkdown(token, helpers) {
+		const [first, second, ...rest] = token.tokens ?? [];
+		const tokens =
+			first?.type === "checkbox" && second?.type === "text"
+				? [{ ...second, tokens: [first, ...(second.tokens ?? [])] }, ...rest]
+				: token.tokens;
+		return this.parent?.({ ...token, tokens }, helpers) ?? [];
+	},
+	renderMarkdown(node, helpers, context) {
+		const written: string = this.parent?.(node, helpers, context) ?? "";
+		return written.replace(BULLET_ALONE, "-");
+	},
+});
+
+/** A bullet starting an item with nothing after it but a space. */
+const BULLET_ALONE = /^- (?=\n|$)/;
+
+/** Reads a task's box among an item's words as its characters, `[ ] ` or `[x] `. */
+const TaskBoxAsText = Extension.create({
+	name: "taskBoxAsText",
+	markdownTokenName: "checkbox",
+	parseMarkdown: (token, helpers) => (token.raw ? helpers.createTextNode(token.raw) : []),
+});
+
 const blocksHoldingBlocks = [
-	Document,
 	Blockquote,
 	BulletList,
 	OrderedList,
-	ListItem,
+	DocumentListItem,
 	TableRow,
 	TableHeader,
 	TableCell,
 ].map((node) => node.extend(SUGGESTIONS_ON_CHILDREN));
+
+/**
+ * What each kind of live document is made of beyond the blocks they share,
+ * each node holding others allowing them a suggestion's marks too: a
+ * document's top, which holds blocks, or a deck's, which holds slides, with
+ * the parts of a slide and what reads a deck's markdown.
+ */
+const KIND_NODES: Record<LiveArtifactKind, Extensions> = {
+	document: [Document.extend(SUGGESTIONS_ON_CHILDREN)],
+	slides: [
+		...[Deck, Slide, SlideBody, SlideColumn, SpeakerNotes].map((node) =>
+			node.extend(SUGGESTIONS_ON_CHILDREN),
+		),
+		...slideMarkdownReaders,
+	],
+};
 
 /** A table, which holds rows and allows them a suggestion's marks too, in a wrapper that scrolls sideways when wider than the page. */
 const DocumentTable = Table.extend(SUGGESTIONS_ON_CHILDREN).configure({ renderWrapper: true });
@@ -476,16 +565,47 @@ function holdsLinkedImage(slice: Slice, image: NodeType, link: MarkType): boolea
 }
 
 /**
- * A paragraph, which keeps an image alone on its line in the text: the
- * standard one lifts it out to stand as a block, which an image here isn't.
+ * A paragraph, which keeps an image alone on its line in the text (the
+ * standard one lifts it out to stand as a block, which an image here isn't),
+ * and writes a line of its words that markdown would read as a rule, or as
+ * the underline making the line above it a heading, with its first character
+ * escaped. Written as it is, a line of `---` in a deck would split its slide
+ * in two, and in a document would become a rule.
  */
-const ParagraphHoldingImages = Paragraph.extend({
+const DocumentParagraph = Paragraph.extend({
 	parseMarkdown(token, helpers) {
 		const [first, ...rest] = token.tokens ?? [];
 		if (first?.type === "image" && rest.length === 0) {
 			return helpers.createNode("paragraph", undefined, helpers.parseInline([first]));
 		}
 		return this.parent?.(token, helpers) ?? [];
+	},
+	renderMarkdown(node, helpers, context) {
+		const written: string = this.parent?.(node, helpers, context) ?? "";
+		return written
+			.split("\n")
+			.map((line) => line.replace(RULE_OR_UNDERLINE, "$1\\"))
+			.join("\n");
+	},
+});
+
+/**
+ * The start of a line of one character, `-`, `*`, `_` or `=`, repeated with
+ * any spaces between, which markdown reads as a rule or an underline: the
+ * first group is the indent before it.
+ */
+const RULE_OR_UNDERLINE = /^([ \t]*)(?=([-*_=])(?:[ \t]*\2)*[ \t]*$)/;
+
+/**
+ * A heading, as the standard one, but written as its marks alone, such as
+ * `##`, when it holds nothing, where the standard one writes nothing at all
+ * and so is gone when its markdown is read back. A new slide's title is such
+ * a heading until somebody types in it.
+ */
+const DocumentHeading = Heading.extend({
+	renderMarkdown(node, helpers, context) {
+		if ((node.content ?? []).length > 0) return this.parent?.(node, helpers, context) ?? "";
+		return "#".repeat(Number(node.attrs?.level ?? 1));
 	},
 });
 
@@ -497,6 +617,7 @@ const ParagraphHoldingImages = Paragraph.extend({
 const standardKit = {
 	document: false,
 	paragraph: false,
+	heading: false,
 	blockquote: false,
 	bulletList: false,
 	orderedList: false,
@@ -506,23 +627,38 @@ const standardKit = {
 	dropcursor: false,
 } as const;
 
+/** What each kind leaves out of the standard kit: a slide holds no horizontal rule, as one is the line between slides. */
+const KIND_KIT: Record<LiveArtifactKind, { horizontalRule?: false }> = {
+	document: {},
+	slides: { horizontalRule: false },
+};
+
 /**
- * The nodes and marks of a live document. The editor passes `undo: false`,
- * because its collaboration extension brings an undo that only takes back the
- * person's own changes, and the document's `ownImages`, without which no
- * image is loaded, as on the API, which draws none.
+ * The nodes and marks of a live document of `kind`. The editor passes
+ * `undo: false`, because its collaboration extension brings an undo that only
+ * takes back the person's own changes, and the document's `ownImages`,
+ * without which no image is loaded, as on the API, which draws none.
  */
 export const liveDocumentExtensions = ({
+	kind,
 	undo,
 	ownImages,
 }: {
+	kind: LiveArtifactKind;
 	undo: boolean;
 	ownImages?: OwnImages;
 }): Extensions => [
-	StarterKit.configure(undo ? standardKit : { ...standardKit, undoRedo: false }),
+	StarterKit.configure({
+		...standardKit,
+		...KIND_KIT[kind],
+		...(undo ? {} : { undoRedo: false as const }),
+	}),
+	...KIND_NODES[kind],
 	...blocksHoldingBlocks,
 	DocumentTable,
-	ParagraphHoldingImages,
+	DocumentParagraph,
+	DocumentHeading,
+	TaskBoxAsText,
 	DocumentLink,
 	DocumentImage.configure({ inline: true, ownImages }),
 	...marksWrittenAsHtml,
@@ -556,12 +692,13 @@ export function suggestionBy(id: unknown): SuggestionBy {
 }
 
 /**
- * Which nodes and marks a live document holds, as a number that goes up
- * whenever they change. The sync layer deletes whatever its own schema cannot
- * hold, so a browser tab built for another number, such as one left open
- * across an update, must not join: it would delete what newer tabs wrote.
+ * Which nodes and marks a live document of either kind holds, as a number
+ * that goes up whenever they change. The sync layer deletes whatever its own
+ * schema cannot hold, so a browser tab built for another number, such as one
+ * left open across an update, must not join: it would delete what newer tabs
+ * wrote.
  */
-export const LIVE_DOCUMENT_SCHEMA = 4;
+export const LIVE_DOCUMENT_SCHEMA = 5;
 
 /** The shared type holding the document's content, which the editor's collaboration extension binds to. */
 export const LIVE_DOCUMENT_CONTENT = "default";

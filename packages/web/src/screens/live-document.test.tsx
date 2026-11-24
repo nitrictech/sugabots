@@ -15,7 +15,9 @@ import {
 } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
-import { LiveDocument, type WordImport } from "./LiveDocument.tsx";
+import { LiveDeck } from "./LiveDeck.tsx";
+import { LiveDocument } from "./LiveDocument.tsx";
+import type { FileImport } from "./live-editor.tsx";
 import { LINKED_IMAGE_LINK, wordImportTestFile } from "./word-import-test-file.ts";
 
 /** Where the stand-in API listens, which the screen is told is where the API is. */
@@ -35,6 +37,12 @@ const POD_ID = "0199a3a0-0000-7000-8000-000000000001";
 const ARTIFACT_ID = "0199a3a0-0000-7000-8000-000000000002";
 /** A document the stand-in API keeps no image for, as when it can't be reached (see the server). */
 const UNREACHABLE_ARTIFACT_ID = "0199a3a0-0000-7000-8000-000000000005";
+/** Decks the stand-in API holds (see the server); it holds every other artifact as a document. */
+const DECK_ID = "0199a3a0-0000-7000-8000-0000000000d1";
+const DECK_OPENED_AS_DOCUMENT_ID = "0199a3a0-0000-7000-8000-0000000000d2";
+
+/** Longer than the sync client waits before trying a closed connection again. */
+const SYNC_RETRY_WAIT_MS = 1_500;
 
 let api: ChildProcess | undefined;
 
@@ -53,17 +61,16 @@ afterAll(() => {
 
 /** The editor on `artifactId`'s document, once it shows, with how to import a Word file into it. */
 async function editing(artifactId: string) {
-	let importWord: WordImport | undefined;
+	let importWord: FileImport | undefined;
 	render(
 		<TooltipProvider>
 			<LiveDocument
 				workspaceId="workspace"
-				podId={POD_ID}
-				artifactId={artifactId}
+				artifact={{ podId: POD_ID, id: artifactId, kind: "document" }}
 				title="Launch plan"
 				as={{ name: "Sam", email: "sam@example.com" }}
 				bot={undefined}
-				onWordImport={(importer) => {
+				onImport={(importer) => {
 					importWord = importer;
 				}}
 				presenceSlot={document.body}
@@ -83,18 +90,24 @@ async function markdownOf(artifactId: string) {
 	return (await held).markdown;
 }
 
+/** What the stand-in API answers when asked `ask` about `artifactId` (see the server). */
+async function answerTo(artifactId: string, ask: "count blocks" | "count refusals") {
+	const answer = new Promise((resolve) => api?.once("message", resolve));
+	api?.send({ artifactId, ask });
+	return await answer;
+}
+
 describe("a document being edited live", () => {
 	it("shows the document, then a bot's change to it and the bot's name as it lands", async () => {
 		render(
 			<TooltipProvider>
 				<LiveDocument
 					workspaceId="workspace"
-					podId="pod"
-					artifactId={ARTIFACT_ID}
+					artifact={{ podId: "pod", id: ARTIFACT_ID, kind: "document" }}
 					title="Launch plan"
 					as={{ name: "Sam", email: "sam@example.com" }}
 					bot={{ agentId: "agent", name: "Planner" }}
-					onWordImport={() => {}}
+					onImport={() => {}}
 					presenceSlot={document.body}
 					statusSlot={null}
 				/>
@@ -116,12 +129,11 @@ describe("a document being edited live", () => {
 			<TooltipProvider>
 				<LiveDocument
 					workspaceId="workspace"
-					podId="pod"
-					artifactId={artifactId}
+					artifact={{ podId: "pod", id: artifactId, kind: "document" }}
 					title="Launch plan"
 					as={{ name: "Sam", email: "sam@example.com" }}
 					bot={undefined}
-					onWordImport={() => {}}
+					onImport={() => {}}
 					presenceSlot={document.body}
 					statusSlot={null}
 				/>
@@ -137,9 +149,65 @@ describe("a document being edited live", () => {
 			expect.stringContaining("Reload to get the latest editor"),
 		);
 		// The heading, the paragraph and the block from elsewhere are all still in the document.
-		const counted = new Promise<{ blocks: number }>((resolve) => api?.once("message", resolve));
-		api?.send({ artifactId, ask: "count blocks" });
-		expect(await counted).toEqual({ blocks: 3 });
+		expect(await answerTo(artifactId, "count blocks")).toEqual({ blocks: 3 });
+	});
+
+	it("stops and says to reload, connecting no more, when the API refuses it as built for another kind of artifact", async () => {
+		render(
+			<TooltipProvider>
+				<LiveDocument
+					workspaceId="workspace"
+					artifact={{ podId: "pod", id: DECK_OPENED_AS_DOCUMENT_ID, kind: "document" }}
+					title="Launch review"
+					as={{ name: "Sam", email: "sam@example.com" }}
+					bot={undefined}
+					onImport={() => {}}
+					presenceSlot={document.body}
+					statusSlot={null}
+				/>
+			</TooltipProvider>,
+		);
+
+		expect(await screen.findByRole("alert")).toHaveProperty(
+			"textContent",
+			expect.stringContaining("Reload to get the latest editor"),
+		);
+		expect(screen.getByLabelText("Launch review").getAttribute("contenteditable")).toBe("false");
+		await new Promise((resolve) => setTimeout(resolve, SYNC_RETRY_WAIT_MS));
+		expect(await answerTo(DECK_OPENED_AS_DOCUMENT_ID, "count refusals")).toEqual({ refusals: 1 });
+	});
+});
+
+describe("a deck being edited live", () => {
+	it("stops and says to reload when the deck holds a block it cannot, deleting nothing", async () => {
+		render(
+			<TooltipProvider>
+				<LiveDeck
+					workspaceId="workspace"
+					artifact={{ podId: "pod", id: DECK_ID, kind: "slides" }}
+					title="Launch review"
+					as={{ name: "Sam", email: "sam@example.com" }}
+					bot={undefined}
+					onPresent={() => {}}
+					onImport={() => {}}
+					presenceSlot={document.body}
+					statusSlot={null}
+				/>
+			</TooltipProvider>,
+		);
+		const slide = await screen.findByRole("region", { name: "Current slide" });
+		expect(await within(slide).findByRole("heading", { name: "Launch review" })).toBeDefined();
+
+		// Somebody on a newer version of the app adds a block this editor has no node for.
+		api?.send({ artifactId: DECK_ID, ask: "unknown block" });
+
+		expect(await screen.findByRole("alert")).toHaveProperty(
+			"textContent",
+			expect.stringContaining("Reload to get the latest editor"),
+		);
+		expect(screen.getByLabelText("Launch review").getAttribute("contenteditable")).toBe("false");
+		// Both slides and the block from elsewhere are all still in the deck.
+		expect(await answerTo(DECK_ID, "count blocks")).toEqual({ blocks: 3 });
 	});
 });
 
@@ -507,12 +575,11 @@ describe("importing a Word file", () => {
 			<TooltipProvider>
 				<LiveDocument
 					workspaceId="workspace"
-					podId={POD_ID}
-					artifactId={artifactId}
+					artifact={{ podId: POD_ID, id: artifactId, kind: "document" }}
 					title="Launch plan"
 					as={{ name: "Kim", email: "kim@example.com" }}
 					bot={undefined}
-					onWordImport={() => {}}
+					onImport={() => {}}
 					presenceSlot={document.body}
 					statusSlot={null}
 				/>

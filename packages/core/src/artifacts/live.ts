@@ -1,7 +1,14 @@
 export * as LiveDocuments from "./live.ts";
 
 import { type Document, Hocuspocus } from "@hocuspocus/server";
-import type { AgentColor, AgentFace, AgentShape, Artifact } from "@sugabots/contracts";
+import {
+	type AgentColor,
+	type AgentFace,
+	type AgentShape,
+	type Artifact,
+	isEditedLive,
+	type LiveArtifactKind,
+} from "@sugabots/contracts";
 import {
 	type EditRequest,
 	LIVE_DOCUMENT_CONTENT,
@@ -13,7 +20,6 @@ import {
 import {
 	liveDocumentFromMarkdown,
 	liveDocumentSchema,
-	markdownOfLiveDocument,
 } from "@sugabots/contracts/live-document-markdown";
 import type { Node } from "@tiptap/pm/model";
 import {
@@ -21,17 +27,25 @@ import {
 	updateYFragment,
 	yXmlFragmentToProseMirrorRootNode,
 } from "@tiptap/y-tiptap";
+import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, Stream } from "effect";
 import { applyUpdate, Doc, encodeStateAsUpdate, XmlElement, type XmlFragment, XmlText } from "yjs";
 import { BlobStore } from "../blob-store/blob-store.ts";
+import { Database, query } from "../database/database.ts";
+import { artifact } from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
-import { type Blocked, changedTo, withoutSuggestions } from "./suggestions.ts";
+import { type Blocked, changedTo, markdownWithoutSuggestions } from "./suggestions.ts";
 
 /**
- * A `document` artifact while it is being edited: one copy held in this
- * process that every writer changes at once. People reach it over a socket
- * from the editor, and an agent's tools change it here, so neither waits for
- * the other and both see each other's work as it lands.
+ * A `document` or `slides` artifact while it is being edited: one copy held
+ * in this process that every writer changes at once. People reach it over a
+ * socket from the editor, and an agent's tools change it here, so neither
+ * waits for the other and both see each other's work as it lands.
+ *
+ * What the copy holds, and how it is read and written as markdown, is the
+ * artifact's kind's. Every operation reads the kind from the artifact's row,
+ * which the editor's kind comes from too: content written as another kind
+ * would be deleted by every editor, whose schema can't hold it.
  *
  * A document becomes live the first time a person opens it, and stays live:
  * its state is kept in the blob store beside its versions, and from then on
@@ -39,23 +53,32 @@ import { type Blocked, changedTo, withoutSuggestions } from "./suggestions.ts";
  */
 export interface Interface {
 	/**
-	 * Joins a person to `artifact`'s live document, which starts from the
-	 * artifact's content if nobody has opened it before. Holding the artifact
-	 * shows the person may read it. What the document sends them goes to
-	 * `outgoing`, and what they send goes to the participant returned.
+	 * Joins a person to the live document of `artifact`, which starts from
+	 * `artifact.content` if nobody has opened it before. Only a caller that
+	 * knows the person may read the artifact joins them. What the document
+	 * sends them goes to `outgoing`, and what they send goes to the
+	 * participant returned. Dies if the artifact is gone or isn't of a kind
+	 * people edit live.
 	 */
-	readonly join: (artifact: Artifact, outgoing: Outgoing) => Effect.Effect<Participant>;
+	readonly join: (
+		artifact: Pick<Artifact, "id" | "content">,
+		outgoing: Outgoing,
+	) => Effect.Effect<Participant>;
 	/**
-	 * The live document as markdown, without the suggestions pending in it, or
-	 * `undefined` if the artifact has never been opened live.
+	 * The live document of the artifact `artifactId` as markdown, without the
+	 * suggestions pending in it, or `undefined` if it has none: it has never
+	 * been opened live, or it isn't of a kind people edit live.
 	 */
 	readonly markdown: (artifactId: string) => Effect.Effect<string | undefined>;
 	/**
-	 * Changes the live document to the markdown `change` returns for what it
-	 * holds now, showing `author` to the people in it. Only the parts that
-	 * differ are written, so what people are typing elsewhere is kept. A
-	 * `change` returning `undefined` changes nothing. `undefined` if the
-	 * artifact has never been opened live.
+	 * Changes the live document of the artifact `artifactId` as `change` asks,
+	 * showing `author` to the people in it: `change` is given the document as
+	 * `markdown` gives it, and returns that markdown changed. Only what it
+	 * changed is written. Every block it left as it was stays as the document
+	 * holds it, even where markdown can't say all of that, and what people are
+	 * typing elsewhere is kept. A `change` returning `undefined` changes
+	 * nothing. `undefined` if the artifact has no live document, as for
+	 * `markdown`.
 	 *
 	 * A change the agent makes in a thread somebody started by asking for an
 	 * edit from inside the document is not made: it is shown to the people in
@@ -74,6 +97,7 @@ export class Service extends Context.Service<Service, Interface>()(
 ) {}
 
 export const make = Effect.gen(function* () {
+	const database = yield* Database;
 	const blobs = yield* BlobStore.Service;
 	const ids = yield* Ids.Service;
 
@@ -85,6 +109,14 @@ export const make = Effect.gen(function* () {
 			// A store that can't be reached is an infrastructure fault, as it is for an artifact's versions.
 			Effect.orDie,
 		);
+
+	const store = (artifactId: string, document: Document) =>
+		blobs
+			.put(stateKey(artifactId), {
+				stream: Stream.succeed(encodeStateAsUpdate(document)),
+				contentType: "application/octet-stream",
+			})
+			.pipe(Effect.orDie);
 
 	const hocuspocus = yield* Effect.acquireRelease(
 		Effect.sync(
@@ -99,21 +131,21 @@ export const make = Effect.gen(function* () {
 						const state = await Effect.runPromise(stored(documentName));
 						if (state) applyUpdate(document, state);
 						else if (context.startFrom !== undefined) {
+							const { kind, markdown } = context.startFrom;
 							prosemirrorToYXmlFragment(
-								liveDocumentFromMarkdown(context.startFrom),
+								liveDocumentFromMarkdown(kind, markdown),
 								fragmentOf(document),
 							);
+							// A build from markdown is new content each time, which an editor
+							// still holding an earlier build would merge in beside it, doubling
+							// every block. So it is stored before anyone is given it, or the load
+							// fails: otherwise it is stored only once someone changes it, and an
+							// unchanged document leaves memory when its last person leaves.
+							await Effect.runPromise(store(documentName, document));
 						}
 					},
 					onStoreDocument: async ({ documentName, document }) => {
-						await Effect.runPromise(
-							blobs
-								.put(stateKey(documentName), {
-									stream: Stream.succeed(encodeStateAsUpdate(document)),
-									contentType: "application/octet-stream",
-								})
-								.pipe(Effect.orDie),
-						);
+						await Effect.runPromise(store(documentName, document));
 					},
 				}),
 		),
@@ -128,6 +160,27 @@ export const make = Effect.gen(function* () {
 		hocuspocus.documents.has(artifactId)
 			? Effect.succeed(true)
 			: Effect.map(stored(artifactId), (state) => state !== undefined);
+
+	/** The kind of the artifact `artifactId`, from its row, when it is one people edit live. */
+	const liveKindOf = (artifactId: string) =>
+		query((db) =>
+			db.select({ kind: artifact.kind }).from(artifact).where(eq(artifact.id, artifactId)),
+		).pipe(
+			Effect.map(([row]) => (row && isEditedLive(row) ? row.kind : undefined)),
+			Effect.provideService(Database, database),
+		);
+
+	/**
+	 * The kind of the artifact's live document, as its row says, or `undefined`
+	 * when it has none: nobody has opened it live, or it isn't of a kind people
+	 * edit live.
+	 */
+	const openedKindOf = (artifactId: string) =>
+		Effect.gen(function* () {
+			const kind = yield* liveKindOf(artifactId);
+			if (kind === undefined || !(yield* isLive(artifactId))) return undefined;
+			return kind;
+		});
 
 	/** Runs `use` on the artifact's live document, loading it if it isn't open. */
 	const withDocument = <A>(artifactId: string, use: (document: Document) => A) =>
@@ -154,8 +207,12 @@ export const make = Effect.gen(function* () {
 		);
 
 	return Service.of({
-		join: (artifact, outgoing) =>
-			Effect.sync(() => {
+		join: ({ id: artifactId, content }, outgoing) =>
+			Effect.gen(function* () {
+				const kind = yield* liveKindOf(artifactId);
+				if (kind === undefined) {
+					return yield* Effect.die(new Error(`Artifact ${artifactId} has no live document`));
+				}
 				let open = true;
 				const connection = hocuspocus.handleConnection(
 					{
@@ -171,11 +228,11 @@ export const make = Effect.gen(function* () {
 							return open ? SOCKET_OPEN : SOCKET_CLOSED;
 						},
 					},
-					new Request(`http://live.invalid/${artifact.id}`),
-					{ artifactId: artifact.id, startFrom: artifact.content },
+					new Request(`http://live.invalid/${artifactId}`),
+					{ artifactId, startFrom: { kind, markdown: content } },
 				);
 				return {
-					receive: (bytes) => connection.handleMessage(bytes),
+					receive: (bytes: Uint8Array) => connection.handleMessage(bytes),
 					leave: () => {
 						open = false;
 						connection.handleClose();
@@ -184,17 +241,20 @@ export const make = Effect.gen(function* () {
 			}),
 
 		markdown: (artifactId) =>
-			Effect.flatMap(isLive(artifactId), (live) =>
-				live ? withDocument(artifactId, toMarkdown) : Effect.succeed(undefined),
-			),
+			Effect.gen(function* () {
+				const kind = yield* openedKindOf(artifactId);
+				if (kind === undefined) return undefined;
+				return yield* withDocument(artifactId, (document) => toMarkdown(document, kind));
+			}),
 
 		rewrite: (artifactId, author, change) =>
 			Effect.gen(function* () {
-				if (!(yield* isLive(artifactId))) return undefined;
+				const kind = yield* openedKindOf(artifactId);
+				if (kind === undefined) return undefined;
 				const unique = yield* ids.next;
 				const rewritten = yield* withDocument(artifactId, (document): Rewritten => {
-					const { content, unreadable } = read(document);
-					const markdown = asMarkdown(content);
+					const { content, unreadable } = read(document, kind);
+					const markdown = markdownWithoutSuggestions(content);
 					const wanted = change(markdown);
 					if (wanted === undefined) return { markdown, outcome: "unchanged" };
 					// Writing what could be read back would write over what could not.
@@ -203,7 +263,7 @@ export const make = Effect.gen(function* () {
 					const request = requests.get(author.threadId);
 					const after = changedTo(
 						content,
-						liveDocumentFromMarkdown(wanted),
+						wanted,
 						request
 							? { suggestionId: suggestionId(unique, { kind: "agent", name: author.name }) }
 							: "edit",
@@ -218,7 +278,10 @@ export const make = Effect.gen(function* () {
 						isOMark: new Map(),
 					});
 					if (request) requests.set(author.threadId, { ...request, answered: true });
-					return { markdown: toMarkdown(document), outcome: request ? "suggested" : "written" };
+					return {
+						markdown: toMarkdown(document, kind),
+						outcome: request ? "suggested" : "written",
+					};
 				});
 				if (rewritten.outcome === "written" || rewritten.outcome === "suggested") {
 					yield* Effect.forkDetach(hideAuthorLater(artifactId));
@@ -228,7 +291,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-/** Needs the blob store and ids, which the entry point provides. */
+/** Needs the database, the blob store and ids, which the entry point provides. */
 export const layer = Layer.effect(Service, make);
 
 /** Where a live document's bytes for a person go. */
@@ -263,9 +326,10 @@ export interface Author {
 /**
  * What `rewrite` did, and the live document's markdown after it: `written`
  * into the document, `suggested` to the people in it, `unchanged` because the
- * change asked for nothing, or `blocked`: it was to be a suggestion and
- * couldn't be shown as one, or the document holds content this version of the
- * app cannot read (`unreadable`), which a write would lose.
+ * change asked for nothing, or `blocked`, none of it made: it couldn't be
+ * made as asked for a suggestion's sake (see `Blocked`), or the document
+ * holds content this version of the app cannot read (`unreadable`), which a
+ * write would lose.
  */
 export type Rewritten =
 	| { readonly markdown: string; readonly outcome: "written" | "suggested" | "unchanged" }
@@ -277,30 +341,49 @@ export type Rewritten =
 
 interface ConnectionContext {
 	artifactId: string;
-	/** The markdown a document nobody has opened before starts from. */
-	startFrom?: string;
+	/** The markdown a document nobody has opened before starts from, and the kind it is written as. */
+	startFrom?: { kind: LiveArtifactKind; markdown: string };
 }
 
 const fragmentOf = (document: Document) => document.getXmlFragment(LIVE_DOCUMENT_CONTENT);
 
 /**
- * The document's content, with what is suggested for whole blocks marked on
- * them as the document carries it, and whether all of it could be read.
+ * The content of a document of `kind`, with what is suggested for whole
+ * blocks marked on them as the document carries it, and whether all of it
+ * could be read.
  *
  * Reading shared content deletes whatever this schema cannot hold, such as a
- * block written by a newer version of the app. So it is read from a copy,
- * which is thrown away, and the document itself keeps everything.
+ * block written by a newer version of the app, or all of it when read as
+ * another kind. So it is read from a copy, which is thrown away, and the
+ * document itself keeps everything.
  */
-function read(document: Document): { content: Node; unreadable: boolean } {
+function read(document: Document, kind: LiveArtifactKind): { content: Node; unreadable: boolean } {
 	const copy = new Doc();
 	applyUpdate(copy, encodeStateAsUpdate(document));
 	const shared = copy.getXmlFragment(LIVE_DOCUMENT_CONTENT);
 	const before = sizeOf(shared);
 	const content = suggestionsFromAttributes(
-		yXmlFragmentToProseMirrorRootNode(shared, liveDocumentSchema),
+		yXmlFragmentToProseMirrorRootNode(shared, liveDocumentSchema(kind)),
 	);
 	const after = sizeOf(shared);
-	return { content, unreadable: after.blocks !== before.blocks || after.text !== before.text };
+	const lost = after.blocks !== before.blocks || after.text !== before.text;
+	return { content, unreadable: lost || !fitsSchema(content) };
+}
+
+/**
+ * Whether content read from a live document is what its schema allows.
+ * Reading deletes a block that doesn't fit where it stands, but takes the
+ * blocks at the top as they come: a document's paragraphs read as a deck
+ * come out whole, where only slides belong, and would be written back as
+ * slides.
+ */
+function fitsSchema(content: Node): boolean {
+	try {
+		content.check();
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /** How many blocks and how much text shared content holds, which reading it must not change. */
@@ -316,11 +399,9 @@ function sizeOf(shared: XmlFragment | XmlElement): { blocks: number; text: numbe
 	return { blocks, text };
 }
 
-/** Content as it reads until someone accepts a suggestion pending in it. */
-const asMarkdown = (content: Node) => markdownOfLiveDocument(withoutSuggestions(content));
-
 /** The document as it reads until someone accepts a suggestion pending in it, as far as it can be read. */
-const toMarkdown = (document: Document) => asMarkdown(read(document).content);
+const toMarkdown = (document: Document, kind: LiveArtifactKind) =>
+	markdownWithoutSuggestions(read(document, kind).content);
 
 /** Beside the artifact's versions, so it is deleted with them. */
 const stateKey = (artifactId: string) => BlobStore.key("artifacts", artifactId, "live");

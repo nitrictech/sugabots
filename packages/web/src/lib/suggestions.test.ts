@@ -8,14 +8,17 @@ import { getSchema } from "@tiptap/core";
 import type { Node } from "@tiptap/pm/model";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
 import { describe, expect, it } from "vitest";
-import { pendingSuggestions, settling } from "./suggestions.ts";
+import { pendingSuggestions, settlingSuggestion } from "./suggestions.ts";
 
-const schema = getSchema(liveDocumentExtensions({ undo: false }));
+const schema = getSchema(liveDocumentExtensions({ kind: "document", undo: false }));
 
 const paragraph = (words: string) => schema.node("paragraph", null, [schema.text(words)]);
 const document = (...blocks: Node[]) => schema.node("doc", null, blocks);
 
-/** A document being edited by someone in suggesting mode, whose every change becomes a suggestion. */
+/**
+ * A document being edited in suggesting mode, whose every change becomes a
+ * suggestion: by `by`, unless another person is named.
+ */
 function suggesting(doc: Node, by: string) {
 	let state = EditorState.create({ doc, plugins: [suggestChanges()] });
 	enableSuggestChanges(state, (transaction) => {
@@ -26,14 +29,14 @@ function suggesting(doc: Node, by: string) {
 		get doc() {
 			return state.doc;
 		},
-		/** Makes the change `edit` describes, as one suggestion. */
-		suggest(edit: (transaction: Transaction) => Transaction) {
-			const id = `s${++made}:person:${by}`;
+		/** Makes the change `edit` describes, as one suggestion by `person`. */
+		suggest(edit: (transaction: Transaction) => Transaction, person = by) {
+			const id = `s${++made}:person:${person}`;
 			state = state.apply(transformToSuggestionTransaction(edit(state.tr), state, () => id));
 			return id;
 		},
 		settle(suggestionId: string, how: "accept" | "reject") {
-			settling(suggestionId, how)(state, (transaction) => {
+			settlingSuggestion(suggestionId, how)(state, (transaction) => {
 				state = state.apply(transaction);
 			});
 		},
@@ -145,5 +148,39 @@ describe("a suggestion, settled by a person", () => {
 		expect(pendingSuggestions(editing.doc)).toMatchObject([
 			{ id: second, removes: "support", adds: "everyone" },
 		]);
+	});
+});
+
+describe("a block's kind, changed in a suggestion while somebody else's change of kind waits", () => {
+	/** Each block's kind, with a heading's level. */
+	const kinds = (doc: Node) =>
+		doc.children.map((block) =>
+			block.type.name === "heading" ? `heading ${block.attrs.level}` : block.type.name,
+		);
+
+	/** Makes the block at `position` a heading of `level`. */
+	const asHeading = (position: number, level: number) => (change: Transaction) => {
+		const heading = schema.node("heading", { level });
+		return change.setNodeMarkup(position, heading.type, heading.attrs);
+	};
+
+	it.each([
+		["accepted", "accept", "heading 2"],
+		["rejected", "reject", "paragraph"],
+	] as const)("is %s alone, the other left waiting as it was", (_, how, settled) => {
+		const editing = suggesting(
+			document(paragraph("Ship on Friday."), paragraph("Tell support.")),
+			"Kim",
+		);
+		const second = editing.doc.child(0).nodeSize;
+		const kims = editing.suggest(asHeading(0, 2));
+		const sams = editing.suggest(asHeading(second, 3), "Sam");
+		const samsBlock = editing.doc.child(1);
+
+		editing.settle(kims, how);
+
+		expect(kinds(editing.doc)).toEqual([settled, "heading 3"]);
+		expect(pendingSuggestions(editing.doc)).toMatchObject([{ id: sams, by: { name: "Sam" } }]);
+		expect(editing.doc.child(1).toJSON()).toEqual(samsBlock.toJSON());
 	});
 });

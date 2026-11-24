@@ -6,16 +6,25 @@ import {
 	suggestionsFromAttributes,
 } from "@sugabots/contracts/live-document";
 import {
-	liveDocumentFromMarkdown as document,
+	liveDocumentFromMarkdown,
 	liveDocumentSchema,
 	markdownOfLiveDocument,
 } from "@sugabots/contracts/live-document-markdown";
+import { fitSlideBody, layoutOf, newSlide } from "@sugabots/contracts/live-slides";
+import { SLIDE_LAYOUTS } from "@sugabots/contracts/slides-markdown";
 import type { Node } from "@tiptap/pm/model";
 import { EditorState } from "@tiptap/pm/state";
 import { prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from "@tiptap/y-tiptap";
 import { describe, expect, it } from "vitest";
 import { Doc } from "yjs";
-import { changedTo, withoutSuggestions } from "./suggestions.ts";
+import {
+	type ChangeAs,
+	changedTo,
+	markdownWithoutSuggestions,
+	withoutSuggestions,
+} from "./suggestions.ts";
+
+const document = (text: string) => liveDocumentFromMarkdown("document", text);
 
 const asMarkdown = (node: Node) => markdownOfLiveDocument(node).trim();
 
@@ -62,15 +71,33 @@ function undone(node: Node): Node {
 function synced(node: Node): Node {
 	const shared = new Doc().getXmlFragment("default");
 	prosemirrorToYXmlFragment(suggestionsAsAttributes(node), shared);
-	return suggestionsFromAttributes(yXmlFragmentToProseMirrorRootNode(shared, liveDocumentSchema));
+	return suggestionsFromAttributes(yXmlFragmentToProseMirrorRootNode(shared, node.type.schema));
 }
 
-/** `live` after an agent suggests it read as `wanted`, which must be possible. */
+/** `live` after an agent suggests it read as the markdown `wanted`, which must be possible. */
 function suggested(live: Node, wanted: string, suggestionId = "s1:agent:Planner"): Node {
-	const after = changedTo(live, document(wanted), { suggestionId });
-	if (typeof after === "string") throw new Error(`Expected a suggestion, got ${after}`);
+	return changed(live, wanted, { suggestionId });
+}
+
+/** `live` after an agent asks for it to read as the markdown `wanted`, which must be possible. */
+function changed(live: Node, wanted: string, as: ChangeAs): Node {
+	const after = changedTo(live, wanted, as);
+	if (typeof after === "string") throw new Error(`Expected a change, got ${after}`);
 	return after;
 }
+
+/** How an agent's change is made, by what each way is called. */
+const MADE_OR_SUGGESTED: [string, ChangeAs][] = [
+	["made", "edit"],
+	["suggested", { suggestionId: "s1:agent:Planner" }],
+];
+
+/** The children of `after`, by index, that aren't the same as `before`'s in their place. */
+const changedChildren = (before: Node, after: Node) =>
+	after.children.flatMap((child, index) => {
+		const was = before.maybeChild(index);
+		return was && child.eq(was) ? [] : [index];
+	});
 
 describe("an agent's suggestion in a live document", () => {
 	const plan = document("# Launch plan\n\nShip on Friday. Tell support first.\n\n- Write the post");
@@ -170,9 +197,9 @@ describe("an agent's suggestion in a live document", () => {
 	it("is blocked inside a code block, which can't be marked", () => {
 		const code = document("```\nship()\n```");
 
-		expect(
-			changedTo(code, document("```\nship(now)\n```"), { suggestionId: "s1:agent:Planner" }),
-		).toBe("unmarkable");
+		expect(changedTo(code, "```\nship(now)\n```", { suggestionId: "s1:agent:Planner" })).toBe(
+			"unmarkable",
+		);
 	});
 });
 
@@ -184,7 +211,7 @@ describe("an agent's edit to a live document holding suggestions", () => {
 
 		const edited = changedTo(
 			pending,
-			document("# Launch plan for May\n\nShip on Friday.\n\n- Write the post"),
+			"# Launch plan for May\n\nShip on Friday.\n\n- Write the post",
 			"edit",
 		);
 
@@ -198,7 +225,7 @@ describe("an agent's edit to a live document holding suggestions", () => {
 	it("reads as wanted after an edit that adds, changes and removes blocks", () => {
 		const wanted = "# Plan\n\nNew opening.\n\nShip on Friday.\n\n1. Write the post";
 
-		const edited = changedTo(plan, document(wanted), "edit");
+		const edited = changedTo(plan, wanted, "edit");
 
 		expect(typeof edited === "string" ? edited : asMarkdown(edited)).toBe(
 			asMarkdown(document(wanted)),
@@ -206,7 +233,7 @@ describe("an agent's edit to a live document holding suggestions", () => {
 	});
 
 	it("is unchanged when the document already reads as wanted", () => {
-		expect(changedTo(plan, document(asMarkdown(plan)), "edit")).toBe("unchanged");
+		expect(changedTo(plan, asMarkdown(plan), "edit")).toBe("unchanged");
 	});
 
 	it("marks a word in the middle of a line, its text otherwise the same", () => {
@@ -214,12 +241,371 @@ describe("an agent's edit to a live document holding suggestions", () => {
 
 		const edited = changedTo(
 			document("# Launch plan\n\nShip on Friday please.\n\n- Write the post"),
-			document(wanted),
+			wanted,
 			"edit",
 		);
 
 		expect(typeof edited === "string" ? edited : asMarkdown(edited)).toBe(
 			asMarkdown(document(wanted)),
 		);
+	});
+});
+
+describe("an agent's change to a live document holding what its markdown can't say", () => {
+	const schema = liveDocumentSchema("document");
+	const node = (type: string, content?: Node | Node[]) => schema.node(type, null, content);
+	const paragraph = (text: string) => node("paragraph", schema.text(text));
+	const list = (item: string) => node("bulletList", node("listItem", paragraph(item)));
+	/** Words that markdown reads as a heading, and two lists side by side, which it reads as one. */
+	const plan = node("doc", [
+		paragraph("Launch plan"),
+		paragraph("# is how a heading starts"),
+		list("Write the post"),
+		list("Record a demo"),
+		paragraph("Ship on Friday."),
+	]);
+
+	it.each(MADE_OR_SUGGESTED)("is unchanged when the agent changes nothing, %s", (_, as) => {
+		// The markdown the agent reads doesn't read back as the document.
+		expect(document(markdownWithoutSuggestions(plan)).eq(plan)).toBe(false);
+
+		expect(changedTo(plan, markdownWithoutSuggestions(plan), as)).toBe("unchanged");
+	});
+
+	it.each(MADE_OR_SUGGESTED)("changes only the paragraph the agent changes, %s", (_, as) => {
+		const after = changed(plan, markdownWithoutSuggestions(plan).replace("Friday", "Monday"), as);
+
+		expect(after.childCount).toBe(plan.childCount);
+		expect(changedChildren(plan, after)).toEqual([4]);
+		expect(asMarkdown(accepted(after))).toContain("Ship on Monday.");
+	});
+});
+
+const deck = (text: string) => liveDocumentFromMarkdown("slides", text);
+
+const slides = (...texts: string[]) => texts.join("\n\n---\n\n");
+
+/** The slides, by number from 1, whose frame doesn't hold what their layout says. */
+const unfitted = (node: Node) =>
+	node.children.flatMap((slide, index) => {
+		const body = slide.child(0);
+		return fitSlideBody(body, layoutOf(slide)).eq(body) ? [] : [index + 1];
+	});
+
+/** The suggestion marks on each slide itself, by name. */
+const slideMarks = (node: Node) =>
+	node.children.map((slide) => slide.marks.map((mark) => mark.type.name));
+
+const TITLE = "<!-- layout: title -->\n\n# Launch review";
+const GOALS =
+	"<!-- layout: bullets -->\n\n## Goals\n\n- Ship on Friday\n- Tell support first\n\n<!-- notes: Start with the date. -->";
+const COLUMNS =
+	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- column -->\n\n- People type\n\n<!-- column -->\n\n- Bots suggest";
+const QUESTIONS = "<!-- layout: section -->\n\n## Questions";
+
+describe("an agent's suggestion in a deck", () => {
+	const live = deck(slides(TITLE, GOALS, COLUMNS, QUESTIONS));
+
+	it.each([
+		[
+			"changes words on a slide",
+			slides(TITLE, GOALS.replace("Friday", "Monday"), COLUMNS, QUESTIONS),
+		],
+		[
+			"adds a slide",
+			slides(
+				TITLE,
+				GOALS,
+				"<!-- layout: bullets -->\n\n## Risks\n\n- None yet",
+				COLUMNS,
+				QUESTIONS,
+			),
+		],
+		["removes a slide", slides(TITLE, COLUMNS, QUESTIONS)],
+		["removes the last slide", slides(TITLE, GOALS, COLUMNS)],
+		[
+			"lays a slide out in columns",
+			slides(TITLE, GOALS.replace("layout: bullets", "layout: columns"), COLUMNS, QUESTIONS),
+		],
+		[
+			"lays a slide in columns out in one flow",
+			slides(TITLE, GOALS, COLUMNS.replace("layout: columns", "layout: bullets"), QUESTIONS),
+		],
+		[
+			"changes a slide's layout alone",
+			slides(TITLE, GOALS, COLUMNS, QUESTIONS.replace("layout: section", "layout: bullets")),
+		],
+		[
+			"changes a slide's notes",
+			slides(
+				TITLE,
+				GOALS.replace("Start with the date.", "Start with the new date."),
+				COLUMNS,
+				QUESTIONS,
+			),
+		],
+		[
+			"gives a slide notes",
+			slides(TITLE, GOALS, COLUMNS, `${QUESTIONS}\n\n<!-- notes: Leave ten minutes. -->`),
+		],
+		[
+			"adds a slide and changes words on the one after it",
+			slides(
+				TITLE,
+				"<!-- layout: section -->\n\n## Plan",
+				GOALS.replace("Friday", "Monday"),
+				COLUMNS,
+				QUESTIONS,
+			),
+		],
+	])("%s, as a suggestion that reaches everyone and is accepted or undone whole", (_, wanted) => {
+		const received = synced(suggested(live, wanted));
+
+		received.check();
+		expect(asMarkdown(withoutSuggestions(received))).toBe(asMarkdown(live));
+		const [kept, dropped] = [accepted(received), undone(received)];
+		kept.check();
+		dropped.check();
+		expect(unfitted(kept)).toEqual([]);
+		expect(unfitted(dropped)).toEqual([]);
+		expect(asMarkdown(kept)).toBe(asMarkdown(deck(wanted)));
+		expect(asMarkdown(dropped)).toBe(asMarkdown(live));
+	});
+
+	it("marks the words that change on a slide, and no other slide", () => {
+		const after = suggested(
+			live,
+			slides(TITLE, GOALS.replace("Friday", "Monday"), COLUMNS, QUESTIONS),
+		);
+
+		expect(shown(after)).toEqual([
+			"Launch review",
+			"",
+			"Goals",
+			"Ship on [-Friday-][+Monday+]",
+			"Tell support first",
+			"Start with the date.",
+			"People and bots",
+			"People type",
+			"Bots suggest",
+			"",
+			"Questions",
+			"",
+		]);
+		expect(slideMarks(after)).toEqual([[], [], [], []]);
+	});
+
+	it("suggests a new layout on the slide itself, moving what it holds into columns", () => {
+		const after = synced(
+			suggested(
+				live,
+				slides(TITLE, GOALS.replace("layout: bullets", "layout: columns"), COLUMNS, QUESTIONS),
+			),
+		);
+
+		const goals = after.child(1);
+		expect(goals.attrs.layout).toBe("columns");
+		expect(goals.marks.map((mark) => mark.attrs)).toMatchObject([
+			{ type: "attr", attrName: "layout", previousValue: "bullets", newValue: "columns" },
+		]);
+		// The list as it was is proposed for removal, and the columns holding it for adding.
+		expect(
+			goals
+				.child(0)
+				.children.map((block) => [block.type.name, block.marks.map((mark) => mark.type.name)]),
+		).toEqual([
+			["heading", []],
+			["bulletList", ["deletion"]],
+			["slideColumn", ["insertion"]],
+			["slideColumn", ["insertion"]],
+		]);
+	});
+
+	it("takes a slide added beside one that changed for a new slide, not for the one that changed", () => {
+		const after = suggested(
+			live,
+			slides(
+				TITLE,
+				"<!-- layout: section -->\n\n## Plan",
+				GOALS.replace("Friday", "Monday"),
+				COLUMNS,
+				QUESTIONS,
+			),
+		);
+
+		expect(slideMarks(after)).toEqual([[], ["insertion"], [], [], []]);
+		expect(shown(after)).toContain("Ship on [-Friday-][+Monday+]");
+	});
+
+	it("is blocked from a second layout for a slide while one suggested waits, as is an edit of it", () => {
+		const waiting = suggested(
+			live,
+			slides(TITLE, GOALS, COLUMNS, QUESTIONS.replace("layout: section", "layout: bullets")),
+		);
+		const titled = slides(
+			TITLE,
+			GOALS,
+			COLUMNS,
+			QUESTIONS.replace("layout: section", "layout: title"),
+		);
+
+		expect(changedTo(waiting, titled, { suggestionId: "s2:agent:Planner" })).toBe("layoutPending");
+		expect(changedTo(waiting, titled, "edit")).toBe("layoutPending");
+	});
+
+	it.each(MADE_OR_SUGGESTED)(
+		"is blocked from the words of a slide whose new layout moves them while it waits, %s, and makes them once it is settled either way",
+		(_, as) => {
+			const inColumns = slides(
+				TITLE,
+				GOALS.replace("layout: bullets", "layout: columns"),
+				COLUMNS,
+				QUESTIONS,
+			);
+			const waiting = suggested(live, inColumns, "s1:person:Kim");
+			const onMonday = (markdown: string) => markdown.replace("Friday", "Monday");
+
+			expect(changedTo(waiting, onMonday(slides(TITLE, GOALS, COLUMNS, QUESTIONS)), as)).toBe(
+				"layoutPending",
+			);
+			for (const [settled, reads] of [
+				[accepted(waiting), inColumns],
+				[undone(waiting), slides(TITLE, GOALS, COLUMNS, QUESTIONS)],
+			] as const) {
+				const after = accepted(changed(settled, onMonday(markdownWithoutSuggestions(settled)), as));
+				expect(asMarkdown(after)).toBe(asMarkdown(deck(onMonday(reads))));
+			}
+		},
+	);
+
+	it.each(MADE_OR_SUGGESTED)(
+		"is blocked from a new layout for a slide holding somebody's suggestion, %s, until it is settled",
+		(_, as) => {
+			const kimsWords = suggested(
+				live,
+				slides(TITLE, GOALS.replace("Friday", "Monday"), COLUMNS, QUESTIONS),
+				"s1:person:Kim",
+			);
+			const inColumns = slides(
+				TITLE,
+				GOALS.replace("layout: bullets", "layout: columns"),
+				COLUMNS,
+				QUESTIONS,
+			);
+
+			expect(changedTo(kimsWords, inColumns, as)).toBe("suggestionPending");
+			// Once Kim's words are settled, the slide can be laid out anew, keeping them.
+			const after = accepted(
+				changed(accepted(kimsWords), inColumns.replace("Friday", "Monday"), as),
+			);
+			expect(asMarkdown(after)).toBe(asMarkdown(deck(inColumns.replace("Friday", "Monday"))));
+		},
+	);
+
+	it.each(MADE_OR_SUGGESTED)(
+		"changes a slide beside slides whose suggestions wait, %s, leaving those as they are",
+		(_, as) => {
+			const kimsWords = suggested(
+				live,
+				slides(TITLE, GOALS.replace("Friday", "Monday"), COLUMNS, QUESTIONS),
+				"s1:person:Kim",
+			);
+			const waiting = suggested(
+				kimsWords,
+				slides(TITLE, GOALS, COLUMNS.replace("layout: columns", "layout: bullets"), QUESTIONS),
+				"s2:person:Sam",
+			);
+
+			const after = changed(
+				waiting,
+				slides(
+					TITLE,
+					GOALS,
+					COLUMNS,
+					QUESTIONS.replace("layout: section", "layout: bullets").replace(
+						"Questions",
+						"Your questions",
+					),
+				),
+				as,
+			);
+
+			expect(changedChildren(waiting, after)).toEqual([3]);
+		},
+	);
+
+	it("is blocked inside a code block on a slide, which can't be marked", () => {
+		const code = deck("<!-- layout: bullets -->\n\n## Run\n\n```\nship()\n```");
+
+		expect(
+			changedTo(code, "<!-- layout: bullets -->\n\n## Run\n\n```\nship(now)\n```", {
+				suggestionId: "s1:agent:Planner",
+			}),
+		).toBe("unmarkable");
+	});
+});
+
+describe("an agent's change to a deck holding what its markdown can't say", () => {
+	const schema = liveDocumentSchema("slides");
+	const node = (type: string, content?: Node | Node[], attrs?: Record<string, unknown>) =>
+		schema.node(type, attrs ?? null, content);
+	const paragraph = (text: string) => node("paragraph", schema.text(text));
+	/** A slide holding words that markdown reads as a heading, and notes ending in spaces, which it drops. */
+	const keptAsTyped = node(
+		"slide",
+		[
+			node("slideBody", [
+				node("heading", schema.text("Kept as typed"), { level: 2 }),
+				paragraph("# is how a heading starts"),
+			]),
+			node("speakerNotes", paragraph("Pause here.   ")),
+		],
+		{ layout: "bullets" },
+	);
+	/** A new slide of every layout, each as the editor adds one, and the slide above. */
+	const newSlides = node("doc", [
+		...SLIDE_LAYOUTS.map((layout) => newSlide(schema, layout)),
+		keptAsTyped,
+	]);
+
+	it.each(MADE_OR_SUGGESTED)("is unchanged when the agent changes nothing, %s", (_, as) => {
+		// The markdown the agent reads doesn't read back as the deck.
+		expect(deck(markdownWithoutSuggestions(newSlides)).eq(newSlides)).toBe(false);
+
+		expect(changedTo(newSlides, markdownWithoutSuggestions(newSlides), as)).toBe("unchanged");
+	});
+
+	it.each(MADE_OR_SUGGESTED)("changes only the slide the agent changes, %s", (_, as) => {
+		const titled = markdownWithoutSuggestions(newSlides).replace(
+			"<!-- layout: bullets -->\n\n##\n",
+			"<!-- layout: bullets -->\n\n## Goals\n",
+		);
+
+		const after = changed(newSlides, titled, as);
+
+		expect(after.childCount).toBe(newSlides.childCount);
+		expect(changedChildren(newSlides, after)).toEqual([SLIDE_LAYOUTS.indexOf("bullets")]);
+		expect(shown(accepted(after))).toContain("Goals");
+	});
+});
+
+describe("an agent's edit to a deck", () => {
+	const live = deck(slides(TITLE, GOALS, COLUMNS, QUESTIONS));
+
+	it.each([
+		[
+			"changes a slide's layout",
+			slides(TITLE, GOALS.replace("layout: bullets", "layout: quote"), COLUMNS, QUESTIONS),
+		],
+		[
+			"adds, removes and changes slides",
+			slides(TITLE, QUESTIONS, COLUMNS.replace("Bots suggest", "Bots write")),
+		],
+	])("%s, reading as wanted", (_, wanted) => {
+		const edited = changed(live, wanted, "edit");
+
+		edited.check();
+		expect(unfitted(edited)).toEqual([]);
+		expect(asMarkdown(edited)).toBe(asMarkdown(deck(wanted)));
 	});
 });

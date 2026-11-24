@@ -5,7 +5,7 @@ import { Collaboration } from "@tiptap/extension-collaboration";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyUpdate, Doc } from "yjs";
 import { Suggesting, suggestingAs } from "./suggesting.ts";
-import { pendingSuggestions, settling } from "./suggestions.ts";
+import { pendingSuggestions, settlingSuggestion } from "./suggestions.ts";
 
 const editors: Editor[] = [];
 afterEach(() => {
@@ -21,7 +21,7 @@ function twoPeople() {
 		const editor = new Editor({
 			element: window.document.createElement("div"),
 			extensions: [
-				...liveDocumentExtensions({ undo: false }),
+				...liveDocumentExtensions({ kind: "document", undo: false }),
 				Suggesting,
 				Collaboration.configure({ document }),
 			],
@@ -48,7 +48,7 @@ describe("suggesting mode, with somebody else in the document", () => {
 			{ by: { kind: "person", name: "Kim" }, removes: "Friday", adds: "Monday" },
 		]);
 		const [suggestion] = pendingSuggestions(sam.state.doc);
-		settling(suggestion?.id ?? "", "accept")(sam.state, sam.view.dispatch);
+		settlingSuggestion(suggestion?.id ?? "", "accept")(sam.state, sam.view.dispatch);
 		expect(lines(kim)).toBe("Ship on Monday. | Tell support.");
 		expect(pendingSuggestions(kim.state.doc)).toEqual([]);
 	});
@@ -64,7 +64,7 @@ describe("suggesting mode, with somebody else in the document", () => {
 		expect(lines(sam)).toBe("Ship on Friday. | Tell support.");
 		expect(pendingSuggestions(sam.state.doc)).toMatchObject([{ removes: "Tell support." }]);
 		const [suggestion] = pendingSuggestions(sam.state.doc);
-		settling(suggestion?.id ?? "", "accept")(sam.state, sam.view.dispatch);
+		settlingSuggestion(suggestion?.id ?? "", "accept")(sam.state, sam.view.dispatch);
 		expect(lines(sam)).toBe("Ship on Friday.");
 		expect(lines(kim)).toBe("Ship on Friday.");
 		expect(pendingSuggestions(kim.state.doc)).toEqual([]);
@@ -83,7 +83,7 @@ describe("suggesting mode, with somebody else in the document", () => {
 
 		expect(pendingSuggestions(sam.state.doc)).toMatchObject([{ adds: "Brief sales too." }]);
 		const [suggestion] = pendingSuggestions(sam.state.doc);
-		settling(suggestion?.id ?? "", "reject")(sam.state, sam.view.dispatch);
+		settlingSuggestion(suggestion?.id ?? "", "reject")(sam.state, sam.view.dispatch);
 		expect(lines(sam)).toBe("Ship on Friday. | Tell support.");
 		expect(lines(kim)).toBe("Ship on Friday. | Tell support.");
 	});

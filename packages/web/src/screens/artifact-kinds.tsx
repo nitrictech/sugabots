@@ -1,7 +1,14 @@
 import type { ArtifactKind } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ChevronDown, ChevronUp, FileText, type LucideIcon, PanelsTopLeft } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
+import {
+	ChevronDown,
+	ChevronUp,
+	FileText,
+	type LucideIcon,
+	PanelsTopLeft,
+	Presentation,
+} from "lucide-react";
+import { lazy, type ReactNode, Suspense, useRef, useState } from "react";
 import { ARTIFACT_KIND_FILES, ARTIFACT_KIND_LABELS } from "@/lib/artifact-kind-catalog.ts";
 import type { PageAt } from "@/lib/artifacts.ts";
 import { FIT_HEIGHT_PX } from "@/lib/page-frame.ts";
@@ -39,12 +46,26 @@ export const ARTIFACT_KINDS: Record<ArtifactKind, ArtifactKindView> = {
 		// A preview, not the document: wide enough for its tables.
 		cardWidth: "max-w-160",
 		Inline: DocumentPreview,
-		Full: ({ content, at }) => (
-			<div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-list">
-				<article className="mx-auto max-w-190 px-6 py-6 max-md:px-4">
-					<DocumentMarkdown text={content} artifact={at} />
-				</article>
-			</div>
+		Full: DocumentFull,
+	},
+	slides: {
+		label: ARTIFACT_KIND_LABELS.slides,
+		Icon: Presentation,
+		file: { ...ARTIFACT_KIND_FILES.slides, contentOf: (content) => content },
+		// A preview, not the deck: its first slide, as wide as a document's preview.
+		cardWidth: "max-w-160",
+		Inline: ({ content, ...shown }) =>
+			content === undefined ? (
+				<InlineLoading />
+			) : (
+				<Suspense fallback={<InlineLoading />}>
+					<DeckPreview {...shown} content={content} />
+				</Suspense>
+			),
+		Full: (shown) => (
+			<Suspense fallback={null}>
+				<DeckSlides {...shown} />
+			</Suspense>
 		),
 	},
 	html: {
@@ -62,6 +83,28 @@ export const ARTIFACT_KINDS: Record<ArtifactKind, ArtifactKindView> = {
 		),
 	},
 };
+
+/*
+ * A deck is drawn by the editor's libraries, which a chat showing no deck
+ * has no need of, so they load with the first deck shown.
+ */
+const DeckPreview = lazy(() =>
+	import("./DeckDrawings.tsx").then(({ DeckPreview }) => ({ default: DeckPreview })),
+);
+const DeckSlides = lazy(() =>
+	import("./DeckDrawings.tsx").then(({ DeckSlides }) => ({ default: DeckSlides })),
+);
+
+/** A document opened large, to read. */
+function DocumentFull({ content, at }: { content: string; at: PageAt }) {
+	return (
+		<div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-list">
+			<article className="mx-auto max-w-190 px-6 py-6 max-md:px-4">
+				<DocumentMarkdown text={content} artifact={at} />
+			</article>
+		</div>
+	);
+}
 
 const DOCUMENT_PREVIEW_HEIGHT_PX = 168;
 

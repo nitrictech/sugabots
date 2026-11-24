@@ -1,4 +1,10 @@
-import { suggestChanges, withSuggestChanges } from "@handlewithcare/prosemirror-suggest-changes";
+import {
+	isSuggestChangesEnabled,
+	suggestChanges,
+	suggestChangesKey,
+	transformToSuggestionTransaction,
+	withSuggestChanges,
+} from "@handlewithcare/prosemirror-suggest-changes";
 import {
 	marksOfNodeSuggestion,
 	NODE_SUGGESTION,
@@ -7,7 +13,7 @@ import {
 	suggestionId,
 } from "@sugabots/contracts/live-document";
 import { type Editor, Extension } from "@tiptap/core";
-import { Plugin } from "@tiptap/pm/state";
+import { Plugin, type Transaction } from "@tiptap/pm/state";
 import { v4 as uuidv4 } from "uuid";
 
 /*
@@ -56,6 +62,24 @@ const nodeSuggestionsInStep = new Plugin({
 
 /** The key the sync layer marks a transaction with, saying whether the change came from somebody else. */
 const FROM_SYNC = "y-sync$";
+
+/**
+ * Makes `change`, a change of `name`'s in several steps, such as giving a
+ * slide a new layout, as one suggestion while they are suggesting, where
+ * `suggestingAs` would make a suggestion of each step. So it is accepted or
+ * undone whole, as the API's suggestions are. Made at once otherwise.
+ */
+export function dispatchAsOneChange(editor: Editor, change: Transaction, name: string): void {
+	const { state, view } = editor;
+	if (!isSuggestChangesEnabled(state)) {
+		view.dispatch(change);
+		return;
+	}
+	const id = suggestionId(uuidv4(), { kind: "person", name });
+	const suggested = transformToSuggestionTransaction(change, state, () => id);
+	// Already a suggestion, which `suggestingAs` passes on as it is.
+	view.dispatch(suggested.setMeta(suggestChangesKey, { skip: true }));
+}
 
 /**
  * Has `editor` hand every change `name` makes to the suggesting library,

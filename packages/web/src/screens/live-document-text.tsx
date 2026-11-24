@@ -59,14 +59,7 @@ export function LiveDocumentText({
 	/** Whether the box for asking the bot is open, which the link's menu makes way for. */
 	askBoxOpen: boolean;
 }) {
-	// The address stays once the dialog closes, so the dialog still shows it while it fades out.
-	const [asking, setAsking] = useState<{ href: string; open: boolean }>();
-	/** Opens `href`, first asking when it leaves the app and its address hasn't been shown. */
-	function open(href: string, { addressShown }: { addressShown: boolean }) {
-		if (!linkMayGoTo(href)) return;
-		if (addressShown || isInApp(href)) openInNewTab(href);
-		else setAsking({ href, open: true });
-	}
+	const { open, leaving } = useLinkOpening();
 	function handleClickInText(event: MouseEvent<HTMLElement>) {
 		const link = event.target instanceof Element ? event.target.closest("a") : null;
 		if (!link || !event.currentTarget.contains(link)) return;
@@ -106,18 +99,34 @@ export function LiveDocumentText({
 					onOpen={(href) => open(href, { addressShown: true })}
 				/>
 			)}
-			{asking && (
-				<LeavingDialog
-					href={asking.href}
-					wording={LINK_WORDING}
-					open={asking.open}
-					onOpenChange={(opening) =>
-						setAsking((current) => current && { ...current, open: opening })
-					}
-				/>
-			)}
+			{leaving}
 		</>
 	);
+}
+
+/**
+ * Opening the links in a live document's text, or in a drawing of a deck's
+ * slide: `open` opens one, first asking when it leaves the app and its
+ * address hasn't been shown, and `leaving` is the dialog that asks.
+ */
+export function useLinkOpening() {
+	// The address stays once the dialog closes, so the dialog still shows it while it fades out.
+	const [asking, setAsking] = useState<{ href: string; open: boolean }>();
+	/** Opens `href`, first asking when it leaves the app and its address hasn't been shown. */
+	function open(href: string, { addressShown }: { addressShown: boolean }) {
+		if (!linkMayGoTo(href)) return;
+		if (addressShown || isInApp(href)) openInNewTab(href);
+		else setAsking({ href, open: true });
+	}
+	const leaving = asking && (
+		<LeavingDialog
+			href={asking.href}
+			wording={LINK_WORDING}
+			open={asking.open}
+			onOpenChange={(opening) => setAsking((current) => current && { ...current, open: opening })}
+		/>
+	);
+	return { open, leaving };
 }
 
 /**
@@ -157,7 +166,7 @@ function shownAddress(href: string): { whole: string; head: string; tail: string
  * click with the main or middle button does, unless Shift or Alt is held, or
  * a plain click ends a drag that selected the link's words.
  */
-function opensUneditableLink(click: MouseEvent, link: Element): boolean {
+export function opensUneditableLink(click: MouseEvent, link: Element): boolean {
 	if (click.button > 1 || click.shiftKey || click.altKey) return false;
 	if (click.button === 1 || click.ctrlKey || click.metaKey) return true;
 	return !endsSelecting(click, link);

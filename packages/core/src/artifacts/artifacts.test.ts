@@ -1,4 +1,5 @@
 import {
+	type ArtifactKind,
 	MAX_ARTIFACT_CONTENT_CHARACTERS,
 	MAX_ARTIFACT_IMAGE_BYTES,
 	MAX_ARTIFACT_IMAGES_BYTES,
@@ -406,7 +407,7 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 	describe("a document's images", () => {
 		const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 		const image = { contentType: "image/png" as const, stream: Stream.succeed(png) };
-		const aDocument = async (kind: "document" | "html" = "document") => {
+		const aDocument = async (kind: ArtifactKind = "document") => {
 			const { service } = await authoring();
 			const made = await runOnPostgres(
 				service.create(by, {
@@ -439,6 +440,15 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 			await as(adminId).remove(at);
 			await runOnPostgres(BlobDeletions.deleteQueued);
 			expect(await imagesStoredFor(at.artifactId)).toEqual([]);
+		});
+
+		it("keeps an image for a deck, as for a document", async () => {
+			const at = await aDocument("slides");
+			const as = await servedOnPostgresAs(Artifacts.Service, Artifacts.layer);
+
+			const ids = await as(memberId).uploadImage({ ...at, ...image });
+
+			expect((await as(memberId).image(ids)).contentType).toBe("image/png");
 		});
 
 		it("keeps the same image once, however often it is kept", async () => {

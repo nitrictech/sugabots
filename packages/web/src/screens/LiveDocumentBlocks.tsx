@@ -1,5 +1,7 @@
+import { SLIDE_BODY, SLIDE_COLUMN } from "@sugabots/contracts/live-slides";
+import type { NestedOptions } from "@tiptap/extension-drag-handle";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
-import type { Node } from "@tiptap/pm/model";
+import type { Node, ResolvedPos } from "@tiptap/pm/model";
 import { type Editor, useEditorState } from "@tiptap/react";
 import { cn } from "cn";
 import {
@@ -120,7 +122,7 @@ function searching(editor: Editor, offeredAt: number | undefined): Searching | n
 	if (!selection.empty) return null;
 	const { $from } = selection;
 	// On a line of the page itself and at its end: a "/" in a list or mid-sentence is only a "/".
-	if ($from.depth !== 1 || $from.parent.type.name !== "paragraph") return null;
+	if (!isPageLine($from)) return null;
 	if ($from.parentOffset !== $from.parent.content.size) return null;
 	const offered = $from.start() === offeredAt;
 	// The focus comes back to the text a moment after the press that offered the menu.
@@ -129,6 +131,15 @@ function searching(editor: Editor, offeredAt: number | undefined): Searching | n
 	const match = search.exec($from.parent.textContent);
 	return match ? { from: $from.start(), to: $from.end(), query: match[1] ?? "" } : null;
 }
+
+/** What holds the lines of the page: a document itself, and a deck's slide, in its frame or a column. */
+const PAGE_REGIONS = new Set(["doc", SLIDE_BODY, SLIDE_COLUMN]);
+
+/** Whether `$from` is in a paragraph of the page's own, not one inside a list, a quote or a cell. */
+const isPageLine = ($from: ResolvedPos) =>
+	$from.depth >= 1 &&
+	$from.parent.type.name === "paragraph" &&
+	PAGE_REGIONS.has($from.node($from.depth - 1).type.name);
 
 /**
  * The blocks a line can become, floating under it and narrowed by what is
@@ -184,11 +195,14 @@ export function SlashMenu({
 					},
 				]
 			: []),
-		...[...BLOCK_KINDS, DIVIDER].map(({ kind, ...shown }) => ({
-			key: kind,
-			...shown,
-			choose: (at: Range) => void turnInto(editor, kind, at),
-		})),
+		// A deck has no divider: a slide holds no line across it.
+		...[...BLOCK_KINDS, ...(editor.schema.nodes.horizontalRule ? [DIVIDER] : [])].map(
+			({ kind, ...shown }) => ({
+				key: kind,
+				...shown,
+				choose: (at: Range) => void turnInto(editor, kind, at),
+			}),
+		),
 	].filter(({ label }) => label.toLowerCase().includes(query));
 	const open = typed !== null && typed.from !== closedAt && choices.length > 0;
 	/** Makes the choice, which ends an offer: asking a bot takes this menu away before it could see itself close. */
@@ -300,10 +314,13 @@ const SLASH_MENU_GAP_PX = 6;
 export function BlockHandle({
 	editor,
 	onOffer,
+	nested,
 }: {
 	editor: Editor;
 	/** Opens the menu of blocks on the empty line that starts at `at`. */
 	onOffer: (at: number) => void;
+	/** Which blocks inside others it shows beside, where the page's blocks hold blocks. Without, only the page's own. */
+	nested?: NestedOptions;
 }) {
 	const over = useRef<{ node: Node; pos: number }>(null);
 	function addBelow() {
@@ -320,6 +337,7 @@ export function BlockHandle({
 	return (
 		<DragHandle
 			editor={editor}
+			nested={nested}
 			onNodeChange={({ node, pos }) => {
 				over.current = node && pos >= 0 ? { node, pos } : null;
 			}}

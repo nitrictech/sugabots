@@ -1,15 +1,22 @@
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
-import type { Artifact } from "@sugabots/contracts";
+import {
+	type Artifact,
+	isEditedLive,
+	LIVE_EDITOR_REFUSED_CLOSE_CODE,
+	liveEditorQuerySchema,
+} from "@sugabots/contracts";
 import { artifactImageAddress, artifactImageIds } from "@sugabots/contracts/http";
 import { LIVE_DOCUMENT_SCHEMA } from "@sugabots/contracts/live-document";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { LiveDocuments } from "@sugabots/core/artifacts/live";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
-import { Ids } from "@sugabots/core/ids/ids";
+import { artifact, pod, workspace } from "@sugabots/core/database/schema";
+import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { unimplemented } from "@sugabots/core/testing";
-import { Context, Effect, Exit, Layer, Scope, Stream } from "effect";
+import { Context, Effect, Exit, Layer, Schema, Scope, Stream } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Doc, type XmlElement } from "yjs";
@@ -18,7 +25,9 @@ import { identifiedBy, testRoutes, type UserResolver, WEB_ORIGIN } from "./app.t
 /**
  * A document's live WebSocket, served on a real port: the editor's sync
  * client joins through the API's route while an agent rewrites the same
- * document in the process.
+ * document in the process. The live documents read each artifact's kind from
+ * its row, so the artifacts here have rows in the test database, under ids
+ * of their own each run.
  */
 const user = {
 	id: "0199a3a0-0000-7000-8000-0000000000ff",
@@ -29,11 +38,11 @@ const user = {
 const resolveUser: UserResolver = async (headers) =>
 	headers.get("cookie") === "session=good" ? user : null;
 
-const POD_ID = "0199a3a0-0000-7000-8000-000000000001";
-const ARTIFACT_ID = "0199a3a0-0000-7000-8000-000000000002";
-const LIVE = `/api/pods/${POD_ID}/artifacts/${ARTIFACT_ID}/live`;
-const PATH = `${LIVE}?schema=${LIVE_DOCUMENT_SCHEMA}`;
+const POD_ID = randomUUID();
+const ARTIFACT_ID = randomUUID();
 const WORD_PATH = `/api/pods/${POD_ID}/artifacts/${ARTIFACT_ID}/word`;
+const DECK_ID = randomUUID();
+const POWERPOINT_PATH = `/api/pods/${POD_ID}/artifacts/${DECK_ID}/powerpoint`;
 
 const plan: Artifact = {
 	id: ARTIFACT_ID,
@@ -48,7 +57,17 @@ const plan: Artifact = {
 	shownVersion: { number: 1, author: null, createdAt: "2026-11-23T00:00:00.000Z" },
 };
 
-const ILLUSTRATED_ID = "0199a3a0-0000-7000-8000-000000000004";
+const ILLUSTRATED_ID = randomUUID();
+
+/** A deck of two slides, which is edited live as a document is. */
+const deck: Artifact = {
+	...plan,
+	id: DECK_ID,
+	kind: "slides",
+	title: "Launch review",
+	content:
+		"<!-- layout: title -->\n\n# Launch review\n\n---\n\n<!-- layout: bullets -->\n\n## Goals\n\n- Ship on Friday",
+};
 
 /** The address of an image kept for `artifactId`. */
 function imageKeptFor(artifactId: string): string {
@@ -84,69 +103,98 @@ const scope = Effect.runSync(Scope.make());
 let apiPort: number;
 let live: LiveDocuments.Interface;
 
-beforeAll(async () => {
-	const blobs = new Map<string, Uint8Array>();
-	live = await Effect.runPromise(
-		LiveDocuments.make.pipe(
-			Effect.provide(
-				unimplemented(BlobStore.Service, {
-					get: (key) =>
-						Effect.fromNullishOr(blobs.get(key)).pipe(
-							Effect.map((bytes) => ({
-								stream: Stream.succeed(bytes),
-								contentType: "application/octet-stream",
-								size: bytes.length,
-							})),
-							Effect.mapError(() => new BlobStore.NotFound({ key })),
-						),
-					put: (key, content) =>
-						Stream.runCollect(content.stream).pipe(
-							Effect.map((chunks) => {
-								const bytes = Buffer.concat(chunks);
-								blobs.set(key, bytes);
-								return { size: bytes.length };
-							}),
-						),
-				}),
+describe.skipIf(!process.env.DATABASE_URL)("a document's live WebSocket", () => {
+	beforeAll(async () => {
+		const [space] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: "Launch", slug: `launch-${POD_ID}` })
+				.returning(),
+		);
+		if (!space) throw new Error("fixture");
+		await onDatabase((db) =>
+			db.insert(pod).values({
+				id: POD_ID,
+				workspaceId: space.id,
+				kind: "shared",
+				name: "Launch",
+				slug: "launch",
+			}),
+		);
+		await onDatabase((db) =>
+			db.insert(artifact).values(
+				[plan, deck, illustrated].map(({ id, kind, title }) => ({
+					id,
+					workspaceId: space.id,
+					podId: POD_ID,
+					kind,
+					title,
+				})),
 			),
-			Effect.provide(Ids.layer),
-			Scope.provide(scope),
-		),
-	);
-	apiPort = await Effect.runPromise(
-		Effect.gen(function* () {
-			const routes = testRoutes(
-				Layer.mergeAll(
-					identifiedBy(resolveUser),
-					unimplemented(Artifacts.Service, {
-						get: ({ artifactId }) =>
-							Effect.succeed(artifactId === illustrated.id ? illustrated : plan),
-						image: () =>
-							Effect.succeed({
-								contentType: "image/png",
-								size: PNG.byteLength,
-								stream: Stream.succeed(PNG),
-							}),
+		);
+		const blobs = new Map<string, Uint8Array>();
+		live = await runOnPostgres(
+			LiveDocuments.make.pipe(
+				Effect.provide(
+					unimplemented(BlobStore.Service, {
+						get: (key) =>
+							Effect.fromNullishOr(blobs.get(key)).pipe(
+								Effect.map((bytes) => ({
+									stream: Stream.succeed(bytes),
+									contentType: "application/octet-stream",
+									size: bytes.length,
+								})),
+								Effect.mapError(() => new BlobStore.NotFound({ key })),
+							),
+						put: (key, content) =>
+							Stream.runCollect(content.stream).pipe(
+								Effect.map((chunks) => {
+									const bytes = Buffer.concat(chunks);
+									blobs.set(key, bytes);
+									return { size: bytes.length };
+								}),
+							),
 					}),
-					Layer.succeed(LiveDocuments.Service, live),
 				),
-			);
-			const context = yield* Layer.buildWithScope(
-				HttpRouter.serve(routes, { disableLogger: true, disableListenLog: true }).pipe(
-					Layer.provideMerge(NodeHttpServer.layer(createServer, { port: 0 })),
-				),
-				scope,
-			);
-			const address = Context.get(context, HttpServer.HttpServer).address;
-			return "port" in address ? address.port : 0;
-			// The routes' requirements are the router's own, which serving provides.
-		}).pipe(Effect.orDie) as Effect.Effect<number>,
-	);
-});
+				Scope.provide(scope),
+			),
+		);
+		apiPort = await Effect.runPromise(
+			Effect.gen(function* () {
+				const routes = testRoutes(
+					Layer.mergeAll(
+						identifiedBy(resolveUser),
+						unimplemented(Artifacts.Service, {
+							get: ({ artifactId }) =>
+								Effect.succeed([illustrated, deck].find(({ id }) => id === artifactId) ?? plan),
+							image: () =>
+								Effect.succeed({
+									contentType: "image/png",
+									size: PNG.byteLength,
+									stream: Stream.succeed(PNG),
+								}),
+						}),
+						Layer.succeed(LiveDocuments.Service, live),
+					),
+				);
+				const context = yield* Layer.buildWithScope(
+					HttpRouter.serve(routes, { disableLogger: true, disableListenLog: true }).pipe(
+						Layer.provideMerge(NodeHttpServer.layer(createServer, { port: 0 })),
+					),
+					scope,
+				);
+				const address = Context.get(context, HttpServer.HttpServer).address;
+				return "port" in address ? address.port : 0;
+				// The routes' requirements are the router's own, which serving provides.
+			}).pipe(Effect.orDie) as Effect.Effect<number>,
+		);
+	});
 
-afterAll(() => Effect.runPromise(Scope.close(scope, Exit.void)));
+	afterAll(async () => {
+		await Effect.runPromise(Scope.close(scope, Exit.void));
+		await closeDatabase();
+	});
 
-describe("a document's live WebSocket", () => {
 	it("syncs a signed-in person's editor with an agent's rewrite of the same document", async () => {
 		const person = await joinAs("session=good");
 
@@ -161,6 +209,32 @@ describe("a document's live WebSocket", () => {
 		await until(() => textOf(person.document).includes("Ship on Monday."));
 		expect(namesIn(person)).toContain("Planner");
 		person.leave();
+	});
+
+	it("syncs a person's editor with an agent's rewrite of a deck, as of a document", async () => {
+		const person = await joinAs("session=good", deck);
+		const textOfDeck = () => person.document.getXmlFragment("default").toString();
+
+		expect(textOfDeck()).toContain("Ship on Friday");
+
+		await Effect.runPromise(
+			live.rewrite(DECK_ID, PLANNER, (markdown) =>
+				markdown.replace("Ship on Friday", "Ship on Monday"),
+			),
+		);
+
+		await until(() => textOfDeck().includes("Ship on Monday"));
+		expect(person.document.getXmlFragment("default").get(1)).toMatchObject({ nodeName: "slide" });
+		person.leave();
+	});
+
+	it("gives no Word file for a deck", async () => {
+		const response = await fetch(
+			`http://127.0.0.1:${apiPort}/api/pods/${POD_ID}/artifacts/${DECK_ID}/word`,
+			{ headers: { cookie: "session=good" } },
+		);
+
+		expect(response.status).toBe(404);
 	});
 
 	it("downloads the document as a Word file holding what the live document holds", async () => {
@@ -188,6 +262,45 @@ describe("a document's live WebSocket", () => {
 		expect(new Set(media).size).toBe(1);
 	});
 
+	it("downloads a deck as a PowerPoint file holding what the live deck holds", async () => {
+		const person = await joinAs("session=good", deck);
+		await Effect.runPromise(
+			live.rewrite(
+				DECK_ID,
+				PLANNER,
+				(markdown) => `${markdown}\n\n---\n\n<!-- layout: section -->\n\n## Next steps`,
+			),
+		);
+
+		const response = await fetch(`http://127.0.0.1:${apiPort}${POWERPOINT_PATH}`, {
+			headers: { cookie: "session=good" },
+		});
+		const file = new Uint8Array(await response.arrayBuffer());
+		person.leave();
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-type")).toBe(
+			"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		);
+		expect(response.headers.get("content-disposition")).toContain("Launch%20review.pptx");
+		// A .pptx is a zip, whose list of files is plain text: a slide for each of the live deck's three.
+		const slides = new TextDecoder().decode(file).match(/ppt\/slides\/slide\d+\.xml/g) ?? [];
+		expect([...new Set(slides)].sort()).toEqual([
+			"ppt/slides/slide1.xml",
+			"ppt/slides/slide2.xml",
+			"ppt/slides/slide3.xml",
+		]);
+	});
+
+	it("gives no PowerPoint file for a document", async () => {
+		const response = await fetch(
+			`http://127.0.0.1:${apiPort}/api/pods/${POD_ID}/artifacts/${ARTIFACT_ID}/powerpoint`,
+			{ headers: { cookie: "session=good" } },
+		);
+
+		expect(response.status).toBe(404);
+	});
+
 	it("gives nobody the Word file without a session", async () => {
 		const response = await fetch(`http://127.0.0.1:${apiPort}${WORD_PATH}`);
 
@@ -195,19 +308,38 @@ describe("a document's live WebSocket", () => {
 	});
 
 	it("refuses an editor built for another schema, which would delete what it could not hold", async () => {
-		const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${LIVE}?schema=1`, {
-			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
-		} as unknown as string[]);
-		const outcome = await new Promise<string>((resolve) => {
-			socket.onopen = () => resolve("opened");
-			socket.onerror = () => resolve("refused");
-		});
+		const code = await closeCodeFor(ARTIFACT_ID, { schema: 1, kind: "document" });
 
-		expect(outcome).toBe("refused");
+		expect(code).toBe(LIVE_EDITOR_REFUSED_CLOSE_CODE);
+	});
+
+	it("lets an editor join only an artifact of the kind it was built for", async () => {
+		const deckAsDocument = await closeCodeFor(DECK_ID, {
+			schema: LIVE_DOCUMENT_SCHEMA,
+			kind: "document",
+		});
+		const documentAsDeck = await closeCodeFor(ARTIFACT_ID, {
+			schema: LIVE_DOCUMENT_SCHEMA,
+			kind: "slides",
+		});
+		const onDocument = await joinAs("session=good", plan);
+		const onDeck = await joinAs("session=good", deck);
+
+		expect([deckAsDocument, documentAsDeck]).toEqual([
+			LIVE_EDITOR_REFUSED_CLOSE_CODE,
+			LIVE_EDITOR_REFUSED_CLOSE_CODE,
+		]);
+		expect(onDocument.document.getXmlFragment("default").get(0)).toMatchObject({
+			nodeName: "heading",
+		});
+		expect(onDeck.document.getXmlFragment("default").get(0)).toMatchObject({ nodeName: "slide" });
+		onDocument.leave();
+		onDeck.leave();
 	});
 
 	it("refuses a socket nobody is signed in on", async () => {
-		const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${PATH}`, {
+		const builtFor = { schema: LIVE_DOCUMENT_SCHEMA, kind: "document" } as const;
+		const socket = new WebSocket(liveAddress(ARTIFACT_ID, builtFor), {
 			headers: { origin: WEB_ORIGIN, cookie: "session=bad" },
 		} as unknown as string[]);
 		const outcome = await new Promise<string>((resolve) => {
@@ -219,19 +351,23 @@ describe("a document's live WebSocket", () => {
 	});
 });
 
-/** The web app's sync client on the route, signed in by `cookie` as a browser on the web app's origin would be. */
-async function joinAs(cookie: string) {
+/**
+ * The web app's sync client on `artifact`'s route, built for the artifact's
+ * kind, signed in by `cookie` as a browser on the web app's origin would be.
+ */
+async function joinAs(cookie: string, artifact: Artifact = plan) {
 	class BrowserSocket extends WebSocket {
 		constructor(url: string) {
 			super(url, { headers: { origin: WEB_ORIGIN, cookie } } as unknown as string[]);
 		}
 	}
+	if (!isEditedLive(artifact)) throw new Error("fixture");
 	const socket = new HocuspocusProviderWebsocket({
-		url: `ws://127.0.0.1:${apiPort}${PATH}`,
+		url: liveAddress(artifact.id, { schema: LIVE_DOCUMENT_SCHEMA, kind: artifact.kind }),
 		WebSocketPolyfill: BrowserSocket,
 	});
 	const provider = new HocuspocusProvider({
-		name: ARTIFACT_ID,
+		name: artifact.id,
 		document: new Doc(),
 		websocketProvider: socket,
 	});
@@ -248,6 +384,38 @@ async function joinAs(cookie: string) {
 		},
 	};
 }
+
+/** What an editor says it was built for when it joins. */
+type BuiltFor = typeof liveEditorQuerySchema.Type;
+
+/** The address of `artifactId`'s live route, as an editor built for `builtFor` opens it. */
+const liveAddress = (artifactId: string, builtFor: BuiltFor) =>
+	`ws://127.0.0.1:${apiPort}/api/pods/${POD_ID}/artifacts/${artifactId}/live?${new URLSearchParams(Schema.encodeSync(liveEditorQuerySchema)(builtFor))}`;
+
+/**
+ * The code the route closes the socket with that an editor built for
+ * `builtFor` opens on `artifactId`, signed in, from the web app's origin.
+ * Fails if the socket is still open after a while, as it is when let in.
+ */
+async function closeCodeFor(artifactId: string, builtFor: BuiltFor): Promise<number> {
+	const socket = new WebSocket(liveAddress(artifactId, builtFor), {
+		headers: { origin: WEB_ORIGIN, cookie: "session=good" },
+	} as unknown as string[]);
+	try {
+		return await new Promise<number>((resolve, reject) => {
+			socket.onclose = (event) => resolve(event.code);
+			setTimeout(
+				() => reject(new Error(`The socket was still open after ${CLOSE_WAIT_MS} ms`)),
+				CLOSE_WAIT_MS,
+			);
+		});
+	} finally {
+		socket.close();
+	}
+}
+
+/** How long a socket the route refuses may take to be closed. */
+const CLOSE_WAIT_MS = 2_000;
 
 const textOf = (document: Doc) =>
 	document
