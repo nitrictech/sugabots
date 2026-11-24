@@ -1,93 +1,92 @@
 import { MAX_ATTACHMENT_BYTES } from "@sugabots/contracts";
+import { FileTooLarge, UploadInterrupted } from "@sugabots/contracts/errors/chats";
 import { BadRequest, Conflict, NotFound, PayloadTooLarge } from "@sugabots/contracts/http";
-import { ChatDetailsView } from "@sugabots/core/chats/chat-details-view";
-import { ChatFiles } from "@sugabots/core/chats/chats/chat-files";
-import { ChatView } from "@sugabots/core/chats/chats/chat-view";
-import { Chats } from "@sugabots/core/chats/chats/chats";
-import { Reactions } from "@sugabots/core/chats/reactions/reactions";
-import { ChatFileStore } from "@sugabots/core/files/chat-file-store";
-import { userText } from "@sugabots/errors";
 import { Effect, Stream } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asCurrentUser } from "../../auth/middleware.ts";
+import { operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 import { fileResponse } from "./file-response.ts";
 
+/** Chats, their messages, reactions and files, each endpoint its operation. */
 export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
-	Effect.gen(function* () {
-		const chats = yield* Chats.Service;
-		const view = yield* ChatView.Service;
-		const files = yield* ChatFiles.Service;
-		const details = yield* ChatDetailsView.Service;
-		const reactions = yield* Reactions.Service;
-		return handlers
+	Effect.map(operationCaller, (callOperation) =>
+		handlers
 			.handle("projectChats", ({ params }) =>
-				view.chats(params.projectId).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.projectChats", { projectId: params.projectId }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("attention", ({ params }) =>
-				view.attention(params.workspace).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.attention", { workspace: params.workspace }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("attentionMarks", ({ params }) =>
-				view.attentionMarks(params.workspace).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.attentionMarks", { workspace: params.workspace }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("approvals", ({ params }) =>
-				view.approvals(params.workspace).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.approvals", { workspace: params.workspace }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("startProjectChat", ({ params, payload }) =>
-				chats
-					.startProjectChat({
-						projectId: params.projectId,
-						messageId: payload.id,
-						content: payload.message,
-					})
-					.pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.startProjectChat", {
+					projectId: params.projectId,
+					id: payload.id,
+					message: payload.message,
+				}).pipe(asHttpError(chatErrors)),
 			)
 			.handle("startInterview", ({ params }) =>
-				chats.startInterview(params.botId).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.startInterview", { botId: params.botId }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("openAutomationFeed", ({ params }) =>
-				chats
-					.openAutomationFeed({ workspace: params.workspace, automationId: params.automationId })
-					.pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.openAutomationFeed", {
+					workspace: params.workspace,
+					automationId: params.automationId,
+				}).pipe(asHttpError(chatErrors)),
 			)
 			.handle("renameChat", ({ params, payload }) =>
-				chats
-					.renameChat({ chatId: params.chatId, name: payload.name })
-					.pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.renameChat", { chatId: params.chatId, name: payload.name }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("markResolved", ({ params }) =>
-				chats
-					.setResolved({ chatId: params.chatId, resolved: true })
-					.pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.setResolved", { chatId: params.chatId, resolved: true }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("reopen", ({ params }) =>
-				chats
-					.setResolved({ chatId: params.chatId, resolved: false })
-					.pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.setResolved", { chatId: params.chatId, resolved: false }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("messages", ({ params, query }) =>
-				view.messages(params.chatId, query).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.messages", { chatId: params.chatId, ...query }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("history", ({ params, query }) =>
-				view.history(params.chatId, query).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.history", { chatId: params.chatId, ...query }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("markRead", ({ params }) =>
-				chats.markRead(params.chatId).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.markRead", { chatId: params.chatId }).pipe(asHttpError(chatErrors)),
 			)
 			.handle("markNestedChatRead", ({ params }) =>
-				chats.markNestedChatRead(params.chatId).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.markNestedChatRead", { chatId: params.chatId }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("send", ({ params, payload }) =>
-				chats
-					.post({
-						chatId: params.chatId,
-						messageId: payload.id,
-						content: payload.message,
-						attachments: payload.attachments,
-						replyTo: payload.replyTo,
-					})
-					.pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.send", { chatId: params.chatId, ...payload }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handleRaw("uploadFile", ({ params, query, request }) =>
 				// Raw, so the file streams into the blob store rather than being read
@@ -95,64 +94,50 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 				Effect.gen(function* () {
 					// Refused before any of it is read, when it says how large it is.
 					if (Number(request.headers["content-length"]) > MAX_ATTACHMENT_BYTES) {
-						return yield* new ChatFileStore.FileTooLarge({ maxSize: MAX_ATTACHMENT_BYTES });
+						return yield* new FileTooLarge({ maxSize: MAX_ATTACHMENT_BYTES });
 					}
-					return yield* files.upload({
+					return yield* callOperation("chats.uploadFile", {
 						chatId: params.chatId,
-						name: query.name,
-						type: query.type,
-						stream: request.stream.pipe(
-							Stream.mapError(
-								() => new BadRequest({ message: userText`The upload was interrupted` }),
-							),
-						),
+						...query,
+						content: request.stream.pipe(Stream.mapError(() => new UploadInterrupted())),
 					});
-				}).pipe(Effect.catchTags(storeOutagesAsDefects), asCurrentUser, asHttpError(fileErrors)),
+				}).pipe(asHttpError(fileErrors)),
 			)
 			.handle("removeFile", ({ params }) =>
-				files
-					.removeUnsentAttachment({ chatId: params.chatId, fileId: params.fileId })
-					.pipe(asCurrentUser, asHttpError(refusals)),
+				callOperation("chats.removeFile", { chatId: params.chatId, fileId: params.fileId }).pipe(
+					asHttpError(refusals),
+				),
 			)
 			.handle("file", ({ params }) =>
-				files
-					.read({ chatId: params.chatId, fileId: params.fileId })
-					.pipe(
-						Effect.map(fileResponse),
-						Effect.catchTags(storeOutagesAsDefects),
-						asCurrentUser,
-						asHttpError(fileErrors),
-					),
+				callOperation("chats.file", { chatId: params.chatId, fileId: params.fileId }).pipe(
+					Effect.map(fileResponse),
+					asHttpError(fileErrors),
+				),
 			)
 			.handle("get", ({ params, query }) =>
-				details.get(params.chatId, query).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.get", { chatId: params.chatId, ...query }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("context", ({ params }) =>
-				details.context(params.chatId).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.context", { chatId: params.chatId }).pipe(asHttpError(chatErrors)),
 			)
 			.handle("react", ({ params }) =>
-				reactions.add(params.messageId, params.emoji).pipe(asCurrentUser, asHttpError(chatErrors)),
+				callOperation("chats.react", { messageId: params.messageId, emoji: params.emoji }).pipe(
+					asHttpError(chatErrors),
+				),
 			)
 			.handle("unreact", ({ params }) =>
-				reactions
-					.remove(params.messageId, params.emoji)
-					.pipe(asCurrentUser, asHttpError(chatErrors)),
-			);
-	}),
+				callOperation("chats.unreact", { messageId: params.messageId, emoji: params.emoji }).pipe(
+					asHttpError(chatErrors),
+				),
+			),
+	),
 );
 
-/**
- * A blob store that cannot be reached, or refuses, is the server's
- * fault, not the caller's: logged, and answered as a server error.
- */
-const storeOutagesAsDefects = {
-	BlobStoreUnavailable: Effect.die,
-	BlobStoreRejected: Effect.die,
-} as const;
-
+/** What each way a chats operation can fail means over HTTP. */
 const chatErrors = {
 	...refusals,
-	BotUnavailable: BadRequest,
 	MessageIdConflict: Conflict,
 	ReplyTargetNotFound: BadRequest,
 	BotHasNoModel: Conflict,
@@ -162,9 +147,11 @@ const chatErrors = {
 	TooManyReactionEmoji: Conflict,
 };
 
+/** What each way uploading or reading a chat's file can fail means over HTTP. */
 const fileErrors = {
 	...refusals,
 	FileTooLarge: PayloadTooLarge,
 	TooManyUnsentAttachments: Conflict,
+	UploadInterrupted: BadRequest,
 	ChatFileNotFound: NotFound,
 };

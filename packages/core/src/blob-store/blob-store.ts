@@ -1,9 +1,12 @@
 export * as BlobStore from "./blob-store.ts";
 
 import { NodeFileSystem } from "@effect/platform-node";
+import { asc, eq } from "drizzle-orm";
 import { Config, Context, Data, Effect, Layer, Stream } from "effect";
-import { fromFileSystem } from "./implementations/filesystem.ts";
-import { fromPostgres } from "./implementations/postgres.ts";
+import { query } from "../database/database.ts";
+import { fromFileSystem, moveFolderOnDisk } from "./implementations/filesystem.ts";
+import { fromPostgres, moveFolderInPostgres } from "./implementations/postgres.ts";
+import { blobFolderMove } from "./sql.ts";
 
 /**
  * Bytes kept under path-like keys, such as `chats/<chatId>/files/<fileId>`,
@@ -49,16 +52,26 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/BlobStore") {}
 
-/** Select the implementation using `BLOB_STORE_PROVIDER`, defaults to the application database. */
+/**
+ * Select the implementation using `BLOB_STORE_PROVIDER`, defaults to the
+ * application database. Before it serves anything, it moves the folders a
+ * migration moved (see `blob_folder_move`).
+ */
 export const make = Effect.gen(function* () {
 	const provider = yield* Config.Literals(PROVIDERS, "BLOB_STORE_PROVIDER").pipe(
 		Config.withDefault("postgres"),
 	);
 	switch (provider) {
-		case "postgres":
+		case "postgres": {
+			yield* moveQueuedFolders(moveFolderInPostgres);
 			return yield* fromPostgres;
-		case "filesystem":
-			return yield* fromFileSystem(yield* Config.String("BLOB_STORE_FILESYSTEM_ROOT"));
+		}
+		case "filesystem": {
+			const root = yield* Config.String("BLOB_STORE_FILESYSTEM_ROOT");
+			const store = yield* fromFileSystem(root);
+			yield* moveQueuedFolders(moveFolderOnDisk(root));
+			return store;
+		}
 	}
 });
 
@@ -157,6 +170,33 @@ export function atMost<E>(
 		),
 	);
 }
+
+/**
+ * Moves each folder `blob_folder_move` holds with `moveFolder`, dropping its
+ * row once it has moved, so the blobs a migration moved are where their
+ * records point. `moveFolder` leaves what has already moved alone, so moving
+ * again after a crash part-way finishes the job. A failure stops the server
+ * starting, rather than leave files it can't find.
+ */
+const moveQueuedFolders = <E, R>(moveFolder: (from: Key, to: Key) => Effect.Effect<void, E, R>) =>
+	Effect.gen(function* () {
+		const queued = yield* query((db) =>
+			db
+				.select()
+				.from(blobFolderMove)
+				.orderBy(asc(blobFolderMove.queuedAt), asc(blobFolderMove.id)),
+		);
+		for (const { id, fromPrefix, toPrefix } of queued) {
+			yield* moveFolder(fromPrefix, toPrefix);
+			yield* query((db) => db.delete(blobFolderMove).where(eq(blobFolderMove.id, id)));
+		}
+		if (queued.length > 0) {
+			yield* Effect.logInfo(`Moved the files of ${queued.length} folders a migration moved`);
+		}
+	}).pipe(
+		Effect.mapError((cause) => new Error("Moving the files a migration moved failed", { cause })),
+		Effect.orDie,
+	);
 
 const PROVIDERS = ["postgres", "filesystem"] as const;
 

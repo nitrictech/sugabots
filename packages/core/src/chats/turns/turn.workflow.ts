@@ -9,29 +9,44 @@
  * which reads the decisions recorded as they were made.
  */
 import { Activities } from "@sugabots/workflow/activities";
-import { and, sql } from "drizzle-orm";
-import { Context, Duration, Effect, Schema } from "effect";
+import { and, type SQL, sql } from "drizzle-orm";
+import { Context, Duration, Effect, Schema, SchemaGetter } from "effect";
 import { DurableClock, DurableDeferred, Workflow } from "effect/unstable/workflow";
 import { Lanes } from "../../workflows/lanes.ts";
 import type { TurnReason } from "../sql.ts";
 import { ApprovalDecision, DecidedApproval } from "./tool-calls/lifecycle.ts";
+
+/**
+ * A hand-back as the workflows started before hand-backs had their name
+ * stored it, `resume`, so one still running decodes as a hand-back. Its
+ * execution id leaves the reason out, so it stays the same.
+ */
+const HandBackStoredAsResume = Schema.Literal("resume").pipe(
+	Schema.decodeTo(Schema.Literal("hand_back"), {
+		decode: SchemaGetter.transform(() => "hand_back" as const),
+		encode: SchemaGetter.transform(() => "resume" as const),
+	}),
+);
 
 /** The turn a workflow carries out, as its payload: which bot answers which message in which chat, and why. */
 export const TurnRequest = Schema.Struct({
 	chatId: Schema.String,
 	botId: Schema.String,
 	triggerMessageId: Schema.String,
-	reason: Schema.Literals([
-		"mention",
-		"reply",
-		"default",
-		"optional",
-		"collaboration",
-		"automation",
-		"hand_back",
-		"interview",
-		"brief",
-	]) satisfies Schema.Codec<TurnReason>,
+	reason: Schema.Union([
+		Schema.Literals([
+			"mention",
+			"reply",
+			"default",
+			"optional",
+			"collaboration",
+			"automation",
+			"hand_back",
+			"interview",
+			"brief",
+		]),
+		HandBackStoredAsResume,
+	]) satisfies Schema.Codec<TurnReason, TurnReason | "resume">,
 });
 export type TurnRequest = typeof TurnRequest.Type;
 
@@ -73,19 +88,20 @@ export const admitTurn = (lanes: Lanes.Interface, request: TurnRequest) =>
 /**
  * Whether the lanes of the chat `chatId` hold a turn for `reason` on the
  * message `triggerMessageId`, not yet started, running, or ended with its lane
- * not yet free; other than `exceptBotId`'s, when given. As a condition for a
- * query.
+ * not yet free; when `botMatches` is given, only one whose bot's id, as text,
+ * it matches. As a condition for a query.
  */
 export const heldInLane = (
 	chatId: string,
-	turn: { triggerMessageId: string; reason: TurnReason; exceptBotId?: string },
+	turn: { triggerMessageId: string; reason: TurnReason },
+	botMatches?: (botId: SQL) => SQL | undefined,
 ) =>
 	// Every field of a `TurnRequest` is a string, so its JSON encoding names them as it does.
 	Lanes.holdsRequest(sql`${chatId}`, Turn._tag, (payload) =>
 		and(
 			sql`${payload}->>'triggerMessageId' = ${turn.triggerMessageId}`,
 			sql`${payload}->>'reason' = ${turn.reason}`,
-			turn.exceptBotId === undefined ? undefined : sql`${payload}->>'botId' <> ${turn.exceptBotId}`,
+			botMatches?.(sql`${payload}->>'botId'`),
 		),
 	);
 

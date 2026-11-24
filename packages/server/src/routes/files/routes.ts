@@ -1,35 +1,37 @@
-import { Files } from "@sugabots/core/files/files";
-import { FilePages } from "@sugabots/core/files/pages";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asCurrentUser } from "../../auth/middleware.ts";
+import { operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
+/** The files in a project's chats, and those bots wrote, each endpoint its operation. */
 export const fileRoutes = HttpApiBuilder.group(ServerApi, "files", (handlers) =>
-	Effect.gen(function* () {
-		const files = yield* Files.Service;
-		const pages = yield* FilePages.Service;
-		return handlers
+	Effect.map(operationCaller, (callOperation) =>
+		handlers
 			.handle("listInProject", ({ params }) =>
-				files.listInProject(params).pipe(asCurrentUser, asHttpError(refusals)),
-			)
-			.handle("get", ({ params }) => files.get(params).pipe(asCurrentUser, asHttpError(refusals)))
-			.handle("versions", ({ params }) =>
-				files.versions(params).pipe(asCurrentUser, asHttpError(refusals)),
-			)
-			.handle("getVersion", ({ params }) =>
-				files.getVersion(params).pipe(asCurrentUser, asHttpError(refusals)),
-			)
-			.handle("pageAddress", ({ params }) =>
-				pages.address(params).pipe(
-					Effect.map((url) => ({ url: url ?? null })),
-					asCurrentUser,
+				callOperation("files.listInProject", { projectId: params.projectId }).pipe(
 					asHttpError(refusals),
 				),
 			)
+			.handle("get", ({ params }) =>
+				callOperation("files.get", { fileId: params.fileId }).pipe(asHttpError(refusals)),
+			)
+			.handle("versions", ({ params }) =>
+				callOperation("files.versions", { fileId: params.fileId }).pipe(asHttpError(refusals)),
+			)
+			.handle("getVersion", ({ params }) =>
+				callOperation("files.getVersion", { fileId: params.fileId, version: params.version }).pipe(
+					asHttpError(refusals),
+				),
+			)
+			.handle("pageAddress", ({ params }) =>
+				callOperation("files.pageAddress", {
+					fileId: params.fileId,
+					version: params.version,
+				}).pipe(asHttpError(refusals)),
+			)
 			.handle("remove", ({ params }) =>
-				files.remove(params).pipe(asCurrentUser, asHttpError(refusals)),
-			);
-	}),
+				callOperation("files.remove", { fileId: params.fileId }).pipe(asHttpError(refusals)),
+			),
+	),
 );

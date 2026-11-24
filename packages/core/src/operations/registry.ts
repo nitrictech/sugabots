@@ -19,7 +19,8 @@ import { chatsOperations } from "./chats/index.ts";
 import { computersOperations } from "./computers/index.ts";
 import { connectorsOperations } from "./connectors/index.ts";
 import { eventsOperations } from "./events/index.ts";
-import type { Operation, ServicesOf } from "./operation.ts";
+import { notificationsOperations } from "./notifications/index.ts";
+import type { Call, Operation, ServicesOf } from "./operation.ts";
 import { projectsOperations } from "./projects/index.ts";
 import { providersOperations } from "./providers/index.ts";
 import { turnsOperations } from "./turns/index.ts";
@@ -27,13 +28,14 @@ import { workspaceOperations } from "./workspace/index.ts";
 
 /**
  * Every operation, by name, for a principal an entrypoint authenticated. The
- * one way into the core: every entrypoint calls these, and each proves access
- * for itself.
+ * one way into the core: every entrypoint calls these, with the call it is
+ * making, and each proves access for itself.
  */
 export type Interface = {
 	readonly [Name in OperationName]: (
 		principal: Principal,
 		input: InputOf<Name>,
+		call: Call,
 	) => Effect.Effect<OutputOf<Name>, FailureOf<Name>>;
 };
 
@@ -55,6 +57,7 @@ const operations = {
 	...approvalsOperations,
 	...eventsOperations,
 	...turnsOperations,
+	...notificationsOperations,
 } satisfies {
 	readonly [Name in OperationName]: Operation<OperationContracts[Name], unknown>;
 };
@@ -69,6 +72,7 @@ interface RegisteredOperation {
 	readonly run: (
 		principal: Principal,
 		input: never,
+		call: Call,
 	) => Effect.Effect<unknown, DomainError, Services>;
 }
 
@@ -76,8 +80,10 @@ export const make = Effect.gen(function* () {
 	const context = yield* Effect.context<Services>();
 	const entries = Object.entries<RegisteredOperation>(operations).map(([name, operation]) => [
 		name,
-		(principal: Principal, input: never) =>
-			operation.run(principal, input).pipe(Effect.provideContext(context)),
+		(principal: Principal, input: never, call: Call) =>
+			operation
+				.run(principal, input, call)
+				.pipe(Effect.provideContext(context), Effect.withSpan(name)),
 	]);
 	return Object.fromEntries(entries) as Interface;
 });

@@ -1,15 +1,15 @@
-import { ActionForbidden } from "@sugabots/core/authorization/access";
-import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { Turns } from "@sugabots/core/chats/turns/turns";
+import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
+import { Operations } from "@sugabots/core/operations/registry";
+import type { Principal } from "@sugabots/core/principal";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { MemberResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy, signedInWith } from "../../http/app.test-support.ts";
 
 /**
- * The approval route, over a double of `Turns.Controls`, which decides who may
- * make which decision; `turns/tool-calls/store.test.ts` tests that.
+ * The approval route, over a double of `approvals.decide`, which decides who
+ * may make which decision; `turns/tool-calls/store.test.ts` tests that.
  */
 
 const MEMBER_ID = "0199a3a0-0000-7000-8000-000000000003";
@@ -22,9 +22,12 @@ const resolveMember: MemberResolver = async () => ({
 	image: null,
 });
 
-function app(decide: Turns.ControlsInterface["decide"]) {
+function app(decide: Operations.Interface["approvals.decide"]) {
 	return createTestApp(
-		Layer.merge(identifiedBy(resolveMember), unimplemented(Turns.Controls, { decide })),
+		Layer.merge(
+			identifiedBy(resolveMember),
+			unimplemented(Operations.Service, { "approvals.decide": decide }),
+		),
 	);
 }
 
@@ -35,28 +38,30 @@ const approve = (routes: ReturnType<typeof app>, decision: string) =>
 		body: JSON.stringify({ decision }),
 	});
 
+/** The member a principal is signed in as, as the session authenticator built it. */
+const memberOf = (principal: Principal) =>
+	principal._tag === "MemberSession" ? principal.member : undefined;
+
 describe("tool approval routes", () => {
 	it("decides the call in the path as the member asking", async () => {
-		let decidedAs: string | undefined;
-		const decide = vi.fn<Turns.ControlsInterface["decide"]>(() =>
-			Effect.map(CurrentActor.Service, ({ memberId }) => {
-				decidedAs = memberId;
-			}),
+		let asked: unknown;
+
+		const response = await approve(
+			app((principal, input) =>
+				Effect.sync(() => {
+					asked = { ...input, memberId: memberOf(principal) };
+				}),
+			),
+			"allow_once",
 		);
 
-		const response = await approve(app(decide), "allow_once");
-
 		expect(response.status).toBe(202);
-		expect(decide).toHaveBeenCalledWith({
-			toolCallId: CALL_ID,
-			decision: "allow_once",
-		});
-		expect(decidedAs).toBe(MEMBER_ID);
+		expect(asked).toEqual({ toolCallId: CALL_ID, decision: "allow_once", memberId: MEMBER_ID });
 	});
 
 	it("answers a decision the caller may not make as forbidden", async () => {
 		const response = await approve(
-			app(() => Effect.fail(new ActionForbidden({ permission: "approval.decide" }))),
+			app(() => Effect.fail(new ActionForbidden({ proof: "CanDecide" }))),
 			"deny",
 		);
 

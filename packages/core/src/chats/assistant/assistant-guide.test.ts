@@ -1,3 +1,5 @@
+import type { NewBot } from "@sugabots/contracts";
+import type { InputOf } from "@sugabots/contracts/operations";
 import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Layer } from "effect";
@@ -24,9 +26,9 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
+import { type CallOperation, servedOperations } from "../../operations/testing.ts";
+import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
-import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { seedChat } from "../seed.test-support.ts";
 import { AssistantGuide } from "./assistant-guide.ts";
 
@@ -36,7 +38,8 @@ import { AssistantGuide } from "./assistant-guide.ts";
  */
 describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () => {
 	let guide: Promised<AssistantGuide.Interface>;
-	let botsAs: (memberId: string) => Promised<BotAdministration.Interface>;
+	let callOperation: CallOperation;
+	let signedIn: ReturnType<typeof principals>;
 
 	let workspaceId: string;
 	let workspaceSlug: string;
@@ -49,10 +52,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 			AssistantGuide.Service,
 			AssistantGuide.layer.pipe(Layer.provide(noComputers)),
 		);
-		botsAs = await servedOnPostgresAs(
-			BotAdministration.Service,
-			BotAdministration.layer.pipe(Layer.provide(noComputers)),
-		);
+		callOperation = await servedOperations();
+		signedIn = principals(await authenticators());
 	});
 
 	afterAll(async () => {
@@ -109,6 +110,14 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 				source: "manual",
 			}),
 		);
+	});
+
+	/** The bots operations these cases make bots with, called for `memberId` signed in. */
+	const botsAs = (memberId: string) => ({
+		create: async ({ workspace, bot }: { workspace: string; bot: NewBot }) =>
+			callOperation(await signedIn.member(memberId), "bots.create", { workspace, ...bot }),
+		ensureAssistant: async (input: InputOf<"bots.ensureAssistant">) =>
+			callOperation(await signedIn.member(memberId), "bots.ensureAssistant", input),
 	});
 
 	const aBot = (creatorId: string, name: string, visibility: "public" | "personal" = "public") =>

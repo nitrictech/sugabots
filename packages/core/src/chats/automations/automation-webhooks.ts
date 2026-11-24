@@ -1,82 +1,92 @@
 import {
+	type AcceptedRun,
+	type AutomationWebhookChallenge,
 	MAX_IDEMPOTENCY_KEY_CHARACTERS,
 	type WebhookAuth,
 	type WebhookFilterTest,
 } from "@sugabots/contracts";
+import {
+	AutomationDeliveryIdTooLong,
+	type AutomationTriggerConflict,
+	type AutomationTriggerRejected,
+	WebhookRefused,
+} from "@sugabots/contracts/errors/automations";
 import { and, eq, isNull } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
-import { query, serviceOperations, transaction } from "../../database/database.ts";
+import { type Database, query, transaction } from "../../database/database.ts";
 import { automation, automationTrigger } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
-import { Secrets } from "../../secrets/secrets.ts";
 import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
-import { AutomationDeliveryIdTooLong } from "./automation.ts";
-import type { Automations } from "./automations.ts";
-import {
-	type Delivery,
-	deliveryAuthentic,
-	deliveryIdOf,
-	slackChallengeOf,
-} from "./webhook-auth.ts";
+import { type Delivery, deliveryIdOf, slackChallengeOf } from "./webhook-auth.ts";
 import { meetsFilter } from "./webhook-filter.ts";
 
-/** Runs a webhook trigger's caller asks for: `Automations.Webhooks`. */
-export const makeWebhooks = Effect.gen(function* () {
-	const operation = yield* serviceOperations<Automations.WebhooksInterface>("Automations.Webhooks");
+/**
+ * What a webhook call that met its trigger's check comes to: the run it
+ * started, or the one an earlier delivery of it started; a call the trigger's
+ * filter turned away; or Slack's check that the address answers to it,
+ * answered with its challenge. Neither of the last two starts a run.
+ */
+export type WebhookAnswer =
+	| { readonly kind: "run"; readonly run: AcceptedRun }
+	| { readonly kind: "ignored" }
+	| ({ readonly kind: "challenge" } & AutomationWebhookChallenge);
+
+/**
+ * Accepts the run a call to the webhook trigger `triggerId` asks for, once the
+ * webhook authenticator has checked it holds the trigger's secret. A trigger
+ * that is gone, or whose automation is paused or deleted, refuses the call as
+ * a bad secret would, so its address can't be probed for.
+ */
+export const makeAcceptWebhook = Effect.gen(function* () {
 	const acceptTrigger = yield* makeAcceptTrigger;
-	const secrets = yield* Secrets.Service;
 
-	const authentic = (webhook: EnabledWebhook, delivery: Delivery, now: Date) => {
-		// Left without a secret on purpose, so its address alone runs it.
-		if (webhook.secret === null) return true;
-		return deliveryAuthentic(webhook.auth, secrets.decrypt(webhook.secret), delivery, now);
-	};
-
-	return {
-		accept: ({ triggerId, delivery }) =>
-			operation(
-				"accept",
+	return (
+		triggerId: string,
+		delivery: Pick<Delivery, "headers" | "payload">,
+	): Effect.Effect<
+		WebhookAnswer,
+		| WebhookRefused
+		| AutomationTriggerConflict
+		| AutomationTriggerRejected
+		| AutomationDeliveryIdTooLong,
+		Database
+	> =>
+		Effect.gen(function* () {
+			const now = yield* DateTime.nowAsDate;
+			const found = yield* enabledWebhook(triggerId);
+			if (!found) return yield* new WebhookRefused();
+			const challenge = slackChallengeOf(found.auth, delivery.payload);
+			if (challenge !== undefined) return { kind: "challenge" as const, challenge };
+			return yield* transaction(
 				Effect.gen(function* () {
-					const now = yield* DateTime.nowAsDate;
-					// Checked before the automation's trigger lock is taken, so a caller
-					// without the secret cannot hold up its other triggers.
-					const found = isUuid(triggerId) ? yield* enabledWebhook(triggerId) : undefined;
-					if (!found || !authentic(found, delivery, now)) return undefined;
-					const challenge = slackChallengeOf(found.auth, delivery.payload);
-					if (challenge !== undefined) return { kind: "challenge" as const, challenge };
-					return yield* transaction(
-						Effect.gen(function* () {
-							yield* lockTriggers(found.automationId);
-							// How callers are checked may have changed while this one was.
-							const current = yield* enabledWebhook(triggerId);
-							if (!current || !sameCheck(current, found)) return undefined;
-							if (!meetsFilter(current.filter, delivery.payload))
-								return { kind: "ignored" as const };
-							const idempotencyKey = deliveryIdOf(current.auth, current.deliveryIdHeader, delivery);
-							if (idempotencyKey && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_CHARACTERS)
-								return yield* new AutomationDeliveryIdTooLong();
-							const run = yield* acceptTrigger({
-								workspaceId: found.workspaceId,
-								projectId: found.projectId,
-								automationId: found.automationId,
-								triggerId,
-								triggerIdentity: idempotencyKey,
-								trigger: {
-									kind: "webhook",
-									idempotencyKey,
-									payload: delivery.payload,
-									receivedAt: now.toISOString(),
-								},
-							});
-							return { kind: "run" as const, run };
-						}),
-					).pipe(Effect.catchTag("AutomationNotFound", () => Effect.undefined));
+					yield* lockTriggers(found.automationId);
+					// The automation may have been paused, or the trigger removed, since it was read.
+					const current = yield* enabledWebhook(triggerId);
+					if (!current) return yield* new WebhookRefused();
+					if (!meetsFilter(current.filter, delivery.payload)) return { kind: "ignored" as const };
+					const idempotencyKey = deliveryIdOf(current.auth, current.deliveryIdHeader, delivery);
+					if (idempotencyKey && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_CHARACTERS)
+						return yield* new AutomationDeliveryIdTooLong();
+					const run = yield* acceptTrigger({
+						workspaceId: current.workspaceId,
+						projectId: current.projectId,
+						automationId: current.automationId,
+						triggerId,
+						triggerIdentity: idempotencyKey,
+						trigger: {
+							kind: "webhook",
+							idempotencyKey,
+							payload: delivery.payload,
+							receivedAt: now.toISOString(),
+						},
+					});
+					return { kind: "run" as const, run };
 				}),
-			),
-	} satisfies Automations.WebhooksInterface;
+			).pipe(Effect.catchTag("AutomationNotFound", () => Effect.fail(new WebhookRefused())));
+		});
 });
 
-/** What a webhook trigger of an enabled automation checks its callers with. */
+/** How a webhook trigger of an enabled automation checks which calls run it. */
 interface EnabledWebhook {
 	workspaceId: string;
 	projectId: string;
@@ -85,33 +95,32 @@ interface EnabledWebhook {
 	/** Where a generic webhook's delivery id is, if anywhere. */
 	deliveryIdHeader: string | null;
 	filter: readonly WebhookFilterTest[] | undefined;
-	/** Encrypted with `Secrets`, for this webhook's use. */
-	secret: string | null;
 }
 
 const enabledWebhook = (triggerId: string) =>
 	Effect.map(
-		query((db) =>
-			db
-				.select({
-					workspaceId: automation.workspaceId,
-					projectId: automation.projectId,
-					automationId: automation.id,
-					settings: automationTrigger.settings,
-					secret: automationTrigger.secretEncrypted,
-				})
-				.from(automationTrigger)
-				.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
-				.where(
-					and(
-						eq(automationTrigger.id, triggerId),
-						eq(automationTrigger.kind, "webhook"),
-						eq(automation.state, "enabled"),
-						isNull(automation.deletedAt),
-					),
+		isUuid(triggerId)
+			? query((db) =>
+					db
+						.select({
+							workspaceId: automation.workspaceId,
+							projectId: automation.projectId,
+							automationId: automation.id,
+							settings: automationTrigger.settings,
+						})
+						.from(automationTrigger)
+						.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
+						.where(
+							and(
+								eq(automationTrigger.id, triggerId),
+								eq(automationTrigger.kind, "webhook"),
+								eq(automation.state, "enabled"),
+								isNull(automation.deletedAt),
+							),
+						)
+						.limit(1),
 				)
-				.limit(1),
-		),
+			: Effect.succeed([]),
 		([row]): EnabledWebhook | undefined => {
 			if (row?.settings.kind !== "webhook") return undefined;
 			const { settings, ...rest } = row;
@@ -123,8 +132,3 @@ const enabledWebhook = (triggerId: string) =>
 			};
 		},
 	);
-
-/** Whether two reads of a trigger check callers the same way, with the same secret. */
-function sameCheck(a: EnabledWebhook, b: EnabledWebhook): boolean {
-	return a.secret === b.secret && JSON.stringify(a.auth) === JSON.stringify(b.auth);
-}

@@ -1,3 +1,10 @@
+export {
+	BotGone,
+	BotHandleReserved,
+	BotNameTaken,
+	SystemBotImmutable,
+	SystemBotMissing,
+} from "@sugabots/contracts/errors/bots";
 export * as BotStore from "./bot-store.ts";
 
 import {
@@ -8,9 +15,15 @@ import {
 	type NewBot,
 	type SystemBotKey,
 } from "@sugabots/contracts";
-import { userText } from "@sugabots/errors";
+import {
+	BotGone,
+	BotHandleReserved,
+	BotNameTaken,
+	SystemBotImmutable,
+	SystemBotMissing,
+} from "@sugabots/contracts/errors/bots";
 import { and, eq, isNotNull, isNull, ne, type SQL, sql } from "drizzle-orm";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import {
 	type QueryFailure,
 	query,
@@ -21,7 +34,6 @@ import {
 } from "../../database/database.ts";
 import { violatedUniqueConstraint } from "../../database/errors.ts";
 import { bot, pinnedBot, projectBot } from "../../database/schema.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { type LeadsProjects, refuseWhileLeading } from "../projects/project-leads.ts";
 import { defaultProjectIdOf, type MemberFacingBotRow, memberFacingBotRow } from "./bot.ts";
 import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
@@ -382,80 +394,6 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
-
-/** Another bot in the workspace already has this name or handle. */
-export class BotNameTaken
-	extends Data.TaggedError("BotNameTaken")<{
-		readonly field: "name" | "handle";
-		readonly value: string;
-	}>
-	implements UserFacing
-{
-	override get message() {
-		return `A bot with the ${this.field} "${this.value}" already exists in this workspace`;
-	}
-	get userMessage() {
-		return this.field === "name"
-			? userText`Another bot in this workspace already has that name`
-			: userText`Another bot in this workspace already has that handle`;
-	}
-}
-
-/** A handle no bot members make may take: see `isReservedHandle`. */
-export class BotHandleReserved
-	extends Data.TaggedError("BotHandleReserved")<{ readonly handle: string }>
-	implements UserFacing
-{
-	override get message() {
-		return `"${this.handle}" is a reserved handle`;
-	}
-	get userMessage() {
-		return isGroupMentionHandle(this.handle)
-			? userText`@${this.handle} mentions everyone, so it can't be a bot's handle`
-			: userText`@personal-assistant is every Personal Assistant's handle, so it can't be another bot's`;
-	}
-}
-
-/** The bot was deleted before the write reached it. */
-export class BotGone
-	extends Data.TaggedError("BotGone")<{ readonly botId: string }>
-	implements UserFacing
-{
-	override get message() {
-		return `No bot with the id "${this.botId}"`;
-	}
-	get userMessage() {
-		return userText`No such bot`;
-	}
-}
-
-/**
- * System bots are shipped by the product and belong to the workspace. The one
- * thing about one that changes, its model, is set through
- * `setSystemBotModel`.
- */
-export class SystemBotImmutable
-	extends Data.TaggedError("SystemBotImmutable")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`A system bot is configured for the workspace`;
-	}
-}
-
-/**
- * The workspace has no row for this system bot. Every workspace is given
- * one when it is created, so this is a fault in the data rather than
- * something a caller can retry.
- */
-export class SystemBotMissing
-	extends Data.TaggedError("SystemBotMissing")<{ readonly key: SystemBotKey }>
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`This workspace has no ${this.key} bot`;
-	}
-}
 
 /**
  * Every Personal Assistant's handle; only its member ever talks to it, so it

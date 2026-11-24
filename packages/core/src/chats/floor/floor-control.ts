@@ -1,13 +1,13 @@
+export { BotHasNoModel } from "@sugabots/contracts/errors/chats";
 export * as FloorControl from "./floor-control.ts";
 
 import { helpersAskedBy, mentionedHandles } from "@sugabots/contracts";
-import { userText } from "@sugabots/errors";
+import { BotHasNoModel } from "@sugabots/contracts/errors/chats";
 import { eq } from "drizzle-orm";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { type Database, query, serviceOperations, transaction } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { message } from "../../database/schema.ts";
-import type { UserFacing } from "../../user-message.ts";
 import type { ChatEvent } from "../events.ts";
 import { ChatStore } from "../store/store.ts";
 import { Turns } from "../turns/turns.ts";
@@ -73,21 +73,28 @@ export const make = Effect.gen(function* () {
 
 	/**
 	 * Asks for the hand-back of the bot that wrote `askingMessageId`, once it
-	 * is owed (see `Turns.handBackOwed`). The asking message is locked first,
-	 * so of two helpers' turns ending at once, the second sees the first's end.
-	 * `endedHelperBotId` is the helper whose turn the caller's transaction ended.
+	 * is owed (see `Turns.handBackOwed`), in the caller's transaction, which
+	 * ended a helper's turn. The asking message is locked first, so of two
+	 * helpers' turns ending at once, the second sees the first's end.
+	 * `endedHelperBotId` is the helper whose turn the caller's transaction
+	 * ended or gave up on. Only a reply a turn wrote asks for help, so a
+	 * message no turn wrote, such as a brief, is owed nothing.
 	 */
 	const handBackIfOwed = (askingMessageId: string, endedHelperBotId?: string) =>
 		Effect.gen(function* () {
 			const [asking] = yield* query((db) =>
 				db
-					.select({ chatId: message.chatId, botId: message.authorBotId })
+					.select({
+						chatId: message.chatId,
+						botId: message.authorBotId,
+						turnId: message.turnId,
+					})
 					.from(message)
 					.where(eq(message.id, askingMessageId))
 					.for("no key update"),
 			);
 			const askingBotId = asking?.botId;
-			if (!askingBotId) return;
+			if (!askingBotId || asking.turnId === null) return;
 			const owed = yield* query((db) =>
 				Turns.handBackOwed(
 					db,
@@ -122,6 +129,7 @@ export const make = Effect.gen(function* () {
 				yield* handBackIfOwed(replied.triggerMessageId, reply.botId);
 			}
 			const mentioned = mentionedHandles(reply.content);
+			// In one order, so two replies asking the same helpers lock their rows and lanes alike.
 			const helpers = helpersAskedBy({
 				chatKind: replied.chatKind,
 				authorBotId: reply.botId,
@@ -130,7 +138,7 @@ export const make = Effect.gen(function* () {
 					mentioned.includes(bot.handle) ? [bot.id] : [],
 				),
 				alreadyAsked: yield* query((db) => Turns.botsAskedBefore(db, reply.messageId)),
-			});
+			}).toSorted();
 			if (helpers.length === 0) return;
 			yield* chats.addBots(reply.chatId, helpers);
 			for (const botId of helpers) {
@@ -167,8 +175,12 @@ export const make = Effect.gen(function* () {
 								return event.willRetry ? Effect.void : afterTurnEnded(event);
 							case "TurnInterrupted":
 								return afterTurnEnded(event);
-							// A helper's turn that never opened ends with its lane, as does
-							// one that ended while another helper's lane was still held.
+							// A helper's turn given up on before it opened, or found ended.
+							case "TurnAbandoned":
+								return event.reason === "collaboration"
+									? handBackIfOwed(event.triggerMessageId, event.botId)
+									: Effect.void;
+							// In case a helper's request left its lane without any turn event.
 							case "LaneReleased":
 								return event.reason === "collaboration"
 									? handBackIfOwed(event.triggerMessageId)
@@ -194,13 +206,3 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(Layer.provide(ChatStore.layer));
-
-/**
- * A bot given the floor has no model, so nothing could answer. The message is
- * not kept, rather than kept with a turn that will never run.
- */
-export class BotHasNoModel extends Data.TaggedError("BotHasNoModel") implements UserFacing {
-	get userMessage() {
-		return userText`This bot has no model chosen, so it can't answer yet`;
-	}
-}

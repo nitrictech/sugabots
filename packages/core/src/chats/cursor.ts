@@ -1,8 +1,9 @@
-import { userText } from "@sugabots/errors";
+export { InvalidCursor } from "@sugabots/contracts/errors/chat-reads";
+
+import { InvalidCursor } from "@sugabots/contracts/errors/chat-reads";
 import { type SQLWrapper, sql } from "drizzle-orm";
-import { Data, Effect } from "effect";
+import { Effect } from "effect";
 import { isUuid } from "../ids/ids.ts";
-import type { UserFacing } from "../user-message.ts";
 
 /**
  * Where a page read newest first ends, as the opaque token a client sends
@@ -31,13 +32,6 @@ export function decodeCursor(cursor: string): CursorPoint | undefined {
 		at.toISOString() === timestamp &&
 		Buffer.from(decoded).toString("base64url") === cursor;
 	return wellFormed ? { at, id } : undefined;
-}
-
-/** A page was asked for after a cursor that no page handed out. */
-export class InvalidCursor extends Data.TaggedError("InvalidCursor") implements UserFacing {
-	get userMessage() {
-		return userText`That page cursor is invalid`;
-	}
 }
 
 /** The point `cursor` names, or `InvalidCursor` when it is not a token `encodeCursor` made. */

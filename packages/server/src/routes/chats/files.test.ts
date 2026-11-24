@@ -1,6 +1,6 @@
 import { MAX_ATTACHMENT_BYTES } from "@sugabots/contracts";
-import { ChatFiles } from "@sugabots/core/chats/chats/chat-files";
-import { ChatFileStore } from "@sugabots/core/files/chat-file-store";
+import { ChatFileNotFound } from "@sugabots/contracts/errors/chat-reads";
+import { Operations } from "@sugabots/core/operations/registry";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
@@ -13,7 +13,7 @@ import {
 
 /**
  * The routes that upload a chat's files and serve them back, over doubles of
- * `ChatFiles`. Who may reach a chat's files is decided in core.
+ * their operations. Who may reach a chat's files is decided in core.
  */
 
 const CHAT = "0199a3a0-0000-7000-8000-000000000401";
@@ -26,15 +26,18 @@ const resolveMember: MemberResolver = async () => ({
 	image: null,
 });
 
-const app = (files: Partial<ChatFiles.Interface>) =>
-	createTestApp(Layer.merge(identifiedBy(resolveMember), unimplemented(ChatFiles.Service, files)));
+/** The app with `operations` as the only operations it has. */
+const app = (operations: Partial<Operations.Interface>) =>
+	createTestApp(
+		Layer.merge(identifiedBy(resolveMember), unimplemented(Operations.Service, operations)),
+	);
 
 const signedIn = signedInWith("sam");
 
-/** A `read` that finds one file, with `bytes` as its content. */
+/** A `chats.file` that finds one file, with `bytes` as its content. */
 const serving = (file: { name: string; contentType: string; bytes: Uint8Array }) =>
 	app({
-		read: ({ fileId }) =>
+		"chats.file": (_principal, { fileId }) =>
 			fileId === FILE
 				? Effect.succeed({
 						id: FILE,
@@ -43,7 +46,7 @@ const serving = (file: { name: string; contentType: string; bytes: Uint8Array })
 						size: file.bytes.byteLength,
 						stream: Stream.succeed(file.bytes),
 					})
-				: Effect.fail(new ChatFileStore.FileNotFound({ fileId })),
+				: Effect.fail(new ChatFileNotFound({ fileId })),
 	});
 
 describe("uploading a chat file", () => {
@@ -52,9 +55,9 @@ describe("uploading a chat file", () => {
 		const name = encodeURIComponent("notes été.txt");
 		const type = encodeURIComponent("text/plain; charset=utf-8");
 		const response = await app({
-			upload: ({ chatId, name, type, stream }) =>
+			"chats.uploadFile": (_principal, { chatId, name, type, content }) =>
 				Effect.gen(function* () {
-					const chunks = yield* Stream.runCollect(stream).pipe(Effect.orDie);
+					const chunks = yield* Stream.runCollect(content).pipe(Effect.orDie);
 					kept = { chatId, name, type, text: Buffer.concat(chunks).toString() };
 					return { id: FILE, name, contentType: type ?? "", size: 5 };
 				}),
@@ -82,7 +85,7 @@ describe("uploading a chat file", () => {
 	it("leaves the type to the name when the uploader names none", async () => {
 		let type: string | undefined = "not called";
 		const response = await app({
-			upload: (input) => {
+			"chats.uploadFile": (_principal, input) => {
 				type = input.type;
 				return Effect.succeed({
 					id: FILE,
@@ -132,7 +135,7 @@ describe("removing an unsent upload", () => {
 	it("removes it for the member asking, answering with no content", async () => {
 		let removed: unknown;
 		const response = await app({
-			removeUnsentAttachment: (input) => {
+			"chats.removeFile": (_principal, input) => {
 				removed = input;
 				return Effect.void;
 			},

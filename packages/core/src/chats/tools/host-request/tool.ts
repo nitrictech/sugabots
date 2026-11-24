@@ -6,8 +6,6 @@ import { type ComputerNetwork, HostBlocked } from "../../../computers/computer-n
 import type { RunEffect } from "../../../database/database.ts";
 import type { Request } from "../computer.ts";
 
-export const HOST_REQUEST_TOOL = "request_host";
-
 /**
  * The `request_host` tool: a bot asking for its computer to
  * reach another host. Every call waits for someone who can see the

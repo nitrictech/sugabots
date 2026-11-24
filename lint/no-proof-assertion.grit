@@ -1,9 +1,9 @@
 language js(typescript)
 
-// Proofs are named for what they show: `MemberOf`, `Reaches…`, `Can…`, `Approved`,
-// `LockedWorkspace`, `VerifiedWebhook` and the `…In` proofs of where something is,
-// such as `MessageIn`. `Named` and `Proof` are the kinds they are built from.
+// Proofs are named for what they show, as `core/src/proofs/` names them: `InWorkspace`,
+// `IsMember`, `ReachSet`, `Reaches…`, `Can…`, `Holds…`, `May…`, `RunsTurn`, `EndsTurn` and
+// `Approved`. `Named` and `Proof` are the kinds they are built from.
 `$_ as $type` as $assertion where {
-	$type <: r"^(?:Named|Proof|MemberOf|Reaches[A-Z]\w*|Can[A-Z]\w*|Approved|LockedWorkspace|VerifiedWebhook|[A-Z]\w*In)(?:<[\s\S]*)?$",
+	$type <: r"^(?:Named|Proof|InWorkspace|IsMember|ReachSet|Reaches[A-Z]\w*|Can[A-Z]\w*|Holds[A-Z]\w*|May[A-Z]\w*|RunsTurn|EndsTurn|Approved)(?:<[\s\S]*)?$",
 	register_diagnostic(span=$assertion, message="A type assertion can make anything look like a proof or a named value. Get one from its prover in `core/src/proofs/`, or from `named`.")
 }

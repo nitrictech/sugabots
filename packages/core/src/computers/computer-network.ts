@@ -1,3 +1,5 @@
+/** The host is blocked for the workspace, so no project may allow it. */
+export { ComputerHostBlocked as HostBlocked } from "@sugabots/contracts/errors/computers";
 export * as ComputerNetwork from "./computer-network.ts";
 
 import {
@@ -5,12 +7,9 @@ import {
 	type ComputerNetworkSettings,
 	type ProjectComputerNetwork,
 } from "@sugabots/contracts";
-import { UserText, userText } from "@sugabots/errors";
+import { ComputerHostBlocked } from "@sugabots/contracts/errors/computers";
 import { and, eq } from "drizzle-orm";
-import { Context, Data, Effect, Layer } from "effect";
-import type { AuthorizationDenied } from "../authorization/access.ts";
-import { Authorization } from "../authorization/authorization.ts";
-import type { CurrentActor } from "../authorization/current-actor.ts";
+import { Context, Effect, Layer } from "effect";
 import { type Database, query, serviceOperations } from "../database/database.ts";
 import {
 	allowedHost,
@@ -20,7 +19,10 @@ import {
 	toolCall,
 	turn,
 } from "../database/schema.ts";
-import type { UserFacing } from "../user-message.ts";
+import type { CanChangeAllowedHosts } from "../proofs/project-permissions.ts";
+import type { ReachesProject } from "../proofs/reaches-project.ts";
+import type { CanManageWorkspace } from "../proofs/workspace-permissions.ts";
+import { processLayer, Tier } from "../tiers.ts";
 import { memberNamesOf } from "../workspaces/membership/member-reads.ts";
 import {
 	addedHostsOf,
@@ -40,53 +42,53 @@ import { ProjectComputers } from "./project-computers.ts";
  * whatever allows them. A change reaches running computers at once, and the
  * others when they are next opened.
  *
- * The workspace's lists take the current actor's `workspace.providers.manage`
- * on the workspace, named by its id or its slug. A project's own list takes
- * `computer.read` in it to see and `computer.manage` to change.
+ * Each method but `grantRequest` is for an operation that has proved what it
+ * needs, and takes the workspace or the project from its proof: the
+ * workspace's lists to those who may manage the workspace, a project's own
+ * list to whoever reaches it to see, and to its managers to change.
  */
 export interface Interface {
-	readonly settings: (
-		workspace: string,
-	) => Effect.Effect<ComputerNetworkSettings, AuthorizationDenied, CurrentActor.Service>;
-	readonly addHost: (input: {
-		workspace: string;
-		host: string;
-	}) => Effect.Effect<ComputerNetworkSettings, AuthorizationDenied, CurrentActor.Service>;
+	readonly settings: <P, W>(
+		canManage: CanManageWorkspace<P, W>,
+	) => Effect.Effect<ComputerNetworkSettings>;
+	readonly addHost: <P, W>(
+		canManage: CanManageWorkspace<P, W>,
+		host: string,
+	) => Effect.Effect<ComputerNetworkSettings>;
 	/** Removing a host the workspace never added changes nothing. */
-	readonly removeHost: (input: {
-		workspace: string;
-		host: string;
-	}) => Effect.Effect<ComputerNetworkSettings, AuthorizationDenied, CurrentActor.Service>;
-	readonly blockHost: (input: {
-		workspace: string;
-		host: string;
-	}) => Effect.Effect<ComputerNetworkSettings, AuthorizationDenied, CurrentActor.Service>;
+	readonly removeHost: <P, W>(
+		canManage: CanManageWorkspace<P, W>,
+		host: string,
+	) => Effect.Effect<ComputerNetworkSettings>;
+	readonly blockHost: <P, W>(
+		canManage: CanManageWorkspace<P, W>,
+		host: string,
+	) => Effect.Effect<ComputerNetworkSettings>;
 	/** Unblocking a host the workspace never blocked changes nothing. */
-	readonly unblockHost: (input: {
-		workspace: string;
-		host: string;
-	}) => Effect.Effect<ComputerNetworkSettings, AuthorizationDenied, CurrentActor.Service>;
-	readonly projectSettings: (
-		projectId: string,
-	) => Effect.Effect<ProjectComputerNetwork, AuthorizationDenied, CurrentActor.Service>;
-	/** Adding a host the workspace blocked fails with {@link HostBlocked}. */
-	readonly addProjectHost: (input: {
-		projectId: string;
-		host: string;
-	}) => Effect.Effect<
-		ProjectComputerNetwork,
-		AuthorizationDenied | HostBlocked,
-		CurrentActor.Service
-	>;
+	readonly unblockHost: <P, W>(
+		canManage: CanManageWorkspace<P, W>,
+		host: string,
+	) => Effect.Effect<ComputerNetworkSettings>;
+	readonly projectSettings: <P, J>(
+		reach: ReachesProject<P, J>,
+	) => Effect.Effect<ProjectComputerNetwork>;
+	/** Adding a host the workspace blocked fails with {@link ComputerHostBlocked}. */
+	readonly addProjectHost: <P, J>(
+		canChange: CanChangeAllowedHosts<P, J>,
+		host: string,
+	) => Effect.Effect<ProjectComputerNetwork, ComputerHostBlocked>;
 	/** Removing a host the project never added changes nothing. */
-	readonly removeProjectHost: (input: {
-		projectId: string;
-		host: string;
-	}) => Effect.Effect<ProjectComputerNetwork, AuthorizationDenied, CurrentActor.Service>;
+	readonly removeProjectHost: <P, J>(
+		canChange: CanChangeAllowedHosts<P, J>,
+		host: string,
+	) => Effect.Effect<ProjectComputerNetwork>;
 	/**
 	 * Adds `host` to the project whose computer the turn worked on whose call
 	 * `sdkToolCallId` asked for it, if a member allowed that call and the
 	 * workspace hasn't blocked the host since.
+	 *
+	 * Takes no proof: it exists only because the `request_host` tool still
+	 * calls this service directly, and goes when tools become operations.
 	 */
 	readonly grantRequest: (input: {
 		turnId: string;
@@ -100,17 +102,15 @@ type Grant = { kind: "added" } | { kind: "blocked"; by: string } | { kind: "not-
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ComputerNetwork",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ComputerNetwork");
-	const authorization = yield* Authorization.Service;
 	const projectComputers = yield* ProjectComputers.Service;
 	const providers = yield* ComputerProviderStore.Service;
 	const computers = yield* Computers.Service;
-
-	const manage = (workspace: string) =>
-		authorization.workspace(workspace, "workspace.providers.manage");
 
 	/**
 	 * How the workspace's computers reach the internet, by its enabled
@@ -189,28 +189,26 @@ export const make = Effect.gen(function* () {
 			),
 		);
 
-	const projectOf = (standing: { project: { id: string; workspaceId: string } }): Project => ({
-		workspaceId: standing.project.workspaceId,
-		projectId: standing.project.id,
+	/** The project a proof that reaches it names. */
+	const projectOf = <P, J>(reach: ReachesProject<P, J>): Project => ({
+		workspaceId: reach.workspace,
+		projectId: reach.project.value,
 	});
 
 	return Service.of({
-		settings: (workspace) =>
-			operation(
-				"settings",
-				Effect.flatMap(manage(workspace), ({ workspaceId }) => settingsOf(workspaceId)),
-			),
+		settings: (canManage) =>
+			operation("settings", settingsOf(canManage.inWorkspace.workspace.value)),
 
-		addHost: ({ workspace, host }) =>
+		addHost: (canManage, host) =>
 			operation(
 				"addHost",
 				Effect.gen(function* () {
-					const { workspaceId, actor } = yield* manage(workspace);
+					const workspaceId = canManage.inWorkspace.workspace.value;
 					if (!TRUSTED_HOSTS.includes(host)) {
 						yield* query((db) =>
 							db
 								.insert(allowedHost)
-								.values({ workspaceId, host, addedById: actor.memberId })
+								.values({ workspaceId, host, addedById: canManage.actor.memberId })
 								.onConflictDoNothing(),
 						);
 						yield* projectComputers.applyNetwork({ workspaceId });
@@ -219,11 +217,11 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		removeHost: ({ workspace, host }) =>
+		removeHost: (canManage, host) =>
 			operation(
 				"removeHost",
 				Effect.gen(function* () {
-					const { workspaceId } = yield* manage(workspace);
+					const workspaceId = canManage.inWorkspace.workspace.value;
 					const removed = yield* query((db) =>
 						db
 							.delete(allowedHost)
@@ -235,15 +233,15 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		blockHost: ({ workspace, host }) =>
+		blockHost: (canManage, host) =>
 			operation(
 				"blockHost",
 				Effect.gen(function* () {
-					const { workspaceId, actor } = yield* manage(workspace);
+					const workspaceId = canManage.inWorkspace.workspace.value;
 					const blocked = yield* query((db) =>
 						db
 							.insert(blockedHost)
-							.values({ workspaceId, host, blockedById: actor.memberId })
+							.values({ workspaceId, host, blockedById: canManage.actor.memberId })
 							.onConflictDoNothing()
 							.returning({ host: blockedHost.host }),
 					);
@@ -252,11 +250,11 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		unblockHost: ({ workspace, host }) =>
+		unblockHost: (canManage, host) =>
 			operation(
 				"unblockHost",
 				Effect.gen(function* () {
-					const { workspaceId } = yield* manage(workspace);
+					const workspaceId = canManage.inWorkspace.workspace.value;
 					const unblocked = yield* query((db) =>
 						db
 							.delete(blockedHost)
@@ -268,34 +266,27 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		projectSettings: (projectId) =>
-			operation(
-				"projectSettings",
-				Effect.flatMap(authorization.project(projectId, "computer.read"), (standing) =>
-					projectSettingsOf(projectOf(standing)),
-				),
-			),
+		projectSettings: (reach) => operation("projectSettings", projectSettingsOf(projectOf(reach))),
 
-		addProjectHost: ({ projectId, host }) =>
+		addProjectHost: (canChange, host) =>
 			operation(
 				"addProjectHost",
 				Effect.gen(function* () {
-					const standing = yield* authorization.project(projectId, "computer.manage");
-					const project = projectOf(standing);
+					const project = projectOf(canChange.reach);
 					const by = yield* blockFor(project.workspaceId, host);
-					if (by !== undefined) return yield* new HostBlocked({ host, by });
+					if (by !== undefined) return yield* new ComputerHostBlocked({ host, by });
 					if (!TRUSTED_HOSTS.includes(host)) {
-						yield* addToProject({ ...project, host, addedById: standing.actor.memberId });
+						yield* addToProject({ ...project, host, addedById: canChange.member.actor.memberId });
 					}
 					return yield* projectSettingsOf(project);
 				}),
 			),
 
-		removeProjectHost: ({ projectId, host }) =>
+		removeProjectHost: (canChange, host) =>
 			operation(
 				"removeProjectHost",
 				Effect.gen(function* () {
-					const project = projectOf(yield* authorization.project(projectId, "computer.manage"));
+					const project = projectOf(canChange.reach);
 					const removed = yield* query((db) =>
 						db
 							.delete(projectAllowedHost)
@@ -350,42 +341,15 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-// Suspended: the authorization and computers modules import this one, so their
-// layers aren't defined yet while it loads.
-export const layer = Layer.suspend(() =>
-	layerNoDeps.pipe(
-		Layer.provide([
-			Authorization.layer,
-			ProjectComputers.layer,
-			ComputerProviderStore.layer,
-			Computers.layer,
-		]),
-	),
+export const layer = layerNoDeps.pipe(
+	Layer.provide([ProjectComputers.layer, ComputerProviderStore.layer, Computers.layer]),
 );
 
 interface Project {
 	readonly workspaceId: string;
 	readonly projectId: string;
-}
-
-/** The host is blocked for the workspace, so no project may allow it. */
-export class HostBlocked
-	extends Data.TaggedError("ComputerHostBlocked")<{ host: string; by: string }>
-	implements UserFacing
-{
-	get userMessage() {
-		const host = hostName(this.host);
-		return this.by === this.host
-			? userText`${host} is blocked for this workspace's computers.`
-			: userText`${host} would reach ${hostName(this.by)}, which is blocked for this workspace's computers.`;
-	}
-}
-
-/** A host as members read it. Hosts are domain names, checked by `computerHostSchema` on the way in. */
-function hostName(host: string) {
-	return UserText.unchecked(host);
 }
 
 function nameOf(names: ReadonlyMap<string, string>, memberId: string | null) {

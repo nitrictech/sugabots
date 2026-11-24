@@ -30,10 +30,12 @@ import { Files } from "@sugabots/core/files/files";
 import { Ids } from "@sugabots/core/ids/ids";
 import { ModelProviderStore } from "@sugabots/core/providers/model-providers/model-provider-store";
 import { Egress } from "@sugabots/core/providers/network/egress";
+import { SearchProviderStore } from "@sugabots/core/providers/search-providers/search-provider-store";
 import { Secrets } from "@sugabots/core/secrets/secrets";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
 import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
+import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
 import { ProjectStore } from "@sugabots/core/workspaces/projects/project-store";
@@ -1197,13 +1199,7 @@ const seed = Effect.gen(function* () {
 	yield* WorkspaceSetup.recordSetUp(workspaceId);
 	yield* Effect.forEach(
 		(Object.keys(MEMBERS) as MemberKey[]).filter((key) => key !== OWNER),
-		(key) =>
-			joinWorkspace({
-				workspaceId,
-				ownerId: members[OWNER],
-				email: MEMBERS[key].email,
-				memberId: members[key],
-			}),
+		(key) => joinWorkspace({ workspaceId, memberId: members[key] }),
 		{ discard: true },
 	);
 
@@ -1279,62 +1275,25 @@ const seed = Effect.gen(function* () {
 
 /** Made the way the app makes one, so it has its system bots, built-in providers and the owner's Personal Assistant. */
 const ensureWorkspace = (ownerId: string) =>
-	Effect.gen(function* () {
-		const membership = yield* Membership.Service;
-		return yield* membership
-			.create({
-				details: {
-					...WORKSPACE,
-					timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-				},
-			})
-			.pipe(
-				CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(ownerId)),
-				Effect.map((created) => created.id),
-				Effect.catchTag("SlugTaken", () =>
-					Effect.flatMap(
-						query((db) =>
-							db
-								.select({ id: workspace.id })
-								.from(workspace)
-								.where(eq(workspace.slug, WORKSPACE.slug)),
-						),
-						([row]) =>
-							row ? Effect.succeed(row.id) : Effect.die(new Error("The workspace is missing")),
-					),
+	Membership.createWorkspace(ownerId, {
+		...WORKSPACE,
+		timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+	}).pipe(
+		Effect.map((created) => created.id),
+		Effect.catchTag("SlugTaken", () =>
+			Effect.flatMap(
+				query((db) =>
+					db.select({ id: workspace.id }).from(workspace).where(eq(workspace.slug, WORKSPACE.slug)),
 				),
-			);
-	});
+				([row]) =>
+					row ? Effect.succeed(row.id) : Effect.die(new Error("The workspace is missing")),
+			),
+		),
+	);
 
-/** By invitation, the way a teammate joins, which also gives them their Personal Assistant. */
-const joinWorkspace = (input: {
-	workspaceId: string;
-	ownerId: string;
-	email: string;
-	memberId: string;
-}) =>
-	Effect.gen(function* () {
-		const membership = yield* Membership.Service;
-		const invite = (resend: boolean) =>
-			membership
-				.invite({
-					workspace: input.workspaceId,
-					invitation: { email: input.email, role: "editor", resend },
-				})
-				.pipe(CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(input.ownerId)));
-		const invitation = yield* invite(false).pipe(
-			Effect.catchTag("AlreadyInvited", () => invite(true)),
-			Effect.catchTag("AlreadyInWorkspace", () => Effect.succeed(undefined)),
-			Effect.orDie,
-		);
-		if (!invitation) return;
-		yield* membership
-			.accept({ invitationId: invitation.id })
-			.pipe(
-				CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(input.memberId)),
-				Effect.orDie,
-			);
-	});
+/** As an accepted invitation lets a teammate in, with their Personal Assistant. */
+const joinWorkspace = (input: { workspaceId: string; memberId: string }) =>
+	Membership.join(input.workspaceId, input.memberId, "editor");
 
 /** The projects with their members, by key, each led by the first of its bots. */
 const ensureProjects = (
@@ -1701,10 +1660,12 @@ seed.pipe(
 	Effect.provide(
 		Layer.mergeAll(
 			Authentication.layer,
-			Membership.layer,
 			ProjectStore.layer,
 			BotStore.layer,
 			ModelProviderStore.layer,
+			// What a workspace is made with, and a member let in with: providers and Personal Assistants.
+			PersonalAssistants.layer,
+			SearchProviderStore.layer,
 			Files.authoringLayer,
 			// The seed defines automations and never runs one, which is all these are for.
 			Automations.layer.pipe(

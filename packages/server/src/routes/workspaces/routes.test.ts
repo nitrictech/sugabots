@@ -1,19 +1,33 @@
 import type { Workspace } from "@sugabots/contracts";
+import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import {
+	EmailUnverified,
+	OwnerStays,
+	SubscriptionInUse,
+	TimeZoneUnknown,
+} from "@sugabots/contracts/errors/workspace";
+import { Operations } from "@sugabots/core/operations/registry";
+import type { Principal } from "@sugabots/core/principal";
 import { unimplemented } from "@sugabots/core/testing";
-import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
+import { DisplayName } from "@sugabots/errors";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { MemberResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy, signedInWith } from "../../http/app.test-support.ts";
 
 /**
- * Creating a workspace and moving it to another time zone, over doubles of
- * `Membership` and `WorkspaceTimeZone`. What they store is their own tests'.
+ * The workspace routes, over doubles of the workspace operations, so what is
+ * under test is the routing, which principal each operation is called for,
+ * and what each refusal means over HTTP. Who may do what is decided, and
+ * tested, in core.
  */
 
+const ADA = "0199a3a0-0000-7000-8000-000000000002";
+const MEMBERSHIP = "0199a3a0-0000-7000-8000-000000000003";
+const INVITATION = "0199a3a0-0000-7000-8000-000000000004";
+
 const resolveMember: MemberResolver = async () => ({
-	id: "0199a3a0-0000-7000-8000-000000000002",
+	id: ADA,
 	name: "Ada",
 	email: "ada@example.com",
 	image: null,
@@ -27,18 +41,34 @@ const created: Workspace = {
 	setUpAt: null,
 };
 
-const createWith = (create: Membership.Interface["create"], payload: unknown) =>
+/** The app with `operations` as the only operations it has. */
+const app = (operations: Partial<Operations.Interface>) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolveMember), unimplemented(Membership.Service, { create })),
-	).request("/workspaces", {
-		method: "POST",
-		headers: { ...signedInWith("token"), "content-type": "application/json" },
-		body: JSON.stringify(payload),
-	});
+		Layer.merge(identifiedBy(resolveMember), unimplemented(Operations.Service, operations)),
+	);
+
+/** The member a principal is signed in as, as the session authenticator built it. */
+const memberOf = (principal: Principal) =>
+	principal._tag === "MemberSession" ? principal.member : undefined;
+
+const sending = (method: string, payload?: unknown): RequestInit => ({
+	method,
+	headers: { ...signedInWith("token"), "content-type": "application/json" },
+	...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+});
 
 describe("creating a workspace", () => {
-	it("creates it in the time zone it is given", async () => {
-		const create = vi.fn<Membership.Interface["create"]>(() => Effect.succeed(created));
+	const createWith = (create: Operations.Interface["workspaces.create"], payload: unknown) =>
+		app({ "workspaces.create": create }).request("/workspaces", sending("POST", payload));
+
+	it("creates it in the time zone it is given, for the member the session belongs to", async () => {
+		let asked: unknown;
+		const create = vi.fn<Operations.Interface["workspaces.create"]>((principal, input) =>
+			Effect.sync(() => {
+				asked = { ...input, memberId: memberOf(principal) };
+				return created;
+			}),
+		);
 
 		const response = await createWith(create, {
 			name: "Nitric",
@@ -48,8 +78,11 @@ describe("creating a workspace", () => {
 
 		expect(response.status).toBe(201);
 		expect(await response.json()).toEqual(created);
-		expect(create).toHaveBeenCalledWith({
-			details: { name: "Nitric", slug: "nitric", timeZone: "Australia/Sydney" },
+		expect(asked).toEqual({
+			name: "Nitric",
+			slug: "nitric",
+			timeZone: "Australia/Sydney",
+			memberId: ADA,
 		});
 	});
 
@@ -57,7 +90,7 @@ describe("creating a workspace", () => {
 		["a zone nobody has", "Mars/Olympus"],
 		["an offset, which Postgres reads backwards", "+05:00"],
 	])("refuses %s", async (_, timeZone) => {
-		const create = vi.fn<Membership.Interface["create"]>(() => Effect.succeed(created));
+		const create = vi.fn<Operations.Interface["workspaces.create"]>(() => Effect.succeed(created));
 
 		const response = await createWith(create, { name: "Nitric", slug: "nitric", timeZone });
 
@@ -66,7 +99,7 @@ describe("creating a workspace", () => {
 	});
 
 	it("refuses a time zone the database does not have", async () => {
-		const response = await createWith(() => Effect.fail(new Membership.TimeZoneUnknown()), {
+		const response = await createWith(() => Effect.fail(new TimeZoneUnknown()), {
 			name: "Nitric",
 			slug: "nitric",
 			timeZone: "Australia/Sydney",
@@ -76,27 +109,31 @@ describe("creating a workspace", () => {
 	});
 });
 
-const changeWith = (change: WorkspaceTimeZone.Interface["change"], payload: unknown) =>
-	createTestApp(
-		Layer.merge(identifiedBy(resolveMember), unimplemented(WorkspaceTimeZone.Service, { change })),
-	).request("/workspaces/nitric/time-zone", {
-		method: "PUT",
-		headers: { ...signedInWith("token"), "content-type": "application/json" },
-		body: JSON.stringify(payload),
-	});
-
 describe("moving a workspace to another time zone", () => {
+	const changeWith = (
+		change: Operations.Interface["workspaces.changeTimeZone"],
+		payload: unknown,
+	) =>
+		app({ "workspaces.changeTimeZone": change }).request(
+			"/workspaces/nitric/time-zone",
+			sending("PUT", payload),
+		);
+
 	it("moves it to the zone it is given", async () => {
-		const change = vi.fn<WorkspaceTimeZone.Interface["change"]>(() => Effect.void);
+		const change = vi.fn<Operations.Interface["workspaces.changeTimeZone"]>(() => Effect.void);
 
 		const response = await changeWith(change, { timeZone: "Asia/Tokyo" });
 
 		expect(response.status).toBe(204);
-		expect(change).toHaveBeenCalledWith({ workspace: "nitric", timeZone: "Asia/Tokyo" });
+		expect(change).toHaveBeenCalledWith(
+			expect.anything(),
+			{ workspace: "nitric", timeZone: "Asia/Tokyo" },
+			expect.anything(),
+		);
 	});
 
 	it("refuses a zone nobody has", async () => {
-		const change = vi.fn<WorkspaceTimeZone.Interface["change"]>(() => Effect.void);
+		const change = vi.fn<Operations.Interface["workspaces.changeTimeZone"]>(() => Effect.void);
 
 		const response = await changeWith(change, { timeZone: "Mars/Olympus" });
 
@@ -105,10 +142,84 @@ describe("moving a workspace to another time zone", () => {
 	});
 
 	it("refuses a time zone the database does not have", async () => {
-		const response = await changeWith(() => Effect.fail(new Membership.TimeZoneUnknown()), {
+		const response = await changeWith(() => Effect.fail(new TimeZoneUnknown()), {
 			timeZone: "Asia/Tokyo",
 		});
 
 		expect(response.status).toBe(400);
+	});
+});
+
+describe("who is in a workspace", () => {
+	it("answers a workspace hidden from the caller as not found, and one they may not change as forbidden", async () => {
+		const routes = app({
+			"workspaces.memberships": () => Effect.fail(new ResourceHidden({ resource: "workspace" })),
+			"workspaces.changeRole": () =>
+				Effect.fail(new ActionForbidden({ proof: "CanChangeMembership" })),
+		});
+
+		const listed = await routes.request("/workspaces/nitric/memberships", sending("GET"));
+		const changed = await routes.request(
+			`/workspaces/nitric/memberships/${MEMBERSHIP}`,
+			sending("PATCH", { role: "admin" }),
+		);
+
+		expect(listed.status).toBe(404);
+		expect(changed.status).toBe(403);
+	});
+
+	it("keeps a member a model provider signs in as, and the owner, who stays until they hand it over", async () => {
+		const inUse = new SubscriptionInUse({
+			member: DisplayName.fromRecord("Bob"),
+			providers: [DisplayName.fromRecord("ChatGPT")],
+		});
+		const routes = app({
+			"workspaces.removeMembership": () => Effect.fail(inUse),
+			"workspaces.leave": () => Effect.fail(new OwnerStays()),
+		});
+
+		const removed = await routes.request(
+			`/workspaces/nitric/memberships/${MEMBERSHIP}`,
+			sending("DELETE"),
+		);
+		const left = await routes.request("/workspaces/nitric/leave", sending("POST"));
+
+		expect(removed.status).toBe(409);
+		expect(await removed.json()).toMatchObject({
+			_tag: "Conflict",
+			message: inUse.userMessage,
+			error: { _tag: "SubscriptionInUse" },
+		});
+		expect(left.status).toBe(400);
+	});
+});
+
+describe("an invitation", () => {
+	it("tells the member it was sent to to verify their address first, with the code the SDK knows", async () => {
+		const response = await app({
+			"workspaces.acceptInvitation": () => Effect.fail(new EmailUnverified()),
+		}).request(`/invitations/${INVITATION}/accept`, sending("POST"));
+
+		expect(response.status).toBe(403);
+		expect(await response.json()).toEqual({
+			_tag: "Forbidden",
+			message: "Verify your email address before accepting this invitation",
+			details: "EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION",
+		});
+	});
+
+	it("is accepted for the member the session belongs to", async () => {
+		let asked: unknown;
+		const response = await app({
+			"workspaces.acceptInvitation": (principal, input) =>
+				Effect.sync(() => {
+					asked = { ...input, memberId: memberOf(principal) };
+					return { workspaceId: created.id };
+				}),
+		}).request(`/invitations/${INVITATION}/accept`, sending("POST"));
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ workspaceId: created.id });
+		expect(asked).toEqual({ invitationId: INVITATION, memberId: ADA });
 	});
 });

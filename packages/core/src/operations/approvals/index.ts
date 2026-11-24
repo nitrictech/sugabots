@@ -4,8 +4,12 @@
  * adding an operation here touches no other file.
  */
 
-import { Layer } from "effect";
+import { Turns } from "../../chats/turns/turns.ts";
+import { decide } from "./decide.ts";
 
-export const approvalsOperations = {};
+export const approvalsOperations = {
+	"approvals.decide": decide,
+};
 
-export const approvalsLayer = Layer.empty;
+/** Over the chat services, whose turns' calls it decides (see `ChatServices.layer`). */
+export const approvalsLayer = Turns.controlsLayer;

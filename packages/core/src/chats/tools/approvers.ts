@@ -1,5 +1,5 @@
 import type { ToolApprovers } from "@sugabots/contracts";
-import { HOST_REQUEST_TOOL } from "./host-request/tool.ts";
+import { HOST_REQUEST_TOOL } from "./host-request/name.ts";
 
 /**
  * The tools whose calls ask to change the computer the turn works on, such as

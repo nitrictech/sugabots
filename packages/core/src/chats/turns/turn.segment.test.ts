@@ -16,11 +16,11 @@ import {
 	workspace,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { asMember } from "../../operations/chats/testing.ts";
+import { servedOperations } from "../../operations/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed } from "../../providers/models/testing.ts";
 import { INTERVIEW_PROMPT } from "../../workspaces/bots/interview-prompt.ts";
-import { onPostgresAs } from "../../workspaces/testing.ts";
-import { Chats } from "../chats/chats.ts";
 import { startBotChat } from "../chats/testing.ts";
 import { chatServicesForTests } from "../testing.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
@@ -46,8 +46,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			delivered.push(...events);
 		},
 	});
-	const chatsAs = (memberId: string) =>
-		onPostgresAs(memberId)(Context.get(services, Chats.Service));
+	const call = await servedOperations({ chats: services });
+	const chatsAs = (memberId: string) => asMember(call, memberId);
 	const execution = onPostgres({
 		prepare: Context.get(services, TurnExecution.Service).prepare,
 	});

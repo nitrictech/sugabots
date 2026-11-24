@@ -1,7 +1,5 @@
 import { eq } from "drizzle-orm";
-import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { noComputers } from "../../computers/testing.ts";
 import { bot, member, membership, workspace } from "../../database/schema.ts";
 import {
 	closeDatabase,
@@ -9,25 +7,22 @@ import {
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { servedOnPostgresAs } from "../testing.ts";
-import { BotAdministration } from "./bot-administration.ts";
+import { type CallOperation, servedOperations } from "../../operations/testing.ts";
+import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { BotStore } from "./bot-store.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => {
 	let bots: Promised<BotStore.Interface>;
-	let administrationAs: (memberId: string) => Promised<BotAdministration.Interface>;
-	/** The administration as the administrator of both workspaces. */
-	let administration: Promised<BotAdministration.Interface>;
+	let callOperation: CallOperation;
+	let signedIn: ReturnType<typeof principals>;
 	let workspaceId: string;
 	let otherWorkspaceId: string;
 	let creatorId: string;
 
 	beforeAll(async () => {
 		bots = await servedOnPostgres(BotStore.Service, BotStore.layer);
-		administrationAs = await servedOnPostgresAs(
-			BotAdministration.Service,
-			BotAdministration.layer.pipe(Layer.provide(noComputers)),
-		);
+		callOperation = await servedOperations();
+		signedIn = principals(await authenticators());
 	});
 
 	afterAll(async () => {
@@ -56,7 +51,6 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 		workspaceId = space.id;
 		otherWorkspaceId = other.id;
 		creatorId = somebody.id;
-		administration = administrationAs(creatorId);
 		await onDatabase((db) =>
 			db.insert(membership).values([
 				{ workspaceId, memberId: creatorId, role: "admin" },
@@ -85,7 +79,9 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 		await bots.createSystemBots({ workspaceId: otherWorkspaceId, createdById: creatorId });
 		await bots.setSystemBotModel(workspaceId, "compact", "one-workspace-only");
 
-		const listed = await administration.systemBots({ workspace: otherWorkspaceId });
+		const listed = await callOperation(await signedIn.member(creatorId), "systemBots.list", {
+			workspace: otherWorkspaceId,
+		});
 		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
 			{ key: "compact", model: null },
 		]);

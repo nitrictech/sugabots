@@ -1,35 +1,10 @@
+export { InvalidRoutineSchedule } from "@sugabots/contracts/errors/automations";
+
 import type { RoutineSchedule } from "@sugabots/contracts";
-import { type UserText, userText } from "@sugabots/errors";
+import { InvalidRoutineSchedule } from "@sugabots/contracts/errors/automations";
 import { CronExpressionParser } from "cron-parser";
-import { Data, Effect } from "effect";
-import type { UserFacing } from "../../user-message.ts";
+import { Effect } from "effect";
 import { calendarLatestAtOrBefore, calendarOccurrencesAfter } from "./calendar.ts";
-
-/** A routine's timetable that cannot run. Members are told what to fix in our words, not the cron parser's. */
-export class InvalidRoutineSchedule
-	extends Data.TaggedError("InvalidRoutineSchedule")<{
-		readonly reason: ScheduleProblem;
-		/** What the cron parser threw, when it refused the expression. */
-		readonly cause?: unknown;
-	}>
-	implements UserFacing
-{
-	override get message() {
-		return `Invalid routine timetable: ${this.reason}`;
-	}
-	get userMessage() {
-		return SCHEDULE_PROBLEM_USER_MESSAGES[this.reason];
-	}
-}
-
-type ScheduleProblem = "notFiveFields" | "unknownTimeZone" | "unparseable" | "neverRuns";
-
-const SCHEDULE_PROBLEM_USER_MESSAGES: Record<ScheduleProblem, UserText> = {
-	notFiveFields: userText`Use a five-field cron expression`,
-	unknownTimeZone: userText`That time zone is not recognised`,
-	unparseable: userText`That cron expression is invalid`,
-	neverRuns: userText`That timetable never runs`,
-};
 
 function requireTimeZone(timezone: string) {
 	if (!Intl.supportedValuesOf("timeZone").includes(timezone) && timezone !== "UTC") {

@@ -8,6 +8,43 @@
   ],
   "footprints": [
     {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "blob_folder_move"
+      ],
+      "writes": [
+        "s|tbl|public.blob_folder_move",
+        "n|tbl|public.blob_folder_move",
+        "e|tbl|public.blob_folder_move",
+        "n|rel|public.blob_folder_move",
+        "n|type|public.blob_folder_move",
+        "n|rel|public.blob_folder_move_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "turn",
+        "retrying"
+      ],
+      "writes": [
+        "s|col|public.turn.retrying",
+        "n|col|public.turn.retrying",
+        "e|col|public.turn.retrying"
+      ],
+      "reads": [
+        "n|tbl|public.turn",
+        "n|sch|public"
+      ]
+    },
+    {
       "statementType": "drop_view",
       "statementTarget": [
         "view",
@@ -81,6 +118,108 @@
     }
   ],
   "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "blob_folder_move",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "blob_folder_move",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "blob_folder_move",
+        "name": "from_prefix",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "blob_folder_move",
+        "name": "to_prefix",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "blob_folder_move",
+        "name": "queued_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "turn",
+        "name": "retrying",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "blob_folder_move",
+        "name": "blob_folder_move_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
     {
       "op": "drop",
       "key": "tables\u0000[\"public\",\"collaboration\"]"

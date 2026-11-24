@@ -1,6 +1,7 @@
 import { NodeRuntime } from "@effect/platform-node";
-import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { SessionAuthentication } from "@sugabots/core/authentication/session";
+import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
 import { BlobDeletions } from "@sugabots/core/blob-store/deletions";
 import { Automations } from "@sugabots/core/chats/automations/automations";
@@ -12,9 +13,6 @@ import { ComputerTools } from "@sugabots/core/chats/tools/computer";
 import { ConnectorTools } from "@sugabots/core/chats/tools/connectors";
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import { ChatWorkflows } from "@sugabots/core/chats/workflows";
-import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
-import { ComputerProviderSetup } from "@sugabots/core/computers/computer-provider-setup";
-import { ProjectComputerSetup } from "@sugabots/core/computers/project-computer-setup";
 import { ProjectComputers } from "@sugabots/core/computers/project-computers";
 import { layer as databaseLayer, directClientLayer } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
@@ -22,25 +20,16 @@ import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventPruning } from "@sugabots/core/database/events/prune";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { Email } from "@sugabots/core/email/email";
-import { Files } from "@sugabots/core/files/files";
 import { FilePages } from "@sugabots/core/files/pages";
 import { UnsentAttachments } from "@sugabots/core/files/unsent-attachments";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Notifications } from "@sugabots/core/notifications/notifications";
-import { ConnectorSetup } from "@sugabots/core/providers/connectors/connector-setup";
-import { GitHubApps } from "@sugabots/core/providers/connectors/github/github-app";
-import { GitHubConnectors } from "@sugabots/core/providers/connectors/github/github-connectors";
+import { layer as operationsLayer } from "@sugabots/core/operations/layer";
 import { GitHubSignIn } from "@sugabots/core/providers/connectors/github/github-sign-in";
-import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { Models } from "@sugabots/core/providers/models/models";
 import { Egress } from "@sugabots/core/providers/network/egress";
-import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { Secrets } from "@sugabots/core/secrets/secrets";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
-import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
-import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { ProjectAdministration } from "@sugabots/core/workspaces/projects/project-administration";
-import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/workspace-setup";
 import { WorkflowEngines } from "@sugabots/workflow/engine";
 import { Duration, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
@@ -98,27 +87,11 @@ const OutsideSystems = Layer.mergeAll(
 );
 
 /**
- * Accounts, memberships, projects, bots, their files and the providers they
- * use, trying a model, and notifying members.
+ * Accounts, the pages of the files bots make, and notifying members.
  */
-const WorkspacesAndProviders = Layer.mergeAll(
-	Membership.layer,
-	Notifications.layer,
-	WorkspaceSetup.layer,
-	ProjectAdministration.layer,
-	BotAdministration.layer,
-	ModelProviderSetup.layer,
-	SearchProviderSetup.layer,
-	ComputerProviderSetup.layer,
-	ComputerNetwork.layer,
-	ProjectComputerSetup.layer,
-	GitHubApps.layer,
-	GitHubConnectors.layer,
-	ConnectorSetup.layer,
-	Files.layer,
-	FilePages.layer,
-	Usage.layer,
-).pipe(Layer.provideMerge(Accounts.layer));
+const WorkspacesAndProviders = Layer.mergeAll(Notifications.layer, FilePages.layer).pipe(
+	Layer.provideMerge(Accounts.layer),
+);
 
 /**
  * The chats, over how they start and signal their workflows. Their
@@ -147,16 +120,26 @@ const Http = listeningLayer.pipe(
 	Layer.provideMerge(
 		HttpRouter.serve(Layer.merge(apiLayer, webAppLayer), { disableListenLog: true }),
 	),
-	Layer.provide([Authentication.layer, StreamAccess.layer, requestSpanNames]),
+	Layer.provide([
+		Authentication.layer,
+		SessionAuthentication.layer,
+		WebhookAuthentication.layer,
+		StreamAccess.layer,
+		requestSpanNames,
+	]),
 	Layer.provide(nodeServerLayer),
 );
 
 /**
  * The process, tier by tier. The tracer goes in at the bottom so that
  * everything is traced: routes, better-auth's hooks, the background work, and
- * the statements they all send.
+ * the statements they all send. The operation registry, with the services of
+ * the domains moved onto operations, sits over the chat services, which some
+ * of those are built from: moving a workspace's time zone moves its routines
+ * through the store that emits.
  */
 export const Main = Layer.mergeAll(Http, Background).pipe(
+	Layer.provide(operationsLayer),
 	Layer.provide(ChatServiceLayers),
 	Layer.provide(WorkspacesAndProviders),
 	Layer.provide(OutsideSystems),

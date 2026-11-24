@@ -6,6 +6,21 @@
 -- with them. The work still going on in those chats ends first, and the
 -- collaboration cards in the asking replies go, as the messages they stood
 -- for are in the chat now.
+CREATE TABLE "blob_folder_move" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"from_prefix" text NOT NULL,
+	"to_prefix" text NOT NULL,
+	"queued_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+-- `20261123015335_people_avatars_and_computers_by_their_glossary_names`
+-- renamed the `artifacts/` keys to `files/` in the database only, so a
+-- filesystem store still keeps their bytes under `artifacts/`. Moving a folder
+-- that isn't there does nothing, so this is safe on every store.
+INSERT INTO "blob_folder_move" ("from_prefix", "to_prefix") VALUES ('artifacts', 'files');--> statement-breakpoint
+-- A helper's failed turn its workflow will start again has not ended, which
+-- its asking bot's hand-back waits for.
+ALTER TABLE "turn" ADD COLUMN "retrying" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 CREATE TABLE "collaboration_move" AS
 WITH RECURSIVE above AS (
 	SELECT "chat_id", "parent_chat_id" AS "target_chat_id" FROM "collaboration"
@@ -15,6 +30,19 @@ WITH RECURSIVE above AS (
 )
 SELECT "chat_id", "target_chat_id" FROM above
 WHERE "target_chat_id" NOT IN (SELECT "chat_id" FROM "collaboration");--> statement-breakpoint
+-- Turns and compactions asked for there never start. A turn waiting for
+-- approvals keeps its lane, so that once it is cancelled below the sweep
+-- for lost cancels finds its workflow, still waiting, and tells it to stop.
+DELETE FROM "lane" WHERE "subject" IN (SELECT "chat_id"::text FROM "collaboration_move")
+	AND NOT EXISTS (
+		SELECT 1 FROM "turn"
+		WHERE "turn"."execution_id" = "lane"."execution_id"
+			AND "turn"."chat_id" IN (SELECT "chat_id" FROM "collaboration_move")
+			AND "turn"."status" = 'waiting'
+	);--> statement-breakpoint
+DELETE FROM "lane_request" WHERE "lane_key" IN (
+	SELECT "key" FROM "lane" WHERE "subject" IN (SELECT "chat_id"::text FROM "collaboration_move")
+);--> statement-breakpoint
 -- The work still going on there ends, as cancelling a turn ends it: its
 -- unfinished tool calls fail, a pending approval is denied, and its reply stops.
 UPDATE "tool_call" SET
@@ -33,8 +61,6 @@ UPDATE "turn" SET
 	"finished_at" = now()
 WHERE "chat_id" IN (SELECT "chat_id" FROM "collaboration_move")
 	AND "status" IN ('running', 'waiting');--> statement-breakpoint
--- Turns and compactions asked for there never start.
-DELETE FROM "lane" WHERE "subject" IN (SELECT "chat_id"::text FROM "collaboration_move");--> statement-breakpoint
 UPDATE "message" SET "chat_id" = moved."target_chat_id"
 FROM "collaboration_move" moved WHERE "message"."chat_id" = moved."chat_id";--> statement-breakpoint
 UPDATE "turn" SET "chat_id" = moved."target_chat_id"
@@ -43,12 +69,11 @@ UPDATE "tool_call" SET "chat_id" = moved."target_chat_id"
 FROM "collaboration_move" moved WHERE "tool_call"."chat_id" = moved."chat_id";--> statement-breakpoint
 UPDATE "file" SET "chat_id" = moved."target_chat_id"
 FROM "collaboration_move" moved WHERE "file"."chat_id" = moved."chat_id";--> statement-breakpoint
--- A file's bytes are kept under its chat's folder, so they follow it there.
--- This moves those the Postgres blob store keeps; deleting the collaboration
--- chats below queues whatever is left under their folders for deletion.
-UPDATE "blob" SET "key" = 'chats/' || moved."target_chat_id" || substr("blob"."key", length('chats/' || moved."chat_id") + 1)
-FROM "collaboration_move" moved
-WHERE "blob"."key" LIKE 'chats/' || moved."chat_id" || '/%';--> statement-breakpoint
+-- A file's bytes are kept under its chat's folder, so they follow it there,
+-- moved by the blob store when the server starts: a migration can't reach a
+-- filesystem store's disk.
+INSERT INTO "blob_folder_move" ("from_prefix", "to_prefix")
+SELECT 'chats/' || "chat_id", 'chats/' || "target_chat_id" FROM "collaboration_move";--> statement-breakpoint
 -- The ledger keeps which chat a model request served.
 UPDATE "model_request" SET "chat_id" = moved."target_chat_id"
 FROM "collaboration_move" moved WHERE "model_request"."chat_id" = moved."chat_id";--> statement-breakpoint
@@ -62,8 +87,32 @@ ON CONFLICT DO NOTHING;--> statement-breakpoint
 DELETE FROM "event"
 WHERE "type" = 'collaboration.updated'
 	OR "stream" IN (SELECT 'chat:' || "chat_id" FROM "collaboration_move");--> statement-breakpoint
--- The asking replies without their collaboration cards, the text on either
--- side of a card joined again.
+-- A finished asking reply that held nothing but collaboration cards goes,
+-- unless something still points at it: a turn answering it, or one asked for
+-- and not yet started, as a resumption is; a reply quoting it; a reaction, a
+-- file or a tool call; or a compaction asked for up to it.
+DELETE FROM "message"
+WHERE "message"."parts" @> '[{"type": "collaboration"}]'
+	AND "message"."status" = 'complete'
+	AND NOT EXISTS (
+		SELECT 1 FROM jsonb_array_elements("message"."parts") AS element(part)
+		WHERE element.part->>'type' <> 'collaboration'
+	)
+	AND NOT EXISTS (SELECT 1 FROM "turn" WHERE "turn"."trigger_message_id" = "message"."id")
+	AND NOT EXISTS (
+		SELECT 1 FROM (
+			SELECT "payload" FROM "lane" WHERE "payload" IS NOT NULL
+			UNION ALL
+			SELECT "payload" FROM "lane_request"
+		) AS asked
+		WHERE "message"."id"::text IN (asked."payload"->>'triggerMessageId', asked."payload"->>'sourceMessageId')
+	)
+	AND NOT EXISTS (SELECT 1 FROM "message" quoting WHERE quoting."reply_to_message_id" = "message"."id")
+	AND NOT EXISTS (SELECT 1 FROM "message_reaction" WHERE "message_reaction"."message_id" = "message"."id")
+	AND NOT EXISTS (SELECT 1 FROM "file" WHERE "file"."message_id" = "message"."id")
+	AND NOT EXISTS (SELECT 1 FROM "tool_call" WHERE "tool_call"."message_id" = "message"."id");--> statement-breakpoint
+-- The other asking replies without their collaboration cards, the text on
+-- either side of a card joined again.
 WITH kept AS (
 	SELECT "message"."id" AS "message_id", element.part, element.position
 	FROM "message", jsonb_array_elements("message"."parts") WITH ORDINALITY AS element(part, position)
@@ -99,8 +148,11 @@ UPDATE "turn" SET "reason" = 'hand_back' WHERE "reason" = 'resume';--> statement
 UPDATE "lane" SET "payload" = jsonb_set("payload", '{reason}', '"hand_back"') WHERE "workflow" = 'turn' AND "payload"->>'reason' = 'resume';--> statement-breakpoint
 UPDATE "lane_request" SET "payload" = jsonb_set("payload", '{reason}', '"hand_back"') WHERE "workflow" = 'turn' AND "payload"->>'reason' = 'resume';--> statement-breakpoint
 -- Empty now, the collaboration chats go, and with them their read cursors,
--- compactions and the system chats serving them.
+-- compactions and the system chats serving them. Deleting them queues their
+-- folders for deletion, which would take the bytes queued to move above.
 DELETE FROM "chat" WHERE "kind" = 'collaboration';--> statement-breakpoint
+DELETE FROM "blob_deletion"
+WHERE "prefix" IN (SELECT 'chats/' || "chat_id" FROM "collaboration_move");--> statement-breakpoint
 DROP TABLE "collaboration_move";--> statement-breakpoint
 DROP VIEW "placed_chat";--> statement-breakpoint
 DROP TABLE "collaboration";--> statement-breakpoint

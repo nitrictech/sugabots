@@ -1,11 +1,20 @@
 import {
 	DEFAULT_PROJECT_COLOR,
+	newProjectSchema,
 	type Project,
 	type ProjectColor,
 	type ProjectPermissions,
+	projectSlugSchema,
+	slugify,
 } from "@sugabots/contracts";
+import { InvalidProjectDetails, UnusableProjectName } from "@sugabots/contracts/errors/projects";
+import { Effect, Schema } from "effect";
 import type { ProjectStanding } from "../../authorization/access.ts";
-import { projectPermissions } from "../../authorization/permissions.ts";
+import {
+	type Actor,
+	type ProjectFacts,
+	projectPermissions,
+} from "../../authorization/permissions.ts";
 import type * as schema from "../../database/schema.ts";
 
 /** The row as the API returns it: timestamps as ISO strings, no internals. */
@@ -36,6 +45,14 @@ function toProject(
  * it are always the ones the caller who asked for it holds.
  */
 export function projectSeenBy({ project: row, actor, facts }: ProjectStanding): Project {
+	return projectSeenAs(row, actor, facts);
+}
+
+/**
+ * The project as `actor` sees it, permissions and all, from whether they are
+ * in it and the bot whose default project it is.
+ */
+export function projectSeenAs(row: schema.ProjectRow, actor: Actor, facts: ProjectFacts): Project {
 	return toProject(
 		row,
 		facts.isMember,
@@ -47,3 +64,32 @@ export function projectSeenBy({ project: row, actor, facts }: ProjectStanding): 
 export function projectColorOf(stored: ProjectColor | null): ProjectColor {
 	return stored ?? DEFAULT_PROJECT_COLOR;
 }
+
+/** A project's name and description, as every caller must give them. */
+const projectDetailsSchema = Schema.Struct({
+	name: newProjectSchema.fields.name,
+	description: newProjectSchema.fields.description,
+});
+
+/**
+ * A new project's name and description checked, and its address: `slug`, or
+ * one derived from its name when that is left out. Checked here, not only by
+ * the HTTP API, for callers that don't come through it, and before anything is
+ * written, so a name such as "!!!" is refused for the name rather than as a
+ * taken address.
+ */
+export const newProjectDetails = (input: {
+	readonly name: string;
+	readonly description?: string | null | undefined;
+	readonly slug?: string | undefined;
+}) =>
+	Effect.gen(function* () {
+		const details = yield* Schema.decodeEffect(projectDetailsSchema)({
+			name: input.name,
+			description: input.description,
+		}).pipe(Effect.mapError(() => new InvalidProjectDetails()));
+		const slug = yield* Schema.decodeEffect(projectSlugSchema)(
+			input.slug ?? slugify(details.name),
+		).pipe(Effect.mapError(() => new UnusableProjectName()));
+		return { ...details, slug };
+	});

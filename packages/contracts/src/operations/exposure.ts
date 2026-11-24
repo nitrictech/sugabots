@@ -5,8 +5,10 @@
  * proves access like any other caller.
  *
  * `defineManifest` fails to compile when an operation has no entry, a reason
- * isn't written out, an endpoint is misspelt or named twice, or the bot loop
- * is said to be covered by an operation it isn't offered directly.
+ * isn't written out, an endpoint is misspelt or named twice, the bot loop is
+ * said to be covered by an operation it isn't offered directly, or a tool
+ * that manages a project outside member bounds runs without the asker's
+ * approval.
  */
 
 import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
@@ -28,28 +30,68 @@ export type HttpDecision =
 	| { readonly kind: "heldBack"; readonly reason: string };
 
 /**
- * Who must allow a bot's call before it runs.
+ * When a bot's call waits for an approver before it runs. A Personal
+ * Assistant's call to an operation that changes something always waits, and
+ * so does every call in its runs that a webhook or GitHub event started,
+ * whatever this says.
  *
  * - `never`: it runs at once.
- * - `always`: it waits for someone allowed to decide: those who decide
- *   approvals in the chat, or for changes to a computer, those who manage its
- *   project.
+ * - `always`: it waits for an approver. `turn`: by the turn's rule, its
+ *   asker, or for a Personal Assistant's call its member, or for a run's call
+ *   admins and the managers of its bot. `computerManagers`: a request to
+ *   change a computer, such as a host request, which those who may manage its
+ *   project decide.
  * - `byToolAccess`: a connector's tool, which runs, waits or is refused by its
  *   tool access, set as data.
  */
 export type Approval =
 	| { readonly kind: "never" }
-	| { readonly kind: "always"; readonly approvers: "chat" | "computerManagers" }
+	| { readonly kind: "always"; readonly approvers: "turn" | "computerManagers" }
 	| { readonly kind: "byToolAccess" };
 
+/** Waiting for the turn's approver: for a turn with an asker, the asker's own say. */
+type AskersApproval = { readonly kind: "always"; readonly approvers: "turn" };
+
 /**
- * The bot loop's decision: offer the operation as a tool, hold it back and say
- * why, or name the operation whose tool already does the same.
+ * In which turns' bounds the bot loop offers a tool.
+ *
+ * - `everywhere`: every turn and run. Asking for a host, and everything that
+ *   manages nothing.
+ * - `chatBounds`: every turn with an asker, never a run. Ways of managing a
+ *   project other than those below, such as making an automation.
+ * - `ownChats`: only in the bot's own chats. Its own interview-written
+ *   settings and its own automations.
+ * - `memberBounds`: only in member bounds, where each change asks the member.
+ *   Managing the workspace or a bot, and changing who reaches what, tool
+ *   access, computer use or allowed hosts.
+ */
+export type OfferedIn = "everywhere" | "chatBounds" | "ownChats" | "memberBounds";
+
+/**
+ * The bot loop's decision: offer the operation as a tool, in some bounds; hold
+ * it back and say why; name the operation whose tool already does the same; or
+ * mark it as called by the loop itself, offered to no model, as loading a turn
+ * and recording its steps are.
+ *
+ * A tool offered in `chatBounds` or `ownChats` manages a project for the
+ * asker, so it always waits for the asker's approval.
  */
 export type BotLoopDecision =
-	| { readonly kind: "offered"; readonly tool: string; readonly approval: Approval }
+	| {
+			readonly kind: "offered";
+			readonly tool: string;
+			readonly offeredIn: "everywhere" | "memberBounds";
+			readonly approval: Approval;
+	  }
+	| {
+			readonly kind: "offered";
+			readonly tool: string;
+			readonly offeredIn: "chatBounds" | "ownChats";
+			readonly approval: AskersApproval;
+	  }
 	| { readonly kind: "heldBack"; readonly reason: string }
-	| { readonly kind: "coveredBy"; readonly operation: string; readonly reason: string };
+	| { readonly kind: "coveredBy"; readonly operation: string; readonly reason: string }
+	| { readonly kind: "calledByLoop" };
 
 export interface Decisions {
 	readonly http: HttpDecision;
@@ -196,6 +238,16 @@ export type BotLoopOperationName<Manifest> = {
 }[keyof Manifest] &
 	string;
 
+/** The operations `Manifest` leaves for the bot loop to call itself, offered to no model. */
+export type LoopCalledOperationName<Manifest> = {
+	[Name in keyof Manifest]: Manifest[Name] extends {
+		readonly botLoop: { readonly kind: "calledByLoop" };
+	}
+		? Name
+		: never;
+}[keyof Manifest] &
+	string;
+
 /** Each operation the HTTP API offers, with its endpoint, in name order. */
 export const httpOperations = <Manifest extends { readonly [name: string]: Decisions }>(
 	manifest: Manifest,
@@ -212,15 +264,17 @@ export const httpOperations = <Manifest extends { readonly [name: string]: Decis
 		.sort((a, b) => a.operation.localeCompare(b.operation));
 
 /**
- * Each operation the bot loop offers as a tool, with the tool's name and its
- * approval, in tool name order: a stable order keeps the model's prompt cache.
- * An operation covered by another offers no tool of its own.
+ * Each operation the bot loop offers as a tool, with the tool's name, the
+ * bounds it is offered in and its approval, in tool name order: a stable order
+ * keeps the model's prompt cache. An operation covered by another, or called by
+ * the loop, offers no tool of its own.
  */
 export const botLoopTools = <Manifest extends { readonly [name: string]: Decisions }>(
 	manifest: Manifest,
 ): ReadonlyArray<{
 	readonly operation: BotLoopOperationName<Manifest>;
 	readonly tool: string;
+	readonly offeredIn: OfferedIn;
 	readonly approval: Approval;
 }> =>
 	Object.entries(manifest)
@@ -230,6 +284,7 @@ export const botLoopTools = <Manifest extends { readonly [name: string]: Decisio
 						{
 							operation: operation as BotLoopOperationName<Manifest>,
 							tool: botLoop.tool,
+							offeredIn: botLoop.offeredIn,
 							approval: botLoop.approval,
 						},
 					]

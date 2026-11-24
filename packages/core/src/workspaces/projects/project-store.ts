@@ -1,3 +1,4 @@
+export { BotNotPublic, ProjectGone, ProjectSlugTaken } from "@sugabots/contracts/errors/projects";
 export * as ProjectStore from "./project-store.ts";
 
 import {
@@ -7,14 +8,13 @@ import {
 	type ProjectUpdate,
 	type ProjectVisibility,
 } from "@sugabots/contracts";
-import { userText } from "@sugabots/errors";
+import { BotNotPublic, ProjectGone, ProjectSlugTaken } from "@sugabots/contracts/errors/projects";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
 import { bot, membership, project, projectBot, projectMember } from "../../database/schema.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { projectColorOf } from "./project.ts";
 import { type LeadsProjects, refuseWhileLeading } from "./project-leads.ts";
 
@@ -408,36 +408,3 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
-
-/** The slug is taken by another project in this workspace. */
-export class ProjectSlugTaken
-	extends Data.TaggedError("ProjectSlugTaken")<{ readonly slug: string }>
-	implements UserFacing
-{
-	override get message() {
-		return `A project with the slug "${this.slug}" already exists in this workspace`;
-	}
-	get userMessage() {
-		return userText`A project with that address already exists in this workspace`;
-	}
-}
-
-/** The project was deleted before the write reached it. */
-export class ProjectGone
-	extends Data.TaggedError("ProjectGone")<{ readonly projectId: string }>
-	implements UserFacing
-{
-	override get message() {
-		return `No project with the id "${this.projectId}"`;
-	}
-	get userMessage() {
-		return userText`No such project`;
-	}
-}
-
-/** Only a public bot of the workspace is put in a project. */
-export class BotNotPublic extends Data.TaggedError("BotNotPublic") implements UserFacing {
-	get userMessage() {
-		return userText`Only a public bot can be added to a project`;
-	}
-}

@@ -1,22 +1,19 @@
-import { BadRequest, Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
-import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
+import { EmailUnverified } from "@sugabots/contracts/errors/workspace";
+import { BadRequest, Conflict, Forbidden } from "@sugabots/contracts/http";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asCurrentUser } from "../../auth/middleware.ts";
+import { operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { asHttpError, refusals } from "../../http/errors.ts";
+import { asHttpError, memberOnly, refusals } from "../../http/errors.ts";
 
-/** `Membership` and `WorkspaceTimeZone` decide who may do what; these map their refusals to HTTP. */
+/** Workspaces, who is in them and who is invited, each endpoint its operation. */
 export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (handlers) =>
-	Effect.gen(function* () {
-		const membership = yield* Membership.Service;
-		const timeZones = yield* WorkspaceTimeZone.Service;
-		return handlers
-			.handle("list", () => asCurrentUser(membership.workspaces))
+	Effect.map(operationCaller, (callOperation) =>
+		handlers
+			.handle("list", () => callOperation("workspaces.list", {}).pipe(memberOnly))
 			.handle("create", ({ payload }) =>
-				membership.create({ details: payload }).pipe(
-					asCurrentUser,
+				callOperation("workspaces.create", payload).pipe(
+					memberOnly,
 					asHttpError({
 						SlugTaken: Conflict,
 						SlugShapedLikeUuid: BadRequest,
@@ -25,24 +22,23 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 				),
 			)
 			.handle("update", ({ params, payload }) =>
-				membership
-					.update({ workspace: params.workspace, details: payload })
-					.pipe(
-						asCurrentUser,
-						asHttpError({ ...refusals, SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest }),
-					),
+				callOperation("workspaces.update", { workspace: params.workspace, ...payload }).pipe(
+					asHttpError({ ...refusals, SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest }),
+				),
 			)
 			.handle("timeZone", ({ params }) =>
-				timeZones.get({ workspace: params.workspace }).pipe(asCurrentUser, asHttpError(refusals)),
+				callOperation("workspaces.timeZone", { workspace: params.workspace }).pipe(
+					asHttpError(refusals),
+				),
 			)
 			.handle("changeTimeZone", ({ params, payload }) =>
-				timeZones
-					.change({ workspace: params.workspace, timeZone: payload.timeZone })
-					.pipe(asCurrentUser, asHttpError({ ...refusals, TimeZoneUnknown: BadRequest })),
+				callOperation("workspaces.changeTimeZone", {
+					workspace: params.workspace,
+					timeZone: payload.timeZone,
+				}).pipe(asHttpError({ ...refusals, TimeZoneUnknown: BadRequest })),
 			)
 			.handle("delete", ({ params }) =>
-				membership.delete({ workspace: params.workspace }).pipe(
-					asCurrentUser,
+				callOperation("workspaces.delete", { workspace: params.workspace }).pipe(
 					asHttpError({
 						...refusals,
 						ComputerUnavailable: Conflict,
@@ -51,87 +47,85 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 				),
 			)
 			.handle("memberships", ({ params }) =>
-				membership
-					.memberships({ workspace: params.workspace })
-					.pipe(asCurrentUser, asHttpError(refusals)),
+				callOperation("workspaces.memberships", { workspace: params.workspace }).pipe(
+					asHttpError(refusals),
+				),
 			)
 			.handle("changeRole", ({ params, payload }) =>
-				membership
-					.changeRole({
-						workspace: params.workspace,
-						membershipId: params.membershipId,
-						role: payload.role,
-					})
-					.pipe(asCurrentUser, asHttpError({ ...refusals, OwnerStays: BadRequest })),
+				callOperation("workspaces.changeRole", {
+					workspace: params.workspace,
+					membershipId: params.membershipId,
+					role: payload.role,
+				}).pipe(asHttpError(refusals)),
 			)
 			.handle("removeMembership", ({ params }) =>
-				membership.remove({ workspace: params.workspace, membershipId: params.membershipId }).pipe(
-					asCurrentUser,
-					asHttpError({
-						...refusals,
-						OwnerStays: BadRequest,
-						SubscriptionInUse: Conflict,
-						ComputerUnavailable: Conflict,
-						ComputerMadeMeanwhile: Conflict,
-					}),
-				),
-			)
-			.handle("leave", ({ params }) =>
-				membership.leave({ workspace: params.workspace }).pipe(
-					asCurrentUser,
-					asHttpError({
-						...refusals,
-						OwnerStays: BadRequest,
-						SubscriptionInUse: Conflict,
-						ComputerUnavailable: Conflict,
-						ComputerMadeMeanwhile: Conflict,
-					}),
-				),
+				callOperation("workspaces.removeMembership", {
+					workspace: params.workspace,
+					membershipId: params.membershipId,
+				}).pipe(asHttpError(departureErrors)),
 			)
 			.handle("handOverOwnership", ({ params, payload }) =>
-				membership
-					.handOverOwnership({ workspace: params.workspace, membershipId: payload.membershipId })
-					.pipe(asCurrentUser, asHttpError(refusals)),
+				callOperation("workspaces.handOverOwnership", {
+					workspace: params.workspace,
+					membershipId: payload.membershipId,
+				}).pipe(asHttpError(refusals)),
+			)
+			.handle("leave", ({ params }) =>
+				callOperation("workspaces.leave", { workspace: params.workspace }).pipe(
+					asHttpError({ ...departureErrors, OwnerStays: BadRequest }),
+				),
 			)
 			.handle("invitations", ({ params }) =>
-				membership
-					.invitations({ workspace: params.workspace })
-					.pipe(asCurrentUser, asHttpError(refusals)),
+				callOperation("workspaces.invitations", { workspace: params.workspace }).pipe(
+					asHttpError(refusals),
+				),
 			)
 			.handle("invite", ({ params, payload }) =>
-				membership
-					.invite({ workspace: params.workspace, invitation: payload })
-					.pipe(
-						asCurrentUser,
-						asHttpError({ ...refusals, AlreadyInWorkspace: Conflict, AlreadyInvited: Conflict }),
-					),
+				callOperation("workspaces.invite", { workspace: params.workspace, ...payload }).pipe(
+					asHttpError({ ...refusals, AlreadyInWorkspace: Conflict, AlreadyInvited: Conflict }),
+				),
 			)
 			.handle("cancelInvitation", ({ params }) =>
-				membership
-					.cancelInvitation({ invitationId: params.invitationId })
-					.pipe(asCurrentUser, asHttpError(refusals)),
+				callOperation("workspaces.cancelInvitation", { invitationId: params.invitationId }).pipe(
+					asHttpError(refusals),
+				),
 			)
 			.handle("invitation", ({ params }) =>
-				membership
-					.invitation({ invitationId: params.invitationId })
-					.pipe(asCurrentUser, asHttpError({ ResourceHidden: NotFound, NotTheInvitee: Forbidden })),
+				callOperation("workspaces.invitation", { invitationId: params.invitationId }).pipe(
+					emailUnverifiedAsForbidden,
+					asHttpError(refusals),
+				),
 			)
 			.handle("acceptInvitation", ({ params }) =>
-				membership.accept({ invitationId: params.invitationId }).pipe(
-					asCurrentUser,
-					Effect.catchTag("EmailUnverified", (unverified) =>
-						Effect.fail(
-							new Forbidden({ message: unverified.userMessage, details: EMAIL_UNVERIFIED }),
-						),
-					),
-					asHttpError({ ResourceHidden: NotFound, NotTheInvitee: Forbidden }),
+				callOperation("workspaces.acceptInvitation", { invitationId: params.invitationId }).pipe(
+					emailUnverifiedAsForbidden,
+					asHttpError(refusals),
 				),
-			);
-	}),
+			),
+	),
 );
+
+/** What each way taking a member out of the workspace can fail means over HTTP. */
+const departureErrors = {
+	...refusals,
+	SubscriptionInUse: Conflict,
+	ComputerUnavailable: Conflict,
+	ComputerMadeMeanwhile: Conflict,
+};
 
 /**
  * The code a client reads to tell "verify your address first" from the other
  * refusals that share its status. `isEmailUnverified` in the SDK knows it.
  */
 const EMAIL_UNVERIFIED = "EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION";
+
+/** An invitation waiting for its member to verify their address, as `Forbidden` with that code. */
+const emailUnverifiedAsForbidden = <A, E, R>(
+	effect: Effect.Effect<A, E | EmailUnverified, R>,
+): Effect.Effect<A, Exclude<E, EmailUnverified> | Forbidden, R> =>
+	Effect.catchIf<A, E | EmailUnverified, R, EmailUnverified, never, Forbidden, never>(
+		effect,
+		(failure): failure is EmailUnverified => failure instanceof EmailUnverified,
+		(unverified) =>
+			Effect.fail(new Forbidden({ message: unverified.userMessage, details: EMAIL_UNVERIFIED })),
+	);

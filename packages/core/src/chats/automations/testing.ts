@@ -1,9 +1,12 @@
-import { handleFromName } from "@sugabots/contracts";
+import { type AcceptedRun, handleFromName } from "@sugabots/contracts";
+import type { InputOf } from "@sugabots/contracts/operations";
 import { and, eq, ne } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { query } from "../../database/database.ts";
 import { automationRun, bot, member, membership, workspace } from "../../database/schema.ts";
 import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
+import { type ChatServicesForTests, servedOperations } from "../../operations/testing.ts";
+import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { lane } from "../../workflows/sql.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
@@ -11,6 +14,23 @@ import { lanesForTests } from "../testing.ts";
 import { releaseTurn, runningTurns } from "../turns/testing.ts";
 import { Automation, AutomationRun, automationLane } from "./automation.workflow.ts";
 import type { AutomationRunner } from "./automation-runner.ts";
+
+/** Starts an automation's run by hand, as the web app's Run button does, returning it. */
+export type StartRun = (input: InputOf<"automations.run">) => Promise<AcceptedRun>;
+
+/**
+ * Starting runs by hand through the `automations.run` operation, over the
+ * chat services a case drives the runs with, for the member the returned
+ * function is given, signed in.
+ */
+export async function manualRunsOver(
+	services: ChatServicesForTests,
+): Promise<(memberId: string) => StartRun> {
+	const call = await servedOperations({ chats: services });
+	const signedIn = principals(await authenticators());
+	return (memberId) => async (input) =>
+		call(await signedIn.member(memberId), "automations.run", input);
+}
 
 /** The automation's run holding its lane, if any. */
 export const runningRun = (automationId: string) =>

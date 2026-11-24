@@ -56,7 +56,45 @@
 				"packages/core/src/providers/connectors/github/**/*.ts",
 				"packages/core/src/providers/models/**/*.ts",
 				"packages/core/src/providers/model-providers/remote.ts",
+				"packages/core/src/providers/model-providers/model-providers.ts",
+				"packages/core/src/providers/model-providers/held-models.ts",
+				"packages/core/src/providers/model-providers/sign-in/*.ts",
+				"!packages/core/src/providers/model-providers/sign-in/*.test.ts",
+				"packages/core/src/providers/search-providers/search-providers.ts",
+				"packages/core/src/providers/search-providers/search-provider-store.ts",
 				"packages/core/src/operations/**/*.ts",
+				"packages/core/src/authentication/**/*.ts",
+				"packages/core/src/proofs/**/*.ts",
+				"packages/core/src/workspaces/projects/**/*.ts",
+				"!packages/core/src/workspaces/projects/**/*.test.ts",
+				"packages/core/src/workspaces/bots/**/*.ts",
+				"!packages/core/src/workspaces/bots/**/*.test.ts",
+				"packages/core/src/chats/automations/automation.ts",
+				"packages/core/src/chats/automations/automation-view.ts",
+				"packages/core/src/chats/automations/automation-webhooks.ts",
+				"packages/core/src/chats/automations/automation-writes.ts",
+				"packages/core/src/chats/automations/automations.ts",
+				"packages/core/src/chats/automations/project-automations.ts",
+				"packages/core/src/chats/automations/schedule.ts",
+				"packages/core/src/workspaces/membership/**/*.ts",
+				"!packages/core/src/workspaces/membership/**/*.test.ts",
+				"packages/core/src/workspaces/time-zone/**/*.ts",
+				"!packages/core/src/workspaces/time-zone/**/*.test.ts",
+				"packages/core/src/workspaces/workspace-setup/**/*.ts",
+				"!packages/core/src/workspaces/workspace-setup/**/*.test.ts",
+				"packages/core/src/accounting/usage.ts",
+				"packages/core/src/workspaces/workspace-reference.ts",
+				"packages/core/src/computers/computer-provider-setup.ts",
+				"packages/core/src/computers/computer-network.ts",
+				"packages/core/src/computers/project-computer-setup.ts",
+				"packages/core/src/chats/chats/chats.ts",
+				"packages/core/src/chats/chats/chat-files.ts",
+				"packages/core/src/chats/chats/chat-view.ts",
+				"packages/core/src/chats/chats/reached-chat.ts",
+				"packages/core/src/chats/chat-details-view.ts",
+				"packages/core/src/chats/reactions/reactions.ts",
+				"packages/core/src/chats/turns/controls.ts",
+				"!packages/core/src/proofs/proof.ts",
 				"packages/contracts/src/errors/**/*.ts",
 				"packages/server/src/http/errors.ts"
 			],
@@ -70,6 +108,43 @@
 			"includes": [
 				"packages/**/src/**",
 				"!packages/core/src/chats/turns/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+									},
+									{
+										"group": [
+											"**/authentication/turn",
+											"**/authentication/turn.ts",
+											"**/authentication/system-work",
+											"**/authentication/system-work.ts"
+										],
+										"message": "Only the bot loop and the scheduler authenticate from stored ids: a turn's, or system work's. Anywhere else, take the principal an entrypoint passed in."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/core/src/authentication/**",
+				"packages/server/src/scheduler/**",
+				"packages/core/src/chats/automations/scheduler.ts",
 				"!**/*.test.ts",
 				"!**/*.test.tsx",
 				"!**/testing.ts",
@@ -126,36 +201,6 @@
 			}
 		},
 		{
-			"includes": ["packages/**/src/**/*.workflow.ts"],
-			"linter": {
-				"rules": {
-					"style": {
-						"noRestrictedImports": {
-							"level": "error",
-							"options": {
-								"patterns": [
-									{
-										"group": [
-											"node:*",
-											"pg",
-											"@effect/sql-pg",
-											"@effect/platform-node",
-											"**/database/**"
-										],
-										"message": "Workflow modules hold only definitions, which the engine replays: import only schemas and step-service tags, and reach the database, the network or Node through a step service."
-									},
-									{
-										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
-										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
-									}
-								]
-							}
-						}
-					}
-				}
-			}
-		},
-		{
 			"includes": ["packages/**/src/**/*.{ts,tsx}", "!packages/core/src/proofs/**"],
 			"plugins": ["./lint/proofs-only-in-proofs.grit"]
 		},
@@ -194,7 +239,6 @@
 		{
 			"includes": [
 				"packages/core/src/operations/**",
-				"packages/bot-loop/src/**",
 				"packages/contracts/src/**",
 				"packages/sdk/src/**",
 				"packages/web/src/**",
@@ -231,6 +275,128 @@
 											"!./turns/index.ts"
 										],
 										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal. (`./turns/index.ts` in `operations/` is the turns domain's operations.)"
+									},
+									{
+										"group": [
+											"**/authentication/turn",
+											"**/authentication/turn.ts",
+											"**/authentication/system-work",
+											"**/authentication/system-work.ts"
+										],
+										"message": "Only the bot loop and the scheduler authenticate from stored ids: a turn's, or system work's. Anywhere else, take the principal an entrypoint passed in."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/bot-loop/src/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"**/database/database",
+											"**/database/database.ts",
+											"**/database/schema",
+											"**/database/schema.ts",
+											"**/sql",
+											"**/sql.ts",
+											"drizzle-orm",
+											"drizzle-orm/*"
+										],
+										"message": "Only services reach the database. Call a service, which takes the proofs it needs."
+									},
+									{
+										"group": [
+											"**/turns/**",
+											"!**/turns/turns",
+											"!**/turns/turns.ts",
+											"!./turns/index.ts"
+										],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal. (`./turns/index.ts` in `operations/` is the turns domain's operations.)"
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/**/src/**/*.workflow.ts", "!packages/bot-loop/src/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"node:*",
+											"pg",
+											"@effect/sql-pg",
+											"@effect/platform-node",
+											"**/database/**"
+										],
+										"message": "Workflow modules hold only definitions, which the engine replays: import only schemas and step-service tags, and reach the database, the network or Node through a step service."
+									},
+									{
+										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+									},
+									{
+										"group": [
+											"**/authentication/turn",
+											"**/authentication/turn.ts",
+											"**/authentication/system-work",
+											"**/authentication/system-work.ts"
+										],
+										"message": "Only the bot loop and the scheduler authenticate from stored ids: a turn's, or system work's. Anywhere else, take the principal an entrypoint passed in."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/bot-loop/src/**/*.workflow.ts"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"node:*",
+											"pg",
+											"@effect/sql-pg",
+											"@effect/platform-node",
+											"**/database/**"
+										],
+										"message": "Workflow modules hold only definitions, which the engine replays: import only schemas and step-service tags, and reach the database, the network or Node through a step service."
+									},
+									{
+										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
 									}
 								]
 							}

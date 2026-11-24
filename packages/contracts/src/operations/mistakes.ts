@@ -45,11 +45,23 @@ const heldBackFromBots = {
 	reason: "Clients follow events; a bot reads them in its turn.",
 } as const;
 declare const computedReason: string;
+const resolveChatTool = {
+	kind: "offered",
+	tool: "resolve_chat",
+	offeredIn: "everywhere",
+	approval: { kind: "never" },
+} as const;
+const renameChatTool = {
+	kind: "offered",
+	tool: "rename_chat",
+	offeredIn: "chatBounds",
+	approval: { kind: "always", approvers: "turn" },
+} as const;
 
 export const sound = define({
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: { kind: "offered", tool: "resolve_chat", approval: { kind: "never" } },
+		botLoop: resolveChatTool,
 	},
 	"chats.rename": {
 		http: { kind: "offered", endpoint: "chats.renameChat" },
@@ -70,22 +82,22 @@ export const sound = define({
 export const missingEntry = define({
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: { kind: "offered", tool: "resolve_chat", approval: { kind: "never" } },
+		botLoop: resolveChatTool,
 	},
 	"chats.rename": {
 		http: { kind: "offered", endpoint: "chats.renameChat" },
-		botLoop: { kind: "offered", tool: "rename_chat", approval: { kind: "never" } },
+		botLoop: renameChatTool,
 	},
 });
 
 export const unregistered = define({
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: { kind: "offered", tool: "resolve_chat", approval: { kind: "never" } },
+		botLoop: resolveChatTool,
 	},
 	"chats.rename": {
 		http: { kind: "offered", endpoint: "chats.renameChat" },
-		botLoop: { kind: "offered", tool: "rename_chat", approval: { kind: "never" } },
+		botLoop: renameChatTool,
 	},
 	"events.followChat": {
 		http: { kind: "heldBack", reason: "Stand-in." },
@@ -99,7 +111,7 @@ export const unregistered = define({
 export const noReason = define({
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: { kind: "offered", tool: "resolve_chat", approval: { kind: "never" } },
+		botLoop: resolveChatTool,
 	},
 	// `heldBack` with no reason.
 	// @ts-expect-error
@@ -113,7 +125,7 @@ export const noReason = define({
 export const blankReason = define({
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: { kind: "offered", tool: "resolve_chat", approval: { kind: "never" } },
+		botLoop: resolveChatTool,
 	},
 	"chats.rename": {
 		http: { kind: "offered", endpoint: "chats.renameChat" },
@@ -127,7 +139,7 @@ export const blankReason = define({
 export const typedReason = define({
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: { kind: "offered", tool: "resolve_chat", approval: { kind: "never" } },
+		botLoop: resolveChatTool,
 	},
 	"chats.rename": {
 		http: { kind: "offered", endpoint: "chats.renameChat" },
@@ -163,7 +175,7 @@ export const covers = define({
 export const chained = define({
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: { kind: "offered", tool: "resolve_chat", approval: { kind: "never" } },
+		botLoop: resolveChatTool,
 	},
 	"chats.rename": {
 		http: { kind: "offered", endpoint: "chats.renameChat" },
@@ -182,7 +194,7 @@ export const misspeltEndpoint = define({
 		// A misspelt endpoint.
 		// @ts-expect-error
 		http: { kind: "offered", endpoint: "chats.archiveChats" },
-		botLoop: { kind: "offered", tool: "resolve_chat", approval: { kind: "never" } },
+		botLoop: resolveChatTool,
 	},
 	"chats.rename": {
 		http: { kind: "offered", endpoint: "chats.renameChat" },
@@ -203,7 +215,7 @@ export const misfiled = defineManifest<{ "chats.rename": typeof setResolved }>()
 export const sharedEndpoint = define({
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: { kind: "offered", tool: "resolve_chat", approval: { kind: "never" } },
+		botLoop: resolveChatTool,
 	},
 	"chats.rename": {
 		http: { kind: "offered", endpoint: "chats.renameChat" },
@@ -212,5 +224,68 @@ export const sharedEndpoint = define({
 	"events.followChat": {
 		http: { kind: "offered", endpoint: "chats.renameChat" },
 		botLoop: heldBackFromBots,
+	},
+});
+
+export const calledByLoop = define({
+	"chats.setResolved": {
+		http: { kind: "offered", endpoint: "chats.markResolved" },
+		botLoop: { kind: "calledByLoop" },
+	},
+	// Covered by an operation the loop calls itself, which no model is offered.
+	// @ts-expect-error
+	"chats.rename": {
+		http: { kind: "offered", endpoint: "chats.renameChat" },
+		botLoop: { kind: "coveredBy", operation: "chats.setResolved", reason: "Stand-in." },
+	},
+	"events.followChat": {
+		http: { kind: "heldBack", reason: "Stand-in." },
+		botLoop: heldBackFromBots,
+	},
+});
+
+export const unbounded = define({
+	"chats.setResolved": {
+		http: { kind: "offered", endpoint: "chats.markResolved" },
+		// A tool that doesn't say in which bounds it is offered.
+		// @ts-expect-error
+		botLoop: { kind: "offered", tool: "resolve_chat", approval: { kind: "never" } },
+	},
+	"chats.rename": {
+		http: { kind: "offered", endpoint: "chats.renameChat" },
+		botLoop: heldBackFromBots,
+	},
+	"events.followChat": {
+		http: { kind: "heldBack", reason: "Stand-in." },
+		botLoop: heldBackFromBots,
+	},
+});
+
+export const managesWithoutAsking = define({
+	"chats.setResolved": {
+		http: { kind: "offered", endpoint: "chats.markResolved" },
+		botLoop: resolveChatTool,
+	},
+	"chats.rename": {
+		http: { kind: "offered", endpoint: "chats.renameChat" },
+		botLoop: {
+			kind: "offered",
+			tool: "rename_chat",
+			offeredIn: "chatBounds",
+			// Managing a project in chat bounds without the asker's approval.
+			// @ts-expect-error
+			approval: { kind: "never" },
+		},
+	},
+	"events.followChat": {
+		http: { kind: "heldBack", reason: "Stand-in." },
+		botLoop: {
+			kind: "offered",
+			tool: "follow_chat",
+			offeredIn: "ownChats",
+			// A bot's own settings changed in its own chats by tool access, not the asker.
+			// @ts-expect-error
+			approval: { kind: "byToolAccess" },
+		},
 	},
 });

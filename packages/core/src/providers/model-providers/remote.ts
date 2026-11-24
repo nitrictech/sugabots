@@ -1,6 +1,15 @@
 import { MAX_PROVIDER_MODELS, type ProviderTestResult } from "@sugabots/contracts";
-import { type DomainError, userText } from "@sugabots/errors";
-import { Effect, ErrorReporter, Schema } from "effect";
+import {
+	DiscoveryAddressRefused,
+	DiscoveryCredentialsMissing,
+	DiscoveryCredentialsRejected,
+	DiscoverySignInLapsed,
+	DiscoveryUnavailable,
+	DiscoveryUnreachable,
+	ModelListTooLarge,
+	ModelListUnreadable,
+} from "@sugabots/contracts/errors/providers";
+import { Effect, Schema } from "effect";
 import { type EgressHttpClients, EgressRefused } from "../network/egress.ts";
 import { timedTest } from "../tested-configuration.ts";
 import {
@@ -10,7 +19,7 @@ import {
 	modelsDev,
 } from "./dialects/index.ts";
 import type { ModelProviderStore } from "./model-provider-store.ts";
-import { ProviderSignInFailed, withSignInAccess } from "./sign-in/sign-in.ts";
+import { withSignInAccess } from "./sign-in/sign-in.ts";
 
 /**
  * Asking a provider which models it offers and what they can do.
@@ -24,149 +33,6 @@ import { ProviderSignInFailed, withSignInAccess } from "./sign-in/sign-in.ts";
 const MAX_MODEL_RESPONSE_BYTES = 5_000_000;
 /** How many models are asked about at once when a listing needs following up. */
 const INSPECT_CONCURRENCY = 4;
-
-/** The provider has no API key or sign-in yet. */
-class DiscoveryCredentialsMissing
-	extends Schema.TaggedError<DiscoveryCredentialsMissing>()("DiscoveryCredentialsMissing", {})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Info" as const;
-	override get message() {
-		return "The provider has no API key or sign-in";
-	}
-	get userMessage() {
-		return userText`This provider has no API key or sign-in yet. Add one, then try again.`;
-	}
-}
-
-/** The provider answered 401 or 403: it doesn't accept the key or sign-in. */
-export class DiscoveryCredentialsRejected
-	extends Schema.TaggedError<DiscoveryCredentialsRejected>()("DiscoveryCredentialsRejected", {
-		status: Schema.Finite,
-		statusText: Schema.String,
-	})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Warn" as const;
-	override get message() {
-		return `The provider answered ${this.status} ${this.statusText}`;
-	}
-	get userMessage() {
-		return userText`The provider didn't accept the API key or sign-in. Replace the key, or sign in again, then try again.`;
-	}
-}
-
-/** The subscription sign-in couldn't give a live token. */
-class DiscoverySignInLapsed
-	extends Schema.TaggedError<DiscoverySignInLapsed>()("DiscoverySignInLapsed", {
-		cause: Schema.instanceOf(ProviderSignInFailed),
-	})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Warn" as const;
-	override get message() {
-		return `The subscription sign-in gave no live token: ${this.cause.message}`;
-	}
-	get userMessage() {
-		return this.cause.userMessage;
-	}
-}
-
-/** The provider failed or was busy: a 408, 429 or 5xx. Asking again later may work. */
-export class DiscoveryUnavailable
-	extends Schema.TaggedError<DiscoveryUnavailable>()("DiscoveryUnavailable", {
-		status: Schema.Finite,
-		statusText: Schema.String,
-	})
-	implements DomainError
-{
-	readonly isRetryable = true;
-	override readonly [ErrorReporter.severity] = "Warn" as const;
-	override get message() {
-		return `The provider answered ${this.status} ${this.statusText}`;
-	}
-	get userMessage() {
-		return userText`The provider couldn't list its models just now. Try again in a few minutes.`;
-	}
-}
-
-/** No connection to the provider: refused, no such host, or no answer in time. */
-export class DiscoveryUnreachable
-	extends Schema.TaggedError<DiscoveryUnreachable>()("DiscoveryUnreachable", {
-		cause: Schema.Defect(),
-	})
-	implements DomainError
-{
-	readonly isRetryable = true;
-	override readonly [ErrorReporter.severity] = "Warn" as const;
-	override get message() {
-		return `The provider could not be reached: ${String(this.cause)}`;
-	}
-	get userMessage() {
-		return userText`We can't reach the provider. Check its address, and that the server is running if it's your own. Then try again.`;
-	}
-}
-
-/** The network policy refused the provider's address before anything was sent. */
-export class DiscoveryAddressRefused
-	extends Schema.TaggedError<DiscoveryAddressRefused>()("DiscoveryAddressRefused", {
-		cause: Schema.instanceOf(EgressRefused),
-	})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Warn" as const;
-	override get message() {
-		return `The network policy refused the provider's address: ${this.cause.reason}`;
-	}
-	get userMessage() {
-		return userText`We can't send requests to the provider's address. ${this.cause.userMessage}`;
-	}
-}
-
-/**
- * The provider's answer isn't a model list we can read: a 4xx other than 401
- * or 403 (usually a wrong address), or a body that isn't a model list.
- */
-export class ModelListUnreadable
-	extends Schema.TaggedError<ModelListUnreadable>()("ModelListUnreadable", {
-		/** What was wrong with the answer, for the logs. */
-		problem: Schema.String,
-		/** The HTTP status, when the provider answered with an error. */
-		status: Schema.optional(Schema.Finite),
-	})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Warn" as const;
-	override get message() {
-		return this.problem;
-	}
-	get userMessage() {
-		return userText`The provider didn't send a model list we can read. Check the address is for the provider's API, then try again.`;
-	}
-}
-
-/** The provider's model list is bigger than we accept: too many bytes or too many models. */
-export class ModelListTooLarge
-	extends Schema.TaggedError<ModelListTooLarge>()("ModelListTooLarge", {
-		/** Which limit it went over, for the logs. */
-		problem: Schema.String,
-	})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Warn" as const;
-	override get message() {
-		return this.problem;
-	}
-	get userMessage() {
-		return userText`The provider lists more models than we can take. Add the models you want by hand instead.`;
-	}
-}
 
 /** Why asking a provider for its models failed. */
 export const DiscoveryFailure = Schema.Union([
@@ -350,7 +216,7 @@ function refusal(response: Response): DiscoveryFailure {
 /** The failure for a request, or a read of its answer, that failed before the whole answer arrived. */
 function unreachable(cause: unknown): DiscoveryUnreachable | DiscoveryAddressRefused {
 	return cause instanceof EgressRefused && cause.reason !== "unresolved"
-		? new DiscoveryAddressRefused({ cause })
+		? new DiscoveryAddressRefused({ rule: cause.reason, reason: cause.userMessage })
 		: new DiscoveryUnreachable({ cause });
 }
 

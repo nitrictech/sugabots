@@ -119,13 +119,16 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly turnId: string;
 	};
 	/**
-	 * The bot `botId`'s turn in the chat was given up with no active
-	 * turn left to end: it could not open, or its workflow failed while none
-	 * was running. `outcome` is how it ended.
+	 * The bot `botId`'s turn on `triggerMessageId` in the chat, asked for
+	 * `reason`, was given up with no active turn left to end: it could not
+	 * open, or its workflow failed while none was running. `outcome` is how it
+	 * ended.
 	 */
 	TurnAbandoned: {
 		readonly chatId: string;
 		readonly botId: string;
+		readonly triggerMessageId: string;
+		readonly reason: TurnReason;
 		readonly outcome: Turns.Ended;
 	};
 	/**

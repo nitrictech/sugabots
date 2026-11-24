@@ -166,6 +166,8 @@ describe("the chat event stream", () => {
 				ChatEvent.TurnAbandoned({
 					chatId,
 					botId,
+					triggerMessageId: crypto.randomUUID(),
+					reason: "mention",
 					outcome: { state: "failed", error: noModel },
 				}),
 			),
@@ -188,7 +190,15 @@ describe("the chat event stream", () => {
 
 	it("shows nothing of a turn given up as cancelled", () => {
 		expect(
-			sent(ChatEvent.TurnAbandoned({ chatId, botId, outcome: { state: "cancelled" } })),
+			sent(
+				ChatEvent.TurnAbandoned({
+					chatId,
+					botId,
+					triggerMessageId: crypto.randomUUID(),
+					reason: "mention",
+					outcome: { state: "cancelled" },
+				}),
+			),
 		).toEqual([]);
 	});
 

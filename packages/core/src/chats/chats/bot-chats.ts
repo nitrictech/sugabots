@@ -10,7 +10,7 @@ import { bot, chat } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import type { FloorControl } from "../floor/floor-control.ts";
 import { madeByMembers } from "../store/participants.ts";
-import { Chats } from "./chats.ts";
+import { AskerChats } from "./asker-chats.ts";
 
 /**
  * What a bot does to chats for the member whose message it is answering, with
@@ -36,7 +36,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("BotChats");
-	const chats = yield* Chats.Service;
+	const chats = yield* AskerChats.Service;
 
 	return Service.of({
 		start: (bot, input) =>
@@ -86,12 +86,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-/**
- * Suspended, because `Chats` reaches the turn's steps, which reach this
- * module: `Chats.layer` is read once the layer is built, not while the
- * modules load.
- */
-export const layer = Layer.suspend(() => layerNoDeps.pipe(Layer.provide(Chats.layer)));
+export const layer = layerNoDeps.pipe(Layer.provide(AskerChats.layer));
 
 /** The bot, where it is, and the member it acts for, if any. */
 export interface Bot {
@@ -151,7 +146,7 @@ export type Refused =
 	| NoBotWithHandle
 	| NotAProjectChat
 	| ChatHiddenFromAsker
-	| Chats.BotUnavailable
+	| AskerChats.BotUnavailable
 	| FloorControl.BotHasNoModel;
 
 export class NoBotWithHandle extends Data.TaggedError("NoBotWithHandle") implements UserFacing {

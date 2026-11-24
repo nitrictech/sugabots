@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { seedWebhookTrigger } from "../../authentication/seed.test-support.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
@@ -200,11 +201,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				{ botId, projectId: ownProjectId, askerId: memberId },
 				standup,
 			);
-			const automations = onPostgresAs(memberId)(Context.get(services, Automations.Service));
-			await automations.addTrigger(
-				{ projectId: ownProjectId, automationId: made.id },
-				{ kind: "webhook" },
-			);
+			// A trigger set up in settings, as the web app would add it.
+			await seedWebhookTrigger(made.id, workspaceId, { kind: "bearer" }, null);
 
 			await expect(
 				bots.update({ botId, projectId: ownProjectId, askerId: memberId }, made.id, {

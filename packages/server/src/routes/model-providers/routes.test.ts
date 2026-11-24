@@ -1,14 +1,17 @@
 import type { ModelProvider } from "@sugabots/contracts";
-import { ResourceHidden } from "@sugabots/core/authorization/access";
-import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
-import { ModelProviderStore } from "@sugabots/core/providers/model-providers/model-provider-store";
-import { DiscoveryUnreachable } from "@sugabots/core/providers/model-providers/remote";
-import { EgressRefused } from "@sugabots/core/providers/network/egress";
-import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import {
+	DiscoveryUnreachable,
+	ModelProviderNameConflict,
+	ProviderActivationRequiresCredential,
+	UrlNotAllowed,
+} from "@sugabots/contracts/errors/providers";
+import { Operations } from "@sugabots/core/operations/registry";
+import type { Principal } from "@sugabots/core/principal";
 import { unimplemented } from "@sugabots/core/testing";
+import { userText } from "@sugabots/errors";
 import { Effect, Layer } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { MemberResolver } from "../../http/app.test-support.ts";
 import {
 	createTestApp,
@@ -18,9 +21,11 @@ import {
 } from "../../http/app.test-support.ts";
 
 /**
- * The model provider routes over doubles of `ModelProviderSetup`: what each
- * request asks of it and what each refusal means over HTTP. The setup's own
- * rules run against Postgres in `model-providers/model-providers.test.ts`.
+ * The model provider routes over doubles of the model providers operations:
+ * which principal each operation is called for, with what, and what each
+ * refusal means over HTTP. Who may do what is decided, and tested, in core;
+ * the providers' own rules run against Postgres in
+ * `model-providers/model-providers.test.ts`.
  */
 
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
@@ -53,41 +58,45 @@ const groq: ModelProvider = {
 	models: [],
 };
 
-const app = (providers: Partial<ModelProviderSetup.Interface>) =>
+/** The app with `operations` as the only operations it has. */
+const app = (operations: Partial<Operations.Interface>) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolveMember), unimplemented(ModelProviderSetup.Service, providers)),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(Operations.Service, operations)),
 	);
+
+/** The member a principal is signed in as, as the session authenticator built it. */
+const memberOf = (principal: Principal) =>
+	principal._tag === "MemberSession" ? principal.member : undefined;
 
 describe("model provider routes", () => {
 	it("adds a built-in provider as the member asking", async () => {
-		let askedAs: string | undefined;
-		const create = vi.fn<ModelProviderSetup.Interface["create"]>(() =>
-			Effect.map(CurrentActor.Service, ({ memberId }) => {
-				askedAs = memberId;
-				return groq;
-			}),
-		);
-
-		const response = await app({ create }).request(root, {
+		let asked: unknown;
+		const response = await app({
+			"modelProviders.create": (principal, input) =>
+				Effect.sync(() => {
+					asked = { ...input, memberId: memberOf(principal) };
+					return groq;
+				}),
+		}).request(root, {
 			method: "POST",
 			headers,
 			body: JSON.stringify({ builtIn: "groq", apiKey: "gsk-test" }),
 		});
 
 		expect(response.status).toBe(201);
-		expect(create).toHaveBeenCalledWith({
+		expect(asked).toEqual({
 			workspace: WORKSPACE_ID,
 			provider: { builtIn: "groq", apiKey: "gsk-test" },
+			memberId: USER_ID,
 		});
-		expect(askedAs).toBe(USER_ID);
 	});
 
 	it("reports an address the network policy refuses as a bad request, in its own words", async () => {
+		const refusal =
+			"That address is on a local or private network, which this server doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.";
 		const response = await app({
-			create: () =>
-				Effect.fail(
-					new UrlNotAllowed({ refusal: new EgressRefused({ reason: "privateNetwork" }) }),
-				),
+			"modelProviders.create": () =>
+				Effect.fail(new UrlNotAllowed({ refusal: userText`${refusal}` })),
 		}).request(root, {
 			method: "POST",
 			headers,
@@ -97,14 +106,14 @@ describe("model provider routes", () => {
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message:
-				"That address is on a local or private network, which this server doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.",
+			message: refusal,
+			error: { _tag: "UrlNotAllowed", userMessage: refusal, isRetryable: false },
 		});
 	});
 
 	it("reports a name already used in the workspace as a conflict", async () => {
 		const response = await app({
-			create: () => Effect.fail(new ModelProviderStore.ModelProviderNameConflict()),
+			"modelProviders.create": () => Effect.fail(new ModelProviderNameConflict()),
 		}).request(root, {
 			method: "POST",
 			headers,
@@ -119,20 +128,20 @@ describe("model provider routes", () => {
 	});
 
 	it("passes a change through, and reports activation without a key as a bad request", async () => {
-		const update = vi.fn<ModelProviderSetup.Interface["update"]>(() =>
-			Effect.fail(
-				new ModelProviderSetup.ProviderActivationRequiresCredential({ missing: "api-key" }),
-			),
-		);
-
-		const response = await app({ update }).request(`${root}/${PROVIDER_ID}`, {
+		let asked: unknown;
+		const response = await app({
+			"modelProviders.update": (_principal, input) => {
+				asked = input;
+				return Effect.fail(new ProviderActivationRequiresCredential({ missing: "api-key" }));
+			},
+		}).request(`${root}/${PROVIDER_ID}`, {
 			method: "PATCH",
 			headers,
 			body: JSON.stringify({ active: true }),
 		});
 
 		expect(response.status).toBe(400);
-		expect(update).toHaveBeenCalledWith({
+		expect(asked).toEqual({
 			workspace: WORKSPACE_ID,
 			providerId: PROVIDER_ID,
 			changes: { active: true },
@@ -141,7 +150,7 @@ describe("model provider routes", () => {
 
 	it("answers a workspace hidden from the caller as not found", async () => {
 		const response = await app({
-			list: () => Effect.fail(new ResourceHidden({ resource: "workspace" })),
+			"modelProviders.list": () => Effect.fail(new ResourceHidden({ resource: "workspace" })),
 		}).request(root, { headers });
 
 		expect(response.status).toBe(404);
@@ -149,7 +158,7 @@ describe("model provider routes", () => {
 
 	it("keeps what a provider or the network said about a failed refresh out of the response", async () => {
 		const response = await app({
-			discoverModels: () =>
+			"modelProviders.discoverModels": () =>
 				Effect.fail(
 					new DiscoveryUnreachable({ cause: new Error("getaddrinfo ENOTFOUND 10.0.0.7") }),
 				),

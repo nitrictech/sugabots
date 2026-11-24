@@ -59,7 +59,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("AssistantGuide");
 	const projectAdministration = yield* ProjectAdministration.Service;
 	const bots = yield* BotAdministration.Service;
-	const view = yield* ChatView.Service;
+	const view = yield* ChatView.ForAssistantGuide;
 	const { webAppUrl } = yield* ServerSettings.Service;
 
 	/** `path` from the web app's root, as a link the member can follow. */
@@ -283,7 +283,11 @@ export const layerNoDeps = Layer.effect(Service, make);
  */
 export const layer = Layer.suspend(() =>
 	layerNoDeps.pipe(
-		Layer.provide([ProjectAdministration.layer, BotAdministration.layer, ChatView.layer]),
+		Layer.provide([
+			ProjectAdministration.layer,
+			BotAdministration.layer,
+			ChatView.forAssistantGuideLayer,
+		]),
 	),
 );
 

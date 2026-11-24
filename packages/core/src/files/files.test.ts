@@ -1,7 +1,7 @@
 import { MAX_FILE_CONTENT_CHARACTERS } from "@sugabots/contracts";
 import { eq, like } from "drizzle-orm";
 import { Effect, Layer, Stream } from "effect";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { seedChat } from "../chats/seed.test-support.ts";
 import {
 	blobDeletion,
@@ -17,11 +17,12 @@ import {
 	workspace,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { asMember } from "../operations/chats/testing.ts";
+import { type CallOperation, servedOperations } from "../operations/testing.ts";
 import { Secrets } from "../secrets/secrets.ts";
 import { ServerSettings } from "../server-settings/server-settings.ts";
 import { defaultProjectOf } from "../workspaces/projects/project-reads.ts";
 import { seedProject } from "../workspaces/projects/seed.test-support.ts";
-import { servedOnPostgresAs } from "../workspaces/testing.ts";
 import { ChatFileStore } from "./chat-file-store.ts";
 import { Files } from "./files.ts";
 import { FilePages } from "./pages.ts";
@@ -37,6 +38,14 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 	let projectId: string;
 	/** A bot outside the project, working in a chat of its own. */
 	let botElsewhere: Files.BotInChat;
+	let call: CallOperation;
+
+	beforeAll(async () => {
+		call = await servedOperations();
+	});
+
+	/** What `memberId`, signed in, reads and deletes of the files in chats. */
+	const filesAs = (memberId: string) => asMember(call, memberId).files;
 
 	const authoring = async () => ({
 		service: await runOnPostgres(Effect.provide(Files.Authoring, Files.authoringLayer)),
@@ -93,22 +102,30 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 	});
 
 	describe("pages on the content origin", () => {
-		const pagesAt = (contentOrigin: string | undefined) =>
-			servedOnPostgresAs(
-				FilePages.Service,
-				FilePages.layer.pipe(
-					Layer.provide(
-						Layer.succeed(
-							ServerSettings.Service,
-							ServerSettings.fromUrls({
-								isProduction: false,
-								publicUrl: "https://sugabots.example.com",
-								...(contentOrigin ? { contentOrigin } : {}),
-							}),
-						),
-					),
+		/**
+		 * A server with its content origin at `contentOrigin`: what a member,
+		 * signed in, is given of its pages' addresses, and what an address opens.
+		 */
+		const pagesAt = async (contentOrigin: string | undefined) => {
+			const settings = ServerSettings.fromUrls({
+				isProduction: false,
+				publicUrl: "https://sugabots.example.com",
+				...(contentOrigin ? { contentOrigin } : {}),
+			});
+			const served = await servedOperations({ serverSettings: settings });
+			const pages = await runOnPostgres(
+				Effect.provide(
+					FilePages.Service,
+					FilePages.layer.pipe(Layer.provide(Layer.succeed(ServerSettings.Service, settings))),
 				),
 			);
+			return (memberId: string) => ({
+				address: async (at: { fileId: string; version: number }) =>
+					(await asMember(served, memberId).files.pageAddress(at.fileId, at.version)).url ??
+					undefined,
+				open: (token: string) => runOnPostgres(pages.open(token)),
+			});
+		};
 		const aPage = async () => {
 			const { service } = await authoring();
 			return runOnPostgres(
@@ -287,15 +304,14 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			}),
 		);
 
-		const reader = (await servedOnPostgresAs(Files.Service, Files.layer))(editorId);
-		const at = { fileId: made.id };
-		expect(await reader.get(at)).toMatchObject({
+		const reader = filesAs(editorId);
+		expect(await reader.get(made.id)).toMatchObject({
 			version: 2,
 			createdBy: { name: "Writer" },
 			content: "# Launch plan\n\n## Goals\n\nShip by Friday.\n\n## Risks\n\nNone yet.\n",
 		});
-		expect((await reader.versions(at)).map((version) => version.number)).toEqual([2, 1]);
-		expect(await reader.getVersion({ ...at, version: 1 })).toMatchObject({
+		expect((await reader.versions(made.id)).map((version) => version.number)).toEqual([2, 1]);
+		expect(await reader.getVersion(made.id, 1)).toMatchObject({
 			version: 2,
 			shownVersion: { number: 1 },
 			content: expect.stringContaining("Ship.\n"),
@@ -369,8 +385,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			service.create(by, { kind: "markdown", title: "Private", content: "# Private" }),
 		);
 
-		const outsider = (await servedOnPostgresAs(Files.Service, Files.layer))(outsiderId);
-		await expect(outsider.get({ fileId: made.id })).rejects.toMatchObject({
+		await expect(filesAs(outsiderId).get(made.id)).rejects.toMatchObject({
 			_tag: "ResourceHidden",
 		});
 		expect(await failureOf(service.read(botElsewhere, made.id))).toMatchObject({
@@ -384,14 +399,15 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			service.create(by, { kind: "markdown", title: "Draft", content: "# One" }),
 		);
 		await runOnPostgres(service.replace(by, { fileId: made.id, baseVersion: 1, content: "# Two" }));
-		const as = await servedOnPostgresAs(Files.Service, Files.layer);
-		const at = { fileId: made.id };
+		await expect(filesAs(editorId).remove(made.id)).rejects.toMatchObject({
+			_tag: "ActionForbidden",
+		});
+		await filesAs(adminId).remove(made.id);
 
-		await expect(as(editorId).remove(at)).rejects.toMatchObject({ _tag: "ActionForbidden" });
-		await as(adminId).remove(at);
-
-		await expect(as(editorId).get(at)).rejects.toMatchObject({ _tag: "ResourceHidden" });
-		expect(await as(editorId).listInProject({ projectId })).toEqual([]);
+		await expect(filesAs(editorId).get(made.id)).rejects.toMatchObject({
+			_tag: "ResourceHidden",
+		});
+		expect(await filesAs(editorId).listInProject(projectId)).toEqual([]);
 		const versionsLeft = await onDatabase((db) =>
 			db.select().from(fileVersion).where(eq(fileVersion.fileId, made.id)),
 		);
@@ -406,22 +422,20 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		const made = await runOnPostgres(
 			service.create(botElsewhere, { kind: "markdown", title: "Diary", content: "# Diary" }),
 		);
-		const as = await servedOnPostgresAs(Files.Service, Files.layer);
-
-		expect(await as(editorId).get({ fileId: made.id })).toMatchObject({ title: "Diary" });
+		expect(await filesAs(editorId).get(made.id)).toMatchObject({ title: "Diary" });
 		expect(
 			(
-				await as(editorId).listInProject({
-					projectId: await runOnPostgres(defaultProjectOf(botElsewhere.botId)),
-				})
+				await filesAs(editorId).listInProject(
+					await runOnPostgres(defaultProjectOf(botElsewhere.botId)),
+				)
 			).map(({ id }) => id),
 		).toEqual([made.id]);
 		for (const somebodyElse of [outsiderId, adminId]) {
-			await expect(as(somebodyElse).get({ fileId: made.id })).rejects.toMatchObject({
+			await expect(filesAs(somebodyElse).get(made.id)).rejects.toMatchObject({
 				_tag: "ResourceHidden",
 			});
 		}
-		await expect(as(editorId).listInProject({ projectId })).resolves.toEqual([]);
+		await expect(filesAs(editorId).listInProject(projectId)).resolves.toEqual([]);
 	});
 
 	it("lists the files sent on a project's messages beside those bots wrote, and only those sent", async () => {
@@ -521,8 +535,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		};
 		const chart = await attachTo(by.chatId, by.botId, "chart.csv");
 
-		const as = await servedOnPostgresAs(Files.Service, Files.layer);
-		const listed = await as(editorId).listInProject({ projectId });
+		const listed = await filesAs(editorId).listInProject(projectId);
 
 		expect(listed.map(({ id }) => id).sort()).toEqual([written.id, sent.id, chart.id].sort());
 		expect(listed.find(({ id }) => id === sent.id)).toMatchObject({
@@ -536,7 +549,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			author: "Writer",
 		});
 		// Only a written file is read here; a sent one is read through its chat.
-		await expect(as(editorId).get({ fileId: sent.id })).rejects.toMatchObject({
+		await expect(filesAs(editorId).get(sent.id)).rejects.toMatchObject({
 			_tag: "ResourceHidden",
 		});
 	});

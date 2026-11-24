@@ -68,6 +68,19 @@ export const fromPostgres = Effect.gen(function* () {
 });
 
 /**
+ * Moves every blob under the key `from` to the same key under `to`, for
+ * `BlobStore.make`. One that has already moved is under `to` alone, so it
+ * is left as it is.
+ */
+export const moveFolderInPostgres = (from: BlobStore.Key, to: BlobStore.Key) =>
+	query((db) =>
+		db
+			.update(blob)
+			.set({ key: sql<BlobStore.Key>`${to} || substr(${blob.key}, length(${from}) + 1)` })
+			.where(like(blob.key, underPattern(from))),
+	).pipe(Effect.asVoid);
+
+/**
  * The largest blob kept. `put` holds a blob in memory whole to insert it, so
  * this bounds what one upload costs the server; larger files belong in an
  * external blob store.

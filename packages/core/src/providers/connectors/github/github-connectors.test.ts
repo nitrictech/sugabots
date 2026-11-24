@@ -1,10 +1,14 @@
 import { createHmac } from "node:crypto";
+import type { InputOf, OperationName, OutputOf } from "@sugabots/contracts/operations";
 import { Effect, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebhookAuthentication } from "../../../authentication/webhook.ts";
 import { closeDatabase, runOnPostgres } from "../../../database/testing.ts";
-import { onPostgresAs } from "../../../workspaces/testing.ts";
 import type { Connected } from "./connected.ts";
 import {
+	egressToGitHub,
+	type GitHubSetup,
+	gitHubSetupAt,
 	INSTALLATION_ID,
 	installedConnector,
 	json,
@@ -12,12 +16,10 @@ import {
 	madeConnector,
 	mintsTokens,
 	type Route,
-	reachingGitHub,
 	standInGitHub,
 	WEBHOOK_SECRET,
 	workspaceWithProject,
 } from "./github.test-support.ts";
-import { GitHubApps } from "./github-app.ts";
 import { GitHubConnectors } from "./github-connectors.ts";
 import * as GitHubReads from "./github-reads.ts";
 
@@ -168,33 +170,40 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 		jobLogs,
 	);
 	let connectors: GitHubConnectors.Interface;
-	let gitHubApps: GitHubApps.Interface;
+	let setup: GitHubSetup;
 	let fixture: Awaited<ReturnType<typeof workspaceWithProject>>;
 	let connectorId: string;
 
 	beforeAll(async () => {
-		[gitHubApps, connectors] = await runOnPostgres(
-			Effect.all([GitHubApps.Service, GitHubConnectors.Service]).pipe(
-				Effect.provide(Layer.mergeAll(GitHubApps.layer, GitHubConnectors.layer)),
-				Effect.provide(reachingGitHub(github.fetch, "https://sugabots.example.com")),
+		setup = await gitHubSetupAt(github.fetch, "https://sugabots.example.com");
+		connectors = await runOnPostgres(
+			Effect.provide(
+				GitHubConnectors.Service,
+				GitHubConnectors.layer.pipe(Layer.provide(egressToGitHub(github.fetch))),
 			),
 		);
 		fixture = await workspaceWithProject("Connectors");
-		connectorId = await installedConnector(gitHubApps, fixture);
+		connectorId = await installedConnector(setup, fixture);
 	});
 
 	afterAll(closeDatabase);
 
-	const as = (memberId: string) => onPostgresAs(memberId)(connectors);
+	/** Calls the operation `name` with `input`, signed in as `memberId`. */
+	const as =
+		(memberId: string) =>
+		async <Name extends OperationName>(name: Name, input: InputOf<Name>): Promise<OutputOf<Name>> =>
+			setup.call(await setup.member(memberId), name, input);
 	const project = () => ({ workspaceId: fixture.workspaceId, projectId: fixture.projectId });
 
 	it("lists what the app reaches, for someone who manages the bot's connectors", async () => {
 		const { projectId, adminId, editorId } = fixture;
 
 		await expect(
-			as(editorId).reachableRepositories({ projectId, connectorId }),
+			as(editorId)("gitHubConnectors.reachableRepositories", { projectId, connectorId }),
 		).rejects.toMatchObject({ _tag: "ActionForbidden" });
-		expect(await as(adminId).reachableRepositories({ projectId, connectorId })).toEqual([
+		expect(
+			await as(adminId)("gitHubConnectors.reachableRepositories", { projectId, connectorId }),
+		).toEqual([
 			{ repository: "acme/web", private: true },
 			{ repository: "acme/infra", private: false },
 		]);
@@ -204,14 +213,28 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 		const { projectId, adminId, editorId } = fixture;
 
 		await expect(
-			as(editorId).addRepository({ projectId, connectorId, repository: "acme/web" }),
+			as(editorId)("gitHubConnectors.addRepository", {
+				projectId,
+				connectorId,
+				repository: "acme/web",
+			}),
 		).rejects.toMatchObject({ _tag: "ActionForbidden" });
 		await expect(
-			as(adminId).addRepository({ projectId, connectorId, repository: "acme-labs/lab" }),
+			as(adminId)("gitHubConnectors.addRepository", {
+				projectId,
+				connectorId,
+				repository: "acme-labs/lab",
+			}),
 		).rejects.toMatchObject({ _tag: "RepositoryUnreachable" });
-		await as(adminId).addRepository({ projectId, connectorId, repository: "ACME/Web" });
+		await as(adminId)("gitHubConnectors.addRepository", {
+			projectId,
+			connectorId,
+			repository: "ACME/Web",
+		});
 
-		expect(await as(editorId).repositories({ projectId, connectorId })).toMatchObject({
+		expect(
+			await as(editorId)("gitHubConnectors.repositories", { projectId, connectorId }),
+		).toMatchObject({
 			account: "acme",
 			repositories: [{ repository: "acme/web", addedByName: "Ada" }],
 		});
@@ -457,12 +480,12 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 		const { projectId, adminId } = fixture;
 		const connected = await runOnPostgres(connectors.forProject(project()));
 
-		const added = await as(adminId).addRepository({
+		const added = await as(adminId)("gitHubConnectors.addRepository", {
 			projectId,
 			connectorId,
 			repository: "acme/infra",
 		});
-		const left = await as(adminId).removeRepository({
+		const left = await as(adminId)("gitHubConnectors.removeRepository", {
 			projectId,
 			connectorId,
 			repository: "acme/web",
@@ -479,11 +502,15 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 	it("keeps a repository GitHub renames, by its id", async () => {
 		const renaming = await workspaceWithProject("Renaming");
 		const { projectId, adminId } = renaming;
-		const renamedId = await installedConnector(gitHubApps, renaming);
-		await as(adminId).addRepository({ projectId, connectorId: renamedId, repository: "acme/web" });
+		const renamedId = await installedConnector(setup, renaming);
+		await as(adminId)("gitHubConnectors.addRepository", {
+			projectId,
+			connectorId: renamedId,
+			repository: "acme/web",
+		});
 		renamed = true;
 		try {
-			const listed = await as(adminId).addRepository({
+			const listed = await as(adminId)("gitHubConnectors.addRepository", {
 				projectId,
 				connectorId: renamedId,
 				repository: "acme/infra",
@@ -507,17 +534,17 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 
 	it("refuses to choose repositories before the connector's app is installed", async () => {
 		const pending = await workspaceWithProject("Pending");
-		const { connectorId: pendingId } = await madeConnector(gitHubApps, pending);
+		const { connectorId: pendingId } = await madeConnector(setup, pending);
 		const asAdmin = as(pending.adminId);
 		const which = { projectId: pending.projectId, connectorId: pendingId };
 
-		await expect(asAdmin.reachableRepositories(which)).rejects.toMatchObject({
+		await expect(asAdmin("gitHubConnectors.reachableRepositories", which)).rejects.toMatchObject({
 			_tag: "GitHubAppNotInstalled",
 		});
-		await expect(asAdmin.addRepository({ ...which, repository: "acme/web" })).rejects.toMatchObject(
-			{ _tag: "GitHubAppNotInstalled" },
-		);
-		expect(await asAdmin.repositories(which)).toEqual({
+		await expect(
+			asAdmin("gitHubConnectors.addRepository", { ...which, repository: "acme/web" }),
+		).rejects.toMatchObject({ _tag: "GitHubAppNotInstalled" });
+		expect(await asAdmin("gitHubConnectors.repositories", which)).toEqual({
 			account: null,
 			repositories: [],
 		});
@@ -527,7 +554,10 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 		const other = await workspaceWithProject("Other");
 
 		await expect(
-			as(other.adminId).repositories({ projectId: other.projectId, connectorId }),
+			as(other.adminId)("gitHubConnectors.repositories", {
+				projectId: other.projectId,
+				connectorId,
+			}),
 		).rejects.toMatchObject({ _tag: "NotGitHubConnector" });
 	});
 
@@ -546,25 +576,28 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 		});
 		const signed = (secret: string) =>
 			`sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+		/** A delivery to `to`, signed with `signature`, admitted by core's webhook authenticator and read. */
 		const deliver = (to: string, signature: string) =>
 			runOnPostgres(
-				connectors.receiveDelivery({
+				Effect.provide(WebhookAuthentication.Service, WebhookAuthentication.layer).pipe(
+					Effect.flatMap((webhooks) =>
+						webhooks.github(to, { headers: { "x-hub-signature-256": signature }, body }),
+					),
+				),
+			).then((principal) =>
+				setup.call(principal, "gitHubWebhooks.delivery", {
 					connectorId: to,
-					headers: {
-						"x-github-event": "pull_request",
-						"x-github-delivery": "delivery-1",
-						"x-hub-signature-256": signature,
-					},
+					event: "pull_request",
+					deliveryId: "delivery-1",
 					body,
 				}),
 			);
 
-		it("takes one its app signed, for the connector's workspace", async () => {
+		it("reads one its app signed, for the connector's workspace", async () => {
 			const delivered = await deliver(connectorId, signed(WEBHOOK_SECRET));
 
 			expect(delivered).toMatchObject({
 				workspaceId: fixture.workspaceId,
-				connectorId,
 				deliveryId: "delivery-1",
 				activity: { event: "pull_request_opened", repository: "acme/web", number: 3 },
 			});
@@ -572,10 +605,10 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 
 		it("refuses one signed with another secret, or for no connector", async () => {
 			await expect(deliver(connectorId, signed("not-the-secret"))).rejects.toMatchObject({
-				_tag: "DeliveryRefused",
+				_tag: "WebhookRefused",
 			});
 			await expect(deliver(crypto.randomUUID(), signed(WEBHOOK_SECRET))).rejects.toMatchObject({
-				_tag: "DeliveryRefused",
+				_tag: "WebhookRefused",
 			});
 		});
 	});

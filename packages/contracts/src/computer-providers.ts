@@ -211,6 +211,8 @@ export type ComputerProviderUpdate = typeof computerProviderUpdateSchema.Type;
  */
 export const computerAccessSchema = Schema.Struct({ enabled: Schema.Boolean });
 
+export type ComputerAccess = typeof computerAccessSchema.Type;
+
 const byteCountSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /** A folder of a project's computer and how much of its disk it takes. */
@@ -326,6 +328,8 @@ export type ProjectComputerDisk = typeof projectComputerDiskSchema.Type;
 export const computerTemplateSchema = Schema.Struct({
 	state: Schema.NullOr(Schema.Literals(["missing", "building", "ready", "failed"])),
 });
+
+export type ComputerTemplate = typeof computerTemplateSchema.Type;
 
 /**
  * A host a computer may reach: a domain name such as `api.example.com`, or a

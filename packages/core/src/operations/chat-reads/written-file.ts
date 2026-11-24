@@ -1,0 +1,15 @@
+import { chatReadsContracts } from "@sugabots/contracts/operations/chat-reads";
+import { Effect } from "effect";
+import { Files } from "../../files/files.ts";
+import { named } from "../../proofs/proof.ts";
+import { proveReachesFile } from "../../proofs/reaches-file.ts";
+import { defineOperation } from "../operation.ts";
+
+export const writtenFile = defineOperation(chatReadsContracts["files.get"], (principal, input) =>
+	Effect.gen(function* () {
+		const files = yield* Files.Service;
+		return yield* named(principal, input.fileId, (principal, file) =>
+			Effect.flatMap(proveReachesFile(principal, file), files.get),
+		);
+	}),
+);

@@ -1,10 +1,23 @@
+/** How changing a project's computer fails, as the computers operations do. */
+export {
+	ComputerInUse,
+	ComputerMadeMeanwhile,
+	NoComputer,
+	UpgradeFailed,
+} from "@sugabots/contracts/errors/computers";
 export * as ProjectComputers from "./project-computers.ts";
 
 import { posix } from "node:path";
 import { COMPUTER_DISK_WARNING_SHARE, computerDiskShare } from "@sugabots/contracts";
-import { type UserText, userText } from "@sugabots/errors";
+import {
+	ComputerInUse,
+	ComputerMadeMeanwhile,
+	NoComputer,
+	UpgradeFailed,
+} from "@sugabots/contracts/errors/computers";
+import { userText } from "@sugabots/errors";
 import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
-import { Clock, Context, Data, DateTime, Duration, Effect, Layer, Semaphore } from "effect";
+import { Clock, Context, DateTime, Duration, Effect, Layer, Semaphore } from "effect";
 import { Database, query, serviceOperations, type Transaction } from "../database/database.ts";
 import {
 	computerLease,
@@ -15,7 +28,6 @@ import {
 } from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
 import { Egress } from "../providers/network/egress.ts";
-import type { UserFacing } from "../user-message.ts";
 import { reachOf } from "./allowed-hosts.ts";
 import { type DiskUsage, measureDisk } from "./computer-disk.ts";
 import { freeDiskSpace, SET_ASIDE_DIRECTORY } from "./computer-disk-clearing.ts";
@@ -1417,20 +1429,6 @@ function imageOf(access: Computers.ProviderAccess): string {
 	return access.provider === "e2b" ? access.template : access.image;
 }
 
-/** A turn is using the computer, and resetting or upgrading it would pull it out from under the project. */
-export class ComputerInUse extends Data.TaggedError("ComputerInUse") implements UserFacing {
-	get userMessage() {
-		return userText`A bot is using the computer right now. Try again when it has finished.`;
-	}
-}
-
-/** The project has no computer to upgrade, or its provider lost it. */
-export class NoComputer extends Data.TaggedError("NoComputer") implements UserFacing {
-	get userMessage() {
-		return userText`There's no computer to upgrade. Its next one is made from the current image.`;
-	}
-}
-
 /**
  * Locks the project until the caller's transaction ends, for a caller that has
  * destroyed its computer and is about to delete it, so no computer is recorded
@@ -1528,29 +1526,6 @@ export const lockWorkspaceWithoutComputers = (
 		);
 		if (madeMeanwhile) return yield* new ComputerMadeMeanwhile();
 	});
-
-/**
- * A computer was made while its project was being deleted, or its provider
- * removed, so nothing was removed.
- */
-export class ComputerMadeMeanwhile
-	extends Data.TaggedError("ComputerMadeMeanwhile")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`A computer started meanwhile, so nothing was removed. Try again.`;
-	}
-}
-
-/** An upgrade stopped before the project moved; its old computer is untouched. */
-export class UpgradeFailed
-	extends Data.TaggedError("UpgradeFailed")<{ reason: UserText }>
-	implements UserFacing
-{
-	get userMessage() {
-		return this.reason;
-	}
-}
 
 /**
  * What of `credentials` a provider that adds them by `scope` can add: by

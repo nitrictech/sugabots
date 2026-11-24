@@ -1,5 +1,8 @@
+import { userText } from "@sugabots/errors";
+import { eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import {
@@ -7,18 +10,23 @@ import {
 	chatParticipant,
 	member,
 	membership,
+	message,
 	projectBot,
 	projectMember,
+	turn,
 	workspace,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { asMember } from "../../operations/chats/testing.ts";
+import { servedOperations } from "../../operations/testing.ts";
 import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
-import { onPostgresAs } from "../../workspaces/testing.ts";
-import { Chats } from "../chats/chats.ts";
+import { ChatEvents } from "../chat-events.ts";
+import { ChatEvent } from "../events.ts";
 import { seedChat } from "../seed.test-support.ts";
 import { chatServicesForTests } from "../testing.ts";
 import {
 	prepareRunnable,
+	queueTurnForTests,
 	releaseTurn,
 	replyTurnOf,
 	runningTurns,
@@ -36,6 +44,7 @@ import {
  */
 describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", async () => {
 	const services = await chatServicesForTests(EventBus.inProcess({ store: EventStore.inMemory() }));
+	const call = await servedOperations({ chats: services });
 	const execution = onPostgres({ prepare: Context.get(services, TurnExecution.Service).prepare });
 	const turns = onPostgres(Context.get(services, TurnStore.Service));
 	let post: (content: string) => Promise<{ id: string }>;
@@ -119,7 +128,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 		);
 		chatId = chat.id;
 		await onDatabase((db) => db.insert(chatParticipant).values({ chatId, memberId: samId }));
-		const asSam = onPostgresAs(samId)(Context.get(services, Chats.Service));
+		const asSam = asMember(call, samId);
 		post = (content) => asSam.post({ chatId, messageId: crypto.randomUUID(), content });
 	});
 
@@ -211,5 +220,136 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 			expect.objectContaining({ triggerMessageId: asking.id, reason: "collaboration" }),
 			expect.objectContaining({ reason: "mention" }),
 		]);
+	});
+
+	it("waits for a helper whose turn failed and runs again before handing back", async () => {
+		await post("@asker is the release ready?");
+		const asking = await answer(bots.asker.id, "@helper and @checker, can you look?");
+		const failing = await prepareRunnable(execution, await runningTurnOf(bots.helper.id));
+		const runsAgain = await turns.fail(
+			replyTurnOf(failing),
+			{ content: "", toolCalls: [] },
+			{ userMessage: userText`The model is busy.`, mayRunAgain: true },
+		);
+		expect(runsAgain).toBe(true);
+
+		await answer(bots.checker.id, "The tests pass.");
+		// Its workflow holds its lane, to run it again.
+		expect(await running()).toEqual([
+			{ botId: bots.helper.id, triggerMessageId: asking.id, reason: "collaboration" },
+		]);
+
+		await answer(bots.helper.id, "The changelog is fine.");
+		expect(await running()).toEqual([
+			{ botId: bots.asker.id, triggerMessageId: asking.id, reason: "hand_back" },
+		]);
+	});
+
+	it("hands back once a helper's turn is given up before it opened", async () => {
+		await post("@asker is the release ready?");
+		const asking = await answer(bots.asker.id, "@helper and @checker, can you look?");
+		await answer(bots.checker.id, "The tests pass.");
+		await onDatabase((db) => db.delete(projectBot).where(eq(projectBot.botId, bots.helper.id)));
+
+		expect(await execution.prepare(await runningTurnOf(bots.helper.id))).toMatchObject({
+			_tag: "NotRunnable",
+		});
+
+		expect(await running()).toContainEqual({
+			botId: bots.asker.id,
+			triggerMessageId: asking.id,
+			reason: "hand_back",
+		});
+	});
+
+	it("lets a helper read the chat up to the asking message, and its own replies since", async () => {
+		await post("@helper what changed today?");
+		await post("@asker is the release ready?");
+		const asking = await answer(bots.asker.id, "@helper, can you check the release too?");
+		// Its turn answering the member, which the helper's turn waited behind.
+		const ownReply = await answer(bots.helper.id, "Two fixes landed today.");
+		await post("Unrelated: who's up for lunch?");
+
+		const helping = await prepareRunnable(execution, await runningTurnOf(bots.helper.id));
+
+		const read = helping.context.messages.map(({ id }) => id);
+		expect(read).toContain(asking.id);
+		expect(read.at(-1)).toBe(ownReply.id);
+	});
+
+	it("lets a hand-back with no helper's turn behind its asking message read the whole chat", async () => {
+		await post("@asker is the release ready?");
+		const asking = await answer(bots.asker.id, "Let me ask around.");
+		// A helper's reply a migration moved into the chat, whose turn answered another message.
+		const [moved] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					chatId,
+					authorBotId: bots.helper.id,
+					status: "complete",
+					parts: [],
+					content: "The changelog is fine.",
+				})
+				.returning(),
+		);
+		await runOnPostgres(
+			queueTurnForTests({
+				chatId,
+				botId: bots.asker.id,
+				triggerMessageId: asking.id,
+				reason: "hand_back",
+			}),
+		);
+
+		const handingBack = await prepareRunnable(execution, await runningTurnOf(bots.asker.id));
+
+		expect(handingBack.context.messages.at(-1)?.id).toBe(moved?.id);
+	});
+
+	it("owes no hand-back on a message no turn wrote, such as a brief", async () => {
+		// A brief another bot wrote, which a migration moved into the chat with
+		// the turn that answered it, and that turn's workflow ending only now.
+		const [brief] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					chatId,
+					authorBotId: bots.asker.id,
+					status: "complete",
+					parts: [],
+					content: "Check the changelog.",
+				})
+				.returning(),
+		);
+		if (!brief) throw new Error("fixture");
+		await onDatabase((db) =>
+			db.insert(turn).values({
+				chatId,
+				botId: bots.helper.id,
+				triggerMessageId: brief.id,
+				status: "cancelled",
+				reason: "collaboration",
+				model: "test/model",
+				startedAt: new Date(),
+				finishedAt: new Date(),
+			}),
+		);
+
+		await runOnPostgres(
+			transaction(
+				Context.get(services, ChatEvents.Service).emit([
+					ChatEvent.TurnAbandoned({
+						chatId,
+						botId: bots.helper.id,
+						triggerMessageId: brief.id,
+						reason: "collaboration",
+						outcome: { state: "cancelled" },
+					}),
+				]),
+			),
+		);
+
+		expect(await running()).toEqual([]);
 	});
 });

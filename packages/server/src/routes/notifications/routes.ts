@@ -1,33 +1,30 @@
-import { Notifications } from "@sugabots/core/notifications/notifications";
-import { DateTime, Effect } from "effect";
+import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asCurrentUser } from "../../auth/middleware.ts";
+import { operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { asHttpError, refusals } from "../../http/errors.ts";
+import { asHttpError, memberOnly, refusals } from "../../http/errors.ts";
 
-/** The current user's notification settings and presence. */
+/** The notification settings and presence of the member signed in, each endpoint its operation. */
 export const notificationRoutes = HttpApiBuilder.group(ServerApi, "notifications", (handlers) =>
-	Effect.gen(function* () {
-		const notifications = yield* Notifications.Service;
-		return handlers
-			.handle("settings", () => notifications.settings.pipe(asCurrentUser))
+	Effect.map(operationCaller, (callOperation) =>
+		handlers
+			.handle("settings", () => callOperation("notifications.settings", {}).pipe(memberOnly))
 			.handle("updatePreferences", ({ payload }) =>
-				notifications.updatePreferences(payload).pipe(asCurrentUser),
+				callOperation("notifications.updatePreferences", payload).pipe(memberOnly),
 			)
 			.handle("setLevel", ({ params, payload }) =>
-				notifications.setLevel(params, payload.level).pipe(asCurrentUser, asHttpError(refusals)),
+				callOperation("notifications.setLevel", { ...params, level: payload.level }).pipe(
+					asHttpError(refusals),
+				),
 			)
 			.handle("mute", ({ params, payload }) =>
-				notifications
-					.mute(
-						params,
-						payload.until === null ? null : DateTime.toDate(DateTime.makeUnsafe(payload.until)),
-					)
-					.pipe(asCurrentUser, asHttpError(refusals)),
+				callOperation("notifications.mute", { ...params, until: payload.until }).pipe(
+					asHttpError(refusals),
+				),
 			)
-			.handle("sendTest", () => notifications.sendTest.pipe(asCurrentUser))
+			.handle("sendTest", () => callOperation("notifications.sendTest", {}).pipe(memberOnly))
 			.handle("reportPresence", ({ payload }) =>
-				notifications.reportPresence(payload).pipe(asCurrentUser),
-			);
-	}),
+				callOperation("notifications.reportPresence", payload).pipe(memberOnly),
+			),
+	),
 );

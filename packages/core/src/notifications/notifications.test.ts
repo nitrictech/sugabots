@@ -4,17 +4,19 @@ import {
 	handleFromName,
 	type Message,
 	memberStream,
+	type NotificationLevel,
 	type NotificationPreferences,
+	type NotificationSettings,
+	type Presence,
 	type StreamEvent,
 } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CurrentActor } from "../authorization/current-actor.ts";
 import { ChatEvent } from "../chats/events.ts";
 import { seedChat } from "../chats/seed.test-support.ts";
-import { HOST_REQUEST_TOOL } from "../chats/tools/host-request/tool.ts";
+import { HOST_REQUEST_TOOL } from "../chats/tools/host-request/name.ts";
 import { transaction } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
 import {
@@ -38,6 +40,8 @@ import {
 	runOnPostgres,
 	type TestInfrastructure,
 } from "../database/testing.ts";
+import { servedOperations } from "../operations/testing.ts";
+import { authenticators, principals } from "../proofs/world.test-support.ts";
 import { unimplemented } from "../testing.ts";
 import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { Notifications } from "./notifications.ts";
@@ -64,19 +68,30 @@ function clockTime(minutes: number): string {
 /** What the service published on the bus, for every test in the file. */
 const published: { stream: EventStream; event: StreamEvent }[] = [];
 
+/** A bus that keeps what is published in `published`. */
+const capturingBus = unimplemented(EventBus.Service, {
+	publish: async (stream, event) => {
+		published.push({ stream, event });
+	},
+});
+
+/** The notifications operations for one member signed in, by the names these cases use. */
+interface NotificationsAs {
+	readonly settings: Promise<NotificationSettings>;
+	updatePreferences(preferences: NotificationPreferences): Promise<NotificationSettings>;
+	setLevel(place: Notifications.Place, level: NotificationLevel): Promise<void>;
+	mute(place: Notifications.Place, until: Date): Promise<void>;
+	reportPresence(presence: Presence): Promise<void>;
+}
+
 /**
  * The service over the test database's own pool, publishing to `published`,
  * with `run` to call it and `close` to stop what it is still sending.
  */
 async function served() {
 	const scope = Scope.makeUnsafe();
-	const bus = unimplemented(EventBus.Service, {
-		publish: async (stream, event) => {
-			published.push({ stream, event });
-		},
-	});
 	const context = await runOnPostgres(
-		Layer.buildWithScope(Notifications.layer.pipe(Layer.provide(bus)), scope),
+		Layer.buildWithScope(Notifications.layer.pipe(Layer.provide(capturingBus)), scope),
 	);
 	return {
 		run: <A, E>(effect: Effect.Effect<A, E, Notifications.Service | TestInfrastructure>) =>
@@ -91,11 +106,33 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		effect: Effect.Effect<A, E, Notifications.Service | TestInfrastructure>,
 	) => (await service).run(effect);
 	const notifications = () => run(Notifications.Service);
-	const as = <A, E>(
-		memberId: string,
-		effect: Effect.Effect<A, E, CurrentActor.Service | Notifications.Service>,
-	) =>
-		run(effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(memberId))));
+	/**
+	 * The notifications operations, called through the registry for a member
+	 * signed in, publishing to the same bus as `service`.
+	 */
+	const operations = (async () => {
+		const callOperation = await servedOperations({ bus: capturingBus });
+		const signedIn = principals(await authenticators());
+		return { callOperation, signedIn };
+	})();
+	/** What `use` comes to with the notifications operations called for `memberId` signed in. */
+	const as = async <A>(memberId: string, use: (service: NotificationsAs) => Promise<A>) => {
+		const { callOperation, signedIn } = await operations;
+		const principal = await signedIn.member(memberId);
+		return use({
+			get settings() {
+				return callOperation(principal, "notifications.settings", {});
+			},
+			updatePreferences: (chosen) =>
+				callOperation(principal, "notifications.updatePreferences", chosen),
+			setLevel: (place, level) =>
+				callOperation(principal, "notifications.setLevel", { ...place, level }),
+			mute: (place, until) =>
+				callOperation(principal, "notifications.mute", { ...place, until: until.toISOString() }),
+			reportPresence: (presence) =>
+				callOperation(principal, "notifications.reportPresence", presence),
+		});
+	};
 	const emit = async (...events: ChatEvent[]) => {
 		const { handler } = await notifications();
 		await run(transaction(handler(events)));
@@ -305,12 +342,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		});
 
 	const chooseLevel = (memberId: string, level: "all" | "mentions" | "nothing") =>
-		as(
-			memberId,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.updatePreferences(preferences({ level })),
-			),
-		);
+		as(memberId, (service) => service.updatePreferences(preferences({ level })));
 
 	it("tells a member they were mentioned in a project, linking to the message", async () => {
 		const chat = await projectChat();
@@ -473,18 +505,10 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 	it("leaves out somebody who muted the bot or paused", async () => {
 		const chat = await chatWithBot([members.ada.id, members.bob.id, members.cy.id]);
-		await as(
-			members.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.setLevel({ kind: "bot", id: botId }, "nothing"),
-			),
-		);
-		await as(
-			members.cy.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.updatePreferences(
-					preferences({ pausedUntil: new Date(Date.now() + 60_000).toISOString() }),
-				),
+		await as(members.bob.id, (service) => service.setLevel({ kind: "bot", id: botId }, "nothing"));
+		await as(members.cy.id, (service) =>
+			service.updatePreferences(
+				preferences({ pausedUntil: new Date(Date.now() + 60_000).toISOString() }),
 			),
 		);
 
@@ -501,18 +525,15 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		// whichever side of midnight they start and end.
 		const now = new Date();
 		const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-		await as(
-			members.cy.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.updatePreferences(
-					preferences({
-						quietHours: {
-							from: clockTime(minutes + 120),
-							to: clockTime(minutes + 60),
-							timeZone: "UTC",
-						},
-					}),
-				),
+		await as(members.cy.id, (service) =>
+			service.updatePreferences(
+				preferences({
+					quietHours: {
+						from: clockTime(minutes + 120),
+						to: clockTime(minutes + 60),
+						timeZone: "UTC",
+					},
+				}),
 			),
 		);
 
@@ -529,10 +550,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			sequence: 1,
 		};
 
-		await as(
-			members.ada.id,
-			Effect.flatMap(Notifications.Service, (service) => service.reportPresence(looking)),
-		);
+		await as(members.ada.id, (service) => service.reportPresence(looking));
 
 		expect(published).toEqual([
 			{
@@ -545,19 +563,11 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	it("lets a project's level quiet its bots, and a bot's level win over it", async () => {
 		const chat = await projectChat();
 		for (const member of [members.ada, members.bob]) {
-			await as(
-				member.id,
-				Effect.flatMap(Notifications.Service, (service) =>
-					service.setLevel({ kind: "project", id: projectId }, "nothing"),
-				),
+			await as(member.id, (service) =>
+				service.setLevel({ kind: "project", id: projectId }, "nothing"),
 			);
 		}
-		await as(
-			members.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.setLevel({ kind: "bot", id: botId }, "all"),
-			),
-		);
+		await as(members.bob.id, (service) => service.setLevel({ kind: "bot", id: botId }, "all"));
 
 		await emit(await botReplied(chat, "Shipped."));
 
@@ -568,12 +578,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	it("quiets a muted bot's replies in a project, and not what members post there", async () => {
 		const chat = await projectChat();
 		await chooseLevel(members.bob.id, "all");
-		await as(
-			members.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.setLevel({ kind: "bot", id: botId }, "nothing"),
-			),
-		);
+		await as(members.bob.id, (service) => service.setLevel({ kind: "bot", id: botId }, "nothing"));
 
 		await emit(await botReplied(chat, "Here is the checklist."));
 		await emit(memberPosted(chat, members.ada, "Thanks, Scout."));
@@ -586,18 +591,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	it("quiets a bot muted for a while until the mute ends, then keeps its level", async () => {
 		const chat = await chatWithBot([members.ada.id, members.bob.id]);
 		const muteUntil = (member: { id: string }, until: Date) =>
-			as(
-				member.id,
-				Effect.flatMap(Notifications.Service, (service) =>
-					service.mute({ kind: "bot", id: botId }, until),
-				),
-			);
-		await as(
-			members.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.setLevel({ kind: "bot", id: botId }, "all"),
-			),
-		);
+			as(member.id, (service) => service.mute({ kind: "bot", id: botId }, until));
+		await as(members.bob.id, (service) => service.setLevel({ kind: "bot", id: botId }, "all"));
 		await muteUntil(members.ada, new Date(Date.now() + 60_000));
 		await muteUntil(members.bob, new Date(Date.now() - 60_000));
 
@@ -605,10 +600,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		expect(await deliveredTo(members.bob.id)).toHaveLength(1);
 		expect(sentTo(members.ada.id)).toEqual([]);
-		const settings = await as(
-			members.bob.id,
-			Effect.flatMap(Notifications.Service, (service) => service.settings),
-		);
+		const settings = await as(members.bob.id, (service) => service.settings);
 		expect(settings.bots).toEqual({ [botId]: "all" });
 		expect(settings.mutedUntil.bots).toEqual({});
 	});
@@ -616,18 +608,10 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	it("quiets every bot in a project muted for a while, even one with a level of its own", async () => {
 		const chat = await projectChat();
 		for (const member of [members.ada, members.bob]) {
-			await as(
-				member.id,
-				Effect.flatMap(Notifications.Service, (service) =>
-					service.setLevel({ kind: "bot", id: botId }, "all"),
-				),
-			);
+			await as(member.id, (service) => service.setLevel({ kind: "bot", id: botId }, "all"));
 		}
-		await as(
-			members.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.mute({ kind: "project", id: projectId }, new Date(Date.now() + 60_000)),
-			),
+		await as(members.bob.id, (service) =>
+			service.mute({ kind: "project", id: projectId }, new Date(Date.now() + 60_000)),
 		);
 
 		await emit(await botReplied(chat, "Shipped."));
@@ -729,11 +713,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 	it("tells somebody of every run of their automation when they chose to", async () => {
 		const run = await automationRunElsewhere({ state: "completed" }, members.bob.id);
-		await as(
-			members.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.updatePreferences(preferences({ automationRuns: "all" })),
-			),
+		await as(members.bob.id, (service) =>
+			service.updatePreferences(preferences({ automationRuns: "all" })),
 		);
 
 		await emit(runSettled(run));
@@ -855,11 +836,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				willRetry: false,
 			});
 		};
-		await as(
-			members.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.updatePreferences(preferences({ turnFailures: false })),
-			),
+		await as(members.bob.id, (service) =>
+			service.updatePreferences(preferences({ turnFailures: false })),
 		);
 
 		await emit(await failedTurn(members.ada), await failedTurn(members.bob));

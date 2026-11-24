@@ -10,17 +10,10 @@ import {
 	type WrittenFile,
 	type WrittenFileKind,
 } from "@sugabots/contracts";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { and, desc, eq, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Data, Effect, Layer, Stream } from "effect";
-import {
-	ActionForbidden,
-	type AuthorizationDenied,
-	ResourceHidden,
-} from "../authorization/access.ts";
-import { Authorization } from "../authorization/authorization.ts";
-import type { CurrentActor } from "../authorization/current-actor.ts";
-import { Visibility } from "../authorization/visibility.ts";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import {
 	type Executor,
@@ -43,44 +36,51 @@ import {
 	WRITTEN_FILE_KINDS,
 } from "../database/schema.ts";
 import { Ids, isUuid } from "../ids/ids.ts";
+import type { CanManageChats } from "../proofs/chat-permissions.ts";
+import type { ReachesFile } from "../proofs/reaches-file.ts";
+import type { ReachesProject } from "../proofs/reaches-project.ts";
+import { processLayer, Tier } from "../tiers.ts";
 
 /**
- * Reading files, for members. A file is reached through the chat it
- * was uploaded or made in: a project's by the members in the project, a bot's
- * by whoever reaches the bot. One made in an automation's run belongs to the
- * automation's feed, which lists the run. Only a file a bot
- * wrote is read here, with its versions; a file on a message is read through
- * its chat (see `chats/chats/chat-files.ts`). Deleting a
- * written file takes changing the project or the bot.
+ * Reading files, for operations that have proved their principal reaches
+ * them. A file is reached through the chat it was uploaded or made in: a
+ * project's by the members in the project, a bot's by whoever reaches the
+ * bot. One made in an automation's run belongs to the automation's feed,
+ * which lists the run. Only a file a bot wrote is read here, with its
+ * versions; a file on a message is read through its chat (see
+ * `chats/chats/chat-files.ts`). Deleting a written file takes managing the
+ * chats of its project.
  */
 export interface Interface {
 	/**
-	 * The files uploaded or made in the project's chats, and what was
-	 * opened from them, newest change first.
+	 * The files uploaded or made in the chats of the project `reach` is
+	 * about, and what was opened from them, newest change first.
 	 */
-	readonly listInProject: (input: {
-		projectId: string;
-	}) => Effect.Effect<ListedFile[], AuthorizationDenied, CurrentActor.Service>;
-	/** The written file at its current version. */
-	readonly get: (
-		at: InFile,
-	) => Effect.Effect<WrittenFile, AuthorizationDenied, CurrentActor.Service>;
+	readonly listInProject: <P, J>(reach: ReachesProject<P, J>) => Effect.Effect<ListedFile[]>;
+	/** The written file `reach` is about, at its current version. */
+	readonly get: <P, F>(reach: ReachesFile<P, F>) => Effect.Effect<WrittenFile, ResourceHidden>;
 	/** What the written file is, without reading its content. */
-	readonly summary: (
-		at: InFile,
-	) => Effect.Effect<ListedWrittenFile, AuthorizationDenied, CurrentActor.Service>;
+	readonly summary: <P, F>(
+		reach: ReachesFile<P, F>,
+	) => Effect.Effect<ListedWrittenFile, ResourceHidden>;
 	/** Its versions, newest first. */
-	readonly versions: (
-		at: InFile,
-	) => Effect.Effect<ListedFileVersion[], AuthorizationDenied, CurrentActor.Service>;
-	readonly getVersion: (
-		at: InFile & { version: number },
-	) => Effect.Effect<WrittenFile, AuthorizationDenied, CurrentActor.Service>;
+	readonly versions: <P, F>(
+		reach: ReachesFile<P, F>,
+	) => Effect.Effect<ListedFileVersion[], ResourceHidden>;
+	readonly getVersion: <P, F>(
+		reach: ReachesFile<P, F>,
+		version: number,
+	) => Effect.Effect<WrittenFile, ResourceHidden>;
 	/** Deletes the written file with every version of it; its stored content is removed after. */
-	readonly remove: (at: InFile) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
+	readonly remove: <P, F>(
+		reach: ReachesFile<P, F>,
+		canManage: CanManageChats<P, F>,
+	) => Effect.Effect<void, ResourceHidden>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Files") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Files") {
+	declare readonly [Tier]: "process";
+}
 
 /**
  * Making and changing written files, for a bot's tools. A bot reaches the
@@ -136,71 +136,54 @@ export class Authoring extends Context.Service<Authoring, AuthoringInterface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Files");
-	const authorization = yield* Authorization.Service;
-	const visibility = yield* Visibility.Service;
 	const blobs = yield* BlobStore.Service;
 	const atVersion = atVersionIn(blobs);
 
-	/** The written file, once the actor reaches the chat it was made in, with their standing there. */
-	const inReachedChat = (fileId: string) =>
-		Effect.gen(function* () {
-			const found = yield* writtenFileWithId(fileId);
-			if (!found) return yield* new ResourceHidden({ resource: "file" });
-			const standing = yield* visibility
-				.chatStanding(found.file.chatId)
-				.pipe(Effect.mapError(() => new ResourceHidden({ resource: "file" })));
-			return { found, standing };
-		});
+	/** The written file `reach` is about, in the chat it was found in; hidden when it isn't one a bot wrote. */
+	const writtenFileIn = <P, F>(reach: ReachesFile<P, F>) =>
+		Effect.flatMap(writtenFileWhere(reach.file.value, eq(file.chatId, reach.chat)), (found) =>
+			found ? Effect.succeed(found) : Effect.fail(new ResourceHidden({ resource: "file" })),
+		);
 
 	return Service.of({
-		listInProject: ({ projectId }) =>
-			operation(
-				"listInProject",
-				Effect.flatMap(authorization.project(projectId, "project.read"), () =>
-					listedWhere(eq(madeInChat.projectId, projectId)),
-				),
-			),
+		listInProject: (reach) =>
+			operation("listInProject", listedWhere(eq(madeInChat.projectId, reach.project.value))),
 
-		get: ({ fileId }) =>
+		get: (reach) =>
 			operation(
 				"get",
 				Effect.gen(function* () {
-					const { found } = yield* inReachedChat(fileId);
+					const found = yield* writtenFileIn(reach);
 					return yield* shownOrHidden(atVersion(found, found.file.currentVersion));
 				}),
 			),
 
-		summary: ({ fileId }) =>
+		summary: (reach) =>
 			operation(
 				"summary",
-				Effect.map(inReachedChat(fileId), ({ found }) =>
-					toListedWrittenFile(found.file, found.creator),
-				),
+				Effect.map(writtenFileIn(reach), (found) => toListedWrittenFile(found.file, found.creator)),
 			),
 
-		versions: ({ fileId }) =>
+		versions: (reach) =>
 			operation(
 				"versions",
-				Effect.flatMap(inReachedChat(fileId), ({ found }) => versionsOf(found.file.id)),
+				Effect.flatMap(writtenFileIn(reach), (found) => versionsOf(found.file.id)),
 			),
 
-		getVersion: ({ fileId, version }) =>
+		getVersion: (reach, version) =>
 			operation(
 				"getVersion",
 				Effect.gen(function* () {
-					const { found } = yield* inReachedChat(fileId);
+					const found = yield* writtenFileIn(reach);
 					return yield* shownOrHidden(atVersion(found, version));
 				}),
 			),
 
-		remove: ({ fileId }) =>
+		remove: (reach, _canManage) =>
 			operation(
 				"remove",
 				Effect.gen(function* () {
-					const { found, standing } = yield* inReachedChat(fileId);
-					if (!standing.standing.may("project.chats.manage")) {
-						return yield* new ActionForbidden({ permission: "project.chats.manage" });
-					}
+					const found = yield* writtenFileIn(reach);
 					// The versions go with it, and the `file_blob_deletion` trigger queues its blobs.
 					yield* query((db) => db.delete(file).where(eq(file.id, found.file.id)));
 				}),
@@ -392,9 +375,9 @@ const makeAuthoring = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));
+export const layer = layerNoDeps;
 
 export const authoringLayer = Layer.effect(Authoring, makeAuthoring);
 
@@ -428,10 +411,6 @@ const CONTENT_TYPES: Record<WrittenFileKind, string> = {
 /** Under the file's folder, `files/<fileId>`, which the `file_blob_deletion` trigger queues for deletion with the file. */
 function versionKey(fileId: string, versionId: string): BlobStore.Key {
 	return BlobStore.key("files", fileId, "versions", versionId);
-}
-
-export interface InFile {
-	fileId: string;
 }
 
 /** The bot a tool acts for, in the chat it is working in, which a new file records it was made in. */

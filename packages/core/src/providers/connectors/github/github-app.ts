@@ -7,159 +7,158 @@ import {
 	GITHUB_WEBHOOK_PATH,
 	type GitHubAppForm,
 	type GitHubSetupFailure,
+	type GitHubSetupOutcome,
 } from "@sugabots/contracts";
+import {
+	NotGitHubConnector,
+	ProjectHasGitHubConnector,
+} from "@sugabots/contracts/errors/connectors";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
-import type { AuthorizationDenied } from "../../../authorization/access.ts";
-import { Authorization } from "../../../authorization/authorization.ts";
-import { CurrentActor } from "../../../authorization/current-actor.ts";
 import { type Database, query, serviceOperations } from "../../../database/database.ts";
-import { bot } from "../../../database/schema.ts";
+import { bot, project } from "../../../database/schema.ts";
 import { Ids } from "../../../ids/ids.ts";
+import type { CanManageProject } from "../../../proofs/project-permissions.ts";
+import type { ReachesProject } from "../../../proofs/reaches-project.ts";
 import { Secrets } from "../../../secrets/secrets.ts";
 import { ServerSettings } from "../../../server-settings/server-settings.ts";
+import { processLayer, Tier } from "../../../tiers.ts";
 import { Egress, isPrivateAddress } from "../../network/egress.ts";
 import { ConnectorStore } from "../connector-store.ts";
 import { encryptAppCredential, openAppCredential } from "./credential.ts";
 import * as GitHub from "./github.ts";
-import {
-	gitHubConnectorForProject,
-	NotGitHubConnector,
-	ProjectHasGitHubConnector,
-} from "./github-connectors.ts";
+import { gitHubConnectorForProject } from "./github-connectors.ts";
 
 /**
- * Connecting a project to GitHub: a member makes the project its own private
+ * Connecting a project to GitHub, for operations that have proved what each
+ * call needs: a member who manages the project makes it its own private
  * GitHub App, from a manifest Sugabots writes, owned by the account whose
  * repositories the project's bots work on, then installs it there; GitHub
  * sends the browser back to Sugabots after each step. The app is the
  * project's GitHub connector, made once GitHub has made the app, and signed
- * in once it is installed. Each step takes `connector.manage` in the project;
- * a bot's GitHub app is its default project's.
+ * in once it is installed. A bot's GitHub app is its default project's.
+ *
+ * Each step's `state` carries, sealed, the project, the connector and the
+ * member it was handed to, so a step GitHub sends back is finished only for
+ * that member, while they still manage the project.
  */
 export interface Interface {
 	/** The form that makes the project's GitHub App, owned by `organization` or by the member. */
-	readonly start: (input: {
-		projectId: string;
-		organization: string | undefined;
-	}) => Effect.Effect<
-		GitHubAppForm,
-		AuthorizationDenied | ProjectHasGitHubConnector,
-		CurrentActor.Service
-	>;
+	readonly start: <P, J>(
+		canManage: CanManageProject<P, J>,
+		organization: string | undefined,
+	) => Effect.Effect<GitHubAppForm, ProjectHasGitHubConnector>;
+	/**
+	 * The setup step `state` was handed out for, if it is a `step` step and
+	 * still current, for the operation to name its project and prove the
+	 * member still manages it. The state is sealed, so opening it proves
+	 * nothing more; the steps below check whose it is.
+	 */
+	readonly setupStep: (
+		state: string | undefined,
+		step: SetupStep["step"],
+	) => Effect.Effect<SetupStep | undefined>;
 	/**
 	 * Makes the project's GitHub connector to the app GitHub made from the
 	 * manifest, given the `code` it sent the browser back with, and says where
 	 * to install it.
 	 */
-	readonly made: (callback: {
-		code: string | undefined;
-		state: string | undefined;
-	}) => Effect.Effect<SetupOutcome, never, CurrentActor.Service>;
+	readonly made: <P, J>(
+		canManage: CanManageProject<P, J>,
+		setup: SetupStep,
+		code: string | undefined,
+	) => Effect.Effect<GitHubSetupOutcome>;
 	/** Records the account the app was installed on, or installed on again. */
-	readonly installed: (callback: {
-		installationId: number | undefined;
-		state: string | undefined;
-	}) => Effect.Effect<SetupOutcome, never, CurrentActor.Service>;
+	readonly installed: <P, J>(
+		canManage: CanManageProject<P, J>,
+		setup: SetupStep,
+		installationId: number | undefined,
+	) => Effect.Effect<GitHubSetupOutcome>;
 	/** Where to install the connector's app, or to change which repositories it reaches. */
-	readonly installUrl: (input: {
-		projectId: string;
-		connectorId: string;
-	}) => Effect.Effect<string, AuthorizationDenied | NotGitHubConnector, CurrentActor.Service>;
+	readonly installUrl: <P, J>(
+		canManage: CanManageProject<P, J>,
+		connectorId: string,
+	) => Effect.Effect<string, NotGitHubConnector>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/GitHubApps") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/GitHubApps") {
+	declare readonly [Tier]: "process";
+}
+
+/** The project `reach` proved reached, by its workspace and its own id. */
+const projectIn = <P, J>(reach: ReachesProject<P, J>): SetupProject => ({
+	workspaceId: reach.workspace,
+	projectId: reach.project.value,
+});
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("GitHubApps");
-	const authorization = yield* Authorization.Service;
 	const secrets = yield* Secrets.Service;
 	const serverSettings = yield* ServerSettings.Service;
 	const connectors = yield* ConnectorStore.Service;
 	const ids = yield* Ids.Service;
-	const http = (yield* Egress.Service).providers.for({ baseUrl: GitHub.API_URL });
+	const egress = yield* Egress.Service;
+	// Asked for when used, so building this asks nothing of egress.
+	const gitHubApi = () => egress.providers.for({ baseUrl: GitHub.API_URL });
 	const apiUrl = `${serverSettings.publicUrl}${API_BASE_PATH}`;
 	const webhooksReachable = reachableFromInternet(serverSettings.publicUrl);
 
-	const managed = (projectId: string) =>
-		Effect.map(authorization.project(projectId, "connector.manage"), ({ project }) => project);
-
-	const managedQuietly = (projectId: string) =>
-		managed(projectId).pipe(
-			Effect.as(true),
-			Effect.orElseSucceed(() => false),
-		);
-
-	/** What the project is called: its own name, or its bot's for a default project. */
-	const nameOf = ({ name, defaultOfBotId }: { name: string; defaultOfBotId: string | null }) => {
-		if (defaultOfBotId === null) return Effect.succeed(name);
-		return Effect.map(
+	/** What the project `reach` proved reached is called: its own name, or its bot's for a default project. */
+	const nameOf = <P, J>(reach: ReachesProject<P, J>) =>
+		Effect.map(
 			query((db) =>
-				db.select({ name: bot.name }).from(bot).where(eq(bot.id, defaultOfBotId)).limit(1),
+				db
+					.select({ name: sql<string>`coalesce(${bot.name}, ${project.name})` })
+					.from(project)
+					.leftJoin(bot, eq(bot.id, project.defaultOfBotId))
+					.where(and(eq(project.id, reach.project.value), eq(project.workspaceId, reach.workspace)))
+					.limit(1),
 			),
-			([row]) => row?.name ?? name,
+			([row]) => row?.name ?? "",
 		);
-	};
 
+	/** The `state` that carries `step` through GitHub, sealed, until it expires. */
 	const stateFor = (step: SetupStep) =>
-		Effect.gen(function* () {
-			const { memberId } = yield* CurrentActor.Service;
-			const now = yield* Clock.currentTimeMillis;
-			const encoded = Schema.encodeSync(SetupStateJson)({
-				...step,
-				memberId,
-				expiresAt: now + SETUP_STATE_LIFETIME_MILLISECONDS,
-			});
-			return secrets.encrypt(encoded, SETUP_STATE_PURPOSE);
-		});
+		Effect.map(Clock.currentTimeMillis, (now) =>
+			secrets.encrypt(
+				Schema.encodeSync(SetupStateJson)({
+					...step,
+					expiresAt: now + SETUP_STATE_LIFETIME_MILLISECONDS,
+				}),
+				SETUP_STATE_PURPOSE,
+			),
+		);
 
-	/** The step `state` was handed out for, if it is that step's, current, and the caller's. */
-	const stepOf = (state: string | undefined, step: SetupStep["step"]) =>
-		Effect.gen(function* () {
-			if (!state) return undefined;
-			const { memberId } = yield* CurrentActor.Service;
-			const now = yield* Clock.currentTimeMillis;
-			const opened = Option.liftThrowable(() =>
-				Schema.decodeSync(SetupStateJson)(secrets.decrypt(state, SETUP_STATE_PURPOSE)),
-			)();
-			if (Option.isNone(opened)) return undefined;
-			const setup = opened.value;
-			return setup.step === step && setup.memberId === memberId && setup.expiresAt > now
-				? setup
-				: undefined;
-		});
-
-	const failed = (setup: SetupStep | undefined, failure: GitHubSetupFailure): SetupOutcome => ({
+	const failed = (
+		setup: SetupStep | undefined,
+		failure: GitHubSetupFailure,
+	): GitHubSetupOutcome => ({
 		kind: "failed",
 		at: setup && setupProjectOf(setup),
 		failure,
 	});
 
 	return Service.of({
-		start: ({ projectId, organization }) =>
+		start: (canManage, organization) =>
 			operation(
 				"start",
 				Effect.gen(function* () {
-					const project = yield* managed(projectId);
-					if (
-						yield* gitHubConnectorForProject({
-							workspaceId: project.workspaceId,
-							projectId: project.id,
-						})
-					) {
+					const { reach, member } = canManage;
+					const project = projectIn(reach);
+					if (yield* gitHubConnectorForProject(project)) {
 						return yield* new ProjectHasGitHubConnector();
 					}
 					// The connector's id is in its webhook's address, so it is minted before GitHub makes the app.
 					const connectorId = yield* ids.next;
 					const state = yield* stateFor({
 						step: "make",
-						workspaceId: project.workspaceId,
-						projectId: project.id,
+						...project,
 						connectorId,
+						memberId: member.actor.memberId,
 					});
 					const manifest = GitHub.appManifest({
-						name: appName(yield* nameOf(project), connectorId),
+						name: appName(yield* nameOf(reach), connectorId),
 						homepageUrl: serverSettings.webAppUrl,
 						redirectUrl: `${apiUrl}${GITHUB_APP_MADE_PATH}`,
 						setupUrl: `${apiUrl}${GITHUB_APP_INSTALLED_PATH}`,
@@ -174,27 +173,36 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		made: ({ code, state }) =>
+		setupStep: (state, step) =>
+			operation(
+				"setupStep",
+				Effect.gen(function* () {
+					if (!state) return undefined;
+					const now = yield* Clock.currentTimeMillis;
+					const opened = Option.liftThrowable(() =>
+						Schema.decodeSync(SetupStateJson)(secrets.decrypt(state, SETUP_STATE_PURPOSE)),
+					)();
+					if (Option.isNone(opened)) return undefined;
+					const { expiresAt, ...setup } = opened.value;
+					return setup.step === step && expiresAt > now ? setup : undefined;
+				}),
+			),
+
+		made: (canManage, setup, code) =>
 			operation(
 				"made",
-				Effect.gen(function* (): Effect.fn.Return<
-					SetupOutcome,
-					never,
-					CurrentActor.Service | Database
-				> {
-					const setup = yield* stepOf(state, "make");
-					if (!setup) return failed(undefined, "expired");
+				Effect.gen(function* (): Effect.fn.Return<GitHubSetupOutcome, never, Database> {
+					const { reach, member } = canManage;
+					if (setup.memberId !== member.actor.memberId) return failed(undefined, "expired");
 					if (!code) return failed(setup, "cancelled");
-					if (!(yield* managedQuietly(setup.projectId))) return failed(undefined, "expired");
-					const made = yield* GitHub.madeApp(http, code).pipe(
+					const made = yield* GitHub.madeApp(gitHubApi(), code).pipe(
 						Effect.tapError((failure) => Effect.logWarning("GitHub didn't make the app", failure)),
 						Effect.option,
 					);
 					if (Option.isNone(made)) return failed(setup, "github");
 					const app = made.value;
-					const { memberId } = yield* CurrentActor.Service;
 					const created = yield* connectors
-						.createGitHub(setup.workspaceId, setup.projectId, memberId, {
+						.createGitHub(reach.workspace, reach.project.value, member.actor.memberId, {
 							id: setup.connectorId,
 							app: { appId: app.id, slug: app.slug, owner: app.owner },
 							appCredentialEncrypted: encryptAppCredential(secrets, {
@@ -210,20 +218,14 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		installed: ({ installationId, state }) =>
+		installed: (canManage, setup, installationId) =>
 			operation(
 				"installed",
-				Effect.gen(function* (): Effect.fn.Return<
-					SetupOutcome,
-					never,
-					CurrentActor.Service | Database
-				> {
-					const setup = yield* stepOf(state, "install");
-					if (!setup) return failed(undefined, "expired");
+				Effect.gen(function* (): Effect.fn.Return<GitHubSetupOutcome, never, Database> {
+					const { reach, member } = canManage;
+					if (setup.memberId !== member.actor.memberId) return failed(undefined, "expired");
 					if (installationId === undefined) return failed(setup, "cancelled");
-					const row = (yield* managedQuietly(setup.projectId))
-						? yield* gitHubConnectorForProject(setup)
-						: undefined;
+					const row = yield* gitHubConnectorForProject(projectIn(reach));
 					if (!row?.settings || !row.appCredentialEncrypted || row.id !== setup.connectorId) {
 						return failed(undefined, "expired");
 					}
@@ -231,7 +233,7 @@ export const make = Effect.gen(function* () {
 					// Only the app's own installations are found with its key, so a
 					// made-up id can't attach another account's.
 					const found = yield* GitHub.installation(
-						http,
+						gitHubApi(),
 						{ appId: row.settings.appId, privateKey },
 						installationId,
 					).pipe(
@@ -242,35 +244,29 @@ export const make = Effect.gen(function* () {
 					);
 					if (Option.isNone(found)) return failed(setup, "github");
 					const { id, account, onUserAccount } = found.value;
-					yield* connectors.installed(setup.workspaceId, row.id, {
+					yield* connectors.installed(reach.workspace, row.id, {
 						installationId: id,
 						account,
 						// Only a member's own account is theirs alone, so only then is the installation theirs.
-						installedById: onUserAccount ? setup.memberId : null,
+						installedById: onUserAccount ? member.actor.memberId : null,
 					});
-					return {
-						kind: "done",
-						at: setupProjectOf(setup),
-						connectorId: row.id,
-					};
+					return { kind: "done", at: projectIn(reach), connectorId: row.id };
 				}),
 			),
 
-		installUrl: ({ projectId, connectorId }) =>
+		installUrl: (canManage, connectorId) =>
 			operation(
 				"installUrl",
 				Effect.gen(function* () {
-					const project = yield* managed(projectId);
-					const row = yield* gitHubConnectorForProject({
-						workspaceId: project.workspaceId,
-						projectId: project.id,
-					});
+					const { reach, member } = canManage;
+					const project = projectIn(reach);
+					const row = yield* gitHubConnectorForProject(project);
 					if (!row?.settings || row.id !== connectorId) return yield* new NotGitHubConnector();
 					const state = yield* stateFor({
 						step: "install",
-						workspaceId: project.workspaceId,
-						projectId: project.id,
+						...project,
 						connectorId,
+						memberId: member.actor.memberId,
 					});
 					return GitHub.installAppUrl(row.settings.slug, state);
 				}),
@@ -278,23 +274,9 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, ConnectorStore.layer]));
-
-/**
- * Where a GitHub setup step goes next: on to GitHub, back to the project's
- * connector, or back with why it stopped. A failure names the project only
- * when the step was the caller's.
- */
-export type SetupOutcome =
-	| { readonly kind: "next"; readonly url: string }
-	| { readonly kind: "done"; readonly at: SetupProject; readonly connectorId: string }
-	| {
-			readonly kind: "failed";
-			readonly at: SetupProject | undefined;
-			readonly failure: GitHubSetupFailure;
-	  };
+export const layer = layerNoDeps.pipe(Layer.provide(ConnectorStore.layer));
 
 /** The project being connected. */
 interface SetupProject {
@@ -312,10 +294,14 @@ const SETUP_STATE_LIFETIME_MILLISECONDS = 60 * 60 * 1000;
 
 const SETUP_STATE_PURPOSE = "github-app-setup";
 
-/** A step of setting up a project's GitHub App, for the connector it is or will be. */
-interface SetupStep extends SetupProject {
+/**
+ * A step of setting up a project's GitHub App, for the connector it is or
+ * will be, handed to the member who manages the project, `memberId`.
+ */
+export interface SetupStep extends SetupProject {
 	readonly step: "make" | "install";
 	readonly connectorId: string;
+	readonly memberId: string;
 }
 
 /**

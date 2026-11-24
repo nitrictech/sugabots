@@ -4,9 +4,9 @@ import {
 	type SignInServiceId,
 	signInServiceNames,
 } from "@sugabots/contracts";
-import { type UserText, userText } from "@sugabots/errors";
-import { Clock, Data, Effect, Schema } from "effect";
-import type { UserFacing } from "../../../user-message.ts";
+import { ProviderSignInFailed } from "@sugabots/contracts/errors/providers";
+import { userText } from "@sugabots/errors";
+import { Clock, Effect, Schema } from "effect";
 import type { EgressHttpClient, EgressHttpClients } from "../../network/egress.ts";
 import type { ModelProviderStore } from "../model-provider-store.ts";
 import { chatgpt } from "./chatgpt.ts";
@@ -79,18 +79,6 @@ function signInTo(service: SignInServiceId): SubscriptionSignIn {
 			return chatgpt;
 		case "xai":
 			return xai;
-	}
-}
-
-export class ProviderSignInFailed
-	extends Data.TaggedError("ProviderSignInFailed")<{
-		readonly userMessage: UserText;
-		readonly cause?: unknown;
-	}>
-	implements UserFacing
-{
-	override get message() {
-		return this.userMessage;
 	}
 }
 

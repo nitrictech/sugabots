@@ -12,17 +12,12 @@ import { Automations } from "./automations/automations.ts";
 import { BotAutomations } from "./automations/bot-automations.ts";
 import { AutomationSettlement } from "./automations/settlement.ts";
 import { AutomationWorkAdmission } from "./automations/work-admission.ts";
-import { ChatDetailsView } from "./chat-details-view.ts";
 import { ChatEventStream } from "./chat-event-stream.ts";
 import { ChatEvents } from "./chat-events.ts";
 import { BotChats } from "./chats/bot-chats.ts";
-import { ChatFiles } from "./chats/chat-files.ts";
-import { ChatView } from "./chats/chat-view.ts";
-import { Chats } from "./chats/chats.ts";
 import { Compactions } from "./compaction/compactions.ts";
 import type { ChatEvent } from "./events.ts";
 import { FloorControl } from "./floor/floor-control.ts";
-import { Reactions } from "./reactions/reactions.ts";
 import { Turns } from "./turns/turns.ts";
 
 /**
@@ -32,11 +27,7 @@ import { Turns } from "./turns/turns.ts";
  * it before it exists.
  */
 const services = Layer.mergeAll(
-	Chats.layer,
-	Reactions.layer,
-	ChatFiles.layer,
 	Automations.layer,
-	Automations.webhooksLayer,
 	Automations.connectorEventsLayer,
 	// The turn's steps read it from here, for the automation tools.
 	BotAutomations.layer,
@@ -51,8 +42,6 @@ const services = Layer.mergeAll(
 	AutomationRunner.layer,
 	Compactions.layer,
 	AutomationSettlement.layer,
-	ChatView.layer,
-	ChatDetailsView.layer,
 	FloorControl.layer,
 ).pipe(Layer.provideMerge(Turns.layer), Layer.provideMerge(AutomationWorkAdmission.layer));
 

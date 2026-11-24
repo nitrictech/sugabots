@@ -1,6 +1,8 @@
+export { GitHubRequestFailed } from "@sugabots/contracts/errors/connectors";
+
 import { createHmac, createSign, timingSafeEqual } from "node:crypto";
-import { type DomainError, userText } from "@sugabots/errors";
-import { Clock, DateTime, Effect, ErrorReporter, Redacted, Schema } from "effect";
+import { GitHubRequestFailed } from "@sugabots/contracts/errors/connectors";
+import { Clock, DateTime, Effect, Redacted, Schema } from "effect";
 import type { GitHubAppOwner } from "../../../database/schema.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
 
@@ -842,30 +844,4 @@ export function basicAuthorizationValue({ username, token }: GitCredential) {
 /** {@link basicAuthorizationValue}, kept out of logs. */
 export function redactedBasicAuthorization(credential: GitCredential) {
 	return Redacted.make(basicAuthorizationValue(credential));
-}
-
-/**
- * GitHub refused a request or couldn't be reached. `reason` is GitHub's own
- * words, for the logs and for the bot whose call it was; members are told
- * only that GitHub refused.
- */
-export class GitHubRequestFailed
-	extends Schema.TaggedError<GitHubRequestFailed>()("GitHubRequestFailed", {
-		status: Schema.UndefinedOr(Schema.Int),
-		reason: Schema.String,
-	})
-	implements DomainError
-{
-	override readonly [ErrorReporter.severity] = "Warn" as const;
-	get isRetryable() {
-		return this.status === undefined || this.status >= 500;
-	}
-	override get message() {
-		return `GitHub ${this.status ?? "unreachable"}: ${this.reason}`;
-	}
-	get userMessage() {
-		return this.isRetryable
-			? userText`We couldn't reach GitHub. Try again in a few minutes.`
-			: userText`GitHub refused the project's sign-in. Someone who manages the project can check its GitHub connector in the project's settings.`;
-	}
 }

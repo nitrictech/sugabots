@@ -1,12 +1,14 @@
+export { ReferralsOff } from "@sugabots/contracts/errors/workspace";
 export * as Accounts from "./accounts.ts";
 
 import { randomBytes } from "node:crypto";
+import { ReferralsOff } from "@sugabots/contracts/errors/workspace";
 import { userText } from "@sugabots/errors";
 import { and, eq, gt } from "drizzle-orm";
 import { Config, Context, Data, DateTime, Effect, Layer } from "effect";
-import { CurrentActor } from "../authorization/current-actor.ts";
 import { Database, query } from "../database/database.ts";
 import { invitation, member } from "../database/schema.ts";
+import type { IsMember } from "../proofs/is-member.ts";
 import { ServerSettings } from "../server-settings/server-settings.ts";
 import { referralPath } from "../server-settings/web-app-paths.ts";
 import type { UserFacing } from "../user-message.ts";
@@ -22,10 +24,10 @@ export interface Interface {
 	) => Effect.Effect<Admission, SignUpClosed | ReferralLinkInvalid>;
 	/** Whether an account must prove its address before it gets a session or joins a workspace. */
 	readonly requireEmailVerification: boolean;
-	/** The link the actor can send members to let them sign up, or `undefined` when sign-up is not by referral. */
-	readonly referralLink: Effect.Effect<string | undefined, never, CurrentActor.Service>;
-	/** Stops the actor's referral link working, and returns the one that replaces it. */
-	readonly resetReferralLink: Effect.Effect<string, ReferralsOff, CurrentActor.Service>;
+	/** The link the member can send others to let them sign up, or `undefined` when sign-up is not by referral. */
+	readonly referralLink: <P>(isMember: IsMember<P>) => Effect.Effect<string | undefined>;
+	/** Stops the member's referral link working, and returns the one that replaces it. */
+	readonly resetReferralLink: <P>(isMember: IsMember<P>) => Effect.Effect<string, ReferralsOff>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Accounts") {}
@@ -56,16 +58,14 @@ export const make = Effect.gen(function* () {
 				return yield* new SignUpClosed();
 			}).pipe(Effect.provideService(Database, database)),
 		requireEmailVerification,
-		referralLink: referrals
-			? Effect.flatMap(CurrentActor.Service, ({ memberId }) => referrals.linkFor(memberId)).pipe(
-					Effect.provideService(Database, database),
-				)
-			: Effect.undefined,
-		resetReferralLink: referrals
-			? Effect.flatMap(CurrentActor.Service, ({ memberId }) => referrals.reset(memberId)).pipe(
-					Effect.provideService(Database, database),
-				)
-			: Effect.fail(new ReferralsOff()),
+		referralLink: (isMember) =>
+			referrals
+				? referrals.linkFor(isMember.member).pipe(Effect.provideService(Database, database))
+				: Effect.undefined,
+		resetReferralLink: (isMember) =>
+			referrals
+				? referrals.reset(isMember.member).pipe(Effect.provideService(Database, database))
+				: Effect.fail(new ReferralsOff()),
 	});
 });
 
@@ -104,12 +104,6 @@ export class ReferralLinkInvalid
 {
 	get userMessage() {
 		return userText`This referral link isn't valid. Check you have all of it, or ask whoever sent it for a new one.`;
-	}
-}
-
-export class ReferralsOff extends Data.TaggedError("ReferralsOff") implements UserFacing {
-	get userMessage() {
-		return userText`This server does not sign members up by referral.`;
 	}
 }
 

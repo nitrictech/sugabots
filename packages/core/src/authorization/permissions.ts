@@ -77,6 +77,12 @@ export type WorkspacePermission =
 export type ProjectPermission =
 	| ProjectResourcePermission
 	| "project.read"
+	/**
+	 * Change what is in it without managing it: mark its chats resolved, and
+	 * have its bots make write/delete tool calls and work on its computer for
+	 * you. A viewer reads and takes part, and changes nothing.
+	 */
+	| "project.change"
 	/** Change its name, address, colour, description, visibility and lead bot. */
 	| "project.update"
 	| "project.delete"
@@ -126,6 +132,8 @@ type ProjectResourcePermission =
 export type BotPermission =
 	| Exclude<ProjectResourcePermission, "computer.read">
 	| "bot.read"
+	/** Change what is in its default project, as `project.change` does in a project members made. */
+	| "bot.use"
 	/** See the bot's settings and the state of its computer. */
 	| "bot.settings.read"
 	| "bot.update"
@@ -203,6 +211,7 @@ const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> 
  */
 const ADMINISTRATOR_PROJECT_GRANTS = new Set<ProjectPermission>([
 	"project.read",
+	"project.change",
 	"project.update",
 	"project.delete",
 	"project.chats.manage",
@@ -238,6 +247,7 @@ const PROJECT_GRANTS: Record<WorkspaceRole, ReadonlySet<ProjectPermission>> = {
 	admin: ADMINISTRATOR_PROJECT_GRANTS,
 	editor: new Set<ProjectPermission>([
 		"project.read",
+		"project.change",
 		"project.leave",
 		"project.members.manage",
 		"project.bots.manage",
@@ -261,6 +271,7 @@ const PROJECT_GRANTS: Record<WorkspaceRole, ReadonlySet<ProjectPermission>> = {
  */
 const DEFAULT_PROJECT_GRANTS: Partial<Record<ProjectPermission, BotPermission>> = {
 	"project.read": "bot.read",
+	"project.change": "bot.use",
 	"approval.decide": "approval.decide",
 	"project.chats.manage": "bot.update",
 	"connector.read": "connector.read",
@@ -293,6 +304,7 @@ const RESOURCES_OF_DEFAULT_PROJECTS: ReadonlySet<ProjectPermission> = new Set<Pr
 /** What anyone who reaches a bot may do with it. */
 const BOT_TALKER_GRANTS = new Set<BotPermission>([
 	"bot.read",
+	"bot.use",
 	"bot.settings.read",
 	"connector.read",
 	"automation.read",

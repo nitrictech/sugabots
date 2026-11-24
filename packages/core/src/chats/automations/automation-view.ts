@@ -13,7 +13,7 @@ import { toAutomation, triggersOf } from "./automation.ts";
 import type { Automations } from "./automations.ts";
 import { latestRunOf, listStatusColumns, resultPosted, toListStatus, toRun } from "./execution.ts";
 
-/** What the automation screens show: the view half of `Automations.Service`. */
+/** What the legacy `Automations.Service` shows a tool: its `list`. */
 export const makeView = Effect.gen(function* () {
 	const operation = yield* serviceOperations<ViewMethods>("Automations");
 	const authorization = yield* Authorization.Service;
@@ -25,45 +25,59 @@ export const makeView = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const standing = yield* authorization.project(projectId, "automation.read");
 					const { project } = standing;
-					const owned = and(
-						eq(automation.workspaceId, project.workspaceId),
-						eq(automation.projectId, project.id),
-						isNull(automation.deletedAt),
-					);
 					// Somebody who manages a bot they don't reach, as an admin does a
 					// personal bot, reads how its automations are set up but not how they ran.
-					if (!standing.may("automation.history.read")) {
-						const definitions = yield* query((db) =>
-							db
-								.select()
-								.from(automation)
-								.where(owned)
-								.orderBy(asc(automation.name), asc(automation.id)),
-						);
-						const triggers = yield* triggersOf(definitions.map((row) => row.id));
-						return definitions.map((row) => toAutomation(row, triggers.get(row.id) ?? []));
-					}
-					const rows = yield* query((db) => listedRows(db, owned));
-					const triggers = yield* triggersOf(rows.map((row) => row.automation.id));
-					return rows.map(
-						(row): ListedAutomationDefinition => ({
-							...toAutomation(row.automation, triggers.get(row.automation.id) ?? []),
-							status: toListStatus(row),
-						}),
+					return yield* automationsOf(
+						{ workspaceId: project.workspaceId, projectId: project.id },
+						{ withStatus: standing.may("automation.history.read") },
 					);
-				}),
-			),
-
-		listProjectRuns: ({ projectId }, page = { limit: DEFAULT_RUN_PAGE_LIMIT }) =>
-			operation(
-				"listProjectRuns",
-				Effect.gen(function* () {
-					const { project } = yield* authorization.project(projectId, "automation.history.read");
-					return yield* runsPage(eq(automation.projectId, project.id), page);
 				}),
 			),
 	} satisfies ViewMethods;
 });
+
+/**
+ * The project's automations, by name, as they are set up, each with how it
+ * stands when `withStatus`: its latest run and whether it is failing, which
+ * only those who may read how its runs went are shown.
+ */
+export const automationsOf = (
+	project: { readonly workspaceId: string; readonly projectId: string },
+	{ withStatus }: { readonly withStatus: boolean },
+) =>
+	Effect.gen(function* () {
+		const owned = and(
+			eq(automation.workspaceId, project.workspaceId),
+			eq(automation.projectId, project.projectId),
+			isNull(automation.deletedAt),
+		);
+		if (!withStatus) {
+			const definitions = yield* query((db) =>
+				db.select().from(automation).where(owned).orderBy(asc(automation.name), asc(automation.id)),
+			);
+			const triggers = yield* triggersOf(definitions.map((row) => row.id));
+			return definitions.map(
+				(row): ListedAutomationDefinition => toAutomation(row, triggers.get(row.id) ?? []),
+			);
+		}
+		const rows = yield* query((db) => listedRows(db, owned));
+		const triggers = yield* triggersOf(rows.map((row) => row.automation.id));
+		return rows.map(
+			(row): ListedAutomationDefinition => ({
+				...toAutomation(row.automation, triggers.get(row.automation.id) ?? []),
+				status: toListStatus(row),
+			}),
+		);
+	});
+
+/**
+ * A page of the runs of every automation of the project, newest first,
+ * removed automations' included.
+ */
+export const projectRunsPage = (
+	projectId: string,
+	page: RunPageQuery = { limit: DEFAULT_RUN_PAGE_LIMIT },
+) => runsPage(eq(automation.projectId, projectId), page);
 
 /**
  * The automations `which` picks, by name, each with its latest run and whether
@@ -79,7 +93,7 @@ const listedRows = (db: Executor, which: SQL | undefined) => {
 		.orderBy(asc(automation.name), asc(automation.id));
 };
 
-type ViewMethods = Pick<Automations.Interface, "list" | "listProjectRuns">;
+type ViewMethods = Pick<Automations.Interface, "list">;
 
 /**
  * A page of the runs `which` picks, by the run and its automation, newest first. A removed automation keeps

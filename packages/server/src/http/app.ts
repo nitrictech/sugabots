@@ -1,6 +1,9 @@
 import { API_BASE_PATH, InternalServerError, NotFound } from "@sugabots/contracts/http";
+import type { SessionAuthentication } from "@sugabots/core/authentication/session";
+import type { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
+import type { Ids } from "@sugabots/core/ids/ids";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { userText } from "@sugabots/errors";
 import { Clock, Effect, Layer, type Types } from "effect";
@@ -69,8 +72,9 @@ const betterAuthRoutes = Layer.effectDiscard(
  *
  * The routes take their services from the layer's context: the operations and
  * views in `HttpServices`, and the database, server settings, sessions and event
- * bus in `ApiInfrastructure`. Each operation authorizes the member the
- * request's session belongs to, so no middleware decides access.
+ * bus in `ApiInfrastructure`. The `Session` middleware authenticates the
+ * request; each operation authorizes the principal it built, so no middleware
+ * decides access.
  * `createTestApp` in `app.test-support.ts` drives the same routes with fakes.
  */
 export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructure> = Layer.mergeAll(
@@ -120,13 +124,19 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 
 /**
  * What the API is built on besides the core services: the database each
- * request runs against, the server's addresses, who holds a session,
- * the bus the streams listen on, and the platform the router serves from.
+ * request runs against, the server's addresses, who holds a session and the
+ * authenticator that makes its principal, the authenticator that admits a
+ * webhook call by the secret of the trigger or GitHub app it is addressed to,
+ * the ids each request's call takes, the bus the streams listen on, and the
+ * platform the router serves from.
  */
 type ApiInfrastructure =
 	| Database
 	| ServerSettings.Service
 	| Authentication.Service
+	| SessionAuthentication.Service
+	| WebhookAuthentication.Service
+	| Ids.Service
 	| EventBus.Service
 	| HttpRouter.HttpRouter
 	| Layer.Success<typeof HttpServer.layerServices>;

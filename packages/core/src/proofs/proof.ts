@@ -222,6 +222,8 @@ export function named(
 	const body = valuesAndBody.at(-1) as NamedBody<readonly AnyNamed[], unknown, unknown, unknown>;
 	return Effect.suspend(() => {
 		const run: NamingRun = { running: true };
+		// The overloads above give each call its body's own types; this one only passes them on.
+		// @effect-diagnostics-next-line anyUnknownInErrorContext:off
 		return body(...values.map((value) => new Named(value, run))).pipe(
 			Effect.ensuring(
 				Effect.sync(() => {

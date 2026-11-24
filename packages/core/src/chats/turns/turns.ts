@@ -7,33 +7,30 @@
  *
  * Two services. `Service` is for the rest of the system and acts for no one:
  * asking for a turn, stopping the turns under an automation run, and recording a
- * system bot's work as a turn. `Controls` is for members, and checks what
- * the current actor may do: deciding a turn's tool approvals.
+ * system bot's work as a turn. `Controls` is for members, and demands proof
+ * of what they may do: deciding a turn's tool approvals.
  *
  * This is the only file outside `turns/` may import.
  */
 export * as Turns from "./turns.ts";
 
 import type { ToolApprovalDecision } from "@sugabots/contracts";
+import type {
+	ToolApprovalConflict,
+	ToolApprovalNotFound,
+} from "@sugabots/contracts/errors/approvals";
 import { inArray, type SQLWrapper } from "drizzle-orm";
 import { Context, type Effect, Layer } from "effect";
-import type { AuthorizationDenied } from "../../authorization/access.ts";
-import { Authorization } from "../../authorization/authorization.ts";
-import type { CurrentActor } from "../../authorization/current-actor.ts";
-import { Visibility } from "../../authorization/visibility.ts";
 import { ACTIVE_TURN_STATUSES, turn } from "../../database/schema.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { Files } from "../../files/files.ts";
+import type { CanDecide } from "../../proofs/can-decide.ts";
+import type { IsMember } from "../../proofs/is-member.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { laneBusy, waitingSince } from "../../workflows/lanes.ts";
 import { BotStore } from "../../workspaces/bots/bot-store.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
-import {
-	makeControls,
-	type ToolApprovalConflict,
-	type ToolApprovalForbidden,
-	type ToolApprovalNotFound,
-} from "./controls.ts";
+import { makeControls } from "./controls.ts";
 import { TurnExecution } from "./execution.ts";
 import { makeService } from "./service.ts";
 import { TurnSignals } from "./signals.ts";
@@ -42,6 +39,10 @@ import { ToolCallStore } from "./tool-calls/store.ts";
 import { turnStepsLayer } from "./turn.steps.ts";
 import { Turn, type TurnRequest, turnWorkflow } from "./turn.workflow.ts";
 
+export {
+	ToolApprovalConflict,
+	ToolApprovalNotFound,
+} from "@sugabots/contracts/errors/approvals";
 export { botsAskedBefore, handBackOwed } from "./collaboration.ts";
 export {
 	contextWindowTokens,
@@ -50,11 +51,6 @@ export {
 	MAX_CONTEXT_WINDOW_TOKENS,
 	newestWithinLimit,
 } from "./context-window.ts";
-export {
-	ToolApprovalConflict,
-	ToolApprovalForbidden,
-	ToolApprovalNotFound,
-} from "./controls.ts";
 export type { Ended } from "./lifecycle.ts";
 export { WorkAdmission } from "./work-admission.ts";
 
@@ -106,21 +102,20 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Turns") {}
 
-/** What members may do to a turn, as the current actor. */
+/** What members may do to a turn, once proved. */
 export interface ControlsInterface {
 	/**
-	 * Decides a tool call a turn is waiting on, as the actor, once they may.
-	 * The decision is recorded, so the chat's watchers see it at once, and
-	 * sent to the turn's workflow, which runs what was allowed.
+	 * Decides the tool call `canDecide` is about, for the member `isMember`
+	 * names, its approver. The decision is recorded, so the chat's watchers
+	 * see it at once, and sent to the turn's workflow, which runs what was
+	 * allowed. A call that waits for no decision, or whose turn no longer
+	 * waits, is not found; one somebody decided first is a conflict.
 	 */
-	readonly decide: (input: {
-		toolCallId: string;
-		decision: ToolApprovalDecision["decision"];
-	}) => Effect.Effect<
-		void,
-		AuthorizationDenied | ToolApprovalNotFound | ToolApprovalConflict | ToolApprovalForbidden,
-		CurrentActor.Service
-	>;
+	readonly decide: <P, X>(
+		isMember: IsMember<P>,
+		canDecide: CanDecide<P, X>,
+		decision: ToolApprovalDecision["decision"],
+	) => Effect.Effect<void, ToolApprovalNotFound | ToolApprovalConflict>;
 }
 
 export class Controls extends Context.Service<Controls, ControlsInterface>()(
@@ -130,13 +125,16 @@ export class Controls extends Context.Service<Controls, ControlsInterface>()(
 const internals = Layer.mergeAll(TurnStore.layer, ToolCallStore.layer);
 
 /**
- * Both services. Needs the chat services a turn reports to, and
+ * `Service`. Needs the chat services a turn reports to, and
  * {@link signalsLayer} over the workflow engine.
  */
-export const layer = Layer.mergeAll(
-	Layer.effect(Service, makeService),
-	Layer.effect(Controls, makeControls).pipe(Layer.provide([Authorization.layer, Visibility.layer])),
-).pipe(Layer.provide(internals));
+export const layer = Layer.effect(Service, makeService).pipe(Layer.provide(internals));
+
+/**
+ * `Controls`, which the approvals operations are built from. Needs the chat
+ * services a turn reports to, and {@link signalsLayer} over the workflow engine.
+ */
+export const controlsLayer = Layer.effect(Controls, makeControls).pipe(Layer.provide(internals));
 
 /** The turn's durable workflow, for the engine to run over {@link stepsLayer}. */
 export const workflow = turnWorkflow;

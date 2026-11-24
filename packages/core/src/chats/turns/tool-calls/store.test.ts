@@ -1,3 +1,5 @@
+import { ToolApprovalConflict } from "@sugabots/contracts/errors/approvals";
+import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
@@ -12,13 +14,11 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../../database/testing.ts";
+import { asMember } from "../../../operations/chats/testing.ts";
+import { type CallOperation, servedOperations } from "../../../operations/testing.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
-import { onPostgresAs } from "../../../workspaces/testing.ts";
-import { ChatDetailsView } from "../../chat-details-view.ts";
-import { Chats } from "../../chats/chats.ts";
 import { chatServicesForTests } from "../../testing.ts";
 import { ApprovedToolCalls } from "../approvals/approved-calls.ts";
-import { ToolApprovalConflict, ToolApprovalForbidden } from "../controls.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "../execution.ts";
 import { TurnSignals } from "../signals.ts";
 import { type TurnCheckpoint, TurnStore } from "../store.ts";
@@ -50,15 +50,17 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		Context.get(services, ToolCallStore.Service),
 	);
 	const turns = onPostgres(Context.get(services, TurnStore.Service));
-	const approvalsAs = (memberId: string): Promised<Turns.ControlsInterface> =>
-		onPostgresAs(memberId)(Context.get(services, Turns.Controls));
+	const call = await servedOperations({ chats: services });
+	/** `memberId`, signed in, deciding through the chat services `over`. */
+	const approvalsAs = (memberId: string, over: CallOperation = call) => asMember(over, memberId);
+	/** The operations over chat services whose turns' workflows hear decisions through `signals`. */
+	const signalledBy = async (signals: TurnSignals.Interface) =>
+		servedOperations({ chats: await chatServicesForTests(bus, signals) });
 	const approvals = onPostgres({
 		beginExecution: Context.get(services, ApprovedToolCalls.Service).beginExecution,
 	});
-	const detailsAs = (memberId: string) =>
-		onPostgresAs(memberId)(Context.get(services, ChatDetailsView.Service));
-	const chatsAs = (memberId: string) =>
-		onPostgresAs(memberId)(Context.get(services, Chats.Service));
+	const detailsAs = (memberId: string) => asMember(call, memberId);
+	const chatsAs = (memberId: string) => asMember(call, memberId);
 	const execution = onPostgres({
 		prepare: Context.get(services, TurnExecution.Service).prepare,
 	});
@@ -303,7 +305,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 		await expect(
 			approvalsAs(stranger.id).decide({ toolCallId: pending.id, decision: "allow_once" }),
-		).rejects.toBeInstanceOf(Turns.ToolApprovalNotFound);
+		).rejects.toBeInstanceOf(ResourceHidden);
 	});
 
 	it("refuses a decision to somebody who reaches the bot but may not decide", async () => {
@@ -322,7 +324,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 		await expect(
 			approvalsAs(viewer.id).decide({ toolCallId: pending.id, decision: "allow_once" }),
-		).rejects.toBeInstanceOf(ToolApprovalForbidden);
+		).rejects.toBeInstanceOf(ActionForbidden);
 		const [undecided] = await onDatabase((db) =>
 			db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
 		);
@@ -425,9 +427,10 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
 
-			await onPostgresAs(adminId)(
-				Context.get(await chatServicesForTests(bus, signals), Turns.Controls),
-			).decide({ toolCallId: pending.id, decision: "allow_once" });
+			await approvalsAs(adminId, await signalledBy(signals)).decide({
+				toolCallId: pending.id,
+				decision: "allow_once",
+			});
 
 			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(2));
 			const [decided] = await onDatabase((db) =>
@@ -436,7 +439,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			expect(decided).toMatchObject({ approvalStatus: "allowed", decidedById: adminId });
 		});
 
-		it("takes the decision of an administrator who did not make the bot", async () => {
+		it("leaves a call to the member its turn acts for, not another administrator", async () => {
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
 			const [administrator] = await onDatabase((db) =>
@@ -450,23 +453,22 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 				db.insert(membership).values({ workspaceId, memberId: administrator.id, role: "admin" }),
 			);
 
-			await onPostgresAs(administrator.id)(
-				Context.get(await chatServicesForTests(bus, signals), Turns.Controls),
-			).decide({ toolCallId: pending.id, decision: "allow_once" });
-
-			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(2));
-			const [decided] = await onDatabase((db) =>
+			await expect(
+				approvalsAs(administrator.id, await signalledBy(signals)).decide({
+					toolCallId: pending.id,
+					decision: "allow_once",
+				}),
+			).rejects.toBeInstanceOf(ActionForbidden);
+			const [undecided] = await onDatabase((db) =>
 				db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
 			);
-			expect(decided).toMatchObject({ approvalStatus: "allowed", decidedById: administrator.id });
+			expect(undecided).toMatchObject({ approvalStatus: "pending", decidedById: null });
 		});
 
 		it("tells a second member the approval is already decided", async () => {
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
-			const deciding = onPostgresAs(adminId)(
-				Context.get(await chatServicesForTests(bus, signals), Turns.Controls),
-			);
+			const deciding = approvalsAs(adminId, await signalledBy(signals));
 			const decide = (decision: "allow_once" | "deny") =>
 				deciding.decide({ toolCallId: pending.id, decision });
 
@@ -481,9 +483,10 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			const unheard = TurnSignals.Service.of({ ...signals, decide: () => Effect.void });
 			delivered = [];
 
-			await onPostgresAs(adminId)(
-				Context.get(await chatServicesForTests(bus, unheard), Turns.Controls),
-			).decide({ toolCallId: pending.id, decision: "allow_once" });
+			await approvalsAs(adminId, await signalledBy(unheard)).decide({
+				toolCallId: pending.id,
+				decision: "allow_once",
+			});
 
 			expect(delivered.map(({ event }) => event)).toContainEqual(
 				expect.objectContaining({

@@ -1,4 +1,5 @@
 import type { NewSearchProvider } from "@sugabots/contracts";
+import { SearchProviderApiKeyRequired } from "@sugabots/contracts/errors/providers";
 import { userText } from "@sugabots/errors";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { workspace } from "../../database/schema.ts";
@@ -112,10 +113,10 @@ describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres",
 		await replace({ builtIn: "brave" });
 
 		await expect(providers.update(workspaceId, { enabled: true })).rejects.toBeInstanceOf(
-			SearchProviderStore.SearchProviderApiKeyRequired,
+			SearchProviderApiKeyRequired,
 		);
 		await expect(replace({ builtIn: "brave", enabled: true })).rejects.toBeInstanceOf(
-			SearchProviderStore.SearchProviderApiKeyRequired,
+			SearchProviderApiKeyRequired,
 		);
 		expect(await shown()).toMatchObject({ enabled: false });
 	});
@@ -162,7 +163,7 @@ describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres",
 
 			await expect(
 				providers.update(workspaceId, { baseUrl: "https://elsewhere.example", enabled: true }),
-			).rejects.toBeInstanceOf(SearchProviderStore.SearchProviderApiKeyRequired);
+			).rejects.toBeInstanceOf(SearchProviderApiKeyRequired);
 			expect(await providers.resolve(workspaceId)).toMatchObject({
 				baseUrl: braveAt,
 				apiKey: "brave-key",

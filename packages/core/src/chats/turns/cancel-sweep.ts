@@ -11,7 +11,8 @@ const SWEEP_INTERVAL = Duration.minutes(1);
 /**
  * Tells again the workflows of turns cancelled while they waited for approvals
  * that still hold their lanes: the turn's automation run ended, and the process
- * stopped between committing that and signalling it.
+ * stopped between committing that and signalling it, or a migration cancelled
+ * the turn, which can't signal.
  * The workflow would otherwise wait, and hold its lane, for good. A cancel it
  * already heard changes nothing.
  */

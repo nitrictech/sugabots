@@ -34,7 +34,8 @@ import {
 	WRITE_FILE_TOOL,
 	writeFileTool,
 } from "./computer/tools.ts";
-import { HOST_REQUEST_TOOL, hostRequestTool } from "./host-request/tool.ts";
+import { HOST_REQUEST_TOOL } from "./host-request/name.ts";
+import { hostRequestTool } from "./host-request/tool.ts";
 
 /**
  * The tools that work in the computer of the project a turn works in:

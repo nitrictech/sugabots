@@ -1,85 +1,87 @@
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
-import { ProjectAdministration } from "@sugabots/core/workspaces/projects/project-administration";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asCurrentUser } from "../../auth/middleware.ts";
+import { operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
-/** Projects, and who and which bots are in them. `ProjectAdministration` decides who may do what. */
+/** Projects, and who and which bots are in them, each endpoint its operation. */
 export const projectRoutes = HttpApiBuilder.group(ServerApi, "projects", (handlers) =>
-	Effect.gen(function* () {
-		const projects = yield* ProjectAdministration.Service;
-		return handlers
+	Effect.map(operationCaller, (callOperation) =>
+		handlers
 			.handle("list", ({ params }) =>
-				projects
-					.list({ workspace: params.workspace })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.list", { workspace: params.workspace }).pipe(
+					asHttpError(projectErrors),
+				),
 			)
 			.handle("create", ({ params, payload }) =>
-				projects
-					.create({ workspace: params.workspace, ...payload })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.create", { workspace: params.workspace, ...payload }).pipe(
+					asHttpError(projectErrors),
+				),
 			)
 			.handle("update", ({ params, payload }) =>
-				projects
-					.update({ projectId: params.projectId, changes: payload })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.update", { projectId: params.projectId, changes: payload }).pipe(
+					asHttpError(projectErrors),
+				),
 			)
 			.handle("remove", ({ params }) =>
-				projects
-					.remove({ projectId: params.projectId })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.remove", { projectId: params.projectId }).pipe(
+					asHttpError(projectErrors),
+				),
 			)
 			.handle("listMembers", ({ params }) =>
-				projects
-					.members({ projectId: params.projectId })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.listMembers", { projectId: params.projectId }).pipe(
+					asHttpError(projectErrors),
+				),
 			)
 			.handle("listMembersReaching", ({ params }) =>
-				projects
-					.membersReaching({ projectId: params.projectId })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.listMembersReaching", { projectId: params.projectId }).pipe(
+					asHttpError(projectErrors),
+				),
 			)
 			.handle("addMember", ({ params, payload }) =>
-				projects
-					.addMember({ projectId: params.projectId, memberId: payload.memberId })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.addMember", {
+					projectId: params.projectId,
+					memberId: payload.memberId,
+				}).pipe(asHttpError(projectErrors)),
 			)
 			.handle("removeMember", ({ params }) =>
-				projects
-					.removeMember({ projectId: params.projectId, memberId: params.memberId })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.removeMember", {
+					projectId: params.projectId,
+					memberId: params.memberId,
+				}).pipe(asHttpError(projectErrors)),
 			)
 			.handle("leave", ({ params }) =>
-				projects
-					.leave({ projectId: params.projectId })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.leave", { projectId: params.projectId }).pipe(
+					asHttpError(projectErrors),
+				),
 			)
 			.handle("join", ({ params }) =>
-				projects
-					.join({ projectId: params.projectId })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.join", { projectId: params.projectId }).pipe(
+					asHttpError(projectErrors),
+				),
 			)
 			.handle("listBots", ({ params }) =>
-				projects
-					.bots({ projectId: params.projectId })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.listBots", { projectId: params.projectId }).pipe(
+					asHttpError(projectErrors),
+				),
 			)
 			.handle("addBot", ({ params, payload }) =>
-				projects
-					.addBot({ projectId: params.projectId, botId: payload.botId })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
+				callOperation("projects.addBot", {
+					projectId: params.projectId,
+					botId: payload.botId,
+				}).pipe(asHttpError(projectErrors)),
 			)
 			.handle("removeBot", ({ params }) =>
-				projects
-					.removeBot({ projectId: params.projectId, botId: params.botId })
-					.pipe(asCurrentUser, asHttpError(projectErrors)),
-			);
-	}),
+				callOperation("projects.removeBot", {
+					projectId: params.projectId,
+					botId: params.botId,
+				}).pipe(asHttpError(projectErrors)),
+			),
+	),
 );
 
-/** What each way a project write can fail means over HTTP. */
+/** What each way a projects operation can fail means over HTTP. */
 const projectErrors = {
 	...refusals,
 	UnusableProjectName: BadRequest,

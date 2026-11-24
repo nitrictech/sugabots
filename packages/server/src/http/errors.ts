@@ -1,3 +1,4 @@
+import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { type ApiFailure, Forbidden, NotFound } from "@sugabots/contracts/http";
 import type { UserFacing } from "@sugabots/core/user-message";
 import { type DomainError, type PublicError, toPublicError, type UserText } from "@sugabots/errors";
@@ -52,9 +53,28 @@ export const asHttpError =
  * How core's refusals are answered, for the `asHttpError` of any endpoint
  * whose operation authorizes. Something the caller cannot reach is `NotFound`,
  * so an id cannot be probed for; something they reach but may not act on is
- * `Forbidden`.
+ * `Forbidden`. `BotCannotReach` is a bot's refusal, which a member's session
+ * never meets: the bot's asker reaches what it may not act on.
  */
-export const refusals = { ResourceHidden: NotFound, ActionForbidden: Forbidden };
+export const refusals = {
+	ResourceHidden: NotFound,
+	ActionForbidden: Forbidden,
+	BotCannotReach: Forbidden,
+};
+
+/**
+ * For an operation only a member signed in may call, such as one on their own
+ * settings, on an endpoint that declares no refusal: behind `Session` the
+ * principal is always a member, so `IsMember`'s refusal there is a defect.
+ */
+export const memberOnly = <A, E, R>(
+	effect: Effect.Effect<A, E | ActionForbidden, R>,
+): Effect.Effect<A, Exclude<E, ActionForbidden>, R> =>
+	Effect.catchIf<A, E | ActionForbidden, R, ActionForbidden, never, never, never>(
+		effect,
+		(failure): failure is ActionForbidden => failure instanceof ActionForbidden,
+		(refusal) => Effect.die(refusal),
+	);
 
 /** Whether `failure` is a `DomainError` rather than an older `UserFacing` error. */
 function isDomainError(failure: DomainError | UserFacing): failure is DomainError {

@@ -32,11 +32,19 @@ export interface Interface {
 	readonly handler: (request: Request) => Effect.Effect<Response>;
 	/** Whose session the cookie in `headers` holds, or `undefined` when nobody's does. */
 	readonly identify: (headers: Headers) => Effect.Effect<Identified | undefined>;
+	/**
+	 * The member `memberId` as the API names them, for a request whose session
+	 * came as a bearer token, with no cookie to read them from; `undefined` when
+	 * there is no such member.
+	 */
+	readonly member: (memberId: string) => Effect.Effect<CurrentUser | undefined>;
 }
 
 /** The holder of a request's credentials. */
 interface Identified {
 	readonly member: CurrentUser;
+	/** The session's id. */
+	readonly session: string;
 	/**
 	 * Cookies better-auth set while checking the credentials, such as a renewed
 	 * session cache. They belong on the response, or the browser never gets them.
@@ -206,20 +214,32 @@ export const make = Effect.gen(function* () {
 				({ headers: responseHeaders, response }): Identified | undefined =>
 					response
 						? {
-								member: {
-									id: response.user.id,
-									email: response.user.email,
-									name: response.user.name,
-									image: response.user.image ?? null,
-								},
+								member: currentUserOf(response.user),
+								session: response.session.id,
 								refreshedCookies: Cookies.fromSetCookie(responseHeaders.getSetCookie()),
 							}
 						: undefined,
 			).pipe(Effect.withSpan("Authentication.identify")),
+		member: (memberId) =>
+			Effect.promise(async () => {
+				const context = await auth.$context;
+				const found = await context.internalAdapter.findUserById(memberId);
+				return found ? currentUserOf(found) : undefined;
+			}).pipe(Effect.withSpan("Authentication.member")),
 	});
 });
 
 export const layer = Layer.effect(Service, make);
+
+/** better-auth's user, which it keeps in `member`, as the API names a member. */
+function currentUserOf(user: {
+	readonly id: string;
+	readonly email: string;
+	readonly name: string;
+	readonly image?: string | null | undefined;
+}): CurrentUser {
+	return { id: user.id, email: user.email, name: user.name, image: user.image ?? null };
+}
 
 /** `name` trimmed, or a refusal the caller is shown when it is blank or too long. */
 function validMemberName(name: unknown): string {

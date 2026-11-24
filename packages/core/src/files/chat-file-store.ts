@@ -1,7 +1,19 @@
+export { ChatFileNotFound as FileNotFound } from "@sugabots/contracts/errors/chat-reads";
+export {
+	FileTooLarge,
+	TooManyUnsentAttachments,
+	UnsentAttachmentsNotFound,
+} from "@sugabots/contracts/errors/chats";
 export * as ChatFileStore from "./chat-file-store.ts";
 
 import { type FilePart, MAX_ATTACHMENTS_PER_MESSAGE } from "@sugabots/contracts";
-import { type DomainError, userText } from "@sugabots/errors";
+import { ChatFileNotFound as FileNotFound } from "@sugabots/contracts/errors/chat-reads";
+import {
+	FileTooLarge,
+	TooManyUnsentAttachments,
+	UnsentAttachmentsNotFound,
+} from "@sugabots/contracts/errors/chats";
+import { userText } from "@sugabots/errors";
 import {
 	and,
 	count,
@@ -13,18 +25,7 @@ import {
 	type SQLWrapper,
 	sql,
 } from "drizzle-orm";
-import {
-	Config,
-	Context,
-	Data,
-	Duration,
-	Effect,
-	ErrorReporter,
-	Layer,
-	Option,
-	Schema,
-	Stream,
-} from "effect";
+import { Config, Context, Data, Duration, Effect, Layer, Option, Schema, Stream } from "effect";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { type AttachedFileRow, loadFileParts } from "../chats/store/file-parts.ts";
 import { afterCommit, query, serviceOperations, transaction } from "../database/database.ts";
@@ -509,73 +510,10 @@ type FileSource =
 	| { kind: "attachment"; uploaderId: string; name: string }
 	| { kind: "bot_attachment"; name: string; messageId: string; position: number };
 
-export class FileNotFound
-	extends Data.TaggedError("ChatFileNotFound")<{
-		fileId: string;
-	}>
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`That file isn't there`;
-	}
-}
-
-/**
- * A file to send is not one of the author's unsent attachments, such as one cleared
- * for waiting too long. A domain error, so a client can tell it apart by its
- * tag rather than its wording.
- */
-export class UnsentAttachmentsNotFound
-	extends Schema.TaggedError<UnsentAttachmentsNotFound>()("UnsentAttachmentsNotFound", {})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Info" as const;
-	override get message() {
-		return "A file to send is not one of the author's unsent attachments";
-	}
-	get userMessage() {
-		return userText`A file to send is no longer there. Remove it and attach it again`;
-	}
-}
-
-export class TooManyUnsentAttachments
-	extends Data.TaggedError("TooManyUnsentAttachments")<{
-		/** How many unsent attachments one member may have in a chat. */
-		maxUnsent: number;
-	}>
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`You can have ${this.maxUnsent} files waiting to be sent at most. Send or remove some first`;
-	}
-}
-
-export class FileTooLarge
-	extends Data.TaggedError("FileTooLarge")<{
-		/** The largest size kept, in bytes. */
-		maxSize: number;
-	}>
-	implements UserFacing
-{
-	get userMessage() {
-		const { amount, unit } = sizeForMembers(this.maxSize);
-		return userText`The file is larger than ${amount} ${unit}, the most that can be kept`;
-	}
-}
-
 export class TooManyReplyFiles extends Data.TaggedError("TooManyReplyFiles") implements UserFacing {
 	get userMessage() {
 		return userText`A reply can carry at most ${MAX_ATTACHMENTS_PER_MESSAGE} files`;
 	}
-}
-
-/** `bytes` as members read a file's size, such as 30 MB or 512 KB. */
-function sizeForMembers(bytes: number): { amount: number; unit: "MB" | "KB" } {
-	const mebibytes = bytes / (1024 * 1024);
-	return mebibytes >= 1
-		? { amount: Math.floor(mebibytes), unit: "MB" }
-		: { amount: Math.max(1, Math.floor(bytes / 1024)), unit: "KB" };
 }
 
 /**

@@ -20,3 +20,18 @@ export const blobDeletion = pgTable("blob_deletion", {
 	prefix: text("prefix").$type<BlobStore.Key>().notNull(),
 	queuedAt: stamp("queued_at"),
 });
+
+/**
+ * Folders whose blobs a migration moved to another key, for the blob store
+ * to move when the server starts, before it serves them: a migration can
+ * reach a Postgres blob store's rows but not a filesystem store's disk, so
+ * every store moves them itself (see `BlobStore.make`). A row goes once its
+ * folder has moved.
+ */
+export const blobFolderMove = pgTable("blob_folder_move", {
+	id: primaryKey(),
+	/** Every blob under this key moves to the same key under `toPrefix`. */
+	fromPrefix: text("from_prefix").$type<BlobStore.Key>().notNull(),
+	toPrefix: text("to_prefix").$type<BlobStore.Key>().notNull(),
+	queuedAt: stamp("queued_at"),
+});

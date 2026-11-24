@@ -1,28 +1,20 @@
 import { NotFound } from "@sugabots/contracts/http";
-import { Accounts } from "@sugabots/core/accounts/accounts";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asCurrentUser } from "../../auth/middleware.ts";
+import { operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { asHttpError } from "../../http/errors.ts";
+import { asHttpError, memberOnly } from "../../http/errors.ts";
 
-/** The current user's referral link, and replacing it. */
+/** The referral link of the member signed in, and replacing it. */
 export const referralRoutes = HttpApiBuilder.group(ServerApi, "referrals", (handlers) =>
-	Effect.gen(function* () {
-		const accounts = yield* Accounts.Service;
-		return handlers
-			.handle("link", () =>
-				accounts.referralLink.pipe(
-					Effect.map((url) => ({ url: url ?? null })),
-					asCurrentUser,
-				),
-			)
+	Effect.map(operationCaller, (callOperation) =>
+		handlers
+			.handle("link", () => callOperation("referrals.link", {}).pipe(memberOnly))
 			.handle("resetLink", () =>
-				accounts.resetReferralLink.pipe(
-					Effect.map((url) => ({ url })),
-					asCurrentUser,
+				callOperation("referrals.resetLink", {}).pipe(
+					memberOnly,
 					asHttpError({ ReferralsOff: NotFound }),
 				),
-			);
-	}),
+			),
+	),
 );

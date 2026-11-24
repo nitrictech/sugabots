@@ -1,14 +1,16 @@
 import { NodeRuntime } from "@effect/platform-node";
-import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ComputerSignIn } from "@sugabots/core/computers/computer-sign-in";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
 import { bot as botTable, workspace } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
+import { ModelProviderStore } from "@sugabots/core/providers/model-providers/model-provider-store";
 import { Egress } from "@sugabots/core/providers/network/egress";
+import { SearchProviderStore } from "@sugabots/core/providers/search-providers/search-provider-store";
 import { Secrets } from "@sugabots/core/secrets/secrets";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
+import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { ProjectStore } from "@sugabots/core/workspaces/projects/project-store";
 import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/workspace-setup";
@@ -38,7 +40,6 @@ const seed = Effect.gen(function* () {
 	if (serverSettings.isProduction) {
 		return yield* Effect.die(new Error("The development seed cannot run in production."));
 	}
-	const membership = yield* Membership.Service;
 	const projects = yield* ProjectStore.Service;
 	const bots = yield* BotStore.Service;
 	const memberId = yield* ensureAccount({ name: "Development", email: EMAIL, password: PASSWORD });
@@ -47,13 +48,13 @@ const seed = Effect.gen(function* () {
 	// provider and the member's Personal Assistant. The system bots are left unset:
 	// the seed provisions no model provider, so naming a model would only make
 	// them look ready while nothing they need is configured.
-	const workspaceId = yield* membership
-		.create({ details: { name: "Development", slug: "dev" } })
-		.pipe(
-			CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(memberId)),
-			Effect.map((created) => created.id),
-			Effect.catchTag("SlugTaken", () => idOf(workspace, eq(workspace.slug, "dev"))),
-		);
+	const workspaceId = yield* Membership.createWorkspace(memberId, {
+		name: "Development",
+		slug: "dev",
+	}).pipe(
+		Effect.map((created) => created.id),
+		Effect.catchTag("SlugTaken", () => idOf(workspace, eq(workspace.slug, "dev"))),
+	);
 	// The seed stands in for setting it up, so it opens straight into the app.
 	yield* WorkspaceSetup.recordSetUp(workspaceId);
 
@@ -124,7 +125,15 @@ const idOf = (table: typeof workspace | typeof botTable, where: SQL | undefined)
 seed.pipe(
 	Effect.scoped,
 	Effect.provide(
-		Layer.mergeAll(Authentication.layer, Membership.layer, ProjectStore.layer, BotStore.layer).pipe(
+		Layer.mergeAll(
+			Authentication.layer,
+			ProjectStore.layer,
+			BotStore.layer,
+			// What a workspace is made with: its providers and the owner's Personal Assistant.
+			PersonalAssistants.layer,
+			SearchProviderStore.layer,
+			ModelProviderStore.layer,
+		).pipe(
 			Layer.provideMerge(
 				Layer.mergeAll(
 					Ids.layer,

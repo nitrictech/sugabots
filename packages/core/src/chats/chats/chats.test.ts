@@ -38,33 +38,43 @@ import {
 	runOnPostgres,
 } from "../../database/testing.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
+import { type AsMember, asMember } from "../../operations/chats/testing.ts";
+import { servedOperations } from "../../operations/testing.ts";
 import { INTERVIEW_PROMPT } from "../../workspaces/bots/interview-prompt.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Automations } from "../automations/automations.ts";
-import { ChatDetailsView } from "../chat-details-view.ts";
-import { Reactions } from "../reactions/reactions.ts";
+import { manualRunsOver, type StartRun } from "../automations/testing.ts";
 import { seedChat } from "../seed.test-support.ts";
 import { ChatStore } from "../store/store.ts";
 import { chatServicesForTests } from "../testing.ts";
 import { modelPrompt, prepareRunnable, runningTurns, TurnExecution } from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
 import { BotChats } from "./bot-chats.ts";
-import { ChatFiles } from "./chat-files.ts";
 import { ChatView } from "./chat-view.ts";
-import { Chats } from "./chats.ts";
 import { startBotChat } from "./testing.ts";
 
 const eventStore = await runOnPostgres(EventStore.make);
 
 describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () => {
 	const services = await chatServicesForTests(EventBus.inProcess({ store: eventStore }));
+	const call = await servedOperations({ chats: services });
+	/** What a Personal Assistant's guide reads for `memberId`, as they are its member. */
+	const guideAs = async (memberId: string) =>
+		onPostgresAs(memberId)(
+			await runOnPostgres(
+				Effect.provide(ChatView.ForAssistantGuide, ChatView.forAssistantGuideLayer),
+			),
+		);
+	const manualRunsAs = await manualRunsOver(services);
 	/** As the editor the chats are with. */
-	let chats: Promised<Chats.Interface>;
-	let view: Promised<ChatView.Interface>;
+	let chats: AsMember;
+	let view: AsMember;
 	/** As an administrator, who may define and run the bots' automations. */
 	let automations: Promised<Automations.Interface>;
+	/** Starting the bots' automations' runs by hand, as that administrator. */
+	let runByHand: StartRun;
 	let workspaceId: string;
 	let projectId: string;
 	let botId: string;
@@ -154,9 +164,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				{ workspaceId, memberId: administrator.id, role: "admin" },
 			]),
 		);
-		chats = onPostgresAs(memberId)(Context.get(services, Chats.Service));
-		view = onPostgresAs(memberId)(Context.get(services, ChatView.Service));
+		chats = asMember(call, memberId);
+		view = asMember(call, memberId);
 		automations = onPostgresAs(administrator.id)(Context.get(services, Automations.Service));
+		runByHand = manualRunsAs(administrator.id);
 		const room = await onDatabase((db) =>
 			seedProject(db, {
 				workspaceId,
@@ -490,7 +501,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			),
 		);
 		if (!quiet || !ran) throw new Error("Could not create the automations");
-		const accepted = await automations.run({
+		const accepted = await runByHand({
 			projectId: botProjectId,
 			automationId: ran.automation.id,
 			requestId: crypto.randomUUID(),
@@ -528,7 +539,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			{ projectId: botProjectId },
 			{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 		);
-		const accepted = await automations.run({
+		const accepted = await runByHand({
 			projectId: botProjectId,
 			automationId: created.automation.id,
 			requestId: crypto.randomUUID(),
@@ -776,9 +787,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("shows how far the member has read, and announces it only when they read further", async () => {
-			const chatDetailsView = onPostgresAs(memberId)(
-				Context.get(services, ChatDetailsView.Service),
-			);
+			const chatDetailsView = asMember(call, memberId);
 			const current = await aChat();
 			const reply = await botWrites(current.id, "Hello!", 1);
 			const readsAnnounced = async () =>
@@ -847,7 +856,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			});
 			await chats.markRead(feed.id);
 			await botWrites(feed.id, "The build is red.", 1);
-			const accepted = await automations.run({
+			const accepted = await runByHand({
 				projectId,
 				automationId: created.automation.id,
 				requestId: crypto.randomUUID(),
@@ -920,7 +929,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				{ projectId: recipientProject.id },
 				{ name: "Elsewhere", instructions: "Run somewhere else.", triggers: [{ kind: "webhook" }] },
 			);
-			await automations.run({
+			await runByHand({
 				projectId: recipientProject.id,
 				automationId: elsewhere.automation.id,
 				requestId: crypto.randomUUID(),
@@ -1118,7 +1127,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			await expect(chats.startInterview(botId)).rejects.toMatchObject({
 				_tag: "ActionForbidden",
 			});
-			const creator = onPostgresAs(administratorId)(Context.get(services, Chats.Service));
+			const creator = asMember(call, administratorId);
 			const opened = await creator.startInterview(botId);
 			if (!opened) throw new Error("The interview did not start");
 			expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
@@ -1193,7 +1202,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			]),
 		);
 		const approves = (memberId: string) =>
-			onPostgresAs(memberId)(Context.get(services, ChatDetailsView.Service))
+			asMember(call, memberId)
 				.get(chat.id)
 				.then((details) => details.permissions?.approveComputerRequests);
 
@@ -1272,9 +1281,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	it("offers for mention in a public bot's chat everyone who reaches the bot, as the floor reads them", async () => {
 		const chat = await aChat();
 
-		const details = await onPostgresAs(memberId)(
-			Context.get(services, ChatDetailsView.Service),
-		).get(chat.id);
+		const details = await asMember(call, memberId).get(chat.id);
 
 		// The bot's default project has no members; the admin reaches it through the bot.
 		expect(details.membersReachingProject.map(({ id }) => id)).toEqual(
@@ -1364,9 +1371,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			content: `@${host?.handle} can you look?`,
 		});
 
-		const details = await onPostgresAs(memberId)(
-			Context.get(services, ChatDetailsView.Service),
-		).get(started.chat.id);
+		const details = await asMember(call, memberId).get(started.chat.id);
 		expect(details.participants.map(({ kind, id }) => ({ kind, id }))).toEqual(
 			expect.arrayContaining([
 				{ kind: "member", id: memberId },
@@ -1420,7 +1425,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(await listed()).toEqual(["General", "Launch", "Pricing"]);
 
 		// Renaming a chat is for whoever may change the project.
-		const administering = onPostgresAs(administratorId)(Context.get(services, Chats.Service));
+		const administering = asMember(call, administratorId);
 		await administering.renameChat({ chatId: pricing.id, name: "Prices" });
 
 		expect(await listed()).toEqual(["General", "Launch", "Prices"]);
@@ -1536,7 +1541,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("lets members react to a message once per emoji, announcing each change", async () => {
-		const reactions = onPostgresAs(memberId)(Context.get(services, Reactions.Service));
+		const reactions = asMember(call, memberId).reactions;
 		const current = await aChat();
 		const asked = await chats.post({
 			chatId: current.id,
@@ -1582,12 +1587,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.returning(),
 		);
 		if (!stranger) throw new Error("Could not create a stranger");
-		const strangers = onPostgresAs(stranger.id)(Context.get(services, Reactions.Service));
+		const strangers = asMember(call, stranger.id).reactions;
 		await expect(strangers.add(asked.id, "👍🏽")).rejects.toMatchObject({ _tag: "ResourceHidden" });
 	});
 
 	it("refuses a reaction to a reply still being written, and a new emoji past the limit", async () => {
-		const reactions = onPostgresAs(memberId)(Context.get(services, Reactions.Service));
+		const reactions = asMember(call, memberId).reactions;
 		const current = await aChat();
 		const asked = await chats.post({
 			chatId: current.id,
@@ -1625,7 +1630,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("says which messages wait for the bot's next turn, and announces when one starts waiting", async () => {
-		const chatDetailsView = onPostgresAs(memberId)(Context.get(services, ChatDetailsView.Service));
+		const chatDetailsView = asMember(call, memberId);
 		const current = await aChat();
 		const post = (content: string) =>
 			chats.post({ chatId: current.id, messageId: crypto.randomUUID(), content });
@@ -1652,7 +1657,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("queues nothing posted before a hand-back on an earlier reply starts waiting", async () => {
-		const chatDetailsView = onPostgresAs(memberId)(Context.get(services, ChatDetailsView.Service));
+		const chatDetailsView = asMember(call, memberId);
 		const turns = Context.get(services, Turns.Service);
 		const current = await aChat();
 		const asked = await chats.post({
@@ -1719,7 +1724,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			},
 		);
 		const requestId = crypto.randomUUID();
-		const accepted = await automations.run({
+		const accepted = await runByHand({
 			projectId: botProjectId,
 			automationId: created.automation.id,
 			requestId,
@@ -1751,7 +1756,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			},
 		);
 		const requestId = crypto.randomUUID();
-		const accepted = await automations.run({
+		const accepted = await runByHand({
 			projectId: botProjectId,
 			automationId: created.automation.id,
 			requestId,
@@ -1815,7 +1820,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			},
 		);
 		const requestId = crypto.randomUUID();
-		const accepted = await automations.run({
+		const accepted = await runByHand({
 			projectId: botProjectId,
 			automationId: created.automation.id,
 			requestId,
@@ -1989,7 +1994,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				{ projectId: botProjectId },
 				{ name: "Overnight filing", instructions: "File it.", triggers: [{ kind: "webhook" }] },
 			);
-			const run = await automations.run({
+			const run = await runByHand({
 				projectId: botProjectId,
 				automationId: created.automation.id,
 				requestId: crypto.randomUUID(),
@@ -2057,7 +2062,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			await botWrites(current.id, "The deploy finished.", 1);
 			const mention = await botWrites(current.id, "@chat-editor can you check it?", 2);
 
-			expect(await view.unreadMentions(workspaceId, 10)).toEqual([
+			expect(await (await guideAs(memberId)).unreadMentions(workspaceId, 10)).toEqual([
 				expect.objectContaining({
 					messageId: mention.id,
 					preview: "@chat-editor can you check it?",
@@ -2069,7 +2074,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 			await chats.markRead(current.id);
 
-			expect(await view.unreadMentions(workspaceId, 10)).toEqual([]);
+			expect(await (await guideAs(memberId)).unreadMentions(workspaceId, 10)).toEqual([]);
 			expect(await unreadForYou()).toBe(0);
 		});
 
@@ -2086,7 +2091,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const runAutomation = () =>
-				automations.run({
+				runByHand({
 					projectId: botProjectId,
 					automationId: created.automation.id,
 					requestId: crypto.randomUUID(),
@@ -2106,7 +2111,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				{ projectId: botProjectId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
-			const accepted = await automations.run({
+			const accepted = await runByHand({
 				projectId: botProjectId,
 				automationId: created.automation.id,
 				requestId: crypto.randomUUID(),
@@ -2128,7 +2133,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				{ projectId: botProjectId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
-			const run = await automations.run({
+			const run = await runByHand({
 				projectId: botProjectId,
 				automationId: created.automation.id,
 				requestId: crypto.randomUUID(),
@@ -2146,7 +2151,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const runAutomation = () =>
-				automations.run({
+				runByHand({
 					projectId: botProjectId,
 					automationId: created.automation.id,
 					requestId: crypto.randomUUID(),
@@ -2174,7 +2179,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				{ projectId: botProjectId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
-			const run = await automations.run({
+			const run = await runByHand({
 				projectId: botProjectId,
 				automationId: created.automation.id,
 				requestId: crypto.randomUUID(),
@@ -2199,7 +2204,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		/** The chat, with the editor's uploads to it. */
 		async function aChatWithFiles() {
 			const { id: chatId } = await aChat();
-			const files = onPostgresAs(memberId)(Context.get(services, ChatFiles.Service));
+			const files = asMember(call, memberId).chatFiles;
 			const upload = (name: string) =>
 				files.upload({
 					chatId,
@@ -2297,7 +2302,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("keeps an uploaded file as the type it was given, or else the type its name suggests", async () => {
 		const { id: chatId } = await aChat();
-		const files = onPostgresAs(memberId)(Context.get(services, ChatFiles.Service));
+		const files = asMember(call, memberId).chatFiles;
 		const upload = (name: string, type: string | undefined) =>
 			files.upload({
 				chatId,

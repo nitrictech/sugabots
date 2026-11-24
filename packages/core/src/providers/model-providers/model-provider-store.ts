@@ -1,3 +1,4 @@
+export { ModelNotEnabled } from "@sugabots/contracts/errors/providers";
 export * as ModelProviderStore from "./model-provider-store.ts";
 
 import type {
@@ -9,9 +10,10 @@ import type {
 	ProviderModelUpdate,
 } from "@sugabots/contracts";
 import { providerBuiltIn, providerLacksCredential, seededBuiltIns } from "@sugabots/contracts";
-import { DisplayName, type UserText, userText } from "@sugabots/errors";
+import { ModelNotEnabled, ModelProviderNameConflict } from "@sugabots/contracts/errors/providers";
+import { DisplayName, type UserText } from "@sugabots/errors";
 import { and, asc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
-import { Context, Data, DateTime, Effect, Layer, Schema } from "effect";
+import { Context, DateTime, Effect, Layer, Schema } from "effect";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import {
@@ -21,7 +23,6 @@ import {
 	workspaceDefaultModel,
 } from "../../database/schema.ts";
 import { Secrets } from "../../secrets/secrets.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { inWorkspaceUnderMembershipLock } from "../../workspaces/membership/member-reads.ts";
 import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
@@ -686,28 +687,6 @@ export interface ProviderAccess {
 	oauthTokens?: OAuthTokens;
 	/** The provider's `updatedAt`, so a test's result is recorded against what it tried. */
 	configurationUpdatedAt: Date;
-}
-
-export class ModelProviderNameConflict
-	extends Data.TaggedError("ModelProviderNameConflict")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`A model provider with that name already exists`;
-	}
-}
-
-/** The workspace does not offer the model something was asked to run on. */
-export class ModelNotEnabled
-	extends Data.TaggedError("ModelNotEnabled")<{ readonly model: string }>
-	implements UserFacing
-{
-	override get message() {
-		return `This workspace does not offer the model "${this.model}"`;
-	}
-	get userMessage() {
-		return userText`This workspace does not offer that model`;
-	}
 }
 
 /** The model the workspace's new bots start on, or nothing until it first offers one. */

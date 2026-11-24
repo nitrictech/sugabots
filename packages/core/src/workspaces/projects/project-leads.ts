@@ -1,9 +1,11 @@
-import { DisplayName, userText } from "@sugabots/errors";
+import { LeadsProjects } from "@sugabots/contracts/errors/projects";
+import { DisplayName } from "@sugabots/errors";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { Data, Effect } from "effect";
+import { Effect } from "effect";
 import { query } from "../../database/database.ts";
 import { bot, project, projectMember } from "../../database/schema.ts";
-import type { UserFacing } from "../../user-message.ts";
+
+export { LeadsProjects } from "@sugabots/contracts/errors/projects";
 
 /**
  * The lead bot of a project members made is always one of its public bots. So
@@ -52,33 +54,3 @@ export const refuseWhileLeading = Effect.fn("ProjectLeads.refuseWhileLeading")(f
 		leadsUnseenProjects: led.some((one) => !one.seen),
 	});
 });
-
-const LIST = new Intl.ListFormat("en", { type: "conjunction" });
-
-/**
- * The bot leads projects members made, so it stays in them, public, until each
- * has another lead. `projects` names those the member refused sees;
- * `leadsUnseenProjects` says it also leads private ones they aren't in.
- */
-export class LeadsProjects
-	extends Data.TaggedError("LeadsProjects")<{
-		readonly botName: DisplayName;
-		readonly projects: readonly DisplayName[];
-		readonly leadsUnseenProjects: boolean;
-	}>
-	implements UserFacing
-{
-	get userMessage() {
-		if (this.leadsUnseenProjects) {
-			if (this.projects.length === 0) {
-				return userText`${this.botName} leads private projects you aren't in. Each needs another lead bot first.`;
-			}
-			const names = DisplayName.fromRecord(this.projects.join(", "));
-			return userText`${this.botName} leads ${names} and private projects you aren't in. Each needs another lead bot first.`;
-		}
-		// A list of names members see is itself a name they see.
-		const names = DisplayName.fromRecord(LIST.format(this.projects));
-		const them = this.projects.length === 1 ? "it" : "each";
-		return userText`${this.botName} leads ${names}. Choose another lead bot for ${them} first.`;
-	}
-}

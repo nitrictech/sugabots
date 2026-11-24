@@ -1,49 +1,46 @@
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
-import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asCurrentUser } from "../../auth/middleware.ts";
+import { operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
+/** A workspace's bots, and each member's Personal Assistant, each endpoint its operation. */
 export const botRoutes = HttpApiBuilder.group(ServerApi, "bots", (handlers) =>
-	Effect.gen(function* () {
-		const bots = yield* BotAdministration.Service;
-		return handlers
+	Effect.map(operationCaller, (callOperation) =>
+		handlers
 			.handle("list", ({ params }) =>
-				bots.list({ workspace: params.workspace }).pipe(asCurrentUser, asHttpError(botErrors)),
+				callOperation("bots.list", { workspace: params.workspace }).pipe(asHttpError(botErrors)),
 			)
 			.handle("create", ({ params, payload }) =>
-				bots
-					.create({ workspace: params.workspace, bot: payload })
-					.pipe(asCurrentUser, asHttpError(botErrors)),
+				callOperation("bots.create", { workspace: params.workspace, ...payload }).pipe(
+					asHttpError(botErrors),
+				),
 			)
 			.handle("update", ({ params, payload }) =>
-				bots
-					.update({ botId: params.botId, changes: payload })
-					.pipe(asCurrentUser, asHttpError(botErrors)),
+				callOperation("bots.update", { botId: params.botId, changes: payload }).pipe(
+					asHttpError(botErrors),
+				),
 			)
 			.handle("remove", ({ params }) =>
-				bots.remove({ botId: params.botId }).pipe(asCurrentUser, asHttpError(botErrors)),
+				callOperation("bots.remove", { botId: params.botId }).pipe(asHttpError(botErrors)),
 			)
 			.handle("pin", ({ params }) =>
-				bots
-					.setPinned({ botId: params.botId, pinned: true })
-					.pipe(asCurrentUser, asHttpError(botErrors)),
+				callOperation("bots.pin", { botId: params.botId }).pipe(asHttpError(botErrors)),
 			)
 			.handle("unpin", ({ params }) =>
-				bots
-					.setPinned({ botId: params.botId, pinned: false })
-					.pipe(asCurrentUser, asHttpError(botErrors)),
+				callOperation("bots.unpin", { botId: params.botId }).pipe(asHttpError(botErrors)),
 			)
 			.handle("ensureAssistant", ({ params, payload }) =>
-				bots
-					.ensureAssistant({ workspace: params.workspace, model: payload.model })
-					.pipe(asCurrentUser, asHttpError(botErrors)),
-			);
-	}),
+				callOperation("bots.ensureAssistant", {
+					workspace: params.workspace,
+					model: payload.model,
+				}).pipe(asHttpError(botErrors)),
+			),
+	),
 );
 
+/** What each way a bots operation can fail means over HTTP. */
 const botErrors = {
 	...refusals,
 	ModelNotEnabled: BadRequest,

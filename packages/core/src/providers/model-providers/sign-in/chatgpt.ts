@@ -1,10 +1,10 @@
+import { ProviderSignInFailed } from "@sugabots/contracts/errors/providers";
 import { userText } from "@sugabots/errors";
 import { Clock, Effect, Schema } from "effect";
 import type { EgressHttpClient } from "../../network/egress.ts";
 import {
 	decodeSignInBody,
 	type OAuthTokens,
-	ProviderSignInFailed,
 	postToSignIn,
 	type SubscriptionSignIn,
 	unverifiedClaims,

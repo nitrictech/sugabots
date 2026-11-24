@@ -1,7 +1,13 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, notInArray, type SQL, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
-import { ACTIVE_TURN_STATUSES, message, type TurnReason, turn } from "../../database/schema.ts";
+import {
+	ACTIVE_TURN_STATUSES,
+	bot,
+	message,
+	type TurnReason,
+	turn,
+} from "../../database/schema.ts";
 import { heldInLane } from "./turn.workflow.ts";
 
 /**
@@ -75,16 +81,20 @@ export const turnAskingFor = Effect.fn("Collaboration.turnAskingFor")(function* 
 });
 
 /**
- * The newest message a turn on `triggerMessageId` for `reason` reads the chat
- * up to: for a helper, the asking message, so it reads what it was asked;
- * for a hand-back, the last of its helpers' replies. Undefined for any other
- * turn, which reads everything posted before it starts.
+ * Where a turn on `triggerMessageId` for `reason` by the bot `botId` stops
+ * reading the chat (see `ReadingLimit`): for a helper, at the asking message,
+ * so it reads what it was asked; for a hand-back, at the last of its helpers'
+ * replies. Undefined for any other turn, which reads everything posted before
+ * it starts. Undefined too for a hand-back with no helper's turn on its
+ * asking message, as one whose helpers' replies a migration moved into the
+ * chat, so it reads those replies rather than stop before them.
  */
-export const readsUpTo = Effect.fn("Collaboration.readsUpTo")(function* (
+export const readingLimitOf = Effect.fn("Collaboration.readingLimitOf")(function* (
 	db: Executor,
-	request: { triggerMessageId: string; reason: TurnReason },
+	request: { botId: string; triggerMessageId: string; reason: TurnReason },
 ) {
-	if (request.reason === "collaboration") return request.triggerMessageId;
+	const limit = (upTo: string): ReadingLimit => ({ upTo, ownBotId: request.botId });
+	if (request.reason === "collaboration") return limit(request.triggerMessageId);
 	if (request.reason !== "hand_back") return undefined;
 	const [lastReply] = yield* db
 		.select({ id: message.id })
@@ -95,15 +105,56 @@ export const readsUpTo = Effect.fn("Collaboration.readsUpTo")(function* (
 		)
 		.orderBy(desc(message.createdAt), desc(message.id))
 		.limit(1);
-	return lastReply?.id ?? request.triggerMessageId;
+	return lastReply && limit(lastReply.id);
+});
+
+/**
+ * How far a helper's or a hand-back's turn reads the chat: up to the message
+ * `upTo`, plus the replies its own bot `ownBotId` posted since, so a message
+ * someone else posts meanwhile can't steer it.
+ */
+export interface ReadingLimit {
+	readonly upTo: string;
+	readonly ownBotId: string;
+}
+
+/**
+ * The helpers whose turns on the asking message `askingMessageId` ended
+ * without replying, failed or interrupted, by name, for the hand-back to be
+ * told: what members were told of a failure is `error`.
+ */
+export const helpersWithoutReply = Effect.fn("Collaboration.helpersWithoutReply")(function* (
+	db: Executor,
+	askingMessageId: string,
+) {
+	return yield* db
+		.select({ name: bot.name, handle: bot.handle, status: turn.status, error: turn.error })
+		.from(turn)
+		.innerJoin(bot, eq(bot.id, turn.botId))
+		.where(
+			and(
+				eq(turn.triggerMessageId, askingMessageId),
+				eq(turn.reason, "collaboration"),
+				inArray(turn.status, ["failed", "cancelled"]),
+			),
+		)
+		.orderBy(asc(bot.name), asc(bot.id));
 });
 
 /**
  * Whether the bot `asking.botId` is owed its hand-back on its message
  * `asking.messageId` in the chat `asking.chatId`: some helper took a turn on
- * it, none is still working or waiting to start, and the hand-back has not
- * been asked for. `endedHelperBotId` is a helper whose turn the caller's
- * transaction ended, whose lane is still held while its workflow finishes.
+ * it, every helper asked on it has ended for good, and the hand-back has not
+ * been asked for. Asked in the transaction that ends the last helper's turn,
+ * so the hand-back's lane holds the chat busy from the moment nothing else
+ * does, and an automation run can't settle in between.
+ *
+ * A helper has ended for good once its turn is done, cancelled, or failed
+ * and not retrying; its lane, still held while its workflow finishes, then
+ * counts for nothing. One with no turn yet is still to start while a lane
+ * holds its request, other than `endedHelperBotId`'s: a helper whose turn
+ * the caller's transaction gives up on before it opened, whose lane is held
+ * until its workflow finishes. So is a retrying one, until its lane is free.
  */
 export const handBackOwed = Effect.fn("Collaboration.handBackOwed")(function* (
 	db: Executor,
@@ -114,6 +165,13 @@ export const handBackOwed = Effect.fn("Collaboration.handBackOwed")(function* (
 		eq(turn.triggerMessageId, asking.messageId),
 		eq(turn.reason, "collaboration"),
 	);
+	const endedForGood = (helperBotId: SQL) => sql`exists (
+		select 1 from ${turn}
+		where ${turn.triggerMessageId} = ${asking.messageId}
+			and ${turn.botId}::text = ${helperBotId}
+			and ${notInArray(turn.status, [...ACTIVE_TURN_STATUSES])}
+			and not ${turn.retrying}
+	)`;
 	const [row] = yield* db.execute<{ owed: boolean }>(
 		sql`select (
 			exists (select 1 from ${turn} where ${helperTurns})
@@ -121,11 +179,15 @@ export const handBackOwed = Effect.fn("Collaboration.handBackOwed")(function* (
 				select 1 from ${turn}
 				where ${helperTurns} and ${inArray(turn.status, [...ACTIVE_TURN_STATUSES])}
 			)
-			and not ${heldInLane(asking.chatId, {
-				triggerMessageId: asking.messageId,
-				reason: "collaboration",
-				...(endedHelperBotId !== undefined && { exceptBotId: endedHelperBotId }),
-			})}
+			and not ${heldInLane(
+				asking.chatId,
+				{ triggerMessageId: asking.messageId, reason: "collaboration" },
+				(helperBotId) =>
+					and(
+						sql`not ${endedForGood(helperBotId)}`,
+						endedHelperBotId === undefined ? undefined : sql`${helperBotId} <> ${endedHelperBotId}`,
+					),
+			)}
 			and not exists (
 				select 1 from ${turn}
 				where ${turn.triggerMessageId} = ${asking.messageId} and ${turn.botId} = ${asking.botId}

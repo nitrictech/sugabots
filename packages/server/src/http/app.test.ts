@@ -1,5 +1,5 @@
 import { healthResponseSchema, meSchema } from "@sugabots/contracts";
-import { Turns } from "@sugabots/core/chats/turns/turns";
+import { Operations } from "@sugabots/core/operations/registry";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
@@ -141,7 +141,7 @@ describe("cookie request origins", () => {
 			identifiedBy(async (headers) =>
 				headers.get("cookie") === "better-auth.session_token=cookie-token" ? signedIn : null,
 			),
-			unimplemented(Turns.Controls, { decide: () => Effect.void }),
+			unimplemented(Operations.Service, { "approvals.decide": () => Effect.void }),
 		),
 	);
 

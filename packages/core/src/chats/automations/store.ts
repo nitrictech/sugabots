@@ -1,8 +1,10 @@
+export { AutomationNameTaken } from "@sugabots/contracts/errors/automations";
 export * as AutomationStore from "./store.ts";
 
+import { AutomationNameTaken } from "@sugabots/contracts/errors/automations";
 import { type UserText, userText } from "@sugabots/errors";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { Context, Data, DateTime, Effect, Layer } from "effect";
+import { Context, DateTime, Effect, Layer } from "effect";
 import {
 	query,
 	queryCatching,
@@ -18,7 +20,6 @@ import {
 	automationRun,
 	automationTrigger,
 } from "../../database/schema.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
 import type { Turns } from "../turns/turns.ts";
@@ -558,19 +559,10 @@ const ofAutomation = (scope: Scope, triggerId: string) =>
 	);
 
 /** Failed runs in a row after which an automation pauses itself. */
-const FAILURES_THAT_PAUSE = 2;
+export const FAILURES_THAT_PAUSE = 2;
 
 /** How a run's work ended. */
 export type Settled = Turns.Ended | { readonly state: "completed" };
-
-export class AutomationNameTaken
-	extends Data.TaggedError("AutomationNameTaken")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`An automation with that name already exists`;
-	}
-}
 
 /**
  * endingAfter returns how a run ends once `outcome` is added to `ending`, how

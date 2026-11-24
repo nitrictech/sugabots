@@ -6,10 +6,10 @@ import { bot, connector, member, membership, workspace } from "../../database/sc
 import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { Files } from "../../files/files.ts";
+import type { AsMember } from "../../operations/chats/testing.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
 import { BotStore } from "../../workspaces/bots/bot-store.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
-import type { Chats } from "../chats/chats.ts";
 import { startBotChat } from "../chats/testing.ts";
 import { lanesForTests } from "../testing.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
@@ -20,7 +20,7 @@ import { admitTurn, Turn, TurnRequest, turnLane } from "./turn.workflow.ts";
 
 // Turn internals the cases outside `turns/` drive or inspect directly.
 export { modelPrompt } from "./context.ts";
-export { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
+export { type PreparedTurn, replyTurnOf, TurnExecution, type TurnRun } from "./execution.ts";
 export { TurnSignals } from "./signals.ts";
 export { type TurnCheckpoint, TurnStore } from "./store.ts";
 export { ToolCallStore } from "./tool-calls/store.ts";
@@ -99,7 +99,7 @@ export async function prepareRunnable(
  * its turn is asked for in the chat.
  */
 export async function aChatAwaitingReply(
-	chatsAs: (memberId: string) => Pick<Promised<Chats.Interface>, "startProjectChat">,
+	chatsAs: (memberId: string) => Pick<AsMember, "startProjectChat">,
 ) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const [created] = await onDatabase((db) =>

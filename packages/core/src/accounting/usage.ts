@@ -1,52 +1,42 @@
 export * as Usage from "./usage.ts";
 
-import {
-	DEFAULT_TIME_ZONE,
-	type UsageMonth,
-	type UsageQuery,
-	type WorkspaceUsage,
-} from "@sugabots/contracts";
+import { DEFAULT_TIME_ZONE, type UsageMonth, type WorkspaceUsage } from "@sugabots/contracts";
 import { and, eq, gte, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
-import type { AuthorizationDenied } from "../authorization/access.ts";
-import { Authorization } from "../authorization/authorization.ts";
-import type { CurrentActor } from "../authorization/current-actor.ts";
 import { query, serviceOperations } from "../database/database.ts";
 import { bot, modelProvider, modelRequest, providerModel, workspace } from "../database/schema.ts";
+import type { CanManageWorkspace } from "../proofs/workspace-permissions.ts";
+import { processLayer, Tier } from "../tiers.ts";
 
 /** What a workspace's models cost, from the request ledger. */
 export interface Interface {
 	/**
-	 * One month's usage in a workspace named by its id or its slug, with the
-	 * month and its days in the workspace's time zone. It shows every bot's
-	 * usage, so it takes the current actor's `workspace.usage.manage`; the
-	 * Personal Assistants', each its own member's, only together.
+	 * One month's usage in the workspace, with the month and its days in the
+	 * workspace's time zone. It shows every bot's usage, so it takes managing
+	 * the workspace; the Personal Assistants', each its own member's, only
+	 * together.
 	 */
-	readonly month: (
-		input: UsageQuery & { workspace: string },
-	) => Effect.Effect<WorkspaceUsage, AuthorizationDenied, CurrentActor.Service>;
+	readonly month: <P, W>(
+		canManage: CanManageWorkspace<P, W>,
+		month: UsageMonth,
+	) => Effect.Effect<WorkspaceUsage>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Usage") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Usage") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Usage");
-	const authorization = yield* Authorization.Service;
 	return Service.of({
-		month: ({ workspace, month }) =>
-			operation(
-				"month",
-				Effect.flatMap(
-					authorization.workspace(workspace, "workspace.usage.manage"),
-					({ workspaceId }) => loadMonth(workspaceId, month),
-				),
-			),
+		month: (canManage, month) =>
+			operation("month", loadMonth(canManage.inWorkspace.workspace.value, month)),
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(Layer.provide(Authorization.layer));
+export const layer = layerNoDeps;
 
 /**
  * How long a request can be out before it is taken to have been cut off by

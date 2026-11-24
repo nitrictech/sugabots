@@ -18,13 +18,13 @@ import type {
 	WorkspaceApprovals,
 } from "@sugabots/contracts";
 import {
-	DEFAULT_CHAT_PAGE_LIMIT,
 	GROUP_MENTION_HANDLES,
 	handleFromName,
 	mentionPattern,
 	messagePreview,
 	textWithoutNarration,
 } from "@sugabots/contracts";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import {
 	and,
 	asc,
@@ -50,7 +50,6 @@ import {
 	type AuthorizationDenied,
 	mayDecideToolCall,
 	projectStandingsFor,
-	ResourceHidden,
 } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
@@ -73,7 +72,12 @@ import {
 	toolCall,
 	turn,
 } from "../../database/schema.ts";
-import { isUuid } from "../../ids/ids.ts";
+import { memberActing } from "../../proofs/facts.ts";
+import type { ChatColumns, ReachSet } from "../../proofs/reach-set.ts";
+import type { ReachesChat } from "../../proofs/reaches-chat.ts";
+import type { ReachesProject } from "../../proofs/reaches-project.ts";
+import type { CanReadWorkspace } from "../../proofs/workspace-permissions.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import {
 	latestRunOf,
 	listStatusColumns,
@@ -106,127 +110,80 @@ import { Turns } from "../turns/turns.ts";
 import { toAutomationFeed, toProjectChat } from "./chat.ts";
 
 /**
- * What the chat screens show, of the chats the principal can see:
- * a project's chats (a bot's are its default project's), and a
- * chat's two timelines.
+ * What the chat screens show, of what an operation has proved its principal
+ * reaches: a project's chats (a bot's are its default project's), a chat's
+ * two timelines, and how much across a workspace waits for the member
+ * acting. Each method takes the workspace, project or chat from its proofs.
  */
 export interface Interface {
 	/**
-	 * The chats and automations of the project `projectId`, a bot's default
-	 * project included. Hidden unless the principal reaches it.
+	 * The chats and automations of the project `reach` is about, a bot's
+	 * default project included, as the member acting sees them: nobody, who
+	 * has read nothing, for a principal acting for no member.
 	 */
-	readonly chats: (
-		projectId: string,
-	) => Effect.Effect<ProjectChatList, AuthorizationDenied, CurrentActor.Service>;
+	readonly chats: <P, J>(reach: ReachesProject<P, J>) => Effect.Effect<ProjectChatList>;
 	/**
-	 * How each project of the workspace the principal reaches, bots' default
-	 * projects included, stands for them: its chats' and automation feeds'
-	 * unread messages, whether any waits on their decision, and how many of its
-	 * automations are failing unseen.
+	 * How each project of the workspace `reach` reaches, bots' default
+	 * projects included, stands for the member `canRead` names: its chats' and
+	 * automation feeds' unread messages, whether any waits on their decision,
+	 * and how many of its automations are failing unseen.
 	 */
-	readonly attentionMarks: (
-		workspace: string,
-	) => Effect.Effect<AttentionMarks, AuthorizationDenied, CurrentActor.Service>;
+	readonly attentionMarks: <P, W>(
+		canRead: CanReadWorkspace<P, W>,
+		reach: ReachSet<P, W>,
+	) => Effect.Effect<AttentionMarks>;
 	/**
-	 * The approvals across the workspace for the principal: those waiting on a
-	 * decision they may make, and the latest answered by the bots they reach.
+	 * The approvals across the workspace for the member `canRead` names: those
+	 * waiting on a decision they may make, and the latest answered in chats
+	 * `reach` reaches.
 	 */
-	readonly approvals: (
-		workspace: string,
-	) => Effect.Effect<WorkspaceApprovals, AuthorizationDenied, CurrentActor.Service>;
+	readonly approvals: <P, W>(
+		canRead: CanReadWorkspace<P, W>,
+		reach: ReachSet<P, W>,
+	) => Effect.Effect<WorkspaceApprovals>;
 	/**
-	 * How much in the workspace waits for the principal: approvals they may
-	 * decide, and unread messages and automation results that mention them,
-	 * over the last `ATTENTION_WINDOW_DAYS`.
+	 * How much in the workspace waits for the member `canRead` names:
+	 * approvals they may decide, and unread messages and automation results
+	 * that mention them, over the last `ATTENTION_WINDOW_DAYS`, in chats
+	 * `reach` reaches.
 	 */
-	readonly attention: (
-		workspace: string,
-	) => Effect.Effect<AttentionCounts, AuthorizationDenied, CurrentActor.Service>;
+	readonly attention: <P, W>(
+		canRead: CanReadWorkspace<P, W>,
+		reach: ReachSet<P, W>,
+	) => Effect.Effect<AttentionCounts>;
 	/**
-	 * The newest `limit` messages in the workspace's chats, over the last
-	 * `ATTENTION_WINDOW_DAYS`, that mention the principal and they have not read.
+	 * A page of the chat `reach` is about, newest last. Only a chat members
+	 * open; any other is hidden.
 	 */
-	readonly unreadMentions: (
-		workspace: string,
-		limit: number,
-	) => Effect.Effect<UnreadMention[], AuthorizationDenied, CurrentActor.Service>;
-	/** A page of the chat, newest last. */
-	readonly messages: (
-		chatId: string,
-		page?: ChatPageQuery,
-	) => Effect.Effect<ChatMessagesPage, ResourceHidden | InvalidCursor, CurrentActor.Service>;
+	readonly messages: <P, C>(
+		reach: ReachesChat<P, C>,
+		page: ChatPageQuery,
+	) => Effect.Effect<ChatMessagesPage, ResourceHidden | InvalidCursor>;
 	/** A page of the chats opened beside the chat, newest activity first. */
-	readonly history: (
-		chatId: string,
-		page?: ChatPageQuery,
-	) => Effect.Effect<ChatHistoryPage, ResourceHidden | InvalidCursor, CurrentActor.Service>;
+	readonly history: <P, C>(
+		reach: ReachesChat<P, C>,
+		page: ChatPageQuery,
+	) => Effect.Effect<ChatHistoryPage, ResourceHidden | InvalidCursor>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ChatView") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ChatView") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ChatView");
-	const authorization = yield* Authorization.Service;
-	const visibility = yield* Visibility.Service;
-
-	/** How each of the chats stands for the principal: its unread messages, and waiting on their decision. */
-	const chatMarks = Effect.fn("ChatView.chatMarks")(function* (
-		workspaceId: string,
-		chatIds: readonly string[],
-	) {
-		const { memberId } = yield* CurrentActor.Service;
-		const unread = yield* query((db) => unreadMessageCounts(db, memberId, chatIds));
-		const awaiting = yield* query((db) =>
-			chatsAwaitingDecisionBy(db, { workspaceId, memberId, chatIds }),
-		);
-		return (chatId: string) => ({
-			unreadMessages: unread.get(chatId) ?? 0,
-			needsApproval: awaiting.has(chatId),
-		});
-	});
-
-	/**
-	 * The chats `rows` as a project's list shows them to `memberId`: each with
-	 * its latest message, how many it holds, who has written in it lately,
-	 * and how it stands for them, newest message first.
-	 */
-	const listedChats = Effect.fn("ChatView.listedChats")(function* (
-		workspaceId: string,
-		memberId: string,
-		rows: readonly ProjectChatRow[],
-	) {
-		const chatIds = rows.map((row) => row.chat.id);
-		const lastMessageTimes = yield* query((db) => lastMessageTimesOf(db, chatIds));
-		const counts = yield* query((db) => messageCounts(db, chatIds));
-		const marksOf = yield* chatMarks(workspaceId, chatIds);
-		const mentioning = yield* query((db) => unreadMentionsIn(db, memberId, chatIds));
-		const statuses = yield* chatStatuses(memberId, chatIds);
-		const listed = rows.map((row): ListedChat => {
-			return {
-				chat: toProjectChat(row.chat),
-				lastMessageAt: lastMessageTimes.get(row.chat.id)?.toISOString() ?? null,
-				participants: row.participants.map(toParticipant),
-				messageCount: counts.get(row.chat.id) ?? 0,
-				...marksOf(row.chat.id),
-				mentionsYou: mentioning.has(row.chat.id),
-				status: statuses.get(row.chat.id) ?? null,
-			};
-		});
-		return listed.sort(byLatestMessage);
-	});
 
 	return Service.of({
-		chats: (projectId) =>
+		chats: (reach) =>
 			operation(
 				"chats",
 				Effect.gen(function* () {
+					const projectId = reach.project.value;
 					yield* Effect.annotateCurrentSpan("chat.list.project", projectId);
-					const standing = yield* authorization.project(projectId, "project.read");
-					const { project: listed, actor } = standing;
-					const { memberId } = actor;
-					const rows = yield* query((db) => projectChats(db, listed.id));
-					const chats = yield* listedChats(listed.workspaceId, memberId, rows);
-					const owned = yield* query((db) => listedAutomations(db, listed.id));
+					const memberId = memberActing(reach.as)?.actor.memberId ?? NOBODY;
+					const rows = yield* query((db) => projectChats(db, projectId));
+					const chats = yield* listedChats(reach.workspace, memberId, rows);
+					const owned = yield* query((db) => listedAutomations(db, projectId));
 					const feedMentions = yield* query((db) =>
 						unreadMentionsIn(
 							db,
@@ -249,20 +206,22 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		attentionMarks: (workspace) =>
+		attentionMarks: (canRead, reach) =>
 			operation(
 				"attentionMarks",
 				Effect.gen(function* () {
-					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
-					const { memberId } = yield* CurrentActor.Service;
-					const reachesProject = yield* visibility.reachesProject;
-					const chats = yield* query((db) => projectChatsReached(db, workspaceId, reachesProject));
+					const workspaceId = reach.workspace.value;
+					const { memberId } = canRead.actor;
+					const chats = yield* query((db) =>
+						projectChatsReached(db, workspaceId, reach.reachesProject),
+					);
 					const marksOf = yield* chatMarks(
 						workspaceId,
+						memberId,
 						chats.map(({ id }) => id),
 					);
 					const failed = yield* query((db) =>
-						failingAutomationsByProject(db, workspaceId, reachesProject, memberId),
+						failingAutomationsByProject(db, workspaceId, reach.reachesProject, memberId),
 					);
 					const projects: Record<string, AttentionMark> = {};
 					for (const { id, projectId } of chats) {
@@ -282,43 +241,116 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
+		approvals: (canRead, reach) =>
+			operation(
+				"approvals",
+				approvalsFor(reach.workspace.value, canRead.actor.memberId, reach.reachesChat),
+			),
+
+		attention: (canRead, reach) =>
+			operation(
+				"attention",
+				Effect.gen(function* () {
+					const workspaceId = reach.workspace.value;
+					const { memberId } = canRead.actor;
+					const approvers = yield* query((db) => approversIn(db, workspaceId, memberId));
+					const waitingApprovals = yield* query((db) =>
+						waitingApprovalCount(db, approvers.decidable, reach.reachesChat),
+					);
+					const scope = yield* attentionScopeIn({
+						workspaceId,
+						memberId,
+						reachesChat: reach.reachesChat,
+					});
+					const messages = yield* query((db) => unreadMentionCount(db, scope));
+					const runs = yield* query((db) => unreadRunMentionCount(db, scope));
+					return { waitingApprovals, unreadForYou: messages + runs };
+				}),
+			),
+
+		messages: (reach, page) =>
+			operation(
+				"messages",
+				Effect.gen(function* () {
+					const chatId = reach.chat.value;
+					yield* Effect.annotateCurrentSpan("chat.id", chatId);
+					// Before the query, so a bad cursor says nothing about the chat.
+					const before = page.cursor ? yield* parseCursor(page.cursor) : undefined;
+					const row = yield* query((db) =>
+						loadMessagesPage(db, { chatId, workspaceId: reach.workspace }, page.limit, before),
+					);
+					if (!row) return yield* new ResourceHidden({ resource: "chat" });
+					return toMessagesPage(row, page.limit);
+				}),
+			),
+
+		history: (reach, page) =>
+			operation(
+				"history",
+				Effect.gen(function* () {
+					const chatId = reach.chat.value;
+					yield* Effect.annotateCurrentSpan("chat.id", chatId);
+					const before = page.cursor ? yield* parseCursor(page.cursor) : undefined;
+					const row = yield* query((db) =>
+						loadHistory(db, { chatId, workspaceId: reach.workspace }, page.limit, before),
+					);
+					if (!row) return yield* new ResourceHidden({ resource: "chat" });
+					return toHistoryPage(row, page.limit);
+				}),
+			),
+	});
+});
+
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
+
+export const layer = layerNoDeps;
+
+/**
+ * What a Personal Assistant's `workspace_guide` tool reads for its member, as
+ * the current actor: the messages that mention them unread, and the approvals
+ * across the workspace. It exists only because that tool still calls services
+ * directly, through `AssistantGuide`; it goes when tools become operations,
+ * called in the bot loop like any other entrypoint's. The HTTP API goes
+ * through the chat-reads operations and `Service`, which demands proofs.
+ */
+export interface ForAssistantGuideInterface {
+	/**
+	 * The approvals across the workspace for the principal: those waiting on a
+	 * decision they may make, and the latest answered by the bots they reach.
+	 */
+	readonly approvals: (
+		workspace: string,
+	) => Effect.Effect<WorkspaceApprovals, AuthorizationDenied, CurrentActor.Service>;
+	/**
+	 * The newest `limit` messages in the workspace's chats, over the last
+	 * `ATTENTION_WINDOW_DAYS`, that mention the principal and they have not read.
+	 */
+	readonly unreadMentions: (
+		workspace: string,
+		limit: number,
+	) => Effect.Effect<UnreadMention[], AuthorizationDenied, CurrentActor.Service>;
+}
+
+export class ForAssistantGuide extends Context.Service<
+	ForAssistantGuide,
+	ForAssistantGuideInterface
+>()("@sugabots/core/ChatView/ForAssistantGuide") {}
+
+export const makeForAssistantGuide = Effect.gen(function* () {
+	const operation = yield* serviceOperations<ForAssistantGuideInterface>(
+		"ChatView.ForAssistantGuide",
+	);
+	const authorization = yield* Authorization.Service;
+	const visibility = yield* Visibility.Service;
+
+	return ForAssistantGuide.of({
 		approvals: (workspace) =>
 			operation(
 				"approvals",
 				Effect.gen(function* () {
 					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
 					const { memberId } = yield* CurrentActor.Service;
-					const approvers = yield* query((db) => approversIn(db, workspaceId, memberId));
-					const reachesChat = yield* visibility.reachesChat;
-					const waiting = yield* query((db) =>
-						waitingApprovalRows(db, approvers.decidable, reachesChat),
-					);
-					const answered = yield* query((db) => answeredApprovalRows(db, workspaceId, reachesChat));
-					return {
-						waiting: waiting.map(toApprovalRequest),
-						answered: answered.flatMap((row): AnsweredApproval[] => {
-							const answer = answerOf(row);
-							return answer ? [{ ...toApprovalRequest(row), answer }] : [];
-						}),
-					};
-				}),
-			),
-
-		attention: (workspace) =>
-			operation(
-				"attention",
-				Effect.gen(function* () {
-					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
-					const { memberId } = yield* CurrentActor.Service;
-					const approvers = yield* query((db) => approversIn(db, workspaceId, memberId));
-					const reachesChat = yield* visibility.reachesChat;
-					const waitingApprovals = yield* query((db) =>
-						waitingApprovalCount(db, approvers.decidable, reachesChat),
-					);
-					const scope = yield* attentionScopeIn({ workspaceId, memberId, reachesChat });
-					const messages = yield* query((db) => unreadMentionCount(db, scope));
-					const runs = yield* query((db) => unreadRunMentionCount(db, scope));
-					return { waitingApprovals, unreadForYou: messages + runs };
+					return yield* approvalsFor(workspaceId, memberId, yield* visibility.reachesChat);
 				}),
 			),
 
@@ -345,50 +377,90 @@ export const make = Effect.gen(function* () {
 					);
 				}),
 			),
-
-		messages: (chatId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
-			operation(
-				"messages",
-				Effect.gen(function* () {
-					yield* Effect.annotateCurrentSpan("chat.id", chatId);
-					if (!isUuid(chatId)) {
-						return yield* new ResourceHidden({ resource: "chat" });
-					}
-					// Before the query, and whether or not the chat is there, so a
-					// bad cursor says nothing about the chat.
-					const before = page.cursor ? yield* parseCursor(page.cursor) : undefined;
-					const reachesChat = yield* visibility.reachesChat;
-					const row = yield* query((db) =>
-						loadMessagesPage(db, chatId, reachesChat, page.limit, before),
-					);
-					if (!row) return yield* new ResourceHidden({ resource: "chat" });
-					return toMessagesPage(row, page.limit);
-				}),
-			),
-
-		history: (chatId, page = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
-			operation(
-				"history",
-				Effect.gen(function* () {
-					yield* Effect.annotateCurrentSpan("chat.id", chatId);
-					if (!isUuid(chatId)) {
-						return yield* new ResourceHidden({ resource: "chat" });
-					}
-					const before = page.cursor ? yield* parseCursor(page.cursor) : undefined;
-					const reachesChat = yield* visibility.reachesChat;
-					const row = yield* query((db) =>
-						loadHistory(db, chatId, reachesChat, page.limit, before),
-					);
-					if (!row) return yield* new ResourceHidden({ resource: "chat" });
-					return toHistoryPage(row, page.limit);
-				}),
-			),
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const forAssistantGuideLayer = Layer.effect(ForAssistantGuide, makeForAssistantGuide).pipe(
+	Layer.provide([Authorization.layer, Visibility.layer]),
+);
 
-export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));
+/** SQL for "the reader reaches this chat", given its columns: a `ReachSet`'s, or the current actor's. */
+type ReachesChatSql = (chat: ChatColumns) => SQL<boolean>;
+
+/** SQL for "the reader reaches this project", given the column naming it. */
+type ReachesProjectSql = (projectId: SQLWrapper) => SQL<boolean>;
+
+/**
+ * Whom a view is shown to when the principal acts for no member, such as an
+ * automation's run: no member's id, so they have read nothing and are
+ * mentioned nowhere.
+ */
+const NOBODY = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * The approvals across the workspace for `memberId`: those waiting on a
+ * decision they may make, and the latest answered, in chats `reachesChat`
+ * reaches.
+ */
+const approvalsFor = (workspaceId: string, memberId: string, reachesChat: ReachesChatSql) =>
+	Effect.gen(function* () {
+		const approvers = yield* query((db) => approversIn(db, workspaceId, memberId));
+		const waiting = yield* query((db) => waitingApprovalRows(db, approvers.decidable, reachesChat));
+		const answered = yield* query((db) => answeredApprovalRows(db, workspaceId, reachesChat));
+		return {
+			waiting: waiting.map(toApprovalRequest),
+			answered: answered.flatMap((row): AnsweredApproval[] => {
+				const answer = answerOf(row);
+				return answer ? [{ ...toApprovalRequest(row), answer }] : [];
+			}),
+		};
+	});
+
+/** How each of the chats stands for `memberId`: its unread messages, and waiting on their decision. */
+const chatMarks = Effect.fn("ChatView.chatMarks")(function* (
+	workspaceId: string,
+	memberId: string,
+	chatIds: readonly string[],
+) {
+	const unread = yield* query((db) => unreadMessageCounts(db, memberId, chatIds));
+	const awaiting = yield* query((db) =>
+		chatsAwaitingDecisionBy(db, { workspaceId, memberId, chatIds }),
+	);
+	return (chatId: string) => ({
+		unreadMessages: unread.get(chatId) ?? 0,
+		needsApproval: awaiting.has(chatId),
+	});
+});
+
+/**
+ * The chats `rows` as a project's list shows them to `memberId`: each with
+ * its latest message, how many it holds, who has written in it lately,
+ * and how it stands for them, newest message first.
+ */
+const listedChats = Effect.fn("ChatView.listedChats")(function* (
+	workspaceId: string,
+	memberId: string,
+	rows: readonly ProjectChatRow[],
+) {
+	const chatIds = rows.map((row) => row.chat.id);
+	const lastMessageTimes = yield* query((db) => lastMessageTimesOf(db, chatIds));
+	const counts = yield* query((db) => messageCounts(db, chatIds));
+	const marksOf = yield* chatMarks(workspaceId, memberId, chatIds);
+	const mentioning = yield* query((db) => unreadMentionsIn(db, memberId, chatIds));
+	const statuses = yield* chatStatuses(memberId, chatIds);
+	const listed = rows.map((row): ListedChat => {
+		return {
+			chat: toProjectChat(row.chat),
+			lastMessageAt: lastMessageTimes.get(row.chat.id)?.toISOString() ?? null,
+			participants: row.participants.map(toParticipant),
+			messageCount: counts.get(row.chat.id) ?? 0,
+			...marksOf(row.chat.id),
+			mentionsYou: mentioning.has(row.chat.id),
+			status: statuses.get(row.chat.id) ?? null,
+		};
+	});
+	return listed.sort(byLatestMessage);
+});
 
 /** A project's attention mark before any of its chats or automations is counted. */
 const NOTHING_NEW: AttentionMark = {
@@ -449,7 +521,7 @@ const projectChats = Effect.fn("ChatView.projectChats")(function* (
 const projectChatsReached = Effect.fn("ChatView.projectChatsReached")(function* (
 	db: Executor,
 	workspaceId: string,
-	reachesProject: Visibility.ReachesProject,
+	reachesProject: ReachesProjectSql,
 ) {
 	const rows = yield* db
 		.select({ id: placedChat.id, projectId: placedChat.projectId })
@@ -823,7 +895,7 @@ const attentionScopeIn = Effect.fn("ChatView.attentionScopeIn")(function* (
 
 interface AttentionScope {
 	workspaceId: string;
-	reachesChat: Visibility.ReachesChat;
+	reachesChat: ReachesChatSql;
 	memberId: string;
 	/** The member's handle, which mentions of them use. */
 	handle: string;
@@ -873,7 +945,7 @@ function spokenText(reply: Reply): string {
 const failingAutomationsByProject = Effect.fn("ChatView.failingAutomationsByProject")(function* (
 	db: Executor,
 	workspaceId: string,
-	reachesProject: Visibility.ReachesProject,
+	reachesProject: ReachesProjectSql,
 	memberId: string,
 ) {
 	const rows = yield* db
@@ -1045,7 +1117,7 @@ interface Decidable {
 const waitingApprovalRows = Effect.fn("ChatView.waitingApprovalRows")(function* (
 	db: Executor,
 	decidable: Decidable,
-	reachesChat: Visibility.ReachesChat,
+	reachesChat: ReachesChatSql,
 ) {
 	const asking = alias(placedChat, "asking_chat");
 	const chat = alias(placedChat, "approval_chat");
@@ -1061,7 +1133,7 @@ const waitingApprovalRows = Effect.fn("ChatView.waitingApprovalRows")(function* 
 const waitingApprovalCount = Effect.fn("ChatView.waitingApprovalCount")(function* (
 	db: Executor,
 	decidable: Decidable,
-	reachesChat: Visibility.ReachesChat,
+	reachesChat: ReachesChatSql,
 ) {
 	const asking = alias(placedChat, "asking_chat");
 	const chat = alias(placedChat, "approval_chat");
@@ -1087,7 +1159,7 @@ function waitingOnDecision(
 	decidable: Decidable,
 	asking: AskingChat,
 	chat: ApprovalChat,
-	reachesChat: Visibility.ReachesChat,
+	reachesChat: ReachesChatSql,
 ): SQL | undefined {
 	const computerRequest = inArray(toolCall.tool, [...COMPUTER_REQUEST_TOOLS]);
 	const inRun = isNotNull(runColumnOf(asking.id, "id"));
@@ -1126,7 +1198,7 @@ function waitingOnDecision(
 const answeredApprovalRows = Effect.fn("ChatView.answeredApprovalRows")(function* (
 	db: Executor,
 	workspaceId: string,
-	reachesChat: Visibility.ReachesChat,
+	reachesChat: ReachesChatSql,
 ) {
 	const asking = alias(placedChat, "asking_chat");
 	const chat = alias(placedChat, "approval_chat");
@@ -1264,22 +1336,22 @@ function byLatestMessage(left: ListedByLatest, right: ListedByLatest): number {
 }
 
 /**
- * A page of the chat: its messages with their authors and parts, and
- * its automation runs, each newest first and one more than the page. Nothing
- * when `reachesChat` does not reach the chat.
+ * A page of the chat `inChat.chatId`, in its workspace: its messages with
+ * their authors and parts, and its automation runs, each newest first and one
+ * more than the page. Nothing when it is not a chat members open.
  */
 const loadMessagesPage = Effect.fn("ChatView.loadMessagesPage")(function* (
 	db: Executor,
-	chatId: string,
-	reachesChat: Visibility.ReachesChat,
+	inChat: { chatId: string; workspaceId: string },
 	limit: number,
 	before: CursorPoint | undefined,
 ) {
+	const { chatId } = inChat;
 	const chat = yield* db.query.placedChat.findFirst({
 		where: {
 			id: chatId,
+			workspaceId: inChat.workspaceId,
 			kind: { in: [...OPENABLE_CHAT_KINDS] },
-			RAW: (row) => reachesChat(row),
 		},
 		columns: { id: true },
 		with: {
@@ -1393,14 +1465,13 @@ function toMessagesPage(row: LoadedMessagesPage, limit: number) {
 }
 
 /**
- * A page of the chats opened beside the chat, one statement: its
- * automation runs, each newest activity first and one more than the page.
- * Nothing when `reachesChat` does not reach the chat.
+ * A page of the chats opened beside the chat `inChat.chatId`, in its
+ * workspace, one statement: its automation runs, each newest activity first
+ * and one more than the page. Nothing when it is not a chat members open.
  */
 const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 	db: Executor,
-	chatId: string,
-	reachesChat: Visibility.ReachesChat,
+	inChat: { chatId: string; workspaceId: string },
 	limit: number,
 	before: CursorPoint | undefined,
 ) {
@@ -1424,9 +1495,9 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 	} satisfies DBQueryConfig<"many", typeof relations, (typeof relations)["placedChat"]>;
 	return yield* db.query.placedChat.findFirst({
 		where: {
-			id: chatId,
+			id: inChat.chatId,
+			workspaceId: inChat.workspaceId,
 			kind: { in: [...OPENABLE_CHAT_KINDS] },
-			RAW: (row) => reachesChat(row),
 		},
 		columns: { id: true },
 		with: { rootedChats: items },

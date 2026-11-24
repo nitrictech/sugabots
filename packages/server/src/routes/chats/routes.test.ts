@@ -1,8 +1,8 @@
-import { ResourceHidden } from "@sugabots/core/authorization/access";
-import { ChatView } from "@sugabots/core/chats/chats/chat-view";
-import { Chats } from "@sugabots/core/chats/chats/chats";
-import { InvalidCursor } from "@sugabots/core/chats/cursor";
-import { FloorControl } from "@sugabots/core/chats/floor/floor-control";
+import { InvalidCursor } from "@sugabots/contracts/errors/chat-reads";
+import { BotHasNoModel } from "@sugabots/contracts/errors/chats";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import type { InputOf } from "@sugabots/contracts/operations";
+import { Operations } from "@sugabots/core/operations/registry";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
@@ -14,8 +14,8 @@ import {
 } from "../../http/app.test-support.ts";
 
 /**
- * How the chat routes answer what `Chats` and `ChatView` refuse, over doubles
- * of both. Why each is refused is decided in core.
+ * How the chat routes answer what their operations refuse, over doubles of
+ * them. Why each is refused is decided in core.
  */
 
 const CHAT = "0199a3a0-0000-7000-8000-000000000401";
@@ -30,13 +30,10 @@ const resolveMember: MemberResolver = async () => ({
 	image: null,
 });
 
-const app = (chats: Partial<Chats.Interface>, view: Partial<ChatView.Interface> = {}) =>
+/** The app with `operations` as the only operations it has. */
+const app = (operations: Partial<Operations.Interface>) =>
 	createTestApp(
-		Layer.mergeAll(
-			identifiedBy(resolveMember),
-			unimplemented(Chats.Service, chats),
-			unimplemented(ChatView.Service, view),
-		),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(Operations.Service, operations)),
 	);
 
 const signedIn = (init: RequestInit = {}) => ({
@@ -49,25 +46,25 @@ const startChat = (body: object = {}) =>
 
 describe("starting a chat in a project", () => {
 	it("hands on the project and the message, and no files, which can't be uploaded before it starts", async () => {
-		let asked: Parameters<Chats.Interface["startProjectChat"]>[0] | undefined;
+		let asked: InputOf<"chats.startProjectChat"> | undefined;
 		await app({
-			startProjectChat: (input) => {
+			"chats.startProjectChat": (_principal, input) => {
 				asked = input;
-				return Effect.fail(new FloorControl.BotHasNoModel());
+				return Effect.fail(new BotHasNoModel());
 			},
 		}).request(`/projects/${PROJECT}/chats`, startChat({ attachments: [UPLOAD] }));
 
-		expect(asked).toEqual({ projectId: PROJECT, messageId: MESSAGE, content: "Hi" });
+		expect(asked).toEqual({ projectId: PROJECT, id: MESSAGE, message: "Hi" });
 	});
 
 	it("is a conflict when a bot given the floor has no model, and not found in a project the member cannot see", async () => {
-		const refusing = (failure: FloorControl.BotHasNoModel | ResourceHidden) =>
-			app({ startProjectChat: () => Effect.fail(failure) }).request(
+		const refusing = (failure: BotHasNoModel | ResourceHidden) =>
+			app({ "chats.startProjectChat": () => Effect.fail(failure) }).request(
 				`/projects/${PROJECT}/chats`,
 				startChat(),
 			);
 
-		expect((await refusing(new FloorControl.BotHasNoModel())).status).toBe(409);
+		expect((await refusing(new BotHasNoModel())).status).toBe(409);
 		expect((await refusing(new ResourceHidden({ resource: "project" }))).status).toBe(404);
 	});
 });
@@ -75,7 +72,7 @@ describe("starting a chat in a project", () => {
 describe("a chat the member cannot see", () => {
 	it("is not found, whatever is asked of it", async () => {
 		const hidden = Effect.fail(new ResourceHidden({ resource: "chat" }));
-		const routes = app({ setResolved: () => hidden }, { messages: () => hidden });
+		const routes = app({ "chats.setResolved": () => hidden, "chats.messages": () => hidden });
 
 		expect(
 			(await routes.request(`/chats/${CHAT}/resolved`, signedIn({ method: "PUT" }))).status,
@@ -84,12 +81,31 @@ describe("a chat the member cannot see", () => {
 	});
 });
 
+describe("resolving a chat", () => {
+	it("marks it resolved, and reopens it, through the one operation", async () => {
+		const asked: Array<InputOf<"chats.setResolved">> = [];
+		const routes = app({
+			"chats.setResolved": (_principal, input) => Effect.sync(() => void asked.push(input)),
+		});
+
+		expect(
+			(await routes.request(`/chats/${CHAT}/resolved`, signedIn({ method: "PUT" }))).status,
+		).toBe(204);
+		expect(
+			(await routes.request(`/chats/${CHAT}/resolved`, signedIn({ method: "DELETE" }))).status,
+		).toBe(204);
+		expect(asked).toEqual([
+			{ chatId: CHAT, resolved: true },
+			{ chatId: CHAT, resolved: false },
+		]);
+	});
+});
+
 describe("a page of a chat", () => {
 	it("is a bad request with a cursor that is not one", async () => {
-		const response = await app({}, { messages: () => Effect.fail(new InvalidCursor()) }).request(
-			`/chats/${CHAT}/messages?cursor=nonsense`,
-			signedIn(),
-		);
+		const response = await app({
+			"chats.messages": () => Effect.fail(new InvalidCursor()),
+		}).request(`/chats/${CHAT}/messages?cursor=nonsense`, signedIn());
 
 		expect(response.status).toBe(400);
 	});

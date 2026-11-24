@@ -1,48 +1,40 @@
 import { BadRequest, NotFound } from "@sugabots/contracts/http";
-import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asCurrentUser } from "../../auth/middleware.ts";
+import { operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
+/** A workspace's one search provider, each endpoint its operation. */
 export const searchProviderRoutes = HttpApiBuilder.group(ServerApi, "searchProviders", (handlers) =>
-	Effect.gen(function* () {
-		const search = yield* SearchProviderSetup.Service;
-		return handlers
+	Effect.map(operationCaller, (callOperation) =>
+		handlers
 			.handle("get", ({ params }) =>
-				search.get(params.workspace).pipe(
-					Effect.map((provider) => ({ provider: provider ?? null })),
-					asCurrentUser,
-					asHttpError(searchProviderErrors),
-				),
+				callOperation("searchProviders.get", params).pipe(asHttpError(searchProviderErrors)),
 			)
 			.handle("webAccess", ({ params }) =>
-				search.webAccess(params.workspace).pipe(
-					Effect.map((enabled) => ({ enabled })),
-					asCurrentUser,
+				callOperation("searchProviders.webAccess", params).pipe(asHttpError(searchProviderErrors)),
+			)
+			.handle("replace", ({ params, payload }) =>
+				callOperation("searchProviders.replace", { ...params, ...payload }).pipe(
 					asHttpError(searchProviderErrors),
 				),
 			)
-			.handle("replace", ({ params, payload }) =>
-				search
-					.replace({ workspace: params.workspace, provider: payload })
-					.pipe(asCurrentUser, asHttpError(searchProviderErrors)),
-			)
 			.handle("update", ({ params, payload }) =>
-				search
-					.update({ workspace: params.workspace, changes: payload })
-					.pipe(asCurrentUser, asHttpError(searchProviderErrors)),
+				callOperation("searchProviders.update", { ...params, changes: payload }).pipe(
+					asHttpError(searchProviderErrors),
+				),
 			)
 			.handle("remove", ({ params }) =>
-				search.remove(params.workspace).pipe(asCurrentUser, asHttpError(searchProviderErrors)),
+				callOperation("searchProviders.remove", params).pipe(asHttpError(searchProviderErrors)),
 			)
 			.handle("test", ({ params }) =>
-				search.test(params.workspace).pipe(asCurrentUser, asHttpError(searchProviderErrors)),
-			);
-	}),
+				callOperation("searchProviders.test", params).pipe(asHttpError(searchProviderErrors)),
+			),
+	),
 );
 
+/** What each way a search providers operation can fail means over HTTP. */
 const searchProviderErrors = {
 	...refusals,
 	SearchProviderNotFound: NotFound,

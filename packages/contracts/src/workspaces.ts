@@ -130,3 +130,15 @@ export const workspacePermissionsSchema = Schema.Struct({
 });
 
 export type WorkspacePermissions = typeof workspacePermissionsSchema.Type;
+
+/**
+ * What the caller may do in one workspace, so the web app can decide whether
+ * to draw a control at all rather than let it fail. The role is here too,
+ * because a settings screen says which one somebody holds.
+ */
+export const workspaceAccessSchema = Schema.Struct({
+	/** Always present past `workspace.read`, which no role-less caller holds. */
+	role: Schema.optional(workspaceRoleSchema),
+	permissions: workspacePermissionsSchema,
+});
+export type WorkspaceAccess = typeof workspaceAccessSchema.Type;

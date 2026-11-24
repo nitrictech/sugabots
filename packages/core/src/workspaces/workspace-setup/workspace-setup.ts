@@ -1,28 +1,27 @@
 export * as WorkspaceSetup from "./workspace-setup.ts";
 
-import { userText } from "@sugabots/errors";
+import { NoModelChosen, NotReadyToFinish } from "@sugabots/contracts/errors/workspace";
 import { and, eq, isNull } from "drizzle-orm";
-import { Context, Data, DateTime, Effect, Layer } from "effect";
-import type { AuthorizationDenied } from "../../authorization/access.ts";
-import { Authorization } from "../../authorization/authorization.ts";
-import type { CurrentActor } from "../../authorization/current-actor.ts";
+import { Context, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { bot, workspace } from "../../database/schema.ts";
+import type { CanManageWorkspace } from "../../proofs/workspace-permissions.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
-import type { UserFacing } from "../../user-message.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { BotStore } from "../bots/bot-store.ts";
 
 /**
- * The current actor finishing setting up a workspace. It is transactional and
- * locks the rows it checks, so the check still holds when the writes that
- * follow it land.
+ * A member finishing setting up a workspace. It is transactional and locks
+ * the rows it checks, so the check still holds when the writes that follow
+ * it land.
  */
 export interface Interface {
 	/**
-	 * Finishes setting up `workspaceId`, once `botId` is a bot the actor
-	 * made there, and that bot runs on a model the workspace offers. Finishing settles the first bot and the model the
-	 * workspace runs it on, so it takes `workspace.providers.manage`.
+	 * Finishes setting up the workspace, once `botId` is a bot the member who
+	 * may manage it made there, and that bot runs on a model the workspace
+	 * offers. Finishing settles the first bot and the model the workspace runs
+	 * it on, so it takes managing the workspace.
 	 *
 	 * That model also becomes the workspace's default and every system bot's:
 	 * it is the one model the member setting the workspace up has chosen, and
@@ -30,36 +29,31 @@ export interface Interface {
 	 *
 	 * The first time, it records when the workspace's setup was completed.
 	 */
-	readonly complete: (input: {
-		workspaceId: string;
-		botId: string;
-	}) => Effect.Effect<
-		void,
-		AuthorizationDenied | NotReadyToFinish | NoModelChosen,
-		CurrentActor.Service
-	>;
+	readonly complete: <P, W>(
+		canManage: CanManageWorkspace<P, W>,
+		botId: string,
+	) => Effect.Effect<void, NotReadyToFinish | NoModelChosen>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/WorkspaceSetup",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("WorkspaceSetup");
-	const authorization = yield* Authorization.Service;
 	const modelProviders = yield* ModelProviderStore.Service;
 	const bots = yield* BotStore.Service;
 
 	return Service.of({
-		complete: ({ workspaceId, botId }) =>
+		complete: (canManage, botId) =>
 			operation(
 				"complete",
 				transaction(
 					Effect.gen(function* () {
-						const { workspaceId: resolved, actor } = yield* authorization.workspace(
-							workspaceId,
-							"workspace.providers.manage",
-						);
+						const resolved = canManage.inWorkspace.workspace.value;
+						const { actor } = canManage;
 						const [eligible] = yield* query((db) =>
 							db
 								.select({ model: bot.model })
@@ -97,25 +91,9 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, ModelProviderStore.layer, BotStore.layer]),
-);
-
-/** The bot named is not one this member may finish workspace setup with. */
-export class NotReadyToFinish extends Data.TaggedError("NotReadyToFinish") implements UserFacing {
-	get userMessage() {
-		return userText`Finish creating your bot first`;
-	}
-}
-
-/** The first bot runs on no model, or on one the workspace does not offer. */
-export class NoModelChosen extends Data.TaggedError("NoModelChosen") implements UserFacing {
-	get userMessage() {
-		return userText`Choose a model for your first bot first`;
-	}
-}
+export const layer = layerNoDeps.pipe(Layer.provide([ModelProviderStore.layer, BotStore.layer]));
 
 /** Records that `workspaceId`'s setup is complete, unless it already was. */
 export const recordSetUp = (workspaceId: string) =>

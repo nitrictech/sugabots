@@ -6,8 +6,8 @@ import { BlobStore } from "../../blob-store/blob-store.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { blob, bot, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
-import { onPostgresAs } from "../../workspaces/testing.ts";
-import { Chats } from "../chats/chats.ts";
+import { asMember } from "../../operations/chats/testing.ts";
+import { servedOperations } from "../../operations/testing.ts";
 import { chatServicesForTests } from "../testing.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
@@ -28,8 +28,8 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	});
 	const turns = onPostgres(Context.get(services, TurnStore.Service));
 	const calls = onPostgres(Context.get(services, ToolCallStore.Service));
-	const chatsAs = (memberId: string) =>
-		onPostgresAs(memberId)(Context.get(services, Chats.Service));
+	const call = await servedOperations({ chats: services });
+	const chatsAs = (memberId: string) => asMember(call, memberId);
 	const execution = onPostgres({
 		prepare: Context.get(services, TurnExecution.Service).prepare,
 	});

@@ -1,5 +1,6 @@
+import { NotReadyToFinish } from "@sugabots/contracts/errors/workspace";
+import { Operations } from "@sugabots/core/operations/registry";
 import { unimplemented } from "@sugabots/core/testing";
-import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/workspace-setup";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import type { MemberResolver } from "../../http/app.test-support.ts";
@@ -20,9 +21,10 @@ const resolveMember: MemberResolver = async (headers) =>
 		? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 		: null;
 
-const app = (workspaceSetup: Partial<WorkspaceSetup.Interface>) =>
+/** The app with `operations` as the only operations it has. */
+const app = (operations: Partial<Operations.Interface>) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolveMember), unimplemented(WorkspaceSetup.Service, workspaceSetup)),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(Operations.Service, operations)),
 	);
 
 const authorization = { ...signedInWith("good-token"), "content-type": "application/json" };
@@ -30,7 +32,7 @@ const authorization = { ...signedInWith("good-token"), "content-type": "applicat
 describe("workspace setup routes", () => {
 	it("reports resources that do not form a valid setup as a bad request", async () => {
 		const response = await app({
-			complete: () => Effect.fail(new WorkspaceSetup.NotReadyToFinish()),
+			"workspaceSetup.complete": () => Effect.fail(new NotReadyToFinish()),
 		}).request("/workspace-setup/complete", {
 			method: "POST",
 			headers: authorization,
@@ -38,9 +40,11 @@ describe("workspace setup routes", () => {
 		});
 
 		expect(response.status).toBe(400);
+		const message = "Finish creating your bot first";
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message: "Finish creating your bot first",
+			message,
+			error: { _tag: "NotReadyToFinish", userMessage: message, isRetryable: false },
 		});
 	});
 });

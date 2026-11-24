@@ -1,12 +1,14 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NodeFileSystem } from "@effect/platform-node";
+import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { effectRunner } from "../database/database.ts";
 import {
 	closeDatabase,
-	noDatabase,
+	onDatabase,
 	onPostgres,
 	type Promised,
 	promising,
@@ -14,16 +16,22 @@ import {
 } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import { BlobStore } from "./blob-store.ts";
+import { fromFileSystem } from "./implementations/filesystem.ts";
+import { blobFolderMove } from "./sql.ts";
 
-/** The blob store `BLOB_STORE_PROVIDER=filesystem` makes, keeping blobs under `root`. */
+/**
+ * The filesystem blob store keeping blobs under `root`, made without the
+ * database `BlobStore.make` reads the folders to move from at startup.
+ */
 function fileSystemRuntime(root: string) {
-	const env = { BLOB_STORE_PROVIDER: "filesystem", BLOB_STORE_FILESYSTEM_ROOT: root };
 	return ManagedRuntime.make(
-		BlobStore.layer.pipe(
-			Layer.provide([noDatabase, Ids.layer, ConfigProvider.layer(ConfigProvider.fromEnv({ env }))]),
+		Layer.effect(BlobStore.Service, fromFileSystem(root)).pipe(
+			Layer.provide([NodeFileSystem.layer, Ids.layer]),
 		),
 	);
 }
+
+afterAll(closeDatabase);
 
 interface Implementation {
 	name: string;
@@ -37,7 +45,8 @@ const implementations: Implementation[] = [
 		skip: !process.env.DATABASE_URL,
 		open: async () => ({
 			blobs: onPostgres(await runOnPostgres(Effect.service(BlobStore.Service))),
-			close: closeDatabase,
+			// The file closes the database once every case has run.
+			close: async () => {},
 		}),
 	},
 	{
@@ -181,6 +190,67 @@ describe.for(implementations.filter(({ skip }) => !skip))("blob store, on $name"
 		await expect(blobs.get(parent)).rejects.toBeInstanceOf(BlobStore.NotFound);
 		await expect(blobs.get(child)).resolves.toBeDefined();
 	});
+});
+
+describe.skipIf(!process.env.DATABASE_URL)("a blob store starting", () => {
+	const text = (value: string): BlobStore.Content => ({
+		stream: Stream.succeed(new TextEncoder().encode(value)),
+		contentType: "text/plain; charset=utf-8",
+	});
+
+	it.for(["postgres", "filesystem"] as const)(
+		"moves the folders a migration moved before it serves them, on %s",
+		async (provider) => {
+			const root = await mkdtemp(join(tmpdir(), "blob-store-"));
+			const env = { BLOB_STORE_PROVIDER: provider, BLOB_STORE_FILESYSTEM_ROOT: root };
+			const start = async () =>
+				promising(runOnPostgres)(
+					await runOnPostgres(
+						BlobStore.make.pipe(
+							Effect.provide([
+								NodeFileSystem.layer,
+								ConfigProvider.layer(ConfigProvider.fromEnv({ env })),
+							]),
+						),
+					),
+				);
+			const from = crypto.randomUUID();
+			const to = crypto.randomUUID();
+			const readText = async (blobs: Promised<BlobStore.Interface>, key: BlobStore.Key) => {
+				const { stream } = await blobs.get(key);
+				return Buffer.concat(await Effect.runPromise(Stream.runCollect(stream))).toString("utf8");
+			};
+			const before = await start();
+			await before.put(BlobStore.key("chats", from, "files", "1"), text("moved"));
+			await before.put(BlobStore.key("chats", to, "files", "2"), text("already there"));
+			const [queued] = await onDatabase((db) =>
+				db
+					.insert(blobFolderMove)
+					.values({
+						fromPrefix: BlobStore.key("chats", from),
+						toPrefix: BlobStore.key("chats", to),
+					})
+					.returning(),
+			);
+
+			const after = await start();
+
+			expect(await readText(after, BlobStore.key("chats", to, "files", "1"))).toBe("moved");
+			expect(await readText(after, BlobStore.key("chats", to, "files", "2"))).toBe("already there");
+			await expect(after.get(BlobStore.key("chats", from, "files", "1"))).rejects.toBeInstanceOf(
+				BlobStore.NotFound,
+			);
+			expect(
+				await onDatabase((db) =>
+					db
+						.select()
+						.from(blobFolderMove)
+						.where(eq(blobFolderMove.id, queued?.id ?? "")),
+				),
+			).toEqual([]);
+			await rm(root, { recursive: true, force: true });
+		},
+	);
 });
 
 describe("a blob store on the filesystem", () => {

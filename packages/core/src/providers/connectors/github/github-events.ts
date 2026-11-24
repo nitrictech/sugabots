@@ -1,12 +1,8 @@
-import type { RepositoryEvent, RunTrigger } from "@sugabots/contracts";
+import type { RepositoryActivity, RepositoryEvent } from "@sugabots/contracts";
 import { Option, Schema } from "effect";
 import * as GitHub from "./github.ts";
 
-/** Something that happened at one of a GitHub account's repositories, as an automation's run is told of it. */
-export type RepositoryActivity = Omit<
-	Extract<RunTrigger, { kind: "github" }>,
-	"kind" | "connectorId" | "receivedAt" | "deliveryId"
->;
+export type { RepositoryActivity } from "@sugabots/contracts";
 
 /** The most of a comment or description a run is given. */
 const MAX_TEXT_CHARACTERS = 4_000;

@@ -1,11 +1,12 @@
 import {
 	ADMINISTERING_WORKSPACE_ROLES,
 	type MemberParticipant,
+	type Project,
 	type ProjectMember,
 } from "@sugabots/contracts";
 import { and, asc, count, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { membersReachingProject } from "../../authorization/access.ts";
+import { listedProjectStandingsFor, membersReachingProject } from "../../authorization/access.ts";
 import { memberColumns, toMember } from "../../chats/store/participants.ts";
 import { query } from "../../database/database.ts";
 import {
@@ -16,6 +17,7 @@ import {
 	projectBot,
 	projectMember,
 } from "../../database/schema.ts";
+import { projectSeenBy } from "./project.ts";
 
 /** The members in the project, by name. Administrators, who are in every one, can't be taken out. */
 export const projectMembers = (projectId: string) =>
@@ -101,3 +103,20 @@ export const defaultProjectOf = (botId: string) =>
 			row ? Effect.succeed(row.id) : Effect.die(new Error(`Bot ${botId} has no default project`)),
 		),
 	);
+
+/**
+ * The projects of the workspace `workspaceId` that `memberId` is in, and the
+ * public ones they could join, by name, as they see them. Each says how many
+ * members and bots are in it where they may list them, as its own lists would.
+ */
+export const projectsListedTo = (workspaceId: string, memberId: string) =>
+	Effect.gen(function* () {
+		const listed = yield* query((db) => listedProjectStandingsFor(db, workspaceId, memberId));
+		const headcountOf = yield* projectHeadcounts(
+			listed.filter((standing) => standing.may("project.read")).map(({ project }) => project.id),
+		);
+		return listed.map((standing): Project => {
+			const seen = projectSeenBy(standing);
+			return standing.may("project.read") ? { ...seen, ...headcountOf(seen.id) } : seen;
+		});
+	});

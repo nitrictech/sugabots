@@ -1,13 +1,12 @@
 import type { Connector } from "@sugabots/contracts";
+import type { InputOf, OperationName, OutputOf } from "@sugabots/contracts/operations";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
-import { ConfigProvider, Effect, Exit, Layer, ManagedRuntime } from "effect";
+import { Effect, type Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Accounts } from "../../accounts/accounts.ts";
-import { CurrentActor } from "../../authorization/current-actor.ts";
 import { ComputerProviderStore } from "../../computers/computer-provider-store.ts";
-import { ComputerSignIn } from "../../computers/computer-sign-in.ts";
 import { Computers } from "../../computers/computers.ts";
-import { noComputers, recordingFirstComputer } from "../../computers/testing.ts";
+import { recordingFirstComputer } from "../../computers/testing.ts";
 import { query } from "../../database/database.ts";
 import {
 	bot,
@@ -30,117 +29,143 @@ import {
 	onDatabase,
 	runOnPostgres,
 	servedOnPostgres,
-	testInfrastructure,
 	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
-import { Email } from "../../email/email.ts";
+import type { Email } from "../../email/email.ts";
+import { type CallOperation, servedOperations } from "../../operations/testing.ts";
+import type { MemberSession } from "../../principal.ts";
+import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { connectorsIn } from "../../providers/connectors/connector-reads.ts";
 import { ConnectorStore } from "../../providers/connectors/connector-store.ts";
 import {
 	egressToGitHub,
+	gitHubSetupAt,
 	installedConnector,
 	json,
-	reachingGitHub,
 	standInGitHub,
 	USER_INSTALLATION_ID,
 	uninstalls,
 } from "../../providers/connectors/github/github.test-support.ts";
-import { GitHubApps } from "../../providers/connectors/github/github-app.ts";
 import { providersIn } from "../../providers/model-providers/model-provider-reads.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
+import type { Egress } from "../../providers/network/egress.ts";
 import { Secrets } from "../../secrets/secrets.ts";
 import { ServerSettings } from "../../server-settings/server-settings.ts";
 import { unimplemented } from "../../testing.ts";
 import { seedProject } from "../projects/seed.test-support.ts";
-import { Membership } from "./membership.ts";
 
 const WEB_APP_URL = "http://localhost:5173";
 /** A computer provider's address nothing listens on. */
 const UNREACHABLE_URL = "http://127.0.0.1:9";
 
 /**
- * The real service over a migrated database, with the emails it sends kept in
- * `sent`. Needs `DATABASE_URL`, and makes a fresh workspace per case so it can
- * run against a database with the dev seed in it.
+ * The workspace operations, called through the registry for members signed
+ * in, over a migrated database, with the emails they send kept in `sent`.
+ * Needs `DATABASE_URL`, and makes a fresh workspace per case so it can run
+ * against a database with the dev seed in it.
  */
 describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () => {
 	const sent: Email.Message[] = [];
-	const runtimes: Array<ManagedRuntime.ManagedRuntime<Membership.Service, unknown>> = [];
+	let signIn: (memberId: string) => Promise<MemberSession>;
 
-	/** `reaching`: what a computer signs in with, and what the server's requests out reach. */
-	function membershipWith(requireEmailVerification: boolean, reaching = noComputers) {
-		const runtime = ManagedRuntime.make(
-			Membership.layer.pipe(
-				Layer.provide([
-					testInfrastructure,
-					reaching,
-					ServerSettings.layer,
-					unimplemented(Accounts.Service, { requireEmailVerification }),
-					Layer.succeed(
-						Email.Service,
-						Email.Service.of({
-							send: (message) =>
-								Effect.sync(() => {
-									sent.push(message);
-								}),
+	beforeAll(async () => {
+		const signedIn = principals(await authenticators());
+		const sessions = new Map<string, Promise<MemberSession>>();
+		signIn = (memberId) => {
+			const known = sessions.get(memberId);
+			if (known) return known;
+			const started = signedIn.member(memberId);
+			sessions.set(memberId, started);
+			return started;
+		};
+	});
+
+	/**
+	 * The workspace operations, by the names these cases use, on a server that
+	 * requires members to verify their email when `requireEmailVerification`,
+	 * as none does by default, and whose requests out reach `egress`, by
+	 * default nothing.
+	 */
+	function membershipWith({
+		requireEmailVerification = false,
+		egress,
+	}: {
+		readonly requireEmailVerification?: boolean;
+		readonly egress?: Layer.Layer<Egress.Service>;
+	} = {}) {
+		let served: Promise<CallOperation> | undefined;
+		const callOperation = () => {
+			served ??= servedOperations({
+				accounts: unimplemented(Accounts.Service, { requireEmailVerification }),
+				egress,
+				serverSettings: ServerSettings.fromUrls({
+					isProduction: false,
+					publicUrl: "http://sugabots.test",
+					webAppUrl: WEB_APP_URL,
+				}),
+				email: {
+					send: (message) =>
+						Effect.sync(() => {
+							sent.push(message);
 						}),
-					),
-				]),
-				Layer.provide(
-					ConfigProvider.layer(
-						ConfigProvider.fromEnv({
-							env: {
-								DATABASE_URL: process.env.DATABASE_URL ?? "",
-								WEB_APP_URL,
-							},
-						}),
-					),
-				),
-			),
-		);
-		runtimes.push(runtime);
+				},
+			});
+			return served;
+		};
+		const membershipAs = async (memberId: string): Promise<MembershipAs> => {
+			const call = await callOperation();
+			const principal = await signIn(memberId);
+			const operation =
+				<Name extends OperationName>(name: Name) =>
+				(input: InputOf<Name>) =>
+					call(principal, name, input);
+			return {
+				get workspaces() {
+					return call(principal, "workspaces.list", {});
+				},
+				create: ({ details }) => call(principal, "workspaces.create", details),
+				update: ({ workspace, details }) =>
+					call(principal, "workspaces.update", { workspace, ...details }),
+				delete: operation("workspaces.delete"),
+				access: operation("system.workspaceAccess"),
+				memberships: operation("workspaces.memberships"),
+				changeRole: operation("workspaces.changeRole"),
+				remove: operation("workspaces.removeMembership"),
+				leave: operation("workspaces.leave"),
+				handOverOwnership: operation("workspaces.handOverOwnership"),
+				invitations: operation("workspaces.invitations"),
+				invite: ({ workspace, invitation }) =>
+					call(principal, "workspaces.invite", { workspace, ...invitation }),
+				cancelInvitation: operation("workspaces.cancelInvitation"),
+				invitation: operation("workspaces.invitation"),
+				accept: operation("workspaces.acceptInvitation"),
+			};
+		};
 		return {
-			/** The operation's value when `memberId` asks for it, or the tag it failed with. */
-			run: <A, E extends { _tag: string }>(
-				memberId: string,
-				operation: (membership: Membership.Interface) => Effect.Effect<A, E, CurrentActor.Service>,
-			) =>
-				runtime
-					.runPromiseExit(
-						Effect.flatMap(Membership.Service, operation).pipe(
-							CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(memberId)),
-						),
-					)
-					.then((exit) => {
-						if (Exit.isSuccess(exit)) return exit.value;
-						const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail");
-						if (!failure) throw new Error(`Unexpected defect: ${String(exit.cause)}`);
-						return { failed: (failure.error as E)._tag };
-					}),
-			/** The error the operation failed with when `memberId` asks for it. */
-			failure: <A, E>(
-				memberId: string,
-				operation: (membership: Membership.Interface) => Effect.Effect<A, E, CurrentActor.Service>,
-			) =>
-				runtime
-					.runPromiseExit(
-						Effect.flatMap(Membership.Service, operation).pipe(
-							CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(memberId)),
-						),
-					)
-					.then((exit) => {
-						if (Exit.isSuccess(exit)) throw new Error("It succeeded");
-						const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail");
-						if (!failure) throw new Error(`Unexpected defect: ${String(exit.cause)}`);
-						return failure.error as E;
-					}),
+			/** What `operation` comes to when `memberId` asks for it: its value, or the tag it failed with. */
+			run: <A>(memberId: string, operation: (membership: MembershipAs) => Promise<A>) =>
+				membershipAs(memberId)
+					.then(operation)
+					.then(
+						(value): A | { failed: string } => value,
+						(failure: unknown) => ({ failed: refusalOf(failure)._tag }),
+					),
+			/** The error `operation` fails with when `memberId` asks for it. */
+			failure: <A>(memberId: string, operation: (membership: MembershipAs) => Promise<A>) =>
+				membershipAs(memberId)
+					.then(operation)
+					.then(
+						() => {
+							throw new Error("It succeeded");
+						},
+						(failure: unknown) => refusalOf(failure),
+					),
 		};
 	}
 
-	const { run, failure } = membershipWith(false);
+	const { run, failure } = membershipWith();
 
 	afterAll(async () => {
-		await Promise.all(runtimes.map((runtime) => runtime.dispose()));
 		await closeDatabase();
 	});
 
@@ -396,7 +421,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(assistant?.model).toBe("offered");
 	});
 
-	it("refuses an invitation to anybody but the address it was sent to", async () => {
+	it("hides an invitation from anybody but the address it was sent to", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await newMember("Bob");
 		const eve = await newMember("Eve");
@@ -409,16 +434,18 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		if ("failed" in invitation) throw new Error(invitation.failed);
 
 		expect(await run(eve.id, (m) => m.invitation({ invitationId: invitation.id }))).toEqual({
-			failed: "NotTheInvitee",
+			failed: "ResourceHidden",
 		});
 		expect(await run(eve.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
-			failed: "NotTheInvitee",
+			failed: "ResourceHidden",
 		});
 	});
 
-	it("requires a proven address to accept only where the server requires one", async () => {
+	it("on a server that requires verified emails, lets in only an address its account has proved, and tells that account to prove it", async () => {
+		const verifying = membershipWith({ requireEmailVerification: true });
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await newMember("Bob", { verified: false });
+		const eve = await newMember("Eve", { verified: false });
 		const invitation = await run(ada.id, (m) =>
 			m.invite({
 				workspace: workspace.id,
@@ -428,9 +455,41 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		if ("failed" in invitation) throw new Error(invitation.failed);
 
 		expect(
-			await membershipWith(true).run(bob.id, (m) => m.accept({ invitationId: invitation.id })),
-		).toEqual({
+			await verifying.run(bob.id, (m) => m.invitation({ invitationId: invitation.id })),
+		).toEqual({ failed: "EmailUnverified" });
+		expect(await verifying.run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
 			failed: "EmailUnverified",
+		});
+		expect(await verifying.run(eve.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
+			failed: "ResourceHidden",
+		});
+
+		await onDatabase((db) =>
+			db.update(member).set({ emailVerified: true }).where(eq(member.id, bob.id)),
+		);
+		expect(await verifying.run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
+			workspaceId: workspace.id,
+		});
+	});
+
+	it("on a server that doesn't require verified emails, lets in the account an invitation is addressed to without proving it", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await newMember("Bob", { verified: false });
+		const eve = await newMember("Eve", { verified: false });
+		const invitation = await run(ada.id, (m) =>
+			m.invite({
+				workspace: workspace.id,
+				invitation: { email: bob.email, role: "editor" },
+			}),
+		);
+		if ("failed" in invitation) throw new Error(invitation.failed);
+
+		expect(await run(bob.id, (m) => m.invitation({ invitationId: invitation.id }))).toMatchObject({
+			status: "pending",
+			role: "editor",
+		});
+		expect(await run(eve.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
+			failed: "ResourceHidden",
 		});
 		expect(await run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
 			workspaceId: workspace.id,
@@ -504,11 +563,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			m.invite({ workspace: workspace.id, invitation: { email: eve.email, role: "editor" } }),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
-		const refusalOf = (invitationId: string) =>
-			run(eve.id, (m) => m.cancelInvitation({ invitationId }).pipe(Effect.flip, Effect.orDie));
+		const cancelling = (invitationId: string) =>
+			failure(eve.id, (m) => m.cancelInvitation({ invitationId }));
 
-		const elsewhere = await refusalOf(invitation.id);
-		const nowhere = await refusalOf(crypto.randomUUID());
+		const elsewhere = await cancelling(invitation.id);
+		const nowhere = await cancelling(crypto.randomUUID());
 
 		expect(elsewhere).toEqual(nowhere);
 		expect(elsewhere).toMatchObject({ _tag: "ResourceHidden", resource: "invitation" });
@@ -643,12 +702,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				await run(actor, (m) =>
 					m.remove({ workspace: workspace.id, membershipId: adaMembership.id }),
 				),
-			).toEqual({ failed: "OwnerStays" });
+			).toEqual({ failed: "ActionForbidden" });
 			expect(
 				await run(actor, (m) =>
 					m.changeRole({ workspace: workspace.id, membershipId: adaMembership.id, role: "editor" }),
 				),
-			).toEqual({ failed: "OwnerStays" });
+			).toEqual({ failed: "ActionForbidden" });
 		}
 		expect(await run(ada.id, (m) => m.leave({ workspace: workspace.id }))).toEqual({
 			failed: "OwnerStays",
@@ -1144,23 +1203,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			);
 
 		/**
-		 * Membership whose requests out reach only `gitHub`, and the GitHub apps
-		 * setup a project's app is made and installed through.
+		 * Membership whose requests out reach only `gitHub`, and the operations
+		 * a project's GitHub app is made and installed through.
 		 */
 		async function reachingOnly(gitHub: typeof fetch) {
-			const reaching = Layer.mergeAll(
-				unimplemented(ComputerSignIn.Service, {}),
-				egressToGitHub(gitHub),
-			);
-			const gitHubApps = await runOnPostgres(
-				Effect.provide(
-					GitHubApps.Service,
-					GitHubApps.layer.pipe(
-						Layer.provide(reachingGitHub(gitHub, "https://sugabots.example.com")),
-					),
-				),
-			);
-			return { ...membershipWith(false, reaching), gitHubApps };
+			const gitHubApps = await gitHubSetupAt(gitHub, "https://sugabots.example.com");
+			return { ...membershipWith({ egress: egressToGitHub(gitHub) }), gitHubApps };
 		}
 
 		/** The ways a member goes from a workspace: the owner removes them, or they leave. */
@@ -1567,7 +1615,49 @@ interface Departing {
 /** Who asks for a member to go, and what they ask for. */
 interface Departure {
 	actorId: string;
-	operation: (
-		membership: Membership.Interface,
-	) => Effect.Effect<void, { readonly _tag: string }, CurrentActor.Service>;
+	operation: (membership: MembershipAs) => Promise<void>;
+}
+
+/** The workspace operations for one member signed in, by the names these cases use. */
+interface MembershipAs {
+	readonly workspaces: Promise<OutputOf<"workspaces.list">>;
+	create(input: { details: InputOf<"workspaces.create"> }): Promise<OutputOf<"workspaces.create">>;
+	update(input: {
+		workspace: string;
+		details: Omit<InputOf<"workspaces.update">, "workspace">;
+	}): Promise<OutputOf<"workspaces.update">>;
+	delete(input: InputOf<"workspaces.delete">): Promise<void>;
+	access(input: InputOf<"system.workspaceAccess">): Promise<OutputOf<"system.workspaceAccess">>;
+	memberships(
+		input: InputOf<"workspaces.memberships">,
+	): Promise<OutputOf<"workspaces.memberships">>;
+	changeRole(input: InputOf<"workspaces.changeRole">): Promise<void>;
+	remove(input: InputOf<"workspaces.removeMembership">): Promise<void>;
+	leave(input: InputOf<"workspaces.leave">): Promise<void>;
+	handOverOwnership(input: InputOf<"workspaces.handOverOwnership">): Promise<void>;
+	invitations(
+		input: InputOf<"workspaces.invitations">,
+	): Promise<OutputOf<"workspaces.invitations">>;
+	invite(input: {
+		workspace: string;
+		invitation: Omit<InputOf<"workspaces.invite">, "workspace">;
+	}): Promise<OutputOf<"workspaces.invite">>;
+	cancelInvitation(input: InputOf<"workspaces.cancelInvitation">): Promise<void>;
+	invitation(input: InputOf<"workspaces.invitation">): Promise<OutputOf<"workspaces.invitation">>;
+	accept(
+		input: InputOf<"workspaces.acceptInvitation">,
+	): Promise<OutputOf<"workspaces.acceptInvitation">>;
+}
+
+/** An operation's error, which it rejects with; anything else is a defect, rethrown. */
+function refusalOf(failure: unknown): { readonly _tag: string } & Record<string, unknown> {
+	if (
+		typeof failure === "object" &&
+		failure !== null &&
+		"userMessage" in failure &&
+		"_tag" in failure
+	) {
+		return failure as { readonly _tag: string } & Record<string, unknown>;
+	}
+	throw failure;
 }

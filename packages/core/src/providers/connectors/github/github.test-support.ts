@@ -8,12 +8,13 @@ import {
 	workspace,
 } from "../../../database/schema.ts";
 import { onDatabase, runOnPostgres } from "../../../database/testing.ts";
+import { type CallOperation, servedOperations } from "../../../operations/testing.ts";
+import type { Principal } from "../../../principal.ts";
+import { authenticators, principals } from "../../../proofs/world.test-support.ts";
 import { ServerSettings } from "../../../server-settings/server-settings.ts";
 import { defaultProjectOf } from "../../../workspaces/projects/project-reads.ts";
 import { seedProject } from "../../../workspaces/projects/seed.test-support.ts";
-import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Egress } from "../../network/egress.ts";
-import type { GitHubApps } from "./github-app.ts";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", {
 	modulusLength: 2048,
@@ -235,16 +236,42 @@ export async function workspaceWithProject(label: string) {
 }
 
 /**
+ * The operations a test sets a project's GitHub app up through, and the
+ * principal each member is signed in as.
+ */
+export interface GitHubSetup {
+	readonly call: CallOperation;
+	readonly member: (memberId: string) => Promise<Principal>;
+}
+
+/**
+ * The operations, reaching only `github`, for an installation served at
+ * `publicUrl`, and each member signed in, from the authenticators. Call it
+ * from `beforeAll`.
+ */
+export async function gitHubSetupAt(github: typeof fetch, publicUrl: string): Promise<GitHubSetup> {
+	const call = await servedOperations({
+		egress: egressToGitHub(github),
+		serverSettings: ServerSettings.fromUrls({ isProduction: false, publicUrl }),
+	});
+	const as = principals(await authenticators());
+	return { call, member: as.member };
+}
+
+/**
  * The project's GitHub app, made by the fixture's admin but
  * not yet installed, and the `state` that installs it.
  */
 export async function madeConnector(
-	gitHubApps: GitHubApps.Interface,
+	{ call, member }: GitHubSetup,
 	{ projectId, adminId }: { projectId: string; adminId: string },
 ) {
-	const asAdmin = onPostgresAs(adminId)(gitHubApps);
-	const form = await asAdmin.start({ projectId, organization: undefined });
-	const made = await asAdmin.made({ code: MANIFEST_CODE, state: stateIn(form.url) });
+	const admin = await member(adminId);
+	const form = await call(admin, "gitHubConnectors.start", { projectId, organization: undefined });
+	const made = await call(admin, "gitHubConnectors.gitHubAppMade", {
+		code: MANIFEST_CODE,
+		state: stateIn(form.url),
+	});
 	if (made.kind !== "next") throw new Error(`Not made: ${JSON.stringify(made)}`);
 	// The connector's id ends its webhook's address.
 	const webhookUrl: string = JSON.parse(form.manifest).hook_attributes.url;
@@ -257,15 +284,16 @@ export async function madeConnector(
  * `acme`, or on the account `installationId` is on.
  */
 export async function installedConnector(
-	gitHubApps: GitHubApps.Interface,
+	setup: GitHubSetup,
 	fixture: { projectId: string; adminId: string },
 	installationId = INSTALLATION_ID,
 ) {
-	const { connectorId, installState } = await madeConnector(gitHubApps, fixture);
-	const installed = await onPostgresAs(fixture.adminId)(gitHubApps).installed({
-		installationId,
-		state: installState,
-	});
+	const { connectorId, installState } = await madeConnector(setup, fixture);
+	const installed = await setup.call(
+		await setup.member(fixture.adminId),
+		"gitHubConnectors.gitHubAppInstalled",
+		{ installationId, state: installState },
+	);
 	if (installed.kind !== "done") throw new Error(`Not installed: ${JSON.stringify(installed)}`);
 	return connectorId;
 }

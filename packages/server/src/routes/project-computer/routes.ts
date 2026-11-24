@@ -1,45 +1,53 @@
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
-import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
-import { ProjectComputerSetup } from "@sugabots/core/computers/project-computer-setup";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asCurrentUser } from "../../auth/middleware.ts";
+import { operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
+/** A project's computer and the hosts it may reach, each endpoint its operation. */
 export const projectComputerRoutes = HttpApiBuilder.group(
 	ServerApi,
 	"projectComputer",
 	(handlers) =>
-		Effect.gen(function* () {
-			const setup = yield* ProjectComputerSetup.Service;
-			const network = yield* ComputerNetwork.Service;
-			return handlers
+		Effect.map(operationCaller, (callOperation) =>
+			handlers
 				.handle("get", ({ params }) =>
-					setup.get(params.projectId).pipe(asCurrentUser, asHttpError(projectComputerErrors)),
+					callOperation("projectComputer.get", { projectId: params.projectId }).pipe(
+						asHttpError(projectComputerErrors),
+					),
 				)
 				.handle("reset", ({ params }) =>
-					setup.reset(params.projectId).pipe(asCurrentUser, asHttpError(projectComputerErrors)),
+					callOperation("projectComputer.reset", { projectId: params.projectId }).pipe(
+						asHttpError(projectComputerErrors),
+					),
 				)
 				.handle("upgrade", ({ params }) =>
-					setup.upgrade(params.projectId).pipe(asCurrentUser, asHttpError(projectComputerErrors)),
+					callOperation("projectComputer.upgrade", { projectId: params.projectId }).pipe(
+						asHttpError(projectComputerErrors),
+					),
 				)
 				.handle("network", ({ params }) =>
-					network.projectSettings(params.projectId).pipe(asCurrentUser, asHttpError(refusals)),
+					callOperation("projectComputer.network", { projectId: params.projectId }).pipe(
+						asHttpError(projectComputerErrors),
+					),
 				)
 				.handle("addHost", ({ params, payload }) =>
-					network
-						.addProjectHost({ projectId: params.projectId, host: payload.host })
-						.pipe(asCurrentUser, asHttpError({ ...refusals, ComputerHostBlocked: BadRequest })),
+					callOperation("projectComputer.addHost", {
+						projectId: params.projectId,
+						host: payload.host,
+					}).pipe(asHttpError(projectComputerErrors)),
 				)
 				.handle("removeHost", ({ params }) =>
-					network
-						.removeProjectHost({ projectId: params.projectId, host: params.host })
-						.pipe(asCurrentUser, asHttpError(refusals)),
-				);
-		}),
+					callOperation("projectComputer.removeHost", {
+						projectId: params.projectId,
+						host: params.host,
+					}).pipe(asHttpError(projectComputerErrors)),
+				),
+		),
 );
 
+/** What each way a project computer operation can fail means over HTTP. */
 const projectComputerErrors = {
 	...refusals,
 	ComputerInUse: Conflict,
@@ -47,4 +55,5 @@ const projectComputerErrors = {
 	UpgradeFailed: Conflict,
 	NoComputerProvider: BadRequest,
 	ComputerUnavailable: Conflict,
+	ComputerHostBlocked: BadRequest,
 };

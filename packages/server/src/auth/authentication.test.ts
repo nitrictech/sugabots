@@ -1,12 +1,17 @@
 import { type Membership as ListedMembership, meSchema } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { SessionAuthentication } from "@sugabots/core/authentication/session";
+import { chatServicesLayerForTests } from "@sugabots/core/chats/testing";
 import { noComputers } from "@sugabots/core/computers/testing";
+import { EventBus } from "@sugabots/core/database/events/bus";
+import { EventStore } from "@sugabots/core/database/events/store";
 import { member } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
+import { layer as operationsLayer } from "@sugabots/core/operations/layer";
+import { Operations } from "@sugabots/core/operations/registry";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
-import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -39,13 +44,23 @@ afterAll(async () => {
 	await closeDatabase();
 });
 
-/** The real `Authentication`, `Membership` and `Accounts` behind the test app, keeping sent emails in `sent`. */
+/**
+ * The real `Authentication`, `Accounts`, session authenticator and operations
+ * behind the test app, keeping sent emails in `sent`. The operations are built
+ * over chat services, and they and the chat services publish to a bus in
+ * memory that no case reads.
+ */
 async function appWith(
 	policy: { SIGNUP_MODE: Accounts.SignUpMode; REQUIRE_EMAIL_VERIFICATION: "true" | "false" },
 	sent: Email.Message[],
 ) {
+	const bus = EventBus.inProcess({ store: EventStore.inMemory() });
 	const runtime = ManagedRuntime.make(
-		Layer.mergeAll(Authentication.layer, Membership.layer).pipe(
+		Layer.mergeAll(
+			Authentication.layer,
+			SessionAuthentication.layer,
+			operationsLayer.pipe(Layer.provide(chatServicesLayerForTests(bus))),
+		).pipe(
 			Layer.provideMerge(Accounts.layer),
 			Layer.provide([
 				Layer.succeed(
@@ -60,6 +75,7 @@ async function appWith(
 			]),
 			Layer.provide(ServerSettings.layer),
 			Layer.provide(noComputers),
+			Layer.provide(Layer.succeed(EventBus.Service, bus)),
 			Layer.provide(testInfrastructure),
 			Layer.provide(
 				ConfigProvider.layer(
@@ -81,16 +97,16 @@ async function appWith(
 	const services = await runtime.runPromise(
 		Effect.all({
 			authentication: Authentication.Service,
-			membership: Membership.Service,
-			accounts: Accounts.Service,
+			sessions: SessionAuthentication.Service,
+			operations: Operations.Service,
 		}),
 	);
 	return atServerRoot(
 		createTestApp(
 			Layer.mergeAll(
 				Layer.succeed(Authentication.Service, services.authentication),
-				Layer.succeed(Membership.Service, services.membership),
-				Layer.succeed(Accounts.Service, services.accounts),
+				Layer.succeed(SessionAuthentication.Service, services.sessions),
+				Layer.succeed(Operations.Service, services.operations),
 				serverSettingsWithWebAppAt(ORIGIN),
 			),
 		),
@@ -229,6 +245,29 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		expect(Schema.decodeUnknownSync(meSchema)(await identified.json()).member.email).toBe(
 			`cookie-${unique}@example.com`,
 		);
+	});
+
+	it("accepts the session's token as a bearer on application routes, reading its row", async () => {
+		const unique = crypto.randomUUID().slice(0, 8);
+		const cookie = await signUp("Bearer User", `bearer-${unique}@example.com`);
+		const slug = `bearer-${unique}`;
+		await workspaceMadeBy(app, cookie, slug);
+		// The cookie's value is the session's token, signed: the bearer is the token alone.
+		const token = decodeURIComponent(cookie.split("=", 2)[1] ?? "").split(".", 1)[0];
+		const asBearer = (path: string, bearer = token) =>
+			app.request(`${API_BASE_PATH}${path}`, { headers: { authorization: `Bearer ${bearer}` } });
+
+		const identified = await asBearer("/me");
+		const listed = await asBearer(`/workspaces/${slug}/projects`);
+		const refused = await asBearer(`/workspaces/${slug}/projects`, "a-token-nobody-holds");
+
+		expect(identified.status).toBe(200);
+		expect(Schema.decodeUnknownSync(meSchema)(await identified.json()).member.email).toBe(
+			`bearer-${unique}@example.com`,
+		);
+		expect(listed.status).toBe(200);
+		expect(await listed.json()).toEqual([]);
+		expect(refused.status).toBe(401);
 	});
 
 	it("refuses an invitation to a role the product does not implement", async () => {

@@ -1,8 +1,10 @@
+export { SubscriptionInUse } from "@sugabots/contracts/errors/workspace";
 export * as MemberSignIns from "./member-sign-ins.ts";
 
-import { DisplayName, type DomainError, userText } from "@sugabots/errors";
+import { SubscriptionInUse } from "@sugabots/contracts/errors/workspace";
+import { DisplayName } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
-import { Context, Duration, Effect, ErrorReporter, Layer, Schedule, Schema } from "effect";
+import { Context, Duration, Effect, Layer, Schedule } from "effect";
 import { afterCommit, query, serviceOperations } from "../database/database.ts";
 import { member } from "../database/schema.ts";
 import { Secrets } from "../secrets/secrets.ts";
@@ -109,35 +111,6 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(Layer.provide(ConnectorStore.layer));
-
-/**
- * Model providers sign in with the subscription of a member being removed
- * from the workspace, or leaving it. Signing them out would stop the bots and
- * the default model that run on them, so the member stays until each is
- * signed in by another member or switched to a key.
- */
-export class SubscriptionInUse
-	extends Schema.TaggedError<SubscriptionInUse>()("SubscriptionInUse", {
-		member: DisplayName.schema,
-		/** In the order the workspace's list of model providers shows them. */
-		providers: Schema.Array(DisplayName.schema),
-	})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Info" as const;
-	override get message() {
-		return `${this.member} stays in the workspace: ${LIST.format(this.providers)} sign in with their subscription`;
-	}
-	get userMessage() {
-		const one = this.providers.length === 1;
-		// A list of names members see is itself a name they see.
-		const names = DisplayName.fromRecord(LIST.format(this.providers));
-		return userText`${names} ${one ? "signs" : "sign"} in with ${this.member}'s subscription, so ${this.member} stays until another member signs ${one ? "it" : "them"} in or ${one ? "it's" : "they're"} switched to a key.`;
-	}
-}
-
-const LIST = new Intl.ListFormat("en", { type: "conjunction" });
 
 const nameOf = (memberId: string) =>
 	query((db) => db.select({ name: member.name }).from(member).where(eq(member.id, memberId))).pipe(

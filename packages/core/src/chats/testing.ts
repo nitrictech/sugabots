@@ -39,13 +39,13 @@ const workflowsForTests = Layer.merge(
 );
 
 /**
- * The chat services as the server composes them, on the test
- * database and engine (see `workflowsForTests`), with stream events delivered
- * to `bus`: a context holding them, what they are composed from, and the
- * turn internals a case drives directly (see `turnInternalsForTests`).
- * `signals`, when given, replaces how turns' workflows are signalled.
+ * The chat services as the server composes them, on the test database and
+ * engine (see `workflowsForTests`), with stream events delivered to `bus`,
+ * with what they are composed from and the turn internals a case drives
+ * directly (see `turnInternalsForTests`). `signals`, when given, replaces how
+ * turns' workflows are signalled.
  */
-export const chatServicesForTests = (
+export const chatServicesLayerForTests = (
 	bus: Pick<EventBus.Interface, "publishCommitted">,
 	signals?: TurnSignals.Interface,
 ) => {
@@ -60,19 +60,23 @@ export const chatServicesForTests = (
 		// Deleting a bot destroys its computer, which no case here has made.
 		Layer.merge(noComputers),
 	);
+	return turnInternalsForTests.pipe(
+		Layer.provideMerge(ChatServices.layer),
+		Layer.provideMerge(composedFrom),
+		Layer.provide(workflowsForTests),
+	);
+};
+
+/**
+ * {@link chatServicesLayerForTests}, built: a context holding the chat
+ * services, what they are composed from, and the turn internals.
+ */
+export const chatServicesForTests = (
+	bus: Pick<EventBus.Interface, "publishCommitted">,
+	signals?: TurnSignals.Interface,
+) => {
+	const services = chatServicesLayerForTests(bus, signals);
 	return runOnPostgres(
-		Effect.context<
-			| ChatServices.Services
-			| Layer.Success<typeof composedFrom>
-			| Layer.Success<typeof turnInternalsForTests>
-		>().pipe(
-			Effect.provide(
-				turnInternalsForTests.pipe(
-					Layer.provideMerge(ChatServices.layer),
-					Layer.provideMerge(composedFrom),
-					Layer.provide(workflowsForTests),
-				),
-			),
-		),
+		Effect.context<Layer.Success<typeof services>>().pipe(Effect.provide(services)),
 	);
 };

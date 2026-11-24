@@ -13,6 +13,7 @@ import { chatsLayer } from "./chats/index.ts";
 import { computersLayer } from "./computers/index.ts";
 import { connectorsLayer } from "./connectors/index.ts";
 import { eventsLayer } from "./events/index.ts";
+import { notificationsLayer } from "./notifications/index.ts";
 import { projectsLayer } from "./projects/index.ts";
 import { providersLayer } from "./providers/index.ts";
 import { Operations } from "./registry.ts";
@@ -34,6 +35,7 @@ export const layer = Operations.layerNoDeps.pipe(
 			approvalsLayer,
 			eventsLayer,
 			turnsLayer,
+			notificationsLayer,
 		),
 	),
 );

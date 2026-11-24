@@ -1,10 +1,12 @@
+export { ConnectorNameTaken, UnknownConnectorTool } from "@sugabots/contracts/errors/connectors";
 export * as ConnectorStore from "./connector-store.ts";
 
 import type { ConnectorTool, ConnectorUpdate, NewConnector } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
-import { type UserText, userText } from "@sugabots/errors";
+import { ConnectorNameTaken, UnknownConnectorTool } from "@sugabots/contracts/errors/connectors";
+import type { UserText } from "@sugabots/errors";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { Context, Data, DateTime, Effect, Layer } from "effect";
+import { Context, DateTime, Effect, Layer } from "effect";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import {
@@ -15,7 +17,6 @@ import {
 	type ToolAccess,
 } from "../../database/schema.ts";
 import { Secrets } from "../../secrets/secrets.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import { type AugmentationTool, augmentConnectorTools } from "./augmentations.ts";
 import type { ConnectorTarget } from "./connector-target.ts";
@@ -643,28 +644,6 @@ interface ProjectTargets {
  * are Sugabots' own, or why it could not be asked.
  */
 type TestOutcome = { tools?: ConnectorTool[] } | { error: UserText };
-
-export class ConnectorNameTaken
-	extends Data.TaggedError("ConnectorNameTaken")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`A connector with that name already exists here`;
-	}
-}
-
-export class UnknownConnectorTool
-	extends Data.TaggedError("UnknownConnectorTool")<{ names: string[] }>
-	implements UserFacing
-{
-	override get message() {
-		return `The connector does not list ${this.names.join(", ")}`;
-	}
-
-	get userMessage() {
-		return userText`The connector no longer lists some of those tools. Check the connector to refresh them.`;
-	}
-}
 
 /** A GitHub connector's address until its app is installed on an account: the app's own page. */
 function gitHubAppUrl(slug: string) {

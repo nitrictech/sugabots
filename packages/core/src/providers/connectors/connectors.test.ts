@@ -1,0 +1,382 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { eq } from "drizzle-orm";
+import { Effect, Layer } from "effect";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { seedBot, seedMember, seedWorkspace } from "../../authentication/seed.test-support.ts";
+import { connector } from "../../database/schema.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	type Promised,
+	runOnPostgres,
+	servedOnPostgres,
+} from "../../database/testing.ts";
+import type { Principal } from "../../principal.ts";
+import {
+	type CanManageProject,
+	type CanReadConnectors,
+	proveCanManageProject,
+	proveCanReadConnectors,
+} from "../../proofs/project-permissions.ts";
+import { named } from "../../proofs/proof.ts";
+import { proveReachesProject } from "../../proofs/reaches-project.ts";
+import { authenticators, principals } from "../../proofs/world.test-support.ts";
+import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
+import { ConnectorSignIn } from "./connector-sign-in.ts";
+import { ConnectorStore } from "./connector-store.ts";
+import { Connectors } from "./connectors.ts";
+import { storedOAuthProvider } from "./oauth.ts";
+
+/**
+ * The connectors service over the real store and Postgres, talking to a real
+ * MCP server in this process, given proofs by the real provers for an admin
+ * who manages a public bot's connectors. Only the OAuth exchange with an
+ * authorization server is a double, since none runs here. Who may do what is
+ * the operations' tests'.
+ */
+
+let http: Server;
+let serverUrl: string;
+let requestsReceived = 0;
+
+beforeAll(async () => {
+	http = createServer(async (request, response) => {
+		requestsReceived += 1;
+		// `/open` takes anybody, as a server signed in to with OAuth would once
+		// it has a token; `/mcp` wants the connector's secret.
+		if (request.url !== "/open" && request.headers["x-fixture-key"] !== "open-sesame") {
+			response.writeHead(401).end("who are you");
+			return;
+		}
+		const mcp = new McpServer({ name: "fixture", version: "1.0.0" });
+		mcp.registerTool("lookup", { description: "Looks a thing up." }, async () => ({
+			content: [{ type: "text", text: "found" }],
+		}));
+		const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+		await mcp.connect(transport);
+		await transport.handleRequest(request, response);
+		response.on("close", () => void transport.close());
+	});
+	await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+	serverUrl = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
+});
+
+afterAll(async () => {
+	http.closeAllConnections();
+	await new Promise<void>((resolve) => http.close(() => resolve()));
+});
+
+describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgres", () => {
+	let connectors: Promised<ConnectorStore.Interface>;
+	let member: (memberId: string) => Promise<Principal>;
+	let workspaceId: string;
+	let adminId: string;
+	let editorId: string;
+	/** A public bot's default project, which holds its connectors. */
+	let projectId: string;
+
+	/**
+	 * Runs `use` on the connectors service, under an egress policy allowing
+	 * private addresses or not and OAuth as `signIn` says, with the proofs that
+	 * the workspace's admin reads and manages the project's connectors.
+	 */
+	const managing = async <A, E>(
+		use: <P, J>(
+			service: Connectors.Interface,
+			proofs: { canManage: CanManageProject<P, J>; canRead: CanReadConnectors<P, J> },
+		) => Effect.Effect<A, E>,
+		options: {
+			allowPrivateNetwork?: boolean;
+			signIn?: Partial<ConnectorSignIn.Interface>;
+		} = {},
+	): Promise<A> => {
+		const principal = await member(adminId);
+		const service = await runOnPostgres(
+			Effect.provide(Connectors.Service, connectorsLayer(options)),
+		);
+		return runOnPostgres(
+			named(principal, projectId, (principal, project) =>
+				Effect.gen(function* () {
+					const reach = yield* proveReachesProject(principal, project);
+					const canManage = yield* proveCanManageProject(reach);
+					const canRead = yield* proveCanReadConnectors(reach);
+					return yield* use(service, { canManage, canRead });
+				}),
+			),
+		);
+	};
+
+	const connectorsLayer = (options: {
+		allowPrivateNetwork?: boolean;
+		signIn?: Partial<ConnectorSignIn.Interface>;
+	}) =>
+		Connectors.layerNoDeps.pipe(
+			Layer.provide([
+				ConnectorStore.layer,
+				Layer.succeed(ConnectorSignIn.Service, {
+					clients: Effect.succeed({
+						for: () =>
+							storedOAuthProvider(
+								{
+									load: async () => undefined,
+									save: async () => {},
+									now: async () => new Date("2026-10-05T21:00:08.000Z"),
+								},
+								{ redirectUrl: "http://localhost:3000/callback", clientName: "Test" },
+							),
+					}),
+					begin: () => Effect.succeed({ authorizationUrl: "https://auth.example/authorize" }),
+					finish: () => Effect.void,
+					...options.signIn,
+				}),
+				Layer.succeed(Egress.Service, {
+					providers: { for: () => fetch },
+					validateProviderUrl: urlValidation(
+						createEgressUrlValidator({
+							allowPrivateNetwork: options.allowPrivateNetwork ?? true,
+						}),
+					),
+					oauth: fetch,
+					webFetch: fetch,
+				}),
+			]),
+		);
+
+	/**
+	 * An OAuth connector to `url` waiting on the sign-in whose state is
+	 * `state`, which `startedByMemberId`, by default the administrator, started.
+	 */
+	const waitingOnSignIn = async (url: string, state: string, startedByMemberId = adminId) => {
+		const made = await connectors.create(workspaceId, projectId, adminId, {
+			name: `Signs in ${state}`,
+			url,
+			auth: "oauth",
+		});
+		await connectors.saveOauthRecord(workspaceId, made.id, { state, startedByMemberId });
+		return made;
+	};
+
+	/** The sign-in `state` belongs to, finished with `callback` by the admin. */
+	const finishing = (
+		state: string,
+		callback: { code?: string; error?: string; errorDescription?: string },
+		signIn?: Partial<ConnectorSignIn.Interface>,
+	) =>
+		managing(
+			(service, { canManage }) =>
+				Effect.gen(function* () {
+					const waiting = yield* service.signInWaitingOn(state);
+					if (!waiting) throw new Error(`No sign-in waits on ${state}`);
+					return yield* service.finishSignIn(canManage, waiting, { ...callback, state });
+				}),
+			{ signIn },
+		);
+
+	beforeAll(async () => {
+		connectors = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
+		member = principals(await authenticators()).member;
+	});
+
+	afterAll(async () => {
+		await closeDatabase();
+	});
+
+	beforeEach(async () => {
+		workspaceId = await seedWorkspace();
+		adminId = await seedMember(workspaceId, "admin");
+		editorId = await seedMember(workspaceId, "editor");
+		projectId = (await seedBot(workspaceId)).defaultProject;
+	});
+
+	const listed = () => managing((service, { canRead }) => service.list(canRead));
+
+	/** The connector `connectorId` of the project, with its tools. */
+	const shown = (connectorId: string, options?: { allowPrivateNetwork?: boolean }) =>
+		managing((service, { canRead }) => service.get(canRead, connectorId), options);
+
+	it("learns a server's tools as soon as it is added", async () => {
+		const made = await managing((service, { canManage }) =>
+			service.create(canManage, {
+				name: "Wiki",
+				url: `${serverUrl}/mcp`,
+				secretHeader: "x-fixture-key",
+				secret: "open-sesame",
+			}),
+		);
+
+		expect(made).toMatchObject({ status: "connected", tools: [{ name: "lookup" }] });
+	});
+
+	it("tests an address and secret before a connector is made, saving nothing", async () => {
+		const tested = await managing((service, { canManage }) =>
+			service.testUnsaved(canManage, {
+				url: `${serverUrl}/mcp`,
+				secretHeader: "x-fixture-key",
+				secret: "open-sesame",
+			}),
+		);
+
+		expect(tested).toMatchObject({ reachable: true, tools: 1 });
+		expect(await listed()).toEqual([]);
+	});
+
+	it("refuses an address the network policy forbids, and stores nothing", async () => {
+		await expect(
+			managing(
+				(service, { canManage }) =>
+					service.create(canManage, { name: "Local", url: `${serverUrl}/mcp` }),
+				{ allowPrivateNetwork: false },
+			),
+		).rejects.toMatchObject({ _tag: "UrlNotAllowed" });
+		expect(await listed()).toEqual([]);
+	});
+
+	it("records a server it cannot reach in its own words, keeping the network's out", async () => {
+		const unreachable =
+			"The server could not be reached. Check the address and port, and that the server is running";
+		const made = await managing((service, { canManage }) =>
+			service.create(canManage, { name: "Gone", url: "http://127.0.0.1:9/mcp" }),
+		);
+
+		const tested = await managing((service, { canManage }) => service.test(canManage, made.id));
+
+		expect(tested).toMatchObject({ reachable: false, error: unreachable });
+		const [stored] = await onDatabase((db) =>
+			db
+				.select({ error: connector.lastTestError })
+				.from(connector)
+				.where(eq(connector.id, made.id)),
+		);
+		expect(stored?.error).toBe(unreachable);
+	});
+
+	it("adds an HTTP endpoint without sending it a request", async () => {
+		const before = requestsReceived;
+
+		const made = await managing((service, { canManage }) =>
+			service.create(canManage, {
+				kind: "http",
+				name: "Alerts",
+				url: `${serverUrl}/v2`,
+				secretHeader: "authorization",
+				secret: "Bearer alerts-key",
+			}),
+		);
+
+		expect(made).toMatchObject({ kind: "http", status: "connected", hasSecret: true });
+		expect((await shown(made.id)).tools.map((tool) => tool.access)).toEqual([
+			"allow",
+			"ask",
+			"ask",
+			"ask",
+			"off",
+		]);
+		expect(requestsReceived).toBe(before);
+	});
+
+	it("records an HTTP endpoint's address the network policy no longer allows", async () => {
+		const made = await managing((service, { canManage }) =>
+			service.create(canManage, { kind: "http", name: "Local", url: `${serverUrl}/v2` }),
+		);
+
+		const tested = await managing((service, { canManage }) => service.test(canManage, made.id), {
+			allowPrivateNetwork: false,
+		});
+
+		expect(tested).toMatchObject({ reachable: false, error: expect.any(String) });
+		expect(await shown(made.id)).toMatchObject({ status: "error" });
+	});
+
+	it("takes nothing back from a sign-in that could not start", async () => {
+		const begin = () =>
+			Effect.fail(
+				new ConnectorSignIn.SignInFailed({
+					step: "begin",
+					cause: new Error(
+						"Incompatible auth server: does not support dynamic client registration",
+					),
+				}),
+			);
+
+		await expect(
+			managing(
+				(service, { canManage }) =>
+					service.connectBuiltIn(canManage, {
+						name: "GitHub",
+						url: "https://api.githubcopilot.com/mcp/",
+					}),
+				{ signIn: { begin } },
+			),
+		).rejects.toMatchObject({
+			_tag: "ConnectorOAuthStartFailed",
+			userMessage:
+				"Sugabots can't use this server's sign-in, because the server doesn't let new apps register themselves. Connect it with an access token from the server instead.",
+		});
+		expect(await listed()).toEqual([]);
+	});
+
+	it("keeps no connector for a built-in connector that needed no sign-in", async () => {
+		await expect(
+			managing(
+				(service, { canManage }) =>
+					service.connectBuiltIn(canManage, { name: "Open", url: `${serverUrl}/open` }),
+				{ signIn: { begin: () => Effect.succeed({ authorized: true as const }) } },
+			),
+		).rejects.toMatchObject({ _tag: "ConnectorNeededNoSignIn" });
+		expect(await listed()).toEqual([]);
+	});
+
+	describe("finishing a sign-in", () => {
+		it("signs in as the member who finished it, learns the connector's tools and names the project", async () => {
+			const made = await waitingOnSignIn(`${serverUrl}/open`, "state-ok");
+			const finishedBy: string[] = [];
+			const finish: ConnectorSignIn.Interface["finish"] = (...[, , , , memberId]) =>
+				Effect.sync(() => void finishedBy.push(memberId));
+
+			const outcome = await finishing("state-ok", { code: "the-code" }, { finish });
+
+			expect(outcome).toEqual({ kind: "done", at: { workspaceId, projectId } });
+			expect(finishedBy).toEqual([adminId]);
+			expect(await shown(made.id)).toMatchObject({ tools: [{ name: "lookup" }] });
+		});
+
+		it("does not finish for anybody but the member who started it", async () => {
+			const made = await waitingOnSignIn(`${serverUrl}/open`, "state-other", editorId);
+
+			expect(await finishing("state-other", { code: "the-code" })).toEqual({
+				kind: "failed",
+				failure: "not_allowed",
+				at: undefined,
+			});
+			expect(await shown(made.id)).toMatchObject({ signedIn: false, tools: [] });
+		});
+
+		it("gives a code, not the authorization server's words, when it refused", async () => {
+			await waitingOnSignIn(`${serverUrl}/open`, "state-refused");
+
+			expect(
+				await finishing("state-refused", {
+					error: "access_denied",
+					errorDescription: "Visit evil.example to continue",
+				}),
+			).toEqual({ kind: "failed", failure: "refused", at: { workspaceId, projectId } });
+		});
+
+		it("gives a code when the code could not be exchanged for tokens", async () => {
+			await waitingOnSignIn(`${serverUrl}/open`, "state-bad-code");
+			const finish = () =>
+				Effect.fail(
+					new ConnectorSignIn.SignInFailed({ step: "finish", cause: new Error("invalid_grant") }),
+				);
+
+			expect(await finishing("state-bad-code", { code: "stale" }, { finish })).toEqual({
+				kind: "failed",
+				failure: "not_completed",
+				at: { workspaceId, projectId },
+			});
+		});
+	});
+});

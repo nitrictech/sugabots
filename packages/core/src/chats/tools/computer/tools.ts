@@ -20,7 +20,7 @@ import type { ChatFileStore } from "../../../files/chat-file-store.ts";
 import type { Ids } from "../../../ids/ids.ts";
 import type { UserFacing } from "../../../user-message.ts";
 import { type Failed, failed } from "../failed.ts";
-import { HOST_REQUEST_TOOL } from "../host-request/tool.ts";
+import { HOST_REQUEST_TOOL } from "../host-request/name.ts";
 import { MAX_IMAGE_BYTES, SHOWN_IMAGE_FORMATS, shownImageType, withImages } from "../images.ts";
 import { unreadableFileRefusal } from "../read-chat-file/tool.ts";
 import { type Copy, copyIntoComputer, safeFileName } from "./attachments.ts";

@@ -1,3 +1,7 @@
+export {
+	ComputerProviderBuiltInFixed,
+	ComputerProviderIncomplete,
+} from "@sugabots/contracts/errors/computers";
 export * as ComputerProviderStore from "./computer-provider-store.ts";
 
 import type {
@@ -7,14 +11,17 @@ import type {
 	NewComputerProvider,
 } from "@sugabots/contracts";
 import { COMPUTER_NETWORK_MODE_DEFAULT, computerBuiltInProvider } from "@sugabots/contracts";
-import { type UserText, userText } from "@sugabots/errors";
+import {
+	ComputerProviderBuiltInFixed,
+	ComputerProviderIncomplete,
+} from "@sugabots/contracts/errors/computers";
+import type { UserText } from "@sugabots/errors";
 import { and, asc, eq, ne } from "drizzle-orm";
-import { Context, Data, DateTime, Effect, Layer, Redacted } from "effect";
+import { Context, DateTime, Effect, Layer, Redacted } from "effect";
 import { query, serviceOperations, transaction, writtenRow } from "../database/database.ts";
 import { type ComputerProviderRow, computerProvider } from "../database/schema.ts";
 import { stillConfiguredAs } from "../providers/tested-configuration.ts";
 import { Secrets } from "../secrets/secrets.ts";
-import type { UserFacing } from "../user-message.ts";
 import type { Computers } from "./computers.ts";
 
 /**
@@ -374,32 +381,4 @@ function sizeIn(
 export function withUsualAddress(settings: ComputerProviderSettings): ComputerProviderSettings {
 	if (settings.builtIn !== "opensandbox" || settings.serverUrl) return settings;
 	return { ...settings, serverUrl: computerBuiltInProvider(settings.builtIn).baseUrl };
-}
-
-/** Enabling a provider that lacks a setting it needs to make computers. */
-export class ComputerProviderIncomplete
-	extends Data.TaggedError("ComputerProviderIncomplete")<{
-		missing: "key" | "address" | "addresses";
-	}>
-	implements UserFacing
-{
-	get userMessage() {
-		return MISSING_SETTING[this.missing];
-	}
-}
-
-const MISSING_SETTING = {
-	key: userText`Add an API key before enabling this provider`,
-	address: userText`Add the server's address before enabling this provider`,
-	addresses: userText`E2B Embed needs both its API and computer addresses`,
-} satisfies Record<ComputerProviderIncomplete["missing"], UserText>;
-
-/** Settings for another built-in provider than the provider's, which is fixed when it's made. */
-export class ComputerProviderBuiltInFixed
-	extends Data.TaggedError("ComputerProviderBuiltInFixed")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`A provider's type can't be changed. Add a provider of the other type instead.`;
-	}
 }

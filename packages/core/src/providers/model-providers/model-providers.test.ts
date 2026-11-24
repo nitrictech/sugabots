@@ -1,8 +1,13 @@
 import type { ModelProviderUpdate, NewModelProvider } from "@sugabots/contracts";
+import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
+import {
+	ModelInUse,
+	ProviderActivationRequiresCredential,
+} from "@sugabots/contracts/errors/providers";
+import type { InputOf, OperationName } from "@sugabots/contracts/operations";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ActionForbidden } from "../../authorization/access.ts";
 import { bot, member, membership, modelProvider, workspace } from "../../database/schema.ts";
 import {
 	closeDatabase,
@@ -11,12 +16,11 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { servedOperations } from "../../operations/testing.ts";
+import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { BotStore } from "../../workspaces/bots/bot-store.ts";
-import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
-import { ModelInUse } from "./held-models.ts";
 import { providerIn, providersIn } from "./model-provider-reads.ts";
-import { ModelProviderSetup } from "./model-provider-setup.ts";
 import { ModelProviderStore } from "./model-provider-store.ts";
 
 /**
@@ -32,29 +36,46 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		store = await servedOnPostgres(ModelProviderStore.Service, ModelProviderStore.layer);
 	});
 
+	let signIn: ReturnType<typeof principals>["member"];
+	beforeAll(async () => {
+		signIn = principals(await authenticators()).member;
+	});
+
 	/**
-	 * The setup as the workspace's administrator, with every provider
-	 * answering `respond` for whichever address was asked.
+	 * The model providers operations, called for the workspace's administrator
+	 * signed in, by the names these cases use, with every provider answering
+	 * `respond` for whichever address was asked.
 	 */
 	const setupWith = async (
 		respond: (url: string) => Response | Promise<Response>,
 		{ allowPrivateNetwork = true, as = memberId } = {},
-	) =>
-		(
-			await servedOnPostgresAs(
-				ModelProviderSetup.Service,
-				ModelProviderSetup.layer.pipe(
-					Layer.provide([
-						Layer.succeed(Egress.Service, {
-							providers: { for: () => async (url) => respond(String(url)) },
-							validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork })),
-							oauth: async () => new Response(null, { status: 503 }),
-							webFetch: async () => new Response(null, { status: 503 }),
-						}),
-					]),
-				),
-			)
-		)(as);
+	) => {
+		const call = await servedOperations({
+			egress: Layer.succeed(Egress.Service, {
+				providers: { for: () => async (url) => respond(String(url)) },
+				validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork })),
+				oauth: async () => new Response(null, { status: 503 }),
+				webFetch: async () => new Response(null, { status: 503 }),
+			}),
+		});
+		const principal = await signIn(as);
+		const operation =
+			<Name extends OperationName>(name: Name) =>
+			(input: InputOf<Name>) =>
+				call(principal, name, input);
+		return {
+			list: operation("modelProviders.list"),
+			listEnabledModels: operation("modelProviders.listEnabledModels"),
+			setDefaultModel: operation("modelProviders.setDefaultModel"),
+			create: operation("modelProviders.create"),
+			update: operation("modelProviders.update"),
+			test: operation("modelProviders.test"),
+			discoverModels: operation("modelProviders.discoverModels"),
+			updateModel: operation("modelProviders.updateModel"),
+			switchOffModel: operation("modelProviders.switchOffModel"),
+			switchOff: operation("modelProviders.switchOff"),
+		};
+	};
 
 	const view = (providerId: string) => runOnPostgres(providerIn(workspaceId, providerId));
 	const list = (inWorkspace: string) => runOnPostgres(providersIn(inWorkspace));
@@ -517,7 +538,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 					providerId: headed,
 					changes: { baseUrl: elsewhere, active: true },
 				}),
-			).rejects.toBeInstanceOf(ModelProviderSetup.ProviderActivationRequiresCredential);
+			).rejects.toBeInstanceOf(ProviderActivationRequiresCredential);
 			expect(await store.access(workspaceId, headed)).toMatchObject({ apiKey: "secret" });
 		});
 
@@ -600,7 +621,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 
 		await expect(
 			setup.update({ workspace: workspaceId, providerId: keyless.id, changes: { active: true } }),
-		).rejects.toBeInstanceOf(ModelProviderSetup.ProviderActivationRequiresCredential);
+		).rejects.toBeInstanceOf(ProviderActivationRequiresCredential);
 		expect(await view(keyless.id)).toMatchObject({ active: false });
 	});
 
@@ -918,14 +939,13 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			it("moves the bots to the chosen model as it switches the model off", async () => {
 				const { ids, setup } = await withBotsOnFirst();
 
-				const moved = await setup.switchOffModel({
+				await setup.switchOffModel({
 					workspace: workspaceId,
 					providerId,
 					modelId: ids.first ?? "",
 					moveBotsTo: "second",
 				});
 
-				expect(moved).toBe(2);
 				expect(await botModels()).toEqual(["second", "second"]);
 				expect(
 					(await setup.listEnabledModels({ workspace: workspaceId })).models.map(
@@ -962,13 +982,12 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				});
 				await setup.setDefaultModel({ workspace: workspaceId, model: "elsewhere" });
 
-				const moved = await setup.switchOff({
+				await setup.switchOff({
 					workspace: workspaceId,
 					providerId,
 					moveBots: [{ from: "first", to: "elsewhere" }],
 				});
 
-				expect(moved).toBe(2);
 				expect(await botModels()).toEqual(["elsewhere", "elsewhere"]);
 				expect(await view(providerId)).toMatchObject({ active: false });
 			});

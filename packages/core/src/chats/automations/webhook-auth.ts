@@ -113,7 +113,7 @@ function presentedSecret(auth: SentSecretAuth, headers: Delivery["headers"]): st
 export function deliveryIdOf(
 	auth: WebhookAuth,
 	deliveryIdHeader: string | null,
-	{ headers, payload }: Delivery,
+	{ headers, payload }: Pick<Delivery, "headers" | "payload">,
 ): string | null {
 	switch (auth.kind) {
 		case "github":

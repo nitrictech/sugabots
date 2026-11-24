@@ -126,6 +126,25 @@ export const connectorSignInFailures = [
 const connectorSignInFailureSchema = Schema.Literals(connectorSignInFailures);
 export type ConnectorSignInFailure = typeof connectorSignInFailureSchema.Type;
 
+/** The project a connector's sign-in was for, by its workspace and its own id. */
+const signInProjectSchema = Schema.Struct({ workspaceId: uuidSchema, projectId: uuidSchema });
+
+/**
+ * How a connector's sign-in ended, for its callback to send the browser back
+ * with. `at` names the project once the sign-in is known to be for one whose
+ * connectors the caller manages.
+ */
+export const connectorSignInOutcomeSchema = Schema.Union([
+	Schema.Struct({ kind: Schema.Literal("done"), at: signInProjectSchema }),
+	Schema.Struct({
+		kind: Schema.Literal("failed"),
+		failure: connectorSignInFailureSchema,
+		at: Schema.UndefinedOr(signInProjectSchema),
+	}),
+]);
+
+export type ConnectorSignInOutcome = typeof connectorSignInOutcomeSchema.Type;
+
 export const connectorSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,

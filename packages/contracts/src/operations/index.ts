@@ -13,6 +13,7 @@ import { computersContracts, computersExposure } from "./computers.ts";
 import { connectorsContracts, connectorsExposure } from "./connectors.ts";
 import { eventsContracts, eventsExposure } from "./events.ts";
 import { defineManifest } from "./exposure.ts";
+import { notificationsContracts, notificationsExposure } from "./notifications.ts";
 import type { OperationContract } from "./operation.ts";
 import { projectsContracts, projectsExposure } from "./projects.ts";
 import { providersContracts, providersExposure } from "./providers.ts";
@@ -35,6 +36,7 @@ export const operationContracts = {
 	...approvalsContracts,
 	...eventsContracts,
 	...turnsContracts,
+	...notificationsContracts,
 };
 
 export type OperationContracts = typeof operationContracts;
@@ -54,6 +56,7 @@ export const manifest = defineManifest<OperationContracts>()({
 	...approvalsExposure,
 	...eventsExposure,
 	...turnsExposure,
+	...notificationsExposure,
 });
 
 export type Manifest = typeof manifest;

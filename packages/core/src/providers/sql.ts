@@ -106,7 +106,7 @@ export const providerModel = pgTable(
 /**
  * The model a workspace's new bots start on, by the `model_id` bots name
  * it by. A workspace has none until it first offers a model, and from then on
- * always has one: `ModelProviderSetup` refuses any change that would stop
+ * always has one: `ModelProviders` refuses any change that would stop
  * offering it, deleting its row included, until another replaces it.
  */
 export const workspaceDefaultModel = pgTable("workspace_default_model", {

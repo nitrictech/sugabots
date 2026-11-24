@@ -1,3 +1,9 @@
+export {
+	MessageIdConflict,
+	MessageNotFinished,
+	ReplyTargetNotFound,
+	TooManyReactionEmoji,
+} from "@sugabots/contracts/errors/chats";
 export * as ChatStore from "./store.ts";
 
 import {
@@ -9,10 +15,15 @@ import {
 	type SystemBotKey,
 	type WrittenFilePart,
 } from "@sugabots/contracts";
-import { userText } from "@sugabots/errors";
+import {
+	MessageIdConflict,
+	MessageNotFinished,
+	ReplyTargetNotFound,
+	TooManyReactionEmoji,
+} from "@sugabots/contracts/errors/chats";
 import { and, eq, isNull, lt, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { Context, Data, DateTime, Effect, Layer } from "effect";
+import { Context, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction, writtenRow } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import {
@@ -30,7 +41,6 @@ import {
 	systemChat,
 } from "../../database/schema.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
 import type { StoredMessagePart } from "../sql.ts";
@@ -935,53 +945,8 @@ const quotedIn = (chatId: string, messageId: string | null | undefined) =>
 			).pipe(Effect.map((quoted) => (quoted ? toReplyTo(quoted) : undefined)))
 		: Effect.succeed(undefined);
 
-export class MessageNotFinished
-	extends Data.TaggedError("MessageNotFinished")
-	implements UserFacing
-{
-	override get message() {
-		return "A reaction was added to a message that is not finished";
-	}
-	get userMessage() {
-		return userText`You can react once the message is finished`;
-	}
-}
-
-export class TooManyReactionEmoji
-	extends Data.TaggedError("TooManyReactionEmoji")
-	implements UserFacing
-{
-	override get message() {
-		return "A message already has as many different reaction emoji as it can";
-	}
-	get userMessage() {
-		return userText`This message has as many different reactions as it can take. React with one already on it`;
-	}
-}
-
-export class ReplyTargetNotFound
-	extends Data.TaggedError("ReplyTargetNotFound")
-	implements UserFacing
-{
-	override get message() {
-		return "A reply quoted a message that is not in its chat";
-	}
-	get userMessage() {
-		return userText`The message you replied to isn't in this chat`;
-	}
-}
-
 /** Whether two lists hold the same ids, in any order. */
 function sameIds(left: readonly string[], right: readonly string[]): boolean {
 	const wanted = new Set(right);
 	return left.length === wanted.size && left.every((id) => wanted.has(id));
-}
-
-export class MessageIdConflict extends Data.TaggedError("MessageIdConflict") implements UserFacing {
-	override get message() {
-		return "A message id was reused for a different message";
-	}
-	get userMessage() {
-		return userText`That message ID is already used by a different message`;
-	}
 }

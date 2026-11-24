@@ -449,6 +449,11 @@ export const turn = pgTable(
 		runs: integer("runs").notNull().default(0),
 		/** A write/delete tool call crossed its durable dispatch boundary. */
 		writeOrDeleteStarted: boolean("write_or_delete_started").notNull().default(false),
+		/**
+		 * A failed turn its workflow starts again by itself, a retry, once it has
+		 * waited. False for any other status, and once it starts again.
+		 */
+		retrying: boolean("retrying").notNull().default(false),
 		/** Server-owned AI SDK messages needed to continue after tool approval. */
 		checkpoint: jsonb("checkpoint").$type<unknown>(),
 		// Why this bot got the turn, for reading the floor's decision back later.

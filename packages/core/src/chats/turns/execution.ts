@@ -33,14 +33,20 @@ import {
 	messageRelations,
 	toParticipant,
 } from "../store/participants.ts";
-import { botsAskedBefore, readsUpTo, turnAskingFor } from "./collaboration.ts";
+import {
+	botsAskedBefore,
+	helpersWithoutReply,
+	type ReadingLimit,
+	readingLimitOf,
+	turnAskingFor,
+} from "./collaboration.ts";
 import {
 	estimatedTokens,
 	historyLimitTokens,
 	loadContextWindow,
 	newestWithinLimit,
 } from "./context-window.ts";
-import { TURN_CANCELLED } from "./lifecycle.ts";
+import { type Ended, TURN_CANCELLED } from "./lifecycle.ts";
 import {
 	type NotRunnable,
 	notRunnable,
@@ -99,6 +105,8 @@ export const make = Effect.gen(function* () {
 					ChatEvent.TurnAbandoned({
 						chatId: run.request.chatId,
 						botId: run.request.botId,
+						triggerMessageId: run.request.triggerMessageId,
+						reason: run.request.reason,
 						outcome:
 							ending.status === "failed"
 								? { state: "failed", error: ending.userMessage }
@@ -120,8 +128,8 @@ export const make = Effect.gen(function* () {
 						Database | Transaction
 					> {
 						const request = run.request;
-						const readingUpTo = yield* query((db) => readsUpTo(db, request));
-						const loaded = yield* query((db) => loadTurnContext(db, request.chatId, readingUpTo));
+						const readingLimit = yield* query((db) => readingLimitOf(db, request));
+						const loaded = yield* query((db) => loadTurnContext(db, request.chatId, readingLimit));
 						if (!loaded) return yield* refuseRun(run, "The chat is gone", CANCELLED);
 						// In a project the bot has to be one of the project's, whoever a
 						// mention picks; in a bot's own chat, it has to be that bot.
@@ -163,6 +171,8 @@ export const make = Effect.gen(function* () {
 									ChatEvent.TurnAbandoned({
 										chatId: request.chatId,
 										botId: request.botId,
+										triggerMessageId: request.triggerMessageId,
+										reason: request.reason,
 										outcome: { state: "cancelled" },
 									}),
 								]);
@@ -197,6 +207,10 @@ export const make = Effect.gen(function* () {
 						const botsToAsk = modelled
 							.filter(({ id }) => askable.includes(id))
 							.sort((left, right) => left.name.localeCompare(right.name));
+						const unanswered =
+							request.reason === "hand_back"
+								? yield* query((db) => helpersWithoutReply(db, request.triggerMessageId))
+								: [];
 						// Loaded before the history is trimmed, so what they add counts towards its limit.
 						const automationInstructions = yield* query((db) =>
 							loadAutomationInstructions(db, messages),
@@ -258,6 +272,14 @@ export const make = Effect.gen(function* () {
 									name,
 									handle,
 									description,
+								})),
+								helpersWithoutReply: unanswered.map(({ name, handle, status, error }) => ({
+									name,
+									handle,
+									ended:
+										status === "failed" && error !== null
+											? { state: "failed", error }
+											: { state: "cancelled" },
 								})),
 								participants: loaded.participants.map(({ member, bot }) =>
 									toParticipant(authorRow(member, bot)),
@@ -400,6 +422,11 @@ export interface TurnContext {
 	 * automation's feed, and in a bot's own chats.
 	 */
 	botsToAsk: Array<{ id: string; name: string; handle: string; description: string | null }>;
+	/**
+	 * On a hand-back, the helpers it asked whose turns ended without a reply,
+	 * and how; none on any other turn.
+	 */
+	helpersWithoutReply: Array<{ name: string; handle: string; ended: Ended }>;
 	participants: Participant[];
 	/** The context window the bot's model is treated as having, which every limit is a share of. */
 	windowTokens: number;
@@ -474,11 +501,16 @@ const CANCELLED = { status: "cancelled", userMessage: TURN_CANCELLED } as const;
 const NOT_HERE = userText`The bot asked to reply doesn't answer here, so it cannot reply.`;
 
 /**
- * Whether the message `row` comes no later in its chat than the message
- * `messageId`, in the order the chat shows them.
+ * Whether the message `row` is within `limit`: no later in its chat than the
+ * message `limit.upTo`, in the order the chat shows them, or written by the
+ * reading turn's own bot.
  */
-const notAfter = (row: { createdAt: SQLWrapper; id: SQLWrapper }, messageId: string) =>
-	sql`(${row.createdAt}, ${row.id}) <= (select ${message.createdAt}, ${message.id} from ${message} where ${message.id} = ${messageId})`;
+const within = (
+	row: { createdAt: SQLWrapper; id: SQLWrapper; authorBotId: SQLWrapper },
+	limit: ReadingLimit,
+) =>
+	sql`((${row.createdAt}, ${row.id}) <= (select ${message.createdAt}, ${message.id} from ${message} where ${message.id} = ${limit.upTo})
+		or ${row.authorBotId} = ${limit.ownBotId})`;
 
 const SPEAKER_COLUMNS = {
 	id: true,
@@ -504,13 +536,13 @@ const SPEAKER_RELATIONS = { defaultProject: { columns: { id: true } } } as const
  * Everything the model is told about the chat, in one statement: the
  * chat with its workspace, its project and the bots in it or the bot it is
  * with, the members and bots in it, its compaction, and its newest completed
- * messages since the compaction kept them, up to the message `readingUpTo`
- * when given, with the parts placed in them.
+ * messages since the compaction kept them, within `readingLimit` when given,
+ * with the parts placed in them.
  */
 const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 	db: Executor,
 	chatId: string,
-	readingUpTo: string | undefined,
+	readingLimit: ReadingLimit | undefined,
 ) {
 	return yield* db.query.placedChat.findFirst({
 		where: { id: chatId },
@@ -542,7 +574,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 					status: "complete",
 					RAW: (row) =>
 						sql`${row.createdAt} >= coalesce((select ${chatCompaction.keptFrom} from ${chatCompaction} where ${chatCompaction.chatId} = ${row.chatId}), '-infinity')
-							and ${readingUpTo === undefined ? sql`true` : notAfter(row, readingUpTo)}`,
+							and ${readingLimit === undefined ? sql`true` : within(row, readingLimit)}`,
 				},
 				orderBy: { createdAt: "desc", id: "desc" },
 				limit: MAX_HISTORY_MESSAGES,

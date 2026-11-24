@@ -1,18 +1,20 @@
 import type { Bot } from "@sugabots/contracts";
-import { ActionForbidden, ResourceHidden } from "@sugabots/core/authorization/access";
-import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { ModelProviderStore } from "@sugabots/core/providers/model-providers/model-provider-store";
+import { BotNameTaken } from "@sugabots/contracts/errors/bots";
+import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { ModelNotEnabled } from "@sugabots/contracts/errors/providers";
+import { Operations } from "@sugabots/core/operations/registry";
+import type { Principal } from "@sugabots/core/principal";
 import { unimplemented } from "@sugabots/core/testing";
-import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
-import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import type { MemberResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy, signedInWith } from "../../http/app.test-support.ts";
 
 /**
- * The bot routes, over doubles of `BotAdministration`. Who may do what to
- * a bot is decided, and tested, in `bots/bot-administration.test.ts`.
+ * The bot routes, over doubles of the bots operations, so what is under test
+ * is the routing, which principal each operation is called for, and what each
+ * refusal means over HTTP. Who may do what to a bot is decided, and tested,
+ * in core.
  */
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000101";
@@ -64,11 +66,15 @@ const resolveMember: MemberResolver = async () => ({
 	image: null,
 });
 
-/** The app with `bots` as the only bot methods it has. */
-const app = (bots: Partial<BotAdministration.Interface> = {}) =>
+/** The app with `operations` as the only operations it has. */
+const app = (operations: Partial<Operations.Interface> = {}) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolveMember), unimplemented(BotAdministration.Service, bots)),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(Operations.Service, operations)),
 	);
+
+/** The member a principal is signed in as, as the session authenticator built it. */
+const memberOf = (principal: Principal) =>
+	principal._tag === "MemberSession" ? principal.member : undefined;
 
 const auth = (body?: unknown): RequestInit => ({
 	method: body === undefined ? "GET" : "POST",
@@ -83,7 +89,7 @@ describe("bot routes", () => {
 	it("lists the bots in the workspace in the path", async () => {
 		let asked: unknown;
 		const response = await app({
-			list: (input) => {
+			"bots.list": (_principal, input) => {
 				asked = input;
 				return Effect.succeed([bot]);
 			},
@@ -97,9 +103,9 @@ describe("bot routes", () => {
 	it("creates a bot in the workspace it is posted to, as the member asking", async () => {
 		let created: unknown;
 		const response = await app({
-			create: (input) =>
-				Effect.map(CurrentActor.Service, ({ memberId }) => {
-					created = { ...input, memberId };
+			"bots.create": (principal, input) =>
+				Effect.sync(() => {
+					created = { ...input, memberId: memberOf(principal) };
 					return bot;
 				}),
 		}).request(`/workspaces/${WORKSPACE}/bots`, auth({ name: "Writer", model: MODEL }));
@@ -107,46 +113,50 @@ describe("bot routes", () => {
 		expect(response.status).toBe(201);
 		expect(created).toEqual({
 			workspace: WORKSPACE,
-			bot: { name: "Writer", model: MODEL },
+			name: "Writer",
+			model: MODEL,
 			memberId: MEMBER,
 		});
 	});
 
 	it("reports a model the workspace does not offer as a bad request", async () => {
 		const response = await app({
-			create: (input) =>
-				Effect.fail(new ModelProviderStore.ModelNotEnabled({ model: input.bot.model })),
+			"bots.create": (_principal, input) =>
+				Effect.fail(new ModelNotEnabled({ model: input.model })),
 		}).request(`/workspaces/${WORKSPACE}/bots`, auth({ name: "Writer", model: "disabled" }));
 
 		expect(response.status).toBe(400);
+		const notOffered = "This workspace does not offer that model";
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message: "This workspace does not offer that model",
+			message: notOffered,
+			error: { _tag: "ModelNotEnabled", userMessage: notOffered, isRetryable: false },
 		});
 	});
 
 	it("reports a name another bot in the workspace has as a conflict", async () => {
 		const response = await app({
-			create: (input) =>
-				Effect.fail(new BotStore.BotNameTaken({ field: "name", value: input.bot.name })),
+			"bots.create": (_principal, input) =>
+				Effect.fail(new BotNameTaken({ field: "name", value: input.name })),
 		}).request(`/workspaces/${WORKSPACE}/bots`, auth({ name: "Triage", model: MODEL }));
 
 		expect(response.status).toBe(409);
+		const taken = "Another bot in this workspace already has that name";
 		expect(await response.json()).toEqual({
 			_tag: "Conflict",
-			message: "Another bot in this workspace already has that name",
+			message: taken,
+			error: { _tag: "BotNameTaken", userMessage: taken, isRetryable: false },
 		});
 	});
 
 	it("pins and unpins the bot in the path for the member asking", async () => {
 		const asked: unknown[] = [];
-		const routes = app({
-			setPinned: (input) =>
-				Effect.map(CurrentActor.Service, ({ memberId }) => {
-					asked.push({ ...input, memberId });
-					return { ...bot, pinned: input.pinned };
-				}),
-		});
+		const pinning = (pinned: boolean) => (principal: Principal, input: { botId: string }) =>
+			Effect.sync(() => {
+				asked.push({ ...input, pinned, memberId: memberOf(principal) });
+				return { ...bot, pinned };
+			});
+		const routes = app({ "bots.pin": pinning(true), "bots.unpin": pinning(false) });
 
 		const pinned = await routes.request(`/bots/${BOT}/pin`, { ...auth(), method: "PUT" });
 		const unpinned = await routes.request(`/bots/${BOT}/pin`, { ...auth(), method: "DELETE" });
@@ -164,7 +174,7 @@ describe("bot routes", () => {
 	it("returns the member's Personal Assistant in the workspace in the path", async () => {
 		let asked: unknown;
 		const response = await app({
-			ensureAssistant: (input) =>
+			"bots.ensureAssistant": (_principal, input) =>
 				Effect.sync(() => {
 					asked = input;
 					return { ...bot, assistant: true, visibility: "personal" as const };
@@ -183,8 +193,8 @@ describe("bot routes", () => {
 				asked.push(input);
 			});
 		const routes = app({
-			update: (input) => Effect.as(record(input), bot),
-			remove: record,
+			"bots.update": (_principal, input) => Effect.as(record(input), bot),
+			"bots.remove": (_principal, input) => record(input),
 		});
 
 		expect(
@@ -206,16 +216,21 @@ describe("bot routes", () => {
 
 	it("answers a bot hidden from the caller as not found", async () => {
 		const response = await app({
-			remove: () => Effect.fail(new ResourceHidden({ resource: "bot" })),
+			"bots.remove": () => Effect.fail(new ResourceHidden({ resource: "bot" })),
 		}).request(`/bots/${BOT}`, { ...auth(), method: "DELETE" });
 
 		expect(response.status).toBe(404);
-		expect(await response.json()).toEqual({ _tag: "NotFound", message: "No such bot" });
+		const hidden = "There's no such bot, or you can't see it";
+		expect(await response.json()).toEqual({
+			_tag: "NotFound",
+			message: hidden,
+			error: { _tag: "ResourceHidden", userMessage: hidden, isRetryable: false },
+		});
 	});
 
 	it("answers a change the caller may not make as forbidden", async () => {
 		const response = await app({
-			remove: () => Effect.fail(new ActionForbidden({ permission: "bot.delete" })),
+			"bots.remove": () => Effect.fail(new ActionForbidden({ proof: "CanDeleteBot" })),
 		}).request(`/bots/${BOT}`, { ...auth(), method: "DELETE" });
 
 		expect(response.status).toBe(403);

@@ -122,6 +122,8 @@ export const turnStepsLayer = Layer.effect(
 							ChatEvent.TurnAbandoned({
 								chatId: request.chatId,
 								botId: request.botId,
+								triggerMessageId: request.triggerMessageId,
+								reason: request.reason,
 								outcome: { state: "failed", error: TURN_STOPPED_UNEXPECTEDLY },
 							}),
 						]);

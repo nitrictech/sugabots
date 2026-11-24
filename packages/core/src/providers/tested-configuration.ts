@@ -1,10 +1,10 @@
 import type { ProviderStatus } from "@sugabots/contracts";
+import { UrlNotAllowed } from "@sugabots/contracts/errors/providers";
 import type { UserText } from "@sugabots/errors";
 import { type SQL, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
-import { Clock, Data, Effect } from "effect";
-import type { UserFacing } from "../user-message.ts";
-import type { Egress, EgressRefused } from "./network/egress.ts";
+import { Clock, Effect } from "effect";
+import type { Egress } from "./network/egress.ts";
 
 /**
  * What model providers, search providers and connectors share: each is
@@ -45,22 +45,15 @@ export function configurationStatus(row: {
 	return row.lastTestError === null ? "connected" : "error";
 }
 
-/** Fails with {@link UrlNotAllowed} unless the egress policy lets a provider or connector use `url`. */
+/**
+ * Fails with {@link UrlNotAllowed} unless the egress policy lets a model
+ * provider, search provider, computer provider or connector use `url`.
+ */
 export const requireAllowedUrl = (egress: Egress.Interface, url: string) =>
-	Effect.mapError(egress.validateProviderUrl(url), (refusal) => new UrlNotAllowed({ refusal }));
-
-/** The egress policy refuses the address a provider or connector was given. */
-export class UrlNotAllowed
-	extends Data.TaggedError("UrlNotAllowed")<{ readonly refusal: EgressRefused }>
-	implements UserFacing
-{
-	override get message() {
-		return `The address is not allowed: ${this.refusal.message}`;
-	}
-	get userMessage() {
-		return this.refusal.userMessage;
-	}
-}
+	Effect.mapError(
+		egress.validateProviderUrl(url),
+		(refusal) => new UrlNotAllowed({ refusal: refusal.userMessage }),
+	);
 
 /** How a test went, with what else it found: `error` is why it failed, if it did. */
 type Tested<Found extends { error?: UserText }> = Omit<Found, "error"> & {

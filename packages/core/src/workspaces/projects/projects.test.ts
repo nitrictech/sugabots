@@ -1,17 +1,27 @@
 import {
+	type NewBot,
 	PROJECT_DESCRIPTION_MAX_LENGTH,
 	PROJECT_NAME_MAX_LENGTH,
 	type ProjectColor,
 	type ProjectVisibility,
 } from "@sugabots/contracts";
+import {
+	AdministratorInEveryProject,
+	InvalidProjectDetails,
+	NotInProject,
+	NotInWorkspace,
+	UnusableProjectName,
+} from "@sugabots/contracts/errors/projects";
+import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import type { InputOf, OperationName } from "@sugabots/contracts/operations";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
+import * as Access from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { projectPermissions } from "../../authorization/permissions.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
-import { noComputers, recordingFirstComputer } from "../../computers/testing.ts";
+import { recordingFirstComputer } from "../../computers/testing.ts";
 import { query, transaction } from "../../database/database.ts";
 import {
 	bot,
@@ -34,10 +44,11 @@ import {
 	servedOnPostgres,
 	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
-import { BotAdministration } from "../bots/bot-administration.ts";
+import { type CallOperation, servedOperations } from "../../operations/testing.ts";
+import type { MemberSession } from "../../principal.ts";
+import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { BotStore } from "../bots/bot-store.ts";
 import { servedOnPostgresAs } from "../testing.ts";
-import { ProjectAdministration } from "./project-administration.ts";
 import { LeadsProjects } from "./project-leads.ts";
 import { ProjectStore } from "./project-store.ts";
 
@@ -51,8 +62,8 @@ import { ProjectStore } from "./project-store.ts";
  */
 describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 	let repository: Promised<ProjectStore.Interface>;
-	let administrationAs: (memberId: string) => Promised<ProjectAdministration.Interface>;
-	let botsAs: (memberId: string) => Promised<BotAdministration.Interface>;
+	let callOperation: CallOperation;
+	let signIn: (memberId: string) => Promise<MemberSession>;
 	let authorizationAs: (memberId: string) => Promised<Authorization.Interface>;
 
 	let workspaceId: string;
@@ -67,14 +78,9 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 
 	beforeAll(async () => {
 		repository = await servedOnPostgres(ProjectStore.Service, ProjectStore.layer);
-		administrationAs = await servedOnPostgresAs(
-			ProjectAdministration.Service,
-			ProjectAdministration.layer.pipe(Layer.provide(noComputers)),
-		);
-		botsAs = await servedOnPostgresAs(
-			BotAdministration.Service,
-			BotAdministration.layer.pipe(Layer.provide(noComputers)),
-		);
+		callOperation = await servedOperations();
+		const signedIn = principals(await authenticators());
+		signIn = (memberId) => signedIn.member(memberId);
 		authorizationAs = await servedOnPostgresAs(Authorization.Service, Authorization.layer);
 	});
 
@@ -82,32 +88,64 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 		await closeDatabase();
 	});
 
+	/** The projects operations, each called for `memberId` signed in, by the names these cases use. */
+	const projectsAs = (memberId: string) => {
+		const operation =
+			<Name extends OperationName>(name: Name) =>
+			async (input: InputOf<Name>) =>
+				callOperation(await signIn(memberId), name, input);
+		return {
+			list: operation("projects.list"),
+			create: operation("projects.create"),
+			update: operation("projects.update"),
+			remove: operation("projects.remove"),
+			members: operation("projects.listMembers"),
+			membersReaching: operation("projects.listMembersReaching"),
+			addMember: operation("projects.addMember"),
+			removeMember: operation("projects.removeMember"),
+			leave: operation("projects.leave"),
+			join: operation("projects.join"),
+			bots: operation("projects.listBots"),
+			addBot: operation("projects.addBot"),
+			removeBot: operation("projects.removeBot"),
+		};
+	};
+
 	const create = (
 		creatorId: string,
 		input: { name: string; slug: string; color?: ProjectColor; visibility?: ProjectVisibility },
-	) => administrationAs(creatorId).create({ workspace: workspaceId, leadBotId: leadId, ...input });
+	) => projectsAs(creatorId).create({ workspace: workspaceId, leadBotId: leadId, ...input });
 	const createIn = (
 		inWorkspace: string,
 		creatorId: string,
 		input: { name: string; slug: string; visibility?: ProjectVisibility },
 	) =>
-		administrationAs(creatorId).create({
+		projectsAs(creatorId).create({
 			workspace: inWorkspace,
 			leadBotId: inWorkspace === workspaceId ? leadId : otherLeadId,
 			...input,
 		});
 	const visibleTo = (memberId: string, inWorkspace = workspaceId) =>
-		administrationAs(memberId).list({ workspace: inWorkspace });
+		projectsAs(memberId).list({ workspace: inWorkspace });
 	/** The ids of the projects `memberId` is listed, with whether they are in each. */
 	const listedTo = async (memberId: string, inWorkspace = workspaceId) =>
 		(await visibleTo(memberId, inWorkspace)).map(({ id, isMember }) => ({ id, isMember }));
+	/** The bots operations these cases make, change and delete bots with, called for `memberId` signed in. */
+	const botsAs = (memberId: string) => ({
+		create: async ({ workspace, bot }: { workspace: string; bot: NewBot }) =>
+			callOperation(await signIn(memberId), "bots.create", { workspace, ...bot }),
+		update: async (input: InputOf<"bots.update">) =>
+			callOperation(await signIn(memberId), "bots.update", input),
+		remove: async (input: InputOf<"bots.remove">) =>
+			callOperation(await signIn(memberId), "bots.remove", input),
+	});
 	/** A bot `creatorId` made, public unless said otherwise. */
 	const aBot = async (creatorId: string, name: string, visibility?: "public" | "personal") =>
 		botsAs(creatorId).create({
 			workspace: workspaceId,
 			bot: { name, model: "test-model", visibility },
 		});
-	const membersOf = (projectId: string) => administrationAs(adminId).members({ projectId });
+	const membersOf = (projectId: string) => projectsAs(adminId).members({ projectId });
 
 	beforeEach(async () => {
 		// A fresh workspace per test rather than a truncate, so these can run
@@ -215,7 +253,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 
 	describe("creating", () => {
 		it("derives its address from its name when none is given, and refuses a name that has none", async () => {
-			const made = await administrationAs(editorId).create({
+			const made = await projectsAs(editorId).create({
 				workspace: workspaceId,
 				name: "Sales Team",
 				leadBotId: leadId,
@@ -223,12 +261,12 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 
 			expect(made.slug).toBe("sales-team");
 			await expect(
-				administrationAs(editorId).create({
+				projectsAs(editorId).create({
 					workspace: workspaceId,
 					name: "!!!",
 					leadBotId: leadId,
 				}),
-			).rejects.toBeInstanceOf(ProjectAdministration.UnusableProjectName);
+			).rejects.toBeInstanceOf(UnusableProjectName);
 		});
 
 		it("refuses a name or description longer than the API allows, from any caller", async () => {
@@ -238,12 +276,12 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 				{ name: "Launch", description: tooLong(PROJECT_DESCRIPTION_MAX_LENGTH) },
 			]) {
 				await expect(
-					administrationAs(editorId).create({
+					projectsAs(editorId).create({
 						workspace: workspaceId,
 						leadBotId: leadId,
 						...details,
 					}),
-				).rejects.toBeInstanceOf(ProjectAdministration.InvalidProjectDetails);
+				).rejects.toBeInstanceOf(InvalidProjectDetails);
 			}
 			expect(await listedTo(editorId)).toEqual([]);
 		});
@@ -265,7 +303,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 		it("counts the members and bots in each project it lists, for those who may list them", async () => {
 			const made = await create(editorId, { name: "Suga", slug: "suga" });
 			const helper = await aBot(adminId, "Triage");
-			await administrationAs(editorId).addBot({ projectId: made.id, botId: helper.id });
+			await projectsAs(editorId).addBot({ projectId: made.id, botId: helper.id });
 
 			// The administrator, in every project members made, the creator, and the lead and the bot added.
 			expect(await visibleTo(editorId)).toEqual([
@@ -327,7 +365,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 			await repository.addMember(workspaceId, made.id, editorId);
 
-			const members = await administrationAs(editorId).membersReaching({ projectId: made.id });
+			const members = await projectsAs(editorId).membersReaching({ projectId: made.id });
 
 			expect(members.map(({ name, handle }) => ({ name, handle }))).toEqual([
 				{ name: "Ada", handle: "ada" },
@@ -376,7 +414,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			expect(await visibleTo(editorId)).toEqual([]);
 			expect((await membersOf(made.id)).map(({ memberId }) => memberId)).not.toContain(editorId);
 			await expect(authorizationAs(editorId).project(made.id, "project.read")).rejects.toThrow(
-				ResourceHidden,
+				Access.ResourceHidden,
 			);
 		});
 	});
@@ -385,11 +423,11 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 		it("lets anybody in the workspace join a public project, once", async () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 
-			expect(await administrationAs(viewerId).join({ projectId: made.id })).toMatchObject({
+			expect(await projectsAs(viewerId).join({ projectId: made.id })).toMatchObject({
 				isMember: true,
 				permissions: { join: false, leave: true },
 			});
-			await administrationAs(viewerId).join({ projectId: made.id });
+			await projectsAs(viewerId).join({ projectId: made.id });
 
 			expect((await membersOf(made.id)).map(({ memberId }) => memberId).toSorted()).toEqual(
 				[adminId, viewerId].toSorted(),
@@ -399,10 +437,10 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 		it("does not let anybody join a private project, and hides it from them", async () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga", visibility: "private" });
 
-			await expect(administrationAs(editorId).join({ projectId: made.id })).rejects.toThrow(
+			await expect(projectsAs(editorId).join({ projectId: made.id })).rejects.toThrow(
 				ResourceHidden,
 			);
-			await expect(administrationAs(outsiderId).join({ projectId: made.id })).rejects.toThrow(
+			await expect(projectsAs(outsiderId).join({ projectId: made.id })).rejects.toThrow(
 				ResourceHidden,
 			);
 		});
@@ -417,7 +455,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			);
 			await otherJoin.held;
 
-			const joining = administrationAs(editorId).join({ projectId: made.id });
+			const joining = projectsAs(editorId).join({ projectId: made.id });
 			await waitUntilWaitingOnLocks(1);
 			await otherJoin.release();
 
@@ -436,7 +474,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			);
 			await hiding.held;
 
-			const joining = administrationAs(editorId).join({ projectId: made.id });
+			const joining = projectsAs(editorId).join({ projectId: made.id });
 			await waitUntilWaitingOnLocks(1);
 			await hiding.release();
 
@@ -447,24 +485,24 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 		it("lets an editor in a project invite and remove members, and a viewer neither", async () => {
 			const made = await create(editorId, { name: "Suga", slug: "suga", visibility: "private" });
 
-			await administrationAs(editorId).addMember({ projectId: made.id, memberId: viewerId });
+			await projectsAs(editorId).addMember({ projectId: made.id, memberId: viewerId });
 			await expect(
-				administrationAs(viewerId).removeMember({ projectId: made.id, memberId: editorId }),
+				projectsAs(viewerId).removeMember({ projectId: made.id, memberId: editorId }),
 			).rejects.toThrow(ActionForbidden);
-			await administrationAs(editorId).removeMember({ projectId: made.id, memberId: viewerId });
+			await projectsAs(editorId).removeMember({ projectId: made.id, memberId: viewerId });
 
 			expect((await membersOf(made.id)).map(({ memberId }) => memberId).toSorted()).toEqual(
 				[adminId, editorId].toSorted(),
 			);
 			await expect(
-				administrationAs(editorId).removeMember({ projectId: made.id, memberId: viewerId }),
-			).rejects.toBeInstanceOf(ProjectAdministration.NotInProject);
+				projectsAs(editorId).removeMember({ projectId: made.id, memberId: viewerId }),
+			).rejects.toBeInstanceOf(NotInProject);
 			await expect(
-				administrationAs(editorId).removeMember({ projectId: made.id, memberId: adminId }),
-			).rejects.toBeInstanceOf(ProjectAdministration.AdministratorInEveryProject);
+				projectsAs(editorId).removeMember({ projectId: made.id, memberId: adminId }),
+			).rejects.toBeInstanceOf(AdministratorInEveryProject);
 			await expect(
-				administrationAs(editorId).addMember({ projectId: made.id, memberId: outsiderId }),
-			).rejects.toBeInstanceOf(ProjectAdministration.NotInWorkspace);
+				projectsAs(editorId).addMember({ projectId: made.id, memberId: outsiderId }),
+			).rejects.toBeInstanceOf(NotInWorkspace);
 		});
 	});
 
@@ -473,25 +511,25 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const made = await create(editorId, { name: "Suga", slug: "suga" });
 			const bot = await aBot(adminId, "Triage");
 
-			await administrationAs(editorId).addBot({ projectId: made.id, botId: bot.id });
-			await administrationAs(editorId).addBot({ projectId: made.id, botId: bot.id });
-			expect(
-				(await administrationAs(editorId).bots({ projectId: made.id })).map(({ id }) => id),
-			).toEqual([leadId, bot.id]);
+			await projectsAs(editorId).addBot({ projectId: made.id, botId: bot.id });
+			await projectsAs(editorId).addBot({ projectId: made.id, botId: bot.id });
+			expect((await projectsAs(editorId).bots({ projectId: made.id })).map(({ id }) => id)).toEqual(
+				[leadId, bot.id],
+			);
 
-			await administrationAs(editorId).removeBot({ projectId: made.id, botId: bot.id });
-			expect(
-				(await administrationAs(editorId).bots({ projectId: made.id })).map(({ id }) => id),
-			).toEqual([leadId]);
+			await projectsAs(editorId).removeBot({ projectId: made.id, botId: bot.id });
+			expect((await projectsAs(editorId).bots({ projectId: made.id })).map(({ id }) => id)).toEqual(
+				[leadId],
+			);
 		});
 
 		it("lists each bot as pinned for whoever pinned it", async () => {
 			const made = await create(editorId, { name: "Suga", slug: "suga" });
 			const bot = await aBot(editorId, "Triage");
-			await administrationAs(editorId).addBot({ projectId: made.id, botId: bot.id });
+			await projectsAs(editorId).addBot({ projectId: made.id, botId: bot.id });
 
 			const pinnedFor = async (memberId: string) =>
-				(await administrationAs(memberId).bots({ projectId: made.id })).map(({ id, pinned }) => ({
+				(await projectsAs(memberId).bots({ projectId: made.id })).map(({ id, pinned }) => ({
 					id,
 					pinned,
 				}));
@@ -511,14 +549,14 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const someoneElses = await aBot(adminId, "Ledger", "personal");
 
 			await expect(
-				administrationAs(editorId).addBot({ projectId: made.id, botId: own.id }),
+				projectsAs(editorId).addBot({ projectId: made.id, botId: own.id }),
 			).rejects.toBeInstanceOf(ProjectStore.BotNotPublic);
 			await expect(
-				administrationAs(editorId).addBot({ projectId: made.id, botId: someoneElses.id }),
+				projectsAs(editorId).addBot({ projectId: made.id, botId: someoneElses.id }),
 			).rejects.toThrow(ResourceHidden);
-			expect(
-				(await administrationAs(editorId).bots({ projectId: made.id })).map(({ id }) => id),
-			).toEqual([leadId]);
+			expect((await projectsAs(editorId).bots({ projectId: made.id })).map(({ id }) => id)).toEqual(
+				[leadId],
+			);
 		});
 
 		it("does not add a bot being made personal at the same time", async () => {
@@ -550,9 +588,9 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await makingPrivate;
 
 			await expect(adding).rejects.toBeInstanceOf(ProjectStore.BotNotPublic);
-			expect(
-				(await administrationAs(adminId).bots({ projectId: made.id })).map(({ id }) => id),
-			).toEqual([leadId]);
+			expect((await projectsAs(adminId).bots({ projectId: made.id })).map(({ id }) => id)).toEqual([
+				leadId,
+			]);
 		});
 
 		it("does not let a viewer add a bot", async () => {
@@ -561,7 +599,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await repository.addMember(workspaceId, made.id, viewerId);
 
 			await expect(
-				administrationAs(viewerId).addBot({ projectId: made.id, botId: bot.id }),
+				projectsAs(viewerId).addBot({ projectId: made.id, botId: bot.id }),
 			).rejects.toThrow(ActionForbidden);
 		});
 	});
@@ -601,10 +639,10 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			});
 			await expect(
 				authorizationAs(viewerId).workspace(workspaceId, "project.create"),
-			).rejects.toThrow(ActionForbidden);
+			).rejects.toThrow(Access.ActionForbidden);
 			await expect(
 				authorizationAs(outsiderId).workspace(workspaceId, "workspace.read"),
-			).rejects.toThrow(ResourceHidden);
+			).rejects.toThrow(Access.ResourceHidden);
 		});
 
 		it("puts every administrator in a new project, and keeps them there", async () => {
@@ -633,7 +671,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 				facts: { isMember: true },
 			});
 			await expect(authorizationAs(editorId).project(joined.id, "project.delete")).rejects.toThrow(
-				ActionForbidden,
+				Access.ActionForbidden,
 			);
 		});
 
@@ -659,7 +697,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 						.project(id, "project.read")
 						.then(() => true)
 						.catch((refusal) =>
-							refusal instanceof ResourceHidden ? false : Promise.reject(refusal),
+							refusal instanceof Access.ResourceHidden ? false : Promise.reject(refusal),
 						);
 					expect({ role, project, listed: listed.get(id) }).toEqual({
 						role,
@@ -691,7 +729,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			expect(standing.may("approval.decide")).toBe(false);
 			await expect(
 				authorizationAs(viewerId).project(joined.id, "project.bots.manage"),
-			).rejects.toThrow(ActionForbidden);
+			).rejects.toThrow(Access.ActionForbidden);
 		});
 
 		it("carries a viewer's permissions on the projects it lists, all closed but leaving", async () => {
@@ -709,10 +747,10 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
 			await repository.addMember(workspaceId, made.id, editorId);
 
-			await administrationAs(editorId).leave({ projectId: made.id });
+			await projectsAs(editorId).leave({ projectId: made.id });
 
 			expect((await membersOf(made.id)).map(({ memberId }) => memberId)).toEqual([adminId]);
-			await expect(administrationAs(adminId).leave({ projectId: made.id })).rejects.toThrow(
+			await expect(projectsAs(adminId).leave({ projectId: made.id })).rejects.toThrow(
 				ActionForbidden,
 			);
 		});
@@ -731,7 +769,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			expect(standing.may("project.delete")).toBe(false);
 			expect(await repository.removeMember(workspaceId, made.id, adminId)).toBe("removed");
 			await expect(authorizationAs(adminId).project(made.id, "project.read")).rejects.toThrow(
-				ResourceHidden,
+				Access.ResourceHidden,
 			);
 		});
 
@@ -750,16 +788,16 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 
 			await expect(authorizationAs(outsiderId).project(made.id, "project.read")).rejects.toThrow(
-				ResourceHidden,
+				Access.ResourceHidden,
 			);
 		});
 
 		it("answers no to ids that are not uuids rather than raising", async () => {
 			await expect(
 				authorizationAs(adminId).workspace("nonsense", "workspace.read"),
-			).rejects.toThrow(ResourceHidden);
+			).rejects.toThrow(Access.ResourceHidden);
 			await expect(authorizationAs(adminId).project("nonsense", "project.read")).rejects.toThrow(
-				ResourceHidden,
+				Access.ResourceHidden,
 			);
 		});
 	});
@@ -771,11 +809,11 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
 			await repository.addMember(workspaceId, made.id, editorId);
 
-			await expect(administrationAs(editorId).remove({ projectId: made.id })).rejects.toThrow(
+			await expect(projectsAs(editorId).remove({ projectId: made.id })).rejects.toThrow(
 				ActionForbidden,
 			);
 			await expect(
-				administrationAs(editorId).update({ projectId: made.id, changes: { name: "Ours" } }),
+				projectsAs(editorId).update({ projectId: made.id, changes: { name: "Ours" } }),
 			).rejects.toThrow(ActionForbidden);
 			await expect(create(viewerId, { name: "Mine", slug: "mine" })).rejects.toThrow(
 				ActionForbidden,
@@ -787,9 +825,9 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const made = await create(adminId, { name: "Sales", slug: "sales", visibility: "private" });
 
 			await expect(
-				administrationAs(editorId).update({ projectId: made.id, changes: { name: "Ours" } }),
+				projectsAs(editorId).update({ projectId: made.id, changes: { name: "Ours" } }),
 			).rejects.toThrow(ResourceHidden);
-			await expect(administrationAs(outsiderId).members({ projectId: made.id })).rejects.toThrow(
+			await expect(projectsAs(outsiderId).members({ projectId: made.id })).rejects.toThrow(
 				ResourceHidden,
 			);
 			await expect(visibleTo(outsiderId)).rejects.toThrow(ResourceHidden);
@@ -817,13 +855,13 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 		it("makes a project with its lead among its bots, and refuses a personal one", async () => {
 			const made = await create(editorId, { name: "Suga", slug: "suga" });
 			expect(made.leadBotId).toBe(leadId);
-			expect(
-				(await administrationAs(editorId).bots({ projectId: made.id })).map(({ id }) => id),
-			).toEqual([leadId]);
+			expect((await projectsAs(editorId).bots({ projectId: made.id })).map(({ id }) => id)).toEqual(
+				[leadId],
+			);
 
 			const diary = await aBot(editorId, "Diary", "personal");
 			await expect(
-				administrationAs(editorId).create({
+				projectsAs(editorId).create({
 					workspace: workspaceId,
 					name: "Mine",
 					slug: "mine",
@@ -838,20 +876,21 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const triage = await aBot(adminId, "Triage");
 
 			await expect(
-				administrationAs(editorId).update({
+				projectsAs(editorId).update({
 					projectId: made.id,
 					changes: { leadBotId: triage.id },
 				}),
 			).rejects.toThrow();
-			const changed = await administrationAs(adminId).update({
+			const changed = await projectsAs(adminId).update({
 				projectId: made.id,
 				changes: { leadBotId: triage.id },
 			});
 
 			expect(changed.leadBotId).toBe(triage.id);
-			expect(
-				(await administrationAs(adminId).bots({ projectId: made.id })).map(({ id }) => id),
-			).toEqual([leadId, triage.id]);
+			expect((await projectsAs(adminId).bots({ projectId: made.id })).map(({ id }) => id)).toEqual([
+				leadId,
+				triage.id,
+			]);
 		});
 
 		it("keeps a lead in its project, public and undeleted, until another is chosen", async () => {
@@ -859,7 +898,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const ops = await create(adminId, { name: "Ops", slug: "ops" });
 			const triage = await aBot(adminId, "Triage");
 
-			const removing = administrationAs(adminId).removeBot({
+			const removing = projectsAs(adminId).removeBot({
 				projectId: sales.id,
 				botId: leadId,
 			});
@@ -877,13 +916,13 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await expect(botsAs(adminId).remove({ botId: leadId })).rejects.toBeInstanceOf(LeadsProjects);
 
 			for (const projectId of [sales.id, ops.id]) {
-				await administrationAs(adminId).update({ projectId, changes: { leadBotId: triage.id } });
+				await projectsAs(adminId).update({ projectId, changes: { leadBotId: triage.id } });
 			}
-			await administrationAs(adminId).removeBot({ projectId: sales.id, botId: leadId });
+			await projectsAs(adminId).removeBot({ projectId: sales.id, botId: leadId });
 			await botsAs(adminId).update({ botId: leadId, changes: { visibility: "personal" } });
-			expect(
-				(await administrationAs(adminId).bots({ projectId: ops.id })).map(({ id }) => id),
-			).toEqual([triage.id]);
+			expect((await projectsAs(adminId).bots({ projectId: ops.id })).map(({ id }) => id)).toEqual([
+				triage.id,
+			]);
 			await botsAs(adminId).remove({ botId: leadId });
 		});
 
@@ -896,7 +935,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 				visibility: "private",
 			});
 			for (const projectId of [ops.id, secret.id]) {
-				await administrationAs(adminId).update({ projectId, changes: { leadBotId: triage.id } });
+				await projectsAs(adminId).update({ projectId, changes: { leadBotId: triage.id } });
 			}
 
 			const toCreator = {
@@ -931,9 +970,10 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 
 			await expect(choosing).resolves.toMatchObject({ leadBotId: triage.id });
 			await expect(removing).rejects.toBeInstanceOf(LeadsProjects);
-			expect(
-				(await administrationAs(adminId).bots({ projectId: made.id })).map(({ id }) => id),
-			).toEqual([leadId, triage.id]);
+			expect((await projectsAs(adminId).bots({ projectId: made.id })).map(({ id }) => id)).toEqual([
+				leadId,
+				triage.id,
+			]);
 		});
 
 		it("puts a bot back in its project when chosen as lead while being taken out", async () => {
@@ -952,9 +992,10 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await removing.release();
 
 			await expect(choosing).resolves.toMatchObject({ leadBotId: triage.id });
-			expect(
-				(await administrationAs(adminId).bots({ projectId: made.id })).map(({ id }) => id),
-			).toEqual([leadId, triage.id]);
+			expect((await projectsAs(adminId).bots({ projectId: made.id })).map(({ id }) => id)).toEqual([
+				leadId,
+				triage.id,
+			]);
 		});
 	});
 
@@ -973,9 +1014,9 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const own = await defaultProjectOf(diary.id);
 
 			expect(own).toMatchObject({ leadBotId: diary.id, workspaceId });
-			expect(
-				(await administrationAs(editorId).bots({ projectId: own.id })).map(({ id }) => id),
-			).toEqual([diary.id]);
+			expect((await projectsAs(editorId).bots({ projectId: own.id })).map(({ id }) => id)).toEqual([
+				diary.id,
+			]);
 			// Nobody is a member of one, administrators included.
 			expect(
 				await onDatabase((db) =>
@@ -1011,14 +1052,14 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 				authorizationAs(editorId).project(diaryOwn.id, "project.read"),
 			).resolves.toMatchObject({ project: { id: diaryOwn.id } });
 			await expect(authorizationAs(adminId).project(diaryOwn.id, "project.read")).rejects.toThrow(
-				ResourceHidden,
+				Access.ResourceHidden,
 			);
 			await expect(authorizationAs(adminId).projectFound(diaryOwn.id)).resolves.toMatchObject({
 				project: { id: diaryOwn.id },
 			});
 			await expect(
 				authorizationAs(outsiderId).project(triageOwn.id, "project.read"),
-			).rejects.toThrow(ResourceHidden);
+			).rejects.toThrow(Access.ResourceHidden);
 		});
 
 		it("names as the members reaching it whoever reaches its bot, though it has no members", async () => {
@@ -1026,7 +1067,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const triage = await aBot(adminId, "Triage");
 			const membersReaching = async (botId: string) =>
 				(
-					await administrationAs(editorId).membersReaching({
+					await projectsAs(editorId).membersReaching({
 						projectId: (await defaultProjectOf(botId)).id,
 					})
 				).map(({ name }) => name);
@@ -1042,7 +1083,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const projectId = own.id;
 
 			for (const memberId of [adminId, editorId]) {
-				const as = administrationAs(memberId);
+				const as = projectsAs(memberId);
 				await expect(as.join({ projectId })).rejects.toThrow(ResourceHidden);
 				await expect(as.leave({ projectId })).rejects.toThrow(ActionForbidden);
 				await expect(as.addMember({ projectId, memberId: viewerId })).rejects.toThrow(
@@ -1097,7 +1138,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 			const recording = await recordingFirstComputerOf(made.id);
 
-			const removing = administrationAs(adminId).remove({ projectId: made.id });
+			const removing = projectsAs(adminId).remove({ projectId: made.id });
 			await waitUntilWaitingOnLocks(1);
 			await recording.release();
 

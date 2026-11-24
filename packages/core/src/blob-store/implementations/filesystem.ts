@@ -72,36 +72,9 @@ export const fromFileSystem = (root: string) =>
 				}),
 			);
 
-		/**
-		 * Syncs `directory`'s entries to disk, so its renamed files survive a
-		 * crash. Windows cannot open a directory to sync it, so a failure here is
-		 * ignored.
-		 */
-		const syncDirectory = (directory: string) =>
-			Effect.scoped(
-				Effect.flatMap(fs.open(directory, { flag: "r" }), (handle) => handle.sync),
-			).pipe(Effect.ignore);
-
-		/**
-		 * Removes `directory` and then each directory above it, up to `root`,
-		 * while they are empty. `rmdir` refuses a directory that is not empty,
-		 * which `FileSystem.remove` cannot, so a blob put meanwhile is never
-		 * removed with it; that `put` may instead fail as `Unavailable`, and
-		 * succeed when tried again.
-		 */
+		const syncDirectory = syncDirectoryWith(fs);
 		const removeEmptyDirectories = (directory: string) =>
-			Effect.gen(function* () {
-				const top = join(root);
-				let current = directory;
-				while (current !== top && current.startsWith(top)) {
-					const removed = yield* Effect.tryPromise(() => rmdir(current)).pipe(
-						Effect.as(true),
-						Effect.orElseSucceed(() => false),
-					);
-					if (!removed) return;
-					current = dirname(current);
-				}
-			});
+			removeEmptyDirectoriesUpTo(root, directory);
 
 		return {
 			put: (key, { stream, contentType }) =>
@@ -185,6 +158,97 @@ export const fromFileSystem = (root: string) =>
 				);
 			},
 		} satisfies BlobStore.Interface;
+	});
+
+/**
+ * Moves every blob under the key `from` to the same key under `to`, for
+ * `BlobStore.make`: each entry is renamed to its place under `to`, merging
+ * into a directory already there, and the directories this empties go. The
+ * blob stored under `from` itself stays, as `deletePrefix` leaves it. A blob
+ * already moved is no longer under `from`, so moving again after a crash
+ * part-way finishes the job; one whose new key is taken is left where it is.
+ */
+export const moveFolderOnDisk = (root: string) => (from: BlobStore.Key, to: BlobStore.Key) =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem;
+		const syncDirectory = syncDirectoryWith(fs);
+		const entriesIn = (directory: string) =>
+			fs
+				.readDirectory(directory)
+				.pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed([])));
+		/** Moves `names` from the directory `source` to the directory `target`. */
+		const moveEntries = (
+			source: string,
+			target: string,
+			names: readonly string[],
+		): Effect.Effect<void, PlatformError.PlatformError> =>
+			Effect.forEach(
+				names,
+				(name) =>
+					Effect.gen(function* () {
+						const moving = join(source, name);
+						const destination = join(target, name);
+						if (!(yield* fs.exists(destination))) {
+							yield* fs.makeDirectory(target, { recursive: true });
+							yield* fs.rename(moving, destination);
+							yield* syncDirectory(target);
+							return;
+						}
+						if (!name.startsWith(".")) yield* moveKey(moving, destination);
+					}),
+				{ discard: true },
+			);
+		/** Moves the blob under the key directory `source`, and every one beneath it, to `target`. */
+		const moveKey = (
+			source: string,
+			target: string,
+		): Effect.Effect<void, PlatformError.PlatformError> =>
+			Effect.gen(function* () {
+				const entries = yield* entriesIn(source);
+				// Not a temporary file, which is part of a `put` that never finished.
+				const kept = entries.filter(
+					(name) => !name.startsWith(".") || name === BYTES_FILE || name === CONTENT_TYPE_FILE,
+				);
+				yield* moveEntries(source, target, kept);
+				yield* syncDirectory(source);
+				yield* Effect.tryPromise(() => rmdir(source)).pipe(Effect.ignore);
+			});
+		const source = directoryOf(root, from);
+		const segments = (yield* entriesIn(source)).filter((name) => !name.startsWith("."));
+		yield* moveEntries(source, directoryOf(root, to), segments);
+		yield* syncDirectory(source);
+		yield* removeEmptyDirectoriesUpTo(root, source);
+	});
+
+/**
+ * Syncs `directory`'s entries to disk, so its renamed files survive a
+ * crash. Windows cannot open a directory to sync it, so a failure here is
+ * ignored.
+ */
+const syncDirectoryWith = (fs: FileSystem.FileSystem) => (directory: string) =>
+	Effect.scoped(Effect.flatMap(fs.open(directory, { flag: "r" }), (handle) => handle.sync)).pipe(
+		Effect.ignore,
+	);
+
+/**
+ * Removes `directory` and then each directory above it, up to `root`,
+ * while they are empty. `rmdir` refuses a directory that is not empty,
+ * which `FileSystem.remove` cannot, so a blob put meanwhile is never
+ * removed with it; that `put` may instead fail as `Unavailable`, and
+ * succeed when tried again.
+ */
+const removeEmptyDirectoriesUpTo = (root: string, directory: string) =>
+	Effect.gen(function* () {
+		const top = join(root);
+		let current = directory;
+		while (current !== top && current.startsWith(top)) {
+			const removed = yield* Effect.tryPromise(() => rmdir(current)).pipe(
+				Effect.as(true),
+				Effect.orElseSucceed(() => false),
+			);
+			if (!removed) return;
+			current = dirname(current);
+		}
 	});
 
 const BYTES_FILE = ".bytes";

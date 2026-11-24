@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { uuidSchema } from "./uuid.ts";
 
 /**
  * Where GitHub sends the browser, under the API, once a project's GitHub App is
@@ -28,6 +29,26 @@ const gitHubSetupFailureSchema = Schema.Literals([
 ]);
 
 export type GitHubSetupFailure = typeof gitHubSetupFailureSchema.Type;
+
+/** The project being connected to GitHub, by its workspace and its own id. */
+const setupProjectSchema = Schema.Struct({ workspaceId: uuidSchema, projectId: uuidSchema });
+
+/**
+ * Where a step of setting up a project's GitHub app goes next: on to GitHub,
+ * back to the project's GitHub app, or back with why it stopped. A failure
+ * names the project only when the step was the caller's.
+ */
+export const gitHubSetupOutcomeSchema = Schema.Union([
+	Schema.Struct({ kind: Schema.Literal("next"), url: Schema.String }),
+	Schema.Struct({ kind: Schema.Literal("done"), at: setupProjectSchema, connectorId: uuidSchema }),
+	Schema.Struct({
+		kind: Schema.Literal("failed"),
+		at: Schema.UndefinedOr(setupProjectSchema),
+		failure: gitHubSetupFailureSchema,
+	}),
+]);
+
+export type GitHubSetupOutcome = typeof gitHubSetupOutcomeSchema.Type;
 
 /**
  * A GitHub organization's login, for an app the organization owns; left out
@@ -87,6 +108,48 @@ export const REPOSITORY_EVENTS = [
 export const repositoryEventSchema = Schema.Literals(REPOSITORY_EVENTS);
 
 export type RepositoryEvent = typeof repositoryEventSchema.Type;
+
+/**
+ * Something that happened at one of a GitHub account's repositories, as an
+ * automation's run is told of it: the fields of a GitHub run trigger besides
+ * which connector and delivery it came from, and when.
+ */
+export const repositoryActivitySchema = Schema.Struct({
+	event: repositoryEventSchema,
+	repository: Schema.String,
+	/** Who did it, by their name at GitHub. */
+	sender: Schema.String,
+	/** Where to see it at GitHub. */
+	url: Schema.String,
+	/** The pull request or issue it is about, if any. */
+	number: Schema.NullOr(Schema.Int),
+	title: Schema.NullOr(Schema.String),
+	/** What was written: a comment's or review's words, or a new issue's or pull request's description. */
+	text: Schema.NullOr(Schema.String),
+	/** The branch it is on, if any. */
+	branch: Schema.NullOr(Schema.String),
+	/** The comment it is about, if any. */
+	comment: Schema.optional(
+		Schema.NullOr(
+			Schema.Struct({ id: Schema.Int, kind: Schema.Literals(["comment", "code_comment"]) }),
+		),
+	),
+});
+
+export type RepositoryActivity = typeof repositoryActivitySchema.Type;
+
+/**
+ * What a delivery to a GitHub app's webhook says happened: in which
+ * workspace, under which id GitHub sends it again, and the activity, or
+ * nothing for an event no automation is run by.
+ */
+export const deliveredActivitySchema = Schema.Struct({
+	workspaceId: uuidSchema,
+	deliveryId: Schema.UndefinedOr(Schema.String),
+	activity: Schema.UndefinedOr(repositoryActivitySchema),
+});
+
+export type DeliveredActivity = typeof deliveredActivitySchema.Type;
 
 /**
  * The repositories a GitHub connector's tools work on, the account they

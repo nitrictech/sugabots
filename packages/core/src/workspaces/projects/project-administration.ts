@@ -1,46 +1,36 @@
+export {
+	InvalidProjectDetails,
+	NotInWorkspace,
+	UnusableProjectName,
+} from "@sugabots/contracts/errors/projects";
 export * as ProjectAdministration from "./project-administration.ts";
 
-import {
-	type Bot,
-	type MemberParticipant,
-	newProjectSchema,
-	PROJECT_DESCRIPTION_MAX_LENGTH,
-	PROJECT_NAME_MAX_LENGTH,
-	type Project,
-	type ProjectColor,
-	type ProjectMember,
-	type ProjectUpdate,
-	type ProjectVisibility,
-	projectSlugSchema,
-	slugify,
-} from "@sugabots/contracts";
-import { userText } from "@sugabots/errors";
-import { Context, Data, Effect, Layer, Schema } from "effect";
+import type { Project, ProjectColor, ProjectVisibility } from "@sugabots/contracts";
+import type {
+	InvalidProjectDetails,
+	UnusableProjectName,
+} from "@sugabots/contracts/errors/projects";
+import { Context, Effect, Layer } from "effect";
 import {
 	type AuthorizationDenied,
 	joinedStanding,
-	listedProjectStandingsFor,
 	ResourceHidden,
 } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { projectPermissions } from "../../authorization/permissions.ts";
-import type { Computers } from "../../computers/computers.ts";
-import { ProjectComputers } from "../../computers/project-computers.ts";
-import { query, serviceOperations, transaction } from "../../database/database.ts";
-import type * as schema from "../../database/schema.ts";
-import type { UserFacing } from "../../user-message.ts";
-import { projectBots } from "../bots/bot-reads.ts";
-import { projectSeenBy } from "./project.ts";
-import type { LeadsProjects } from "./project-leads.ts";
-import { membersReachingProjectNamed, projectHeadcounts, projectMembers } from "./project-reads.ts";
+import { serviceOperations } from "../../database/database.ts";
+import { newProjectDetails, projectSeenBy } from "./project.ts";
+import { projectsListedTo } from "./project-reads.ts";
 import { ProjectStore } from "./project-store.ts";
 
 /**
- * A workspace's projects, who is in them, and their bots. Projects are
- * returned as the current actor sees them, permissions and all. A bot's
- * default project is never listed, and nothing here changes one: its
- * permissions refuse it (see `mayInProject`).
+ * What a Personal Assistant's project tools do for its member, as the current
+ * actor: list the workspace's projects, make one, join one and add a bot to
+ * one. It exists only because those tools still call services directly; it
+ * goes when tools become operations, called in the bot loop like any other
+ * entrypoint's. Everything else, and the HTTP API, goes through the projects
+ * operations and the `Projects` service, which demands proofs.
  */
 export interface Interface {
 	/** The projects the actor is in, and the public ones they could join, by name. */
@@ -68,82 +58,14 @@ export interface Interface {
 		| ProjectStore.BotNotPublic,
 		CurrentActor.Service
 	>;
-	/** Changes the project, its lead bot included, which must be public. */
-	readonly update: (input: {
-		projectId: string;
-		changes: ProjectUpdate;
-	}) => Effect.Effect<
-		Project,
-		| AuthorizationDenied
-		| EmptyProjectUpdate
-		| ProjectStore.ProjectGone
-		| ProjectStore.ProjectSlugTaken
-		| ProjectStore.BotNotPublic,
-		CurrentActor.Service
-	>;
-	/**
-	 * Deletes the project, with everything in it. Its computer is destroyed at
-	 * its provider first, since its record is the only way to find the machine:
-	 * when the provider can't be reached, or a computer is made meanwhile, the
-	 * project is kept, to try again.
-	 */
-	readonly remove: (input: {
-		projectId: string;
-	}) => Effect.Effect<
-		void,
-		AuthorizationDenied | Computers.Unavailable | ProjectComputers.ComputerMadeMeanwhile,
-		CurrentActor.Service
-	>;
-	readonly members: (input: {
-		projectId: string;
-	}) => Effect.Effect<ProjectMember[], AuthorizationDenied, CurrentActor.Service>;
-	/**
-	 * The members who reach the project, by name, as a mention in its chats can
-	 * name them: in a project members made, its members; in a bot's default
-	 * project, which has none, whoever reaches the bot.
-	 */
-	readonly membersReaching: (input: {
-		projectId: string;
-	}) => Effect.Effect<MemberParticipant[], AuthorizationDenied, CurrentActor.Service>;
-	/** Adds `memberId` to the project. Adding somebody already in it changes nothing. */
-	readonly addMember: (input: {
-		projectId: string;
-		memberId: string;
-	}) => Effect.Effect<void, AuthorizationDenied | NotInWorkspace, CurrentActor.Service>;
-	/** Takes `memberId` out of the project. Refuses an administrator, who belongs to every one. */
-	readonly removeMember: (input: {
-		projectId: string;
-		memberId: string;
-	}) => Effect.Effect<
-		void,
-		AuthorizationDenied | AdministratorInEveryProject | NotInProject,
-		CurrentActor.Service
-	>;
-	/** Takes the caller out of the project, on the same terms as {@link Interface.removeMember}. */
-	readonly leave: (input: {
-		projectId: string;
-	}) => Effect.Effect<
-		void,
-		AuthorizationDenied | AdministratorInEveryProject | NotInProject,
-		CurrentActor.Service
-	>;
 	/** Puts the caller in a public project. Joining one they are in changes nothing. */
 	readonly join: (input: {
 		projectId: string;
 	}) => Effect.Effect<Project, AuthorizationDenied, CurrentActor.Service>;
-	/** The project's bots, by name. */
-	readonly bots: (input: {
-		projectId: string;
-	}) => Effect.Effect<Bot[], AuthorizationDenied, CurrentActor.Service>;
 	readonly addBot: (input: {
 		projectId: string;
 		botId: string;
 	}) => Effect.Effect<void, AuthorizationDenied | ProjectStore.BotNotPublic, CurrentActor.Service>;
-	/** Refused for the project's lead bot, until another is chosen. */
-	readonly removeBot: (input: {
-		projectId: string;
-		botId: string;
-	}) => Effect.Effect<void, AuthorizationDenied | LeadsProjects, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -154,20 +76,6 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ProjectAdministration");
 	const authorization = yield* Authorization.Service;
 	const projects = yield* ProjectStore.Service;
-	const projectComputers = yield* ProjectComputers.Service;
-
-	const takeOut = (project: schema.ProjectRow, memberId: string) =>
-		Effect.gen(function* () {
-			const outcome = yield* projects.removeMember(project.workspaceId, project.id, memberId);
-			switch (outcome) {
-				case "removed":
-					return;
-				case "administrator":
-					return yield* new AdministratorInEveryProject();
-				case "not_a_member":
-					return yield* new NotInProject();
-			}
-		});
 
 	return Service.of({
 		list: (input) =>
@@ -178,23 +86,11 @@ export const make = Effect.gen(function* () {
 						input.workspace,
 						"workspace.read",
 					);
-					const listed = yield* query((db) =>
-						listedProjectStandingsFor(db, workspaceId, actor.memberId),
-					);
-					// Counted only where the actor may list who is in the project, as its own lists would.
-					const headcountOf = yield* projectHeadcounts(
-						listed
-							.filter((standing) => standing.may("project.read"))
-							.map(({ project }) => project.id),
-					);
-					return listed.map((standing): Project => {
-						const seen = projectSeenBy(standing);
-						return standing.may("project.read") ? { ...seen, ...headcountOf(seen.id) } : seen;
-					});
+					return yield* projectsListedTo(workspaceId, actor.memberId);
 				}),
 			),
 
-		create: ({ workspace, slug: givenSlug, ...input }) =>
+		create: ({ workspace, ...input }) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
@@ -204,105 +100,13 @@ export const make = Effect.gen(function* () {
 					);
 					// A bot the member can't see is answered as if it weren't there.
 					yield* authorization.bot(input.leadBotId, "bot.read");
-					// Checked here, not only by the HTTP API, for callers such as the
-					// Personal Assistant that don't come through it.
-					const details = yield* Schema.decodeUnknownEffect(projectDetailsSchema)({
-						name: input.name,
-						description: input.description,
-					}).pipe(Effect.mapError(() => new InvalidProjectDetails()));
-					// Checked before anything is written, so an unsluggable name such as
-					// "!!!" is refused for the name rather than as a taken address.
-					const slug = yield* Schema.decodeUnknownEffect(projectSlugSchema)(
-						givenSlug ?? slugify(details.name),
-					).pipe(Effect.mapError(() => new UnusableProjectName()));
+					const details = yield* newProjectDetails(input);
 					const row = yield* projects.create(workspaceId, {
-						creatorId: actor.memberId,
-						slug,
 						...input,
 						...details,
+						creatorId: actor.memberId,
 					});
 					return projectSeenBy(joinedStanding(row, actor));
-				}),
-			),
-
-		update: ({ projectId, changes }) =>
-			operation(
-				"update",
-				Effect.gen(function* () {
-					const standing = yield* authorization.project(projectId, "project.update");
-					if (Object.values(changes).every((value) => value === undefined)) {
-						return yield* new EmptyProjectUpdate();
-					}
-					if (changes.leadBotId !== undefined) {
-						yield* authorization.bot(changes.leadBotId, "bot.read");
-					}
-					const updated = yield* projects.update(
-						standing.project.workspaceId,
-						standing.project.id,
-						changes,
-					);
-					return projectSeenBy({ ...standing, project: updated });
-				}),
-			),
-
-		remove: ({ projectId }) =>
-			operation(
-				"remove",
-				Effect.gen(function* () {
-					const { project } = yield* authorization.project(projectId, "project.delete");
-					const removed = { workspaceId: project.workspaceId, projectId: project.id };
-					yield* projectComputers.destroy(removed);
-					yield* transaction(
-						Effect.andThen(
-							ProjectComputers.lockWithoutComputer(removed),
-							projects.remove(project.workspaceId, project.id),
-						),
-					);
-				}),
-			),
-
-		members: ({ projectId }) =>
-			operation(
-				"members",
-				Effect.flatMap(authorization.project(projectId, "project.read"), ({ project }) =>
-					projectMembers(project.id),
-				),
-			),
-
-		membersReaching: ({ projectId }) =>
-			operation(
-				"membersReaching",
-				Effect.flatMap(authorization.project(projectId, "project.read"), ({ project }) =>
-					membersReachingProjectNamed(project.id),
-				),
-			),
-
-		addMember: ({ projectId, memberId }) =>
-			operation(
-				"addMember",
-				Effect.gen(function* () {
-					const { project } = yield* authorization.project(projectId, "project.members.manage");
-					if (!(yield* projects.addMember(project.workspaceId, project.id, memberId))) {
-						return yield* new NotInWorkspace();
-					}
-				}),
-			),
-
-		removeMember: ({ projectId, memberId }) =>
-			operation(
-				"removeMember",
-				Effect.gen(function* () {
-					const { project } = yield* authorization.project(projectId, "project.members.manage");
-					return yield* takeOut(project, memberId);
-				}),
-			),
-
-		leave: ({ projectId }) =>
-			operation(
-				"leave",
-				Effect.gen(function* () {
-					const { project, actor } = yield* authorization.project(projectId, "project.leave");
-					return yield* takeOut(project, actor.memberId);
 				}),
 			),
 
@@ -325,15 +129,6 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		bots: ({ projectId }) =>
-			operation(
-				"bots",
-				Effect.gen(function* () {
-					const { project, actor } = yield* authorization.project(projectId, "project.read");
-					return yield* projectBots(project.id, actor);
-				}),
-			),
-
 		addBot: ({ projectId, botId }) =>
 			operation(
 				"addBot",
@@ -344,80 +139,9 @@ export const make = Effect.gen(function* () {
 					yield* projects.addBot(project.workspaceId, project.id, botId);
 				}),
 			),
-
-		removeBot: ({ projectId, botId }) =>
-			operation(
-				"removeBot",
-				Effect.flatMap(
-					authorization.project(projectId, "project.bots.manage"),
-					({ project, actor }) =>
-						projects.removeBot(project.workspaceId, project.id, botId, actor.memberId),
-				),
-			),
 	});
 });
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, ProjectStore.layer, ProjectComputers.layer]),
-);
-
-/** A project update that names nothing to change. */
-export class EmptyProjectUpdate
-	extends Data.TaggedError("EmptyProjectUpdate")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`Nothing to change`;
-	}
-}
-
-/** Administrators belong to every project members made, so nobody takes one out of it. */
-export class AdministratorInEveryProject
-	extends Data.TaggedError("AdministratorInEveryProject")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`Administrators are in every project`;
-	}
-}
-
-/** A project's name and description, as every caller must give them. */
-const projectDetailsSchema = Schema.Struct({
-	name: newProjectSchema.fields.name,
-	description: newProjectSchema.fields.description,
-});
-
-/** A project's name is empty or too long, or its description too long. */
-export class InvalidProjectDetails
-	extends Data.TaggedError("InvalidProjectDetails")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`A project's name must be 1 to ${PROJECT_NAME_MAX_LENGTH} characters, and its description at most ${PROJECT_DESCRIPTION_MAX_LENGTH}.`;
-	}
-}
-
-/** No address can be derived from the name a project was given. */
-export class UnusableProjectName
-	extends Data.TaggedError("UnusableProjectName")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`That name can't be a project's address. Choose another.`;
-	}
-}
-
-/** Only a member in the project's workspace can be added to it. */
-export class NotInWorkspace extends Data.TaggedError("NotInWorkspace") implements UserFacing {
-	get userMessage() {
-		return userText`That member is not in this workspace`;
-	}
-}
-
-export class NotInProject extends Data.TaggedError("NotInProject") implements UserFacing {
-	get userMessage() {
-		return userText`That member is not in this project`;
-	}
-}
+export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, ProjectStore.layer]));

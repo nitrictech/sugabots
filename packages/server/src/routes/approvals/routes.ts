@@ -1,28 +1,25 @@
-import { Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
-import { Turns } from "@sugabots/core/chats/turns/turns";
+import { Conflict, NotFound } from "@sugabots/contracts/http";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asCurrentUser } from "../../auth/middleware.ts";
+import { operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
+/** Deciding a tool call a turn waits on, as its operation. */
 export const approvalRoutes = HttpApiBuilder.group(ServerApi, "approvals", (handlers) =>
-	Effect.gen(function* () {
-		const turns = yield* Turns.Controls;
-		return handlers.handle("decide", ({ params, payload }) =>
-			turns
-				.decide({
-					toolCallId: params.toolCallId,
-					decision: payload.decision,
-				})
-				.pipe(asCurrentUser, asHttpError(approvalErrors)),
-		);
-	}),
+	Effect.map(operationCaller, (callOperation) =>
+		handlers.handle("decide", ({ params, payload }) =>
+			callOperation("approvals.decide", {
+				toolCallId: params.toolCallId,
+				decision: payload.decision,
+			}).pipe(asHttpError(approvalErrors)),
+		),
+	),
 );
 
+/** What each way deciding can fail means over HTTP. */
 const approvalErrors = {
 	...refusals,
 	ToolApprovalNotFound: NotFound,
 	ToolApprovalConflict: Conflict,
-	ToolApprovalForbidden: Forbidden,
 };

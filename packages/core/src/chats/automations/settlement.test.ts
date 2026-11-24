@@ -24,9 +24,10 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../database/testing.ts";
+import { asMember } from "../../operations/chats/testing.ts";
+import { servedOperations } from "../../operations/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ChatEvents } from "../chat-events.ts";
-import { ChatView } from "../chats/chat-view.ts";
 import { ChatEvent } from "../events.ts";
 import { seedChat } from "../seed.test-support.ts";
 import { chatServicesForTests } from "../testing.ts";
@@ -39,6 +40,7 @@ import {
 	ToolCallStore,
 	type TurnCheckpoint,
 	TurnExecution,
+	type TurnRun,
 	TurnStore,
 	turnLane,
 } from "../turns/testing.ts";
@@ -46,7 +48,14 @@ import type { Turns } from "../turns/turns.ts";
 import { AutomationRunner } from "./automation-runner.ts";
 import { Automations } from "./automations.ts";
 import { AutomationSettlement } from "./settlement.ts";
-import { anAutomationAdmin, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
+import {
+	anAutomationAdmin,
+	finishTurnsIn,
+	manualRunsOver,
+	releaseRun,
+	type StartRun,
+	startRunning,
+} from "./testing.ts";
 
 /**
  * Automation settlement against Postgres, driven by the events that settle a
@@ -60,9 +69,13 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		},
 	};
 	const services = await chatServicesForTests(bus);
+	const call = await servedOperations({ chats: services });
 	const { emit } = Context.get(services, ChatEvents.Service);
+	const manualRunsAs = await manualRunsOver(services);
 	/** As an admin of the automations' workspace. */
 	let automations: Promised<Automations.Interface>;
+	/** Starting runs by hand, as that admin. */
+	let runByHand: StartRun;
 	const { settleRun, failRun } = Context.get(services, AutomationSettlement.Service);
 	const settlement = onPostgres({ settleRun, failRun });
 	const runner = onPostgres(Context.get(services, AutomationRunner.Service));
@@ -73,9 +86,15 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	});
 	/** Emits `events` in a transaction of their own, as a service would. */
 	const announce = (...events: ChatEvent[]) => runOnPostgres(transaction(emit(events)));
-	/** An event ending the turn in `chatId` early, as `outcome`. */
+	/** An event ending the run's own bot's turn in `chatId` early, as `outcome`. */
 	const ended = (chatId: string, outcome: Turns.Ended) =>
-		ChatEvent.TurnAbandoned({ chatId, botId, outcome });
+		ChatEvent.TurnAbandoned({
+			chatId,
+			botId,
+			triggerMessageId: crypto.randomUUID(),
+			reason: "automation",
+			outcome,
+		});
 	const failed = (error: UserText): Turns.Ended => ({ state: "failed", error });
 	const executionOf = async (runId: string) => {
 		const [row] = await onDatabase((db) =>
@@ -98,6 +117,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		delivered = [];
 		({ workspaceId, botId, memberId, ownProjectId, projectId } = await anAutomationAdmin());
 		automations = onPostgresAs(memberId)(Context.get(services, Automations.Service));
+		runByHand = manualRunsAs(memberId);
 	});
 
 	/**
@@ -114,7 +134,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			},
 		);
 		const requestId = crypto.randomUUID();
-		const accepted = await automations.run({
+		const accepted = await runByHand({
 			projectId: inProject,
 			automationId: created.automation.id,
 			requestId,
@@ -127,35 +147,38 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	}
 
 	/**
-	 * A running run of a project's automation whose bot asked another of the
-	 * project's bots for help: its asking turn is done, with the reply that
-	 * mentioned the helper, and the helper's turn on that reply is asked for in
+	 * A running run of a project's automation whose bot asked `count` other
+	 * bots of the project for help: its asking turn is done, with the reply
+	 * that mentioned them, and each helper's turn on that reply is asked for in
 	 * the run's chat, holding its lane, as the run's own turn workflow still
 	 * holds its.
 	 */
-	async function aRunWithHelper() {
+	async function aRunWithHelpers(count: number) {
 		const { accepted, run } = await aRunningRun(projectId);
 		const [triggerMessage] = await onDatabase((db) =>
 			db.select({ id: message.id }).from(message).where(eq(message.chatId, accepted.chatId)),
 		);
 		if (!triggerMessage) throw new Error("Settlement test trigger message is missing");
-		const [helper] = await onDatabase((db) =>
+		const helpers = await onDatabase((db) =>
 			db
 				.insert(bot)
-				.values({
-					workspaceId,
-					name: "Helper Bot",
-					handle: `helper-${crypto.randomUUID()}`,
-					color: "rose",
-					eyes: "dot",
-					model: "test/model",
-					createdById: memberId,
-				})
+				.values(
+					Array.from({ length: count }, (_, index) => ({
+						workspaceId,
+						name: `Helper Bot ${index + 1}`,
+						handle: `helper-${crypto.randomUUID()}`,
+						color: "rose" as const,
+						eyes: "dot" as const,
+						model: "test/model",
+						createdById: memberId,
+					})),
+				)
 				.returning(),
 		);
-		if (!helper) throw new Error("Could not create settlement test helper");
 		await onDatabase((db) =>
-			db.insert(projectBot).values({ workspaceId, projectId, botId: helper.id }),
+			db
+				.insert(projectBot)
+				.values(helpers.map((helper) => ({ workspaceId, projectId, botId: helper.id }))),
 		);
 		const now = new Date();
 		const [askingTurn] = await onDatabase((db) =>
@@ -182,28 +205,59 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 					authorBotId: botId,
 					status: "complete",
 					parts: [],
-					content: `@${helper.handle} Complete the delegated work.`,
+					content: `${helpers.map(({ handle }) => `@${handle}`).join(" ")} Complete the delegated work.`,
 					turnId: askingTurn.id,
 				})
 				.returning(),
 		);
 		if (!askingMessage) throw new Error("Could not create settlement test asking message");
 		const [runningTurn] = await runOnPostgres(runningTurns(accepted.chatId));
-		await runOnPostgres(
-			queueTurnForTests({
-				chatId: accepted.chatId,
-				botId: helper.id,
-				triggerMessageId: askingMessage.id,
-				reason: "collaboration",
-			}),
+		for (const helper of helpers) {
+			await runOnPostgres(
+				queueTurnForTests({
+					chatId: accepted.chatId,
+					botId: helper.id,
+					triggerMessageId: askingMessage.id,
+					reason: "collaboration",
+				}),
+			);
+		}
+		const running = await runOnPostgres(runningTurns(accepted.chatId));
+		const helperTurns = helpers.map((helper) =>
+			running.find(({ request }) => request.botId === helper.id),
 		);
-		const helperTurn = (await runOnPostgres(runningTurns(accepted.chatId))).find(
-			({ request }) => request.botId === helper.id,
-		);
-		if (!runningTurn || !helperTurn) {
+		if (!runningTurn || helperTurns.some((helperTurn) => !helperTurn)) {
 			throw new Error("Could not create settlement test active work");
 		}
-		return { accepted, run, askingTurn, askingMessage, helper, runningTurn, helperTurn };
+		return {
+			accepted,
+			run,
+			askingTurn,
+			askingMessage,
+			helpers,
+			runningTurn,
+			helperTurns: helperTurns.filter((helperTurn) => helperTurn !== undefined),
+		};
+	}
+
+	/** `aRunWithHelpers` with one helper. */
+	async function aRunWithHelper() {
+		const fixture = await aRunWithHelpers(1);
+		const [helper] = fixture.helpers;
+		const [helperTurn] = fixture.helperTurns;
+		if (!helper || !helperTurn) throw new Error("Could not create settlement test helper");
+		return { ...fixture, helper, helperTurn };
+	}
+
+	/** The helper's or hand-back's running turn `run` replies `content` and ends, with its lane still held. */
+	async function replyIn(run: TurnRun, content: string) {
+		const prepared = await prepareRunnable(execution, run);
+		await turns.complete(
+			replyTurnOf(prepared),
+			{ content, toolCalls: [] },
+			{ contextCapacity: 128_000, readKeptFrom: null },
+		);
+		return prepared;
 	}
 
 	/**
@@ -348,7 +402,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		for (let run = 0; run < 2; run++) {
 			const requestId = crypto.randomUUID();
 			accepted.push(
-				await automations.run({
+				await runByHand({
 					projectId: ownProjectId,
 					automationId: created.automation.id,
 					requestId,
@@ -379,7 +433,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			},
 		);
 		const requestId = crypto.randomUUID();
-		const accepted = await automations.run({
+		const accepted = await runByHand({
 			projectId: ownProjectId,
 			automationId: created.automation.id,
 			requestId,
@@ -472,6 +526,67 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			state: "running",
 			finishedAt: null,
 		});
+	});
+
+	it("asks for the hand-back as the last helper's turn ends, so the run doesn't settle while their lanes are freed", async () => {
+		const fixture = await aRunWithHelpers(2);
+		await runOnPostgres(releaseTurn(fixture.runningTurn));
+		for (const helperTurn of fixture.helperTurns) await replyIn(helperTurn, "Done my part.");
+
+		for (const helperTurn of fixture.helperTurns) {
+			await runOnPostgres(releaseTurn(helperTurn));
+			expect(await settlement.settleRun(fixture.run)).toBe(false);
+		}
+
+		expect(
+			(await runOnPostgres(runningTurns(fixture.accepted.chatId))).map(({ request }) => request),
+		).toEqual([
+			{
+				chatId: fixture.accepted.chatId,
+				botId,
+				triggerMessageId: fixture.askingMessage.id,
+				reason: "hand_back",
+			},
+		]);
+	});
+
+	it("keeps a run going when a helper's turn fails, and ends it as its own bot's hand-back does, which is told of the failure", async () => {
+		const fixture = await aRunWithHelpers(2);
+		await runOnPostgres(releaseTurn(fixture.runningTurn));
+		const [failing, answering] = fixture.helperTurns;
+		if (!failing || !answering) throw new Error("fixture");
+
+		const failed = await prepareRunnable(execution, failing);
+		await turns.fail(
+			replyTurnOf(failed),
+			{ content: "", toolCalls: [] },
+			{ userMessage: userText`Model failed`, mayRunAgain: false },
+		);
+		await runOnPostgres(releaseTurn(failing));
+		expect(await executionOf(fixture.accepted.runId)).toMatchObject({
+			state: "running",
+			pendingTerminalState: null,
+		});
+		await replyIn(answering, "Done my part.");
+		await runOnPostgres(releaseTurn(answering));
+
+		const [handBack] = await runOnPostgres(runningTurns(fixture.accepted.chatId));
+		if (!handBack) throw new Error("No hand-back was asked for");
+		const prepared = await prepareRunnable(execution, handBack);
+		expect(prepared.context.helpersWithoutReply).toEqual([
+			{
+				name: "Helper Bot 1",
+				handle: fixture.helpers[0]?.handle,
+				ended: { state: "failed", error: userText`Model failed` },
+			},
+		]);
+		await runOnPostgres(releaseTurn(handBack));
+		await turns.complete(
+			replyTurnOf(prepared),
+			{ content: "All done, bar one part.", toolCalls: [] },
+			{ contextCapacity: 128_000, readKeptFrom: null },
+		);
+		expect(await executionOf(fixture.accepted.runId)).toMatchObject({ state: "completed" });
 	});
 
 	it("settles a run once its helper's lane is free, when the helper took no turn", async () => {
@@ -692,9 +807,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const inFeed = posted.find((row) => row.chatKind === "automation_feed");
 		const chatId = inFeed?.rootChatId;
 		if (!chatId) throw new Error("The result was posted outside a chat");
-		const page = await onPostgresAs(memberId)(Context.get(services, ChatView.Service)).messages(
-			chatId,
-		);
+		const page = await asMember(call, memberId).messages(chatId);
 		expect(page.items).toContainEqual({
 			kind: "message",
 			message: expect.objectContaining({
@@ -809,7 +922,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		);
 		const automationId = created.automation.id;
 		const failOnce = async () => {
-			const accepted = await automations.run({
+			const accepted = await runByHand({
 				projectId: ownProjectId,
 				automationId,
 				requestId: crypto.randomUUID(),
@@ -839,7 +952,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		await failOnce();
 		expect(await standing()).toEqual({ state: "paused", pausedAfterFailuresAt: expect.any(Date) });
 
-		await automations.run({
+		await runByHand({
 			projectId: ownProjectId,
 			automationId,
 			requestId: crypto.randomUUID(),

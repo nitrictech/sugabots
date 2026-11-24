@@ -1,3 +1,4 @@
+import type { InputOf, OperationName } from "@sugabots/contracts/operations";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { member, membership, workspace } from "../../../database/schema.ts";
@@ -8,10 +9,10 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../../database/testing.ts";
-import { servedOnPostgresAs } from "../../../workspaces/testing.ts";
+import { servedOperations } from "../../../operations/testing.ts";
+import { authenticators, principals } from "../../../proofs/world.test-support.ts";
 import { Egress, type EgressHttpClients } from "../../network/egress.ts";
 import { providerIn, providersIn } from "../model-provider-reads.ts";
-import { ModelProviderSetup } from "../model-provider-setup.ts";
 import { ModelProviderStore } from "../model-provider-store.ts";
 import { withSignInAccess } from "./sign-in.ts";
 
@@ -25,24 +26,28 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 	let memberId: string;
 	let providerId: string;
 	let service: { clients: EgressHttpClients };
+	let signInAs: ReturnType<typeof principals>["member"];
 
-	/** The setup as the workspace's administrator. */
-	const setup = async () =>
-		(
-			await servedOnPostgresAs(
-				ModelProviderSetup.Service,
-				ModelProviderSetup.layer.pipe(
-					Layer.provide([
-						Layer.succeed(Egress.Service, {
-							providers: service.clients,
-							validateProviderUrl: () => Effect.void,
-							oauth: async () => new Response(null, { status: 503 }),
-							webFetch: async () => new Response(null, { status: 503 }),
-						}),
-					]),
-				),
-			)
-		)(memberId);
+	/** The sign-in operations, called for the workspace's administrator signed in. */
+	const setup = async () => {
+		const call = await servedOperations({
+			egress: Layer.succeed(Egress.Service, {
+				providers: service.clients,
+				validateProviderUrl: () => Effect.void,
+				oauth: async () => new Response(null, { status: 503 }),
+				webFetch: async () => new Response(null, { status: 503 }),
+			}),
+		});
+		const principal = await signInAs(memberId);
+		const operation =
+			<Name extends OperationName>(name: Name) =>
+			(input: InputOf<Name>) =>
+				call(principal, name, input);
+		return {
+			startSignIn: operation("modelProviders.startSignIn"),
+			completeSignIn: operation("modelProviders.completeSignIn"),
+		};
+	};
 
 	const view = () => runOnPostgres(providerIn(workspaceId, providerId));
 
@@ -63,6 +68,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 
 	beforeAll(async () => {
 		store = await servedOnPostgres(ModelProviderStore.Service, ModelProviderStore.layer);
+		signInAs = principals(await authenticators()).member;
 	});
 
 	afterAll(async () => {
@@ -132,7 +138,12 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 
 			expect(outcome).toMatchObject({
 				status: "signed_in",
-				provider: { signedIn: true, active: true, status: "connected" },
+				provider: {
+					signedIn: true,
+					signedInAs: { id: memberId },
+					active: true,
+					status: "connected",
+				},
 			});
 			if (outcome.status !== "signed_in") throw new Error("unreachable");
 			expect(outcome.provider.models.map(({ modelId }) => modelId)).toEqual(["gpt-5.5"]);
@@ -247,7 +258,12 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 
 			expect(outcome).toMatchObject({
 				status: "signed_in",
-				provider: { signedIn: true, active: true, status: "connected" },
+				provider: {
+					signedIn: true,
+					signedInAs: { id: memberId },
+					active: true,
+					status: "connected",
+				},
 			});
 			if (outcome.status !== "signed_in") throw new Error("unreachable");
 			expect(outcome.provider.models.map(({ modelId }) => modelId)).toEqual(["grok-4.3"]);

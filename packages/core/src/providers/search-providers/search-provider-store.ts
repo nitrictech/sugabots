@@ -2,13 +2,13 @@ export * as SearchProviderStore from "./search-provider-store.ts";
 
 import type { NewSearchProvider, SearchProviderUpdate } from "@sugabots/contracts";
 import { DEFAULT_SEARCH_BUILT_IN, searchBuiltInProvider } from "@sugabots/contracts";
-import { type UserText, userText } from "@sugabots/errors";
+import { SearchProviderApiKeyRequired } from "@sugabots/contracts/errors/providers";
+import type { UserText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
-import { Context, Data, DateTime, Effect, Layer } from "effect";
+import { Context, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { type SearchProviderRow, searchProvider } from "../../database/schema.ts";
 import { Secrets } from "../../secrets/secrets.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import type { SearchProviderAccess } from "./search-provider-access.ts";
 import { searchProviderRowOf } from "./search-provider-reads.ts";
@@ -227,13 +227,3 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Service, make);
-
-/** Search was to be switched on for a built-in provider that needs a key, without one. */
-export class SearchProviderApiKeyRequired
-	extends Data.TaggedError("SearchProviderApiKeyRequired")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`Add an API key before enabling search`;
-	}
-}

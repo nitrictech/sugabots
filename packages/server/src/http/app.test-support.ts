@@ -1,36 +1,18 @@
 import type { CurrentUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
-import { Usage } from "@sugabots/core/accounting/usage";
-import { Accounts } from "@sugabots/core/accounts/accounts";
+import { SessionAuthentication } from "@sugabots/core/authentication/session";
+import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import { Automations } from "@sugabots/core/chats/automations/automations";
-import { ChatDetailsView } from "@sugabots/core/chats/chat-details-view";
-import { ChatFiles } from "@sugabots/core/chats/chats/chat-files";
-import { ChatView } from "@sugabots/core/chats/chats/chat-view";
-import { Chats } from "@sugabots/core/chats/chats/chats";
-import { Reactions } from "@sugabots/core/chats/reactions/reactions";
 import { DesktopViewer } from "@sugabots/core/chats/tools/browser/viewer";
-import { Turns } from "@sugabots/core/chats/turns/turns";
-import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
-import { ComputerProviderSetup } from "@sugabots/core/computers/computer-provider-setup";
-import { ProjectComputerSetup } from "@sugabots/core/computers/project-computer-setup";
+import type { Database } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
-import { Files } from "@sugabots/core/files/files";
 import { FilePages } from "@sugabots/core/files/pages";
-import { Notifications } from "@sugabots/core/notifications/notifications";
-import { ConnectorSetup } from "@sugabots/core/providers/connectors/connector-setup";
-import { GitHubApps } from "@sugabots/core/providers/connectors/github/github-app";
-import { GitHubConnectors } from "@sugabots/core/providers/connectors/github/github-connectors";
-import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
-import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
+import { Ids } from "@sugabots/core/ids/ids";
+import { Operations } from "@sugabots/core/operations/registry";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
-import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
-import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { ProjectAdministration } from "@sugabots/core/workspaces/projects/project-administration";
-import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
-import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/workspace-setup";
 import { Effect, Layer } from "effect";
 import { Cookies, HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "../auth/authentication.ts";
@@ -77,6 +59,9 @@ export interface TestApp {
 type TestServices =
 	| HttpServices
 	| Authentication.Service
+	| SessionAuthentication.Service
+	| WebhookAuthentication.Service
+	| Ids.Service
 	| ServerSettings.Service
 	| EventBus.Service;
 
@@ -115,6 +100,7 @@ export function identifiedBy(resolveMember: MemberResolver): Layer.Layer<Authent
 	return Layer.succeed(Authentication.Service, {
 		handler: () => Effect.succeed(new Response(null, { status: 404 })),
 		identify: identifyFromResolver(resolveMember),
+		member: () => Effect.succeed(undefined),
 	});
 }
 
@@ -129,40 +115,21 @@ export function serverSettingsWithWebAppAt(webAppUrl: string): Layer.Layer<Serve
 /**
  * Services whose every method dies naming itself, nobody signed in, no
  * event stream open to listen on, and a bus in memory, so a case supplies exactly
- * what it is about.
+ * what it is about. Sessions are authenticated by core's own authenticator,
+ * from what `identifiedBy`'s resolver says the cookie holds.
  */
-const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
-	unimplemented(Accounts.Service),
-	// `/me` answers with these beside the current user; a case about them supplies its own.
-	unimplemented(Membership.Service, { workspaces: Effect.succeed([]) }),
-	unimplemented(ProjectAdministration.Service),
-	unimplemented(WorkspaceTimeZone.Service),
-	unimplemented(Files.Service),
+const fakes: Layer.Layer<TestServices, never, Database> = Layer.mergeAll(
+	// `/me` answers with the workspaces beside the current user; a case about them supplies its own.
+	unimplemented(Operations.Service, { "workspaces.list": () => Effect.succeed([]) }),
 	unimplemented(FilePages.Service),
-	unimplemented(BotAdministration.Service),
-	unimplemented(WorkspaceSetup.Service),
-	unimplemented(ModelProviderSetup.Service),
-	unimplemented(SearchProviderSetup.Service),
-	unimplemented(ComputerProviderSetup.Service),
-	unimplemented(ComputerNetwork.Service),
 	unimplemented(DesktopViewer.Service),
-	unimplemented(ProjectComputerSetup.Service),
-	unimplemented(GitHubApps.Service),
-	unimplemented(GitHubConnectors.Service),
-	unimplemented(ConnectorSetup.Service),
-	unimplemented(Usage.Service),
-	unimplemented(Notifications.Service),
-	unimplemented(Chats.Service),
-	unimplemented(ChatFiles.Service),
-	unimplemented(ChatView.Service),
-	unimplemented(Reactions.Service),
-	unimplemented(ChatDetailsView.Service),
-	unimplemented(Turns.Controls),
-	unimplemented(Automations.Service),
-	unimplemented(Automations.Webhooks),
 	unimplemented(Automations.ConnectorEvents),
 	Layer.succeed(StreamAccess.Service, closedStreamAccess),
 	identifiedBy(async () => null),
+	SessionAuthentication.layer,
+	// A webhook route's case supplies who its calls authenticate as.
+	unimplemented(WebhookAuthentication.Service),
+	Ids.layer,
 	serverSettingsWithWebAppAt(WEB_ORIGIN),
 	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: EventStore.inMemory() })),
 );
@@ -175,6 +142,9 @@ function identifyFromResolver(resolveMember: MemberResolver) {
 	return (headers: Headers) =>
 		Effect.map(
 			Effect.promise(() => resolveMember(headers)),
-			(member) => (member ? { member, refreshedCookies: Cookies.empty } : undefined),
+			(member) =>
+				member
+					? { member, session: `session-of-${member.id}`, refreshedCookies: Cookies.empty }
+					: undefined,
 		);
 }

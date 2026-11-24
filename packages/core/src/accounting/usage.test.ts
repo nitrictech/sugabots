@@ -1,6 +1,7 @@
+import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
+import type { InputOf } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { ActionForbidden } from "../authorization/access.ts";
 import {
 	bot,
 	member,
@@ -9,9 +10,10 @@ import {
 	modelRequest,
 	workspace,
 } from "../database/schema.ts";
-import { closeDatabase, onDatabase, type Promised } from "../database/testing.ts";
-import { servedOnPostgresAs } from "../workspaces/testing.ts";
-import { Usage } from "./usage.ts";
+import { closeDatabase, onDatabase } from "../database/testing.ts";
+import { type CallOperation, servedOperations } from "../operations/testing.ts";
+import type { MemberSession } from "../principal.ts";
+import { authenticators, principals } from "../proofs/world.test-support.ts";
 
 /**
  * A month's usage, read from the request ledger in Postgres: how requests are
@@ -20,7 +22,8 @@ import { Usage } from "./usage.ts";
  * without one; CI always has one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
-	let usageAs: (memberId: string) => Promised<Usage.Interface>;
+	let callOperation: CallOperation;
+	let signIn: (memberId: string) => Promise<MemberSession>;
 	let workspaceId: string;
 	let adminId: string;
 	let editorId: string;
@@ -29,9 +32,17 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 	let providerId: string;
 
 	beforeAll(async () => {
-		usageAs = await servedOnPostgresAs(Usage.Service, Usage.layer);
+		callOperation = await servedOperations();
+		const signedIn = principals(await authenticators());
+		signIn = (memberId) => signedIn.member(memberId);
 	});
 	afterAll(closeDatabase);
+
+	/** `usage.month` called for `memberId` signed in. */
+	const usageAs = (memberId: string) => ({
+		month: async (input: InputOf<"usage.month">) =>
+			callOperation(await signIn(memberId), "usage.month", input),
+	});
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

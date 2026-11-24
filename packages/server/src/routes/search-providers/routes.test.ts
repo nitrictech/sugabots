@@ -1,13 +1,16 @@
 import type { SearchProvider } from "@sugabots/contracts";
-import { ActionForbidden } from "@sugabots/core/authorization/access";
-import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { EgressRefused } from "@sugabots/core/providers/network/egress";
-import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
-import { SearchProviderStore } from "@sugabots/core/providers/search-providers/search-provider-store";
-import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
+import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
+import {
+	SearchProviderApiKeyRequired,
+	SearchProviderNotFound,
+	UrlNotAllowed,
+} from "@sugabots/contracts/errors/providers";
+import { Operations } from "@sugabots/core/operations/registry";
+import type { Principal } from "@sugabots/core/principal";
 import { unimplemented } from "@sugabots/core/testing";
+import { userText } from "@sugabots/errors";
 import { Effect, Layer } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { MemberResolver } from "../../http/app.test-support.ts";
 import {
 	createTestApp,
@@ -17,9 +20,11 @@ import {
 } from "../../http/app.test-support.ts";
 
 /**
- * The search provider routes over doubles of `SearchProviderSetup`: what each
- * request asks of it and what each refusal means over HTTP. The setup's own
- * rules run against Postgres in `search-providers/search-provider-setup.test.ts`.
+ * The search provider routes over doubles of the search providers operations:
+ * which principal each operation is called for, with what, and what each
+ * refusal means over HTTP. Who may do what is decided, and tested, in core;
+ * the provider's own rules run against Postgres in
+ * `search-providers/search-providers.test.ts`.
  */
 
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
@@ -45,48 +50,53 @@ const brave: SearchProvider = {
 	createdAt: "2026-09-14T00:00:00.000Z",
 };
 
-const app = (search: Partial<SearchProviderSetup.Interface>) =>
+/** The app with `operations` as the only operations it has. */
+const app = (operations: Partial<Operations.Interface>) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolveMember), unimplemented(SearchProviderSetup.Service, search)),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(Operations.Service, operations)),
 	);
+
+/** The member a principal is signed in as, as the session authenticator built it. */
+const memberOf = (principal: Principal) =>
+	principal._tag === "MemberSession" ? principal.member : undefined;
 
 describe("a workspace's search provider", () => {
 	it("answers null when the workspace has none", async () => {
-		const response = await app({ get: () => Effect.undefined }).request(root, { headers });
+		const response = await app({
+			"searchProviders.get": () => Effect.succeed({ provider: null }),
+		}).request(root, { headers });
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ provider: null });
 	});
 
 	it("sets a built-in provider as the member asking", async () => {
-		let askedAs: string | undefined;
-		const replace = vi.fn<SearchProviderSetup.Interface["replace"]>(() =>
-			Effect.map(CurrentActor.Service, ({ memberId }) => {
-				askedAs = memberId;
-				return brave;
-			}),
-		);
-
-		const response = await app({ replace }).request(root, {
+		let asked: unknown;
+		const response = await app({
+			"searchProviders.replace": (principal, input) =>
+				Effect.sync(() => {
+					asked = { ...input, memberId: memberOf(principal) };
+					return brave;
+				}),
+		}).request(root, {
 			method: "PUT",
 			headers,
 			body: JSON.stringify({ builtIn: "brave", apiKey: "brave-key" }),
 		});
 
 		expect(response.status).toBe(201);
-		expect(replace).toHaveBeenCalledWith({
+		expect(asked).toEqual({
 			workspace: WORKSPACE_ID,
-			provider: { builtIn: "brave", apiKey: "brave-key" },
+			builtIn: "brave",
+			apiKey: "brave-key",
+			memberId: USER_ID,
 		});
-		expect(askedAs).toBe(USER_ID);
 	});
 
 	it("reports an address the network policy refuses as a bad request", async () => {
 		const response = await app({
-			replace: () =>
-				Effect.fail(
-					new UrlNotAllowed({ refusal: new EgressRefused({ reason: "privateNetwork" }) }),
-				),
+			"searchProviders.replace": () =>
+				Effect.fail(new UrlNotAllowed({ refusal: userText`That address is on a local network.` })),
 		}).request(root, { method: "PUT", headers, body: JSON.stringify({ builtIn: "searxng" }) });
 
 		expect(response.status).toBe(400);
@@ -94,19 +104,22 @@ describe("a workspace's search provider", () => {
 
 	it("reports switching search on without a key as a bad request", async () => {
 		const response = await app({
-			update: () => Effect.fail(new SearchProviderStore.SearchProviderApiKeyRequired()),
+			"searchProviders.update": () => Effect.fail(new SearchProviderApiKeyRequired()),
 		}).request(root, { method: "PATCH", headers, body: JSON.stringify({ enabled: true }) });
 
 		expect(response.status).toBe(400);
+		const refusal = "Add an API key before enabling search";
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message: "Add an API key before enabling search",
+			message: refusal,
+			error: { _tag: "SearchProviderApiKeyRequired", userMessage: refusal, isRetryable: false },
 		});
 	});
 
 	it("answers a change the caller may not make as forbidden", async () => {
 		const response = await app({
-			remove: () => Effect.fail(new ActionForbidden({ permission: "workspace.providers.manage" })),
+			"searchProviders.remove": () =>
+				Effect.fail(new ActionForbidden({ proof: "CanManageWorkspace" })),
 		}).request(root, { method: "DELETE", headers });
 
 		expect(response.status).toBe(403);
@@ -114,7 +127,7 @@ describe("a workspace's search provider", () => {
 
 	it("says when there was no provider to remove", async () => {
 		const response = await app({
-			remove: () => Effect.fail(new SearchProviderSetup.SearchProviderNotFound()),
+			"searchProviders.remove": () => Effect.fail(new SearchProviderNotFound()),
 		}).request(root, { method: "DELETE", headers });
 
 		expect(response.status).toBe(404);

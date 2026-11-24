@@ -1,10 +1,11 @@
 import type { ChatDetails } from "@sugabots/contracts";
 import { chatContextSchema, chatDetailsSchema } from "@sugabots/contracts";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import type { InputOf } from "@sugabots/contracts/operations";
 import { testMember } from "@sugabots/contracts/testing";
-import { ResourceHidden } from "@sugabots/core/authorization/access";
-import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { ChatDetailsView } from "@sugabots/core/chats/chat-details-view";
-import { Reactions } from "@sugabots/core/chats/reactions/reactions";
+import { Operations } from "@sugabots/core/operations/registry";
+import type { Principal } from "@sugabots/core/principal";
+import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { MemberResolver } from "../../http/app.test-support.ts";
@@ -80,45 +81,39 @@ const details: ChatDetails = {
 };
 
 /**
- * Answers as the view would for Sam, who can see `CHAT`, and hides
- * everything from anybody else, so a case can tell who it was asked as.
+ * Answers as the operation would for Sam, who can see `CHAT`, and hides
+ * everything from anybody else, so a case can tell who it was called for.
  */
-const seenBy = <A>(chatId: string, seen: A) =>
-	Effect.flatMap(CurrentActor.Service, ({ memberId }) =>
-		chatId === CHAT && memberId === USER
-			? Effect.succeed(seen)
-			: Effect.fail(new ResourceHidden({ resource: "chat" })),
-	);
+const seenBy = <A>(principal: Principal, chatId: string, seen: A) =>
+	chatId === CHAT && principal._tag === "MemberSession" && principal.member === USER
+		? Effect.succeed(seen)
+		: Effect.fail(new ResourceHidden({ resource: "chat" }));
 
-let view: ChatDetailsView.Interface;
 let reacted: Array<{ change: "add" | "remove"; messageId: string; emoji: string }>;
-let requestedHistory: Parameters<ChatDetailsView.Interface["get"]>[1] | undefined;
+let requestedHistory: Omit<InputOf<"chats.get">, "chatId"> | undefined;
 
 beforeEach(() => {
 	reacted = [];
 	requestedHistory = undefined;
-	view = {
-		get: (chatId, history) => {
-			requestedHistory = history;
-			return seenBy(chatId, details);
-		},
-		context: (chatId) => seenBy(chatId, null),
-	};
 });
 
 const app = () =>
 	createTestApp(
 		Layer.mergeAll(
 			identifiedBy(resolveMember),
-			Layer.succeed(ChatDetailsView.Service, view),
-			Layer.succeed(Reactions.Service, {
-				add: (messageId, emoji) => {
+			unimplemented(Operations.Service, {
+				"chats.get": (principal, { chatId, ...history }) => {
+					requestedHistory = history;
+					return seenBy(principal, chatId, details);
+				},
+				"chats.context": (principal, { chatId }) => seenBy(principal, chatId, null),
+				"chats.react": (_principal, { messageId, emoji }) => {
 					reacted.push({ change: "add", messageId, emoji });
 					return Effect.succeed([
 						{ emoji, members: [{ id: USER, name: "Sam", at: chat.createdAt }] },
 					]);
 				},
-				remove: (messageId, emoji) => {
+				"chats.unreact": (_principal, { messageId, emoji }) => {
 					reacted.push({ change: "remove", messageId, emoji });
 					return Effect.succeed([]);
 				},

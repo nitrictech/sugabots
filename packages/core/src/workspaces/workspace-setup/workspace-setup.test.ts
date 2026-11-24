@@ -1,7 +1,7 @@
+import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
+import { NoModelChosen, NotReadyToFinish } from "@sugabots/contracts/errors/workspace";
 import { eq } from "drizzle-orm";
-import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { ActionForbidden } from "../../authorization/access.ts";
 import {
 	bot,
 	member,
@@ -11,12 +11,14 @@ import {
 	workspace,
 	workspaceDefaultModel,
 } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
-import { onPostgresAs } from "../testing.ts";
-import { WorkspaceSetup } from "./workspace-setup.ts";
+import { closeDatabase, onDatabase } from "../../database/testing.ts";
+import { type CallOperation, servedOperations } from "../../operations/testing.ts";
+import type { MemberSession } from "../../principal.ts";
+import { authenticators, principals } from "../../proofs/world.test-support.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", () => {
-	let workspaceSetup: WorkspaceSetup.Interface;
+	let callOperation: CallOperation;
+	let signIn: (memberId: string) => Promise<MemberSession>;
 	let workspaceId: string;
 	let adminId: string;
 	let editorId: string;
@@ -24,21 +26,18 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 	let systemBotId: string;
 
 	beforeAll(async () => {
-		workspaceSetup = await runOnPostgres(
-			Effect.provide(WorkspaceSetup.Service, WorkspaceSetup.layer),
-		);
+		callOperation = await servedOperations();
+		const signedIn = principals(await authenticators());
+		signIn = (memberId) => signedIn.member(memberId);
 	});
 
 	afterAll(async () => {
 		await closeDatabase();
 	});
 
-	const as = (memberId: string) =>
-		onPostgresAs(memberId)({
-			complete: workspaceSetup.complete,
-		});
-	const complete = (memberId: string, botId: string) =>
-		as(memberId).complete({ workspaceId, botId });
+	/** `workspaceSetup.complete` called for `memberId` signed in. */
+	const complete = async (memberId: string, botId: string) =>
+		callOperation(await signIn(memberId), "workspaceSetup.complete", { workspaceId, botId });
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -131,14 +130,10 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 		await onDatabase((db) =>
 			db.update(bot).set({ model: "not-switched-on" }).where(eq(bot.id, customBotId)),
 		);
-		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(
-			WorkspaceSetup.NoModelChosen,
-		);
+		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(NoModelChosen);
 
 		await onDatabase((db) => db.update(bot).set({ model: null }).where(eq(bot.id, customBotId)));
-		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(
-			WorkspaceSetup.NoModelChosen,
-		);
+		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(NoModelChosen);
 	});
 
 	it("makes the first bot's model the workspace's default and Compaction's", async () => {
@@ -162,9 +157,7 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 			onDatabase((db) =>
 				db.select({ at: workspace.setUpAt }).from(workspace).where(eq(workspace.id, workspaceId)),
 			).then(([row]) => row?.at);
-		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(
-			WorkspaceSetup.NotReadyToFinish,
-		);
+		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(NotReadyToFinish);
 		expect(await setUpAt()).toBeNull();
 
 		await complete(adminId, customBotId);
@@ -176,9 +169,7 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 	});
 
 	it("does not accept a system bot or an editor who may not choose the workspace's models", async () => {
-		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(
-			WorkspaceSetup.NotReadyToFinish,
-		);
+		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(NotReadyToFinish);
 		await expect(complete(editorId, customBotId)).rejects.toBeInstanceOf(ActionForbidden);
 	});
 
@@ -187,8 +178,6 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 			db.update(bot).set({ createdById: editorId }).where(eq(bot.id, customBotId)),
 		);
 
-		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(
-			WorkspaceSetup.NotReadyToFinish,
-		);
+		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(NotReadyToFinish);
 	});
 });

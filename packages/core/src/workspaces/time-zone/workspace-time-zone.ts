@@ -1,20 +1,17 @@
 export * as WorkspaceTimeZone from "./workspace-time-zone.ts";
 
 import type { TimeZone, WorkspaceTimeZone as WorkspaceTimeZoneView } from "@sugabots/contracts";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { TimeZoneUnknown } from "@sugabots/contracts/errors/workspace";
 import { and, countDistinct, eq, isNull, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
-import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
-import { Authorization } from "../../authorization/authorization.ts";
-import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { nextOccurrence } from "../../chats/automations/schedule.ts";
 import { AutomationStore } from "../../chats/automations/store.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { automation, automationTrigger, workspace } from "../../database/schema.ts";
-import {
-	type InWorkspace,
-	requireTimeZoneKnownToPostgres,
-	TimeZoneUnknown,
-} from "../membership/membership.ts";
+import type { CanManageWorkspace } from "../../proofs/workspace-permissions.ts";
+import { processLayer, Tier } from "../../tiers.ts";
+import { requireTimeZoneKnownToPostgres } from "../membership/membership.ts";
 
 /**
  * Where a workspace's days begin. Its automations' routines in its zone are
@@ -22,23 +19,25 @@ import {
  * zone was chosen for that zone, and stays.
  */
 export interface Interface {
-	/** Takes the current actor's `workspace.update`, as changing it does. */
-	readonly get: (
-		input: InWorkspace,
-	) => Effect.Effect<WorkspaceTimeZoneView, AuthorizationDenied, CurrentActor.Service>;
+	/** Read by whoever may manage the workspace, as they change it. */
+	readonly get: <P, W>(
+		canManage: CanManageWorkspace<P, W>,
+	) => Effect.Effect<WorkspaceTimeZoneView, ResourceHidden>;
 	/** Moves the workspace, and its automations' routines in its old zone, to `timeZone`. */
-	readonly change: (
-		input: InWorkspace & { timeZone: TimeZone },
-	) => Effect.Effect<void, AuthorizationDenied | TimeZoneUnknown, CurrentActor.Service>;
+	readonly change: <P, W>(
+		canManage: CanManageWorkspace<P, W>,
+		timeZone: TimeZone,
+	) => Effect.Effect<void, ResourceHidden | TimeZoneUnknown>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/WorkspaceTimeZone",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("WorkspaceTimeZone");
-	const authorization = yield* Authorization.Service;
 	const automations = yield* AutomationStore.Service;
 
 	/** Rewrites each routine in `from` to run in `to`, from now. */
@@ -82,14 +81,11 @@ export const make = Effect.gen(function* () {
 		);
 
 	return Service.of({
-		get: (input) =>
+		get: (canManage) =>
 			operation(
 				"get",
 				Effect.gen(function* () {
-					const { workspaceId } = yield* authorization.workspace(
-						input.workspace,
-						"workspace.update",
-					);
+					const workspaceId = canManage.inWorkspace.workspace.value;
 					const [current] = yield* query((db) =>
 						db
 							.select({ timeZone: workspace.timeZone })
@@ -111,15 +107,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		change: (input) =>
+		change: (canManage, timeZone) =>
 			operation(
 				"change",
 				Effect.gen(function* () {
-					const { workspaceId } = yield* authorization.workspace(
-						input.workspace,
-						"workspace.update",
-					);
-					yield* requireTimeZoneKnownToPostgres(input.timeZone);
+					const workspaceId = canManage.inWorkspace.workspace.value;
+					yield* requireTimeZoneKnownToPostgres(timeZone);
 					yield* transaction(
 						Effect.gen(function* () {
 							// Locked, so a change made meanwhile moves the routines this one leaves.
@@ -131,13 +124,10 @@ export const make = Effect.gen(function* () {
 									.for("update"),
 							);
 							if (!current) return yield* new ResourceHidden({ resource: "workspace" });
-							if (current.timeZone === input.timeZone) return;
-							yield* moveRoutines(workspaceId, current.timeZone, input.timeZone);
+							if (current.timeZone === timeZone) return;
+							yield* moveRoutines(workspaceId, current.timeZone, timeZone);
 							yield* query((db) =>
-								db
-									.update(workspace)
-									.set({ timeZone: input.timeZone })
-									.where(eq(workspace.id, workspaceId)),
+								db.update(workspace).set({ timeZone }).where(eq(workspace.id, workspaceId)),
 							);
 						}),
 					);
@@ -146,9 +136,9 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, AutomationStore.layer]));
+export const layer = layerNoDeps.pipe(Layer.provide(AutomationStore.layer));
 
 /** Routines in `timeZone` of the automations still defined. */
 function inZone(timeZone: string) {

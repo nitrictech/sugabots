@@ -12,13 +12,6 @@ import {
 } from "@sugabots/contracts";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
-import {
-	botStandingFor,
-	projectStandingFor,
-	type ResourceHidden,
-	requireReach,
-} from "../authorization/access.ts";
-import { CurrentActor } from "../authorization/current-actor.ts";
 import type { ChatEvent } from "../chats/events.ts";
 import {
 	afterCommit,
@@ -30,6 +23,10 @@ import {
 import { EventBus } from "../database/events/bus.ts";
 import type { DomainEvents } from "../database/events/domain-events.ts";
 import { notificationOverride, notificationSettings } from "../database/schema.ts";
+import type { IsMember } from "../proofs/is-member.ts";
+import type { ReachesBot } from "../proofs/reaches-bot.ts";
+import type { ReachesProject } from "../proofs/reaches-project.ts";
+import { processLayer, Tier } from "../tiers.ts";
 import {
 	type Addressed,
 	DEFAULT_AUTOMATION_RUNS,
@@ -48,36 +45,46 @@ import {
  * show. With no tab open, nothing reaches them. Their tabs also say there
  * which chat each is showing, so none notifies them of what they are
  * reading.
+ *
+ * What a member chooses is theirs alone: each method on it takes the proof
+ * that a member is signed in, and acts for that member.
  */
 export interface Interface {
-	readonly settings: Effect.Effect<NotificationSettings, never, CurrentActor.Service>;
-	readonly updatePreferences: (
+	readonly settings: <P>(isMember: IsMember<P>) => Effect.Effect<NotificationSettings>;
+	readonly updatePreferences: <P>(
+		isMember: IsMember<P>,
 		preferences: NotificationPreferences,
-	) => Effect.Effect<NotificationSettings, never, CurrentActor.Service>;
+	) => Effect.Effect<NotificationSettings>;
+	/** Sets the member's level for a project or bot they reach, which ends its mute. */
+	readonly setLevel: <P, X>(
+		isMember: IsMember<P>,
+		reached: PlaceReached<P, X>,
+		level: NotificationLevel,
+	) => Effect.Effect<void>;
 	/**
-	 * Sets the actor's level for a project or bot they reach, or with null goes
-	 * back to the one above it, which also ends its mute.
+	 * Goes back to the level above `place`, which also ends its mute. It
+	 * removes only the member's own choice, so it needs no reach.
 	 */
-	readonly setLevel: (
-		place: Place,
-		level: NotificationLevel | null,
-	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
-	/** Mutes a project or bot the actor reaches until `until`, or with null, or a time passed, ends its mute. */
-	readonly mute: (
-		place: Place,
-		until: Date | null,
-	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
-	/** Notifies every open tab of the actor's, whatever they chose, so they can see it works. */
-	readonly sendTest: Effect.Effect<void, never, CurrentActor.Service>;
-	/** Tells the actor's other tabs what one of theirs is looking at. */
-	readonly reportPresence: (presence: Presence) => Effect.Effect<void, never, CurrentActor.Service>;
+	readonly clearLevel: <P>(isMember: IsMember<P>, place: Place) => Effect.Effect<void>;
+	/** Mutes a project or bot the member reaches until `until`. */
+	readonly mute: <P, X>(
+		isMember: IsMember<P>,
+		reached: PlaceReached<P, X>,
+		until: Date,
+	) => Effect.Effect<void>;
+	/** Ends the member's mute of `place`, which needs no reach, as clearing a level doesn't. */
+	readonly unmute: <P>(isMember: IsMember<P>, place: Place) => Effect.Effect<void>;
+	/** Notifies every open tab of the member's, whatever they chose, so they can see it works. */
+	readonly sendTest: <P>(isMember: IsMember<P>) => Effect.Effect<void>;
+	/** Tells the member's other tabs what one of theirs is looking at. */
+	readonly reportPresence: <P>(isMember: IsMember<P>, presence: Presence) => Effect.Effect<void>;
 	/** Notifies members of finished messages and of approvals waiting on them, once they commit. */
 	readonly handler: DomainEvents.Handler<ChatEvent>;
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-	"@sugabots/core/Notifications",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Notifications") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Notifications");
@@ -149,16 +156,13 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		settings: operation(
-			"settings",
-			Effect.flatMap(CurrentActor.Service, ({ memberId }) => settingsOf(memberId)),
-		),
+		settings: (isMember) => operation("settings", settingsOf(isMember.member)),
 
-		updatePreferences: (preferences) =>
+		updatePreferences: (isMember, preferences) =>
 			operation(
 				"updatePreferences",
 				Effect.gen(function* () {
-					const { memberId } = yield* CurrentActor.Service;
+					const memberId = isMember.member;
 					const values = {
 						level: preferences.level,
 						pausedUntil: preferences.pausedUntil
@@ -178,18 +182,11 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		setLevel: (place, level) =>
+		setLevel: (isMember, reached, level) =>
 			operation(
 				"setLevel",
 				Effect.gen(function* () {
-					const { memberId } = yield* CurrentActor.Service;
-					const override = overrideOf(memberId, place);
-					// Clearing removes only the actor's own choice, so it needs no reach.
-					if (level === null) {
-						yield* query((db) => db.delete(notificationOverride).where(override.where));
-						return;
-					}
-					yield* requireReachOf(memberId, place);
+					const override = overrideOf(isMember.member, placeOf(reached));
 					yield* query((db) =>
 						db
 							.insert(notificationOverride)
@@ -199,26 +196,19 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		mute: (place, until) =>
+		clearLevel: (isMember, place) =>
+			operation(
+				"clearLevel",
+				query((db) =>
+					db.delete(notificationOverride).where(overrideOf(isMember.member, place).where),
+				).pipe(Effect.asVoid),
+			),
+
+		mute: (isMember, reached, until) =>
 			operation(
 				"mute",
 				Effect.gen(function* () {
-					const { memberId } = yield* CurrentActor.Service;
-					const override = overrideOf(memberId, place);
-					const now = yield* DateTime.nowAsDate;
-					if (until === null || until <= now) {
-						// A row that only held the mute has nothing left to say.
-						yield* query((db) =>
-							db
-								.delete(notificationOverride)
-								.where(and(override.where, isNull(notificationOverride.level))),
-						);
-						yield* query((db) =>
-							db.update(notificationOverride).set({ mutedUntil: null }).where(override.where),
-						);
-						return;
-					}
-					yield* requireReachOf(memberId, place);
+					const override = overrideOf(isMember.member, placeOf(reached));
 					yield* query((db) =>
 						db
 							.insert(notificationOverride)
@@ -228,13 +218,29 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		sendTest: operation(
-			"sendTest",
-			Effect.gen(function* () {
-				const { memberId } = yield* CurrentActor.Service;
-				yield* deliver([
+		unmute: (isMember, place) =>
+			operation(
+				"unmute",
+				Effect.gen(function* () {
+					const override = overrideOf(isMember.member, place);
+					// A row that only held the mute has nothing left to say.
+					yield* query((db) =>
+						db
+							.delete(notificationOverride)
+							.where(and(override.where, isNull(notificationOverride.level))),
+					);
+					yield* query((db) =>
+						db.update(notificationOverride).set({ mutedUntil: null }).where(override.where),
+					);
+				}),
+			),
+
+		sendTest: (isMember) =>
+			operation(
+				"sendTest",
+				deliver([
 					{
-						memberId,
+						memberId: isMember.member,
 						notification: {
 							title: "Notifications are on",
 							body: "This is how Sugabots will tell you when something needs you.",
@@ -243,17 +249,14 @@ export const make = Effect.gen(function* () {
 							chatId: null,
 						},
 					},
-				]);
-			}),
-		),
+				]),
+			),
 
-		reportPresence: (reported) =>
+		reportPresence: (isMember, reported) =>
 			operation(
 				"reportPresence",
-				Effect.flatMap(CurrentActor.Service, ({ memberId }) =>
-					Effect.promise(() =>
-						bus.publish(memberStream(memberId), streamEvent("presence", reported)),
-					),
+				Effect.promise(() =>
+					bus.publish(memberStream(isMember.member), streamEvent("presence", reported)),
 				),
 			),
 
@@ -266,7 +269,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 type NotifyingEvent = Extract<
 	ChatEvent,
@@ -343,6 +346,19 @@ export interface Place {
 	id: string;
 }
 
+/**
+ * A project or bot the member reaches, as a place: proved reached, so their
+ * choice there can be set.
+ */
+export type PlaceReached<P, X> = ReachesProject<P, X> | ReachesBot<P, X>;
+
+/** The place `reached` is. */
+function placeOf<P, X>(reached: PlaceReached<P, X>): Place {
+	return reached.kind === "ReachesProject"
+		? { kind: "project", id: reached.project.value }
+		: { kind: "bot", id: reached.bot.value };
+}
+
 /** The member's override row for `place`: how to find it, make it, and update it in place. */
 function overrideOf(memberId: string, place: Place) {
 	const column =
@@ -354,12 +370,3 @@ function overrideOf(memberId: string, place: Place) {
 		conflict: { target: [notificationOverride.memberId, column], targetWhere: isNotNull(column) },
 	};
 }
-
-const requireReachOf = (memberId: string, place: Place) =>
-	place.kind === "project"
-		? query((db) => projectStandingFor(db, place.id, memberId)).pipe(
-				Effect.flatMap((standing) => requireReach(standing, "project")),
-			)
-		: query((db) => botStandingFor(db, place.id, memberId)).pipe(
-				Effect.flatMap((standing) => requireReach(standing, "bot")),
-			);

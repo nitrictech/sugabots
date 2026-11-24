@@ -1,4 +1,4 @@
-import { Duration, Effect, Layer, ManagedRuntime, Option } from "effect";
+import { Duration, Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +7,7 @@ import { TurnSignals } from "./signals.ts";
 import {
 	type SegmentOutcome,
 	Turn,
-	type TurnRequest,
+	TurnRequest,
 	TurnSteps,
 	turnLane,
 	turnWorkflow,
@@ -61,6 +61,16 @@ describe("the turn workflow", () => {
 		for (const step of [segment, cancelWaiting, abandon, announceReleased, release]) {
 			step.mockClear();
 		}
+	});
+
+	it("reads the payload of a hand-back started before hand-backs had their name as a hand-back", () => {
+		const json = Schema.toCodecJson(TurnRequest);
+		const stored = { chatId: "chat", botId: "bot", triggerMessageId: "message", reason: "resume" };
+
+		const request = Schema.decodeSync(json)(stored);
+
+		expect(request.reason).toBe("hand_back");
+		expect(Schema.encodeSync(json)(request)).toEqual({ ...stored, reason: "hand_back" });
 	});
 
 	it("runs a failed segment again once the retry delay has passed", async () => {

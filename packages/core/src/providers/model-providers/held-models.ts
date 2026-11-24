@@ -1,9 +1,9 @@
-import { UserText, userText } from "@sugabots/errors";
+import { ModelInUse } from "@sugabots/contracts/errors/providers";
+import { DisplayName } from "@sugabots/errors";
 import { and, eq, isNotNull } from "drizzle-orm";
-import { Data, Effect } from "effect";
+import { Effect } from "effect";
 import { query, transaction } from "../../database/database.ts";
 import { bot, providerModel, workspace } from "../../database/schema.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { offeredModels } from "./model-provider-reads.ts";
 import { defaultModelOf, ModelNotEnabled } from "./model-provider-store.ts";
 
@@ -19,7 +19,7 @@ import { defaultModelOf, ModelNotEnabled } from "./model-provider-store.ts";
 /** What holds one model: the workspace default, and the system bots by name. */
 interface Holders {
 	readonly workspaceDefault: boolean;
-	readonly systemBots: readonly string[];
+	readonly systemBots: readonly DisplayName[];
 }
 
 /**
@@ -80,7 +80,7 @@ export const keepingHeldModelsOffered = <A, E, R>(
 			);
 			if (lost) {
 				const [modelId, holders] = lost;
-				return yield* new ModelInUse({ modelId, holders });
+				return yield* new ModelInUse({ modelId: DisplayName.fromRecord(modelId), holders });
 			}
 			return result;
 		}),
@@ -123,7 +123,10 @@ const heldModels = (workspaceId: string) =>
 		for (const { name, model } of systemBots) {
 			if (model === null) continue;
 			const holders = holdersOf(model);
-			held.set(model, { ...holders, systemBots: [...holders.systemBots, name] });
+			held.set(model, {
+				...holders,
+				systemBots: [...holders.systemBots, DisplayName.fromRecord(name)],
+			});
 		}
 		return held;
 	});
@@ -145,24 +148,3 @@ const modelStates = (workspaceId: string) =>
 			(rows) => new Set(rows.map(({ modelId }) => modelId)),
 		),
 	});
-
-const LIST = new Intl.ListFormat("en", { type: "conjunction" });
-
-/** A change would stop the workspace offering a model its default or a system bot runs on. */
-export class ModelInUse
-	extends Data.TaggedError("ModelInUse")<{
-		readonly modelId: string;
-		readonly holders: Holders;
-	}>
-	implements UserFacing
-{
-	get userMessage() {
-		const { workspaceDefault, systemBots } = this.holders;
-		const names = [...(workspaceDefault ? ["New bots"] : []), ...systemBots];
-		const one = names.length === 1 && !workspaceDefault;
-		// System bots' names are ours; a model id is the provider's name for a
-		// model an administrator switched on.
-		const subject = UserText.unchecked(LIST.format(names));
-		return userText`${subject} ${one ? "uses" : "use"} ${UserText.unchecked(this.modelId)}. Choose another model for ${one ? "it" : "them"} under Models → Default first.`;
-	}
-}

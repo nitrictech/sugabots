@@ -1,10 +1,12 @@
+/** The provider could not be reached, refused the request, or failed doing it. */
+export { ComputerUnavailable as Unavailable } from "@sugabots/contracts/errors/computers";
 export * as Computers from "./computers.ts";
 
 import type { ComputerNetworkMode } from "@sugabots/contracts";
+import type { ComputerUnavailable as Unavailable } from "@sugabots/contracts/errors/computers";
 import { type UserText, userText } from "@sugabots/errors";
 import { type Brand, Context, Data, type Duration, Effect, Layer, type Redacted } from "effect";
 import { Ids } from "../ids/ids.ts";
-import type { UserFacing } from "../user-message.ts";
 import { fromE2b } from "./implementations/e2b.ts";
 import { fromOpenSandbox } from "./implementations/opensandbox.ts";
 
@@ -306,21 +308,6 @@ interface FileStart {
 	readonly content: Uint8Array;
 	/** The whole file's size, which is more than `content` when it was cut off. */
 	readonly sizeBytes: number;
-}
-
-/** The provider could not be reached, refused the request, or failed doing it. */
-export class Unavailable
-	extends Data.TaggedError("ComputerUnavailable")<{
-		provider: ProviderAccess["provider"];
-		cause: unknown;
-		/** What went wrong, when the provider said something members can act on. */
-		reason?: UserText;
-	}>
-	implements UserFacing
-{
-	get userMessage() {
-		return this.reason ?? userText`The computer provider didn't answer. Try again shortly.`;
-	}
 }
 
 /** The provider no longer has the computer. */

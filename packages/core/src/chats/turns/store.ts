@@ -175,12 +175,14 @@ export const make = Effect.gen(function* () {
 	/**
 	 * Writes the state the lifecycle decided, plus what else the command
 	 * records, and answers the time it wrote it at: when the turn finished, if
-	 * `next` ends it.
+	 * `next` ends it. Only failing records the turn as `retrying`.
 	 */
 	const write = (
 		turnId: string,
 		next: TurnState,
-		recorded: Partial<Pick<typeof turn.$inferInsert, "checkpoint" | keyof ContextMeasurement>> = {},
+		recorded: Partial<
+			Pick<typeof turn.$inferInsert, "checkpoint" | "retrying" | keyof ContextMeasurement>
+		> = {},
 	) =>
 		Effect.gen(function* () {
 			const now = yield* DateTime.nowAsDate;
@@ -194,6 +196,7 @@ export const make = Effect.gen(function* () {
 						runs: next.runs,
 						error: next.status === "failed" ? next.userMessage : null,
 						finishedAt: next.status === "running" || next.status === "waiting" ? null : now,
+						retrying: false,
 						...(next.checkpointed ? {} : { checkpoint: null }),
 						...recorded,
 					})
@@ -638,7 +641,7 @@ export const make = Effect.gen(function* () {
 						if (locked?.decided._tag !== "Next") return false;
 						const willRetry = mayRunAgain && runsAgainAfterFailure(locked.state);
 						yield* writeReply(reply, draft, "failed");
-						yield* write(locked.id, locked.decided.state);
+						yield* write(locked.id, locked.decided.state, { retrying: willRetry });
 						yield* toolCalls.abandonUnfinished([locked.id], userMessage);
 						yield* emit([
 							ChatEvent.TurnFailed({

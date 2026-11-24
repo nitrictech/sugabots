@@ -1,6 +1,7 @@
+import type { InputOf } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
 import { Context } from "effect";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Automations } from "../../chats/automations/automations.ts";
 import { anAutomationAdmin } from "../../chats/automations/testing.ts";
 import { chatServicesForTests } from "../../chats/testing.ts";
@@ -8,8 +9,9 @@ import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { workspace } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, type Promised } from "../../database/testing.ts";
+import { type CallOperation, servedOperations } from "../../operations/testing.ts";
+import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { onPostgresAs } from "../testing.ts";
-import { WorkspaceTimeZone } from "./workspace-time-zone.ts";
 
 /** Moving a workspace to another time zone, with its automations' routines, against Postgres. */
 describe.skipIf(!process.env.DATABASE_URL)(
@@ -18,9 +20,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		const services = await chatServicesForTests(
 			EventBus.inProcess({ store: EventStore.inMemory() }),
 		);
+		let callOperation: CallOperation;
+		let signedIn: ReturnType<typeof principals>;
 		let workspaceId: string;
 		let ownProjectId: string;
-		let timeZones: Promised<WorkspaceTimeZone.Interface>;
+		let timeZones: TimeZonesAs;
 		let automations: Promised<Automations.Interface>;
 
 		const atNine = (timezone: string) => ({
@@ -29,9 +33,27 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			timezone,
 		});
 
+		beforeAll(async () => {
+			// The registry takes the time zone service from the chat services, as `index.ts` does.
+			callOperation = await servedOperations({ chats: services });
+			signedIn = principals(await authenticators());
+		});
+
 		afterAll(async () => {
 			await closeDatabase();
 		});
+
+		/** The time zone operations, called for `memberId` signed in. */
+		const timeZonesAs = async (memberId: string) => {
+			const principal = await signedIn.member(memberId);
+			return {
+				get: (input: InputOf<"workspaces.timeZone">) =>
+					callOperation(principal, "workspaces.timeZone", input),
+				change: (input: InputOf<"workspaces.changeTimeZone">) =>
+					callOperation(principal, "workspaces.changeTimeZone", input),
+			};
+		};
+		type TimeZonesAs = Awaited<ReturnType<typeof timeZonesAs>>;
 
 		beforeEach(async () => {
 			let memberId: string;
@@ -42,7 +64,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					.set({ timeZone: "Australia/Sydney" })
 					.where(eq(workspace.id, workspaceId)),
 			);
-			timeZones = onPostgresAs(memberId)(Context.get(services, WorkspaceTimeZone.Service));
+			timeZones = await timeZonesAs(memberId);
 			automations = onPostgresAs(memberId)(Context.get(services, Automations.Service));
 		});
 

@@ -1,149 +1,152 @@
 export * as Chats from "./chats.ts";
 
 import type { AutomationFeed, Message, ProjectChat, StartedChat } from "@sugabots/contracts";
-import { userText } from "@sugabots/errors";
+import {
+	type BotHasNoModel,
+	MessageIdConflict,
+	type ReplyTargetNotFound,
+	type UnsentAttachmentsNotFound,
+} from "@sugabots/contracts/errors/chats";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { and, eq, getColumns, isNotNull, isNull, notExists } from "drizzle-orm";
-import { Context, Data, Effect, Layer } from "effect";
-import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
-import { Authorization } from "../../authorization/authorization.ts";
-import { CurrentActor } from "../../authorization/current-actor.ts";
-import { Visibility } from "../../authorization/visibility.ts";
+import { Context, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import {
 	automation,
 	bot,
 	message,
+	OPENABLE_CHAT_KINDS,
 	type PlacedChatRow,
 	placedChat,
 	project,
 } from "../../database/schema.ts";
-import type { ChatFileStore } from "../../files/chat-file-store.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
-import type { UserFacing } from "../../user-message.ts";
+import type { CanManageBot } from "../../proofs/can-manage-bot.ts";
+import type { CanManageChats } from "../../proofs/chat-permissions.ts";
+import type { IsMember } from "../../proofs/is-member.ts";
+import type { CanChangeChat, CanTakePart } from "../../proofs/project-permissions.ts";
+import type { ReachSet } from "../../proofs/reach-set.ts";
+import type { ReachesChat } from "../../proofs/reaches-chat.ts";
+import type { ReachesProject } from "../../proofs/reaches-project.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { INTERVIEW_PROMPT } from "../../workspaces/bots/interview-prompt.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { FloorControl } from "../floor/floor-control.ts";
-import { madeByMembers, memberColumns } from "../store/participants.ts";
+import { memberColumns } from "../store/participants.ts";
 import { ChatStore, lockMessageId } from "../store/store.ts";
 import { Turns } from "../turns/turns.ts";
 import { toAutomationFeed, toProjectChat } from "./chat.ts";
 import { chatTitleFrom } from "./chat-title.ts";
+import { reachedChatOfKind } from "./reached-chat.ts";
 
 /**
- * Talking in chats: the principal starts chats, in projects and
- * with bots, talks in them, and whoever has the floor after a message is asked
- * to speak.
+ * Talking in chats, for operations that have proved what each call needs:
+ * members start chats, in projects and with bots, post in them and read them,
+ * and whoever has the floor after a message is asked to speak. Each method
+ * takes the chat, project or workspace from its proofs, and the member from
+ * `IsMember`.
  */
 export interface Interface {
 	/**
-	 * Starts the chat in which the bot `botId` interviews the principal, who made
-	 * it, to write its own instructions: once, while it still has the
-	 * interview's instructions, a model and no chats. Null when it is not due one.
+	 * Starts the chat in which the bot `canManage` is about interviews the
+	 * member, who made it, to write its own instructions: once, while it still
+	 * has the interview's instructions, a model and no chats. Null when it is
+	 * not due one, as for a manager who didn't make it.
 	 */
-	readonly startInterview: (
-		botId: string,
-	) => Effect.Effect<ProjectChat | null, AuthorizationDenied, CurrentActor.Service>;
+	readonly startInterview: <P, B>(
+		isMember: IsMember<P>,
+		canManage: CanManageBot<P, B>,
+	) => Effect.Effect<ProjectChat | null>;
 	/**
-	 * Starts a chat for the principal in the project `projectId`, for everyone in
-	 * it, titled from its first message, which whoever has the floor answers:
-	 * the lead bot, unless it mentions others. Anyone who reaches the project
-	 * may, so a bot's chats are started in its default project. Refused when
-	 * a bot given the floor has no model. Starting it again with the same
-	 * message returns the chat it started. Files are added once it has
-	 * started, since an upload belongs to a chat.
+	 * Starts a chat for the member in the project `reach` is about, for
+	 * everyone in it, titled from its first message, which whoever has the
+	 * floor answers: the lead bot, unless it mentions others. A bot's chats are
+	 * started in its default project. Refused when a bot given the floor has
+	 * no model. Starting it again with the same message returns the chat it
+	 * started. Files are added once it has started, since an upload belongs to
+	 * a chat.
 	 */
-	readonly startProjectChat: (input: {
-		projectId: string;
-		messageId: string;
-		content: string;
-	}) => Effect.Effect<
-		StartedChat,
-		AuthorizationDenied | FloorControl.BotHasNoModel | ChatStore.MessageIdConflict,
-		CurrentActor.Service
-	>;
+	readonly startProjectChat: <P, J>(
+		isMember: IsMember<P>,
+		reach: ReachesProject<P, J>,
+		first: { messageId: string; content: string },
+	) => Effect.Effect<StartedChat, BotHasNoModel | MessageIdConflict>;
+	/** Renames the project's chat `reach` is about to `name`. Any other chat is hidden from this. */
+	readonly renameChat: <P, C>(
+		reach: ReachesChat<P, C>,
+		name: string,
+		canManage: CanManageChats<P, C>,
+	) => Effect.Effect<void, ResourceHidden>;
 	/**
-	 * Renames the project's chat `chatId` to `name`, for whoever may manage
-	 * the project's chats.
+	 * The automation `automationId`'s feed, where its runs post, opened on
+	 * first use. Hidden unless it is an automation of the workspace in a
+	 * project `reach` reaches.
 	 */
-	readonly renameChat: (input: {
-		chatId: string;
-		name: string;
-	}) => Effect.Effect<void, AuthorizationDenied | ResourceHidden, CurrentActor.Service>;
+	readonly openAutomationFeed: <P, W>(
+		reach: ReachSet<P, W>,
+		automationId: string,
+	) => Effect.Effect<AutomationFeed, ResourceHidden>;
 	/**
-	 * The automation's feed, where its runs post, opened on first use.
-	 * Hidden unless the principal reaches the automation's project.
+	 * Posts the member's message in the chat `canTakePart` is about, with the
+	 * files they uploaded to it, and gives the floor. Posting the same message
+	 * again returns it unchanged. Only a chat members open, a project's chat or
+	 * an automation's feed, takes messages; any other is hidden from this.
 	 */
-	readonly openAutomationFeed: (input: {
-		workspace: string;
-		automationId: string;
-	}) => Effect.Effect<AutomationFeed, AuthorizationDenied | ResourceHidden, CurrentActor.Service>;
-	/**
-	 * Posts the principal's message into the chat, with the files
-	 * they uploaded to it, and gives the floor. Posting the same message again
-	 * returns it unchanged.
-	 */
-	readonly post: (input: {
-		chatId: string;
-		messageId: string;
-		/** May be empty when the message carries files. */
-		content: string;
-		/** Ids of the principal's uploads to the chat, not yet sent. None unless set. */
-		attachments?: readonly string[];
-		/** The id of the message in the chat that this one quotes and answers. */
-		replyTo?: string;
-	}) => Effect.Effect<
+	readonly post: <P, C>(
+		isMember: IsMember<P>,
+		canTakePart: CanTakePart<P, C>,
+		posted: {
+			messageId: string;
+			/** May be empty when the message carries files. */
+			content: string;
+			/** Ids of the member's uploads to the chat, not yet sent. None unless set. */
+			attachments?: readonly string[];
+			/** The id of the message in the chat that this one quotes and answers. */
+			replyTo?: string;
+		},
+	) => Effect.Effect<
 		Message,
 		| ResourceHidden
-		| ChatStore.MessageIdConflict
-		| ChatStore.ReplyTargetNotFound
-		| ChatFileStore.UnsentAttachmentsNotFound
-		| FloorControl.BotHasNoModel,
-		CurrentActor.Service
+		| MessageIdConflict
+		| ReplyTargetNotFound
+		| UnsentAttachmentsNotFound
+		| BotHasNoModel
 	>;
 	/**
-	 * Starts a chat for the principal with the bot `botId`, in its default
-	 * project, which takes its turn on `brief`, the first message, written by
-	 * the bot `briefingBotId` that started it for them. Refused unless the
-	 * actor reaches that bot and it has a model.
+	 * Marks the project's chat `reach` is about resolved, or reopens it. An
+	 * automation's feed is never resolved, so it is hidden from this.
 	 */
-	readonly startBriefedChat: (input: {
-		workspaceId: string;
-		botId: string;
-		briefingBotId: string;
-		title: string;
-		brief: string;
-	}) => Effect.Effect<
-		ProjectChat,
-		BotUnavailable | FloorControl.BotHasNoModel,
-		CurrentActor.Service
-	>;
+	readonly setResolved: <P, C>(
+		reach: ReachesChat<P, C>,
+		resolved: boolean,
+		canChange: CanChangeChat<P, C>,
+	) => Effect.Effect<void, ResourceHidden>;
 	/**
-	 * Marks the chat `chatId` resolved, or reopens it. An automation's
-	 * feed is never resolved, so it is hidden from this.
+	 * Records that the member has read the chat `reach` is about up to its
+	 * newest finished message. Only a chat members open; any other is hidden.
 	 */
-	readonly setResolved: (input: {
-		chatId: string;
-		resolved: boolean;
-	}) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
-	/** Records that the principal has read the chat up to its newest finished message. */
-	readonly markRead: (chatId: string) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
+	readonly markRead: <P, C>(
+		isMember: IsMember<P>,
+		reach: ReachesChat<P, C>,
+	) => Effect.Effect<void, ResourceHidden>;
 	/**
-	 * Records that the principal has read one automation run, opened as a page
-	 * of its own, by its own chat `nestedChatId`, leaving the chat it is
+	 * Records that the member has read one automation run, opened as a page of
+	 * its own, by its own chat, which `reach` is about, leaving the chat it is
 	 * listed in, and what was written in the run's chat since it began,
 	 * unread. Other chats are hidden from this.
 	 */
-	readonly markNestedChatRead: (
-		nestedChatId: string,
-	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
+	readonly markNestedChatRead: <P, C>(
+		isMember: IsMember<P>,
+		reach: ReachesChat<P, C>,
+	) => Effect.Effect<void, ResourceHidden>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Chats") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Chats") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Chats");
-	const authorization = yield* Authorization.Service;
-	const visibility = yield* Visibility.Service;
 	const chats = yield* ChatStore.Service;
 	const floor = yield* FloorControl.Service;
 	const turns = yield* Turns.Service;
@@ -176,12 +179,13 @@ export const make = Effect.gen(function* () {
 		);
 
 	/**
-	 * Posts the principal's message in `chat`, which they have been found
-	 * to reach, and gives the floor. Posting the same message again returns it
+	 * Posts `memberId`'s message in `chat`, which they have been found to
+	 * reach, and gives the floor. Posting the same message again returns it
 	 * unchanged.
 	 */
 	const postIn = (
 		chat: PlacedChatRow,
+		memberId: string,
 		input: {
 			messageId: string;
 			content: string;
@@ -190,11 +194,10 @@ export const make = Effect.gen(function* () {
 		},
 	) =>
 		Effect.gen(function* () {
-			const author = yield* authorOf(yield* CurrentActor.Service);
 			const posted = yield* chats.post({
 				id: input.messageId,
 				chatId: chat.id,
-				author,
+				author: yield* authorOf(memberId),
 				content: input.content,
 				replyTo: input.replyTo,
 				attachments: input.attachments ?? [],
@@ -235,7 +238,7 @@ export const make = Effect.gen(function* () {
 				)
 			: [];
 		if (sent && (sent.chat.kind !== "project_chat" || sent.chat.projectId !== place.projectId)) {
-			return yield* new ChatStore.MessageIdConflict();
+			return yield* new MessageIdConflict();
 		}
 		const chat =
 			sent?.chat ??
@@ -245,7 +248,7 @@ export const make = Effect.gen(function* () {
 				startedById: memberId,
 				title: chatTitleFrom(input.content),
 			}));
-		const posted = yield* postIn(chat, input).pipe(
+		const posted = yield* postIn(chat, memberId, input).pipe(
 			// It neither quotes a message nor carries files, so neither can be missing.
 			Effect.catchTags({ ReplyTargetNotFound: Effect.die, UnsentAttachmentsNotFound: Effect.die }),
 		);
@@ -253,18 +256,17 @@ export const make = Effect.gen(function* () {
 	});
 
 	return Service.of({
-		startInterview: (botId) =>
+		startInterview: (isMember, canManage) =>
 			operation(
 				"startInterview",
 				transaction(
 					Effect.gen(function* () {
-						const { actor } = yield* authorization.bot(botId, "bot.update");
-						const due = yield* dueInterview(botId, actor.memberId);
+						const due = yield* dueInterview(canManage.bot.value, isMember.member);
 						if (!due) return null;
 						const interview = yield* chats.startChat({
-							workspaceId: due.workspaceId,
+							workspaceId: canManage.workspace,
 							projectId: yield* defaultProjectOf(due.id),
-							startedById: actor.memberId,
+							startedById: isMember.member,
 							title: `Setting up ${due.name}`,
 						});
 						yield* turns.ask({
@@ -278,48 +280,32 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		startProjectChat: (input) =>
+		startProjectChat: (isMember, reach, first) =>
 			operation(
 				"startProjectChat",
 				transaction(
-					Effect.gen(function* () {
-						const { project: started, actor } = yield* authorization.project(
-							input.projectId,
-							"project.read",
-						);
-						return yield* startWithMessage(
-							{ workspaceId: started.workspaceId, projectId: started.id },
-							actor.memberId,
-							input,
-						);
-					}),
+					startWithMessage(
+						{ workspaceId: reach.workspace, projectId: reach.project.value },
+						isMember.member,
+						first,
+					),
 				),
 			),
 
-		renameChat: (input) =>
+		renameChat: (reach, name, _canManage) =>
 			operation(
 				"renameChat",
-				Effect.gen(function* () {
-					const chat = yield* visibility.chat(input.chatId);
-					if (chat.kind !== "project_chat" || chat.projectId === null) {
-						return yield* new ResourceHidden({ resource: "chat" });
-					}
-					yield* authorization.project(chat.projectId, "project.chats.manage");
-					yield* chats.renameChat(chat, input.name);
-				}),
+				Effect.flatMap(reachedChatOfKind(reach, ["project_chat"]), (chat) =>
+					chats.renameChat(chat, name),
+				),
 			),
 
-		openAutomationFeed: (input) =>
+		openAutomationFeed: (reach, automationId) =>
 			operation(
 				"openAutomationFeed",
 				transaction(
 					Effect.gen(function* () {
-						const { workspaceId } = yield* authorization.workspace(
-							input.workspace,
-							"workspace.read",
-						);
-						const reachesProject = yield* visibility.reachesProject;
-						const [owned] = isUuid(input.automationId)
+						const [owned] = isUuid(automationId)
 							? yield* query((db) =>
 									db
 										.select({ automation, leadBotId: project.leadBotId })
@@ -327,10 +313,10 @@ export const make = Effect.gen(function* () {
 										.innerJoin(project, eq(project.id, automation.projectId))
 										.where(
 											and(
-												eq(automation.id, input.automationId),
-												eq(automation.workspaceId, workspaceId),
+												eq(automation.id, automationId),
+												eq(automation.workspaceId, reach.workspace.value),
 												isNull(automation.deletedAt),
-												reachesProject(automation.projectId),
+												reach.reachesProject(automation.projectId),
 											),
 										)
 										.limit(1),
@@ -344,132 +330,61 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		post: (input) =>
+		post: (isMember, canTakePart, posted) =>
 			operation(
 				"post",
 				transaction(
-					Effect.flatMap(visibility.chat(input.chatId), (visible) => postIn(visible, input)),
+					Effect.flatMap(reachedChatOfKind(canTakePart.reach, OPENABLE_CHAT_KINDS), (chat) =>
+						postIn(chat, isMember.member, posted),
+					),
 				),
 			),
 
-		startBriefedChat: (input) =>
-			operation(
-				"startBriefedChat",
-				transaction(
-					Effect.gen(function* () {
-						const chatBot = yield* reachedBot(input, yield* visibility.reachesBot);
-						if (!chatBot) return yield* new BotUnavailable();
-						if (chatBot.model === null) return yield* new FloorControl.BotHasNoModel();
-						const { memberId } = yield* CurrentActor.Service;
-						return toProjectChat(
-							yield* chats.startBriefedChat({
-								workspaceId: input.workspaceId,
-								projectId: chatBot.defaultProjectId,
-								briefingBotId: input.briefingBotId,
-								startedById: memberId,
-								title: input.title,
-								brief: input.brief,
-							}),
-						);
-					}),
-				),
-			),
-
-		setResolved: (input) =>
+		setResolved: (reach, resolved, _canChange) =>
 			operation(
 				"setResolved",
 				transaction(
-					Effect.gen(function* () {
-						const visible = yield* visibility.chat(input.chatId);
-						// Only a project's chat is ever resolved, not an automation's feed.
-						if (visible.kind !== "project_chat") {
-							return yield* new ResourceHidden({ resource: "chat" });
-						}
-						yield* chats.setResolved(visible, input.resolved);
-					}),
+					// Only a project's chat is ever resolved, not an automation's feed.
+					Effect.flatMap(reachedChatOfKind(reach, ["project_chat"]), (chat) =>
+						chats.setResolved(chat, resolved),
+					),
 				),
 			),
 
-		markRead: (chatId) =>
+		markRead: (isMember, reach) =>
 			operation(
 				"markRead",
 				transaction(
-					Effect.gen(function* () {
-						const visible = yield* visibility.chat(chatId);
-						const { memberId } = yield* CurrentActor.Service;
-						yield* chats.markRead(memberId, visible.id);
-					}),
+					Effect.flatMap(reachedChatOfKind(reach, OPENABLE_CHAT_KINDS), (chat) =>
+						chats.markRead(isMember.member, chat.id),
+					),
 				),
 			),
 
-		markNestedChatRead: (nestedChatId) =>
+		markNestedChatRead: (isMember, reach) =>
 			operation(
 				"markNestedChatRead",
 				transaction(
-					Effect.gen(function* () {
-						const { chat } = yield* visibility.chatStanding(nestedChatId);
-						if (chat.kind !== "run") {
-							return yield* new ResourceHidden({ resource: "chat" });
-						}
-						const { memberId } = yield* CurrentActor.Service;
-						yield* chats.markNestedChatRead(memberId, chat.id);
-					}),
+					Effect.flatMap(reachedChatOfKind(reach, ["run"]), (chat) =>
+						chats.markNestedChatRead(isMember.member, chat.id),
+					),
 				),
 			),
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 /**
- * Suspended: the floor control's module reaches this one through the turns,
- * their steps and the bot chats, so `FloorControl.layer` is read once the
- * layer is built, not while the modules load.
+ * Over the chat services it gives the floor and asks turns of, which
+ * `ChatServices.layer` composes with the events they emit.
  */
-export const layer = Layer.suspend(() =>
-	layerNoDeps.pipe(
-		Layer.provide([Authorization.layer, Visibility.layer, ChatStore.layer, FloorControl.layer]),
-	),
-);
+export const layer = layerNoDeps.pipe(Layer.provide(ChatStore.layer));
 
-/** The bot asked to chatBot the chat is out of the principal's reach, or not one members make. */
-export class BotUnavailable extends Data.TaggedError("BotUnavailable") implements UserFacing {
-	get userMessage() {
-		return userText`That bot isn't available for this chat`;
-	}
-}
-
-/**
- * The bot `input.botId`, with its model and default project, when
- * `reachesBot` reaches it, it is in the workspace, and members make it.
- */
-const reachedBot = (
-	input: { workspaceId: string; botId: string },
-	reachesBot: Visibility.ReachesBot,
-) =>
-	Effect.map(
-		query((db) =>
-			db
-				.select({ model: bot.model, defaultProjectId: project.id })
-				.from(bot)
-				.innerJoin(project, eq(project.defaultOfBotId, bot.id))
-				.where(
-					and(
-						eq(bot.id, input.botId),
-						eq(bot.workspaceId, input.workspaceId),
-						madeByMembers,
-						reachesBot(bot.id),
-					),
-				)
-				.limit(1),
-		),
-		([chatBot]) => chatBot,
-	);
-
-/** The principal as the author of their messages. */
-const authorOf = ({ memberId }: CurrentActor.Interface) =>
+/** The member `memberId` as the author of their messages. */
+const authorOf = (memberId: string) =>
 	Effect.flatMap(
 		query((db) => db.query.member.findFirst({ where: { id: memberId }, ...memberColumns })),
 		(author) =>
-			author ? Effect.succeed(author) : Effect.die(new Error("The principal has no account")),
+			author ? Effect.succeed(author) : Effect.die(new Error("The member has no account")),
 	);

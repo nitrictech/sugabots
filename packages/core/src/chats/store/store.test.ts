@@ -1,8 +1,8 @@
 import { chatStream, handleFromName } from "@sugabots/contracts";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { ResourceHidden } from "../../authorization/access.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import {
@@ -27,15 +27,13 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { asMember } from "../../operations/chats/testing.ts";
+import { servedOperations } from "../../operations/testing.ts";
 import { lane } from "../../workflows/sql.ts";
 import { BotStore } from "../../workspaces/bots/bot-store.ts";
 import { SYSTEM_BOTS } from "../../workspaces/bots/system-bots.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
-import { onPostgresAs } from "../../workspaces/testing.ts";
-import { ChatDetailsView } from "../chat-details-view.ts";
-import { ChatView } from "../chats/chat-view.ts";
-import { Chats } from "../chats/chats.ts";
 import { startBotChat } from "../chats/testing.ts";
 import { compactionLane } from "../compaction/compaction.workflow.ts";
 import { Compactions } from "../compaction/compactions.ts";
@@ -62,12 +60,10 @@ const eventStore = await runOnPostgres(EventStore.make);
 describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () => {
 	const eventBus = EventBus.inProcess({ store: eventStore });
 	const services = await chatServicesForTests(eventBus);
-	const viewAs = (memberId: string) =>
-		onPostgresAs(memberId)(Context.get(services, ChatDetailsView.Service));
-	const chatsAs = (memberId: string) =>
-		onPostgresAs(memberId)(Context.get(services, Chats.Service));
-	const chatViewAs = (memberId: string) =>
-		onPostgresAs(memberId)(Context.get(services, ChatView.Service));
+	const call = await servedOperations({ chats: services });
+	const viewAs = (memberId: string) => asMember(call, memberId);
+	const chatsAs = (memberId: string) => asMember(call, memberId);
+	const chatViewAs = (memberId: string) => asMember(call, memberId);
 	const turns = onPostgres({ prepare: Context.get(services, TurnExecution.Service).prepare });
 	const turnStore = onPostgres(Context.get(services, TurnStore.Service));
 	const compactions = onPostgres({

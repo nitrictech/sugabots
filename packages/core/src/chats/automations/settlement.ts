@@ -20,7 +20,7 @@ import { ChatEvent } from "../events.ts";
 import { ChatStore } from "../store/store.ts";
 import { Turns } from "../turns/turns.ts";
 import type { AutomationRun } from "./automation.workflow.ts";
-import { findRunId, lockAutomationSettlement, lockAutomationSettlementOf } from "./execution.ts";
+import { lockAutomationSettlement, lockAutomationSettlementOf } from "./execution.ts";
 import { AutomationRuns } from "./runs.ts";
 import { AutomationStore, endingAfter, endingOf, RUN_STOPPED_UNEXPECTEDLY } from "./store.ts";
 
@@ -34,9 +34,12 @@ import { AutomationStore, endingAfter, endingOf, RUN_STOPPED_UNEXPECTEDLY } from
  * `handler` reacts to the chat events that can end a run. In the
  * emitting transaction it only records how an event says the run should end,
  * without locking the run; the run settles once that transaction commits, in
- * its own. A turn that failed for good, or a turn that was cancelled, starts
- * ending its run early: the rest of its work is cancelled, and it ends that
- * way once what is still running stops. Every later settlement of an ending run cancels whatever work is
+ * its own. A turn of the run's own bot that failed for good, or was
+ * cancelled, starts ending its run early: the rest of its work is cancelled,
+ * and it ends that way once what is still running stops. A helper's turn
+ * ending, however it ends, only lets the run settle: the run's outcome is its
+ * own bot's, and the helper's failure shows to that bot in its hand-back.
+ * Every later settlement of an ending run cancels whatever work is
  * left, since some may have been held by another transaction. A settlement
  * lost to a crash after commit is made by the run's workflow's next check.
  */
@@ -112,7 +115,7 @@ export const make = Effect.gen(function* () {
 				}
 				if (ending && ending !== wasEnding) yield* automations.recordEnding(run.id, ending);
 				if (yield* stillBusy(run.chatId, ending !== undefined)) return;
-				const settled = settledAs(ending, yield* lastTurnIn(run.chatId));
+				const settled = settledAs(ending, yield* lastTurnOf(run));
 				if (!(yield* automations.settle(run.id, settled))) return;
 				if (settled.state === "completed") yield* postResult(run);
 				yield* runs.settled({ automationId: run.automationId, runId: run.id });
@@ -144,11 +147,13 @@ export const make = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const settlements = yield* Effect.forEach(
 					events.flatMap(settlementFor),
-					({ chatId, outcome }) =>
+					({ chatId, endedEarly }) =>
 						Effect.gen(function* () {
-							if (!outcome) return { chatId, announce: false };
-							const runId = yield* query((db) => findRunId(db, chatId));
-							const started = runId ? yield* automations.recordEnding(runId, outcome) : false;
+							if (!endedEarly) return { chatId, announce: false };
+							const run = yield* runOf(chatId);
+							// Another bot's turn is a helper's, which only lets the run settle.
+							if (run?.botId !== endedEarly.botId) return { chatId, announce: false };
+							const started = yield* automations.recordEnding(run.id, endedEarly.outcome);
 							return { chatId, announce: started };
 						}),
 				);
@@ -198,10 +203,15 @@ export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(Layer.provide([AutomationStore.layer, ChatStore.layer]));
 
-/** The chat an event may let an automation run settle in, and how the run ends if it ends it early. */
-function settlementFor(
-	event: ChatEvent,
-): Array<{ readonly chatId: string; readonly outcome?: Turns.Ended }> {
+/**
+ * The chat an event may let an automation run settle in, and, for a turn
+ * that ended early, whose turn it was and how it ended, which ends the run
+ * early if it was the run's own bot's.
+ */
+function settlementFor(event: ChatEvent): Array<{
+	readonly chatId: string;
+	readonly endedEarly?: { readonly botId: string; readonly outcome: Turns.Ended };
+}> {
 	switch (event._tag) {
 		case "TurnCompleted":
 		case "TurnStayedSilent":
@@ -214,13 +224,21 @@ function settlementFor(
 				: [
 						{
 							chatId: event.chatId,
-							outcome: { state: "failed", error: event.userMessage },
+							endedEarly: {
+								botId: event.botId,
+								outcome: { state: "failed", error: event.userMessage },
+							},
 						},
 					];
 		case "TurnInterrupted":
-			return [{ chatId: event.chatId, outcome: { state: "cancelled" } }];
+			return [
+				{
+					chatId: event.chatId,
+					endedEarly: { botId: event.botId, outcome: { state: "cancelled" } },
+				},
+			];
 		case "TurnAbandoned":
-			return [{ chatId: event.chatId, outcome: event.outcome }];
+			return [{ chatId: event.chatId, endedEarly: { botId: event.botId, outcome: event.outcome } }];
 		default:
 			return [];
 	}
@@ -247,6 +265,19 @@ const runningRun = (runId: string) =>
 				.select()
 				.from(automationRun)
 				.where(and(eq(automationRun.id, runId), eq(automationRun.state, "running")))
+				.limit(1),
+		),
+		([row]) => row,
+	);
+
+/** The automation run whose chat is `chatId`, with its bot, if the chat is a run's. */
+const runOf = (chatId: string) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select({ id: automationRun.id, botId: automationRun.botId })
+				.from(automationRun)
+				.where(eq(automationRun.chatId, chatId))
 				.limit(1),
 		),
 		([row]) => row,
@@ -334,14 +365,17 @@ const stillBusy = (chatId: string, ending: boolean) =>
 		([row]) => row?.busy ?? false,
 	);
 
-/** How the last turn to end in the run's chat `chatId` ended, if any has. */
-const lastTurnIn = (chatId: string) =>
+/**
+ * How the last of the run's own turns to end in its chat ended, if any has:
+ * its bot's, the first and its hand-backs, not its helpers'.
+ */
+const lastTurnOf = (run: schema.RunRow) =>
 	Effect.map(
 		query((db) =>
 			db
 				.select({ status: turn.status, error: turn.error })
 				.from(turn)
-				.where(eq(turn.chatId, chatId))
+				.where(and(eq(turn.chatId, run.chatId), eq(turn.botId, run.botId)))
 				.orderBy(sql`${turn.finishedAt} desc nulls last`, desc(turn.id))
 				.limit(1),
 		),

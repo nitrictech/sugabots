@@ -1,12 +1,20 @@
 import type { Project } from "@sugabots/contracts";
 import { projectSchema } from "@sugabots/contracts";
+import {
+	AdministratorInEveryProject,
+	BotNotPublic,
+	EmptyProjectUpdate,
+	NotInProject,
+	NotInWorkspace,
+	ProjectSlugTaken,
+	UnusableProjectName,
+} from "@sugabots/contracts/errors/projects";
+import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { BadRequest, Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
-import { ActionForbidden, ResourceHidden } from "@sugabots/core/authorization/access";
-import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { projectPermissions } from "@sugabots/core/authorization/permissions";
+import { Operations } from "@sugabots/core/operations/registry";
+import type { Principal } from "@sugabots/core/principal";
 import { unimplemented } from "@sugabots/core/testing";
-import { ProjectAdministration } from "@sugabots/core/workspaces/projects/project-administration";
-import { ProjectStore } from "@sugabots/core/workspaces/projects/project-store";
 import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import type { MemberResolver } from "../../http/app.test-support.ts";
@@ -18,9 +26,10 @@ import {
 } from "../../http/app.test-support.ts";
 
 /**
- * The project routes, over doubles of `ProjectAdministration`, so what is under
- * test is the routing, who the administration is asked as, and what each
- * refusal means over HTTP. Who may do what is decided, and tested, in core.
+ * The project routes, over doubles of the projects operations, so what is
+ * under test is the routing, which principal each operation is called for,
+ * and what each refusal means over HTTP. Who may do what is decided, and
+ * tested, in core.
  */
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
@@ -69,14 +78,15 @@ const projectFor = (memberId: string, isMember = true): Project => ({
 	createdAt: "2026-09-09T00:00:00.000Z",
 });
 
-/** The app with `projects` as the only project methods it has. */
-const app = (projects: Partial<ProjectAdministration.Interface>) =>
+/** The app with `operations` as the only operations it has. */
+const app = (operations: Partial<Operations.Interface>) =>
 	createTestApp(
-		Layer.merge(
-			identifiedBy(resolveMember),
-			unimplemented(ProjectAdministration.Service, projects),
-		),
+		Layer.merge(identifiedBy(resolveMember), unimplemented(Operations.Service, operations)),
 	);
+
+/** The member a principal is signed in as, as the session authenticator built it. */
+const memberOf = (principal: Principal) =>
+	principal._tag === "MemberSession" ? principal.member : undefined;
 
 const as = (token: string, init: RequestInit = {}) => ({
 	...init,
@@ -98,10 +108,10 @@ describe("GET /workspaces/:workspace/projects", () => {
 	it("lists the projects as the member the session belongs to sees them", async () => {
 		let asked: unknown;
 		const response = await app({
-			list: (input) =>
-				Effect.map(CurrentActor.Service, ({ memberId }) => {
-					asked = { ...input, memberId };
-					return [projectFor(memberId)];
+			"projects.list": (principal, input) =>
+				Effect.sync(() => {
+					asked = { ...input, memberId: memberOf(principal) };
+					return [projectFor(admin.id)];
 				}),
 		}).request(`/workspaces/${WORKSPACE}/projects`, as("admin-token"));
 
@@ -114,11 +124,19 @@ describe("GET /workspaces/:workspace/projects", () => {
 
 	it("answers a workspace hidden from the caller as not found", async () => {
 		const response = await app({
-			list: () => Effect.fail(new ResourceHidden({ resource: "workspace" })),
+			"projects.list": () => Effect.fail(new ResourceHidden({ resource: "workspace" })),
 		}).request(`/workspaces/${WORKSPACE}/projects`, as("outsider-token"));
 
 		expect(response.status).toBe(404);
-		expect(await response.json()).toEqual({ _tag: "NotFound", message: "No such workspace" });
+		expect(await response.json()).toEqual({
+			_tag: "NotFound",
+			message: "There's no such workspace, or you can't see it",
+			error: {
+				_tag: "ResourceHidden",
+				userMessage: "There's no such workspace, or you can't see it",
+				isRetryable: false,
+			},
+		});
 	});
 });
 
@@ -126,7 +144,7 @@ describe("POST /workspaces/:workspace/projects", () => {
 	it("creates one for an admin, leaving its address to be derived when none is given", async () => {
 		let created: unknown;
 		const response = await app({
-			create: (input) => {
+			"projects.create": (_principal, input) => {
 				created = { workspace: input.workspace, name: input.name, slug: input.slug };
 				return Effect.succeed(projectFor(admin.id));
 			},
@@ -141,22 +159,25 @@ describe("POST /workspaces/:workspace/projects", () => {
 
 	it("answers an action the caller may not take as forbidden", async () => {
 		const response = await app({
-			create: () => Effect.fail(new ActionForbidden({ permission: "project.create" })),
+			"projects.create": () => Effect.fail(new ActionForbidden({ proof: "CanCreateProjects" })),
 		}).request(
 			`/workspaces/${WORKSPACE}/projects`,
 			as("admin-token", json({ name: "Sales", leadBotId: BOT })),
 		);
 
 		expect(response.status).toBe(403);
+		const refusal =
+			"You aren't allowed to do that here. Someone who manages it can do it, or let you";
 		expect(await response.json()).toEqual({
 			_tag: "Forbidden",
-			message: "You are not allowed to do that",
+			message: refusal,
+			error: { _tag: "ActionForbidden", userMessage: refusal, isRetryable: false },
 		});
 	});
 
 	it("rejects a name nothing can be slugged from", async () => {
 		const response = await app({
-			create: () => Effect.fail(new ProjectAdministration.UnusableProjectName()),
+			"projects.create": () => Effect.fail(new UnusableProjectName()),
 		}).request(
 			`/workspaces/${WORKSPACE}/projects`,
 			as("admin-token", json({ name: "!!!", leadBotId: BOT })),
@@ -180,16 +201,18 @@ describe("POST /workspaces/:workspace/projects", () => {
 
 	it("reports a taken slug as a conflict", async () => {
 		const response = await app({
-			create: () => Effect.fail(new ProjectStore.ProjectSlugTaken({ slug: "suga-team" })),
+			"projects.create": () => Effect.fail(new ProjectSlugTaken({ slug: "suga-team" })),
 		}).request(
 			`/workspaces/${WORKSPACE}/projects`,
 			as("admin-token", json({ name: "Suga-Team", leadBotId: BOT })),
 		);
 
 		expect(response.status).toBe(409);
+		const taken = "A project with that address already exists in this workspace";
 		expect(await response.json()).toEqual({
 			_tag: "Conflict",
-			message: "A project with that address already exists in this workspace",
+			message: taken,
+			error: { _tag: "ProjectSlugTaken", userMessage: taken, isRetryable: false },
 		});
 	});
 });
@@ -197,7 +220,7 @@ describe("POST /workspaces/:workspace/projects", () => {
 describe("changing a project", () => {
 	it("renames the project in the path", async () => {
 		const response = await app({
-			update: ({ projectId, changes }) =>
+			"projects.update": (_principal, { projectId, changes }) =>
 				Effect.succeed({ ...projectFor(admin.id), id: projectId, name: changes.name ?? "" }),
 		}).request(
 			`/projects/${PROJECT}`,
@@ -210,7 +233,7 @@ describe("changing a project", () => {
 
 	it("answers a project hidden from the caller as not found", async () => {
 		const response = await app({
-			update: () => Effect.fail(new ResourceHidden({ resource: "project" })),
+			"projects.update": () => Effect.fail(new ResourceHidden({ resource: "project" })),
 		}).request(
 			`/projects/${PROJECT}`,
 			as("outsider-token", { method: "PATCH", body: JSON.stringify({ name: "Platform" }) }),
@@ -222,7 +245,7 @@ describe("changing a project", () => {
 
 	it("reports a patch that changes nothing as a bad request", async () => {
 		const response = await app({
-			update: () => Effect.fail(new ProjectAdministration.EmptyProjectUpdate()),
+			"projects.update": () => Effect.fail(new EmptyProjectUpdate()),
 		}).request(
 			`/projects/${PROJECT}`,
 			as("admin-token", { method: "PATCH", body: JSON.stringify({}) }),
@@ -232,7 +255,7 @@ describe("changing a project", () => {
 	});
 
 	it("deletes a project", async () => {
-		const response = await app({ remove: () => Effect.void }).request(
+		const response = await app({ "projects.remove": () => Effect.void }).request(
 			`/projects/${PROJECT}`,
 			as("admin-token", { method: "DELETE" }),
 		);
@@ -243,7 +266,7 @@ describe("changing a project", () => {
 describe("project membership", () => {
 	it("reports somebody outside the workspace as a bad request", async () => {
 		const response = await app({
-			addMember: () => Effect.fail(new ProjectAdministration.NotInWorkspace()),
+			"projects.addMember": () => Effect.fail(new NotInWorkspace()),
 		}).request(`/projects/${PROJECT}/members`, as("admin-token", json({ memberId: outsider.id })));
 
 		expect(response.status).toBe(400);
@@ -251,7 +274,7 @@ describe("project membership", () => {
 
 	it("reports removing somebody who was not there as not found", async () => {
 		const response = await app({
-			removeMember: () => Effect.fail(new ProjectAdministration.NotInProject()),
+			"projects.removeMember": () => Effect.fail(new NotInProject()),
 		}).request(
 			`/projects/${PROJECT}/members/${outsider.id}`,
 			as("admin-token", { method: "DELETE" }),
@@ -262,7 +285,7 @@ describe("project membership", () => {
 
 	it("refuses taking an administrator out of a project", async () => {
 		const response = await app({
-			removeMember: () => Effect.fail(new ProjectAdministration.AdministratorInEveryProject()),
+			"projects.removeMember": () => Effect.fail(new AdministratorInEveryProject()),
 		}).request(`/projects/${PROJECT}/members/${admin.id}`, as("admin-token", { method: "DELETE" }));
 
 		expect(response.status).toBe(400);
@@ -271,9 +294,9 @@ describe("project membership", () => {
 	it("takes the member the session belongs to out of the project", async () => {
 		let asked: unknown;
 		const response = await app({
-			leave: (input) =>
-				Effect.map(CurrentActor.Service, ({ memberId }) => {
-					asked = { ...input, memberId };
+			"projects.leave": (principal, input) =>
+				Effect.sync(() => {
+					asked = { ...input, memberId: memberOf(principal) };
 				}),
 		}).request(`/projects/${PROJECT}/membership`, as("admin-token", { method: "DELETE" }));
 
@@ -284,10 +307,10 @@ describe("project membership", () => {
 	it("puts the member the session belongs to in a public project", async () => {
 		let asked: unknown;
 		const response = await app({
-			join: (input) =>
-				Effect.map(CurrentActor.Service, ({ memberId }) => {
-					asked = { ...input, memberId };
-					return projectFor(memberId);
+			"projects.join": (principal, input) =>
+				Effect.sync(() => {
+					asked = { ...input, memberId: memberOf(principal) };
+					return projectFor(admin.id);
 				}),
 		}).request(`/projects/${PROJECT}/membership`, as("admin-token", { method: "PUT" }));
 
@@ -301,8 +324,9 @@ describe("a project's bots", () => {
 	it("adds and removes the bot named", async () => {
 		const asked: unknown[] = [];
 		const routes = app({
-			addBot: (input) => Effect.sync(() => void asked.push({ add: input })),
-			removeBot: (input) => Effect.sync(() => void asked.push({ remove: input })),
+			"projects.addBot": (_principal, input) => Effect.sync(() => void asked.push({ add: input })),
+			"projects.removeBot": (_principal, input) =>
+				Effect.sync(() => void asked.push({ remove: input })),
 		});
 
 		const added = await routes.request(
@@ -324,7 +348,7 @@ describe("a project's bots", () => {
 
 	it("reports adding a personal bot as a bad request", async () => {
 		const response = await app({
-			addBot: () => Effect.fail(new ProjectStore.BotNotPublic()),
+			"projects.addBot": () => Effect.fail(new BotNotPublic()),
 		}).request(`/projects/${PROJECT}/bots`, as("admin-token", json({ botId: BOT })));
 
 		expect(response.status).toBe(400);

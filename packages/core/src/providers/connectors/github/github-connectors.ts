@@ -1,12 +1,24 @@
+export {
+	GitHubAppNotInstalled,
+	NotGitHubConnector,
+	ProjectHasGitHubConnector,
+	RepositoryUnreachable,
+} from "@sugabots/contracts/errors/connectors";
 export * as GitHubConnectors from "./github-connectors.ts";
 
-import type { AccountRepository, ConnectorRepositories } from "@sugabots/contracts";
-import { type DomainError, userText } from "@sugabots/errors";
+import type {
+	AccountRepository,
+	ConnectorRepositories,
+	DeliveredActivity,
+} from "@sugabots/contracts";
+import {
+	GitHubAppNotInstalled,
+	type GitHubRequestFailed,
+	NotGitHubConnector,
+	RepositoryUnreachable,
+} from "@sugabots/contracts/errors/connectors";
 import { and, eq } from "drizzle-orm";
-import { Context, DateTime, Effect, ErrorReporter, Layer, Schema } from "effect";
-import type { AuthorizationDenied } from "../../../authorization/access.ts";
-import { Authorization } from "../../../authorization/authorization.ts";
-import { CurrentActor } from "../../../authorization/current-actor.ts";
+import { Context, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations } from "../../../database/database.ts";
 import {
 	type ConnectorRow,
@@ -14,14 +26,18 @@ import {
 	type GitHubConnectorRepository,
 	type GitHubConnectorSettings,
 } from "../../../database/schema.ts";
+import type { CanManageProject, CanReadConnectors } from "../../../proofs/project-permissions.ts";
+import type { ReachesProject } from "../../../proofs/reaches-project.ts";
+import type { SignedByGitHubApp } from "../../../proofs/signed-by-github-app.ts";
 import { Secrets } from "../../../secrets/secrets.ts";
+import { processLayer, Tier } from "../../../tiers.ts";
 import { memberNamesOf } from "../../../workspaces/membership/member-reads.ts";
 import { Egress } from "../../network/egress.ts";
 import { ConnectorStore } from "../connector-store.ts";
 import { Connected } from "./connected.ts";
 import { openAppCredential } from "./credential.ts";
 import * as GitHub from "./github.ts";
-import { activityOf, type RepositoryActivity } from "./github-events.ts";
+import { activityOf } from "./github-events.ts";
 
 /**
  * A project's GitHub app (see `github-app.ts`), installed on the account the
@@ -29,80 +45,69 @@ import { activityOf, type RepositoryActivity } from "./github-events.ts";
  * computer and changed through the connector's tools, which are Sugabots'
  * own, and what happens there, which its app delivers. A project has at most
  * one, since its computer can be signed in to only one account at GitHub; a
- * bot's is its default project's. Seeing a connector's repositories takes
- * `connector.read`; choosing them takes `connector.manage`.
+ * bot's is its default project's. Each method an operation calls takes the
+ * workspace and the project from its proof, and the connector it names only
+ * from that project.
  */
 export interface Interface {
 	/** What the connector's app reaches, to choose the project's repositories from. */
-	readonly reachableRepositories: (input: {
-		projectId: string;
-		connectorId: string;
-	}) => Effect.Effect<
+	readonly reachableRepositories: <P, J>(
+		canManage: CanManageProject<P, J>,
+		connectorId: string,
+	) => Effect.Effect<
 		readonly AccountRepository[],
-		AuthorizationDenied | NotGitHubConnector | AppNotInstalled | GitHub.GitHubRequestFailed,
-		CurrentActor.Service
+		NotGitHubConnector | GitHubAppNotInstalled | GitHubRequestFailed
 	>;
-	readonly repositories: (input: {
-		projectId: string;
-		connectorId: string;
-	}) => Effect.Effect<
+	readonly repositories: <P, J>(
+		canRead: CanReadConnectors<P, J>,
+		connectorId: string,
+	) => Effect.Effect<ConnectorRepositories, NotGitHubConnector>;
+	/** Adds a repository the connector's app reaches, as added by the member who manages the project. */
+	readonly addRepository: <P, J>(
+		canManage: CanManageProject<P, J>,
+		connectorId: string,
+		repository: string,
+	) => Effect.Effect<
 		ConnectorRepositories,
-		AuthorizationDenied | NotGitHubConnector,
-		CurrentActor.Service
-	>;
-	/** Adds a repository the connector's app reaches. */
-	readonly addRepository: (input: {
-		projectId: string;
-		connectorId: string;
-		repository: string;
-	}) => Effect.Effect<
-		ConnectorRepositories,
-		| AuthorizationDenied
-		| NotGitHubConnector
-		| AppNotInstalled
-		| RepositoryUnreachable
-		| GitHub.GitHubRequestFailed,
-		CurrentActor.Service
+		NotGitHubConnector | GitHubAppNotInstalled | RepositoryUnreachable | GitHubRequestFailed
 	>;
 	/** Removing one the connector doesn't have changes nothing. */
-	readonly removeRepository: (input: {
-		projectId: string;
-		connectorId: string;
-		repository: string;
-	}) => Effect.Effect<
-		ConnectorRepositories,
-		AuthorizationDenied | NotGitHubConnector,
-		CurrentActor.Service
-	>;
+	readonly removeRepository: <P, J>(
+		canManage: CanManageProject<P, J>,
+		connectorId: string,
+		repository: string,
+	) => Effect.Effect<ConnectorRepositories, NotGitHubConnector>;
 	/**
 	 * The project's GitHub app, for the turns in it and its computer;
-	 * undefined until its app is installed.
+	 * undefined until its app is installed. It takes no proof because the
+	 * bot loop's connector tools and the computer's sign-in call it directly,
+	 * until tools become operations.
 	 */
 	readonly forProject: (project: Project) => Effect.Effect<Connected | undefined>;
 	/**
-	 * What a delivery to the connector's webhook says happened at one of its
-	 * account's repositories, once its app proves it sent it; `activity` is
-	 * `undefined` for an event no automation is run by.
+	 * What a delivery the connector's app signed says happened at one of its
+	 * account's repositories; `activity` is `undefined` for an event no
+	 * automation is run by.
 	 */
-	readonly receiveDelivery: (
-		delivery: Delivery & { connectorId: string },
-	) => Effect.Effect<Delivered, DeliveryRefused>;
+	readonly readDelivery: <P, K>(
+		signed: SignedByGitHubApp<P, K>,
+		delivery: Delivery,
+	) => Effect.Effect<DeliveredActivity>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/GitHubConnectors",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("GitHubConnectors");
-	const authorization = yield* Authorization.Service;
 	const secrets = yield* Secrets.Service;
 	const connectors = yield* ConnectorStore.Service;
 	const egress = yield* Egress.Service;
-	const http = egress.providers.for({ baseUrl: GitHub.API_URL });
-
-	const managed = (projectId: string) =>
-		Effect.map(authorization.project(projectId, "connector.manage"), projectOf);
+	// Asked for when used, so building this asks nothing of egress.
+	const gitHubApi = () => egress.providers.for({ baseUrl: GitHub.API_URL });
 
 	/** The project's GitHub connector `connectorId`, with its app's settings. */
 	const connectorOf = (project: Project, connectorId: string) =>
@@ -130,7 +135,7 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const { row } = yield* connectorOf(project, connectorId);
 			const app = installedApp(secrets, row);
-			if (!app) return yield* new AppNotInstalled();
+			if (!app) return yield* new GitHubAppNotInstalled();
 			return app;
 		});
 
@@ -169,41 +174,39 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		reachableRepositories: ({ projectId, connectorId }) =>
+		reachableRepositories: (canManage, connectorId) =>
 			operation(
 				"reachableRepositories",
 				Effect.gen(function* () {
-					const project = yield* managed(projectId);
-					const app = yield* installedAppOf(project, connectorId);
-					const reached = yield* GitHub.repositories(http, app);
+					const app = yield* installedAppOf(projectIn(canManage.reach), connectorId);
+					const reached = yield* GitHub.repositories(gitHubApi(), app);
 					return reached.map((one) => ({ repository: one.fullName, private: one.private }));
 				}),
 			),
 
-		repositories: ({ projectId, connectorId }) =>
+		repositories: (canRead, connectorId) =>
 			operation(
 				"repositories",
 				Effect.gen(function* () {
-					const project = projectOf(yield* authorization.project(projectId, "connector.read"));
-					const { settings } = yield* connectorOf(project, connectorId);
+					const { settings } = yield* connectorOf(projectIn(canRead.reach), connectorId);
 					return yield* shown(settings);
 				}),
 			),
 
-		addRepository: ({ projectId, connectorId, repository }) =>
+		addRepository: (canManage, connectorId, repository) =>
 			operation(
 				"addRepository",
 				Effect.gen(function* () {
-					const project = yield* managed(projectId);
+					const project = projectIn(canManage.reach);
 					const { settings } = yield* connectorOf(project, connectorId);
 					const app = yield* installedAppOf(project, connectorId);
-					const reached = yield* GitHub.repositories(http, app);
+					const reached = yield* GitHub.repositories(gitHubApi(), app);
 					// GitHub's paths ignore case.
 					const found = reached.find(
 						(one) => one.fullName.toLowerCase() === repository.toLowerCase(),
 					);
 					if (!found) return yield* new RepositoryUnreachable({ repository });
-					const { memberId } = yield* CurrentActor.Service;
+					const addedById = canManage.member.actor.memberId;
 					const addedAt = DateTime.formatIso(yield* DateTime.now);
 					const pathOf = new Map(reached.map((one) => [one.id, one.fullName]));
 					return yield* changed(project, connectorId, settings, (repositories) => [
@@ -211,16 +214,16 @@ export const make = Effect.gen(function* () {
 						...repositories.map((one) => ({ ...one, path: pathOf.get(one.id) ?? one.path })),
 						...(repositories.some((one) => one.id === found.id)
 							? []
-							: [{ id: found.id, path: found.fullName, addedById: memberId, addedAt }]),
+							: [{ id: found.id, path: found.fullName, addedById, addedAt }]),
 					]);
 				}),
 			),
 
-		removeRepository: ({ projectId, connectorId, repository }) =>
+		removeRepository: (canManage, connectorId, repository) =>
 			operation(
 				"removeRepository",
 				Effect.gen(function* () {
-					const project = yield* managed(projectId);
+					const project = projectIn(canManage.reach);
 					const { settings } = yield* connectorOf(project, connectorId);
 					return yield* changed(project, connectorId, settings, (repositories) =>
 						repositories.filter((one) => one.path.toLowerCase() !== repository.toLowerCase()),
@@ -235,49 +238,44 @@ export const make = Effect.gen(function* () {
 					const row = yield* gitHubConnectorForProject(project);
 					const app = row && installedApp(secrets, row);
 					if (!row?.settings || !app) return undefined;
-					return new Connected(row, app, row.settings, { api: http, storage: egress.webFetch });
+					return new Connected(row, app, row.settings, {
+						api: gitHubApi(),
+						storage: egress.webFetch,
+					});
 				}),
 			),
 
-		receiveDelivery: ({ connectorId, headers, body }) =>
+		readDelivery: (signed, { event, deliveryId, body }) =>
 			operation(
-				"receiveDelivery",
+				"readDelivery",
 				Effect.gen(function* () {
 					const [row] = yield* query((db) =>
 						db
-							.select()
+							.select({ settings: connector.settings })
 							.from(connector)
-							.where(and(eq(connector.id, connectorId), eq(connector.kind, "github")))
+							.where(
+								and(
+									eq(connector.id, signed.connector.value),
+									eq(connector.workspaceId, signed.workspace),
+									eq(connector.projectId, signed.project),
+									eq(connector.kind, "github"),
+								),
+							)
 							.limit(1),
 					);
-					const secret =
-						row?.appCredentialEncrypted &&
-						openAppCredential(secrets, row.appCredentialEncrypted).webhookSecret;
-					if (
-						!row?.settings ||
-						!secret ||
-						!GitHub.signedDelivery(secret, body, headers["x-hub-signature-256"])
-					) {
-						return yield* new DeliveryRefused({ connectorId });
-					}
-					return {
-						workspaceId: row.workspaceId,
-						connectorId,
-						deliveryId: headers["x-github-delivery"],
-						activity: activityOf(
-							headers["x-github-event"],
-							GitHub.parsedJson(body),
-							row.settings.slug,
-						),
-					};
+					// Removed since its app signed the delivery, so no automation runs on it.
+					const activity = row?.settings
+						? activityOf(event, GitHub.parsedJson(body), row.settings.slug)
+						: undefined;
+					return { workspaceId: signed.workspace, deliveryId, activity };
 				}),
 			),
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, ConnectorStore.layer]));
+export const layer = layerNoDeps.pipe(Layer.provide(ConnectorStore.layer));
 
 /** A project, by its workspace and its own id. */
 export interface Project {
@@ -304,9 +302,10 @@ export const gitHubConnectorForProject = (project: Project) =>
 		([row]) => row,
 	);
 
-const projectOf = (standing: { project: { id: string; workspaceId: string } }): Project => ({
-	workspaceId: standing.project.workspaceId,
-	projectId: standing.project.id,
+/** The project `reach` proved reached, by its workspace and its own id. */
+const projectIn = <P, J>(reach: ReachesProject<P, J>): Project => ({
+	workspaceId: reach.workspace,
+	projectId: reach.project.value,
 });
 
 /** The connector's app at the account it is installed on; undefined until it is installed. */
@@ -325,94 +324,9 @@ function installedApp(
 	};
 }
 
-/** A GitHub connector whose app isn't installed on an account yet. */
-class AppNotInstalled
-	extends Schema.TaggedError<AppNotInstalled>()("GitHubAppNotInstalled", {})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Info" as const;
-	override get message() {
-		return "The connector's GitHub App isn't installed yet";
-	}
-	get userMessage() {
-		return userText`Install the connector's GitHub App on an account first.`;
-	}
-}
-
-export class NotGitHubConnector
-	extends Schema.TaggedError<NotGitHubConnector>()("NotGitHubConnector", {})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Info" as const;
-	override get message() {
-		return "No such GitHub connector in the project";
-	}
-	get userMessage() {
-		return userText`There's no such GitHub app here. It may have been removed.`;
-	}
-}
-
-/** A second GitHub app for a project, whose computer can be signed in to only one account there. */
-export class ProjectHasGitHubConnector
-	extends Schema.TaggedError<ProjectHasGitHubConnector>()("ProjectHasGitHubConnector", {})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Info" as const;
-	override get message() {
-		return "The project already has a GitHub app";
-	}
-	get userMessage() {
-		return userText`There's a GitHub app here already. Add repositories to it, or remove it first to connect another account.`;
-	}
-}
-
-export class RepositoryUnreachable
-	extends Schema.TaggedError<RepositoryUnreachable>()("RepositoryUnreachable", {
-		repository: Schema.String,
-	})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Info" as const;
-	override get message() {
-		return `The account doesn't reach ${this.repository}`;
-	}
-	get userMessage() {
-		return userText`The connector's GitHub App can't reach that repository. Give it access on GitHub first.`;
-	}
-}
-
-/** A request GitHub sent the connector's webhook, as it arrived. */
+/** A delivery GitHub sent the connector's webhook: the event and delivery its headers name, and its body as sent. */
 interface Delivery {
-	/** Its headers, by lowercase name. */
-	readonly headers: Readonly<Record<string, string | undefined>>;
-	readonly body: string;
-}
-
-/** A delivery the connector's app signed, the id GitHub gave it, and what it says happened. */
-interface Delivered {
-	readonly workspaceId: string;
-	readonly connectorId: string;
+	readonly event: string | undefined;
 	readonly deliveryId: string | undefined;
-	readonly activity: RepositoryActivity | undefined;
-}
-
-/** A delivery for no GitHub connector, or one its app didn't send. */
-export class DeliveryRefused
-	extends Schema.TaggedError<DeliveryRefused>()("DeliveryRefused", {
-		connectorId: Schema.String,
-	})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Info" as const;
-	override get message() {
-		return `A delivery for connector ${this.connectorId} wasn't signed by its app`;
-	}
-	get userMessage() {
-		return userText`That delivery isn't signed by the app it's addressed to.`;
-	}
+	readonly body: string;
 }

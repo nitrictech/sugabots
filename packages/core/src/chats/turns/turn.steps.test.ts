@@ -36,7 +36,8 @@ import { BuiltInTools } from "../tools/built-in.ts";
 import { ComputerTools } from "../tools/computer.ts";
 import { ConnectorTools } from "../tools/connectors.ts";
 import { FILE_TOOLS } from "../tools/files/tool.ts";
-import { HOST_REQUEST_TOOL, hostRequestTool } from "../tools/host-request/tool.ts";
+import { HOST_REQUEST_TOOL } from "../tools/host-request/name.ts";
+import { hostRequestTool } from "../tools/host-request/tool.ts";
 import { MARK_RESOLVED_TOOL } from "../tools/mark-resolved/tool.ts";
 import { READ_CHAT_FILE_TOOL } from "../tools/read-chat-file/tool.ts";
 import { SAVE_INSTRUCTIONS_TOOL } from "../tools/save-instructions/tool.ts";
@@ -127,6 +128,7 @@ const prepared: PreparedTurn = {
 		askerId: null,
 		startedFor: null,
 		botsToAsk: [],
+		helpersWithoutReply: [],
 		participants: [],
 		messages: [],
 	},

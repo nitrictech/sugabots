@@ -1,9 +1,9 @@
+import { ProviderSignInFailed } from "@sugabots/contracts/errors/providers";
 import { userText } from "@sugabots/errors";
 import { Clock, Effect, Schema } from "effect";
 import {
 	decodeSignInBody,
 	type OAuthTokens,
-	ProviderSignInFailed,
 	postToSignIn,
 	type SubscriptionSignIn,
 } from "./sign-in.ts";

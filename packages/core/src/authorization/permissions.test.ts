@@ -72,6 +72,7 @@ const WORKSPACE_PERMISSIONS = Object.keys({
 
 const PROJECT_PERMISSIONS = Object.keys({
 	"project.read": true,
+	"project.change": true,
 	"project.update": true,
 	"project.delete": true,
 	"project.members.manage": true,
@@ -93,6 +94,7 @@ const PROJECT_PERMISSIONS = Object.keys({
 
 const BOT_PERMISSIONS = Object.keys({
 	"bot.read": true,
+	"bot.use": true,
 	"bot.settings.read": true,
 	"bot.update": true,
 	"bot.delete": true,
@@ -126,6 +128,7 @@ const EDITOR_IN_WORKSPACE: WorkspacePermission[] = [
 /** What an editor holds in a project they are in: everything but changing or deleting it. */
 const EDITOR_IN_PROJECT: ProjectPermission[] = [
 	"project.read",
+	"project.change",
 	"project.leave",
 	"project.members.manage",
 	"project.bots.manage",
@@ -154,6 +157,7 @@ const VIEWER_IN_PROJECT: ProjectPermission[] = [
 /** What anybody who reaches a bot may do with it without managing it. */
 const USING_A_BOT: BotPermission[] = [
 	"bot.read",
+	"bot.use",
 	"bot.settings.read",
 	"connector.read",
 	"automation.read",
