@@ -1,6 +1,7 @@
 import { type ChildProcess, fork } from "node:child_process";
 import { join } from "node:path";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { Editor } from "@tiptap/core";
 import {
 	afterAll,
 	afterEach,
@@ -142,24 +143,63 @@ describe("a document being edited live", () => {
 	});
 });
 
-describe("following a link in the document, as a bot's link in a message is", () => {
+describe("links in the document", () => {
+	const PLAN = "https://example.com/plan?from=doc";
+	const LONG =
+		"https://example.com/reports/2026/launch/a-long-path-that-goes-on/summary?view=full&section=risks&owner=planner";
+	const CHART = "https://example.com/chart";
+	/** How every link opens: in a new tab that gets no referrer and no hold on the document's. */
+	const NEW_TAB = ["_blank", "noopener,noreferrer"] as const;
+
 	let opened: MockInstance<typeof window.open>;
 	beforeEach(() => {
 		opened = vi.spyOn(window, "open").mockReturnValue(null);
 	});
 	afterEach(() => opened.mockRestore());
 
-	/** The editor on `artifactId`'s document once a bot has written links into it. */
+	/** The editor on `artifactId`'s document once a bot has written links into it, with the first link's words. */
 	async function editingLinks(artifactId: string) {
 		await editing(artifactId);
 		const markdown = [
 			"# Launch plan",
-			"Read [the plan](https://example.com/plan?from=doc) first.",
-			`[![The launch chart](/api/pods/${POD_ID}/artifacts/${artifactId}/images/${"c".repeat(64)})](https://example.com/chart)`,
+			`Read [the plan](${PLAN}) first, and [the long one](${LONG}).`,
+			`[![The launch chart](/api/pods/${POD_ID}/artifacts/${artifactId}/images/${"c".repeat(64)})](${CHART})`,
 			"Go to [settings](/settings), or [run it](javascript:alert(1)).",
 		].join("\n\n");
 		api?.send({ artifactId, ask: "rewrite", markdown });
 		return await screen.findByText("the plan");
+	}
+
+	/** The editor drawing the text, which keeps itself on the element it draws into. */
+	const editorOf = (element: Element) =>
+		(element.closest(".ProseMirror") as HTMLElement & { editor: Editor }).editor;
+
+	/** Where in the document `words` start. */
+	function positionOf(editor: Editor, words: string): number {
+		let found = -1;
+		editor.state.doc.descendants((node, position) => {
+			const at = node.isText ? (node.text ?? "").indexOf(words) : -1;
+			if (found === -1 && at !== -1) found = position + at;
+		});
+		return found;
+	}
+
+	/** Puts the caret inside `words`, as a click there or the arrow keys would. */
+	function caretIn(words: string): Editor {
+		const editor = editorOf(screen.getByText(words));
+		editor.commands.focus(positionOf(editor, words) + 2);
+		return editor;
+	}
+
+	/** The menu for the link the caret is in. */
+	const linkMenu = () => screen.findByRole("toolbar", { name: "Link" });
+
+	/** The editor on a document holding links that can't be edited here, as when it holds content this tab can't show. */
+	async function readingLinks(artifactId: string) {
+		const link = await editingLinks(artifactId);
+		api?.send({ artifactId, ask: "unknown block" });
+		await screen.findByRole("alert");
+		return link;
 	}
 
 	/** Asserts the dialog asks before `address` opens, showing the whole of it, and that nothing opened. */
@@ -175,82 +215,55 @@ describe("following a link in the document, as a bot's link in a message is", ()
 		expect(opened).not.toHaveBeenCalled();
 	}
 
-	it("asks before a plain click opens a link off the app, and the browser follows nothing", async () => {
+	it("places the caret on a plain click on a link's words, opening nothing and asking nothing", async () => {
 		const link = await editingLinks("0199a3a0-0000-7000-8000-00000000000a");
+		const words = link.firstChild as Text;
 
-		const followed = fireEvent.click(link);
-
-		expect(followed).toBe(false);
-		await asksBefore("https://example.com/plan?from=doc");
-	});
-
-	it("asks before a plain click opens a linked image's link", async () => {
-		await editingLinks("0199a3a0-0000-7000-8000-00000000000b");
-
-		fireEvent.click(screen.getByRole("img", { name: "The launch chart" }));
-
-		await asksBefore("https://example.com/chart");
-	});
-
-	it("opens a link back into the app at once, in a new tab with no referrer or opener", async () => {
-		await editingLinks("0199a3a0-0000-7000-8000-00000000000c");
-
-		fireEvent.click(screen.getByText("settings"));
-
-		expect(opened).toHaveBeenCalledWith("/settings", "_blank", "noopener,noreferrer");
-		expect(screen.queryByRole("dialog")).toBeNull();
-	});
-
-	it("opens a link off the app at once when the reader chose where, with a modified or middle click", async () => {
-		const link = await editingLinks("0199a3a0-0000-7000-8000-00000000000d");
-
-		fireEvent.click(link, { ctrlKey: true });
-		fireEvent(link, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }));
-
-		expect(opened.mock.calls).toEqual([
-			["https://example.com/plan?from=doc", "_blank", "noopener,noreferrer"],
-			["https://example.com/plan?from=doc", "_blank", "noopener,noreferrer"],
-		]);
-		expect(screen.queryByRole("dialog")).toBeNull();
-	});
-
-	it("follows no link to an address a text link may not go to", async () => {
-		await editingLinks("0199a3a0-0000-7000-8000-00000000000e");
-
-		const followed = fireEvent.click(screen.getByText("run it"));
+		// The browser puts the caret where the press was, then the click arrives.
+		window.getSelection()?.collapse(words, 3);
+		const followed = fireEvent.click(link, { detail: 1 });
 
 		expect(followed).toBe(false);
+		const caret = window.getSelection();
+		expect([caret?.anchorNode, caret?.anchorOffset, caret?.isCollapsed]).toEqual([words, 3, true]);
 		expect(opened).not.toHaveBeenCalled();
 		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
-	it("asks the same once the document can't be edited here", async () => {
-		const artifactId = "0199a3a0-0000-7000-8000-00000000000f";
-		const link = await editingLinks(artifactId);
-		api?.send({ artifactId, ask: "unknown block" });
-		await screen.findByRole("alert");
+	it("opens nothing on a Ctrl, Cmd or middle click on a link, a link into the app or a linked image, and stops the browser following it", async () => {
+		await editingLinks("0199a3a0-0000-7000-8000-00000000000b");
+		const links = [
+			screen.getByText("the plan"),
+			screen.getByText("settings"),
+			screen.getByRole("img", { name: "The launch chart" }),
+		];
 
-		const followed = fireEvent.click(link);
+		const followed = links.flatMap((link) => [
+			fireEvent.click(link, { ctrlKey: true }),
+			fireEvent.click(link, { metaKey: true }),
+			fireEvent(link, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 })),
+		]);
 
-		expect(followed).toBe(false);
-		await asksBefore("https://example.com/plan?from=doc");
+		expect(followed).toEqual(new Array(9).fill(false));
+		expect(opened).not.toHaveBeenCalled();
+		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
-	it("neither asks nor opens when the reader drags to select part of a link's words", async () => {
-		const link = await editingLinks("0199a3a0-0000-7000-8000-000000000010");
-		const words = link.firstChild as Text;
+	it("opens nothing for a link to an address a text link may not go to, whose menu can't open it", async () => {
+		await editingLinks("0199a3a0-0000-7000-8000-00000000000d");
 
-		// A press on the link, a drag along it and a release on it leave part of its words selected, then click.
-		window.getSelection()?.setBaseAndExtent(words, 1, words, 6);
-		const followed = fireEvent.click(link, { detail: 1 });
+		const followed = fireEvent.click(screen.getByText("run it"), { ctrlKey: true });
+		caretIn("run it");
 
 		expect(followed).toBe(false);
+		const open = within(await linkMenu()).getByRole("button", { name: "Open link" });
+		expect(open).toHaveProperty("disabled", true);
 		expect(opened).not.toHaveBeenCalled();
 		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
 	it("leaves a Shift or Alt click on a link's words to the editor, neither asking nor opening", async () => {
-		const link = await editingLinks("0199a3a0-0000-7000-8000-000000000011");
+		const link = await editingLinks("0199a3a0-0000-7000-8000-00000000000e");
 		const words = link.firstChild as Text;
 
 		for (const modifier of [{ shiftKey: true }, { altKey: true }]) {
@@ -265,18 +278,143 @@ describe("following a link in the document, as a bot's link in a message is", ()
 		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
-	it("asks on a click with no press of its own, after a press elsewhere and with the link's words selected", async () => {
-		const link = await editingLinks("0199a3a0-0000-7000-8000-000000000012");
-		const heading = screen.getByRole("heading", { level: 1, name: "Launch plan" });
-		fireEvent.pointerDown(heading, { clientX: 400, clientY: 300 });
-		fireEvent.pointerUp(document.body, { clientX: 10, clientY: 10 });
+	it("shows the menu for the link the caret is in, with its address, which opens it at once", async () => {
+		await editingLinks("0199a3a0-0000-7000-8000-000000000010");
+
+		caretIn("the plan");
+		const menu = await linkMenu();
+
+		expect(menu.textContent).toContain(PLAN);
+		fireEvent.click(within(menu).getByRole("button", { name: "Open link" }));
+		expect(opened.mock.calls).toEqual([[PLAN, ...NEW_TAB]]);
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
+	it("keeps a long address's host whole in the menu, cutting only what follows it", async () => {
+		await editingLinks("0199a3a0-0000-7000-8000-000000000011");
+
+		caretIn("the long one");
+		const menu = await linkMenu();
+
+		const host = within(menu).getByText("https://example.com");
+		const rest = within(menu).getByText(LONG.slice("https://example.com".length));
+		expect([host.className.includes("shrink-0"), rest.className.includes("truncate")]).toEqual([
+			true,
+			true,
+		]);
+	});
+
+	it("copies the link's address from its menu", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+		try {
+			await editingLinks("0199a3a0-0000-7000-8000-000000000012");
+
+			caretIn("the plan");
+			fireEvent.click(within(await linkMenu()).getByRole("button", { name: "Copy link" }));
+
+			expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+			expect(writeText).toHaveBeenCalledWith(PLAN);
+		} finally {
+			Reflect.deleteProperty(navigator, "clipboard");
+		}
+	});
+
+	it("changes the link's address from its menu, for everyone in the document", async () => {
+		const artifactId = "0199a3a0-0000-7000-8000-000000000013";
+		await editingLinks(artifactId);
+
+		caretIn("the plan");
+		fireEvent.click(within(await linkMenu()).getByRole("button", { name: "Edit link" }));
+		const field = await screen.findByRole("textbox", { name: "Link address" });
+		expect(field).toHaveProperty("value", PLAN);
+		fireEvent.change(field, { target: { value: "example.com/new-plan" } });
+		fireEvent.submit(field.closest("form") as HTMLFormElement);
+
+		await waitFor(async () =>
+			expect(await markdownOf(artifactId)).toContain(
+				"[the plan](https://example.com/new-plan) first",
+			),
+		);
+	});
+
+	it("takes the link off its words from its menu, keeping the words", async () => {
+		const artifactId = "0199a3a0-0000-7000-8000-000000000014";
+		await editingLinks(artifactId);
+
+		caretIn("the plan");
+		fireEvent.click(within(await linkMenu()).getByRole("button", { name: "Remove link" }));
+
+		await waitFor(() =>
+			expect(screen.getByText("the plan", { exact: false }).closest("a")).toBeNull(),
+		);
+		await waitFor(async () =>
+			expect(await markdownOf(artifactId)).toContain("Read the plan first"),
+		);
+	});
+
+	it("shows the menu for a selected linked image, which opens its link", async () => {
+		await editingLinks("0199a3a0-0000-7000-8000-000000000015");
+		const editor = editorOf(screen.getByRole("img", { name: "The launch chart" }));
+		let image = -1;
+		editor.state.doc.descendants((node, position) => {
+			if (node.type.name === "image") image = position;
+		});
+
+		editor.chain().focus().setNodeSelection(image).run();
+		const menu = await linkMenu();
+
+		expect(menu.textContent).toContain(CHART);
+		fireEvent.click(within(menu).getByRole("button", { name: "Open link" }));
+		expect(opened.mock.calls).toEqual([[CHART, ...NEW_TAB]]);
+	});
+
+	it("shows no link menu for words selected inside a link, where the menu for selected text shows", async () => {
+		await editingLinks("0199a3a0-0000-7000-8000-000000000016");
+		const editor = editorOf(screen.getByText("the plan"));
+		const start = positionOf(editor, "the plan");
+
+		editor
+			.chain()
+			.focus()
+			.setTextSelection({ from: start + 1, to: start + 6 })
+			.run();
+
+		expect(await screen.findByRole("toolbar", { name: "Selected text" })).toBeDefined();
+		expect(screen.queryByRole("toolbar", { name: "Link" })).toBeNull();
+	});
+
+	it("asks before a plain click opens a link off the app where the document can't be edited", async () => {
+		const link = await readingLinks("0199a3a0-0000-7000-8000-000000000017");
+
+		const followed = fireEvent.click(link);
+
+		expect(followed).toBe(false);
+		await asksBefore(PLAN);
+	});
+
+	it("neither asks nor opens where the document can't be edited when the reader drags to select a link's words", async () => {
+		const link = await readingLinks("0199a3a0-0000-7000-8000-000000000018");
+		const words = link.firstChild as Text;
+
+		// A press on the link, a drag along it and a release on it leave part of its words selected, then click.
+		window.getSelection()?.setBaseAndExtent(words, 1, words, 6);
+		const followed = fireEvent.click(link, { detail: 1 });
+
+		expect(followed).toBe(false);
+		expect(opened).not.toHaveBeenCalled();
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
+	it("asks where the document can't be edited on a click with no press of its own, with the link's words selected", async () => {
+		const link = await readingLinks("0199a3a0-0000-7000-8000-000000000019");
 		const words = link.firstChild as Text;
 		window.getSelection()?.setBaseAndExtent(words, 0, words, 8);
 
 		// Enter on the focused link, a screen reader or voice control clicks it with no press, and no count of presses.
 		fireEvent.click(link, { detail: 0 });
 
-		await asksBefore("https://example.com/plan?from=doc");
+		await asksBefore(PLAN);
 	});
 });
 

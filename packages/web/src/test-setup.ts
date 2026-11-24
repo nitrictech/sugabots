@@ -70,6 +70,12 @@ if (!Element.prototype.hasPointerCapture) {
 	Element.prototype.releasePointerCapture = () => {};
 }
 
+// The boxes of a stretch of text, which the document editor places its menus against.
+if (!Range.prototype.getClientRects) {
+	Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+	Range.prototype.getBoundingClientRect = () => new DOMRect();
+}
+
 // An open listbox scrolls its selected option into view.
 if (!Element.prototype.scrollIntoView) {
 	Element.prototype.scrollIntoView = () => {};

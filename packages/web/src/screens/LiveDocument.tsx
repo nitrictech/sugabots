@@ -73,6 +73,7 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
+import { FloatingMenu, MENU_GAP_PX, MenuDivider } from "./floating-menu.tsx";
 import {
 	BLOCK_KINDS,
 	BlockHandle,
@@ -85,7 +86,7 @@ import {
 	turnInto,
 } from "./LiveDocumentBlocks.tsx";
 import { Outline } from "./LiveDocumentOutline.tsx";
-import { LiveDocumentText } from "./live-document-text.tsx";
+import { LinkBox, LiveDocumentText } from "./live-document-text.tsx";
 
 /** Who the person is to the others in the document. */
 export interface Editing {
@@ -348,6 +349,8 @@ function LiveEditor({
 					editor={editor}
 					ref={text}
 					className="mx-auto max-w-204 pt-14 pb-30 max-md:pt-6"
+					page={page}
+					askBoxOpen={asking !== undefined}
 				/>
 				{!outOfDate && <BlockHandle editor={editor} onOffer={setBlocksOfferedAt} />}
 				{!asking && !outOfDate && (
@@ -727,30 +730,22 @@ function SelectionMenu({
 		onHold(false);
 		editor.commands.focus();
 	}
+	/** Links the selected text to `address`, or unlinks it with none. */
+	function link(address: string | undefined) {
+		const selected = editor.chain().focus().extendMarkRange("link");
+		(address ? selected.setLink({ href: address }) : selected.unsetLink()).run();
+	}
+	const linkedTo: unknown = editor.getAttributes("link").href;
 
-	// Starts over the selection's first word, moved left where it would run off the window.
-	const menu = useRef<HTMLDivElement>(null);
-	const [left, setLeft] = useState(at.left);
-	useLayoutEffect(() => {
-		const roomAcross =
-			window.innerWidth - (menu.current?.offsetWidth ?? 0) - SELECTION_MENU_MARGIN_PX;
-		setLeft(Math.max(SELECTION_MENU_MARGIN_PX, Math.min(at.left, roomAcross)));
-	}, [at.left]);
-	// In the window, not the page: the page clips what reaches past its edges, as a menu over its first line does.
-	return createPortal(
-		<div
-			ref={menu}
-			role="toolbar"
-			aria-label="Selected text"
-			style={{ top: at.top, left }}
-			// Keeps the selection, which a press anywhere else would clear. A press in the link's box places its caret.
-			onMouseDown={(event) => {
-				if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
-			}}
-			className="fixed z-40 flex -translate-y-full items-center gap-0.5 rounded-lg border border-border-strong bg-panel p-1 shadow-popover"
-		>
+	// Starts over the selection's first word.
+	return (
+		<FloatingMenu at={at} label="Selected text">
 			{linking ? (
-				<LinkBox editor={editor} onDone={stopLinking} />
+				<LinkBox
+					address={typeof linkedTo === "string" ? linkedTo : ""}
+					onApply={link}
+					onDone={stopLinking}
+				/>
 			) : (
 				<>
 					{editWith && (
@@ -778,12 +773,9 @@ function SelectionMenu({
 					<LinkButton editor={editor} onClick={startLinking} />
 				</>
 			)}
-		</div>,
-		document.body,
+		</FloatingMenu>
 	);
 }
-
-const MenuDivider = () => <span aria-hidden className="mx-0.5 h-4 w-px bg-border-strong" />;
 
 /** Opens the box for a link, lit while the selected text is one. */
 function LinkButton({ editor, onClick }: { editor: Editor; onClick: () => void }) {
@@ -803,55 +795,6 @@ function LinkButton({ editor, onClick }: { editor: Editor; onClick: () => void }
 		</IconButton>
 	);
 }
-
-/**
- * Where the selected text's link is typed, in the menu's place. Enter links
- * the text, or unlinks it when the box is empty, and Escape leaves it as it was.
- */
-function LinkBox({ editor, onDone }: { editor: Editor; onDone: () => void }) {
-	const linkedTo: unknown = editor.getAttributes("link").href;
-	const [address, setAddress] = useState(typeof linkedTo === "string" ? linkedTo : "");
-	// The person clicked Link to open this box, so typing goes here.
-	const field = useRef<HTMLInputElement>(null);
-	useEffect(() => field.current?.select(), []);
-	function apply() {
-		const link = editor.chain().focus().extendMarkRange("link");
-		if (address.trim() === "") link.unsetLink().run();
-		else link.setLink({ href: withScheme(address.trim()) }).run();
-		onDone();
-	}
-	return (
-		<form
-			className="flex items-center gap-1"
-			onSubmit={(event) => {
-				event.preventDefault();
-				apply();
-			}}
-		>
-			<input
-				ref={field}
-				aria-label="Link address"
-				placeholder="Paste a link"
-				value={address}
-				onChange={(event) => setAddress(event.target.value)}
-				onKeyDown={(event) => {
-					if (event.key === "Escape") onDone();
-				}}
-				className="h-6 w-64 rounded-md bg-transparent px-2 text-foreground text-xs outline-none placeholder:text-subtle-foreground"
-			/>
-			<IconButton label={address.trim() === "" ? "Remove link" : "Link"} type="submit">
-				<Check aria-hidden />
-			</IconButton>
-		</form>
-	);
-}
-
-/** An address as a link's target: one typed without a scheme, such as `example.com`, is a web address. */
-const withScheme = (address: string) =>
-	/^[a-z][a-z0-9+.-]*:/i.test(address) ? address : `https://${address}`;
-
-/** The least room the menu keeps from the window's edge. */
-const SELECTION_MENU_MARGIN_PX = 16;
 
 /** Says what kind of block the selected text is, by its icon and name, and turns it into another. */
 function BlockKindPicker({
@@ -1082,7 +1025,7 @@ function useSelectionMenu(
 		if (start.top < frame.top || start.top > frame.bottom) return setOffer(undefined);
 		setOffer({
 			selected,
-			menu: { top: start.top - EDIT_OFFER_GAP_PX, left: start.left },
+			menu: { top: start.top - MENU_GAP_PX, left: start.left },
 			below: end.bottom - frame.top + element.scrollTop + EDIT_OFFER_GAP_PX,
 			left: start.left - frame.left,
 		});
@@ -1102,7 +1045,7 @@ function useSelectionMenu(
 	return offer;
 }
 
-/** The space between the selected text and the menu above it or the box below it. */
+/** The space between the text and the box below it, or a suggestion's card above or below it. */
 const EDIT_OFFER_GAP_PX = 6;
 
 /**
