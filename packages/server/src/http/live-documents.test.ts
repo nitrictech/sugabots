@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import type { Artifact } from "@sugabots/contracts";
+import { artifactImageAddress, artifactImageIds } from "@sugabots/contracts/http";
 import { LIVE_DOCUMENT_SCHEMA } from "@sugabots/contracts/live-document";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { LiveDocuments } from "@sugabots/core/artifacts/live";
@@ -47,6 +48,32 @@ const plan: Artifact = {
 	shownVersion: { number: 1, author: null, createdAt: "2026-11-23T00:00:00.000Z" },
 };
 
+const ILLUSTRATED_ID = "0199a3a0-0000-7000-8000-000000000004";
+
+/** The address of an image kept for `artifactId`. */
+function imageKeptFor(artifactId: string): string {
+	const ids = artifactImageIds({ podId: POD_ID, artifactId, imageId: "f".repeat(64) });
+	if (!ids) throw new Error("fixture");
+	return artifactImageAddress(ids);
+}
+
+/**
+ * A document showing one of its own images and one kept for another
+ * artifact, which `Artifacts` here would serve as readily.
+ */
+const illustrated: Artifact = {
+	...plan,
+	id: ILLUSTRATED_ID,
+	title: "Illustrated plan",
+	content: `# Illustrated plan\n\n![Our chart](${imageKeptFor(ILLUSTRATED_ID)})\n\n![Their chart](${imageKeptFor(ARTIFACT_ID)})`,
+};
+
+/** A one-pixel PNG. */
+const PNG = Buffer.from(
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+	"base64",
+);
+
 const PLANNER = {
 	name: "Planner",
 	threadId: "0199a3a0-0000-7000-8000-000000000003",
@@ -91,7 +118,16 @@ beforeAll(async () => {
 			const routes = testRoutes(
 				Layer.mergeAll(
 					identifiedBy(resolveUser),
-					unimplemented(Artifacts.Service, { get: () => Effect.succeed(plan) }),
+					unimplemented(Artifacts.Service, {
+						get: ({ artifactId }) =>
+							Effect.succeed(artifactId === illustrated.id ? illustrated : plan),
+						image: () =>
+							Effect.succeed({
+								contentType: "image/png",
+								size: PNG.byteLength,
+								stream: Stream.succeed(PNG),
+							}),
+					}),
 					Layer.succeed(LiveDocuments.Service, live),
 				),
 			);
@@ -137,6 +173,19 @@ describe("a document's live WebSocket", () => {
 		expect(response.headers.get("content-disposition")).toContain("Launch%20plan.docx");
 		// A .docx is a zip, which starts with these two letters.
 		expect(new TextDecoder().decode(file.slice(0, 2))).toBe("PK");
+	});
+
+	it("puts the document's own image in its Word file, and no other", async () => {
+		const response = await fetch(
+			`http://127.0.0.1:${apiPort}/api/pods/${POD_ID}/artifacts/${ILLUSTRATED_ID}/word`,
+			{ headers: { cookie: "session=good" } },
+		);
+		const file = new Uint8Array(await response.arrayBuffer());
+
+		expect(response.status).toBe(200);
+		// A .docx is a zip, whose list of files is plain text: one image is among them.
+		const media = new TextDecoder().decode(file).match(/word\/media\/[\w-]+\.png/g) ?? [];
+		expect(new Set(media).size).toBe(1);
 	});
 
 	it("gives nobody the Word file without a session", async () => {

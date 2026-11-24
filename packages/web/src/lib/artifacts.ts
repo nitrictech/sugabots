@@ -1,4 +1,9 @@
-import { ARTIFACT_WRITING_TOOLS, type ToolCallPart } from "@sugabots/contracts";
+import {
+	ARTIFACT_WRITING_TOOLS,
+	type ArtifactImageType,
+	type ToolCallPart,
+} from "@sugabots/contracts";
+import { type ArtifactImageIds, artifactImagePath } from "@sugabots/contracts/http";
 import {
 	type QueryClient,
 	queryOptions,
@@ -59,6 +64,29 @@ function artifactQuery(podId: string, artifactId: string, version?: number) {
 			),
 	});
 }
+
+/** Keeps an image for a document artifact to show, answering the address the document refers to it by. */
+export async function uploadArtifactImage(
+	{ podId, artifactId }: { podId: string; artifactId: string },
+	{ type, bytes }: { type: ArtifactImageType; bytes: Uint8Array },
+): Promise<string> {
+	const { address } = await Effect.runPromise(
+		client.api.artifacts.uploadImage({
+			params: { podId, artifactId },
+			query: { type },
+			payload: bytes,
+		}),
+	);
+	return address;
+}
+
+/**
+ * Where the page loads an image a document keeps from: the API, wherever it
+ * is served. Like a chat's files, it is loaded with the person's cookie,
+ * as far as the browser sends it to the API's origin.
+ */
+export const artifactImageSource = (image: ArtifactImageIds): string =>
+	`${client.baseUrl}${artifactImagePath(image)}`;
 
 /** Deletes one of the pod's artifacts, then refreshes the pod's list. */
 export function useDeleteArtifact(podId: string) {

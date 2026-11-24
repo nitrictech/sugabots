@@ -3,5 +3,6 @@
  */
 
 export { API_BASE_PATH, Api } from "./api.ts";
+export * from "./artifact-images.ts";
 export * from "./errors.ts";
 export * from "./middleware.ts";

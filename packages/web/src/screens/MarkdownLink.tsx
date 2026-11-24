@@ -4,8 +4,7 @@ import { ImageIcon } from "lucide-react";
 import { normalizeUri } from "micromark-util-sanitize-uri";
 import { type ComponentProps, type MouseEvent, type ReactNode, useState } from "react";
 import type { ExtraProps } from "streamdown";
-import { Button, buttonStyles } from "@/ui/button.tsx";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/ui/dialog.tsx";
+import { isInApp, LeavingDialog, type LeavingWording, LINK_WORDING } from "./leaving-the-app.tsx";
 
 /**
  * MarkdownLink draws a link in a message's markdown as a real anchor, so
@@ -74,20 +73,7 @@ export function MarkdownImageLink({
 	);
 }
 
-/** What the dialog says before a link off the app opens. */
-interface Wording {
-	title: string;
-	description: string;
-	open: string;
-}
-
-const LINK_WORDING: Wording = {
-	title: "Open external link?",
-	description: "You're about to visit a website outside Sugabots.",
-	open: "Open link",
-};
-
-const IMAGE_WORDING: Wording = {
+const IMAGE_WORDING: LeavingWording = {
 	title: "Open image?",
 	description: "You're about to open an image from a website outside Sugabots.",
 	open: "Open image",
@@ -107,7 +93,7 @@ function AnchorThatAsks({
 }: Omit<ComponentProps<"a">, "href" | "target" | "rel" | "onClick"> & {
 	href: string;
 	asks: boolean;
-	wording: Wording;
+	wording: LeavingWording;
 }) {
 	const [confirming, setConfirming] = useState(false);
 	function askBeforeLeaving(event: MouseEvent<HTMLAnchorElement>) {
@@ -120,29 +106,7 @@ function AnchorThatAsks({
 			<a {...anchor} href={href} target="_blank" rel="noreferrer" onClick={askBeforeLeaving}>
 				{children}
 			</a>
-			<Dialog open={confirming} onOpenChange={setConfirming}>
-				<DialogContent sheetOnPhone>
-					<div className="flex flex-col gap-1.5">
-						<DialogTitle>{wording.title}</DialogTitle>
-						<DialogDescription>{wording.description}</DialogDescription>
-					</div>
-					<p className="break-all rounded-md bg-chip p-2.5 font-mono text-xs">{href}</p>
-					<div className="flex justify-end gap-2">
-						<Button variant="secondary" size="sm" onClick={() => setConfirming(false)}>
-							Cancel
-						</Button>
-						<a
-							href={href}
-							target="_blank"
-							rel="noreferrer"
-							className={buttonStyles({ size: "sm" })}
-							onClick={() => setConfirming(false)}
-						>
-							{wording.open}
-						</a>
-					</div>
-				</DialogContent>
-			</Dialog>
+			<LeavingDialog href={href} wording={wording} open={confirming} onOpenChange={setConfirming} />
 		</>
 	);
 }
@@ -157,10 +121,6 @@ function showsItsAddress(link: Element | undefined, href: string) {
 	if (!link) return false;
 	const text = hastToString(link);
 	return [text, `http://${text}`, `mailto:${text}`].map(normalizeUri).includes(href);
-}
-
-function isInApp(href: string) {
-	return URL.parse(href, window.location.href)?.origin === window.location.origin;
 }
 
 /* A middle or modified click is the reader choosing where the link opens, so it is theirs to make unasked. */

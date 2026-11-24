@@ -1,15 +1,25 @@
 import type { MessageAuthor } from "@sugabots/contracts";
+import { allowedHtmlTag } from "@sugabots/contracts/document-markdown";
+import { ownImageAt } from "@sugabots/contracts/http";
 import { cn } from "cn";
 import type { ElementContent, Root } from "hast";
 import { toString as hastToString } from "hast-util-to-string";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import type { Definition, Image, Link, Root as MdastRoot } from "mdast";
+import type {
+	Definition,
+	Image,
+	Link,
+	Root as MdastRoot,
+	PhrasingContent,
+	RootContent,
+} from "mdast";
 import {
 	type CSSProperties,
 	cloneElement,
 	createElement,
 	isValidElement,
 	type ReactNode,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -26,6 +36,7 @@ import {
 import type { PluggableList, Plugin } from "unified";
 import { SKIP, visit } from "unist-util-visit";
 import { visitParents } from "unist-util-visit-parents";
+import { artifactImageSource } from "@/lib/artifacts.ts";
 import { Button } from "@/ui/button.tsx";
 import { codeHighlighter } from "./code-highlighter.ts";
 import { MarkdownImageLink, MarkdownLink } from "./MarkdownLink.tsx";
@@ -52,16 +63,49 @@ export function MessageMarkdown({
 	text: string;
 	/** Everyone a mention in the text could name. */
 	mentionable: readonly MentionTarget[];
-	/** A bot, routine or artifact writes markdown on purpose; a person writes chat. See `WRITERS`. */
+	/** A bot or routine writes markdown on purpose; a person writes chat. See `WRITERS`. */
 	writer: MarkdownWriter;
 }) {
-	const { className, remarkPlugins, components, completesUnclosedMarkup } = WRITERS[writer];
+	return <MarkdownView text={text} mentionable={mentionable} reading={WRITERS[writer]} />;
+}
+
+/**
+ * A `document` artifact's markdown, as its editor writes it: a bot's
+ * markdown, with the marks the editor writes as HTML tags drawn as marks, and
+ * the images the artifact keeps drawn in place. Any other image is a link to
+ * it, as in a message.
+ */
+export function DocumentMarkdown({
+	text,
+	artifact,
+}: {
+	text: string;
+	/** The document's artifact, whose kept images are the only ones drawn. */
+	artifact: { podId: string; artifactId: string };
+}) {
+	const { podId, artifactId } = artifact;
+	const reading = useMemo(() => documentReading({ podId, artifactId }), [podId, artifactId]);
+	return <MarkdownView text={text} mentionable={NO_MENTIONS} reading={reading} />;
+}
+
+const NO_MENTIONS: readonly MentionTarget[] = [];
+
+function MarkdownView({
+	text,
+	mentionable,
+	reading,
+}: {
+	text: string;
+	mentionable: readonly MentionTarget[];
+	reading: MarkdownReading;
+}) {
+	const { className, remarkPlugins, rehypePlugins, components, completesUnclosedMarkup } = reading;
 	return (
 		<MentionableContext value={mentionable}>
 			<Streamdown
 				className={cn(BREAK_LONG_WORDS, "message-markdown", className)}
 				remarkPlugins={remarkPlugins}
-				rehypePlugins={REHYPE_PLUGINS}
+				rehypePlugins={rehypePlugins}
 				components={components}
 				controls={CONTROLS}
 				plugins={PLUGINS}
@@ -129,22 +173,83 @@ const rehypeSoftBreaks: Plugin<[], Root> = () => (tree) => {
  * An image is drawn as a link to it, never loaded: a bot led by planted
  * instructions could write one whose address carries the conversation, sent
  * out as soon as anyone read the reply. Sugabots' own addresses are no
- * exception. Inside a link already, an image is only its words.
+ * exception, but for those `mayLoad` says may, as a document says of the
+ * images it keeps. Inside a link already, an image is only its words.
  */
-const rehypeImagesAsLinks: Plugin<[], Root> = () => (tree) => {
-	visitParents(tree, "element", (node, ancestors) => {
-		const parent = ancestors.at(-1);
-		if (node.tagName !== "img" || !parent) return;
-		const src = String(node.properties.src ?? "");
-		const words: ElementContent = { type: "text", value: String(node.properties.alt ?? "") || src };
-		const inLink = ancestors.some(
-			(ancestor) => ancestor.type === "element" && ancestor.tagName === "a",
-		);
-		parent.children[parent.children.indexOf(node)] = inLink
-			? words
-			: { type: "element", tagName: IMAGE_LINK_TAG, properties: { href: src }, children: [words] };
+const rehypeImagesAsLinks: Plugin<[{ mayLoad?: (src: string) => boolean }?], Root> =
+	({ mayLoad } = {}) =>
+	(tree) => {
+		visitParents(tree, "element", (node, ancestors) => {
+			const parent = ancestors.at(-1);
+			if (node.tagName !== "img" || !parent) return;
+			const src = String(node.properties.src ?? "");
+			if (mayLoad?.(src)) return;
+			const words: ElementContent = {
+				type: "text",
+				value: String(node.properties.alt ?? "") || src,
+			};
+			const inLink = ancestors.some(
+				(ancestor) => ancestor.type === "element" && ancestor.tagName === "a",
+			);
+			parent.children[parent.children.indexOf(node)] = inLink
+				? words
+				: {
+						type: "element",
+						tagName: IMAGE_LINK_TAG,
+						properties: { href: src },
+						children: [words],
+					};
+		});
+	};
+
+/*
+ * A document's markdown writes the marks markdown has no sign for as HTML
+ * tags, such as `<sup>2</sup>`, and joins a table cell's lines with `<br>`
+ * (see `allowedHtmlTag`). Each of those tags, closed where it opens, is drawn
+ * as what it marks. Any other HTML stays the text it is.
+ */
+const remarkAllowedHtmlTags: Plugin<[], MdastRoot> = () => (tree) => {
+	// `visit` goes on into the children it is handed back, so tags within a mark are drawn too.
+	visit(tree, (node) => {
+		if ("children" in node) {
+			node.children = withAllowedHtmlTags(node.children) as typeof node.children;
+		}
 	});
 };
+
+/** `children` with the allowed tags among them drawn as what they mark. */
+function withAllowedHtmlTags(children: readonly RootContent[]): RootContent[] {
+	const drawn: RootContent[] = [];
+	for (let index = 0; index < children.length; index++) {
+		const child = children[index] as RootContent;
+		const tag = child.type === "html" ? allowedHtmlTag(child.value) : undefined;
+		if (tag?.name === "br") {
+			drawn.push({ type: "break" });
+			continue;
+		}
+		const closesAt = tag && !tag.closing ? closingTagIndex(children, index, tag.name) : -1;
+		if (!tag || closesAt === -1) {
+			drawn.push(child);
+			continue;
+		}
+		// Drawn as the tag it was written with, by remark's usual element for inline content.
+		drawn.push({
+			type: "emphasis",
+			data: { hName: tag.name },
+			children: children.slice(index + 1, closesAt) as PhrasingContent[],
+		});
+		index = closesAt;
+	}
+	return drawn;
+}
+
+/** Where in `children`, after `opensAt`, the tag `name` closes, or -1 if it never does. */
+const closingTagIndex = (children: readonly RootContent[], opensAt: number, name: string) =>
+	children.findIndex((child, index) => {
+		if (index <= opensAt || child.type !== "html") return false;
+		const tag = allowedHtmlTag(child.value);
+		return tag?.name === name && tag.closing;
+	});
 
 /** The element `rehypeImagesAsLinks` puts in an image's place; `MarkdownImageLink` draws it. */
 const IMAGE_LINK_TAG = "image-link";
@@ -185,11 +290,11 @@ const remarkOnlyWebLinks: Plugin<[], MdastRoot> = () => (tree, file) => {
  * Without its `rehype-raw` either, HTML in a message is drawn as text, which
  * keeps anyone in a pod from putting markup in front of the others: never
  * add it. Nothing filters link addresses; React refuses `javascript:` ones.
- * `rehypeImagesAsLinks` keeps every writer's images from loading, so never
- * drop it either.
+ * `rehypeImagesAsLinks` keeps every writer's images from loading, but for the
+ * images a document keeps, so never drop it either.
  */
-const REHYPE_PLUGINS: PluggableList = [
-	rehypeImagesAsLinks,
+const rehypePluginsFor = (images: { mayLoad?: (src: string) => boolean } = {}): PluggableList => [
+	[rehypeImagesAsLinks, images],
 	rehypeFocusableCodeBlocks,
 	rehypeSoftBreaks,
 ];
@@ -322,6 +427,20 @@ function heading(tag: "h1" | "h2" | "h3", size: string) {
 
 type MarkdownWriter = "bot" | "person";
 
+/** How markdown is read and drawn, which differs by who writes it. */
+interface MarkdownReading {
+	className: string | undefined;
+	remarkPlugins: PluggableList;
+	rehypePlugins: PluggableList;
+	components: Components;
+	completesUnclosedMarkup: boolean;
+}
+
+const BOT_COMPONENTS: Components = {
+	...COMPONENTS,
+	a: (props) => <MarkdownLink {...props} asks="always" />,
+};
+
 /** Whose markdown `author`'s text is: a person's, or else a bot's, as a routine's is. */
 export function writerOf(author: MessageAuthor): MarkdownWriter {
 	return author.kind === "person" ? "person" : "bot";
@@ -342,24 +461,64 @@ const WRITERS = {
 	bot: {
 		className: undefined,
 		remarkPlugins: remarkPluginsWith({}),
-		components: { ...COMPONENTS, a: (props) => <MarkdownLink {...props} asks="always" /> },
+		rehypePlugins: rehypePluginsFor(),
+		components: BOT_COMPONENTS,
 		completesUnclosedMarkup: true,
 	},
 	person: {
 		className: "[--bot-mono:initial] [--bot-tint:initial]",
 		remarkPlugins: [...remarkPluginsWith({ singleTilde: false }), remarkOnlyWebLinks, remarkBreaks],
+		rehypePlugins: rehypePluginsFor(),
 		components: {
 			...COMPONENTS,
 			a: (props) => <MarkdownLink {...props} asks="unless-text-is-address" />,
 		},
 		completesUnclosedMarkup: false,
 	},
-} satisfies Record<
-	MarkdownWriter,
-	{
-		className: string | undefined;
-		remarkPlugins: PluggableList;
-		components: Components;
-		completesUnclosedMarkup: boolean;
-	}
->;
+} satisfies Record<MarkdownWriter, MarkdownReading>;
+
+const DOCUMENT_REMARK_PLUGINS: PluggableList = [...remarkPluginsWith({}), remarkAllowedHtmlTags];
+
+/** How a document's markdown is read: as a bot's, with the editor's tags and `artifact`'s own images. */
+function documentReading(artifact: { podId: string; artifactId: string }): MarkdownReading {
+	return {
+		className: undefined,
+		remarkPlugins: DOCUMENT_REMARK_PLUGINS,
+		rehypePlugins: rehypePluginsFor({ mayLoad: (src) => ownImageAt(src, artifact) !== undefined }),
+		components: {
+			...BOT_COMPONENTS,
+			img: ({ src, alt, title }) => (
+				<OwnImage src={src} alt={alt} title={title} artifact={artifact} />
+			),
+		},
+		completesUnclosedMarkup: true,
+	};
+}
+
+/**
+ * An image `artifact` keeps, drawn in place, loaded from the API. An image
+ * at any other address is drawn as its words, so drawing one never fetches
+ * anything but the document's own.
+ */
+function OwnImage({
+	src,
+	alt,
+	title,
+	artifact,
+}: {
+	src?: string | Blob;
+	alt?: string;
+	title?: string;
+	artifact: { podId: string; artifactId: string };
+}) {
+	const own = typeof src === "string" ? ownImageAt(src, artifact) : undefined;
+	if (!own) return alt ?? null;
+	return (
+		<img
+			src={artifactImageSource(own)}
+			alt={alt ?? ""}
+			title={title}
+			className="my-2 inline-block max-w-full rounded-md"
+		/>
+	);
+}

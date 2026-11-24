@@ -56,6 +56,16 @@ export const asHttpError =
  */
 export const refusals = { ResourceHidden: NotFound, ActionForbidden: Forbidden };
 
+/**
+ * For `Effect.catchTags`: a blob store that cannot be reached, or refuses, is
+ * the installation's fault, not the caller's: logged, and answered as a
+ * server error.
+ */
+export const storeOutagesAsDefects = {
+	BlobStoreUnavailable: Effect.die,
+	BlobStoreRejected: Effect.die,
+} as const;
+
 /** Whether `failure` is a `DomainError` rather than an older `UserFacing` error. */
 function isDomainError(failure: DomainError | UserFacing): failure is DomainError {
 	return "isRetryable" in failure;

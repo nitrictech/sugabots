@@ -19,7 +19,7 @@ import { BlobStore } from "../../blob-store/blob-store.ts";
 import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
 import { message, threadFile } from "../../database/schema.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
-import type { UserFacing } from "../../user-message.ts";
+import { sizeForPeople, type UserFacing } from "../../user-message.ts";
 import { type AttachedFileRow, loadFileParts } from "../threads/file-parts.ts";
 
 /**
@@ -550,14 +550,6 @@ export class TooManyReplyFiles extends Data.TaggedError("TooManyReplyFiles") imp
 	get userMessage() {
 		return userText`A reply can carry at most ${MAX_ATTACHMENTS_PER_MESSAGE} files`;
 	}
-}
-
-/** `bytes` as people read a file's size, such as 30 MB or 512 KB. */
-function sizeForPeople(bytes: number): { amount: number; unit: "MB" | "KB" } {
-	const mebibytes = bytes / (1024 * 1024);
-	return mebibytes >= 1
-		? { amount: Math.floor(mebibytes), unit: "MB" }
-		: { amount: Math.max(1, Math.floor(bytes / 1024)), unit: "KB" };
 }
 
 /**

@@ -4,7 +4,12 @@ import {
 	isSuggestChangesEnabled,
 } from "@handlewithcare/prosemirror-suggest-changes";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { agentColorSchema, agentFaceSchema, agentShapeSchema } from "@sugabots/contracts";
+import {
+	agentColorSchema,
+	agentFaceSchema,
+	agentShapeSchema,
+	MAX_ARTIFACT_IMAGE_BYTES,
+} from "@sugabots/contracts";
 import {
 	type EditRequest,
 	LIVE_DOCUMENT_CONTENT,
@@ -20,7 +25,7 @@ import { Placeholder } from "@tiptap/extensions/placeholder";
 import type { Node } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import { type Editor, EditorContent, useEditor, useEditorState } from "@tiptap/react";
+import { type Editor, useEditor, useEditorState } from "@tiptap/react";
 import { cn } from "cn";
 import { Effect, Schema } from "effect";
 import {
@@ -52,8 +57,11 @@ import { v4 as uuidv4 } from "uuid";
 import { Doc } from "yjs";
 import { client } from "@/api.ts";
 import { apiBaseUrl } from "@/lib/api-url.ts";
+import { artifactImageSource, uploadArtifactImage } from "@/lib/artifacts.ts";
+import { failureMessage } from "@/lib/failure.ts";
 import { Suggesting, suggestingAs } from "@/lib/suggesting.ts";
 import { type PendingSuggestion, pendingSuggestions, settling } from "@/lib/suggestions.ts";
+import { ImageNotKept, importWordFile, type KeepImage } from "@/lib/word-import.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -77,6 +85,7 @@ import {
 	turnInto,
 } from "./LiveDocumentBlocks.tsx";
 import { Outline } from "./LiveDocumentOutline.tsx";
+import { LiveDocumentText } from "./live-document-text.tsx";
 
 /** Who the person is to the others in the document. */
 export interface Editing {
@@ -116,16 +125,22 @@ export function LiveDocument({
 	statusSlot: HTMLElement | null;
 }) {
 	const provider = useLiveDocument(podId, artifactId);
+	const keepImage = useCallback<KeepImage>(
+		(image) => uploadArtifactImage({ podId, artifactId }, image),
+		[podId, artifactId],
+	);
 	return (
 		<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-list">
 			{provider && (
 				<LiveEditor
 					key={artifactId}
 					provider={provider}
+					artifact={{ podId, artifactId }}
 					title={title}
 					as={as}
 					bot={bot}
 					onAsk={(bot, asked) => askForEdit({ workspaceId, podId, artifactId, title, bot, asked })}
+					keepImage={keepImage}
 					onWordImport={onWordImport}
 					presenceSlot={presenceSlot}
 					statusSlot={statusSlot}
@@ -155,20 +170,26 @@ function useLiveDocument(podId: string, artifactId: string) {
 
 function LiveEditor({
 	provider,
+	artifact,
 	title,
 	as,
 	bot,
 	onAsk,
+	keepImage,
 	onWordImport,
 	presenceSlot,
 	statusSlot,
 }: {
 	provider: HocuspocusProvider;
+	/** The document's artifact, whose kept images are the only ones it loads. */
+	artifact: { podId: string; artifactId: string };
 	title: string;
 	as: Editing;
 	bot: AskedBot | undefined;
 	/** Asks `bot` for the edit, answering the id of the thread the bot will work in. */
 	onAsk: (bot: AskedBot, asked: Asked) => Promise<string>;
+	/** Keeps an image from a Word file for the document. */
+	keepImage: KeepImage;
 	onWordImport: (importWord: WordImport | undefined) => void;
 	presenceSlot: HTMLElement | null;
 	statusSlot: HTMLElement | null;
@@ -176,7 +197,10 @@ function LiveEditor({
 	const slashKeys = useRef<TextKeys>(undefined);
 	const editor = useEditor({
 		extensions: [
-			...liveDocumentExtensions({ undo: false }),
+			...liveDocumentExtensions({
+				undo: false,
+				ownImages: { artifact, source: artifactImageSource },
+			}),
 			EditTarget,
 			EmptyHints,
 			DropLine,
@@ -222,11 +246,21 @@ function LiveEditor({
 		if (!editor || asking || stillWaiting) return;
 		editor.view.dispatch(editor.state.tr.setMeta(editTarget, null));
 	}, [editor, asking, stillWaiting]);
+	// What the last Word file imported here left out, or why it wasn't imported.
+	const [importNotice, setImportNotice] = useState<string>();
 	useEffect(() => {
 		if (!editor) return;
-		onWordImport((file) => importWordFile(editor, file));
+		onWordImport(async (file) => {
+			setImportNotice(undefined);
+			try {
+				const { imagesLeftOut } = await importWordFile(editor, file, keepImage);
+				if (imagesLeftOut > 0) setImportNotice(imagesLeftOutInWords(imagesLeftOut));
+			} catch (failure) {
+				setImportNotice(importFailureInWords(failure));
+			}
+		});
 		return () => onWordImport(undefined);
-	}, [editor, onWordImport]);
+	}, [editor, onWordImport, keepImage]);
 	const [menuHeld, setMenuHeld] = useState(false);
 	// Where the line starts that the + beside a block opened the menu of blocks on.
 	const [blocksOfferedAt, setBlocksOfferedAt] = useState<number>();
@@ -290,10 +324,7 @@ function LiveEditor({
 				)}
 			{statusSlot && createPortal(saved ? "Saved" : "Saving", statusSlot)}
 			{outOfDate && (
-				<div
-					role="alert"
-					className="flex items-center gap-3 border-border border-b bg-chip px-4 py-2 text-foreground text-xs"
-				>
+				<Notice>
 					<span className="min-w-0 flex-1">
 						This document has content this tab can't show, so editing here is off. Reload to get the
 						latest editor. Nothing in the document was changed.
@@ -301,13 +332,23 @@ function LiveEditor({
 					<Button size="sm" onClick={() => window.location.reload()}>
 						Reload
 					</Button>
-				</div>
+				</Notice>
+			)}
+			{importNotice && (
+				<Notice>
+					<span className="min-w-0 flex-1">{importNotice}</span>
+					<IconButton label="Dismiss" onClick={() => setImportNotice(undefined)}>
+						<X aria-hidden />
+					</IconButton>
+				</Notice>
 			)}
 			<div ref={page} className="@container relative min-h-0 flex-1 overflow-y-auto">
 				<Outline editor={editor} />
-				<article ref={text} className="mx-auto max-w-204 pt-14 pb-30 max-md:pt-6">
-					<EditorContent editor={editor} />
-				</article>
+				<LiveDocumentText
+					editor={editor}
+					ref={text}
+					className="mx-auto max-w-204 pt-14 pb-30 max-md:pt-6"
+				/>
 				{!outOfDate && <BlockHandle editor={editor} onOffer={setBlocksOfferedAt} />}
 				{!asking && !outOfDate && (
 					<SlashMenu
@@ -1267,10 +1308,35 @@ const quoted = (text: string) => `> ${text.replaceAll("\n", "\n> ")}`;
 /** Replaces the document with a Word file's content, for everyone in it. */
 export type WordImport = (file: File) => Promise<void>;
 
-async function importWordFile(editor: Editor, file: File) {
-	const { convertToHtml } = await import("mammoth");
-	const { value } = await convertToHtml({ arrayBuffer: await file.arrayBuffer() });
-	editor.commands.setContent(value);
+/** Something the person should know about the document, in a row across the top of it. */
+function Notice({ children }: { children: ReactNode }) {
+	return (
+		<div
+			role="alert"
+			className="flex items-center gap-3 border-border border-b bg-chip px-4 py-2 text-foreground text-xs"
+		>
+			{children}
+		</div>
+	);
+}
+
+/** What an import left out of the document, as the person is told it. */
+function imagesLeftOutInWords(count: number): string {
+	const which =
+		count === 1 ? "1 image in the Word file was" : `${count} images in the Word file were`;
+	const megabytes = MAX_ARTIFACT_IMAGE_BYTES / BYTES_PER_MEGABYTE;
+	return `${which} left out. A document shows PNG, JPEG, GIF and WebP images of up to ${megabytes} MB, saved inside the file.`;
+}
+
+const BYTES_PER_MEGABYTE = 1024 * 1024;
+
+/** Why a Word file wasn't imported, as the person is told it. */
+function importFailureInWords(failure: unknown): string {
+	const why =
+		failure instanceof ImageNotKept
+			? failureMessage(failure.cause)
+			: "It couldn't be read as a Word document";
+	return `The Word file wasn't imported, so the document is as it was. ${why}.`;
 }
 
 /**

@@ -6,7 +6,7 @@ import { ARTIFACT_KIND_FILES, ARTIFACT_KIND_LABELS } from "@/lib/artifact-kind-c
 import type { PageAt } from "@/lib/artifacts.ts";
 import { FIT_HEIGHT_PX } from "@/lib/page-frame.ts";
 import { HtmlFrame, withContentPolicy } from "./HtmlFrame.tsx";
-import { MessageMarkdown } from "./MessageMarkdown.tsx";
+import { DocumentMarkdown } from "./MessageMarkdown.tsx";
 
 /**
  * How each kind of artifact is shown and saved. A kind added to
@@ -39,10 +39,10 @@ export const ARTIFACT_KINDS: Record<ArtifactKind, ArtifactKindView> = {
 		// A preview, not the document: wide enough for its tables.
 		cardWidth: "max-w-160",
 		Inline: DocumentPreview,
-		Full: ({ content }) => (
+		Full: ({ content, at }) => (
 			<div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-list">
 				<article className="mx-auto max-w-190 px-6 py-6 max-md:px-4">
-					<MessageMarkdown text={content} mentionable={[]} writer="bot" />
+					<DocumentMarkdown text={content} artifact={at} />
 				</article>
 			</div>
 		),
@@ -69,10 +69,12 @@ const DOCUMENT_PREVIEW_HEIGHT_PX = 168;
 function DocumentPreview({
 	title,
 	content,
+	at,
 	onOpen,
 }: {
 	title: string;
 	content: string | undefined;
+	at: PageAt;
 	onOpen: () => void;
 }) {
 	if (content === undefined) return <InlineLoading />;
@@ -84,7 +86,7 @@ function DocumentPreview({
 			style={{ maxHeight: DOCUMENT_PREVIEW_HEIGHT_PX }}
 			className="focus-ring relative block w-full cursor-zoom-in overflow-hidden px-3.5 py-2 text-left text-xs mask-b-from-60%"
 		>
-			<MessageMarkdown text={content} mentionable={[]} writer="bot" />
+			<DocumentMarkdown text={content} artifact={at} />
 		</button>
 	);
 }

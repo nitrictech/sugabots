@@ -42,8 +42,8 @@ export function pendingSuggestions(document: Node): PendingSuggestion[] {
 				from: position,
 				to: position,
 			};
-			// A block marked whole carries the mark itself, and its text carries none.
-			const text = (node.isText ? (node.text ?? "") : node.textContent).replaceAll(UNSEEN, "");
+			// A block or image marked whole carries the mark itself, and its text carries none.
+			const text = wordsOf(node).replaceAll(UNSEEN, "");
 			pending.set(id, {
 				...suggestion,
 				removes:
@@ -72,6 +72,16 @@ const SUGGESTION_MARKS = new Set([SUGGESTED_INSERTION, SUGGESTED_DELETION, "modi
 
 /** The character the suggesting library puts where a block was split or joined, which nobody sees. */
 const UNSEEN = "​";
+
+/**
+ * What a node says, as a suggestion's card puts it: its text, with a block's
+ * lines and a table's cells apart, and an image's words for what it shows.
+ */
+function wordsOf(node: Node): string {
+	if (node.isText) return node.text ?? "";
+	if (node.isLeaf) return typeof node.attrs.alt === "string" ? node.attrs.alt : "";
+	return node.textBetween(0, node.content.size, " ", wordsOf);
+}
 
 /** Text from separate places reads as separate words. */
 const joined = (text: string, more: string) => (text && more ? `${text} ${more}` : text || more);

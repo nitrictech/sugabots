@@ -1,14 +1,16 @@
-import { API_BASE_PATH } from "@sugabots/contracts/http";
+import { artifactImageTypeSchema } from "@sugabots/contracts";
+import { API_BASE_PATH, type ArtifactImageIds } from "@sugabots/contracts/http";
 import { LIVE_DOCUMENT_SCHEMA } from "@sugabots/contracts/live-document";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { LiveDocuments } from "@sugabots/core/artifacts/live";
 import { WORD_CONTENT_TYPE, wordFileOf } from "@sugabots/core/artifacts/word";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Installation } from "@sugabots/core/installation/installation";
-import { Data, Effect, Layer, Queue } from "effect";
+import { Data, Effect, Layer, Queue, Schema, Stream } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Socket } from "effect/unstable/socket";
 import { Authentication } from "../auth/authentication.ts";
+import { storeOutagesAsDefects } from "./errors.ts";
 
 /**
  * A `document` artifact as people work on it: the WebSocket the web app's
@@ -24,24 +26,45 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 		const live = yield* LiveDocuments.Service;
 		const trusted = new Set((yield* Installation.Service).trustedOrigins);
 
-		/** The document the request's path names, if whoever holds its session may read it. */
+		/**
+		 * An image the document keeps, for its Word file: `undefined` when it
+		 * keeps none under that id, or the one kept isn't of a kind a document
+		 * keeps, which the file shows as its words.
+		 */
+		const keptImage = (image: ArtifactImageIds) =>
+			artifacts.image(image).pipe(
+				Effect.flatMap(({ contentType, stream }) =>
+					isImageType(contentType)
+						? Effect.map(Stream.runCollect(stream), (chunks) => ({
+								contentType,
+								bytes: Buffer.concat(chunks),
+							}))
+						: Effect.succeed(undefined),
+				),
+				Effect.catchTags({
+					ArtifactImageNotFound: () => Effect.succeed(undefined),
+					// Deleted while it was read, with the document.
+					BlobNotFound: () => Effect.succeed(undefined),
+				}),
+			);
+
+		/**
+		 * The document the request's path names, if whoever holds its session may
+		 * read it, and how to act as them.
+		 */
 		const requestedDocument = Effect.gen(function* () {
 			const request = yield* HttpServerRequest.HttpServerRequest;
 			const holder = yield* authentication.identify(new Headers(request.headers));
 			if (!holder) return yield* new Refused({ status: 401 });
 			const { podId, artifactId } = yield* HttpRouter.params;
 			if (!podId || !artifactId) return yield* new Refused({ status: 404 });
-			const artifact = yield* artifacts
-				.get({ podId, artifactId })
-				.pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(holder.user.id)));
+			const asHolder = CurrentActor.provide(
+				CurrentActor.AuthenticatedUserId.vouchedFor(holder.user.id),
+			);
+			const artifact = yield* artifacts.get({ podId, artifactId }).pipe(asHolder);
 			if (artifact.kind !== "document") return yield* new Refused({ status: 404 });
-			return artifact;
-		}).pipe(
-			Effect.catchTags({
-				ResourceHidden: () => Effect.fail(new Refused({ status: 404 })),
-				ActionForbidden: () => Effect.fail(new Refused({ status: 403 })),
-			}),
-		);
+			return { artifact, asHolder };
+		}).pipe(Effect.catchTags(refusedAsStatus));
 
 		yield* router.add(
 			"GET",
@@ -59,7 +82,7 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 						status: 409,
 					});
 				}
-				const artifact = yield* requestedDocument;
+				const { artifact } = yield* requestedDocument;
 				yield* edit(yield* request.upgrade, (outgoing) => live.join(artifact, outgoing));
 				return HttpServerResponse.empty();
 			}).pipe(
@@ -76,20 +99,34 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 			"GET",
 			`${API_BASE_PATH}/pods/:podId/artifacts/:artifactId/word`,
 			Effect.gen(function* () {
-				const artifact = yield* requestedDocument;
+				const { artifact, asHolder } = yield* requestedDocument;
 				// What people have typed, where the document is live; its last version otherwise.
 				const markdown = (yield* live.markdown(artifact.id)) ?? artifact.content;
-				const file = yield* wordFileOf(artifact.title, markdown);
+				const file = yield* wordFileOf(artifact, markdown, (image) =>
+					keptImage(image).pipe(asHolder),
+				);
 				return HttpServerResponse.uint8Array(file, { contentType: WORD_CONTENT_TYPE }).pipe(
 					HttpServerResponse.setHeader(
 						"content-disposition",
 						`attachment; filename*=UTF-8''${encodeURIComponent(`${artifact.title}.docx`)}`,
 					),
 				);
-			}).pipe(Effect.catchTag("DocumentRefused", refusal)),
+			}).pipe(
+				// Reading the images asks again whether the person may read the document, as they may have been taken out of its pod meanwhile.
+				Effect.catchTags({ ...refusedAsStatus, ...storeOutagesAsDefects }),
+				Effect.catchTag("DocumentRefused", refusal),
+			),
 		);
 	}),
 );
+
+/** A refusal to read the document, as the status that says so: hidden as absent, so an id cannot be probed for. */
+const refusedAsStatus = {
+	ResourceHidden: () => Effect.fail(new Refused({ status: 404 })),
+	ActionForbidden: () => Effect.fail(new Refused({ status: 403 })),
+};
+
+const isImageType = Schema.is(artifactImageTypeSchema);
 
 /** The schema the editor asking to join says it was built for, from the address it asked at. */
 const schemaOf = (url: string) =>

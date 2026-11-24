@@ -5,7 +5,7 @@ import {
 	transformToSuggestionTransaction,
 } from "@handlewithcare/prosemirror-suggest-changes";
 import { SUGGESTED_INSERTION, suggestionsAsAttributes } from "@sugabots/contracts/live-document";
-import { Fragment, type Node, Slice } from "@tiptap/pm/model";
+import { Fragment, Mark, type Node, Slice } from "@tiptap/pm/model";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
 
 /*
@@ -130,16 +130,21 @@ function findDifferences(before: Node, after: Node, start: number, found: Found)
 /**
  * Adds to `found` the words of a paragraph that differ and the words that
  * replace them. Whole words, so a suggestion reads as "~~Friday~~ Monday" and
- * not "~~Fri~~Mon". `start` is where the paragraph's text begins in the document.
+ * not "~~Fri~~Mon". A word differs when its text, its marks or an image in it
+ * does, so a change that only marks a word, or swaps an image, is found too.
+ * `start` is where the paragraph's text begins in the document.
  */
 function findTextDifference(before: Node, after: Node, start: number, found: Found): void {
-	const [was, becomes] = [textOf(before), textOf(after)];
+	const [was, becomes] = [lineOf(before), lineOf(after)];
 	const shorter = Math.min(was.length, becomes.length);
 	let same = 0;
-	while (same < shorter && was[same] === becomes[same]) same++;
+	while (same < shorter && samePlace(was[same], becomes[same])) same++;
 	while (same > 0 && !isSpace(was[same - 1])) same--;
 	let sameAtEnd = 0;
-	while (sameAtEnd < shorter - same && was.at(-1 - sameAtEnd) === becomes.at(-1 - sameAtEnd)) {
+	while (
+		sameAtEnd < shorter - same &&
+		samePlace(was.at(-1 - sameAtEnd), becomes.at(-1 - sameAtEnd))
+	) {
 		sameAtEnd++;
 	}
 	while (sameAtEnd > 0 && !isSpace(was.at(-sameAtEnd))) sameAtEnd--;
@@ -151,13 +156,43 @@ function findTextDifference(before: Node, after: Node, start: number, found: Fou
 	if (!canHoldSuggestions(before)) found.unmarkable = true;
 }
 
-/** Stands for anything in a line that isn't text, so an offset into the text is a position in the line. */
+/**
+ * One place in a line: a character of its text with the marks on it, or a
+ * node that isn't text, such as an image, which takes one place too. So an
+ * index into a line's places is a position in the line.
+ */
+interface Place {
+	character: string;
+	marks: readonly Mark[];
+	node?: Node;
+}
+
+/** Stands for a place in a line that isn't text. */
 const NOT_TEXT = "￼";
 
-const textOf = (textblock: Node) =>
-	textblock.textBetween(0, textblock.content.size, undefined, NOT_TEXT);
+function lineOf(textblock: Node): Place[] {
+	const places: Place[] = [];
+	textblock.forEach((child) => {
+		if (!child.isText) {
+			places.push({ character: NOT_TEXT, marks: child.marks, node: child });
+			return;
+		}
+		const text = child.text ?? "";
+		for (let index = 0; index < text.length; index++) {
+			places.push({ character: text.charAt(index), marks: child.marks });
+		}
+	});
+	return places;
+}
 
-const isSpace = (character: string | undefined) => character !== undefined && /\s/.test(character);
+const samePlace = (one: Place | undefined, other: Place | undefined) =>
+	one !== undefined &&
+	other !== undefined &&
+	one.character === other.character &&
+	Mark.sameSet(one.marks, other.marks) &&
+	(one.node && other.node ? one.node.eq(other.node) : one.node === other.node);
+
+const isSpace = (place: Place | undefined) => place !== undefined && /\s/.test(place.character);
 
 /** Whether every line of text in the node can carry a suggestion's marks, which a code block's can't. */
 function canHoldSuggestions(node: Node): boolean {

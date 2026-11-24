@@ -6,14 +6,16 @@ import {
 	type EditRequest,
 	LIVE_DOCUMENT_CONTENT,
 	LIVE_DOCUMENT_EDIT_REQUESTS,
-	liveDocumentExtensions,
 	suggestionId,
 	suggestionsAsAttributes,
 	suggestionsFromAttributes,
 } from "@sugabots/contracts/live-document";
-import { getSchema } from "@tiptap/core";
-import { MarkdownManager } from "@tiptap/markdown";
-import { Node } from "@tiptap/pm/model";
+import {
+	liveDocumentFromMarkdown,
+	liveDocumentSchema,
+	markdownOfLiveDocument,
+} from "@sugabots/contracts/live-document-markdown";
+import type { Node } from "@tiptap/pm/model";
 import {
 	prosemirrorToYXmlFragment,
 	updateYFragment,
@@ -97,7 +99,10 @@ export const make = Effect.gen(function* () {
 						const state = await Effect.runPromise(stored(documentName));
 						if (state) applyUpdate(document, state);
 						else if (context.startFrom !== undefined) {
-							prosemirrorToYXmlFragment(fromMarkdown(context.startFrom), fragmentOf(document));
+							prosemirrorToYXmlFragment(
+								liveDocumentFromMarkdown(context.startFrom),
+								fragmentOf(document),
+							);
 						}
 					},
 					onStoreDocument: async ({ documentName, document }) => {
@@ -198,7 +203,7 @@ export const make = Effect.gen(function* () {
 					const request = requests.get(author.threadId);
 					const after = changedTo(
 						content,
-						fromMarkdown(wanted),
+						liveDocumentFromMarkdown(wanted),
 						request
 							? { suggestionId: suggestionId(unique, { kind: "agent", name: author.name }) }
 							: "edit",
@@ -276,10 +281,6 @@ interface ConnectionContext {
 	startFrom?: string;
 }
 
-const extensions = liveDocumentExtensions({ undo: true });
-const schema = getSchema(extensions);
-const markdownOf = new MarkdownManager({ extensions });
-
 const fragmentOf = (document: Document) => document.getXmlFragment(LIVE_DOCUMENT_CONTENT);
 
 /**
@@ -295,7 +296,9 @@ function read(document: Document): { content: Node; unreadable: boolean } {
 	applyUpdate(copy, encodeStateAsUpdate(document));
 	const shared = copy.getXmlFragment(LIVE_DOCUMENT_CONTENT);
 	const before = sizeOf(shared);
-	const content = suggestionsFromAttributes(yXmlFragmentToProseMirrorRootNode(shared, schema));
+	const content = suggestionsFromAttributes(
+		yXmlFragmentToProseMirrorRootNode(shared, liveDocumentSchema),
+	);
 	const after = sizeOf(shared);
 	return { content, unreadable: after.blocks !== before.blocks || after.text !== before.text };
 }
@@ -314,12 +317,10 @@ function sizeOf(shared: XmlFragment | XmlElement): { blocks: number; text: numbe
 }
 
 /** Content as it reads until someone accepts a suggestion pending in it. */
-const asMarkdown = (content: Node) => markdownOf.serialize(withoutSuggestions(content).toJSON());
+const asMarkdown = (content: Node) => markdownOfLiveDocument(withoutSuggestions(content));
 
 /** The document as it reads until someone accepts a suggestion pending in it, as far as it can be read. */
 const toMarkdown = (document: Document) => asMarkdown(read(document).content);
-
-const fromMarkdown = (markdown: string) => Node.fromJSON(schema, markdownOf.parse(markdown));
 
 /** Beside the artifact's versions, so it is deleted with them. */
 const stateKey = (artifactId: string) => BlobStore.key("artifacts", artifactId, "live");

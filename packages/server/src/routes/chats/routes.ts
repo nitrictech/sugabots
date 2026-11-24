@@ -4,13 +4,13 @@ import { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { ThreadFiles } from "@sugabots/core/conversations/thread-files/thread-files";
-import { userText } from "@sugabots/errors";
-import { Effect, Stream } from "effect";
+import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { asHttpError, refusals } from "../../http/errors.ts";
-import { fileResponse } from "./file-response.ts";
+import { asHttpError, refusals, storeOutagesAsDefects } from "../../http/errors.ts";
+import { fileResponse } from "../../http/file-response.ts";
+import { uploadedBody } from "../../http/uploads.ts";
 
 export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 	Effect.gen(function* () {
@@ -130,19 +130,16 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 				// Raw, so the file streams into the blob store rather than being read
 				// into memory first.
 				Effect.gen(function* () {
-					// Refused before any of it is read, when it says how large it is.
-					if (Number(request.headers["content-length"]) > MAX_ATTACHMENT_BYTES) {
-						return yield* new ThreadFiles.FileTooLarge({ maxSize: MAX_ATTACHMENT_BYTES });
-					}
+					const stream = yield* uploadedBody(
+						request,
+						MAX_ATTACHMENT_BYTES,
+						() => new ThreadFiles.FileTooLarge({ maxSize: MAX_ATTACHMENT_BYTES }),
+					);
 					return yield* files.upload({
 						conversationId: params.conversationId,
 						name: query.name,
 						type: query.type,
-						stream: request.stream.pipe(
-							Stream.mapError(
-								() => new BadRequest({ message: userText`The upload was interrupted` }),
-							),
-						),
+						stream,
 					});
 				}).pipe(Effect.catchTags(storeOutagesAsDefects), asSessionUser, asHttpError(fileErrors)),
 			)
@@ -163,15 +160,6 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			);
 	}),
 );
-
-/**
- * A blob store that cannot be reached, or refuses, is the installation's
- * fault, not the caller's: logged, and answered as a server error.
- */
-const storeOutagesAsDefects = {
-	BlobStoreUnavailable: Effect.die,
-	BlobStoreRejected: Effect.die,
-} as const;
 
 const chatErrors = {
 	...refusals,

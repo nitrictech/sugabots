@@ -1,10 +1,30 @@
 import { addSuggestionMarks } from "@handlewithcare/prosemirror-suggest-changes";
-import { Extension, type Extensions, Mark } from "@tiptap/core";
+import { Extension, type Extensions, Mark, type MarkConfig, mergeAttributes } from "@tiptap/core";
 import { Blockquote } from "@tiptap/extension-blockquote";
 import { Document } from "@tiptap/extension-document";
+import { Highlight } from "@tiptap/extension-highlight";
+import { Image, type ImageOptions } from "@tiptap/extension-image";
+import { isAllowedUri, Link } from "@tiptap/extension-link";
 import { BulletList, ListItem, OrderedList } from "@tiptap/extension-list";
-import { Fragment, type Node, type Mark as SuggestionMarkOnNode } from "@tiptap/pm/model";
+import { Paragraph } from "@tiptap/extension-paragraph";
+import { Subscript } from "@tiptap/extension-subscript";
+import { Superscript } from "@tiptap/extension-superscript";
+import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
+import { Underline } from "@tiptap/extension-underline";
+import {
+	type DOMOutputSpec,
+	Fragment,
+	type MarkType,
+	type Node,
+	type NodeType,
+	type Slice,
+	type Mark as SuggestionMarkOnNode,
+} from "@tiptap/pm/model";
+import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
+import { AddMarkStep, Mapping, RemoveMarkStep, ReplaceStep } from "@tiptap/pm/transform";
 import { StarterKit } from "@tiptap/starter-kit";
+import { LINE_BREAK_TAG, MARK_HTML_TAGS, type MarkWrittenAsHtml } from "./document-markdown.ts";
+import { type ArtifactImageIds, ownImageAt } from "./http/artifact-images.ts";
 
 /*
  * What a live document holds, for the two places that hold one: the editor in
@@ -57,27 +77,30 @@ const SuggestionSchema = Extension.create({
 	addGlobalAttributes() {
 		return [
 			{
-				types: BLOCKS_SUGGESTED_WHOLE,
-				attributes: { [BLOCK_SUGGESTION]: { default: null, rendered: false } },
+				types: NODES_SUGGESTED_WHOLE,
+				attributes: { [NODE_SUGGESTION]: { default: null, rendered: false } },
 			},
 		];
 	},
 });
 
 /*
- * A suggestion on a whole block is a mark on the block, and the sync layer
- * carries marks on text only. So each block also says what is suggested for
- * it in an attribute, which the sync layer does carry. The two are kept the
- * same: whoever changes the marks writes the attribute (`suggestionsAsAttributes`),
- * and whoever receives the attribute restores the marks from it
- * (`suggestionsFromAttributes`).
+ * A suggestion on a whole node, such as a block or an image, is a mark on the
+ * node, and the sync layer carries marks on text only. So each such node also
+ * says what is suggested for it in an attribute, which the sync layer does
+ * carry. The two are kept the same: whoever changes the marks writes the
+ * attribute (`suggestionsAsAttributes`), and whoever receives the attribute
+ * restores the marks from it (`suggestionsFromAttributes`).
  */
 
-/** The attribute a block says its own suggestion marks in, as JSON, or `null` with none. */
-export const BLOCK_SUGGESTION = "suggestion";
+/** The attribute a node says its own suggestion marks in, as JSON, or `null` with none. */
+export const NODE_SUGGESTION = "suggestion";
 
-/** The blocks a suggestion can add, remove or change whole. */
-const BLOCKS_SUGGESTED_WHOLE = [
+/**
+ * The nodes a suggestion can add, remove or change whole: the blocks, and the
+ * nodes in a line of text that aren't text, an image and a line break.
+ */
+const NODES_SUGGESTED_WHOLE = [
 	"paragraph",
 	"heading",
 	"blockquote",
@@ -86,88 +109,424 @@ const BLOCKS_SUGGESTED_WHOLE = [
 	"listItem",
 	"codeBlock",
 	"horizontalRule",
+	"table",
+	"tableRow",
+	"tableHeader",
+	"tableCell",
+	"image",
+	"hardBreak",
 ];
 
 const isSuggestionMark = (mark: SuggestionMarkOnNode) => mark.type.name in suggestionSpecs;
 
-/** What is suggested for the block itself, as its attribute says it: `null` when nothing is. */
-export function blockSuggestion(block: Node): string | null {
-	const marks = block.marks.filter(isSuggestionMark);
+/** What is suggested for the node itself, as its attribute says it: `null` when nothing is. */
+export function nodeSuggestion(node: Node): string | null {
+	const marks = node.marks.filter(isSuggestionMark);
 	return marks.length === 0 ? null : JSON.stringify(marks.map((mark) => mark.toJSON()));
 }
 
-/** The suggestion marks a block's attribute says it has. */
-export function marksOfBlockSuggestion(block: Node): SuggestionMarkOnNode[] {
-	const said: unknown = block.attrs[BLOCK_SUGGESTION];
+/** The suggestion marks a node's attribute says it has. */
+export function marksOfNodeSuggestion(node: Node): SuggestionMarkOnNode[] {
+	const said: unknown = node.attrs[NODE_SUGGESTION];
 	if (typeof said !== "string") return [];
-	return (JSON.parse(said) as unknown[]).map((mark) => block.type.schema.markFromJSON(mark));
+	return (JSON.parse(said) as unknown[]).map((mark) => node.type.schema.markFromJSON(mark));
 }
 
-/** Whether the block is of a kind that says its suggestion in an attribute. */
-export const saysBlockSuggestion = (node: Node) => !node.isText && BLOCK_SUGGESTION in node.attrs;
+/** Whether the node is of a kind that says its suggestion in an attribute. */
+export const saysNodeSuggestion = (node: Node) => !node.isText && NODE_SUGGESTION in node.attrs;
 
-/** The document with every block's attribute saying the suggestion marks the block has, to send. */
+/** The document with every node's attribute saying the suggestion marks the node has, to send. */
 export const suggestionsAsAttributes = (document: Node): Node =>
-	everyBlock(document, (block, content) =>
-		block.type.create(
-			{ ...block.attrs, [BLOCK_SUGGESTION]: blockSuggestion(block) },
+	everyNodeSayingSuggestion(document, (node, content) =>
+		node.type.create(
+			{ ...node.attrs, [NODE_SUGGESTION]: nodeSuggestion(node) },
 			content,
-			block.marks,
+			node.marks,
 		),
 	);
 
-/** The document with every block marked as its attribute says, as received. */
+/** The document with every node marked as its attribute says, as received. */
 export const suggestionsFromAttributes = (document: Node): Node =>
-	everyBlock(document, (block, content) =>
-		block.type.create(block.attrs, content, [
-			...block.marks.filter((mark) => !isSuggestionMark(mark)),
-			...marksOfBlockSuggestion(block),
+	everyNodeSayingSuggestion(document, (node, content) =>
+		node.type.create(node.attrs, content, [
+			...node.marks.filter((mark) => !isSuggestionMark(mark)),
+			...marksOfNodeSuggestion(node),
 		]),
 	);
 
-/** `node` with `change` made to every block in it that says its suggestion in an attribute. */
-function everyBlock(node: Node, change: (block: Node, content: Fragment) => Node): Node {
+/** `node` with `change` made to every node in it that says its suggestion in an attribute. */
+function everyNodeSayingSuggestion(
+	node: Node,
+	change: (node: Node, content: Fragment) => Node,
+): Node {
 	if (node.isText) return node;
 	const content = Fragment.fromArray(
-		node.content.content.map((child) => everyBlock(child, change)),
+		node.content.content.map((child) => everyNodeSayingSuggestion(child, change)),
 	);
-	return saysBlockSuggestion(node) ? change(node, content) : node.copy(content);
+	return saysNodeSuggestion(node) ? change(node, content) : node.copy(content);
 }
 
 /**
  * A block suggested whole, such as a new list item or a paragraph to remove,
  * carries the suggestion's mark itself, which the block holding it must
- * allow. These are the blocks that hold other blocks, each allowing that.
+ * allow. These are the blocks that hold other blocks, each allowing that. (A
+ * paragraph allows any mark on the text and images in it already.)
  */
-const BLOCK_SUGGESTIONS = {
+const SUGGESTIONS_ON_CHILDREN = {
 	marks: [SUGGESTED_INSERTION, SUGGESTED_MODIFICATION, SUGGESTED_DELETION].join(" "),
 };
-const blocksHoldingBlocks = [Document, Blockquote, BulletList, OrderedList, ListItem].map((node) =>
-	node.extend(BLOCK_SUGGESTIONS),
+const blocksHoldingBlocks = [
+	Document,
+	Blockquote,
+	BulletList,
+	OrderedList,
+	ListItem,
+	TableRow,
+	TableHeader,
+	TableCell,
+].map((node) => node.extend(SUGGESTIONS_ON_CHILDREN));
+
+/** A table, which holds rows and allows them a suggestion's marks too, in a wrapper that scrolls sideways when wider than the page. */
+const DocumentTable = Table.extend(SUGGESTIONS_ON_CHILDREN).configure({ renderWrapper: true });
+
+/*
+ * The marks markdown has no sign for are written as their HTML tags, and a
+ * table cell's lines are joined by `<br>` (see `document-markdown.ts`).
+ */
+
+/**
+ * Writes a mark as its HTML tag, `<tag>…</tag>`, and reads it back: the token
+ * is the text up to the first closing tag outside a code span.
+ */
+const markWrittenAsHtmlTag = (
+	markName: MarkWrittenAsHtml,
+): Pick<MarkConfig, "renderMarkdown" | "parseMarkdown" | "markdownTokenizer"> => {
+	const tag = MARK_HTML_TAGS[markName];
+	return {
+		renderMarkdown: (node, helpers) =>
+			`<${tag}>${helpers.renderChildren(node.content ?? [])}</${tag}>`,
+		parseMarkdown: (token, helpers) =>
+			helpers.applyMark(markName, helpers.parseInline(token.tokens ?? [])),
+		markdownTokenizer: {
+			name: markName,
+			level: "inline",
+			start: (source) => source.toLowerCase().indexOf(`<${tag}>`),
+			tokenize(source, _tokens, lexer) {
+				const opening = `<${tag}>`;
+				if (!source.toLowerCase().startsWith(opening)) return undefined;
+				// What can stand before the closing tag without being it: an escaped character, or a code span's backticks.
+				const delimiters = new RegExp(`\\\\[\\s\\S]|\`+|</${tag}>`, "gi");
+				delimiters.lastIndex = opening.length;
+				for (let match = delimiters.exec(source); match; match = delimiters.exec(source)) {
+					if (match[0].startsWith("\\")) continue;
+					if (match[0].startsWith("`")) {
+						const codeSpan = /^(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/.exec(source.slice(match.index));
+						if (codeSpan) delimiters.lastIndex = match.index + codeSpan[0].length;
+						continue;
+					}
+					const text = source.slice(opening.length, match.index);
+					if (!text) return undefined;
+					return {
+						type: markName,
+						raw: source.slice(0, delimiters.lastIndex),
+						text,
+						tokens: lexer.inlineTokens(text),
+					};
+				}
+				return undefined;
+			},
+		},
+	};
+};
+
+/** The marks written as HTML tags, by name: one for each tag the markdown may hold. */
+const MARKS_WRITTEN_AS_HTML = {
+	underline: Underline,
+	superscript: Superscript,
+	subscript: Subscript,
+	highlight: Highlight,
+} satisfies Record<MarkWrittenAsHtml, Mark>;
+
+const marksWrittenAsHtml = (Object.keys(MARK_HTML_TAGS) as MarkWrittenAsHtml[]).map((name) =>
+	(MARKS_WRITTEN_AS_HTML[name] as Mark).extend(markWrittenAsHtmlTag(name)),
 );
 
 /**
- * The editor's standard nodes and marks, but for the blocks declared above in
- * their place. The line that shows where something dragged will land is left
- * to the editor, which draws its own.
+ * Reads `<br>` in the markdown as a hard break. The table extension writes
+ * one between the lines of a cell, as a row of a markdown table is one line.
+ */
+const LineBreakTag = Extension.create({
+	name: "lineBreakTag",
+	markdownTokenizer: {
+		name: "lineBreakTag",
+		level: "inline",
+		start: (source) => source.toLowerCase().indexOf("<br"),
+		tokenize: (source) => {
+			const [raw] = LINE_BREAK_TAG.exec(source) ?? [];
+			return raw ? { type: "lineBreakTag", raw } : undefined;
+		},
+	},
+	parseMarkdown: () => ({ type: "hardBreak" }),
+});
+
+/** A document's own images: the artifact that keeps them, and where the page loads one from. */
+export interface OwnImages {
+	/** The artifact whose kept images the document shows. Any other image is drawn as its words. */
+	artifact: { podId: string; artifactId: string };
+	/** Where the page fetches one of the artifact's images from, as the API may be on another origin. */
+	source: (ids: ArtifactImageIds) => string;
+}
+
+/**
+ * A link, as the editor's standard one is, that also hands its address to an
+ * image inside it when read from markdown, as `[![words](address)](link)`
+ * (see `DocumentImage`). It opens nothing when clicked. Bots write documents
+ * too, so the web app handles a click on a link in one as it does on a bot's
+ * link in a message, and asks before the link leaves the app.
+ */
+const DocumentLink = Link.extend({
+	parseMarkdown: (token, helpers) => {
+		const link = { href: token.href, title: token.title || null };
+		const content = helpers
+			.parseInline(token.tokens ?? [])
+			.map((node) =>
+				node.type === "image"
+					? { ...node, attrs: { ...node.attrs, link: link.href, linkTitle: link.title } }
+					: node,
+			);
+		return helpers.applyMark("link", content, link);
+	},
+}).configure({ openOnClick: false });
+
+const LINK_OPTIONS = DocumentLink.options;
+
+/** Whether a text link may go to `href`, as the link extension decides. */
+export const linkMayGoTo = (href: string) =>
+	LINK_OPTIONS.isAllowedUri(href, {
+		defaultValidate: (url) => !!isAllowedUri(url, LINK_OPTIONS.protocols),
+		protocols: LINK_OPTIONS.protocols,
+		defaultProtocol: LINK_OPTIONS.defaultProtocol,
+	});
+
+/** An element of a page being read, as far as finding what holds it goes. */
+interface ElementInPage {
+	closest(selector: string): { getAttribute(name: string): string | null } | null;
+}
+
+/** The link around `image` in a page, when it goes somewhere a text link may. */
+function linkAround(image: ElementInPage) {
+	const anchor = image.closest("a[href]");
+	const href = anchor?.getAttribute("href");
+	return anchor && href && linkMayGoTo(href) ? anchor : undefined;
+}
+
+/** The attribute an image is drawn with that holds its address as the document keeps it. */
+const ADDRESS_ATTRIBUTE = "data-address";
+
+/**
+ * An image the document shows: its address, the words that say what it
+ * shows, its title, and the link around it with that link's title, as
+ * markdown's `[![words](address "title")](link "title")` holds. It sits in
+ * the text, as markdown's does, so an image anywhere markdown can put one,
+ * such as in a table cell or beside words, is one the document can hold.
+ *
+ * Only an image of the document's own is loaded. An image anywhere else would
+ * be fetched by everyone who opens the document, telling that address
+ * whatever a bot led by planted instructions put in it, so it is drawn with no
+ * source, as its words. Either way it carries its address, so copying and
+ * pasting it keeps the address it had.
+ *
+ * Its link is an attribute, not a link's mark: the sync layer carries a mark
+ * on text only, as with a suggestion on a whole node. It is drawn as a text
+ * link is, so a click on it does what one on a text link does, and a link
+ * that goes nowhere a text link may is drawn going nowhere, as a text link's
+ * is. In the editor, a link's mark that lands on an image becomes its link
+ * (`imageLinksAsAttributes`).
+ */
+const DocumentImage = Image.extend<ImageOptions & { ownImages: OwnImages | undefined }>({
+	addOptions() {
+		return { ...(this.parent?.() as ImageOptions), ownImages: undefined };
+	},
+	addAttributes: () => ({
+		// The address it was drawn with, which may be where the page loads it from instead, or none.
+		src: {
+			default: null,
+			parseHTML: (element) =>
+				element.getAttribute(ADDRESS_ATTRIBUTE) ?? element.getAttribute("src"),
+		},
+		alt: { default: null },
+		title: { default: null },
+		link: {
+			default: null,
+			parseHTML: (element) => linkAround(element)?.getAttribute("href") ?? null,
+		},
+		linkTitle: {
+			default: null,
+			parseHTML: (element) => linkAround(element)?.getAttribute("title") ?? null,
+		},
+	}),
+	parseHTML() {
+		return [{ tag: `img[${ADDRESS_ATTRIBUTE}]` }, ...(this.parent?.() ?? [])];
+	},
+	renderHTML({ node }) {
+		const { src, alt, title, link, linkTitle } = node.attrs as Record<
+			"src" | "alt" | "title" | "link" | "linkTitle",
+			string | null
+		>;
+		const { ownImages } = this.options;
+		const own = src && ownImages ? ownImageAt(src, ownImages.artifact) : undefined;
+		const drawn = { alt, title, [ADDRESS_ATTRIBUTE]: src };
+		const image: DOMOutputSpec = [
+			"img",
+			own && ownImages ? { ...drawn, src: ownImages.source(own) } : drawn,
+		];
+		if (!link) return image;
+		const anchor = { href: linkMayGoTo(link) ? link : "", title: linkTitle };
+		return ["a", mergeAttributes(LINK_OPTIONS.HTMLAttributes, anchor), image];
+	},
+	renderMarkdown(node, helpers, context) {
+		const image: string = this.parent?.(node, helpers, context) ?? "";
+		const { link, linkTitle } = (node.attrs ?? {}) as Record<"link" | "linkTitle", string | null>;
+		if (!link) return image;
+		return linkTitle ? `[${image}](${link} "${linkTitle}")` : `[${image}](${link})`;
+	},
+	addProseMirrorPlugins() {
+		return [imageLinksAsAttributes(this.type)];
+	},
+});
+
+/**
+ * Keeps an image's link in its attribute, never as a link's mark on it,
+ * which the sync layer would drop: a link put on text that holds an image,
+ * as by pasting a linked image or linking a selection, becomes the image's
+ * link, and a link taken off such text is taken off the image too.
+ */
+function imageLinksAsAttributes(image: NodeType): Plugin {
+	return new Plugin({
+		key: new PluginKey("imageLinksAsAttributes"),
+		appendTransaction(transactions, _before, state) {
+			const link = state.schema.marks.link;
+			if (!link) return null;
+			const { linking, unlinked } = linkChanges(transactions, image, link);
+			if (!linking && unlinked.length === 0) return null;
+			const change = state.tr;
+			const relink = (node: Node, position: number, mark: ReturnType<MarkType["isInSet"]>) =>
+				change.setNodeMarkup(
+					position,
+					undefined,
+					{ ...node.attrs, link: mark?.attrs.href ?? null, linkTitle: mark?.attrs.title ?? null },
+					mark ? mark.removeFromSet(node.marks) : node.marks,
+				);
+			for (const { from, to } of unlinked) {
+				state.doc.nodesBetween(from, to, (node, position) => {
+					if (node.type === image && node.attrs.link && !link.isInSet(node.marks)) {
+						relink(node, position, undefined);
+					}
+				});
+			}
+			if (linking) {
+				state.doc.descendants((node, position) => {
+					const mark = node.type === image ? link.isInSet(node.marks) : undefined;
+					if (mark) relink(node, position, mark);
+				});
+			}
+			return change.docChanged ? change : null;
+		},
+	});
+}
+
+/**
+ * Whether `transactions` may have put a link's mark on an image, and where in
+ * the document they leave it each took links off text: from the first text
+ * it unlinked to the last, as an image between them, which carries no mark,
+ * was unlinked with them, as when unlinking a selection holding it.
+ */
+function linkChanges(
+	transactions: readonly Transaction[],
+	image: NodeType,
+	link: MarkType,
+): { linking: boolean; unlinked: { from: number; to: number }[] } {
+	let linking = false;
+	const unlinked: { from: number; to: number }[] = [];
+	transactions.forEach((transaction, index) => {
+		const later = transactions.slice(index + 1).flatMap(({ mapping }) => mapping.maps);
+		const positions: number[] = [];
+		transaction.steps.forEach((step, stepIndex) => {
+			if (step instanceof AddMarkStep && step.mark.type === link) linking = true;
+			if (step instanceof ReplaceStep && holdsLinkedImage(step.slice, image, link)) linking = true;
+			if (step instanceof RemoveMarkStep && step.mark.type === link) {
+				const after = new Mapping([...transaction.mapping.maps.slice(stepIndex + 1), ...later]);
+				positions.push(after.map(step.from, 1), after.map(step.to, -1));
+			}
+		});
+		if (positions.length > 0) {
+			unlinked.push({ from: Math.min(...positions), to: Math.max(...positions) });
+		}
+	});
+	return { linking, unlinked };
+}
+
+function holdsLinkedImage(slice: Slice, image: NodeType, link: MarkType): boolean {
+	let holds = false;
+	slice.content.descendants((node) => {
+		if (node.type === image && link.isInSet(node.marks)) holds = true;
+		return !holds;
+	});
+	return holds;
+}
+
+/**
+ * A paragraph, which keeps an image alone on its line in the text: the
+ * standard one lifts it out to stand as a block, which an image here isn't.
+ */
+const ParagraphHoldingImages = Paragraph.extend({
+	parseMarkdown(token, helpers) {
+		const [first, ...rest] = token.tokens ?? [];
+		if (first?.type === "image" && rest.length === 0) {
+			return helpers.createNode("paragraph", undefined, helpers.parseInline([first]));
+		}
+		return this.parent?.(token, helpers) ?? [];
+	},
+});
+
+/**
+ * The editor's standard nodes and marks, but for the blocks and the link
+ * declared above in their place. The line that shows where something dragged
+ * will land is left to the editor, which draws its own.
  */
 const standardKit = {
 	document: false,
+	paragraph: false,
 	blockquote: false,
 	bulletList: false,
 	orderedList: false,
 	listItem: false,
+	underline: false,
+	link: false,
 	dropcursor: false,
 } as const;
 
 /**
  * The nodes and marks of a live document. The editor passes `undo: false`,
  * because its collaboration extension brings an undo that only takes back the
- * person's own changes.
+ * person's own changes, and the document's `ownImages`, without which no
+ * image is loaded, as on the API, which draws none.
  */
-export const liveDocumentExtensions = ({ undo }: { undo: boolean }): Extensions => [
+export const liveDocumentExtensions = ({
+	undo,
+	ownImages,
+}: {
+	undo: boolean;
+	ownImages?: OwnImages;
+}): Extensions => [
 	StarterKit.configure(undo ? standardKit : { ...standardKit, undoRedo: false }),
 	...blocksHoldingBlocks,
+	DocumentTable,
+	ParagraphHoldingImages,
+	DocumentLink,
+	DocumentImage.configure({ inline: true, ownImages }),
+	...marksWrittenAsHtml,
+	LineBreakTag,
 	suggestionMark(SUGGESTED_INSERTION),
 	suggestionMark(SUGGESTED_DELETION),
 	suggestionMark(SUGGESTED_MODIFICATION),
@@ -202,7 +561,7 @@ export function suggestionBy(id: unknown): SuggestionBy {
  * hold, so a browser tab built for another number, such as one left open
  * across an update, must not join: it would delete what newer tabs wrote.
  */
-export const LIVE_DOCUMENT_SCHEMA = 2;
+export const LIVE_DOCUMENT_SCHEMA = 4;
 
 /** The shared type holding the document's content, which the editor's collaboration extension binds to. */
 export const LIVE_DOCUMENT_CONTENT = "default";

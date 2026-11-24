@@ -47,6 +47,7 @@ const PLACEHOLDERS: Record<string, string> = {
 	emoji: "%F0%9F%91%8D",
 	fileId: "0199a3a0-0000-7000-8000-000000000010",
 	triggerId: "0199a3a0-0000-7000-8000-000000000011",
+	imageId: "0199a3a0-0000-7000-8000-000000000012",
 	// Whether a notification choice is for a pod or a bot.
 	kind: "pod",
 };

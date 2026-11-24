@@ -35,10 +35,7 @@
 		"@sugabots/docs": "workspace:*",
 		"@sugabots/errors": "workspace:*",
 		"@sugabots/workflow": "workspace:*",
-		"@tiptap/core": "^3.35.0",
-		"@tiptap/markdown": "^3.35.0",
 		"@tiptap/pm": "^3.35.0",
-		"@tiptap/starter-kit": "^3.35.0",
 		"@tiptap/y-tiptap": "^3.3.1",
 		"@turbodocx/html-to-docx": "^1.23.3",
 		"ai": "^7.0.173",
@@ -47,6 +44,7 @@
 		"drizzle-orm": "catalog:",
 		"e2b": "2.64.0",
 		"effect": "catalog:",
+		"jszip": "^3.10.2",
 		"linkedom": "^0.18.15",
 		"marked": "^18.2.1",
 		"mime-types": "^3.0.2",
@@ -61,6 +59,7 @@
 		"@types/mime-types": "^3.0.1",
 		"@types/pg": "catalog:",
 		"@types/turndown": "^5.0.6",
+		"mammoth": "^1.13.0",
 		"pg": "^8.23.1"
 	}
 }

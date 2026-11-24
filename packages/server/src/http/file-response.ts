@@ -1,6 +1,19 @@
 import { mediaTypeEssence } from "@sugabots/contracts";
-import type { ThreadFiles } from "@sugabots/core/conversations/thread-files/thread-files";
+import type { Stream } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
+
+/**
+ * A blob someone stored, such as a chat's attachment or a document's image,
+ * being read: its bytes, their media type and size, and the name it was
+ * uploaded under, where it has one.
+ */
+interface StoredBlob {
+	contentType: string;
+	/** In bytes. */
+	size: number;
+	name?: string | undefined;
+	stream: Stream.Stream<Uint8Array, unknown>;
+}
 
 /**
  * Media types a browser may show in place. Anything else, HTML and SVG
@@ -21,7 +34,7 @@ const SHOWN_IN_PLACE = new Set([
  * browser open it anyway. Files never change once kept, so a browser may keep
  * its copy.
  */
-export function fileResponse(file: ThreadFiles.StoredFile): HttpServerResponse.HttpServerResponse {
+export function fileResponse(file: StoredBlob): HttpServerResponse.HttpServerResponse {
 	const shownInPlace = SHOWN_IN_PLACE.has(mediaTypeEssence(file.contentType));
 	return HttpServerResponse.stream(file.stream, {
 		contentType: file.contentType,

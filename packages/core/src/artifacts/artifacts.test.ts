@@ -1,7 +1,14 @@
-import { MAX_ARTIFACT_CONTENT_CHARACTERS } from "@sugabots/contracts";
+import {
+	MAX_ARTIFACT_CONTENT_CHARACTERS,
+	MAX_ARTIFACT_IMAGE_BYTES,
+	MAX_ARTIFACT_IMAGES_BYTES,
+} from "@sugabots/contracts";
+import { artifactImageIds } from "@sugabots/contracts/http";
 import { eq, like } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { BlobStore } from "../blob-store/blob-store.ts";
+import { BlobDeletions } from "../blob-store/deletions.ts";
 import { Credentials } from "../credentials/credentials.ts";
 import {
 	agent,
@@ -394,5 +401,145 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 			db.select().from(artifactVersion).where(eq(artifactVersion.artifactId, made.id)),
 		);
 		expect(versionsLeft).toEqual([]);
+	});
+
+	describe("a document's images", () => {
+		const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+		const image = { contentType: "image/png" as const, stream: Stream.succeed(png) };
+		const aDocument = async (kind: "document" | "html" = "document") => {
+			const { service } = await authoring();
+			const made = await runOnPostgres(
+				service.create(by, {
+					kind,
+					title: "Plan",
+					content: kind === "html" ? "<p>Plan</p>" : "# Plan",
+				}),
+			);
+			return { podId: by.podId, artifactId: made.id };
+		};
+		/** The images the blob store holds for the artifact. */
+		const imagesStoredFor = (artifactId: string) =>
+			runOnPostgres(
+				Effect.flatMap(BlobStore.Service, (blobs) =>
+					blobs.list(BlobStore.key("artifacts", artifactId, "images")),
+				),
+			);
+
+		it("keeps an image for the people in the document's pod, and deletes it with the document", async () => {
+			const at = await aDocument();
+			const as = await servedOnPostgresAs(Artifacts.Service, Artifacts.layer);
+
+			const ids = await as(memberId).uploadImage({ ...at, ...image });
+			const kept = await as(memberId).image(ids);
+
+			expect(kept.contentType).toBe("image/png");
+			expect(
+				new Uint8Array(Buffer.concat(await runOnPostgres(Stream.runCollect(kept.stream)))),
+			).toEqual(png);
+			await as(adminId).remove(at);
+			await runOnPostgres(BlobDeletions.deleteQueued);
+			expect(await imagesStoredFor(at.artifactId)).toEqual([]);
+		});
+
+		it("keeps the same image once, however often it is kept", async () => {
+			const at = await aDocument();
+			const as = await servedOnPostgresAs(Artifacts.Service, Artifacts.layer);
+
+			const first = await as(memberId).uploadImage({ ...at, ...image });
+			const again = await as(memberId).uploadImage({ ...at, ...image });
+
+			expect(again).toEqual(first);
+			expect(await imagesStoredFor(at.artifactId)).toHaveLength(1);
+		});
+
+		it("hides a document's images from people outside its pod, keeping none for them", async () => {
+			const at = await aDocument();
+			const as = await servedOnPostgresAs(Artifacts.Service, Artifacts.layer);
+			const ids = await as(memberId).uploadImage({ ...at, ...image });
+
+			await expect(as(outsiderId).image(ids)).rejects.toMatchObject({ _tag: "ResourceHidden" });
+			await expect(
+				as(outsiderId).uploadImage({ ...at, ...image, stream: Stream.succeed(png.slice(1)) }),
+			).rejects.toMatchObject({ _tag: "ResourceHidden" });
+			expect(await imagesStoredFor(at.artifactId)).toHaveLength(1);
+		});
+
+		it("keeps no image for a page, and finds none the document doesn't keep", async () => {
+			const page = await aDocument("html");
+			const at = await aDocument();
+			const as = await servedOnPostgresAs(Artifacts.Service, Artifacts.layer);
+			const kept = await as(memberId).uploadImage({ ...at, ...image });
+			const notKept = artifactImageIds({ ...at, imageId: "c".repeat(64) });
+
+			await expect(as(memberId).uploadImage({ ...page, ...image })).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+			});
+			await expect(
+				as(memberId).image({ ...kept, artifactId: page.artifactId } as typeof kept),
+			).rejects.toMatchObject({ _tag: "ResourceHidden" });
+			if (!notKept) throw new Error("fixture");
+			await expect(as(memberId).image(notKept)).rejects.toMatchObject({
+				_tag: "ArtifactImageNotFound",
+			});
+		});
+
+		it("keeps nothing of an image over the limit", async () => {
+			const at = await aDocument();
+			const as = await servedOnPostgresAs(Artifacts.Service, Artifacts.layer);
+
+			await expect(
+				as(memberId).uploadImage({
+					...at,
+					contentType: "image/png",
+					stream: Stream.succeed(new Uint8Array(MAX_ARTIFACT_IMAGE_BYTES + 1)),
+				}),
+			).rejects.toMatchObject({ _tag: "ArtifactImageTooLarge" });
+			expect(await imagesStoredFor(at.artifactId)).toEqual([]);
+		});
+
+		it("keeps an image only as the kind its bytes are", async () => {
+			const at = await aDocument();
+			const as = await servedOnPostgresAs(Artifacts.Service, Artifacts.layer);
+			const gif = new TextEncoder().encode("GIF89a");
+
+			await expect(
+				as(memberId).uploadImage({ ...at, contentType: "image/png", stream: Stream.succeed(gif) }),
+			).rejects.toMatchObject({ _tag: "ArtifactImageNotOfType" });
+			expect(await imagesStoredFor(at.artifactId)).toEqual([]);
+			const kept = await as(memberId).uploadImage({
+				...at,
+				contentType: "image/gif",
+				stream: Stream.succeed(gif),
+			});
+			expect((await as(memberId).image(kept)).contentType).toBe("image/gif");
+		});
+
+		it("keeps no image that would take the document's images past the most it keeps", async () => {
+			const at = await aDocument();
+			const as = await servedOnPostgresAs(Artifacts.Service, Artifacts.layer);
+			const largest = (fill: number) => {
+				const bytes = new Uint8Array(MAX_ARTIFACT_IMAGE_BYTES).fill(fill);
+				bytes.set(png);
+				return { ...at, contentType: "image/png" as const, stream: Stream.succeed(bytes) };
+			};
+			for (
+				let fill = 0;
+				MAX_ARTIFACT_IMAGE_BYTES * (fill + 1) <= MAX_ARTIFACT_IMAGES_BYTES;
+				fill++
+			) {
+				await as(memberId).uploadImage(largest(fill));
+			}
+
+			await expect(as(memberId).uploadImage({ ...at, ...image })).rejects.toMatchObject({
+				_tag: "ArtifactImagesFull",
+			});
+			// One the document keeps already is kept again for nothing.
+			expect(await as(memberId).uploadImage(largest(0))).toMatchObject({
+				artifactId: at.artifactId,
+			});
+			expect(await imagesStoredFor(at.artifactId)).toHaveLength(
+				MAX_ARTIFACT_IMAGES_BYTES / MAX_ARTIFACT_IMAGE_BYTES,
+			);
+		});
 	});
 });

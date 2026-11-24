@@ -1,9 +1,9 @@
 import { suggestChanges, withSuggestChanges } from "@handlewithcare/prosemirror-suggest-changes";
 import {
-	BLOCK_SUGGESTION,
-	blockSuggestion,
-	marksOfBlockSuggestion,
-	saysBlockSuggestion,
+	marksOfNodeSuggestion,
+	NODE_SUGGESTION,
+	nodeSuggestion,
+	saysNodeSuggestion,
 	suggestionId,
 } from "@sugabots/contracts/live-document";
 import { type Editor, Extension } from "@tiptap/core";
@@ -24,30 +24,30 @@ import { v4 as uuidv4 } from "uuid";
 export const Suggesting = Extension.create({
 	name: "suggesting",
 	addProseMirrorPlugins() {
-		return [suggestChanges(), blockSuggestionsInStep];
+		return [suggestChanges(), nodeSuggestionsInStep];
 	},
 });
 
 /**
- * Keeps each block's suggestion marks and the attribute that says them the
+ * Keeps each node's suggestion marks and the attribute that says them the
  * same, since only the attribute reaches the others in the document. After a
  * change made here, the attribute is written from the marks; after one that
  * arrived from elsewhere, the marks are restored from the attribute.
  */
-const blockSuggestionsInStep = new Plugin({
+const nodeSuggestionsInStep = new Plugin({
 	appendTransaction(transactions, _before, state) {
 		if (!transactions.some((transaction) => transaction.docChanged)) return null;
 		const arrived = transactions.some(
 			(transaction) => transaction.getMeta(FROM_SYNC)?.isChangeOrigin === true,
 		);
 		const inStep = state.tr;
-		state.doc.descendants((block, position) => {
-			if (!saysBlockSuggestion(block)) return;
-			const marked = blockSuggestion(block);
-			if (marked === (block.attrs[BLOCK_SUGGESTION] ?? null)) return;
-			if (!arrived) return void inStep.setNodeAttribute(position, BLOCK_SUGGESTION, marked);
-			for (const mark of block.marks) inStep.removeNodeMark(position, mark);
-			for (const mark of marksOfBlockSuggestion(block)) inStep.addNodeMark(position, mark);
+		state.doc.descendants((node, position) => {
+			if (!saysNodeSuggestion(node)) return;
+			const marked = nodeSuggestion(node);
+			if (marked === (node.attrs[NODE_SUGGESTION] ?? null)) return;
+			if (!arrived) return void inStep.setNodeAttribute(position, NODE_SUGGESTION, marked);
+			for (const mark of node.marks) inStep.removeNodeMark(position, mark);
+			for (const mark of marksOfNodeSuggestion(node)) inStep.addNodeMark(position, mark);
 		});
 		// Not a change of the person's own to undo.
 		return inStep.docChanged ? inStep.setMeta("addToHistory", false) : null;

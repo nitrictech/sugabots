@@ -107,6 +107,30 @@ describe("a suggestion, settled by a person", () => {
 		expect(lines(editing.doc)).toEqual(["Ship on Friday."]);
 	});
 
+	it("says what a proposed table and image hold, in words", () => {
+		const editing = plan();
+		const cell = (type: string, words: string) => schema.node(type, null, [paragraph(words)]);
+		const table = schema.node("table", null, [
+			schema.node("tableRow", null, [
+				cell("tableHeader", "Milestone"),
+				cell("tableHeader", "Owner"),
+			]),
+			schema.node("tableRow", null, [cell("tableCell", "Beta"), cell("tableCell", "Priya")]),
+		]);
+		const image = schema.node("image", {
+			src: "/api/pods/0199a3a0-0000-7000-8000-000000000001/artifacts/0199a3a0-0000-7000-8000-000000000002/images/0199a3a0-0000-7000-8000-000000000003",
+			alt: "The launch chart",
+		});
+
+		const tableId = editing.suggest((change) => change.insert(change.doc.content.size, table));
+		const imageId = editing.suggest((change) => change.insert(1, image));
+
+		expect(pendingSuggestions(editing.doc)).toMatchObject([
+			{ id: imageId, adds: "The launch chart" },
+			{ id: tableId, adds: "Milestone Owner Beta Priya" },
+		]);
+	});
+
 	it("leaves other suggestions waiting", () => {
 		const editing = plan();
 		const first = editing.suggest((change) => change.insertText("Monday", friday.from, friday.to));

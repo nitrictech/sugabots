@@ -1,13 +1,20 @@
 export * as Artifacts from "./artifacts.ts";
 
+import { createHash } from "node:crypto";
 import {
 	type Artifact,
 	type ArtifactAuthor,
+	type ArtifactImageType,
 	type ArtifactKind,
 	type ArtifactSummary,
 	type ArtifactVersionSummary,
+	imageTypeOf,
 	MAX_ARTIFACT_CONTENT_CHARACTERS,
+	MAX_ARTIFACT_IMAGE_BYTES,
+	MAX_ARTIFACT_IMAGES_BYTES,
 } from "@sugabots/contracts";
+import { type ArtifactImageIds, artifactImageIds } from "@sugabots/contracts/http";
+import { userText } from "@sugabots/errors";
 import { and, desc, eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer, Stream } from "effect";
 import { type AuthorizationDenied, ResourceHidden } from "../authorization/access.ts";
@@ -25,12 +32,14 @@ import {
 	blobDeletion,
 } from "../database/schema.ts";
 import { Ids, isUuid } from "../ids/ids.ts";
+import { sizeForPeople, type UserFacing } from "../user-message.ts";
 import { LiveDocuments } from "./live.ts";
 
 /**
- * Reading a pod's artifacts, for people. Seeing them takes `pod.read`, the
- * same reach that shows the pod's conversations; deleting one takes
- * `pod.update`, held by those who manage the pod.
+ * Reading a pod's artifacts, for people, and keeping the images a document
+ * shows. Seeing them takes `pod.read`, the same reach that shows the pod's
+ * conversations; deleting one takes `pod.update`, held by those who manage
+ * the pod.
  */
 export interface Interface {
 	readonly list: (
@@ -55,6 +64,37 @@ export interface Interface {
 	readonly remove: (
 		at: InArtifact,
 	) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
+	/**
+	 * Keeps `stream` as an image for a `document` artifact to show, and
+	 * answers the ids it is addressed by. Anyone who can read the document
+	 * can, as anyone who can read it can edit it. The image's id is its bytes'
+	 * digest, so the same image kept again is kept once, and answers the same
+	 * ids. Keeping nothing, fails with `ImageTooLarge` past
+	 * `MAX_ARTIFACT_IMAGE_BYTES` or what the blob store keeps, with
+	 * `ImageNotOfType` when its bytes aren't an image of `contentType`, with
+	 * `ImagesFull` when the document's images would come to more than
+	 * `MAX_ARTIFACT_IMAGES_BYTES`, and with whatever `stream` fails with.
+	 * Uploads at the same moment may each pass that check, so it bounds them
+	 * only roughly.
+	 */
+	readonly uploadImage: <E>(
+		at: InArtifact & { contentType: ArtifactImageType; stream: Stream.Stream<Uint8Array, E> },
+	) => Effect.Effect<
+		ArtifactImageIds,
+		E | AuthorizationDenied | ImageTooLarge | ImageNotOfType | ImagesFull | BlobStore.Failure,
+		CurrentActor.Service
+	>;
+	/**
+	 * An image kept for a `document` artifact, for anyone who can read the
+	 * document. Fails with `ImageNotFound` for an id it keeps no image under.
+	 */
+	readonly image: (
+		at: ArtifactImageIds,
+	) => Effect.Effect<
+		BlobStore.Blob,
+		AuthorizationDenied | ImageNotFound | BlobStore.Failure,
+		CurrentActor.Service
+	>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Artifacts") {}
@@ -127,6 +167,14 @@ export const make = Effect.gen(function* () {
 			return found;
 		});
 
+	/** The `document` artifact, if the person may read it: who may, may edit it and its images. */
+	const readableDocument = (podId: string, artifactId: string) =>
+		Effect.gen(function* () {
+			const { artifact: row } = yield* inReachedPod(podId, artifactId);
+			if (row.kind !== "document") return yield* new ResourceHidden({ resource: "artifact" });
+			return row;
+		});
+
 	return Service.of({
 		list: ({ podId }) =>
 			operation(
@@ -174,6 +222,57 @@ export const make = Effect.gen(function* () {
 					yield* authorization.pod(podId, "pod.update");
 					// The versions go with it, and the `artifact_blob_deletion` trigger queues its blobs.
 					yield* query((db) => db.delete(artifact).where(eq(artifact.id, row.id)));
+				}),
+			),
+
+		uploadImage: ({ podId, artifactId, contentType, stream }) =>
+			operation(
+				"uploadImage",
+				Effect.gen(function* () {
+					const document = yield* readableDocument(podId, artifactId);
+					// Read whole, as its id is the digest of its bytes; never more than an image may be.
+					const chunks = yield* Stream.runCollect(
+						BlobStore.atMost(stream, MAX_ARTIFACT_IMAGE_BYTES),
+					).pipe(
+						Effect.catchIf(isTooLarge, ({ maxSize }) =>
+							Effect.fail(new ImageTooLarge({ maxSize })),
+						),
+					);
+					const bytes = Buffer.concat(chunks);
+					// It is served as `contentType`, so its bytes must be that kind of image and nothing else.
+					if (imageTypeOf(bytes) !== contentType) {
+						return yield* new ImageNotOfType({ contentType });
+					}
+					const image = imageIdsOf(document, bytes);
+					const kept = yield* blobs.list(imagesFolder(document.id));
+					if (kept.some((entry) => entry.key === imageKey(image))) return image;
+					const keptBytes = kept.reduce((total, entry) => total + entry.size, 0);
+					if (keptBytes + bytes.byteLength > MAX_ARTIFACT_IMAGES_BYTES) {
+						return yield* new ImagesFull({ maxSize: MAX_ARTIFACT_IMAGES_BYTES });
+					}
+					yield* blobs
+						.put(imageKey(image), { stream: Stream.succeed(bytes), contentType })
+						.pipe(
+							Effect.catchIf(isTooLarge, ({ maxSize }) =>
+								Effect.fail(new ImageTooLarge({ maxSize })),
+							),
+						);
+					return image;
+				}),
+			),
+
+		image: (image) =>
+			operation(
+				"image",
+				Effect.gen(function* () {
+					yield* readableDocument(image.podId, image.artifactId);
+					return yield* blobs
+						.get(imageKey(image))
+						.pipe(
+							Effect.catchTag("BlobNotFound", () =>
+								Effect.fail(new ImageNotFound({ imageId: image.imageId })),
+							),
+						);
 				}),
 			),
 	});
@@ -478,6 +577,28 @@ function versionKey(artifactId: string, versionId: string): BlobStore.Key {
 	return BlobStore.key("artifacts", artifactId, "versions", versionId);
 }
 
+/** Under the artifact's folder too, so its images are deleted with it, as its versions are. */
+function imageKey({ artifactId, imageId }: ArtifactImageIds): BlobStore.Key {
+	return BlobStore.key("artifacts", artifactId, "images", imageId);
+}
+
+/** Where every image an artifact keeps is, to count them by. */
+function imagesFolder(artifactId: string): BlobStore.Key {
+	return BlobStore.key("artifacts", artifactId, "images");
+}
+
+/** The ids `bytes`, an image for `document`, are addressed by: its own, and the SHA-256 of the bytes. */
+function imageIdsOf(document: ArtifactRow, bytes: Uint8Array): ArtifactImageIds {
+	const imageId = createHash("sha256").update(bytes).digest("hex");
+	const ids = artifactImageIds({ podId: document.podId, artifactId: document.id, imageId });
+	if (!ids)
+		throw new Error(`Artifact ${document.id} in pod ${document.podId} has ids no address holds`);
+	return ids;
+}
+
+const isTooLarge = (error: unknown): error is BlobStore.TooLarge =>
+	error instanceof BlobStore.TooLarge;
+
 export interface InPod {
 	podId: string;
 }
@@ -539,6 +660,63 @@ export class Unreadable extends Data.TaggedError("ArtifactUnreadable") {}
 
 /** Why a change to a live document left it and its versions as they were. */
 export type NotWritten = Suggested | SuggestionBlocked | Unreadable;
+
+/** An image for a document is over `maxSize` bytes, the most kept. */
+export class ImageTooLarge
+	extends Data.TaggedError("ArtifactImageTooLarge")<{
+		readonly maxSize: number;
+	}>
+	implements UserFacing
+{
+	get userMessage() {
+		const { amount, unit } = sizeForPeople(this.maxSize);
+		return userText`The image is larger than ${amount} ${unit}, the most a document keeps of one`;
+	}
+}
+
+/** An image for a document said to be of `contentType` holds bytes of another kind, or of none. */
+export class ImageNotOfType
+	extends Data.TaggedError("ArtifactImageNotOfType")<{
+		readonly contentType: ArtifactImageType;
+	}>
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`The file says it is a ${IMAGE_TYPE_NAMES[this.contentType]} image, but its content isn't one`;
+	}
+}
+
+const IMAGE_TYPE_NAMES = {
+	"image/png": "PNG",
+	"image/jpeg": "JPEG",
+	"image/gif": "GIF",
+	"image/webp": "WebP",
+} as const satisfies Record<ArtifactImageType, string>;
+
+/** A document's images would come to more than `maxSize` bytes, the most it keeps of them in all. */
+export class ImagesFull
+	extends Data.TaggedError("ArtifactImagesFull")<{
+		readonly maxSize: number;
+	}>
+	implements UserFacing
+{
+	get userMessage() {
+		const { amount, unit } = sizeForPeople(this.maxSize);
+		return userText`A document keeps ${amount} ${unit} of images at most, and this one would take it past that`;
+	}
+}
+
+/** The document keeps no image under `imageId`. */
+export class ImageNotFound
+	extends Data.TaggedError("ArtifactImageNotFound")<{
+		readonly imageId: string;
+	}>
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`That image isn't there`;
+	}
+}
 
 /** An edit's text appears in the artifact `matches` times, not exactly once. */
 export class EditTextUnmatched extends Data.TaggedError("EditTextUnmatched")<{

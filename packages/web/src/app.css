@@ -928,6 +928,83 @@
 	background: none;
 }
 
+/* A table in a document: ruled cells and a tinted header row, scrolling sideways when it is wider than the page. */
+.live-document .tableWrapper {
+	overflow-x: auto;
+}
+
+.live-document table {
+	width: 100%;
+	border-collapse: collapse;
+	table-layout: fixed;
+}
+
+.live-document th,
+.live-document td {
+	padding: 6px 10px;
+	border: 1px solid var(--border-strong);
+	text-align: left;
+	vertical-align: top;
+}
+
+.live-document th {
+	background: var(--chip);
+	color: var(--foreground);
+	font-weight: 600;
+}
+
+.live-document :is(th, td) > * + * {
+	margin-top: 0.5em;
+}
+
+/* The cells picked out by dragging across them. */
+.live-document .selectedCell {
+	background: color-mix(in srgb, var(--suggestion) 12%, transparent);
+}
+
+/* An image in a document, no wider than the text, ringed while it is selected. */
+.live-document img {
+	max-width: 100%;
+	height: auto;
+	border-radius: 6px;
+	vertical-align: bottom;
+}
+
+.live-document img.ProseMirror-selectednode {
+	outline: 2px solid var(--suggestion);
+	outline-offset: 2px;
+}
+
+/* An image that isn't the document's own, which is never loaded: its words, in a dashed box. */
+.live-document img:not([src]) {
+	min-width: 1em;
+	min-height: 1em;
+	padding: 1px 6px;
+	border: 1px dashed var(--border-strong);
+	border-radius: 4px;
+	color: var(--muted-foreground);
+}
+
+/* An image a suggestion would add, ringed in the suggestion's colour, or remove, faded and dashed. */
+.live-document ins[data-id] img {
+	outline: 2px solid var(--suggestion);
+	outline-offset: 2px;
+}
+
+.live-document del[data-id] img {
+	opacity: 0.45;
+	outline: 2px dashed var(--subtle-foreground);
+	outline-offset: 2px;
+}
+
+/* Highlighted text in a document, in the warning colour, light enough to read through in either theme. */
+:is(.live-document, .message-markdown) mark {
+	padding: 0 2px;
+	border-radius: 2px;
+	background: color-mix(in srgb, var(--warning) 30%, transparent);
+	color: inherit;
+}
+
 /* Someone else's caret in the document, in their colour, with their name above it. */
 .live-document .collaboration-carets__caret {
 	position: relative;
