@@ -107,6 +107,11 @@ export const notificationDelivery = pgTable(
 		createdAt: stamp("created_at"),
 		/** When it went to the member's tabs; null until then, so one that didn't is sent again. */
 		sentAt: timestamp("sent_at", { withTimezone: true }),
+		/**
+		 * Until when the sweep sending it again has it to itself: one whose
+		 * sweep stopped, or failed to publish it, is sent again once this passes.
+		 */
+		claimedUntil: timestamp("claimed_until", { withTimezone: true }),
 	},
 	(table) => [
 		compositePrimaryKey({ columns: [table.chatId, table.deliveryId, table.memberId] }),

@@ -50,6 +50,7 @@ import { ConnectorStore } from "@sugabots/core/providers/connectors/connector-st
 import {
 	egressToGitHub,
 	gitHubSetupAt,
+	INSTALLATION_ID,
 	installedConnector,
 	json,
 	madeConnector,
@@ -1030,6 +1031,106 @@ describe("the scheduler, against Postgres", () => {
 					.where(eq(gitHubUninstall.connectorId, connectorId)),
 			),
 		).toEqual([{ installationId: USER_INSTALLATION_ID }]);
+	});
+
+	it("uninstalls an app installed by a member who left before GitHub sent them back", async () => {
+		const { workspaceId, projectId, adminId } = await projectWithAdmin();
+		const attempted: number[] = [];
+		const gitHub = standInGitHub(
+			uninstalls(async (installationId) => {
+				attempted.push(installationId);
+				return new Response(null, { status: 204 });
+			}),
+		);
+		const setup = await gitHubSetupAt(gitHub.fetch, "https://sugabots.example.com");
+		const { connectorId, installState } = await madeConnector(setup, { projectId, adminId });
+		const admin = await setup.member(adminId);
+		await setup.call(admin, "workspaces.leave", { workspace: workspaceId });
+
+		const outcome = await setup.call(admin, "gitHubConnectors.gitHubAppInstalled", {
+			installationId: INSTALLATION_ID,
+			state: installState,
+		});
+		const [work] = await onDatabase((db) =>
+			db.select().from(gitHubUninstall).where(eq(gitHubUninstall.connectorId, connectorId)),
+		);
+		if (!work) throw new Error("Nothing queued to uninstall the app");
+		const scheduler = await makeScheduler(
+			await operationsForTests({ egress: egressToGitHub(gitHub.fetch) }),
+		);
+		await clockAt(new Date(work.nextAttemptAt.getTime() + 100))(scheduler.uninstallGitHubApps);
+
+		expect(outcome).toMatchObject({ kind: "failed", failure: "expired" });
+		expect(attempted).toEqual([INSTALLATION_ID]);
+	});
+
+	it("cannot abandon another member's GitHub installation with their callback state", async () => {
+		const { projectId, adminId } = await projectWithAdmin();
+		const outsider = await seedMember(await seedWorkspace(), "admin");
+		const uninstalled: number[] = [];
+		const gitHub = standInGitHub(
+			uninstalls(async (installationId) => {
+				uninstalled.push(installationId);
+				return new Response(null, { status: 204 });
+			}),
+		);
+		const setup = await gitHubSetupAt(gitHub.fetch, "https://sugabots.example.com");
+		const { installState } = await madeConnector(setup, { projectId, adminId });
+		const callback = { state: installState, installationId: INSTALLATION_ID };
+
+		const refused = await setup.call(
+			await setup.member(outsider),
+			"gitHubConnectors.gitHubAppInstalled",
+			callback,
+		);
+		const installed = await setup.call(
+			await setup.member(adminId),
+			"gitHubConnectors.gitHubAppInstalled",
+			callback,
+		);
+		const scheduler = await makeScheduler(
+			await operationsForTests({ egress: egressToGitHub(gitHub.fetch) }),
+		);
+		await clockAt(new Date(Date.now() + 60_000))(scheduler.uninstallGitHubApps);
+
+		expect(refused).toMatchObject({ kind: "failed", failure: "expired" });
+		expect(installed).toMatchObject({ kind: "done" });
+		expect(uninstalled).toEqual([]);
+	});
+
+	it("uninstalls what a GitHub connector's app had installed when the connector goes before its installation is recorded", async () => {
+		const { projectId, adminId } = await projectWithAdmin();
+		const attempted: number[] = [];
+		const gitHub = standInGitHub(
+			// The member installed the app, but GitHub hasn't sent them back yet.
+			({ method, path, search }) =>
+				method === "GET" && path === "/app/installations" && search.includes("page=1")
+					? json([{ id: INSTALLATION_ID, account: { login: "acme", type: "Organization" } }])
+					: undefined,
+			uninstalls(async (installationId) => {
+				attempted.push(installationId);
+				return new Response(null, { status: 204 });
+			}),
+		);
+		const setup = await gitHubSetupAt(gitHub.fetch, "https://sugabots.example.com");
+		const { connectorId } = await madeConnector(setup, { projectId, adminId });
+
+		await setup.call(await setup.member(adminId), "connectors.remove", { projectId, connectorId });
+		const [work] = await onDatabase((db) =>
+			db.select().from(gitHubUninstall).where(eq(gitHubUninstall.connectorId, connectorId)),
+		);
+		if (!work) throw new Error("Nothing queued to uninstall the app");
+		const scheduler = await makeScheduler(
+			await operationsForTests({ egress: egressToGitHub(gitHub.fetch) }),
+		);
+		await clockAt(new Date(work.nextAttemptAt.getTime() + 100))(scheduler.uninstallGitHubApps);
+
+		expect(attempted).toEqual([INSTALLATION_ID]);
+		expect(
+			await onDatabase((db) =>
+				db.select().from(gitHubUninstall).where(eq(gitHubUninstall.connectorId, connectorId)),
+			),
+		).toEqual([]);
 	});
 
 	it("asks GitHub to uninstall a member's app with its queued uninstall unlocked", async () => {

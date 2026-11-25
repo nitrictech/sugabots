@@ -6,6 +6,7 @@ import {
 	type OAuthTokens,
 	postToSignIn,
 	type SubscriptionSignIn,
+	TokenRefused,
 } from "./sign-in.ts";
 
 /**
@@ -114,6 +115,7 @@ export const xai: SubscriptionSignIn = {
 			if (!response.ok) {
 				return yield* new ProviderSignInFailed({
 					userMessage: userText`xAI would not issue a token (${response.status}); sign in again`,
+					cause: new TokenRefused({ status: response.status }),
 				});
 			}
 			const next = yield* decodeSignInBody(response, SERVICE, TokenResponse);

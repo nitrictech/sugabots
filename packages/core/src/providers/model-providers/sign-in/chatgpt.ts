@@ -7,6 +7,7 @@ import {
 	type OAuthTokens,
 	postToSignIn,
 	type SubscriptionSignIn,
+	TokenRefused,
 	unverifiedClaims,
 } from "./sign-in.ts";
 
@@ -137,6 +138,7 @@ function requestTokens(
 		if (!response.ok) {
 			return yield* new ProviderSignInFailed({
 				userMessage: userText`ChatGPT would not issue a token (${response.status}); sign in again`,
+				cause: new TokenRefused({ status: response.status }),
 			});
 		}
 		const tokens = yield* decodeSignInBody(response, SERVICE, TokenResponse);

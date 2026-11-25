@@ -99,7 +99,7 @@ function modelAnswering(
 								...provider,
 								apiKey: "secret",
 								headers: {},
-								configurationUpdatedAt: new Date(0),
+								configurationRevision: 0,
 							},
 							capabilities,
 						),
@@ -263,10 +263,10 @@ describe("the request a provider is sent", () => {
 	const KEY = "secret";
 	const customHeaders = { "x-workspace": "workspace" };
 	const resolvingTo =
-		(access: Omit<ModelProviderStore.ProviderAccess, "providerId" | "configurationUpdatedAt">) =>
+		(access: Omit<ModelProviderStore.ProviderAccess, "providerId" | "configurationRevision">) =>
 		() =>
 			Effect.succeed(
-				resolvedModel({ providerId: PROVIDER_ID, ...access, configurationUpdatedAt: new Date(0) }),
+				resolvedModel({ providerId: PROVIDER_ID, ...access, configurationRevision: 0 }),
 			);
 
 	it.each([

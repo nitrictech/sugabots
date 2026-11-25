@@ -22,7 +22,7 @@ function access(
 		apiFormat: "openai",
 		apiKey: "secret",
 		headers: {},
-		configurationUpdatedAt: new Date(),
+		configurationRevision: 0,
 		...overrides,
 	};
 }
@@ -34,7 +34,7 @@ function store(found: ModelProviderStore.ProviderAccess) {
 		synced,
 		access: vi.fn(() => Effect.succeed(found)),
 		recordDiscovery: vi.fn(
-			(_workspaceId: string, _providerId: string, _testedAt: Date, models: DiscoveredModel[]) =>
+			(_workspaceId: string, _providerId: string, _revision: number, models: DiscoveredModel[]) =>
 				Effect.sync(() => {
 					synced.push(models);
 					return { added: models.length, updated: 0 };

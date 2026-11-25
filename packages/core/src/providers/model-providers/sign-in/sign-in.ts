@@ -5,8 +5,8 @@ import {
 	signInServiceNames,
 } from "@sugabots/contracts";
 import { ProviderSignInFailed } from "@sugabots/contracts/errors/providers";
-import { userText } from "@sugabots/errors";
-import { Clock, Effect, Schema } from "effect";
+import { type DomainError, userText } from "@sugabots/errors";
+import { Clock, Effect, ErrorReporter, Schema } from "effect";
 import type { EgressHttpClient, EgressHttpClients } from "../../network/egress.ts";
 import type { ModelProviderStore } from "../model-provider-store.ts";
 import { chatgpt } from "./chatgpt.ts";
@@ -66,6 +66,30 @@ export interface SubscriptionSignIn {
 	readonly requestHeaders: (tokens: OAuthTokens) => Record<string, string>;
 }
 
+/** The cause of a sign-in service's refusal to issue tokens: the status it answered with. */
+export class TokenRefused
+	extends Schema.TaggedError<TokenRefused>()("TokenRefused", { status: Schema.Int })
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The sign-in service refused to issue tokens (${this.status})`;
+	}
+	get userMessage() {
+		return userText`The sign-in service refused to issue tokens (${this.status}); sign in again`;
+	}
+}
+
+/**
+ * Whether `failure`, a refresh's, is the service answering that the refresh
+ * token no longer refreshes, so the sign-in must be made again. Any other
+ * failure, unanswered or unreadable, may have spent the token or not.
+ */
+export const refreshRefused = (failure: ProviderSignInFailed) =>
+	failure.cause instanceof TokenRefused &&
+	(failure.cause.status === 400 || failure.cause.status === 401);
+
 /** The sign-in of a provider made from `builtIn`, if it is signed in to rather than given a key. */
 export function signInFor(builtIn: BuiltInProviderId | null): SubscriptionSignIn | undefined {
 	const service = builtInSignInService(builtIn);
@@ -109,8 +133,10 @@ export function withSignInAccess(
 	const http = httpClients.for({ baseUrl: signIn.issuer });
 	return Effect.gen(function* () {
 		const tokens = yield* store.renewOAuthTokens(workspaceId, access.providerId, {
+			configurationRevision: access.configurationRevision,
 			isStale: needsRefresh,
 			refresh: (current) => signIn.refresh(http, current),
+			lapsedBecause: (failure) => (refreshRefused(failure) ? failure.userMessage : undefined),
 		});
 		if (!tokens) {
 			return yield* new ProviderSignInFailed({

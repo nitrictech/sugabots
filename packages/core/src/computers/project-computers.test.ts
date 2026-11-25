@@ -1,7 +1,9 @@
+import { ComputerUnavailable } from "@sugabots/contracts/errors/computers";
 import { eq, inArray } from "drizzle-orm";
 import { DateTime, type Duration, Effect, Exit, Fiber, Layer, Redacted, Scope } from "effect";
 import { afterAll, afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { SystemWorkAuthentication } from "../authentication/system-work.ts";
+import { query, transaction } from "../database/database.ts";
 import {
 	computer,
 	computerDestruction,
@@ -12,7 +14,7 @@ import {
 	project as projectTable,
 	workspace,
 } from "../database/schema.ts";
-import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { closeDatabase, holdTransaction, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { scheduledWorkOperations } from "../operations/scheduled-work.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { unimplemented } from "../testing.ts";
@@ -70,8 +72,10 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 			[PYTHON, PYTHON_DIGEST],
 		]),
 		reachable: true,
+		beforeAnswer: async () => {},
 	};
 	const registryFetch = (async (input: string | URL | Request) => {
+		await registry.beforeAnswer();
 		if (!registry.reachable) throw new Error("registry unreachable");
 		const url = new URL(input instanceof Request ? input.url : input);
 		const [, repository, tag] =
@@ -156,6 +160,7 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 		registry,
 		/** Holds every creation from now on until released. */
 		holdCreations: () => released(provider.holdCreations()),
+		holdLabelledLookups: () => released(provider.holdLabelledLookups()),
 		/** Holds every opening of the computer `id` at its provider from now on until released. */
 		holdOpening: (id: Computers.ComputerId) => released(provider.holdOpening(id)),
 		/** What the project's computer is signed in with from now on. */
@@ -604,6 +609,96 @@ describe("a project's computer, over an in-memory provider", () => {
 			);
 			await runOnPostgres(world.projectComputers.destroyLeftBehind);
 		};
+
+		it("keeps the record of a computer still being made through its provider's removal, and holds the removal until it is made", async () => {
+			const world = await startWorld();
+			const provider = await world.enabledProvider();
+			const creating = world.holdCreations();
+			const opening = world.open();
+			await creating.started(1);
+			const recordsOfIt = () =>
+				onDatabase((db) =>
+					db
+						.select({ creationId: computerDestruction.creationId })
+						.from(computerDestruction)
+						.where(eq(computerDestruction.workspaceId, world.project.workspaceId)),
+				);
+
+			await runOnPostgres(
+				world.projectComputers.destroyAllMadeBy(world.project.workspaceId, provider),
+			);
+			const whileBeingMade = await recordsOfIt();
+			const removal = await runOnPostgres(
+				Effect.exit(
+					transaction(
+						ProjectComputers.lockProviderWithoutComputers(world.project.workspaceId, provider.id),
+					),
+				),
+			);
+			creating.release();
+			const opened = await opening;
+
+			expect(whileBeingMade).toEqual([{ creationId: expect.any(String) }]);
+			expect(Exit.isFailure(removal) && String(removal.cause)).toContain("ComputerMadeMeanwhile");
+			expect(opened.arrival).toBe("made");
+			expect(await recordsOfIt()).toEqual([]);
+		});
+
+		it("does not destroy the computer a project opens while provider removal looks up an expired creation", async () => {
+			const world = await startWorld();
+			const provider = await world.enabledProvider();
+			const creating = world.holdCreations();
+			const opening = world.open();
+			await creating.started(1);
+			await onDatabase((db) =>
+				db
+					.update(computerDestruction)
+					.set({ dueAt: new Date(0) })
+					.where(eq(computerDestruction.workspaceId, world.project.workspaceId)),
+			);
+			const lookingUp = world.holdLabelledLookups();
+			const removing = runOnPostgres(
+				world.projectComputers.destroyAllMadeBy(world.project.workspaceId, provider),
+			);
+			await lookingUp.started(1);
+			creating.release();
+			const opened = await opening;
+			lookingUp.release();
+			await removing;
+
+			expect(world.provider.computers().map(({ id }) => id)).toEqual([opened.computer.id]);
+		});
+
+		it("does not start a provider creation after the workspace's final deletion check", async () => {
+			const world = await startWorld();
+			const checkingImage = Promise.withResolvers<void>();
+			const answerImage = Promise.withResolvers<void>();
+			onTestFinished(() => answerImage.resolve());
+			world.registry.beforeAnswer = () => {
+				checkingImage.resolve();
+				return answerImage.promise;
+			};
+			const opening = world.open().catch((error: unknown) => error);
+			await checkingImage.promise;
+			const { workspaceId } = world.project;
+			await onDatabase((db) =>
+				db.update(workspace).set({ deleting: true }).where(eq(workspace.id, workspaceId)),
+			);
+			const deleting = holdTransaction(
+				ProjectComputers.lockWorkspaceWithoutComputers(workspaceId),
+				query((db) => db.delete(workspace).where(eq(workspace.id, workspaceId))),
+			);
+			await deleting.held;
+			world.provider.failDestroys(1);
+			answerImage.resolve();
+			await deleting.waitForWaiters(1);
+			await deleting.release();
+			const refused = await opening;
+
+			expect(refused).toBeInstanceOf(ComputerUnavailable);
+			expect(refused).toMatchObject({ provider: "project" });
+			expect(world.provider.computers()).toEqual([]);
+		});
 
 		it("destroys a computer made while its project was being deleted, which couldn't be destroyed at once", async () => {
 			const world = await startWorld();

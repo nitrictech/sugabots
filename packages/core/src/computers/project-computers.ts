@@ -623,10 +623,35 @@ export const make = Effect.gen(function* () {
 				),
 		);
 
+	/** Claims the machines left behind by `providerId`, or by any of the workspace's providers, for removal. */
+	const claimForRemoval = (workspaceId: string, providerId?: string) =>
+		Effect.flatMap(DateTime.now, (now) =>
+			query((db) =>
+				db
+					.update(computerDestruction)
+					.set(destructionClaim(now))
+					.where(
+						and(
+							eq(computerDestruction.workspaceId, workspaceId),
+							providerId === undefined
+								? undefined
+								: eq(computerDestruction.computerProviderId, providerId),
+							// A known machine can be removed immediately. A pending creation needs its
+							// grace to become visible, and only its creator or the claim can win.
+							or(
+								lte(computerDestruction.dueAt, DateTime.toDateUtc(now)),
+								and(isNull(computerDestruction.creationId), eq(computerDestruction.attempts, 0)),
+							),
+						),
+					)
+					.returning(),
+			),
+		);
+
 	/** Destroys every machine the workspace's providers, or `providerId`, left behind, stopping at the first that fails. */
 	const destroyAllLeftBehind = (workspaceId: string, providerId?: string) =>
 		Effect.gen(function* () {
-			for (const left of yield* leftBehindIn(workspaceId, providerId)) {
+			for (const left of yield* claimForRemoval(workspaceId, providerId)) {
 				yield* destroyLeftBehindAt(yield* reachableProvider(left), left);
 			}
 		});
@@ -705,7 +730,8 @@ export const make = Effect.gen(function* () {
 	 * destroyed, as is one whose recording fails and can't be destroyed now.
 	 */
 	const madeAndRecorded = <E, R>(
-		provider: { workspaceId: string; id: string; access: Computers.ProviderAccess },
+		project: Project,
+		provider: { id: string; access: Computers.ProviderAccess },
 		spec: Computers.Spec,
 		record: (
 			computer: Computers.Computer,
@@ -716,7 +742,10 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const pinned = yield* pinnedAccess(provider.access);
 			const at = computers.forAccess(pinned);
-			const creation = yield* expectCreation(provider.workspaceId, provider.id);
+			const creation = yield* recordWhileOpen(
+				project,
+				expectCreation(project.workspaceId, provider.id),
+			);
 			const labelled = {
 				...spec,
 				labels: { ...spec.labels, [CREATION_LABEL]: creation.creationId },
@@ -775,7 +804,8 @@ export const make = Effect.gen(function* () {
 			const id = yield* ids.next;
 			const at = computers.forAccess(provider.access);
 			const { computer } = yield* madeAndRecorded(
-				{ ...provider, workspaceId: project.workspaceId },
+				project,
+				provider,
 				yield* specFor(project, id, at),
 				(computer, image, creation) =>
 					recordWhileOpen(
@@ -889,7 +919,8 @@ export const make = Effect.gen(function* () {
 			const spec = yield* specFor(project, row.id, at);
 			yield* requireIntent(row, intentId);
 			const { computer: fresh, creation } = yield* madeAndRecorded(
-				{ workspaceId: row.workspaceId, id: row.computerProviderId, access },
+				project,
+				{ id: row.computerProviderId, access },
 				spec,
 				(computer, image, creation) =>
 					moveRecord(row, intentId, row.computerProviderId, computer.id, image, creation),
@@ -1183,7 +1214,6 @@ export const make = Effect.gen(function* () {
 			const to = computers.forAccess(provider.access);
 			const destroyOld = (creation: Creation) =>
 				destroyedNow(from, row.providerComputerId, creation.id);
-			const madeBy = { ...provider, workspaceId: row.workspaceId };
 			yield* requireIntent(row, intentId);
 			const { workKeptApart } = yield* from
 				.info(row.providerComputerId)
@@ -1192,7 +1222,8 @@ export const make = Effect.gen(function* () {
 				const spec = yield* specFor(row, row.id, to);
 				yield* requireIntent(row, intentId);
 				const { computer: fresh, creation } = yield* madeAndRecorded(
-					madeBy,
+					row,
+					provider,
 					spec,
 					(computer, image, creation) =>
 						moveRecord(row, intentId, provider.id, computer.id, image, creation),
@@ -1234,7 +1265,8 @@ export const make = Effect.gen(function* () {
 			const spec = yield* specFor(row, row.id, to);
 			yield* requireIntent(row, intentId);
 			const { computer: fresh, creation } = yield* madeAndRecorded(
-				madeBy,
+				row,
+				provider,
 				spec,
 				(computer, image, creation) =>
 					computer.uploadFile(archivePath, archive).pipe(
@@ -1575,7 +1607,7 @@ export const make = Effect.gen(function* () {
 							at.destroy(row.providerComputerId).pipe(Effect.andThen(forget(row))),
 						);
 					}
-					for (const left of yield* leftBehindIn(workspaceId, provider.id)) {
+					for (const left of yield* claimForRemoval(workspaceId, provider.id)) {
 						yield* destroyLeftBehindAt(at, left);
 					}
 				}),
@@ -1717,10 +1749,7 @@ export const make = Effect.gen(function* () {
 				const claimed = yield* query((db) =>
 					db
 						.update(computerDestruction)
-						.set({
-							attempts: sql`${computerDestruction.attempts} + 1`,
-							dueAt: DateTime.toDateUtc(DateTime.addDuration(now, LEFT_BEHIND_RETRY)),
-						})
+						.set(destructionClaim(now))
 						.where(
 							inArray(
 								computerDestruction.id,
@@ -1899,6 +1928,11 @@ function imageIsBehind(madeFrom: string, configured: string, pinned: string | un
 type ComputerRow = typeof computerTable.$inferSelect;
 
 type LeftBehindRow = typeof computerDestruction.$inferSelect;
+
+const destructionClaim = (now: DateTime.Utc) => ({
+	attempts: sql`${computerDestruction.attempts} + 1`,
+	dueAt: DateTime.toDateUtc(DateTime.addDuration(now, LEFT_BEHIND_RETRY)),
+});
 
 /** A machine given up at its provider. */
 type LeftBehind = Pick<ComputerRow, "computerProviderId" | "providerComputerId">;

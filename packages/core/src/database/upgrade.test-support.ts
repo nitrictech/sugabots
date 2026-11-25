@@ -58,6 +58,8 @@ export const legacy = {
 	 * A routine's runs that main's `routine` workflow held in its lane: one it
 	 * was carrying out, and one waiting.
 	 */
+	/** The routine those runs are of. */
+	routine: "00000008-0000-4000-8000-000000000001",
 	routineRuns: {
 		running: "00000009-0000-4000-8000-000000000001",
 		waiting: "00000009-0000-4000-8000-000000000002",

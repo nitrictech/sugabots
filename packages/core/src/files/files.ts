@@ -24,8 +24,9 @@ import {
 } from "@sugabots/contracts/errors/proofs";
 import { and, desc, eq, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { Context, DateTime, Duration, Effect, Layer, Stream } from "effect";
+import { Context, Effect, Layer, Stream } from "effect";
 import { BlobStore } from "../blob-store/blob-store.ts";
+import { BlobDeletions } from "../blob-store/deletions.ts";
 import {
 	commitWrittenFile,
 	executionFence,
@@ -37,13 +38,13 @@ import {
 	type Executor,
 	query,
 	serviceOperations,
+	type Transaction,
 	transaction,
 	writtenRow,
 } from "../database/database.ts";
 import {
 	automationRun,
 	type BotRow,
-	blobDeletion,
 	bot,
 	type FileRow,
 	type FileVersionRow,
@@ -363,7 +364,7 @@ const replayFileWrite = (writer: FileWriter) =>
 
 const recordFileWrite = <E>(
 	writer: FileWriter | undefined,
-	write: Effect.Effect<FileWritten, E, Database>,
+	write: Effect.Effect<FileWritten, E, Database | Transaction>,
 ) =>
 	writer
 		? commitWrittenFile(fileWriteFence(writer), writer.toolCallId, write)
@@ -443,19 +444,7 @@ const withContent = <E, R>(
 		const versionId = yield* ids.next;
 		const key = versionKey(fileId, versionId);
 		const contentType = CONTENT_TYPES[kind];
-		// Queued for deletion before the bytes are stored, once the write has had
-		// time to record them, which deletes the queue row: bytes stored by a
-		// process that stopped before recording them are deleted all the same.
-		const now = yield* DateTime.now;
-		const staged = yield* query((db) =>
-			db
-				.insert(blobDeletion)
-				.values({
-					prefix: key,
-					dueAt: DateTime.toDateUtc(DateTime.addDuration(now, STAGED_CONTENT_GRACE)),
-				})
-				.returning({ id: blobDeletion.id }),
-		).pipe(Effect.flatMap(writtenRow("blob_deletion")));
+		const staged = yield* BlobDeletions.stage(key);
 		const discard = blobs.delete(key).pipe(Effect.ignore);
 		return yield* Effect.uninterruptibleMask((restore) =>
 			Effect.gen(function* () {
@@ -472,7 +461,7 @@ const withContent = <E, R>(
 					versionId,
 					contentType,
 					size,
-					stagedDeletionId: staged.id,
+					staged,
 				}).pipe(Effect.onError(() => discard));
 				if (!usedContent) yield* discard;
 				return receipt;
@@ -486,12 +475,9 @@ interface StoredContent {
 	contentType: string;
 	/** In bytes. */
 	size: number;
-	/** The `blob_deletion` row that deletes the content unless a version records it. */
-	stagedDeletionId: string;
+	/** Deletes the content unless a version records it. */
+	staged: BlobDeletions.Staged;
 }
-
-/** How long a write has to record the content it stored before the content is deleted. */
-const STAGED_CONTENT_GRACE = Duration.hours(1);
 
 const CONTENT_TYPES: Record<WrittenFileKind, string> = {
 	markdown: "text/markdown; charset=utf-8",
@@ -691,11 +677,11 @@ const shownOrHidden = <E, R>(shown: Effect.Effect<WrittenFile | undefined, E, R>
 		),
 	);
 
-/** Records the stored content as the file's version `number`, so its staged deletion goes. */
+/** Records the stored content as the file's version `number`, keeping it from its staged deletion. */
 const insertVersion = (
 	of: WrittenFileRow,
 	number: number,
-	{ versionId, contentType, size, stagedDeletionId }: StoredContent,
+	{ versionId, contentType, size, staged }: StoredContent,
 	botId: string,
 ) =>
 	Effect.andThen(
@@ -710,7 +696,7 @@ const insertVersion = (
 				authorBotId: botId,
 			}),
 		),
-		query((db) => db.delete(blobDeletion).where(eq(blobDeletion.id, stagedDeletionId))),
+		BlobDeletions.keepStaged(staged),
 	);
 
 const toListedWrittenFile = (row: WrittenFileRow, creator: FileAuthor): ListedWrittenFile => ({

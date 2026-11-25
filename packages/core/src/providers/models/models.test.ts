@@ -79,7 +79,7 @@ describe("models", () => {
 		apiFormat: "openai" as const,
 		apiKey: "secret",
 		headers: {},
-		configurationUpdatedAt: new Date(),
+		configurationRevision: 0,
 	};
 	const modelResolving = (resolved: ModelProviderStore.ResolvedModel) =>
 		Models.make({

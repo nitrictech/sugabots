@@ -85,6 +85,17 @@ export interface Interface {
 		setup: SetupStep,
 		installationId: number | undefined,
 	) => Effect.Effect<GitHubSetupOutcome>;
+	/**
+	 * Uninstalls `installationId`, which an install step that can't be
+	 * finished reports, since nothing records it: its member left the
+	 * workspace, or no longer manages the project, before GitHub sent them
+	 * back. Only an installation of the step's connector's app, found with its
+	 * key, and not the one the connector records, is uninstalled.
+	 */
+	readonly abandonInstall: (
+		setup: SetupStep,
+		installationId: number | undefined,
+	) => Effect.Effect<void>;
 	/** Where to install the connector's app, or to change which repositories it reaches. */
 	readonly installUrl: <P, J, K>(
 		canManage: CanManageProject<P, J>,
@@ -278,6 +289,53 @@ export const make = Effect.gen(function* () {
 						return failed(undefined, "expired");
 					}
 					return { kind: "done", at: projectIn(reach), connectorId: row.id };
+				}),
+			),
+
+		abandonInstall: (setup, installationId) =>
+			operation(
+				"abandonInstall",
+				Effect.gen(function* () {
+					if (setup.step !== "install" || installationId === undefined) return;
+					// The step's connector's app, unless it records this installation, so uses it.
+					const unrecordedBy = gitHubConnectorForProject(setupProjectOf(setup)).pipe(
+						Effect.map((row) =>
+							row?.id === setup.connectorId &&
+							row.settings &&
+							row.appCredentialEncrypted &&
+							row.settings.installationId !== installationId
+								? {
+										connectorId: row.id,
+										appId: row.settings.appId,
+										appCredentialEncrypted: row.appCredentialEncrypted,
+									}
+								: undefined,
+						),
+					);
+					const app = yield* unrecordedBy;
+					if (!app) return;
+					const { privateKey } = openAppCredential(secrets, app.appCredentialEncrypted);
+					const found = yield* GitHub.installation(
+						gitHubApi(),
+						{ appId: app.appId, privateKey },
+						installationId,
+					).pipe(
+						Effect.tapError((failure) =>
+							Effect.logWarning("Couldn't find the abandoned installation", failure),
+						),
+						Effect.option,
+					);
+					if (Option.isNone(found)) return;
+					yield* transaction(
+						Effect.gen(function* () {
+							// Another member's step may have recorded it meanwhile.
+							const stillUnrecorded = yield* unrecordedBy;
+							if (!stillUnrecorded) return;
+							yield* uninstalls.enqueue(setup.workspaceId, [
+								{ ...stillUnrecorded, installationId: found.value.id },
+							]);
+						}),
+					);
 				}),
 			),
 

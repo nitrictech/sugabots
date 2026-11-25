@@ -547,6 +547,44 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		}
 	});
 
+	it("records a notification sent once it is published, in a Postgres session of its own", async () => {
+		const chat = await projectChat();
+		let other: ReturnType<typeof holdTransaction> | undefined;
+		const bus = unimplemented(EventBus.Service, {
+			publish: async (stream, event) => {
+				published.push({ stream, event });
+				// Another transaction takes the Postgres session the recording one let go
+				// of, and is rolled back.
+				other = holdTransaction(Effect.void, Effect.die("rolled back"));
+				await other.held;
+			},
+		});
+		const sending = await served(bus);
+		try {
+			const { handler } = await sending.run(Notifications.Service);
+			const handled = joiningWhatItStarts(
+				transaction(
+					handler([memberPosted(chat, members.ada, `@${handleFromName(members.bob.name)} look`)]),
+				),
+			);
+			await sending.run(handled.handled);
+			await handled.allEnded;
+		} finally {
+			await sending.close();
+		}
+		await other?.release().catch(() => undefined);
+
+		expect(sentTo(members.bob.id)).toHaveLength(1);
+		expect(
+			await onDatabase((db) =>
+				db
+					.select({ sentAt: notificationDelivery.sentAt })
+					.from(notificationDelivery)
+					.where(eq(notificationDelivery.chatId, chat)),
+			),
+		).toEqual([{ sentAt: expect.any(Date) }]);
+	});
+
 	describe("after the process sending them stops", () => {
 		/** Makes everything left unsent look old enough for the sweep, as if its process stopped a while ago. */
 		const aWhileLater = async () => {
@@ -555,10 +593,125 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			await onDatabase((db) =>
 				db
 					.update(notificationDelivery)
-					.set({ createdAt: before })
+					.set({ createdAt: before, claimedUntil: before })
 					.where(isNull(notificationDelivery.sentAt)),
 			);
 		};
+
+		/** Records `events`' notifications without publishing them, as a process whose bus was down. */
+		const recordedUnsent = async (...events: ChatEvent[]) => {
+			const failing = await served(
+				unimplemented(EventBus.Service, {
+					publish: async () => {
+						throw new Error("The bus is down");
+					},
+				}),
+			);
+			try {
+				const { handler } = await failing.run(Notifications.Service);
+				const handled = joiningWhatItStarts(transaction(handler(events)));
+				await failing.run(handled.handled);
+				await handled.allEnded;
+			} finally {
+				await failing.close();
+			}
+		};
+
+		it("acknowledges each notification it sends again once it is published, and sends again one it failed to", async () => {
+			const chat = await projectChat();
+			const bob = `@${handleFromName(members.bob.name)}`;
+			const cy = `@${handleFromName(members.cy.name)}`;
+			await recordedUnsent(memberPosted(chat, members.ada, `${bob} ${cy} look`));
+			await aWhileLater();
+			let publishes = 0;
+			const failingOnce = await served(
+				unimplemented(EventBus.Service, {
+					publish: async (stream, event) => {
+						publishes += 1;
+						if (publishes === 1) throw new Error("The bus dropped it");
+						published.push({ stream, event });
+					},
+				}),
+			);
+			try {
+				await failingOnce.run(Effect.flatMap(Notifications.Service, (n) => n.sendLeftBehind));
+			} finally {
+				await failingOnce.close();
+			}
+			const sentByTheFirstSweep = sentTo(members.bob.id).length + sentTo(members.cy.id).length;
+
+			await aWhileLater();
+			const { sendLeftBehind } = await notifications();
+			await run(sendLeftBehind);
+			await run(sendLeftBehind);
+
+			expect(sentByTheFirstSweep).toBe(1);
+			expect(sentTo(members.bob.id)).toHaveLength(1);
+			expect(sentTo(members.cy.id)).toHaveLength(1);
+		});
+
+		it("sends again only to those who still reach the chat", async () => {
+			const chat = await projectChat();
+			await recordedUnsent(
+				memberPosted(
+					chat,
+					members.ada,
+					`@${handleFromName(members.bob.name)} @${handleFromName(members.cy.name)} look`,
+				),
+			);
+			await onDatabase((db) =>
+				db
+					.delete(projectMember)
+					.where(
+						and(eq(projectMember.projectId, projectId), eq(projectMember.memberId, members.bob.id)),
+					),
+			);
+
+			await aWhileLater();
+			const { sendLeftBehind } = await notifications();
+			await run(sendLeftBehind);
+
+			expect(sentTo(members.cy.id)).toHaveLength(1);
+			expect(sentTo(members.bob.id)).toEqual([]);
+		});
+
+		it("skips notifications another sweep already sent while the first sweep was held up", async () => {
+			const chat = await projectChat();
+			const bob = `@${handleFromName(members.bob.name)}`;
+			const cy = `@${handleFromName(members.cy.name)}`;
+			await recordedUnsent(memberPosted(chat, members.ada, `${bob} ${cy} look`));
+			await aWhileLater();
+			const publishing = Promise.withResolvers<EventStream>();
+			const resume = Promise.withResolvers<void>();
+			let held = false;
+			const first = await served(
+				unimplemented(EventBus.Service, {
+					publish: async (stream, event) => {
+						if (!held) {
+							held = true;
+							publishing.resolve(stream);
+							await resume.promise;
+						}
+						published.push({ stream, event });
+					},
+				}),
+			);
+			const sweeping = first.run(Effect.flatMap(Notifications.Service, (n) => n.sendLeftBehind));
+			try {
+				const alreadyPublishing = await publishing.promise;
+				await aWhileLater();
+				await run((await notifications()).sendLeftBehind);
+				resume.resolve();
+				await sweeping;
+
+				const otherMember =
+					alreadyPublishing === memberStream(members.bob.id) ? members.cy.id : members.bob.id;
+				expect(sentTo(otherMember)).toHaveLength(1);
+			} finally {
+				resume.resolve();
+				await first.close();
+			}
+		});
 
 		it("sends again a notification it recorded and failed to publish", async () => {
 			const chat = await projectChat();

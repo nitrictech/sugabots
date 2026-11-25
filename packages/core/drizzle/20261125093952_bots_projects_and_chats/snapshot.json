@@ -14818,6 +14818,42 @@
         "n|col|public.chat.id",
         "e|uniqueness|public.chat.id"
       ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "model_provider",
+        "configuration_revision"
+      ],
+      "writes": [
+        "s|col|public.model_provider.configuration_revision",
+        "n|col|public.model_provider.configuration_revision",
+        "e|col|public.model_provider.configuration_revision"
+      ],
+      "reads": [
+        "n|tbl|public.model_provider",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "notification_delivery",
+        "claimed_until"
+      ],
+      "writes": [
+        "s|col|public.notification_delivery.claimed_until",
+        "n|col|public.notification_delivery.claimed_until",
+        "e|col|public.notification_delivery.claimed_until"
+      ],
+      "reads": [
+        "n|tbl|public.notification_delivery",
+        "n|sch|public"
+      ]
     }
   ],
   "deltas": [
@@ -22711,7 +22747,7 @@
         "name": "installation_id",
         "type": "bigint",
         "typeSchema": null,
-        "notNull": true,
+        "notNull": false,
         "dimensions": 0,
         "default": null,
         "generated": null,
@@ -24132,6 +24168,38 @@
         ],
         "nameExplicit": false,
         "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "model_provider",
+        "name": "configuration_revision",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "claimed_until",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
       }
     }
   ]

@@ -9,7 +9,7 @@ import {
 	ModelListTooLarge,
 	ModelListUnreadable,
 } from "@sugabots/contracts/errors/providers";
-import { Effect, Schema } from "effect";
+import { Effect, type Result, Schema } from "effect";
 import { type EgressHttpClients, EgressRefused } from "../network/egress.ts";
 import { timedTest } from "../tested-configuration.ts";
 import {
@@ -19,7 +19,7 @@ import {
 	modelsDev,
 } from "./dialects/index.ts";
 import type { ModelProviderStore } from "./model-provider-store.ts";
-import { withSignInAccess } from "./sign-in/sign-in.ts";
+import { type OAuthTokens, withSignInAccess } from "./sign-in/sign-in.ts";
 
 /**
  * Asking a provider which models it offers and what they can do.
@@ -73,7 +73,7 @@ export function testProvider(
 			yield* providers.recordTest(
 				workspaceId,
 				providerId,
-				access.configurationUpdatedAt,
+				access.configurationRevision,
 				error === undefined ? { activateOnSuccess: false } : { error },
 			);
 			return { error };
@@ -110,7 +110,7 @@ export function fetchProviderModels(
 		);
 
 		if (outcome._tag === "Failure") {
-			yield* providers.recordTest(workspaceId, providerId, access.configurationUpdatedAt, {
+			yield* providers.recordTest(workspaceId, providerId, access.configurationRevision, {
 				error: outcome.failure.userMessage,
 			});
 			return yield* outcome.failure;
@@ -121,7 +121,7 @@ export function fetchProviderModels(
 		const recorded = yield* providers.recordDiscovery(
 			workspaceId,
 			providerId,
-			access.configurationUpdatedAt,
+			access.configurationRevision,
 			outcome.success,
 			activateOnSuccess,
 		);
@@ -131,29 +131,53 @@ export function fetchProviderModels(
 }
 
 /**
+ * What trying a candidate found: the models its provider listed, or why it
+ * didn't, and the sign-in tokens it was tried with.
+ */
+export interface CandidateDiscovery {
+	readonly listed: Result.Result<DiscoveredModel[], DiscoveryFailure>;
+	/**
+	 * The candidate's own tokens, or the ones that replaced them when they
+	 * were close to expiring: a refresh may spend the old refresh token, so
+	 * these are the ones to keep. `undefined` for a key.
+	 */
+	readonly triedTokens: OAuthTokens | undefined;
+}
+
+/**
  * Asks the provider `candidate` describes for its models, as discovery does,
  * storing nothing: for a key or sign-in that replaces the provider's only
  * once it has answered. A candidate sign-in's tokens are refreshed, if they
- * need it, in memory.
+ * need it, in memory, and returned as `triedTokens`.
  */
 export function discoverWithCandidate(
 	candidate: ModelProviderStore.ProviderAccess,
 	httpClients: EgressHttpClients,
 	registry: ModelRegistry = modelsDev,
-): Effect.Effect<DiscoveredModel[], DiscoveryFailure> {
-	const inMemory: Pick<ModelProviderStore.Interface, "renewOAuthTokens"> = {
-		renewOAuthTokens: (_workspaceId, _providerId, { isStale, refresh }) => {
-			const tokens = candidate.oauthTokens;
-			if (!tokens) return Effect.succeed(undefined);
-			return Effect.flatMap(isStale(tokens), (stale) =>
-				stale ? refresh(tokens) : Effect.succeed(tokens),
-			);
-		},
-	};
-	return requestModels(inMemory, "", candidate, httpClients).pipe(
-		Effect.tapError(logFailure),
-		Effect.map((models) => models.map((model) => registry.complete(model, candidate))),
-	);
+): Effect.Effect<CandidateDiscovery> {
+	return Effect.suspend(() => {
+		let triedTokens = candidate.oauthTokens;
+		const inMemory: Pick<ModelProviderStore.Interface, "renewOAuthTokens"> = {
+			renewOAuthTokens: (_workspaceId, _providerId, { isStale, refresh }) => {
+				const tokens = candidate.oauthTokens;
+				if (!tokens) return Effect.succeed(undefined);
+				return Effect.flatMap(isStale(tokens), (stale) =>
+					stale
+						? Effect.map(refresh(tokens), (refreshed) => {
+								triedTokens = refreshed;
+								return refreshed;
+							})
+						: Effect.succeed(tokens),
+				);
+			},
+		};
+		return requestModels(inMemory, "", candidate, httpClients).pipe(
+			Effect.tapError(logFailure),
+			Effect.map((models) => models.map((model) => registry.complete(model, candidate))),
+			Effect.result,
+			Effect.map((listed) => ({ listed, triedTokens })),
+		);
+	});
 }
 
 function requireAccess(

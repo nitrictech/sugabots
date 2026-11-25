@@ -37,6 +37,7 @@ import {
 	Stream,
 } from "effect";
 import { BlobStore } from "../blob-store/blob-store.ts";
+import { BlobDeletions } from "../blob-store/deletions.ts";
 import { type AttachedFileRow, loadFileParts } from "../chats/store/file-parts.ts";
 import {
 	afterCommit,
@@ -200,7 +201,8 @@ export const make = Effect.gen(function* () {
 
 	/**
 	 * Puts `content` in the blob store as a new file in the chat, with no row
-	 * yet: a row is never without its blob.
+	 * yet: a row is never without its blob. Staged, so its bytes are deleted
+	 * unless the row is written, with `BlobDeletions.keepStaged`, in time.
 	 */
 	const putBlob = <E>(
 		chatId: string,
@@ -218,13 +220,14 @@ export const make = Effect.gen(function* () {
 					? content.stream
 					: BlobStore.atMost(content.stream, limit);
 			const id = yield* ids.next;
+			const staged = yield* BlobDeletions.stage(fileKey(chatId, id));
 			const { size } = yield* blobs.put(fileKey(chatId, id), { stream, contentType }).pipe(
 				Effect.catchIf(
 					(error) => error instanceof BlobStore.TooLarge,
 					({ maxSize }) => new FileTooLarge({ maxSize }),
 				),
 			);
-			return { id, contentType, size } satisfies FileDescription;
+			return { described: { id, contentType, size } satisfies FileDescription, staged };
 		});
 
 	/** Keeps `content` as a new file in the chat, its row saying where it came from. */
@@ -236,14 +239,15 @@ export const make = Effect.gen(function* () {
 		fence: Effect.Effect<void, G, Database | Transaction> = Effect.void,
 	) =>
 		Effect.gen(function* () {
-			const kept = yield* putBlob(chatId, content, maxSize);
+			const { described, staged } = yield* putBlob(chatId, content, maxSize);
 			yield* transaction(
-				Effect.andThen(
-					fence,
-					query((db) => db.insert(file).values({ ...kept, chatId, ...source })),
-				),
-			).pipe(Effect.onError(() => removeBlob(chatId, kept.id)));
-			return kept;
+				Effect.gen(function* () {
+					yield* fence;
+					yield* query((db) => db.insert(file).values({ ...described, chatId, ...source }));
+					yield* BlobDeletions.keepStaged(staged);
+				}),
+			).pipe(Effect.onError(() => removeBlob(chatId, described.id)));
+			return described;
 		});
 
 	/**
@@ -253,6 +257,7 @@ export const make = Effect.gen(function* () {
 	 * process that stops first, leaves it to `BlobDeletions`.
 	 */
 	const removedWithBlobs = <E, R>(
+		method: keyof Interface & string,
 		remove: Effect.Effect<ReadonlyArray<{ id: string; chatId: string }>, E, R>,
 	) =>
 		Effect.gen(function* () {
@@ -270,20 +275,28 @@ export const make = Effect.gen(function* () {
 				}),
 			);
 			// After the caller's transaction too, if it runs in one, so a rollback
-			// never leaves a row whose blob has gone.
-			const context = yield* Effect.context<Database>();
+			// never leaves a row whose blob has gone; on the service's own
+			// database, as the transaction's Postgres session is another's once it commits.
 			yield* afterCommit(
-				Effect.forEach(
-					queued,
-					({ id, prefix }) =>
-						blobs.delete(prefix).pipe(
-							Effect.andThen(query((db) => db.delete(blobDeletion).where(eq(blobDeletion.id, id)))),
-							Effect.catchCause((cause) =>
-								Effect.logWarning("Removing a chat file's blob failed; it is deleted later", cause),
+				operation(
+					method,
+					Effect.forEach(
+						queued,
+						({ id, prefix }) =>
+							blobs.delete(prefix).pipe(
+								Effect.andThen(
+									query((db) => db.delete(blobDeletion).where(eq(blobDeletion.id, id))),
+								),
+								Effect.catchCause((cause) =>
+									Effect.logWarning(
+										"Removing a chat file's blob failed; it is deleted later",
+										cause,
+									),
+								),
 							),
-						),
-					{ discard: true },
-				).pipe(Effect.provideContext(context)),
+						{ discard: true },
+					),
+				),
 			);
 			return queued.length;
 		});
@@ -411,12 +424,12 @@ export const make = Effect.gen(function* () {
 			operation(
 				"withReplyFile",
 				Effect.gen(function* () {
-					const kept = yield* putBlob(chatId, {
+					const { described, staged } = yield* putBlob(chatId, {
 						stream: Stream.succeed(content),
 						contentType,
 					});
-					const stored = { ...kept, chatId, messageId, name } as StoredReplyFile;
-					return yield* use(stored).pipe(Effect.onError(() => removeBlob(chatId, kept.id)));
+					const stored = { ...described, chatId, messageId, name, staged } as StoredReplyFile;
+					return yield* use(stored).pipe(Effect.onError(() => removeBlob(chatId, described.id)));
 				}),
 			),
 		attachToReply: (stored) =>
@@ -453,6 +466,7 @@ export const make = Effect.gen(function* () {
 								position,
 							}),
 						);
+						yield* BlobDeletions.keepStaged(stored.staged);
 						return { type: "file", id, name, contentType, size } as const;
 					}),
 				),
@@ -468,6 +482,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"removeReplyAttachments",
 				removedWithBlobs(
+					"removeReplyAttachments",
 					query((db) =>
 						db
 							.delete(file)
@@ -484,6 +499,7 @@ export const make = Effect.gen(function* () {
 					// uuid comparison against anything that is not one.
 					if (!isUuid(fileId)) return;
 					yield* removedWithBlobs(
+						"removeUnsentAttachment",
 						query((db) =>
 							db
 								.delete(file)
@@ -506,6 +522,7 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					// Measured on the database's clock, which stamped `created_at`.
 					return yield* removedWithBlobs(
+						"removeUnsentAttachments",
 						query((db) =>
 							db
 								.delete(file)
@@ -562,6 +579,8 @@ interface StoredReplyFile extends FileDescription {
 	readonly chatId: string;
 	readonly messageId: string;
 	readonly name: string;
+	/** Deletes the blob unless `attachToReply` attaches it in time. */
+	readonly staged: BlobDeletions.Staged;
 }
 
 /** A file a member uploaded and has not sent yet, with the name it had on their computer. */

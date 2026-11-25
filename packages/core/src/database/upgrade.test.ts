@@ -4,16 +4,29 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeFileSystem } from "@effect/platform-node";
 import { PgClient } from "@effect/sql-pg";
+import { WorkflowEngines } from "@sugabots/workflow/engine";
 import { makeWithDefaults } from "drizzle-orm/effect-postgres";
 import { migrate } from "drizzle-orm/effect-postgres/migrator";
-import { ConfigProvider, Effect, Layer, ManagedRuntime, Redacted, Schema, Stream } from "effect";
+import {
+	ConfigProvider,
+	Duration,
+	Effect,
+	Layer,
+	ManagedRuntime,
+	Option,
+	Redacted,
+	Schedule,
+	Schema,
+	Stream,
+} from "effect";
+import { DurableDeferred, Workflow } from "effect/unstable/workflow";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebhookAuthentication, WebhookRefused } from "../authentication/webhook.ts";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { BlobDeletions } from "../blob-store/deletions.ts";
 import { fromFileSystem } from "../blob-store/implementations/filesystem.ts";
-import { CompactionRequest } from "../chats/compaction/compaction.workflow.ts";
+import { Compaction, CompactionRequest } from "../chats/compaction/compaction.workflow.ts";
 import { TurnRequests } from "../chats/turns/turns.ts";
 import { ChatFileStore } from "../files/chat-file-store.ts";
 import { Files } from "../files/files.ts";
@@ -56,6 +69,9 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", store);
 		let root: string;
 		let upgraded: Upgraded;
+		let submitted: SubmittedToMainsEngine;
+		/** The folders queued for deletion as the upgrade left them, before any case works the queue. */
+		let queuedByTheUpgrade: string[];
 
 		beforeAll(async () => {
 			root = await mkdtemp(join(tmpdir(), "upgrade-blobs-"));
@@ -66,8 +82,12 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				await client.query(legacySummaryRequest);
 			});
 			await storeLegacyBytes(url, store, root);
+			submitted = await submitToMainsEngine(url);
 			await Effect.runPromise(applyMigrations.pipe(Effect.provide(poolAt(url))));
 			upgraded = startServer(url, store, root);
+			queuedByTheUpgrade = (
+				await upgraded.rows<{ prefix: string }>(`select prefix from blob_deletion order by prefix`)
+			).map(({ prefix }) => prefix);
 		}, UPGRADE_TIMEOUT_MS);
 
 		afterAll(async () => {
@@ -204,6 +224,51 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			});
 		});
 
+		it("resumes the work main's engine held by its requests' new names, and forgets a workflow gone", async () => {
+			const resumed = Promise.withResolvers<CompactionRequest>();
+			const engine = ManagedRuntime.make(
+				Compaction.toLayer((request) =>
+					DurableDeferred.await(Paused).pipe(
+						Effect.andThen(Effect.sync(() => resumed.resolve(request))),
+					),
+				).pipe(Layer.provideMerge(engineAt(url))),
+			);
+			try {
+				await engine.runPromise(
+					DurableDeferred.succeed(Paused, {
+						token: DurableDeferred.tokenFromExecutionId(Paused, {
+							workflow: Compaction,
+							executionId: submitted.compaction,
+						}),
+						value: undefined,
+					}),
+				);
+				expect(await resumed.promise).toEqual({
+					chatId: legacy.threads.trip,
+					botId: legacy.bots.planner,
+					sourceMessageId: legacy.tripMessages.answered,
+					readKeptFrom: null,
+				});
+			} finally {
+				await engine.dispose();
+			}
+			const requests = await upgraded.rows<{ entity_type: string; payload: string }>(
+				`select entity_type, payload from cluster_messages
+				 where tag = 'run' and entity_type <> 'Workflow/compaction' order by entity_type`,
+			);
+			expect(requests.map(({ entity_type }) => entity_type)).toEqual(["Workflow/turn"]);
+			expect(
+				Schema.decodeUnknownSync(Schema.toCodecJson(TurnRequests.TurnRequest))(
+					JSON.parse(requests[0]?.payload ?? "null"),
+				),
+			).toEqual({
+				chatId: legacy.threads.trip,
+				botId: legacy.bots.planner,
+				triggerMessageId: legacy.tripMessages.asked,
+				reason: "automation",
+			});
+		});
+
 		it("records the runs main's routine workflow held as failed, and keeps no lane of a workflow gone", async () => {
 			const workflows = await upgraded.rows<{ workflow: string }>(
 				`select workflow from lane where workflow is not null
@@ -270,12 +335,9 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					[directMessages],
 				),
 			).toEqual([]);
-			expect(
-				await upgraded.rows<{ prefix: string }>(
-					`select prefix from blob_deletion where prefix = any($1) order by prefix`,
-					[directMessages.map((id) => `chats/${id}`)],
-				),
-			).toEqual(directMessages.map((id) => ({ prefix: `chats/${id}` })));
+			expect(queuedByTheUpgrade).toEqual(
+				expect.arrayContaining(directMessages.map((id) => `chats/${id}`)),
+			);
 		});
 
 		it("keeps what summaries cost, as system bots' work on their chats", async () => {
@@ -313,6 +375,108 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 		});
 	},
 );
+
+/** Pauses work main's engine was carrying out, until the test resumes it. */
+const Paused = DurableDeferred.make("upgrade/paused");
+
+/** Main's workflows, as their requests encoded, to submit work through main's engine. */
+const MainCompaction = Workflow.make("compaction", {
+	payload: {
+		threadId: Schema.String,
+		agentId: Schema.String,
+		sourceMessageId: Schema.String,
+		readKeptFrom: Schema.NullOr(Schema.String),
+	},
+	idempotencyKey: (request) => `${request.threadId}/${request.sourceMessageId}`,
+});
+const MainTurn = Workflow.make("turn", {
+	payload: {
+		threadId: Schema.String,
+		agentId: Schema.String,
+		triggerMessageId: Schema.String,
+		reason: Schema.String,
+	},
+	idempotencyKey: (request) => `${request.threadId}/${request.agentId}/${request.triggerMessageId}`,
+});
+const MainRoutine = Workflow.make("routine", {
+	payload: { routineId: Schema.String, executionId: Schema.String },
+	idempotencyKey: (run) => run.executionId,
+});
+
+interface SubmittedToMainsEngine {
+	/** The compaction's execution, the one id main's and today's workflow agree on. */
+	compaction: string;
+}
+
+/**
+ * Work main's engine was carrying out when the upgrade stopped it, each
+ * execution waiting to resume: a compaction, a turn a routine asked for, and
+ * a routine's run.
+ */
+async function submitToMainsEngine(url: string): Promise<SubmittedToMainsEngine> {
+	const waiting = () => DurableDeferred.await(Paused);
+	const engine = ManagedRuntime.make(
+		Layer.mergeAll(
+			MainCompaction.toLayer(waiting),
+			MainTurn.toLayer(waiting),
+			MainRoutine.toLayer(waiting),
+		).pipe(Layer.provideMerge(engineAt(url))),
+	);
+	try {
+		const compaction = await engine.runPromise(
+			MainCompaction.execute(
+				{
+					threadId: legacy.threads.trip,
+					agentId: legacy.bots.planner,
+					sourceMessageId: legacy.tripMessages.answered,
+					readKeptFrom: null,
+				},
+				{ discard: true },
+			).pipe(Effect.tap((id) => untilSuspended(MainCompaction.poll(id)))),
+		);
+		await engine.runPromise(
+			MainTurn.execute(
+				{
+					threadId: legacy.threads.trip,
+					agentId: legacy.bots.planner,
+					triggerMessageId: legacy.tripMessages.asked,
+					reason: "routine",
+				},
+				{ discard: true },
+			).pipe(Effect.tap((id) => untilSuspended(MainTurn.poll(id)))),
+		);
+		await engine.runPromise(
+			MainRoutine.execute(
+				{ routineId: legacy.routine, executionId: legacy.routineRuns.running },
+				{ discard: true },
+			).pipe(Effect.tap((id) => untilSuspended(MainRoutine.poll(id)))),
+		);
+		return { compaction };
+	} finally {
+		await engine.dispose();
+	}
+}
+
+/** Waits for the engine to record an execution suspended, as a stopped process leaves it. */
+const untilSuspended = <R>(
+	polled: Effect.Effect<Option.Option<Workflow.Result<unknown, unknown>>, never, R>,
+) =>
+	polled.pipe(
+		Effect.flatMap((result) =>
+			Option.isSome(result) && result.value._tag === "Suspended"
+				? Effect.void
+				: Effect.fail("not suspended yet"),
+		),
+		Effect.retry({ times: 400, schedule: Schedule.spaced(Duration.millis(25)) }),
+		Effect.orDie,
+	);
+
+/** The server's workflow engine, on the database at `url`. */
+function engineAt(url: string) {
+	return WorkflowEngines.singleRunnerWith({ hostLockWait: Duration.seconds(30) }).pipe(
+		Layer.provideMerge(poolAt(url)),
+	);
+}
 
 /** Where a legacy file is read from now: its chat's folder, which kept the thread's id, or its file's. */
 function keyNow(file: LegacyFile, chatOf: ReadonlyMap<string, string>): BlobStore.Key {

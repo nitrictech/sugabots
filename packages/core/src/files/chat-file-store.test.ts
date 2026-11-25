@@ -7,6 +7,7 @@ import { BlobStore } from "../blob-store/blob-store.ts";
 import { BlobDeletions } from "../blob-store/deletions.ts";
 import { anAutomationAdmin } from "../chats/automations/testing.ts";
 import { seedChat } from "../chats/seed.test-support.ts";
+import { transaction } from "../database/database.ts";
 import {
 	blob,
 	blobDeletion,
@@ -19,6 +20,7 @@ import {
 } from "../database/schema.ts";
 import {
 	closeDatabase,
+	holdTransaction,
 	onDatabase,
 	type Promised,
 	runOnPostgres,
@@ -399,6 +401,110 @@ describe.skipIf(!process.env.DATABASE_URL)("chat files, against Postgres", () =>
 
 		expect(leftAtOnce).toEqual([BlobStore.key("chats", chatId, "files", upload.id)]);
 		expect(await blobKeysUnder(BlobStore.key("chats", chatId))).toEqual([]);
+	});
+
+	it("deletes what a write stored when it never recorded it and the store couldn't take it back", async () => {
+		const { chatId, botId } = await aChat();
+		const deletesFailing = Layer.effect(
+			BlobStore.Service,
+			Effect.map(BlobStore.Service, (store) =>
+				BlobStore.Service.of({
+					...store,
+					delete: () =>
+						Effect.fail(
+							new BlobStore.Unavailable({
+								operation: "delete",
+								provider: "postgres",
+								cause: "down",
+							}),
+						),
+				}),
+			),
+		);
+		const toolCallId = await aToolCall(chatId, botId);
+
+		const refused = await runOnPostgres(
+			Effect.flatMap(ChatFileStore.Service, (service) =>
+				service.write({
+					chatId,
+					toolCallId,
+					content: text("never kept"),
+					fence: Effect.fail("the turn ended"),
+				}),
+			).pipe(
+				Effect.provide(ChatFileStore.layer.pipe(Layer.provide(deletesFailing), Layer.orDie)),
+				Effect.exit,
+			),
+		);
+		const folder = BlobStore.key("chats", chatId);
+		const leftBehind = await blobKeysUnder(folder);
+		await onDatabase((db) =>
+			db
+				.update(blobDeletion)
+				.set({ dueAt: new Date(0) })
+				.where(like(blobDeletion.prefix, `${folder}%`)),
+		);
+		await runOnPostgres(BlobDeletions.deleteQueued);
+
+		expect(refused._tag).toBe("Failure");
+		expect(leftBehind).toHaveLength(1);
+		expect(await blobKeysUnder(folder)).toEqual([]);
+	});
+
+	it("forgets a removed file's queued deletion once its blob is gone, in a Postgres session of its own", async () => {
+		const { chatId, memberId } = await aChat();
+		let other: ReturnType<typeof holdTransaction> | undefined;
+		const deletesWhileAnotherTransactionStarts = Layer.effect(
+			BlobStore.Service,
+			Effect.map(BlobStore.Service, (store) =>
+				BlobStore.Service.of({
+					...store,
+					delete: (key) =>
+						store.delete(key).pipe(
+							// Another transaction takes the Postgres session the removing one let
+							// go of, and is rolled back.
+							Effect.andThen(
+								Effect.promise(() => {
+									other = holdTransaction(Effect.void, Effect.die("rolled back"));
+									return other.held;
+								}),
+							),
+						),
+				}),
+			),
+		);
+		const layer = ChatFileStore.layer.pipe(
+			Layer.provide(deletesWhileAnotherTransactionStarts),
+			Layer.orDie,
+		);
+		const removing = await servedOnPostgres(ChatFileStore.Service, layer);
+		const upload = await removing.upload({
+			chatId,
+			uploaderId: memberId,
+			name: "draft.txt",
+			maxSize: 1024,
+			maxUnsent: 20,
+			content: text("draft"),
+		});
+
+		await runOnPostgres(
+			Effect.flatMap(ChatFileStore.Service, (service) =>
+				transaction(
+					service.removeUnsentAttachment({ chatId, uploaderId: memberId, fileId: upload.id }),
+				),
+			).pipe(Effect.provide(layer)),
+		);
+		await other?.release().catch(() => undefined);
+
+		expect(await blobKeysUnder(BlobStore.key("chats", chatId))).toEqual([]);
+		expect(
+			await onDatabase((db) =>
+				db
+					.select()
+					.from(blobDeletion)
+					.where(like(blobDeletion.prefix, `${BlobStore.key("chats", chatId)}%`)),
+			),
+		).toEqual([]);
 	});
 
 	it("removes uploads left unsent, with their blobs, and nothing else", async () => {

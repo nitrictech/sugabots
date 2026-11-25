@@ -26,7 +26,7 @@ import {
 import { Secrets } from "../../secrets/secrets.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { inWorkspaceUnderMembershipLock } from "../../workspaces/membership/member-reads.ts";
-import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
+import { changesAddress } from "../tested-configuration.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
 import { OAuthTokens } from "./sign-in/sign-in.ts";
 
@@ -79,7 +79,8 @@ export interface Interface {
 	) => Effect.Effect<boolean>;
 	/**
 	 * A signed-in provider's tokens, refreshed first when `renewal` finds them
-	 * stale, or `undefined` if it is not signed in. A refresh token is good for
+	 * stale, or `undefined` if the provider is signed out or its configuration
+	 * no longer matches `renewal.configurationRevision`. A refresh token is good for
 	 * one use, so one process at a time refreshes, under a claim it commits
 	 * before calling the sign-in service and holds no transaction across;
 	 * another waits for it, for at most the claim's lease, and then makes do
@@ -91,15 +92,23 @@ export interface Interface {
 		workspaceId: string,
 		providerId: string,
 		renewal: {
+			readonly configurationRevision: number;
 			readonly isStale: (current: OAuthTokens) => Effect.Effect<boolean>;
 			readonly refresh: (current: OAuthTokens) => Effect.Effect<OAuthTokens, E>;
+			/**
+			 * Why a failed refresh means the refresh token no longer refreshes, so
+			 * the sign-in is signed out to be made again; `undefined` for a failure
+			 * that may have spent it or not, after which the claim is kept until it
+			 * runs out and the next refresh finds out which.
+			 */
+			readonly lapsedBecause: (error: E) => UserText | undefined;
 		},
 	) => Effect.Effect<OAuthTokens | undefined, E>;
 	/**
 	 * How to reach the provider with `candidate` in place of its key or
 	 * sign-in, and the other changes given with a key, without storing any of
 	 * it, so the candidate can be tried before it replaces what works.
-	 * `configurationUpdatedAt` is the configuration it was built on, which
+	 * `configurationRevision` is the configuration it was built on, which
 	 * {@link Interface.replaceCredential} checks is still the provider's.
 	 */
 	readonly candidateAccess: (
@@ -107,6 +116,24 @@ export interface Interface {
 		providerId: string,
 		candidate: CandidateCredential,
 	) => Effect.Effect<ProviderAccess | undefined>;
+	/**
+	 * Stores `candidate`, which the provider refused with `error`, switched
+	 * off, for a provider that offers nothing. Run under the held-models lock.
+	 * Changes nothing, and answers `changed`, once the provider is on or is no
+	 * longer at the configuration `builtOn`, so another member's working
+	 * credential is never put aside for a refused one; `signerGone` as
+	 * {@link Interface.replaceCredential} says.
+	 */
+	readonly storeRejectedCredential: (
+		workspaceId: string,
+		providerId: string,
+		rejected: {
+			candidate: CandidateCredential;
+			builtOn: number;
+			changedById: string;
+			error: UserText;
+		},
+	) => Effect.Effect<ModelProviderRow | "changed" | "signerGone">;
 	/**
 	 * Puts `candidate`, which has answered with `models`, in place of the
 	 * provider's key or sign-in, as one change: who connected it, whether it is
@@ -120,35 +147,39 @@ export interface Interface {
 		providerId: string,
 		replacement: {
 			candidate: CandidateCredential;
-			builtOn: Date;
+			builtOn: number;
 			changedById: string;
 			active: boolean;
 			models: DiscoveredModel[];
 		},
 	) => Effect.Effect<ModelProviderRow | "reconfigured" | "signerGone">;
 	/**
-	 * Records the models the configuration last updated at `testedAt` listed,
+	 * Records the models the configuration `revision` listed,
 	 * and its successful test, as one change, switching it on when
 	 * `activateOnSuccess` asks; nothing, and `undefined`, once it has been
 	 * reconfigured since, so models one configuration listed are never
-	 * recorded against another.
+	 * recorded against another. New models are added, and a fetched one whose
+	 * name, capabilities or context length it now reports differently is
+	 * brought up to date. A model somebody added by hand keeps what they
+	 * wrote, and one another provider in the workspace already lists is left
+	 * to it.
 	 */
 	readonly recordDiscovery: (
 		workspaceId: string,
 		providerId: string,
-		testedAt: Date,
+		revision: number,
 		models: DiscoveredModel[],
 		activateOnSuccess: boolean,
 	) => Effect.Effect<{ added: number; updated: number } | undefined>;
 	/**
-	 * Records how a test of the configuration last updated at `testedAt` went,
+	 * Records how a test of the configuration `revision` went,
 	 * unless the provider has been reconfigured since. A success switches it on
 	 * when `activateOnSuccess` asks; a failure leaves it as it was.
 	 */
 	readonly recordTest: (
 		workspaceId: string,
 		providerId: string,
-		testedAt: Date,
+		revision: number,
 		outcome: { error: UserText } | { activateOnSuccess: boolean },
 	) => Effect.Effect<void>;
 	readonly addModels: (
@@ -156,18 +187,6 @@ export interface Interface {
 		providerId: string,
 		models: Array<Omit<ProviderModel, "id" | "enabled" | "disabledCapabilities">>,
 	) => Effect.Effect<number>;
-	/**
-	 * Records what a provider says it offers: new models are added, and a
-	 * fetched one whose name, capabilities or context length it now reports
-	 * differently is brought up to date. A model somebody added by hand keeps
-	 * what they wrote, and one another provider in the workspace already lists
-	 * is left to it.
-	 */
-	readonly syncDiscovered: (
-		workspaceId: string,
-		providerId: string,
-		models: DiscoveredModel[],
-	) => Effect.Effect<{ added: number; updated: number }>;
 	/**
 	 * One model's switch, the capabilities switched off for bots, or, for a
 	 * model added by hand, what it can do; a fetched model's capabilities are
@@ -293,14 +312,14 @@ export const make = Effect.gen(function* () {
 				oauthTokens: row.oauthTokensEncrypted
 					? openOAuthTokens(row.oauthTokensEncrypted, cipher)
 					: undefined,
-				configurationUpdatedAt: row.updatedAt,
+				configurationRevision: row.configurationRevision,
 				headers: Object.fromEntries(
 					row.customHeadersEncrypted.map(({ name, value }) => [name, cipher.decrypt(value)]),
 				),
 			} satisfies ProviderAccess;
 		});
 
-	/** What `syncDiscovered` says: new models added, fetched ones brought up to date. */
+	/** What a discovery's `models` change, as `recordDiscovery` says: new ones added, fetched ones brought up to date. */
 	const syncModels = (workspaceId: string, providerId: string, models: DiscoveredModel[]) =>
 		Effect.gen(function* () {
 			if (models.length === 0) return { added: 0, updated: 0 };
@@ -348,6 +367,88 @@ export const make = Effect.gen(function* () {
 			);
 			const added = rows.filter(({ inserted }) => inserted).length;
 			return { added, updated: rows.length - added };
+		});
+
+	/**
+	 * Writes `candidate` as the provider's credential, with its test's
+	 * outcome, while the provider is still at the configuration `builtOn` (and
+	 * off, when `whileOff`), in the caller's transaction. `undefined` when it
+	 * isn't, `signerGone` when a sign-in's member has left the workspace.
+	 */
+	const writeCredential = (
+		workspaceId: string,
+		providerId: string,
+		candidate: CandidateCredential,
+		outcome: {
+			builtOn: number;
+			changedById: string;
+			active: boolean;
+			error: UserText | null;
+			whileOff?: boolean;
+		},
+	) =>
+		Effect.gen(function* () {
+			if (
+				"tokens" in candidate &&
+				!(yield* inWorkspaceUnderMembershipLock(workspaceId, candidate.signedInById))
+			) {
+				return "signerGone" as const;
+			}
+			const inProvider = and(
+				eq(modelProvider.id, providerId),
+				eq(modelProvider.workspaceId, workspaceId),
+			);
+			const [unchanged] = yield* query((db) =>
+				db
+					.select({ id: modelProvider.id })
+					.from(modelProvider)
+					.where(
+						and(
+							inProvider,
+							eq(modelProvider.configurationRevision, outcome.builtOn),
+							outcome.whileOff ? eq(modelProvider.active, false) : undefined,
+						),
+					)
+					.for("update"),
+			);
+			if (!unchanged) return undefined;
+			const now = yield* DateTime.nowAsDate;
+			const credential =
+				"tokens" in candidate
+					? {
+							oauthTokensEncrypted: cipher.encrypt(JSON.stringify(candidate.tokens)),
+							oauthRefreshId: null,
+							oauthRefreshUntil: null,
+							signedInById: candidate.signedInById,
+							connectedById: candidate.signedInById,
+						}
+					: {
+							apiKeyEncrypted: cipher.encrypt(candidate.apiKey),
+							apiFormat: candidate.apiFormat,
+							customHeadersEncrypted: candidate.customHeaders?.map(({ name, value }) => ({
+								name,
+								value: cipher.encrypt(value),
+							})),
+							oauthTokensEncrypted: null,
+							oauthRefreshId: null,
+							oauthRefreshUntil: null,
+							signedInById: null,
+							connectedById: outcome.changedById,
+						};
+			const [row] = yield* query((db) =>
+				db
+					.update(modelProvider)
+					.set({
+						...credential,
+						configurationRevision: sql<number>`${modelProvider.configurationRevision} + 1`,
+						active: outcome.active,
+						lastTestedAt: now,
+						lastTestError: outcome.error,
+					})
+					.where(inProvider)
+					.returning(),
+			);
+			return row;
 		});
 
 	const isEnabled = (workspaceId: string, modelId: string) =>
@@ -437,7 +538,14 @@ export const make = Effect.gen(function* () {
 									name,
 									value: cipher.encrypt(value),
 								})) ?? (moved ? [] : undefined),
+							configurationRevision:
+								configurationChanged || changes.active !== undefined
+									? sql<number>`${modelProvider.configurationRevision} + 1`
+									: undefined,
 							oauthTokensEncrypted: losesSignIn ? null : undefined,
+							// A refresh of the tokens taken away has nothing left to save over.
+							oauthRefreshId: losesSignIn ? null : undefined,
+							oauthRefreshUntil: losesSignIn ? null : undefined,
 							signedInById: losesSignIn ? null : undefined,
 							lastTestedAt: configurationChanged ? null : undefined,
 							lastTestError: configurationChanged ? null : undefined,
@@ -492,6 +600,7 @@ export const make = Effect.gen(function* () {
 										? {
 												active: false,
 												oauthTokensEncrypted: cipher.encrypt(JSON.stringify(signIn.tokens)),
+												configurationRevision: sql<number>`${modelProvider.configurationRevision} + 1`,
 												oauthRefreshId: null,
 												oauthRefreshUntil: null,
 												signedInById: signIn.signedInById,
@@ -499,7 +608,10 @@ export const make = Effect.gen(function* () {
 												lastTestedAt: null,
 												lastTestError: null,
 											}
-										: SIGNED_OUT,
+										: {
+												...SIGNED_OUT,
+												configurationRevision: sql<number>`${modelProvider.configurationRevision} + 1`,
+											},
 								)
 								.where(
 									and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId)),
@@ -510,13 +622,21 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		renewOAuthTokens: (workspaceId, providerId, { isStale, refresh }) =>
+		renewOAuthTokens: (
+			workspaceId,
+			providerId,
+			{ configurationRevision, isStale, refresh, lapsedBecause },
+		) =>
 			operation(
 				"renewOAuthTokens",
 				Effect.gen(function* () {
 					const inProvider = and(
 						eq(modelProvider.id, providerId),
 						eq(modelProvider.workspaceId, workspaceId),
+					);
+					const atRevision = and(
+						inProvider,
+						eq(modelProvider.configurationRevision, configurationRevision),
 					);
 					// Kept as it was, so a test of the configuration still records against it.
 					const sameConfiguration = { updatedAt: sql<Date>`${modelProvider.updatedAt}` };
@@ -525,7 +645,7 @@ export const make = Effect.gen(function* () {
 							db
 								.select({ sealed: modelProvider.oauthTokensEncrypted })
 								.from(modelProvider)
-								.where(inProvider),
+								.where(atRevision),
 						);
 						if (!row?.sealed) return undefined;
 						const sealed = row.sealed;
@@ -541,7 +661,7 @@ export const make = Effect.gen(function* () {
 								})
 								.where(
 									and(
-										inProvider,
+										atRevision,
 										eq(modelProvider.oauthTokensEncrypted, sealed),
 										sql`coalesce(${modelProvider.oauthRefreshUntil}, '-infinity') <= clock_timestamp()`,
 									),
@@ -557,19 +677,40 @@ export const make = Effect.gen(function* () {
 							continue;
 						}
 						const claimId = claim.id;
+						// A refresh that failed without an answer may have spent the refresh
+						// token, so its claim is kept until it runs out rather than let
+						// another spend it again at once; the next refresh, with the same
+						// token, either works or is refused. A refusal signs the sign-in
+						// out, so it is made again.
 						const refreshed = yield* refresh(current).pipe(
-							Effect.onError(() =>
-								query((db) =>
-									db
-										.update(modelProvider)
-										.set({ oauthRefreshId: null, oauthRefreshUntil: null, ...sameConfiguration })
-										.where(and(inProvider, eq(modelProvider.oauthRefreshId, claimId))),
-								).pipe(Effect.ignore),
-							),
+							Effect.tapError((error) => {
+								const lapsed = lapsedBecause(error);
+								return lapsed === undefined
+									? Effect.void
+									: query((db) =>
+											db
+												.update(modelProvider)
+												.set({
+													...SIGNED_OUT_KEEPING_STATE,
+													configurationRevision: sql<number>`${modelProvider.configurationRevision} + 1`,
+													lastTestError: lapsed,
+													lastTestedAt: sql`now()`,
+												})
+												.where(
+													and(
+														inProvider,
+														eq(modelProvider.oauthTokensEncrypted, sealed),
+														eq(modelProvider.oauthRefreshId, claimId),
+													),
+												),
+										).pipe(Effect.ignore);
+							}),
 						);
 						// Saved over the tokens it refreshed, even once its claim has run
-						// out, since they no longer refresh; not over a new sign-in.
-						yield* query((db) =>
+						// out, since they no longer refresh; and only over them, so never
+						// over a new sign-in or a key given meanwhile. Tokens it can't save
+						// are another credential's, and aren't used: what is stored now is.
+						const [saved] = yield* query((db) =>
 							db
 								.update(modelProvider)
 								.set({
@@ -578,22 +719,16 @@ export const make = Effect.gen(function* () {
 									oauthRefreshUntil: null,
 									...sameConfiguration,
 								})
-								.where(
-									and(
-										inProvider,
-										or(
-											eq(modelProvider.oauthRefreshId, claimId),
-											eq(modelProvider.oauthTokensEncrypted, sealed),
-										),
-									),
-								),
+								.where(and(inProvider, eq(modelProvider.oauthTokensEncrypted, sealed)))
+								.returning({ revision: modelProvider.configurationRevision }),
 						);
-						return refreshed;
+						if (!saved) continue;
+						return saved.revision === configurationRevision ? refreshed : undefined;
 					}
 				}),
 			),
 
-		recordTest: (workspaceId, providerId, testedAt, outcome) =>
+		recordTest: (workspaceId, providerId, revision, outcome) =>
 			operation(
 				"recordTest",
 				Effect.gen(function* () {
@@ -611,7 +746,7 @@ export const make = Effect.gen(function* () {
 								and(
 									eq(modelProvider.id, providerId),
 									eq(modelProvider.workspaceId, workspaceId),
-									stillConfiguredAs(modelProvider.updatedAt, testedAt),
+									eq(modelProvider.configurationRevision, revision),
 								),
 							),
 					);
@@ -640,9 +775,6 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		syncDiscovered: (workspaceId, providerId, models) =>
-			operation("syncDiscovered", syncModels(workspaceId, providerId, models)),
-
 		candidateAccess: (workspaceId, providerId, candidate) =>
 			operation(
 				"candidateAccess",
@@ -667,7 +799,7 @@ export const make = Effect.gen(function* () {
 							apiFormat: row.apiFormat,
 							apiKey: row.apiKeyEncrypted ? cipher.decrypt(row.apiKeyEncrypted) : undefined,
 							oauthTokens: candidate.tokens,
-							configurationUpdatedAt: row.updatedAt,
+							configurationRevision: row.configurationRevision,
 							headers: stored,
 						} satisfies ProviderAccess;
 					}
@@ -677,7 +809,7 @@ export const make = Effect.gen(function* () {
 						baseUrl: row.baseUrl,
 						apiFormat: candidate.apiFormat ?? row.apiFormat,
 						apiKey: candidate.apiKey,
-						configurationUpdatedAt: row.updatedAt,
+						configurationRevision: row.configurationRevision,
 						headers: candidate.customHeaders
 							? Object.fromEntries(candidate.customHeaders.map(({ name, value }) => [name, value]))
 							: stored,
@@ -694,59 +826,43 @@ export const make = Effect.gen(function* () {
 				"replaceCredential",
 				transaction(
 					Effect.gen(function* () {
-						if (
-							"tokens" in candidate &&
-							!(yield* inWorkspaceUnderMembershipLock(workspaceId, candidate.signedInById))
-						) {
-							return "signerGone" as const;
+						const written = yield* writeCredential(workspaceId, providerId, candidate, {
+							builtOn,
+							changedById,
+							active,
+							error: null,
+						});
+						if (written === "signerGone" || written === undefined) {
+							return written ?? ("reconfigured" as const);
 						}
-						const inProvider = and(
-							eq(modelProvider.id, providerId),
-							eq(modelProvider.workspaceId, workspaceId),
-						);
-						const [unchanged] = yield* query((db) =>
-							db
-								.select({ id: modelProvider.id })
-								.from(modelProvider)
-								.where(and(inProvider, stillConfiguredAs(modelProvider.updatedAt, builtOn)))
-								.for("update"),
-						);
-						if (!unchanged) return "reconfigured" as const;
-						const now = yield* DateTime.nowAsDate;
-						const credential =
-							"tokens" in candidate
-								? {
-										oauthTokensEncrypted: cipher.encrypt(JSON.stringify(candidate.tokens)),
-										oauthRefreshId: null,
-										oauthRefreshUntil: null,
-										signedInById: candidate.signedInById,
-										connectedById: candidate.signedInById,
-									}
-								: {
-										apiKeyEncrypted: cipher.encrypt(candidate.apiKey),
-										apiFormat: candidate.apiFormat,
-										customHeadersEncrypted: candidate.customHeaders?.map(({ name, value }) => ({
-											name,
-											value: cipher.encrypt(value),
-										})),
-										oauthTokensEncrypted: null,
-										signedInById: null,
-										connectedById: changedById,
-									};
-						const [row] = yield* query((db) =>
-							db
-								.update(modelProvider)
-								.set({ ...credential, active, lastTestedAt: now, lastTestError: null })
-								.where(inProvider)
-								.returning(),
-						);
 						yield* syncModels(workspaceId, providerId, models);
-						return row ?? ("reconfigured" as const);
+						return written;
 					}),
 				),
 			),
 
-		recordDiscovery: (workspaceId, providerId, testedAt, models, activateOnSuccess) =>
+		storeRejectedCredential: (
+			workspaceId,
+			providerId,
+			{ candidate, builtOn, changedById, error },
+		) =>
+			operation(
+				"storeRejectedCredential",
+				transaction(
+					Effect.map(
+						writeCredential(workspaceId, providerId, candidate, {
+							builtOn,
+							changedById,
+							active: false,
+							error,
+							whileOff: true,
+						}),
+						(written) => written ?? ("changed" as const),
+					),
+				),
+			),
+
+		recordDiscovery: (workspaceId, providerId, revision, models, activateOnSuccess) =>
 			operation(
 				"recordDiscovery",
 				transaction(
@@ -754,7 +870,7 @@ export const make = Effect.gen(function* () {
 						const inProvider = and(
 							eq(modelProvider.id, providerId),
 							eq(modelProvider.workspaceId, workspaceId),
-							stillConfiguredAs(modelProvider.updatedAt, testedAt),
+							eq(modelProvider.configurationRevision, revision),
 						);
 						const [unchanged] = yield* query((db) =>
 							db
@@ -925,8 +1041,8 @@ export interface ProviderAccess {
 	 * `apiKey`.
 	 */
 	oauthTokens?: OAuthTokens;
-	/** The provider's `updatedAt`, so a test's result is recorded against what it tried. */
-	configurationUpdatedAt: Date;
+	/** Which configuration it is (see `model_provider.configuration_revision`), so what is learned of it is recorded against it. */
+	configurationRevision: number;
 }
 
 /** The model the workspace's new bots start on, or nothing until it first offers one. */
@@ -989,6 +1105,14 @@ function providerValues(input: NewModelProvider, cipher: Secrets.Interface) {
 		})),
 	};
 }
+
+/** A sign-in that lapsed: gone, with whatever else the provider holds kept as it is. */
+const SIGNED_OUT_KEEPING_STATE = {
+	oauthTokensEncrypted: null,
+	oauthRefreshId: null,
+	oauthRefreshUntil: null,
+	signedInById: null,
+} satisfies Partial<ModelProviderRow>;
 
 /** What signing a subscription provider out leaves: switched off and untested until it is signed in and tried again. */
 const SIGNED_OUT = {

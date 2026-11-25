@@ -179,6 +179,17 @@ export const installation = (http: EgressHttpClient, app: AppIdentity, installat
 		})),
 	);
 
+/**
+ * The ids of the app's installations. A private app is installed only on the
+ * account that owns it, so one page holds them all.
+ */
+export const installationIds = (http: EgressHttpClient, app: AppIdentity) =>
+	appJwt(app).pipe(
+		Effect.flatMap((bearer) => getPage(http, bearer, "/app/installations", 1)),
+		Effect.flatMap(({ body }) => decoded(Schema.Array(FoundInstallation))(body)),
+		Effect.map((found) => found.map(({ id }) => id)),
+	);
+
 /** GitHub's status for an installation that isn't there, which uninstalling leaves as wanted. */
 const NOT_FOUND_STATUS = 404;
 

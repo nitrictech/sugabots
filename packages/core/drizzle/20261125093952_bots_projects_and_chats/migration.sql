@@ -2298,7 +2298,43 @@ WHERE "state" IN ('queued', 'running') AND "id"::text IN (
 );--> statement-breakpoint
 DELETE FROM "lane_request" WHERE "workflow" IN ('routine', 'summary');--> statement-breakpoint
 DELETE FROM "lane"
-WHERE "workflow" IN ('routine', 'summary') OR "key" LIKE 'routine:%' OR "key" LIKE 'summary:%';
+WHERE "workflow" IN ('routine', 'summary') OR "key" LIKE 'routine:%' OR "key" LIKE 'summary:%';--> statement-breakpoint
+-- The workflow engine keeps each execution's request itself, as the JSON its
+-- workflow's payload encodes to, in the tables it makes the first time it
+-- starts (`cluster_messages`, its replies in `cluster_replies`), so an
+-- installation that never ran it has none. An execution waiting to resume
+-- decodes that request again, so a turn's and a compaction's are renamed as
+-- their lanes are, and keep their executions, whose ids their unchanged
+-- idempotency keys make. The `routine` and `summary` workflows are gone, so
+-- their executions, and the clocks that would wake them, are forgotten:
+-- nothing could carry them on, and their runs are recorded as failed above.
+DO $$
+BEGIN
+	IF to_regclass('cluster_messages') IS NULL THEN
+		RETURN;
+	END IF;
+	EXECUTE $sql$
+		UPDATE "cluster_messages" SET "payload" = (
+			("payload"::jsonb - 'threadId' - 'agentId')
+			|| jsonb_build_object('chatId', "payload"::jsonb->'threadId', 'botId', "payload"::jsonb->'agentId')
+			|| CASE WHEN "payload"::jsonb->>'reason' = 'routine' THEN '{"reason": "automation"}'::jsonb ELSE '{}'::jsonb END
+		)::text
+		WHERE "entity_type" IN ('Workflow/turn', 'Workflow/compaction') AND "tag" = 'run'
+			AND "payload"::jsonb ? 'threadId'
+	$sql$;
+	EXECUTE $sql$
+		CREATE TEMPORARY TABLE "workflow_gone" ON COMMIT DROP AS
+		SELECT "id" FROM "cluster_messages"
+		WHERE "entity_type" IN ('Workflow/routine', 'Workflow/summary')
+			OR ("entity_type" = 'Workflow/-/DurableClock'
+				AND "payload"::jsonb->>'workflowName' IN ('routine', 'summary'))
+	$sql$;
+	IF to_regclass('cluster_replies') IS NOT NULL THEN
+		EXECUTE 'DELETE FROM "cluster_replies" WHERE "request_id" IN (SELECT "id" FROM "workflow_gone")';
+	END IF;
+	EXECUTE 'DELETE FROM "cluster_messages" WHERE "id" IN (SELECT "id" FROM "workflow_gone")';
+	EXECUTE 'DROP TABLE "workflow_gone"';
+END $$;
 --> statement-breakpoint
 -- ## Architecture and computer words
 -- The architecture's and computers' glossary words: a tool call that may
@@ -2784,7 +2820,7 @@ CREATE TABLE "github_uninstall" (
 	"workspace_id" uuid NOT NULL,
 	"connector_id" uuid NOT NULL,
 	"app_id" bigint NOT NULL,
-	"installation_id" bigint NOT NULL,
+	"installation_id" bigint,
 	"app_credential_encrypted" text NOT NULL,
 	"attempts" integer DEFAULT 0 NOT NULL,
 	"next_attempt_at" timestamp with time zone DEFAULT now() NOT NULL
@@ -3155,7 +3191,10 @@ CREATE INDEX "blob_deletion_due_idx" ON "blob_deletion" ("due_at","id");
 --> statement-breakpoint
 -- ## Model provider refresh claim
 ALTER TABLE "model_provider" ADD COLUMN "oauth_refresh_id" uuid;--> statement-breakpoint
-ALTER TABLE "model_provider" ADD COLUMN "oauth_refresh_until" timestamp with time zone;
+ALTER TABLE "model_provider" ADD COLUMN "oauth_refresh_until" timestamp with time zone;--> statement-breakpoint
+-- Which configuration a provider has, counted rather than read from when it
+-- was last updated, which a test or a refresh also moves on.
+ALTER TABLE "model_provider" ADD COLUMN "configuration_revision" integer DEFAULT 0 NOT NULL;
 --> statement-breakpoint
 -- ## Requests remember personal assistants
 ALTER TABLE "model_request" ADD COLUMN "by_personal_assistant" boolean DEFAULT false NOT NULL;--> statement-breakpoint
@@ -3166,10 +3205,12 @@ FROM "bot" WHERE "bot"."id" = "model_request"."bot_id" AND "bot"."assistant_of" 
 --> statement-breakpoint
 -- ## Deleted GitHub connectors uninstall
 -- A GitHub connector is the only record of its app's installation, and of the
--- key that uninstalls it, so deleting one still installed, however it goes
+-- key that uninstalls it, so deleting one whose app was made, however it goes
 -- (on its own, or with its project, bot or workspace), queues the uninstall,
 -- which the scheduler makes at GitHub once it commits. Only the database sees
--- every route.
+-- every route. One with no installation recorded may still have been
+-- installed before GitHub sent its member back, so its uninstall names none,
+-- and GitHub is asked for the app's installations.
 CREATE FUNCTION queue_deleted_github_installations() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -3177,7 +3218,6 @@ BEGIN
 	SELECT "workspace_id", "id", ("settings"->>'appId')::bigint, ("settings"->>'installationId')::bigint, "app_credential_encrypted"
 	FROM deleted_connectors
 	WHERE "kind" = 'github'
-		AND "settings"->>'installationId' IS NOT NULL
 		AND "app_credential_encrypted" IS NOT NULL;
 	RETURN NULL;
 END;
@@ -3199,6 +3239,7 @@ CREATE TABLE "pending_notification" (
 --> statement-breakpoint
 ALTER TABLE "notification_delivery" ADD COLUMN "created_at" timestamp with time zone DEFAULT now() NOT NULL;--> statement-breakpoint
 ALTER TABLE "notification_delivery" ADD COLUMN "sent_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "notification_delivery" ADD COLUMN "claimed_until" timestamp with time zone;--> statement-breakpoint
 -- Every notification recorded before was sent as it was recorded.
 UPDATE "notification_delivery" SET "sent_at" = "created_at";--> statement-breakpoint
 CREATE INDEX "notification_delivery_unsent_idx" ON "notification_delivery" ("created_at") WHERE "sent_at" is null;--> statement-breakpoint

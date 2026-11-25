@@ -2,7 +2,7 @@ export * as BlobDeletions from "./deletions.ts";
 
 import { and, eq, inArray, lte } from "drizzle-orm";
 import { DateTime, Duration, Effect, Layer, Schedule } from "effect";
-import { type Database, query } from "../database/database.ts";
+import { type Database, query, Transaction, writtenRow } from "../database/database.ts";
 import { blobDeletion } from "../database/schema.ts";
 import { processLayer } from "../tiers.ts";
 import { BlobStore } from "./blob-store.ts";
@@ -88,3 +88,55 @@ export const deleteQueued: Effect.Effect<void, BlobStore.Failure, Database | Blo
 		// A short batch means nothing more was due.
 		yield* Effect.repeat(deleteBatch, { while: (claimed) => claimed === BATCH_SIZE });
 	}).pipe(Effect.withSpan("BlobDeletions.deleteQueued"));
+
+/** How long a writer has to record a blob it staged before the queue deletes it. */
+const STAGING_GRACE = Duration.hours(1);
+
+/**
+ * A blob a writer is storing, whose deletion was queued before any of its
+ * bytes were, due once {@link STAGING_GRACE} has passed: bytes stored and
+ * never recorded, by a writer that failed or a process that stopped, are
+ * deleted all the same. The writer keeps it with {@link keepStaged}.
+ */
+export interface Staged {
+	readonly deletionId: string;
+	/** When the deletion is due, until a worker claims it by moving this on. */
+	readonly dueAt: Date;
+}
+
+/** Queues the blob about to be stored under `key` for deletion, as {@link Staged} says. */
+export const stage = (key: BlobStore.Key): Effect.Effect<Staged, never, Database> =>
+	Effect.gen(function* () {
+		const now = yield* DateTime.now;
+		return yield* query((db) =>
+			db
+				.insert(blobDeletion)
+				.values({
+					prefix: key,
+					dueAt: DateTime.toDateUtc(DateTime.addDuration(now, STAGING_GRACE)),
+				})
+				.returning({ deletionId: blobDeletion.id, dueAt: blobDeletion.dueAt }),
+		).pipe(Effect.flatMap(writtenRow("blob_deletion")));
+	});
+
+/**
+ * Keeps `staged`'s blob, in the transaction that records it, by forgetting
+ * its queued deletion while no worker has claimed it. One claimed is a
+ * defect: its writer was held up past its grace, and its bytes are, or soon
+ * will be, gone, so recording them would leave a row without its blob.
+ */
+export const keepStaged = (staged: Staged): Effect.Effect<void, never, Database | Transaction> =>
+	Effect.gen(function* () {
+		yield* Transaction;
+		const [kept] = yield* query((db) =>
+			db
+				.delete(blobDeletion)
+				.where(and(eq(blobDeletion.id, staged.deletionId), eq(blobDeletion.dueAt, staged.dueAt)))
+				.returning({ id: blobDeletion.id }),
+		);
+		if (!kept) {
+			return yield* Effect.die(
+				new Error("A staged blob's deletion was claimed before its writer recorded it"),
+			);
+		}
+	});

@@ -11,7 +11,7 @@ import {
 	streamEvent,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { Context, DateTime, Duration, Effect, Layer, Schedule } from "effect";
 import { reachesChatFor } from "../authorization/access.ts";
 import type { ChatEvent } from "../chats/events.ts";
@@ -28,6 +28,7 @@ import { EventBus } from "../database/events/bus.ts";
 import type { DomainEvents } from "../database/events/domain-events.ts";
 import {
 	member,
+	membership,
 	notificationDelivery,
 	notificationOverride,
 	notificationSettings,
@@ -141,12 +142,10 @@ export const make = Effect.gen(function* () {
 					.returning({ id: notificationDelivery.deliveryId }),
 			);
 			if (!recorded) return;
-			const context = yield* Effect.context<Database>();
+			// On the service's own database: the transaction's Postgres session is
+			// another's once it commits.
 			yield* afterCommit(
-				sentAndRecorded(chatId, deliveryId, addressed).pipe(
-					Effect.asVoid,
-					Effect.provideContext(context),
-				),
+				operation("handler", sentAndRecorded(chatId, deliveryId, addressed).pipe(Effect.asVoid)),
 			);
 		});
 
@@ -254,23 +253,68 @@ export const make = Effect.gen(function* () {
 				),
 			);
 		}
-		const sendAgainBefore = DateTime.toDateUtc(DateTime.subtractDuration(now, SEND_GRACE));
-		// Claimed by marking them sent first: one sent twice shows once, by its tag.
+		const resendingAt = yield* DateTime.now;
+		const sendAgainBefore = DateTime.toDateUtc(DateTime.subtractDuration(resendingAt, SEND_GRACE));
+		const claimedUntil = DateTime.toDateUtc(DateTime.addDuration(resendingAt, SEND_GRACE));
+		// Claimed, so another process's sweep skips each until its claim runs out.
 		const unsent = yield* query((db) =>
 			db
 				.update(notificationDelivery)
-				.set({ sentAt: DateTime.toDateUtc(now) })
+				.set({ claimedUntil })
 				.where(
 					and(
 						isNull(notificationDelivery.sentAt),
 						lt(notificationDelivery.createdAt, sendAgainBefore),
 						gt(notificationDelivery.createdAt, stillNews),
+						or(
+							isNull(notificationDelivery.claimedUntil),
+							lte(notificationDelivery.claimedUntil, DateTime.toDateUtc(resendingAt)),
+						),
 					),
 				)
 				.returning(),
 		);
-		yield* deliver(unsent.map(({ memberId, notification }) => ({ memberId, notification })));
+		for (const delivery of unsent) {
+			yield* sendAgain(delivery, claimedUntil).pipe(
+				Effect.catchCause((cause) =>
+					Effect.logWarning("Sending a notification again failed; trying again later", cause),
+				),
+			);
+		}
 	});
+
+	/**
+	 * Sends `delivery`, claimed until `claimedUntil`, to its member's tabs, if
+	 * they may still be told it, and records it sent once it is published; one
+	 * they may no longer be told is forgotten. One sent twice shows once, by
+	 * its tag.
+	 */
+	const sendAgain = (delivery: NotificationDeliveryRow, claimedUntil: Date) =>
+		Effect.gen(function* () {
+			const { chatId, deliveryId, memberId, notification } = delivery;
+			const ours = and(
+				eq(notificationDelivery.chatId, chatId),
+				eq(notificationDelivery.deliveryId, deliveryId),
+				eq(notificationDelivery.memberId, memberId),
+				eq(notificationDelivery.claimedUntil, claimedUntil),
+				isNull(notificationDelivery.sentAt),
+			);
+			if (!(yield* transaction(mayStillBeTold(delivery)))) {
+				yield* query((db) => db.delete(notificationDelivery).where(ours));
+				return;
+			}
+			const now = yield* DateTime.nowAsDate;
+			const [stillClaimed] = yield* query((db) =>
+				db
+					.select({ deliveryId: notificationDelivery.deliveryId })
+					.from(notificationDelivery)
+					.where(and(ours, gt(notificationDelivery.claimedUntil, now))),
+			);
+			if (!stillClaimed) return;
+			yield* deliver([{ memberId, notification }]);
+			const sentAt = yield* DateTime.nowAsDate;
+			yield* query((db) => db.update(notificationDelivery).set({ sentAt }).where(ours));
+		});
 
 	const settingsOf = (memberId: string) =>
 		Effect.gen(function* () {
@@ -438,6 +482,8 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = processLayer(Layer.effect(Service, make));
+
+type NotificationDeliveryRow = typeof notificationDelivery.$inferSelect;
 
 /** How long the process that wrote a notification has to send it before the sweep does. */
 const SEND_GRACE = Duration.seconds(30);
@@ -662,6 +708,37 @@ const reachesChatUnderLock = (chatId: string, memberId: string) =>
 				.limit(1),
 		);
 		return reaching !== undefined;
+	});
+
+/**
+ * Whether the member `delivery` is for may still be told it: they reach the
+ * chat it shows, or, for one that shows none, such as an approval asked of a
+ * computer's project's manager, are still in the workspace of the chat it is
+ * about. Read under a share of the workspace's lock, as {@link reachesChatUnderLock}.
+ */
+const mayStillBeTold = (delivery: NotificationDeliveryRow) =>
+	Effect.gen(function* () {
+		const { memberId, notification } = delivery;
+		if (notification.chatId) return yield* reachesChatUnderLock(notification.chatId, memberId);
+		const [placed] = yield* query((db) =>
+			db
+				.select({ workspaceId: placedChat.workspaceId })
+				.from(placedChat)
+				.where(eq(placedChat.id, delivery.chatId))
+				.limit(1),
+		);
+		if (!placed) return false;
+		yield* shareWorkspaceLock(placed.workspaceId);
+		const [inWorkspace] = yield* query((db) =>
+			db
+				.select({ id: membership.id })
+				.from(membership)
+				.where(
+					and(eq(membership.workspaceId, placed.workspaceId), eq(membership.memberId, memberId)),
+				)
+				.limit(1),
+		);
+		return inWorkspace !== undefined;
 	});
 
 /** A project or a bot, where a member chooses in place of the level above. */

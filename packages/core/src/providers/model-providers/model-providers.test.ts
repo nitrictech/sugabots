@@ -2,13 +2,15 @@ import type { ModelProviderUpdate, NewModelProvider } from "@sugabots/contracts"
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import {
 	DiscoveryCredentialsRejected,
+	DiscoverySignInLapsed,
 	ModelInUse,
 	ProviderActivationRequiresCredential,
 } from "@sugabots/contracts/errors/providers";
 import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
+import { userText } from "@sugabots/errors";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Effect } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { query } from "../../database/database.ts";
 import { bot, member, membership, modelProvider, workspace } from "../../database/schema.ts";
 import {
@@ -24,6 +26,7 @@ import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { unimplemented } from "../../testing.ts";
 import { BotStore } from "../../workspaces/bots/bot-store.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
+import type { DiscoveredModel } from "./dialects/index.ts";
 import { providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderStore } from "./model-provider-store.ts";
 import type { OAuthTokens } from "./sign-in/sign-in.ts";
@@ -90,6 +93,11 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	};
 
 	const view = (providerId: string) => runOnPostgres(providerIn(workspaceId, providerId));
+	const revisionOf = async (providerId: string) => {
+		const access = await store.access(workspaceId, providerId);
+		if (!access) throw new Error("fixture");
+		return access.configurationRevision;
+	};
 	const list = (inWorkspace: string) => runOnPostgres(providersIn(inWorkspace));
 	const create = (provider: NewModelProvider) =>
 		store.create(workspaceId, { createdById: memberId, provider });
@@ -179,6 +187,76 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(await view(openai.id)).toMatchObject({ active: false, hasApiKey: true });
 	});
 
+	it("refuses a key the provider rejects once another key has made the provider work meanwhile", async () => {
+		const openai = (await list(workspaceId)).find(({ builtIn }) => builtIn === "openai");
+		if (!openai) throw new Error("fixture");
+		const asked = Promise.withResolvers<void>();
+		const answer = Promise.withResolvers<void>();
+		const rejecting = await setupWith(async () => {
+			asked.resolve();
+			await answer.promise;
+			return new Response(null, { status: 401 });
+		});
+		const working = await setupWith(() => Response.json({ data: [{ id: "gpt-test" }] }));
+
+		const rejected = rejecting
+			.update({ workspace: workspaceId, providerId: openai.id, changes: { apiKey: "bad-key" } })
+			.catch((error: unknown) => error);
+		await asked.promise;
+		await working.update({
+			workspace: workspaceId,
+			providerId: openai.id,
+			changes: { apiKey: "good-key" },
+		});
+		answer.resolve();
+
+		expect(await rejected).toBeInstanceOf(DiscoveryCredentialsRejected);
+		expect(await view(openai.id)).toMatchObject({ active: true, hasApiKey: true });
+		expect((await store.access(workspaceId, openai.id))?.apiKey).toBe("good-key");
+	});
+
+	it("refuses a key the provider rejects once a discovery of the same configuration has switched the provider on meanwhile", async () => {
+		const discovery = {
+			asked: Promise.withResolvers<void>(),
+			answer: Promise.withResolvers<void>(),
+		};
+		const candidate = {
+			asked: Promise.withResolvers<void>(),
+			answer: Promise.withResolvers<void>(),
+		};
+		let requests = 0;
+		const setup = await setupWith(async () => {
+			requests += 1;
+			if (requests === 1) {
+				discovery.asked.resolve();
+				await discovery.answer.promise;
+				return Response.json({ data: [{ id: "gpt-test" }] });
+			}
+			candidate.asked.resolve();
+			await candidate.answer.promise;
+			return new Response(null, { status: 401 });
+		});
+
+		// A new address given with a key is stored at once, then discovered, which switches it on.
+		const moving = setup.update({
+			workspace: workspaceId,
+			providerId,
+			changes: { baseUrl: "https://other.example/v1", apiKey: "good-key" },
+		});
+		await discovery.asked.promise;
+		const rejected = setup
+			.update({ workspace: workspaceId, providerId, changes: { apiKey: "bad-key" } })
+			.catch((error: unknown) => error);
+		await candidate.asked.promise;
+		discovery.answer.resolve();
+		expect(await moving).toMatchObject({ active: true });
+		candidate.answer.resolve();
+
+		expect(await rejected).toBeInstanceOf(DiscoveryCredentialsRejected);
+		expect(await view(providerId)).toMatchObject({ active: true, hasApiKey: true });
+		expect((await store.access(workspaceId, providerId))?.apiKey).toBe("good-key");
+	});
+
 	it("refuses a replacement API key the provider rejects, and keeps the provider on with its old key", async () => {
 		const openai = (await list(workspaceId)).find(({ builtIn }) => builtIn === "openai");
 		if (!openai) throw new Error("fixture");
@@ -218,6 +296,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		const answered = Promise.withResolvers<void>();
 		const spent: string[] = [];
 		const renewal = {
+			configurationRevision: await revisionOf(chatgpt.id),
 			isStale: (tokens: OAuthTokens) => Effect.succeed(tokens.expiresAt < Date.now()),
 			refresh: (tokens: OAuthTokens) =>
 				Effect.promise(async () => {
@@ -226,6 +305,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 					await answered.promise;
 					return fresh;
 				}),
+			lapsedBecause: () => undefined,
 		};
 
 		const first = store.renewOAuthTokens(workspaceId, chatgpt.id, renewal);
@@ -252,6 +332,142 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(await second).toEqual(fresh);
 		expect(spent).toEqual(["once"]);
 		expect((await store.access(workspaceId, chatgpt.id))?.oauthTokens).toEqual(fresh);
+	});
+
+	it.each(["given", "tried"] as const)(
+		"keeps a key %s in place of a sign-in while the sign-in's tokens were being refreshed",
+		async (how) => {
+			const chatgpt = (await list(workspaceId)).find(({ builtIn }) => builtIn === "chatgpt");
+			if (!chatgpt) throw new Error("fixture");
+			const stale = { access: "old", refresh: "once", expiresAt: 0, accountId: null };
+			await store.saveOAuthTokens(workspaceId, chatgpt.id, {
+				tokens: stale,
+				signedInById: memberId,
+			});
+			const refreshing = Promise.withResolvers<void>();
+			const answered = Promise.withResolvers<void>();
+			const renewing = store.renewOAuthTokens(workspaceId, chatgpt.id, {
+				configurationRevision: await revisionOf(chatgpt.id),
+				lapsedBecause: () => undefined,
+				isStale: (tokens: OAuthTokens) => Effect.succeed(tokens.expiresAt < Date.now()),
+				refresh: () =>
+					Effect.promise(async () => {
+						refreshing.resolve();
+						await answered.promise;
+						return {
+							access: "new",
+							refresh: "next",
+							expiresAt: Date.now() + 3_600_000,
+							accountId: null,
+						};
+					}),
+			});
+			await refreshing.promise;
+
+			if (how === "given") {
+				await store.update(workspaceId, chatgpt.id, { apiKey: "the-key" }, memberId);
+			} else {
+				const builtOn = (await store.access(workspaceId, chatgpt.id))?.configurationRevision;
+				if (builtOn === undefined) throw new Error("fixture");
+				await store.replaceCredential(workspaceId, chatgpt.id, {
+					candidate: { apiKey: "the-key" },
+					builtOn,
+					changedById: memberId,
+					active: true,
+					models: [],
+				});
+			}
+			answered.resolve();
+			const renewed = await renewing;
+
+			expect(renewed).toBeUndefined();
+			const access = await store.access(workspaceId, chatgpt.id);
+			expect(access?.apiKey).toBe("the-key");
+			expect(access?.oauthTokens).toBeUndefined();
+			expect(await view(chatgpt.id)).toMatchObject({ signedIn: false, signedInAs: null });
+		},
+	);
+
+	it("keeps a refresh that may have spent its token claimed, and signs the sign-in out once it is refused", async () => {
+		const chatgpt = (await list(workspaceId)).find(({ builtIn }) => builtIn === "chatgpt");
+		if (!chatgpt) throw new Error("fixture");
+		const stale = { access: "old", refresh: "maybe-spent", expiresAt: 0, accountId: null };
+		await store.saveOAuthTokens(workspaceId, chatgpt.id, { tokens: stale, signedInById: memberId });
+		const configurationRevision = await revisionOf(chatgpt.id);
+		const asked: string[] = [];
+		const answering = (answer: "no answer" | "refused") => ({
+			configurationRevision,
+			isStale: (tokens: OAuthTokens) => Effect.succeed(tokens.expiresAt < Date.now()),
+			refresh: (tokens: OAuthTokens) =>
+				Effect.suspend(() => {
+					asked.push(tokens.refresh);
+					return Effect.fail(answer);
+				}),
+			lapsedBecause: (answered: unknown) =>
+				answered === "refused" ? userText`Sign in to ChatGPT again` : undefined,
+		});
+		const renewWith = (answer: "no answer" | "refused") =>
+			store.renewOAuthTokens(workspaceId, chatgpt.id, answering(answer)).catch(() => "failed");
+
+		const unanswered = await renewWith("no answer");
+		const [claimed] = await onDatabase((db) =>
+			db
+				.select({ claim: modelProvider.oauthRefreshId })
+				.from(modelProvider)
+				.where(eq(modelProvider.id, chatgpt.id)),
+		);
+		// Its claim runs out.
+		await onDatabase((db) =>
+			db
+				.update(modelProvider)
+				.set({ oauthRefreshUntil: new Date(0) })
+				.where(eq(modelProvider.id, chatgpt.id)),
+		);
+		const refused = await renewWith("refused");
+
+		expect([unanswered, refused]).toEqual(["failed", "failed"]);
+		// Kept, so no other turn spends the same token again until it runs out.
+		expect(claimed?.claim).toEqual(expect.any(String));
+		expect(asked).toEqual(["maybe-spent", "maybe-spent"]);
+		expect((await store.access(workspaceId, chatgpt.id))?.oauthTokens).toBeUndefined();
+		expect(await view(chatgpt.id)).toMatchObject({
+			signedIn: false,
+			signedInAs: null,
+			lastTestError: "Sign in to ChatGPT again",
+		});
+	});
+
+	it("never asks an old provider address for models with a newer sign-in", async () => {
+		const chatgpt = (await list(workspaceId)).find(({ builtIn }) => builtIn === "chatgpt");
+		if (!chatgpt) throw new Error("fixture");
+		const save = (tokens: OAuthTokens) =>
+			store.saveOAuthTokens(workspaceId, chatgpt.id, { tokens, signedInById: memberId });
+		await save({ access: "old", refresh: "once", expiresAt: 0, accountId: null });
+		const listings: string[] = [];
+		const setup = await setupWith(async (url) => {
+			if (!url.endsWith("/oauth/token")) {
+				listings.push(url);
+				return Response.json({ models: [] });
+			}
+			await store.update(
+				workspaceId,
+				chatgpt.id,
+				{ baseUrl: "https://other.example/v1" },
+				memberId,
+			);
+			await save({
+				access: "new-sign-in",
+				refresh: "new-refresh",
+				expiresAt: Date.now() + 3_600_000,
+				accountId: null,
+			});
+			return Response.json({ access_token: "rotated-old", refresh_token: "rotated-once" });
+		});
+
+		await expect(
+			setup.discoverModels({ workspace: workspaceId, providerId: chatgpt.id }),
+		).rejects.toBeInstanceOf(DiscoverySignInLapsed);
+		expect(listings).toEqual([]);
 	});
 
 	it("refuses a new sign-in the provider rejects, and keeps the provider on as it was signed in", async () => {
@@ -295,6 +511,45 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(activeDuringCheck).toBe(true);
 		expect(await view(chatgpt.id)).toMatchObject({ active: true, signedIn: true });
 		expect((await store.access(workspaceId, chatgpt.id))?.oauthTokens?.access).toBe("old-access");
+	});
+
+	it("stores the tokens a new sign-in was refreshed to while it was tried, not the ones that were spent", async () => {
+		const chatgpt = (await list(workspaceId)).find(({ builtIn }) => builtIn === "chatgpt");
+		if (!chatgpt) throw new Error("fixture");
+		let issued = 0;
+		const setup = await setupWith((url) => {
+			if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+				return Response.json({ device_auth_id: "device", user_code: "ABCD-EFGH" });
+			}
+			if (url.endsWith("/api/accounts/deviceauth/token")) {
+				return Response.json({ authorization_code: "code", code_verifier: "verifier" });
+			}
+			if (url.endsWith("/oauth/token")) {
+				issued += 1;
+				// The first pair is about to expire, so trying it refreshes it.
+				return issued === 1
+					? Response.json({
+							access_token: "first-access",
+							refresh_token: "first-refresh",
+							expires_in: 60,
+						})
+					: Response.json({ access_token: "second-access", refresh_token: "second-refresh" });
+			}
+			return Response.json({ models: [] });
+		});
+		const started = await setup.startSignIn({ workspace: workspaceId, providerId: chatgpt.id });
+
+		await setup.completeSignIn({
+			workspace: workspaceId,
+			providerId: chatgpt.id,
+			attempt: started.attempt,
+		});
+
+		expect(issued).toBe(2);
+		expect((await store.access(workspaceId, chatgpt.id))?.oauthTokens).toMatchObject({
+			access: "second-access",
+			refresh: "second-refresh",
+		});
 	});
 
 	it.each([
@@ -500,25 +755,6 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(await view(providerId)).toMatchObject({ connectedBy: null });
 	});
 
-	it("does not let an in-flight successful test undo a manual deactivation", async () => {
-		vi.useFakeTimers({ toFake: ["Date"] });
-		try {
-			vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
-			await switchOn(providerId);
-			const setup = await setupWith(async () => {
-				vi.setSystemTime(new Date("2030-01-01T00:00:01Z"));
-				await store.update(workspaceId, providerId, { active: false }, memberId);
-				return Response.json({ data: [] });
-			});
-
-			await setup.test({ workspace: workspaceId, providerId });
-
-			expect(await view(providerId)).toMatchObject({ active: false });
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
 	it("does not reactivate a manually disabled provider when refreshing models", async () => {
 		await store.update(workspaceId, providerId, { active: false }, memberId);
 		const setup = await setupWith(() => Response.json({ data: [] }));
@@ -529,6 +765,28 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			active: false,
 			status: "connected",
 		});
+	});
+
+	it("keeps a provider switched off when its new address finishes discovery", async () => {
+		const discovering = Promise.withResolvers<void>();
+		const discovered = Promise.withResolvers<Response>();
+		const setup = await setupWith(() => {
+			discovering.resolve();
+			return discovered.promise;
+		});
+		const moving = setup.update({
+			workspace: workspaceId,
+			providerId,
+			changes: { baseUrl: "https://other.example/v1", apiKey: "new-key" },
+		});
+		await discovering.promise;
+		try {
+			await setup.switchOff({ workspace: workspaceId, providerId, moveBots: [] });
+		} finally {
+			discovered.resolve(Response.json({ data: [] }));
+		}
+
+		expect(await moving).toMatchObject({ active: false });
 	});
 
 	it("does not enable a provider that still needs an API key when testing", async () => {
@@ -765,14 +1023,26 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(await list(fresh.id)).toEqual(seeded);
 	});
 
+	/** Records `models` as what the provider's current configuration listed, as discovery does. */
+	const discovered = async (workspace: string, provider: string, models: DiscoveredModel[]) => {
+		const [row] = await onDatabase((db) =>
+			db
+				.select({ revision: modelProvider.configurationRevision })
+				.from(modelProvider)
+				.where(eq(modelProvider.id, provider)),
+		);
+		if (!row) throw new Error("fixture");
+		return store.recordDiscovery(workspace, provider, row.revision, models, false);
+	};
+
 	it("adds what is new, updates what changed, and counts each once", async () => {
-		const first = await store.syncDiscovered(workspaceId, providerId, [
+		const first = await discovered(workspaceId, providerId, [
 			{ modelId: "alpha", displayName: "Alpha", capabilities: [], contextLength: null },
 			{ modelId: "beta", displayName: null, capabilities: ["tools"], contextLength: 8_000 },
 		]);
 		expect(first).toEqual({ added: 2, updated: 0 });
 
-		const second = await store.syncDiscovered(workspaceId, providerId, [
+		const second = await discovered(workspaceId, providerId, [
 			{
 				modelId: "alpha",
 				displayName: "Alpha",
@@ -805,7 +1075,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("switches a capability off within what the provider reports, and a refresh keeps the choice", async () => {
-		await store.syncDiscovered(workspaceId, providerId, [
+		await discovered(workspaceId, providerId, [
 			{
 				modelId: "alpha",
 				displayName: "Alpha",
@@ -821,7 +1091,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				disabledCapabilities: ["vision"],
 			}),
 		).toBe(1);
-		const synced = await store.syncDiscovered(workspaceId, providerId, [
+		const synced = await discovered(workspaceId, providerId, [
 			{
 				modelId: "alpha",
 				displayName: "Alpha",
@@ -852,7 +1122,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			},
 		]);
 
-		const synced = await store.syncDiscovered(workspaceId, providerId, [
+		const synced = await discovered(workspaceId, providerId, [
 			{ modelId: "hand-made", displayName: null, capabilities: [], contextLength: null },
 		]);
 		expect(synced).toEqual({ added: 0, updated: 0 });
@@ -877,11 +1147,11 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			apiKey: "secret",
 			customHeaders: [],
 		});
-		await store.syncDiscovered(workspaceId, other.id, [
+		await discovered(workspaceId, other.id, [
 			{ modelId: "shared-id", displayName: null, capabilities: [], contextLength: null },
 		]);
 
-		const synced = await store.syncDiscovered(workspaceId, providerId, [
+		const synced = await discovered(workspaceId, providerId, [
 			{ modelId: "shared-id", displayName: null, capabilities: [], contextLength: null },
 			{ modelId: "own-id", displayName: null, capabilities: [], contextLength: null },
 		]);

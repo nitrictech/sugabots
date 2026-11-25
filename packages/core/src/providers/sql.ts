@@ -61,6 +61,13 @@ export const modelProvider = pgTable(
 		oauthRefreshId: uuid("oauth_refresh_id"),
 		oauthRefreshUntil: timestamp("oauth_refresh_until", { withTimezone: true }),
 		/**
+		 * Which configuration it has: one more each time its address, protocol,
+		 * key, headers or sign-in change, and never otherwise, so a test, a
+		 * discovery or a credential tried against one configuration is recorded
+		 * only while it is still the provider's.
+		 */
+		configurationRevision: integer("configuration_revision").notNull().default(0),
+		/**
 		 * Who made its subscription sign-in, whose plan it signs in as, so they
 		 * can't leave the workspace, or be removed from it, while it does; null
 		 * while it is signed out.
@@ -312,7 +319,7 @@ export type ProviderModelRow = typeof providerModel.$inferSelect;
 
 /**
  * GitHub installations pending uninstall, even if the original connector is
- * deleted. Deleting a connector still installed queues one, by the
+ * deleted. Deleting a connector whose app was made queues one, by the
  * `connector_github_uninstall` trigger, whatever deletes it.
  */
 export const gitHubUninstall = pgTable(
@@ -322,7 +329,11 @@ export const gitHubUninstall = pgTable(
 		workspaceId: uuid("workspace_id").notNull(),
 		connectorId: uuid("connector_id").notNull(),
 		appId: bigint("app_id", { mode: "number" }).notNull(),
-		installationId: bigint("installation_id", { mode: "number" }).notNull(),
+		/**
+		 * Null for every installation the app has, found by asking GitHub: an
+		 * app installed before its connector recorded it is installed only there.
+		 */
+		installationId: bigint("installation_id", { mode: "number" }),
 		appCredentialEncrypted: text("app_credential_encrypted").notNull(),
 		attempts: integer("attempts").notNull().default(0),
 		nextAttemptAt: stamp("next_attempt_at"),

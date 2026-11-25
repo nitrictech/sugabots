@@ -345,31 +345,42 @@ export const make = Effect.gen(function* () {
 	 * provider has answered it, with the models it listed, and switches it on:
 	 * a provider that works keeps working until its replacement does. When the
 	 * provider doesn't answer the candidate, one that is on keeps what it has
-	 * and this fails with why; one that is off is given the candidate by
-	 * `storeUntried`, and keeps the test's error. Tried again from the start
+	 * and this fails with why; one that is still off, at the configuration the
+	 * candidate was tried against, stores it switched off with the test's
+	 * error, under the held-models lock, and otherwise this fails with why too,
+	 * so another member's working credential is never put aside for it. Tried again from the start
 	 * when the provider was reconfigured meanwhile. `signerGone` when the
 	 * member signing in has left the workspace.
 	 */
-	const replacingCredential = <E, R>(
+	const replacingCredential = (
 		workspaceId: string,
 		providerId: string,
 		candidate: ModelProviderStore.CandidateCredential,
-		options: { changedById: string; storeUntried: Effect.Effect<Date | undefined, E, R> },
+		options: { changedById: string },
 	) =>
 		Effect.gen(function* () {
+			// A sign-in refreshed while it was tried has spent its old refresh
+			// token, so the refreshed one is what is stored, and tried again.
+			let tried = candidate;
 			for (let attempt = 1; ; attempt++) {
 				const current = yield* requireProvider(workspaceId, providerId);
-				const access = yield* providers.candidateAccess(workspaceId, providerId, candidate);
+				const access = yield* providers.candidateAccess(workspaceId, providerId, tried);
 				if (!access) return yield* new ModelProviderNotFound();
-				const listed = yield* Effect.result(discoverWithCandidate(access, egress.providers));
+				const { listed, triedTokens } = yield* discoverWithCandidate(access, egress.providers);
+				if ("tokens" in tried && triedTokens) tried = { ...tried, tokens: triedTokens };
 				if (listed._tag === "Failure") {
 					if (current.active) return yield* listed.failure;
-					const storedAt = yield* options.storeUntried;
-					if (storedAt) {
-						yield* providers.recordTest(workspaceId, providerId, storedAt, {
+					const stored = yield* withHeldModelsLocked(
+						workspaceId,
+						providers.storeRejectedCredential(workspaceId, providerId, {
+							candidate: tried,
+							builtOn: access.configurationRevision,
+							changedById: options.changedById,
 							error: listed.failure.userMessage,
-						});
-					}
+						}),
+					);
+					if (stored === "signerGone") return stored;
+					if (stored === "changed") return yield* listed.failure;
 					return "stored" as const;
 				}
 				// Switching it on with what it listed only adds to what the
@@ -377,8 +388,8 @@ export const make = Effect.gen(function* () {
 				const replaced = yield* withHeldModelsLocked(
 					workspaceId,
 					providers.replaceCredential(workspaceId, providerId, {
-						candidate,
-						builtOn: access.configurationUpdatedAt,
+						candidate: tried,
+						builtOn: access.configurationRevision,
 						changedById: options.changedById,
 						active: true,
 						models: listed.success,
@@ -405,17 +416,7 @@ export const make = Effect.gen(function* () {
 				workspaceId,
 				providerId,
 				{ tokens, signedInById },
-				{
-					changedById: signedInById,
-					storeUntried: Effect.gen(function* () {
-						const saved = yield* providers.saveOAuthTokens(workspaceId, providerId, {
-							tokens,
-							signedInById,
-						});
-						if (!saved) return yield* new ResourceHidden({ resource: "workspace" });
-						return (yield* providers.access(workspaceId, providerId))?.configurationUpdatedAt;
-					}),
-				},
+				{ changedById: signedInById },
 			).pipe(
 				Effect.catchIf(isDiscoveryFailure, (failure) =>
 					Effect.fail(
@@ -494,13 +495,7 @@ export const make = Effect.gen(function* () {
 								apiFormat: changes.apiFormat,
 								customHeaders: changes.customHeaders,
 							},
-							{
-								changedById: canManage.actor.memberId,
-								storeUntried: Effect.map(
-									providers.update(workspaceId, providerId, changes, canManage.actor.memberId),
-									(updated) => updated?.updatedAt,
-								),
-							},
+							{ changedById: canManage.actor.memberId },
 						);
 						yield* adoptFirstModel(workspaceId);
 						return yield* requireProvider(workspaceId, providerId);

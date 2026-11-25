@@ -771,7 +771,7 @@ export const replayWrittenFile = (fence: FencedProof, toolCallId: string) =>
 export const commitWrittenFile = <E>(
 	fence: FencedProof,
 	toolCallId: string,
-	write: Effect.Effect<FileWritten, E, Database>,
+	write: Effect.Effect<FileWritten, E, Database | Transaction>,
 ) =>
 	transaction(
 		Effect.gen(function* () {

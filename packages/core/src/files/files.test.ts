@@ -14,6 +14,7 @@ import {
 	blob,
 	blobDeletion,
 	bot,
+	file,
 	fileVersion,
 	member,
 	membership,
@@ -638,6 +639,52 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		await expect(filesAs(editorId).get(sent.id)).rejects.toMatchObject({
 			_tag: "ResourceHidden",
 		});
+	});
+
+	it("records no version whose content was deleted while its writer was held up", async () => {
+		const stored = Promise.withResolvers<BlobStore.Key>();
+		const resume = Promise.withResolvers<void>();
+		const heldAfterStoring = Layer.effect(
+			BlobStore.Service,
+			Effect.map(BlobStore.Service, (store) =>
+				BlobStore.Service.of({
+					...store,
+					put: (key, content) =>
+						store.put(key, content).pipe(
+							Effect.tap(() =>
+								Effect.promise(() => {
+									stored.resolve(key);
+									return resume.promise;
+								}),
+							),
+						),
+				}),
+			),
+		);
+		const title = `Late ${crypto.randomUUID()}`;
+		const writing = runOnPostgres(
+			Effect.exit(
+				Files.seedWrittenFile(by, { kind: "markdown", title, content: "# Late" }).pipe(
+					Effect.provide(heldAfterStoring),
+				),
+			),
+		);
+		const key = await stored.promise;
+		// Its grace runs out, and the queue deletes what it stored.
+		await onDatabase((db) =>
+			db
+				.update(blobDeletion)
+				.set({ dueAt: new Date(0) })
+				.where(eq(blobDeletion.prefix, key)),
+		);
+		await runOnPostgres(BlobDeletions.deleteQueued);
+		resume.resolve();
+		const written = await writing;
+
+		expect(written._tag).toBe("Failure");
+		expect(
+			await onDatabase((db) => db.select({ id: file.id }).from(file).where(eq(file.name, title))),
+		).toEqual([]);
 	});
 
 	it("deletes what a write stored when it never recorded it and the store couldn't take it back", async () => {

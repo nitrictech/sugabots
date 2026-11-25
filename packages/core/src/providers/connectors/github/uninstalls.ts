@@ -79,11 +79,17 @@ export const make = Effect.gen(function* () {
 					);
 					const { appId, installationId, connectorId } = work;
 					const uninstall = Effect.suspend(() => {
-						const { privateKey } = openAppCredential(secrets, work.appCredentialEncrypted);
-						return GitHub.uninstall(
-							egress.providers.for({ baseUrl: GitHub.API_URL }),
-							{ appId, privateKey },
-							installationId,
+						const http = egress.providers.for({ baseUrl: GitHub.API_URL });
+						const app = {
+							appId,
+							privateKey: openAppCredential(secrets, work.appCredentialEncrypted).privateKey,
+						};
+						const installations =
+							installationId === null
+								? GitHub.installationIds(http, app)
+								: Effect.succeed([installationId]);
+						return Effect.flatMap(installations, (ids) =>
+							Effect.forEach(ids, (id) => GitHub.uninstall(http, app, id), { discard: true }),
 						);
 					});
 					const logUninstallError = (error: unknown) =>

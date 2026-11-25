@@ -177,6 +177,7 @@ export function inMemoryComputers(
 	const networkWaiters = new Map<Computers.ComputerId, Array<(network: Network) => void>>();
 	let created = 0;
 	let creationHold: Effect.Effect<void> | undefined;
+	let labelledLookupHold: Effect.Effect<void> | undefined;
 	const openingHolds = new Map<Computers.ComputerId, Effect.Effect<void>>();
 	let answerCommand = (_computerId: Computers.ComputerId) => 0;
 	let destroyFailures = 0;
@@ -276,8 +277,15 @@ export function inMemoryComputers(
 						})
 					: Effect.sync(() => void held.delete(id)),
 			labelled: (key, value) =>
-				Effect.sync(() =>
-					[...held.values()].filter((one) => one.spec.labels[key] === value).map(({ id }) => id),
+				Effect.suspend(() =>
+					Effect.andThen(
+						labelledLookupHold ?? Effect.void,
+						Effect.sync(() =>
+							[...held.values()]
+								.filter((one) => one.spec.labels[key] === value)
+								.map(({ id }) => id),
+						),
+					),
 				),
 		};
 	};
@@ -308,6 +316,13 @@ export function inMemoryComputers(
 				if (creationHold === wait) creationHold = undefined;
 			});
 			creationHold = wait;
+			return hold;
+		},
+		holdLabelledLookups: (): ProviderHold => {
+			const { hold, wait } = holdCalls(() => {
+				if (labelledLookupHold === wait) labelledLookupHold = undefined;
+			});
+			labelledLookupHold = wait;
 			return hold;
 		},
 		/** Holds every opening of the computer `id` from now on until released. */
