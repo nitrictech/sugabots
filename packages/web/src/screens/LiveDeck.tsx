@@ -7,7 +7,7 @@ import type { NestedOptions } from "@tiptap/extension-drag-handle";
 import { DOMSerializer } from "@tiptap/pm/model";
 import type { Transaction } from "@tiptap/pm/state";
 import { type Editor, useEditorState } from "@tiptap/react";
-import { ChevronDown, LayoutTemplate, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, LayoutTemplate, X } from "lucide-react";
 import {
 	type ReactNode,
 	type RefObject,
@@ -356,7 +356,7 @@ function DeckView({
 							aria-label="Current slide"
 							className="flex w-full min-w-0 max-w-240 flex-col gap-3"
 						>
-							<div className="flex flex-wrap items-center gap-2">
+							<div className="flex items-center gap-2">
 								{editable && (
 									<LayoutPicker
 										heading="Change layout"
@@ -369,17 +369,16 @@ function DeckView({
 										onPick={(layout: SlideLayout) =>
 											change(changeLayout(editor.state, current, layout))
 										}
-										className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-sm px-2 text-soft-foreground text-xs transition-colors hover:bg-hover data-popup-open:bg-hover max-md:h-11 max-md:text-sm"
+										className="focus-ring inline-flex h-8 min-w-0 items-center gap-1.5 rounded-sm px-2 text-soft-foreground text-xs transition-colors hover:bg-hover data-popup-open:bg-hover max-md:h-11 max-md:text-sm"
 									>
 										<LayoutTemplate aria-hidden size={16} strokeWidth={1.75} />
-										{LAYOUT_NAMES[layoutOf(shown.node)]}
+										{/* Cut short where a phone is too narrow for it beside the pager. */}
+										<span className="truncate">{LAYOUT_NAMES[layoutOf(shown.node)]}</span>
 										<ChevronDown aria-hidden size={12} className="text-subtle-foreground" />
 									</LayoutPicker>
 								)}
 								<span className="flex-1" />
-								<span className="pr-1 text-subtle-foreground text-xs">
-									Slide {current + 1} of {slides.length}
-								</span>
+								<SlidePager current={current} total={slides.length} onSelect={select} />
 							</div>
 							<div ref={frame}>
 								<LiveDocumentText
@@ -442,6 +441,60 @@ function DeckView({
 }
 
 const COARSE_POINTER = "(pointer: coarse)";
+
+/**
+ * Which slide is on the stage, written "2 / 3" and read out as "Slide 2 of
+ * 3", between buttons that put the slide before it or after it there.
+ */
+function SlidePager({
+	current,
+	total,
+	onSelect,
+}: {
+	/** The slide on the stage, by its place in the deck. */
+	current: number;
+	/** How many slides the deck has. */
+	total: number;
+	onSelect: (index: number) => void;
+}) {
+	return (
+		<div className="inline-flex h-8 shrink-0 items-center rounded-sm border border-border-strong px-0.75 text-muted-foreground text-xs max-md:h-11 max-md:text-sm">
+			<IconButton
+				label="Previous slide"
+				disabled={current === 0}
+				onClick={() => onSelect(current - 1)}
+				className={PAGER_BUTTON}
+			>
+				<ChevronLeft aria-hidden />
+			</IconButton>
+			<span className="px-1 tabular-nums">
+				<span aria-hidden>
+					{current + 1} / {total}
+				</span>
+				<span className="sr-only">
+					Slide {current + 1} of {total}
+				</span>
+			</span>
+			<IconButton
+				label="Next slide"
+				disabled={current === total - 1}
+				onClick={() => onSelect(current + 1)}
+				className={PAGER_BUTTON}
+			>
+				<ChevronRight aria-hidden />
+			</IconButton>
+		</div>
+	);
+}
+
+/**
+ * Merged over a pager's button: its corners one size under the pager's, so
+ * its hover wash stays inside them; with no slide to go to it takes no hover
+ * wash or tooltip; and on a phone it is sized for a thumb, as the layout's
+ * button is.
+ */
+const PAGER_BUTTON =
+	"rounded-xs disabled:pointer-events-none max-md:size-9 max-md:[&_svg]:size-4.5";
 
 /**
  * The blocks the handle beside a block moves on a slide: those in its frame
