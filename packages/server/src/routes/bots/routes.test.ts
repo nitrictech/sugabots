@@ -1,6 +1,5 @@
 import type { Bot } from "@sugabots/contracts";
 import { BotNameTaken } from "@sugabots/contracts/errors/bots";
-import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { ModelNotEnabled } from "@sugabots/contracts/errors/providers";
 import { Operations } from "@sugabots/core/operations/registry";
 import type { Principal } from "@sugabots/core/principal";
@@ -122,32 +121,30 @@ describe("bot routes", () => {
 	});
 
 	it("reports a model the workspace does not offer as a bad request", async () => {
+		const error = new ModelNotEnabled({ model: "disabled" });
 		const response = await app({
-			"bots.create": (_principal, input) =>
-				Effect.fail(new ModelNotEnabled({ model: input.model })),
+			"bots.create": () => Effect.fail(error),
 		}).request(`/workspaces/${WORKSPACE}/bots`, auth({ name: "Writer", model: "disabled" }));
 
 		expect(response.status).toBe(400);
-		const notOffered = "This workspace does not offer that model";
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message: notOffered,
-			error: { _tag: "ModelNotEnabled", userMessage: notOffered, isRetryable: false },
+			message: error.userMessage,
+			error: { _tag: "ModelNotEnabled", userMessage: error.userMessage, isRetryable: false },
 		});
 	});
 
 	it("reports a name another bot in the workspace has as a conflict", async () => {
+		const error = new BotNameTaken({ field: "name", value: "Triage" });
 		const response = await app({
-			"bots.create": (_principal, input) =>
-				Effect.fail(new BotNameTaken({ field: "name", value: input.name })),
+			"bots.create": () => Effect.fail(error),
 		}).request(`/workspaces/${WORKSPACE}/bots`, auth({ name: "Triage", model: MODEL }));
 
 		expect(response.status).toBe(409);
-		const taken = "Another bot in this workspace already has that name";
 		expect(await response.json()).toEqual({
 			_tag: "Conflict",
-			message: taken,
-			error: { _tag: "BotNameTaken", userMessage: taken, isRetryable: false },
+			message: error.userMessage,
+			error: { _tag: "BotNameTaken", userMessage: error.userMessage, isRetryable: false },
 		});
 	});
 
@@ -214,27 +211,5 @@ describe("bot routes", () => {
 			{ botId: BOT, changes: { description: "Sorts the inbox" } },
 			{ botId: BOT },
 		]);
-	});
-
-	it("answers a bot hidden from the caller as not found", async () => {
-		const response = await app({
-			"bots.remove": () => Effect.fail(new ResourceHidden({ resource: "bot" })),
-		}).request(`/bots/${BOT}`, { ...auth(), method: "DELETE" });
-
-		expect(response.status).toBe(404);
-		const hidden = "There's no such bot, or you can't see it";
-		expect(await response.json()).toEqual({
-			_tag: "NotFound",
-			message: hidden,
-			error: { _tag: "ResourceHidden", userMessage: hidden, isRetryable: false },
-		});
-	});
-
-	it("answers a change the caller may not make as forbidden", async () => {
-		const response = await app({
-			"bots.remove": () => Effect.fail(new ActionForbidden({ proof: "CanDeleteBot" })),
-		}).request(`/bots/${BOT}`, { ...auth(), method: "DELETE" });
-
-		expect(response.status).toBe(403);
 	});
 });

@@ -24,8 +24,8 @@ import {
 } from "../../http/app.test-support.ts";
 
 /**
- * The routes that upload a chat's files and serve them back, over doubles of
- * their operations. Who may reach a chat's files is decided in core.
+ * The routes that upload and serve chat files. The uppercase address test runs
+ * the real operations and blob store to check that both spellings find the same file.
  */
 
 const CHAT = "0199a3a0-0000-7000-8000-000000000401";
@@ -63,7 +63,7 @@ const serving = (file: { name: string; contentType: string; bytes: Uint8Array })
 				: Effect.fail(new ChatFileNotFound({ fileId })),
 	});
 
-describe.skipIf(!process.env.DATABASE_URL)("chat file blob keys", () => {
+describe("chat file addresses with uppercase ids", () => {
 	afterAll(closeDatabase);
 
 	it("serves the same blob through a chat and file address written in uppercase", async () => {

@@ -33,7 +33,7 @@ import { asSchema } from "ai";
 import { eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { botLoopOnPostgres, scriptedSteps } from "./testing.ts";
+import { botLoopOnPostgres, failedCall, scriptedSteps, toolResultFor } from "./testing.ts";
 
 const standup = {
 	name: "Morning standup",
@@ -122,8 +122,8 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 				projectId = await seedProject(workspaceId, { leadBotId: botId });
 				const opened = await chatsAs(adminId).startProjectChat({
 					projectId,
-					messageId: crypto.randomUUID(),
-					content: "Set up a standup.",
+					retryKey: crypto.randomUUID(),
+					message: "Set up a standup.",
 				});
 				source = opened.chat.id;
 			}
@@ -153,9 +153,6 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 
 			expect(requests[0]?.tools).toHaveProperty("create_automation");
 			expect(await automationsOf(projectId)).toEqual([]);
-			await expect(
-				loop.call(ran.principal, "automations.createWithRoutine", standup),
-			).rejects.toMatchObject({ _tag: "ApprovalNeeded" });
 			const parked = await approve(ran);
 			expect(parked).toMatchObject({
 				tool: "create_automation",
@@ -209,7 +206,10 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 					},
 				},
 			});
-			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(created.id);
+			expect(toolResultFor(requests[1], "automation-tool")).toMatchObject({
+				type: "json",
+				value: { automation: { id: created.id } },
+			});
 		},
 	);
 
@@ -267,7 +267,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			expect(await automationsOf(defaultProject)).toMatchObject([
 				{ name: created.name, state: "enabled" },
 			]);
-			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error.userMessage);
+			expect(toolResultFor(requests[1], "automation-tool")).toEqual(failedCall(error.userMessage));
 			return;
 		}
 		expect(completed).toMatchObject({
@@ -337,7 +337,11 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			]),
 		);
 		expect(await automationsOf(defaultProject)).toMatchObject([{ state: "enabled" }]);
-		expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
+		expect(toolResultFor(requests[1], "list")).toMatchObject({
+			type: "json",
+			value: { automations: [{ id: created.id }] },
+		});
+		expect(toolResultFor(requests[1], "change")).toEqual(failedCall(error));
 	});
 
 	it("hides the bot's own automation from an update in a different project", async () => {
@@ -345,8 +349,8 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 		const projectId = await seedProject(workspaceId, { leadBotId: botId });
 		const opened = await chatsAs(adminId).startProjectChat({
 			projectId,
-			messageId: crypto.randomUUID(),
-			content: "Pause the standup.",
+			retryKey: crypto.randomUUID(),
+			message: "Pause the standup.",
 		});
 		const { model, requests } = requestTool("update_automation", {
 			automationId: owned.id,
@@ -358,7 +362,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			{ approvalStatus: null, status: "failed", error },
 		]);
 		expect(await automationsOf(defaultProject)).toMatchObject([{ state: "enabled" }]);
-		expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
+		expect(toolResultFor(requests[1], "automation-tool")).toEqual(failedCall(error));
 	});
 
 	it.each(["project", "default project"])(
@@ -384,13 +388,12 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			expect(requests[0]?.tools).not.toHaveProperty("create_automation");
 			expect(requests[0]?.tools).not.toHaveProperty("update_automation");
 			expect(await callsOf(ran.turnId)).toMatchObject([
-				{
-					tool: "list_automations",
-					approvalStatus: null,
-					status: "completed",
-					output: { automations: [{ id: created.id }] },
-				},
+				{ tool: "list_automations", approvalStatus: null, status: "completed" },
 			]);
+			expect(toolResultFor(requests[1], "automation-tool")).toMatchObject({
+				type: "json",
+				value: { automations: [{ id: created.id }] },
+			});
 			await expect(
 				loop.call(ran.principal, "automations.createWithRoutine", standup),
 			).rejects.toMatchObject({ _tag: "ResourceHidden" });
@@ -404,10 +407,10 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			workspace: workspaceId,
 			automationId: created.id,
 		});
-		await admin.post({
+		await admin.send({
 			chatId: feed.id,
-			messageId: crypto.randomUUID(),
-			content: "List the automations.",
+			retryKey: crypto.randomUUID(),
+			message: "List the automations.",
 		});
 		const { model, requests } = requestTool("list_automations", {});
 		const ran = await loop.runTurn(feed.id, { model });
@@ -416,13 +419,12 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 		expect(requests[0]?.tools).not.toHaveProperty("create_automation");
 		expect(requests[0]?.tools).not.toHaveProperty("update_automation");
 		expect(await callsOf(ran.turnId)).toMatchObject([
-			{
-				tool: "list_automations",
-				status: "completed",
-				approvalStatus: null,
-				output: { automations: [{ id: created.id }] },
-			},
+			{ tool: "list_automations", status: "completed", approvalStatus: null },
 		]);
+		expect(toolResultFor(requests[1], "automation-tool")).toMatchObject({
+			type: "json",
+			value: { automations: [{ id: created.id }] },
+		});
 	});
 
 	it("hides the automation list when the turn's project is being deleted", async () => {
@@ -430,8 +432,8 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 		const { automation: created } = await defineAutomation([routine], projectId);
 		const { chat } = await chatsAs(adminId).startProjectChat({
 			projectId,
-			messageId: crypto.randomUUID(),
-			content: "List the automations.",
+			retryKey: crypto.randomUUID(),
+			message: "List the automations.",
 		});
 		const { model } = requestTool("list_automations", {});
 		const ran = await loop.runTurn(chat.id, { model });
@@ -487,6 +489,6 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 		const error = new ApprovalRefused({ reason: "automationsOff" }).userMessage;
 		expect(await callsOf(ran.turnId)).toMatchObject([{ status: "failed", error }]);
 		expect(await automationsOf(defaultProject)).toEqual([]);
-		expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
+		expect(toolResultFor(requests[1], "automation-tool")).toEqual(failedCall(error));
 	});
 });

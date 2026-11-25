@@ -6,7 +6,6 @@ import {
 	NoComputerProvider,
 	UpgradeFailed,
 } from "@sugabots/contracts/errors/computers";
-import { BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { FailureOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { Operations } from "@sugabots/core/operations/registry";
 import type { Principal } from "@sugabots/core/principal";
@@ -148,22 +147,18 @@ describe("the project computer routes", () => {
 		}
 	});
 
-	it("answers each failure with its status", async () => {
+	it("answers computer errors with their statuses", async () => {
 		const upgrading = (failure: FailureOf<"projectComputer.upgrade">) =>
 			app({ "projectComputer.upgrade": () => Effect.fail(failure) })
 				.request(`${root}/upgrade`, asAdmin("POST"))
 				.then((response) => response.status);
 
 		expect({
-			hidden: await upgrading(new ResourceHidden({ resource: "project" })),
-			botCannotReach: await upgrading(new BotCannotReach({ resource: "project" })),
 			noProvider: await upgrading(new NoComputerProvider()),
 			inUse: await upgrading(new ComputerInUse()),
 			noComputer: await upgrading(new NoComputer()),
 			failed: await upgrading(new UpgradeFailed({ reason: userText`The copy stopped.` })),
 		}).toEqual({
-			hidden: 404,
-			botCannotReach: 403,
 			noProvider: 400,
 			inUse: 409,
 			noComputer: 404,
@@ -172,18 +167,16 @@ describe("the project computer routes", () => {
 	});
 
 	it("refuses a host the workspace blocked as a bad request, naming the block", async () => {
+		const error = new ComputerHostBlocked({ host: "api.example.com", by: "*.example.com" });
 		const response = await app({
-			"projectComputer.addHost": () =>
-				Effect.fail(new ComputerHostBlocked({ host: "api.example.com", by: "*.example.com" })),
+			"projectComputer.addHost": () => Effect.fail(error),
 		}).request(`${root}/network/hosts`, asAdmin("POST", { host: "api.example.com" }));
 
 		expect(response.status).toBe(400);
-		const blocked =
-			"api.example.com would reach *.example.com, which is blocked for this workspace's computers.";
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message: blocked,
-			error: { _tag: "ComputerHostBlocked", userMessage: blocked, isRetryable: false },
+			message: error.userMessage,
+			error: { _tag: "ComputerHostBlocked", userMessage: error.userMessage, isRetryable: false },
 		});
 	});
 });

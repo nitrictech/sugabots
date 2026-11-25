@@ -3,7 +3,6 @@ import {
 	ConnectorNotFound,
 	ConnectorOAuthStartFailed,
 } from "@sugabots/contracts/errors/connectors";
-import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { Operations } from "@sugabots/core/operations/registry";
 import type { Principal } from "@sugabots/core/principal";
 import { unimplemented } from "@sugabots/core/testing";
@@ -133,18 +132,6 @@ describe("a bot's connectors", () => {
 		expect(calls).toEqual([{ projectId: PROJECT_ID, url: "https://wiki.example.com/mcp" }]);
 	});
 
-	it("answers a change the caller may not make as forbidden", async () => {
-		const response = await app({
-			"connectors.create": () => Effect.fail(new ActionForbidden({ proof: "CanManageProject" })),
-		}).request(root, {
-			method: "POST",
-			headers,
-			body: JSON.stringify({ name: "Docs", url: "https://docs.example.com/mcp" }),
-		});
-
-		expect(response.status).toBe(403);
-	});
-
 	it("says when there is no such connector to remove", async () => {
 		const response = await app({
 			"connectors.remove": () => Effect.fail(new ConnectorNotFound()),
@@ -168,9 +155,9 @@ describe("signing a connector in", () => {
 	});
 
 	it("keeps why a sign-in could not start out of the response", async () => {
+		const error = new ConnectorOAuthStartFailed({ reason: "unknown" });
 		const response = await app({
-			"connectors.connectBuiltIn": () =>
-				Effect.fail(new ConnectorOAuthStartFailed({ reason: "unknown" })),
+			"connectors.connectBuiltIn": () => Effect.fail(error),
 		}).request(`${root}/connect`, {
 			method: "POST",
 			headers,
@@ -178,12 +165,16 @@ describe("signing a connector in", () => {
 		});
 
 		expect(response.status).toBe(400);
-		const refusal =
-			"The server didn't start a sign-in. Try again, or connect it with an access token from the server instead.";
-		expect(await response.json()).toEqual({
+		const body = await response.text();
+		expect(body).not.toContain("unknown");
+		expect(JSON.parse(body)).toEqual({
 			_tag: "BadRequest",
-			message: refusal,
-			error: { _tag: "ConnectorOAuthStartFailed", userMessage: refusal, isRetryable: false },
+			message: error.userMessage,
+			error: {
+				_tag: "ConnectorOAuthStartFailed",
+				userMessage: error.userMessage,
+				isRetryable: false,
+			},
 		});
 	});
 

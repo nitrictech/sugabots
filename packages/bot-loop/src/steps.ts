@@ -12,7 +12,7 @@ import type {
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import type { Call } from "@sugabots/core/operations/operation";
-import { Operations } from "@sugabots/core/operations/registry";
+import { makeOfferStepTools, Operations } from "@sugabots/core/operations/registry";
 import type { BotPrincipal } from "@sugabots/core/principal";
 import { processLayer } from "@sugabots/core/tiers";
 import { type UserText, userText } from "@sugabots/errors";
@@ -82,13 +82,14 @@ const carryOn: StepOutcome = { _tag: "Continue" };
 const loopCall = (): Call => ({ kind: "request", request: randomUUID() });
 
 /** The turn workflow's steps, which its activities reach through `TurnSteps`, timed as `timing` says. */
-export const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
+const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 	Layer.effect(
 		TurnSteps,
 		Effect.gen(function* () {
 			const operations = yield* Operations.Service;
 			const runs = yield* Turns.Runs.Service;
 			const tools = yield* Turns.Tools.Service;
+			const offerStepTools = yield* makeOfferStepTools;
 			const events = yield* EventBus.Service;
 
 			const runOf = (request: Turns.TurnRequests.TurnRequest) =>
@@ -287,12 +288,9 @@ export const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 												),
 											),
 							};
-							const offered = yield* tools.forStep(
+							const offered = yield* offerStepTools(
 								principal,
-								operations,
 								{
-									turnId,
-									executionNumber: principal.executionNumber,
 									replyMessageId: loaded.replyMessageId,
 									setting: loaded.setting,
 									approvals: loaded.approvals,

@@ -10,7 +10,7 @@
  * ```
  *
  * An operation whose bot-loop decision can need approval names its call
- * with the principal and its input ids in one `named`, so `Approved<P, X>`
+ * with the principal and its input ids in one `named`, so `Approved<P, X, Targets, Operation>`
  * shares the principal its other proofs are about.
  *
  * Its contract, in `@sugabots/contracts/operations`, says what it takes,
@@ -42,7 +42,7 @@ export class ApprovalCheckReached extends ApprovalNeeded {
 }
 
 /**
- * One call of an operation, the `X` of `Approved<P, X>`, which the registry
+ * One call of an operation, the `X` of `Approved<P, X, Targets, Operation>`, which the registry
  * hands its body with the principal and input. A bot's tool call is the
  * `tool_call` row the bot loop recorded before calling, which its approval is
  * stored against. A request is identified by its entrypoint. An approval check stops at the

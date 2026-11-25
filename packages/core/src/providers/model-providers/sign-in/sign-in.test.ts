@@ -8,6 +8,7 @@ import {
 	type Promised,
 	runOnPostgres,
 	servedOnPostgres,
+	waitUntilWaitingOnLocks,
 } from "../../../database/testing.ts";
 import { servedOperations } from "../../../operations/testing.ts";
 import { authenticators, principals } from "../../../proofs/world.test-support.ts";
@@ -203,8 +204,17 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 				signedInById: memberId,
 			});
 			const access = await storedAccess();
+			const exchange = openai.holdRefreshes();
 
-			const ready = await Promise.all([1, 2, 3].map(() => withAccess(access)));
+			const starting = Promise.all([1, 2, 3].map(() => withAccess(access)));
+			try {
+				// One turn is exchanging the token; the other two wait on its lock.
+				await exchange.started;
+				await waitUntilWaitingOnLocks(2);
+			} finally {
+				exchange.release();
+			}
+			const ready = await starting;
 
 			expect(openai.refreshesSpent).toEqual(["refresh-0"]);
 			const renewed = openai.issued[0];
@@ -336,6 +346,8 @@ function fakeOpenAI() {
 	const issued: string[] = [];
 	const refreshesSpent: string[] = [];
 	const state = { listingHeaders: {} as Record<string, string> };
+	let refreshHeld: Promise<void> | undefined;
+	let refreshStarted = () => {};
 
 	const respond = async (url: string, init?: RequestInit): Promise<Response> => {
 		const { pathname } = new URL(url);
@@ -356,8 +368,8 @@ function fakeOpenAI() {
 			if (spent) {
 				if (refreshesSpent.includes(spent)) return new Response(null, { status: 401 });
 				refreshesSpent.push(spent);
-				// Slow enough that concurrent callers would overlap without the lock.
-				await Effect.runPromise(Effect.sleep("50 millis"));
+				refreshStarted();
+				await refreshHeld;
 			}
 			const access = jwt({ n: issued.length, chatgpt_account_id: "account-1" });
 			issued.push(access);
@@ -395,6 +407,17 @@ function fakeOpenAI() {
 		},
 		enterCode: () => {
 			codeEntered = true;
+		},
+		/**
+		 * Holds every refresh exchange from now on until `release`, so a case sees
+		 * callers that overlap with one in flight. `started` resolves once one is.
+		 */
+		holdRefreshes: () => {
+			const held = Promise.withResolvers<void>();
+			const started = Promise.withResolvers<void>();
+			refreshHeld = held.promise;
+			refreshStarted = started.resolve;
+			return { started: started.promise, release: held.resolve };
 		},
 	};
 }

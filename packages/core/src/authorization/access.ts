@@ -74,6 +74,13 @@ export function reachesBotFor(botId: SQLWrapper, memberId: string | SQLWrapper):
 			and not reach_bot_membership.leaving
 		where reach_bot.id = ${outerColumn(botId)}
 			and reach_bot.system_bot_key is null
+			and not exists (
+				select 1
+				from ${project} as reach_bot_default_project
+				where reach_bot_default_project.default_of_bot_id = reach_bot.id
+					and reach_bot_default_project.workspace_id = reach_bot.workspace_id
+					and reach_bot_default_project.deleting
+			)
 			and case
 				when reach_bot.assistant_of is not null then reach_bot.assistant_of = ${outerColumn(memberId)}
 				when reach_bot.visibility = 'personal' then reach_bot.created_by_id = ${outerColumn(memberId)}

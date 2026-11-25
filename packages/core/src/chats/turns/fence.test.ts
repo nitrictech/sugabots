@@ -1,6 +1,6 @@
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
-import { Context, Effect, Exit, Stream } from "effect";
+import { Context, Effect, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { TurnAuthentication } from "../../authentication/turn.ts";
 import { file, message, toolCall, turn } from "../../database/schema.ts";
@@ -57,7 +57,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 	/** Writes `text` as the reply, as `principal`'s execution of the turn, and says how it went. */
 	const writeAs = (principal: BotPrincipal, text: string) =>
 		run(
-			Effect.exit(
+			Effect.result(
 				asRunningTurn(
 					principal,
 					{ chatId: opened.run.request.chatId, turnId: opened.turnId },
@@ -77,7 +77,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 	};
 
 	it("lets the turn's current execution write", async () => {
-		expect(Exit.isSuccess(await writeAs(opened.principal, "Hello"))).toBe(true);
+		expect((await writeAs(opened.principal, "Hello"))._tag).toBe("Success");
 		expect(await storedReply()).toMatchObject({ content: "Hello" });
 	});
 
@@ -88,10 +88,10 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 
 		expect(stale).toMatchObject({
 			_tag: "Failure",
-			cause: { reasons: [{ error: { _tag: "TurnExecutionSuperseded" } }] },
+			failure: { _tag: "TurnExecutionSuperseded" },
 		});
 		expect(await storedReply()).toMatchObject({ content: "" });
-		expect(Exit.isSuccess(await writeAs(resumed, "From the new one"))).toBe(true);
+		expect((await writeAs(resumed, "From the new one"))._tag).toBe("Success");
 		expect(await storedReply()).toMatchObject({ content: "From the new one" });
 	});
 
@@ -151,7 +151,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 		await runOnPostgres(authentication.authenticate(opened.turnId));
 
 		const stale = await run(
-			Effect.exit(
+			Effect.result(
 				named(opened.principal, opened.turnId, (principal, turnId) =>
 					Effect.gen(function* () {
 						const endsTurn = yield* proveEndsTurn(principal, turnId);
@@ -167,7 +167,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 
 		expect(stale).toMatchObject({
 			_tag: "Failure",
-			cause: { reasons: [{ error: { _tag: "TurnExecutionSuperseded" } }] },
+			failure: { _tag: "TurnExecutionSuperseded" },
 		});
 		const [stored] = await onDatabase((db) =>
 			db.select().from(turn).where(eq(turn.id, opened.turnId)),
@@ -211,7 +211,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 
 		// As a step's tools keep a long result: only while their execution runs the turn.
 		const kept = await run(
-			Effect.exit(
+			Effect.result(
 				Effect.flatMap(ChatFileStore.Service, (files) =>
 					files.write({
 						chatId: opened.run.request.chatId,
@@ -231,7 +231,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 
 		expect(kept).toMatchObject({
 			_tag: "Failure",
-			cause: { reasons: [{ error: { _tag: "TurnExecutionSuperseded" } }] },
+			failure: { _tag: "TurnExecutionSuperseded" },
 		});
 		expect(await filesInChat()).toEqual([]);
 	});
@@ -241,7 +241,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 
 		expect(await writeAs(opened.principal, "Too late")).toMatchObject({
 			_tag: "Failure",
-			cause: { reasons: [{ error: { _tag: "TurnEnded" } }] },
+			failure: { _tag: "TurnEnded" },
 		});
 	});
 });

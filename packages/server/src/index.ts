@@ -1,6 +1,7 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { BotLoop } from "@sugabots/bot-loop/bot-loop";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { PageAuthentication } from "@sugabots/core/authentication/page";
 import { SessionAuthentication } from "@sugabots/core/authentication/session";
 import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
@@ -15,7 +16,6 @@ import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventPruning } from "@sugabots/core/database/events/prune";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { Email } from "@sugabots/core/email/email";
-import { FilePages } from "@sugabots/core/files/pages";
 import { UnsentAttachments } from "@sugabots/core/files/unsent-attachments";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Notifications } from "@sugabots/core/notifications/notifications";
@@ -79,11 +79,9 @@ const Infrastructure = Layer.mergeAll(
 const OutsideSystems = Layer.mergeAll(Email.layer, Models.layer);
 
 /**
- * Accounts, the pages of the files bots make, and notifying members.
+ * Accounts and notifying members.
  */
-const WorkspacesAndProviders = Layer.mergeAll(Notifications.layer, FilePages.layer).pipe(
-	Layer.provideMerge(Accounts.layer),
-);
+const WorkspacesAndProviders = Notifications.layer.pipe(Layer.provideMerge(Accounts.layer));
 
 /**
  * The chats, over how they start and signal their workflows: a turn's from
@@ -116,6 +114,7 @@ const Http = listeningLayer.pipe(
 		Authentication.layer,
 		SessionAuthentication.layer,
 		WebhookAuthentication.layer,
+		PageAuthentication.layer,
 		requestSpanNames,
 	]),
 	Layer.provide(nodeServerLayer),

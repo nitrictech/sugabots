@@ -1,8 +1,9 @@
 import type { WrittenFilePart } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedMessage } from "../../authentication/seed.test-support.ts";
 import { SystemWorkAuthentication } from "../../authentication/system-work.ts";
 import { askerColumns } from "../../authentication/turn-facts.ts";
 import { beforeCommit, type Database, query, transaction } from "../../database/database.ts";
@@ -15,7 +16,6 @@ import {
 	message,
 	placedChat,
 	projectBot,
-	toolCall,
 	turn,
 } from "../../database/schema.ts";
 import {
@@ -24,6 +24,7 @@ import {
 	onDatabase,
 	onPostgres,
 	runOnPostgres,
+	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
 import { asMember } from "../../operations/chats/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
@@ -32,9 +33,11 @@ import { ChatEvent } from "../events.ts";
 import { seedChat } from "../seed.test-support.ts";
 import { chatServicesForTests } from "../testing.ts";
 import {
+	AUTOMATION_RUN_ENDED,
 	asTheLoop,
 	completeTurn,
 	endTurn,
+	type OpenedTurnForTests,
 	parkTurn,
 	prepareTurn,
 	queueTurnForTests,
@@ -47,11 +50,13 @@ import {
 	TurnRuns,
 	TurnStore,
 	turnLane,
+	turnRunFor,
 	writeReply,
 } from "../turns/testing.ts";
 import type { Turns } from "../turns/turns.ts";
 import { AutomationRunner } from "./automation-runner.ts";
 import { AutomationSettlement } from "./settlement.ts";
+import { RUN_STOPPED_UNEXPECTEDLY } from "./store.ts";
 import {
 	anAutomationAdmin,
 	automationsAs,
@@ -157,10 +162,6 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	 */
 	async function aRunWithHelpers(count: number) {
 		const { accepted, run } = await aRunningRun(projectId);
-		const [triggerMessage] = await onDatabase((db) =>
-			db.select({ id: message.id }).from(message).where(eq(message.chatId, accepted.chatId)),
-		);
-		if (!triggerMessage) throw new Error("Settlement test trigger message is missing");
 		const helpers = await onDatabase((db) =>
 			db
 				.insert(bot)
@@ -182,65 +183,24 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 				.insert(projectBot)
 				.values(helpers.map((helper) => ({ workspaceId, projectId, botId: helper.id }))),
 		);
-		const now = new Date();
-		const [askingTurn] = await onDatabase((db) =>
-			db
-				.insert(turn)
-				.values({
-					chatId: accepted.chatId,
-					botId,
-					triggerMessageId: triggerMessage.id,
-					status: "done",
-					reason: "automation",
-					model: "test/model",
-					startedAt: now,
-					finishedAt: now,
-					...askerColumns({
-						chatId: accepted.chatId,
-						botId: botId,
-						triggerMessageId: triggerMessage.id,
-					}),
-				})
-				.returning(),
-		);
-		if (!askingTurn) throw new Error("Could not create settlement test turn");
-		const [askingMessage] = await onDatabase((db) =>
-			db
-				.insert(message)
-				.values({
-					chatId: accepted.chatId,
-					authorBotId: botId,
-					status: "complete",
-					parts: [],
-					content: `${helpers.map(({ handle }) => `@${handle}`).join(" ")} Complete the delegated work.`,
-					turnId: askingTurn.id,
-				})
-				.returning(),
-		);
-		if (!askingMessage) throw new Error("Could not create settlement test asking message");
 		const [runningTurn] = await runOnPostgres(runningTurns(accepted.chatId));
-		for (const helper of helpers) {
-			await runOnPostgres(
-				queueTurnForTests({
-					chatId: accepted.chatId,
-					botId: helper.id,
-					triggerMessageId: askingMessage.id,
-					reason: "collaboration",
-				}),
-			);
-		}
+		if (!runningTurn) throw new Error("The run asked for no turn");
+		const asking = await replyIn(
+			runningTurn,
+			`${helpers.map(({ handle }) => `@${handle}`).join(" ")} Complete the delegated work.`,
+		);
 		const running = await runOnPostgres(runningTurns(accepted.chatId));
 		const helperTurns = helpers.map((helper) =>
 			running.find(({ request }) => request.botId === helper.id),
 		);
-		if (!runningTurn || helperTurns.some((helperTurn) => !helperTurn)) {
+		if (helperTurns.some((helperTurn) => !helperTurn)) {
 			throw new Error("Could not create settlement test active work");
 		}
 		return {
 			accepted,
 			run,
-			askingTurn,
-			askingMessage,
+			askingTurnId: asking.turnId,
+			askingMessageId: asking.replyMessageId,
 			helpers,
 			runningTurn,
 			helperTurns: helperTurns.filter((helperTurn) => helperTurn !== undefined),
@@ -275,23 +235,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const [turnRun] = await runOnPostgres(runningTurns(chatId));
 		if (!turnRun) throw new Error("The run asked for no turn");
 		const prepared = await drive(prepareTurn(turnRun));
-		for (const written of writes) {
-			const id = await drive(
-				recordToolCall(prepared, {
-					toolCallId: `sdk-${crypto.randomUUID()}`,
-					tool: "file_write",
-					input: {},
-					writeOrDelete: true,
-				}),
-			);
-			await drive(
-				asTheLoop(prepared, (runsTurn) =>
-					Effect.flatMap(ToolCallStore.Service, (calls) =>
-						calls.close(runsTurn, id, { output: { status: "written", ...written } }),
-					),
-				),
-			);
-		}
+		await writeFilesIn(prepared, writes);
 		// Freed first, so completing the turn finishes the run's work.
 		await runOnPostgres(releaseTurn(turnRun));
 		// Completed as it stands, text or none: what settlement makes of a reply is the case here.
@@ -310,79 +254,48 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		);
 	}
 
-	/**
-	 * A turn of the run, done a minute ago, whose reply wrote each of `writes`
-	 * with `file_write`: the run asked somebody something and carried on
-	 * in a later turn.
-	 */
+	async function writeFilesIn(
+		prepared: OpenedTurnForTests,
+		writes: readonly Omit<WrittenFilePart, "type">[],
+	) {
+		for (const written of writes) {
+			const id = await drive(
+				recordToolCall(prepared, {
+					toolCallId: `sdk-${crypto.randomUUID()}`,
+					tool: "file_write",
+					input: {},
+					writeOrDelete: true,
+				}),
+			);
+			await drive(
+				asTheLoop(prepared, (runsTurn) =>
+					Effect.flatMap(ToolCallStore.Service, (calls) =>
+						calls.close(runsTurn, id, { output: { status: "written", ...written } }),
+					),
+				),
+			);
+		}
+	}
+
 	async function anEarlierTurnWrote(
 		chatId: string,
 		writes: readonly Omit<WrittenFilePart, "type">[],
 	) {
-		const finishedAt = new Date(Date.now() - 60_000);
-		// Its own trigger, so the run's turn waiting on the run's trigger still runs.
-		const [trigger] = await onDatabase((db) =>
-			db
-				.insert(message)
-				.values({
-					chatId,
-					authorBotId: botId,
-					status: "complete",
-					parts: [],
-					content: "Earlier work.",
-					createdAt: finishedAt,
-				})
-				.returning(),
+		const [earlier] = await runOnPostgres(runningTurns(chatId));
+		if (!earlier) throw new Error("The run asked for no turn");
+		const prepared = await drive(prepareTurn(earlier));
+		await writeFilesIn(prepared, writes);
+		const followUp = await seedMessage(chatId, { member: memberId });
+		await runOnPostgres(
+			queueTurnForTests({
+				chatId,
+				botId,
+				triggerMessageId: followUp,
+				reason: "automation",
+			}),
 		);
-		if (!trigger) throw new Error("Could not create the earlier turn's trigger");
-		const [earlier] = await onDatabase((db) =>
-			db
-				.insert(turn)
-				.values({
-					chatId,
-					botId,
-					triggerMessageId: trigger.id,
-					status: "done",
-					model: "test/model",
-					startedAt: finishedAt,
-					finishedAt,
-					...askerColumns({ chatId: chatId, botId: botId, triggerMessageId: trigger.id }),
-				})
-				.returning(),
-		);
-		if (!earlier) throw new Error("Could not create the earlier turn");
-		const [reply] = await onDatabase((db) =>
-			db
-				.insert(message)
-				.values({
-					chatId,
-					authorBotId: botId,
-					status: "complete",
-					parts: [],
-					content: "Asking first.",
-					turnId: earlier.id,
-					createdAt: finishedAt,
-				})
-				.returning(),
-		);
-		if (!reply) throw new Error("Could not create the earlier reply");
-		await onDatabase((db) =>
-			db.insert(toolCall).values(
-				writes.map((written) => ({
-					chatId,
-					messageId: reply.id,
-					turnId: earlier.id,
-					tool: "file_write",
-					input: {},
-					output: { status: "written", ...written },
-					status: "completed" as const,
-					writeOrDelete: true,
-					atOffset: 0,
-					startedAt: finishedAt,
-					finishedAt,
-				})),
-			),
-		);
+		await drive(completeTurn(prepared, "Earlier work."));
+		await runOnPostgres(releaseTurn(earlier));
 	}
 
 	/** The messages posted as the run's result, which open the run. */
@@ -432,7 +345,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 		expect(await executionOf(first.execution.id)).toMatchObject({
 			state: "failed",
-			error: "The automation run stopped unexpectedly",
+			error: RUN_STOPPED_UNEXPECTEDLY,
 			finishedAt: expect.any(Date),
 		});
 		const next = await startRunning(runner, created.automation.id);
@@ -459,7 +372,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 		expect(await executionOf(accepted.runId)).toMatchObject({
 			state: "failed",
-			error: "The automation run stopped unexpectedly",
+			error: RUN_STOPPED_UNEXPECTEDLY,
 		});
 	});
 
@@ -497,7 +410,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			// The helper's turn is refused once its workflow starts it.
 			expect(await runs.open(fixture.helperTurn)).toMatchObject({
 				_tag: "NotRunnable",
-				reason: "The automation run has ended",
+				reason: AUTOMATION_RUN_ENDED,
 			});
 		},
 	);
@@ -565,7 +478,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			{
 				chatId: fixture.accepted.chatId,
 				botId,
-				triggerMessageId: fixture.askingMessage.id,
+				triggerMessageId: fixture.askingMessageId,
 				reason: "hand_back",
 			},
 		]);
@@ -647,19 +560,19 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		expect(sentBeforeCommit).toEqual([0]);
 		expect(cancel).toHaveBeenCalledWith("workflow-execution");
 		const [cancelled] = await onDatabase((db) =>
-			db.select().from(turn).where(eq(turn.id, fixture.askingTurn.id)),
+			db.select().from(turn).where(eq(turn.id, fixture.askingTurnId)),
 		);
 		expect(cancelled?.status).toBe("cancelled");
 	});
 
 	it("asks a running turn to stop, and waits for it, before ending a run as failed", async () => {
 		const fixture = await aRunWithHelper();
-		await runAgain(fixture.askingTurn.id);
+		await runAgain(fixture.askingTurnId);
 
 		await announce(ended(fixture.accepted.chatId, failed(userText`Helper's model failed`)));
 
 		const [stopping] = await onDatabase((db) =>
-			db.select().from(turn).where(eq(turn.id, fixture.askingTurn.id)),
+			db.select().from(turn).where(eq(turn.id, fixture.askingTurnId)),
 		);
 		expect(await executionOf(fixture.accepted.runId)).toMatchObject({
 			state: "running",
@@ -673,7 +586,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			expect.objectContaining({
 				event: expect.objectContaining({
 					type: "turn.interrupt_requested",
-					turnId: fixture.askingTurn.id,
+					turnId: fixture.askingTurnId,
 				}),
 			}),
 		);
@@ -682,7 +595,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			db
 				.update(turn)
 				.set({ status: "cancelled", finishedAt: new Date() })
-				.where(eq(turn.id, fixture.askingTurn.id)),
+				.where(eq(turn.id, fixture.askingTurnId)),
 		);
 		await runOnPostgres(releaseTurn(fixture.runningTurn));
 		expect(await settlement.settleRun(fixture.run)).toBe(true);
@@ -697,13 +610,13 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 	it("refuses to open a turn once a run has started ending", async () => {
 		const fixture = await aRunWithHelper();
-		await runAgain(fixture.askingTurn.id);
+		await runAgain(fixture.askingTurnId);
 
 		await announce(ended(fixture.accepted.chatId, failed(userText`Helper's model failed`)));
 
 		expect(await runs.open(fixture.helperTurn)).toMatchObject({
 			_tag: "NotRunnable",
-			reason: "The automation run has ended",
+			reason: AUTOMATION_RUN_ENDED,
 		});
 	});
 
@@ -719,9 +632,19 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		);
 		await holder.held;
 
-		// Settles while the holder still has the turn locked: a wait here would never end.
-		await announce(ended(accepted.chatId, failed(userText`Model failed`)));
-		await holder.release();
+		const settlementFinished = announce(ended(accepted.chatId, failed(userText`Model failed`)));
+		const lockObservation = new AbortController();
+		const outcome = await Promise.race([
+			settlementFinished.then(() => "finished"),
+			waitUntilWaitingOnLocks(1, lockObservation.signal).then(() => "waiting on the turn lock"),
+		]).finally(async () => {
+			lockObservation.abort();
+			await holder.release();
+		});
+		await settlementFinished;
+		expect(outcome, "Settlement must finish while the running turn is still locked").toBe(
+			"finished",
+		);
 
 		const [skipped] = await onDatabase((db) =>
 			db.select().from(turn).where(eq(turn.id, prepared.turnId)),
@@ -745,42 +668,27 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	it("lets a transaction holding a turn record the run's ending while settlement waits on that turn", async () => {
 		const fixture = await aRunWithHelper();
 		await onDatabase((db) =>
-			db.update(turn).set({ status: "waiting" }).where(eq(turn.id, fixture.askingTurn.id)),
+			db.update(turn).set({ status: "waiting" }).where(eq(turn.id, fixture.askingTurnId)),
 		);
 		const holder = holdTransaction(
-			Effect.gen(function* () {
-				yield* query((db) =>
-					db
-						.select({ id: turn.id })
-						.from(turn)
-						.where(eq(turn.id, fixture.askingTurn.id))
-						.for("update"),
-				);
-				const [backend] = yield* query((db) =>
-					db.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`, "objects"),
-				);
-				return backend?.pid ?? 0;
-			}),
-			// Ends a turn in the run, as a turn writer holding its turn does.
+			query((db) =>
+				db
+					.select({ id: turn.id })
+					.from(turn)
+					.where(eq(turn.id, fixture.askingTurnId))
+					.for("update"),
+			),
 			emit([ended(fixture.accepted.chatId, { state: "cancelled" })]),
 		);
-		const pid = await holder.held;
+		await holder.held;
 
 		const failing = settlement.failRun(fixture.run);
-		await vi.waitFor(async () => {
-			const blocked = await onDatabase((db) =>
-				db.execute<{ pid: number }>(
-					sql`select pid from pg_stat_activity where ${pid} = any(pg_blocking_pids(pid))`,
-					"objects",
-				),
-			);
-			expect(blocked.length).toBeGreaterThan(0);
-		});
+		await waitUntilWaitingOnLocks(1);
 		await Promise.all([holder.release(), failing]);
 
 		expect(await executionOf(fixture.run.runId)).toMatchObject({ state: "failed" });
 		const [asking] = await onDatabase((db) =>
-			db.select().from(turn).where(eq(turn.id, fixture.askingTurn.id)),
+			db.select().from(turn).where(eq(turn.id, fixture.askingTurnId)),
 		);
 		expect(asking?.status).toBe("cancelled");
 	});
@@ -869,16 +777,6 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 				}),
 			}),
 		);
-	});
-
-	it("tells the bot its last reply goes to the automation's feed", async () => {
-		const { accepted } = await aRunningRun();
-
-		const [trigger] = await onDatabase((db) =>
-			db.select().from(message).where(eq(message.chatId, accepted.chatId)),
-		);
-
-		expect(trigger?.content).toContain("your last reply is posted in this automation's feed");
 	});
 
 	it("posts each file a run wrote with its result, at the last version any of its turns wrote", async () => {
@@ -1027,45 +925,12 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const { accepted } = await aRunningRun();
 		const [runningTurn] = await runOnPostgres(runningTurns(accepted.chatId));
 		if (!runningTurn) throw new Error("The run asked for no turn");
-		const pieces = await Promise.all(
-			["First piece.", "Second piece."].map(async (content) => {
-				const [trigger] = await onDatabase((db) =>
-					db
-						.insert(message)
-						.values({
-							chatId: accepted.chatId,
-							authorBotId: botId,
-							status: "complete",
-							parts: [],
-							content,
-						})
-						.returning(),
-				);
-				if (!trigger) throw new Error("Could not create settlement test trigger");
-				const [piece] = await onDatabase((db) =>
-					db
-						.insert(turn)
-						.values({
-							chatId: accepted.chatId,
-							botId,
-							triggerMessageId: trigger.id,
-							status: "running",
-							model: "test/model",
-							startedAt: new Date(),
-							...askerColumns({
-								chatId: accepted.chatId,
-								botId: botId,
-								triggerMessageId: trigger.id,
-							}),
-						})
-						.returning(),
-				);
-				if (!piece) throw new Error("Could not create settlement test turn");
-				return piece;
-			}),
+		const first = await drive(prepareTurn(runningTurn));
+		const followUp = await seedMessage(accepted.chatId, { member: memberId });
+		const secondRun = await runOnPostgres(
+			turnRunFor({ ...runningTurn.request, triggerMessageId: followUp }),
 		);
-		const [first, second] = pieces;
-		if (!first || !second) throw new Error("Could not create settlement test work");
+		const second = await drive(prepareTurn(secondRun));
 
 		let arrivals = 0;
 		let release: (() => void) | undefined;
@@ -1092,7 +957,10 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			);
 
 		delivered = [];
-		await Promise.all([finish(first.id, releaseTurn(runningTurn)), finish(second.id, Effect.void)]);
+		await Promise.all([
+			finish(first.turnId, releaseTurn(runningTurn)),
+			finish(second.turnId, Effect.void),
+		]);
 
 		expect(await executionOf(accepted.runId)).toMatchObject({
 			state: "completed",

@@ -13,7 +13,6 @@ import {
 	seedProject,
 	seedProjectChat,
 	seedRoutine,
-	seedRun,
 	seedWebhookTrigger,
 	seedWorkspace,
 } from "./seed.test-support.ts";
@@ -134,21 +133,8 @@ describe("SystemWorkAuthentication", () => {
 	});
 
 	describe("pausing an automation after failures", () => {
-		const runsEnding = async (
-			automationId: string,
-			states: readonly ("completed" | "failed")[],
-		) => {
-			for (const [index, state] of states.entries()) {
-				await seedRun(workspaceId, automationId, leadId, "routine", {
-					state,
-					acceptedAt: new Date(Date.now() - (states.length - index) * 60_000),
-				});
-			}
-		};
-
-		it("reaches an automation whose last runs all failed", async () => {
+		it("reaches an automation flagged for pausing after failures", async () => {
 			const automationId = await seedAutomation(workspaceId, projectId);
-			await runsEnding(automationId, ["completed", "failed", "failed"]);
 			await onDatabase((db) =>
 				db
 					.update(automation)
@@ -165,15 +151,9 @@ describe("SystemWorkAuthentication", () => {
 			});
 		});
 
-		it("refuses one whose latest run completed, or that failed only once", async () => {
-			const recovered = await seedAutomation(workspaceId, projectId);
-			await runsEnding(recovered, ["failed", "failed", "completed"]);
-			const once = await seedAutomation(workspaceId, projectId);
-			await runsEnding(once, ["failed"]);
-
-			for (const automationId of [recovered, once]) {
-				await refused(auth.pauseAfterFailures(automationId), "pauseAfterFailures");
-			}
+		it("refuses an automation with no pending pause", async () => {
+			const automationId = await seedAutomation(workspaceId, projectId);
+			await refused(auth.pauseAfterFailures(automationId), "pauseAfterFailures");
 		});
 	});
 });

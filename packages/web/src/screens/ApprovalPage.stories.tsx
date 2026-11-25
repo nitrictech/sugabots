@@ -7,8 +7,8 @@ import type {
 import { HttpResponse, http } from "msw";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyChatFor, storyWorkspace } from "@/story-app.tsx";
+import { growthDesk, revenue } from "@/shell/story-fixtures.test-support.ts";
+import { appHandlers, StoryApp, storyChatFor, storyWorkspace } from "@/story-app.test-support.tsx";
 
 /*
  * One approval request in full, beside the Approvals list: what it would do,

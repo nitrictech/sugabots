@@ -1,97 +1,119 @@
-import { EVENT_VERSION } from "@sugabots/contracts";
-import { Duration, Effect, Layer, ManagedRuntime } from "effect";
+import { Duration, Exit, Layer, ManagedRuntime, Scope } from "effect";
 import { TestClock } from "effect/testing";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { EventPruning } from "./prune.ts";
 import { EventStore } from "./store.ts";
+import { inMemoryEventStore } from "./testing.ts";
+
+const A_DAY = Duration.days(1);
 
 /**
- * Running the layer starts the sweep on a test clock, which `passes` moves on;
- * disposing the runtime stops it.
+ * A store that records each sweep's cutoff and answers it with `prune`, and a
+ * pruning layer over it running on a test clock that outlives the layer's
+ * scope, so a case can move time on after the scope has closed.
  */
-function pruning(store: EventStore.Interface) {
-	const runtime = ManagedRuntime.make(
-		EventPruning.layer.pipe(
-			Layer.provide(Layer.succeed(EventStore.Service, store)),
-			Layer.provideMerge(TestClock.layer()),
+async function sweeping(prune: (sweepNumber: number) => Promise<number> = async () => 0) {
+	const cutoffs: Date[] = [];
+	const waiting: Array<{ count: number; resolve: () => void }> = [];
+	const store: EventStore.Interface = {
+		...inMemoryEventStore(),
+		prune: (before) => {
+			cutoffs.push(before);
+			for (const { count, resolve } of waiting) if (cutoffs.length === count) resolve();
+			return prune(cutoffs.length);
+		},
+	};
+	const runtime = ManagedRuntime.make(TestClock.layer());
+	const scope = await runtime.runPromise(Scope.make());
+	await runtime.runPromise(
+		Layer.buildWithScope(
+			EventPruning.layer.pipe(Layer.provide(Layer.succeed(EventStore.Service, store))),
+			scope,
 		),
 	);
 	return {
-		runtime,
-		passes: (duration: Duration.Input) => runtime.runPromise(TestClock.adjust(duration)),
+		cutoffs,
+		/** Resolves once `count` sweeps have started. */
+		started: (count: number) =>
+			new Promise<void>((resolve) => {
+				if (cutoffs.length >= count) resolve();
+				else waiting.push({ count, resolve });
+			}),
+		/** Moves the clock on, then lets what that woke run as far as it can without more time. */
+		passes: async (duration: Duration.Input) => {
+			await runtime.runPromise(TestClock.adjust(duration));
+			await new Promise((resolve) => setImmediate(resolve));
+		},
+		/** Lets what is running reach its next wait, which a case that moves the clock next needs. */
+		settled: () => new Promise((resolve) => setImmediate(resolve)),
+		closeScope: () => runtime.runPromise(Scope.close(scope, Exit.void)),
+		dispose: () => runtime.dispose(),
 	};
 }
 
 describe("pruning", () => {
-	it("disposes during a blocked sweep without starting another sweep", async () => {
-		const store = EventStore.inMemory();
-		const started = Promise.withResolvers<void>();
-		const pending = Promise.withResolvers<number>();
-		const prune = vi.spyOn(store, "prune").mockImplementation(() => {
-			started.resolve();
-			return pending.promise;
-		});
-		const { runtime } = pruning(store);
+	it("sweeps what is over a week old once on start and again each day, until the scope closes", async () => {
+		const pruning = await sweeping();
 		try {
-			await runtime.runPromise(Effect.void);
-			await started.promise;
-			await runtime.dispose();
-			pending.resolve(0);
-			await new Promise((resolve) => setTimeout(resolve, 20));
-			expect(prune).toHaveBeenCalledTimes(1);
+			await pruning.started(1);
+			await pruning.settled();
+			await pruning.passes(Duration.hours(23));
+			const beforeADay = pruning.cutoffs.length;
+			await pruning.passes(Duration.hours(1));
+			await pruning.started(2);
+			await pruning.settled();
+			await pruning.passes(A_DAY);
+			await pruning.started(3);
+			await pruning.settled();
+
+			await pruning.closeScope();
+			await pruning.passes(A_DAY);
+
+			// The clock starts at the epoch, so each cutoff is a week before its sweep.
+			expect(pruning.cutoffs.map((cutoff) => cutoff.getTime())).toEqual([
+				-Duration.toMillis(Duration.days(7)),
+				Duration.toMillis(Duration.days(1 - 7)),
+				Duration.toMillis(Duration.days(2 - 7)),
+			]);
+			expect(beforeADay).toBe(1);
 		} finally {
-			pending.resolve(0);
-			await runtime.dispose();
+			await pruning.dispose();
 		}
 	});
 
-	it("sweeps what is over a week old once on start, and again a day later", async () => {
-		const store = EventStore.inMemory();
-		const prune = vi.spyOn(store, "prune");
+	it("disposes during a blocked sweep without starting another sweep", async () => {
+		const blocked = Promise.withResolvers<number>();
+		const pruning = await sweeping(() => blocked.promise);
+		try {
+			await pruning.started(1);
 
-		const { runtime, passes } = pruning(store);
-		await runtime.runPromise(Effect.void);
-		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(1));
-		const [cutoff] = prune.mock.calls[0] ?? [];
-		expect(cutoff?.getTime()).toBe(-Duration.toMillis(Duration.days(7)));
+			await pruning.closeScope();
+			blocked.resolve(0);
+			await pruning.settled();
+			await pruning.passes(A_DAY);
 
-		await passes(Duration.hours(23));
-		expect(prune).toHaveBeenCalledTimes(1);
-		await passes(Duration.hours(1));
-		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(2));
-		await runtime.dispose();
+			expect(pruning.cutoffs).toHaveLength(1);
+		} finally {
+			blocked.resolve(0);
+			await pruning.dispose();
+		}
 	});
 
-	it("keeps sweeping, and stops when the scope closes", async () => {
-		const store = EventStore.inMemory();
-		const prune = vi.spyOn(store, "prune");
+	it("sweeps again the next day after a store that throws, so a failed sweep cannot take the API down", async () => {
+		const pruning = await sweeping(async (sweepNumber) => {
+			if (sweepNumber === 1) throw new Error("connection lost");
+			return 0;
+		});
+		try {
+			await pruning.started(1);
+			await pruning.settled();
 
-		const { runtime, passes } = pruning(store);
-		await runtime.runPromise(Effect.void);
-		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(1));
-		await passes(Duration.days(1));
-		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(2));
-		await passes(Duration.days(1));
-		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(3));
+			await pruning.passes(A_DAY);
+			await pruning.started(2);
 
-		await runtime.dispose();
-		await new Promise((resolve) => setTimeout(resolve, 20));
-
-		expect(prune).toHaveBeenCalledTimes(3);
-	});
-
-	it("survives a store that throws, so a failed sweep cannot take the API down", async () => {
-		const store = EventStore.inMemory();
-		store.record("chat:c1", { v: EVENT_VERSION, type: "message.created" });
-		const prune = vi.spyOn(store, "prune").mockRejectedValue(new Error("connection lost"));
-
-		const { runtime, passes } = pruning(store);
-		await runtime.runPromise(Effect.void);
-		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(1));
-		await passes(Duration.days(1));
-		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(2));
-		await runtime.dispose();
-
-		expect(await store.has("chat:c1", 1)).toBe(true);
+			expect(pruning.cutoffs).toHaveLength(2);
+		} finally {
+			await pruning.dispose();
+		}
 	});
 });

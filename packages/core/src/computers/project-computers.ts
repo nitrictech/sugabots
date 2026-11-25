@@ -46,6 +46,7 @@ import {
 	workspace as workspaceTable,
 } from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
+import type { DeletionRecorded, ProjectDeletionRecorded } from "../proofs/deletion-started.ts";
 import type { DoesStoredWork } from "../proofs/does-stored-work.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { processLayer, Tier } from "../tiers.ts";
@@ -175,14 +176,16 @@ export interface Interface {
 	 * record, the only way anything finds the machine. When the provider can't
 	 * be reached it fails and keeps the record, so the project is kept to try again.
 	 */
-	readonly destroy: (project: Project) => Effect.Effect<void, ClaimLost | Computers.Unavailable>;
+	readonly destroy: <W, J>(
+		recorded: ProjectDeletionRecorded<W, J>,
+	) => Effect.Effect<void, ClaimLost | Computers.Unavailable>;
 	/**
 	 * Does {@link destroy} for every project in the workspace that has a
 	 * computer, for a workspace about to be deleted. Stops at the first
 	 * provider that can't be reached, keeping that record and those not yet reached.
 	 */
-	readonly destroyAllIn: (
-		workspaceId: string,
+	readonly destroyAllIn: <W>(
+		recorded: DeletionRecorded<W>,
 	) => Effect.Effect<void, ClaimLost | Computers.Unavailable>;
 	/**
 	 * Moves the project's work to a new computer made by `provider`, the
@@ -1463,12 +1466,20 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		destroy: (project) => operation("destroy", destroyProjectComputer(project)),
+		destroy: (recorded) =>
+			operation(
+				"destroy",
+				destroyProjectComputer({
+					workspaceId: recorded.workspace.value,
+					projectId: recorded.project.value,
+				}),
+			),
 
-		destroyAllIn: (workspaceId) =>
+		destroyAllIn: (recorded) =>
 			operation(
 				"destroyAllIn",
 				Effect.gen(function* () {
+					const workspaceId = recorded.workspace.value;
 					const rows = yield* query((db) =>
 						db
 							.select({ projectId: computerTable.projectId })

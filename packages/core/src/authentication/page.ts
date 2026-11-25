@@ -67,7 +67,12 @@ export const make = Effect.gen(function* () {
 							.limit(1),
 					);
 					if (!page || version < 1) return yield* new PageAddressUnavailable();
-					return authenticated.pageAddress({ workspace: page.workspace, file: fileId, version });
+					return authenticated.pageAddress({
+						workspace: page.workspace,
+						file: fileId,
+						version,
+						expiresAt,
+					});
 				}),
 			),
 	});

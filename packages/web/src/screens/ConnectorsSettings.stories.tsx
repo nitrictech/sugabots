@@ -3,8 +3,13 @@ import type { TestConnector } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, connectorHandlers, StoryApp, storyProjects } from "../story-app.tsx";
+import { revenue } from "@/shell/story-fixtures.test-support.ts";
+import {
+	appHandlers,
+	connectorHandlers,
+	StoryApp,
+	storyProjects,
+} from "../story-app.test-support.tsx";
 
 /*
  * A project's connectors, as its Connectors page shows them: each service its bots

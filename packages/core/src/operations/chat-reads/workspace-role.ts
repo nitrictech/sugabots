@@ -13,14 +13,15 @@ export const workspaceRole = defineOperation(
 		if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun") {
 			return new ResourceHidden({ resource: "chat" });
 		}
-		return named(principal, principal.chat, call, (principal, chat, call) =>
+		return named(principal, principal.chat, call, input, (principal, chat, call, approvedInput) =>
 			Effect.gen(function* () {
 				const reach = yield* proveReachesChat(principal, chat);
 				const approved = yield* proveApproved(
 					principal,
 					call,
 					approvalRule("chats.workspaceRole"),
-					input,
+					approvedInput,
+					chat,
 				);
 				return yield* lookUpWorkspaceRole(reach, input.member, approved);
 			}),

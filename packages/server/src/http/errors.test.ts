@@ -1,9 +1,10 @@
-import { Conflict, NotFound } from "@sugabots/contracts/http";
+import { ActionForbidden, BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
 import type { UserFacing } from "@sugabots/core/user-message";
 import { DisplayName, type DomainError, userText } from "@sugabots/errors";
 import { Data, Duration, Effect, ErrorReporter, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { asHttpError } from "./errors.ts";
+import { asHttpError, refusals } from "./errors.ts";
 
 class ProviderRateLimited
 	extends Schema.TaggedError<ProviderRateLimited>()("ProviderRateLimited", {
@@ -79,4 +80,23 @@ describe("asHttpError", () => {
 			details: { id: "t1" },
 		});
 	});
+});
+
+it("answers shared refusals with their HTTP status and public error", () => {
+	for (const [refusal, status, tag] of [
+		[new ResourceHidden({ resource: "chat" }), 404, "NotFound"],
+		[new ActionForbidden({ proof: "CanManageProject" }), 403, "Forbidden"],
+		[new BotCannotReach({ resource: "project" }), 403, "Forbidden"],
+	] as const) {
+		const error = Effect.runSync(Effect.fail(refusal).pipe(asHttpError(refusals), Effect.flip));
+		expect(
+			Schema.resolveAnnotations(error.constructor as typeof NotFound | typeof Forbidden)
+				?.httpApiStatus,
+		).toBe(status);
+		expect(Schema.encodeSync(Schema.Union([NotFound, Forbidden]))(error)).toEqual({
+			_tag: tag,
+			message: refusal.userMessage,
+			error: { _tag: refusal._tag, userMessage: refusal.userMessage, isRetryable: false },
+		});
+	}
 });

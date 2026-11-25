@@ -15,7 +15,7 @@ import { type ComponentProps, useEffect, useState } from "react";
 import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
-import { growthDesk } from "@/shell/story-fixtures.ts";
+import { growthDesk } from "@/shell/story-fixtures.test-support.ts";
 import { ChatMessages } from "./ChatMessages.tsx";
 import { findAnsweringFace } from "./chat-layout.ts";
 import { queuedBehindReply } from "./queued-messages.ts";

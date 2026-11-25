@@ -2,6 +2,7 @@ import { providersContracts } from "@sugabots/contracts/operations/providers";
 import { Effect } from "effect";
 import { proveInWorkspace } from "../../../proofs/in-workspace.ts";
 import { named } from "../../../proofs/proof.ts";
+import { proveReachesModelProvider } from "../../../proofs/reaches-model-provider.ts";
 import { proveCanManageWorkspace } from "../../../proofs/workspace-permissions.ts";
 import { ModelProviders } from "../../../providers/model-providers/model-providers.ts";
 import { workspaceIdOf } from "../../../workspaces/workspace-reference.ts";
@@ -11,13 +12,18 @@ export const test = defineOperation(providersContracts["modelProviders.test"], (
 	Effect.gen(function* () {
 		const modelProviders = yield* ModelProviders.Service;
 		const workspaceId = yield* workspaceIdOf(input.workspace);
-		return yield* named(principal, workspaceId, (principal, workspace) =>
-			Effect.gen(function* () {
-				const canManage = yield* proveCanManageWorkspace(
-					yield* proveInWorkspace(principal, workspace),
-				);
-				return yield* modelProviders.test(canManage, input.providerId);
-			}),
+		return yield* named(
+			principal,
+			workspaceId,
+			input.providerId,
+			(principal, workspace, provider) =>
+				Effect.gen(function* () {
+					const canManage = yield* proveCanManageWorkspace(
+						yield* proveInWorkspace(principal, workspace),
+					);
+					const reach = yield* proveReachesModelProvider(canManage, provider);
+					return yield* modelProviders.test(reach);
+				}),
 		);
 	}),
 );

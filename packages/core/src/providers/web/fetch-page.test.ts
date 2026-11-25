@@ -80,23 +80,29 @@ describe("fetching a page", () => {
 		expect(String(fetch.mock.calls[0]?.[0])).toBe("https://example.com/page");
 	});
 
-	it("passes plain text and JSON through, cut to the character limit", async () => {
-		const fetch = vi.fn<FakeFetch>(
-			async () =>
-				new Response(`{"items":[${"1,".repeat(200)}1]}`, {
-					headers: { "content-type": "application/json" },
-				}),
-		);
+	it.each([
+		["JSON", "application/json"],
+		["plain text", "text/plain"],
+	])(
+		"passes %s through, cut to the character limit and keeping the start",
+		async (_, contentType) => {
+			const limit = 50;
+			const start = "S".repeat(limit);
+			const fetch = vi.fn<FakeFetch>(
+				async () =>
+					new Response(`${start}${"-".repeat(200)}E`, { headers: { "content-type": contentType } }),
+			);
 
-		const outcome = await fetcher(fetch, { maxCharacters: 50 })("https://api.example.com/items");
+			const outcome = await fetcher(fetch, { maxCharacters: limit })(
+				"https://api.example.com/items",
+			);
 
-		expect(outcome).toMatchObject({
-			ok: true,
-			page: { contentType: "application/json", title: null, truncated: true },
-		});
-		if (!outcome.ok) throw new Error(outcome.reason);
-		expect(outcome.page.text).toHaveLength(50);
-	});
+			expect(outcome).toMatchObject({
+				ok: true,
+				page: { contentType, title: null, truncated: true, text: start },
+			});
+		},
+	);
 
 	it("decodes the charset the server names", async () => {
 		const fetch = vi.fn<FakeFetch>(

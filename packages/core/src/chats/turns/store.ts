@@ -297,6 +297,8 @@ export interface Interface {
 	readonly cancelUnder: (chatIds: readonly string[]) => Effect.Effect<readonly string[]>;
 }
 
+export const AUTOMATION_RUN_ENDED = "The automation run has ended";
+
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/TurnStore") {
 	declare readonly [Tier]: "process";
 }
@@ -627,7 +629,7 @@ export const make = Effect.gen(function* () {
 	/** Ends `existing`, if it is still active, because its automation run takes no more work. */
 	const endForEndedAutomation = (existing: { id: string; state: TurnState } | undefined) =>
 		Effect.gen(function* () {
-			const reason = "The automation run has ended";
+			const reason = AUTOMATION_RUN_ENDED;
 			const decided =
 				existing &&
 				transition(

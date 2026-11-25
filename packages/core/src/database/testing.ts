@@ -1,7 +1,6 @@
-import { PgClient } from "@effect/sql-pg";
+import { setTimeout as delay } from "node:timers/promises";
 import { sql } from "drizzle-orm";
 import { type Context, Effect, Layer, ManagedRuntime } from "effect";
-import { SqlClient } from "effect/unstable/sql";
 import { onTestFinished } from "vitest";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { Ids } from "../ids/ids.ts";
@@ -61,29 +60,52 @@ export const runOnPostgres = effectRunner<TestInfrastructure>(databaseForTests);
 export const onDatabase = <A>(run: (db: Executor) => Effect.Effect<A, QueryFailure>): Promise<A> =>
 	runOnPostgres(query(run));
 
-/** How often, and how many times, `waitUntilWaitingOnLocks` looks. */
 const LOCK_WAIT_POLL_INTERVAL_MS = 20;
-const LOCK_WAIT_POLL_ATTEMPTS = 100;
 
 /**
- * Waits until at least `count` connections to the test database are waiting
- * on a lock, so a case can order concurrent writes by where they block rather
- * than by sleeping. Each Vitest worker has a database of its own, so only this
- * case's connections are counted. Throws if they never get there.
+ * Waits until `count` connections to this worker's database are waiting on locks.
+ * Use a held transaction's `waitForWaiters` to limit the observation to its locks.
  */
-export async function waitUntilWaitingOnLocks(count: number): Promise<void> {
-	for (let attempt = 0; attempt < LOCK_WAIT_POLL_ATTEMPTS; attempt++) {
-		const [waiting] = await onDatabase((db) =>
-			db.execute<{ count: number }>(
-				sql`select count(*)::int as count from pg_stat_activity
-					where datname = current_database() and wait_event_type = 'Lock'`,
-				"objects",
+export function waitUntilWaitingOnLocks(count: number, signal?: AbortSignal): Promise<void> {
+	return observeLockWait(count, signal);
+}
+
+function observeLockWait(count: number, signal?: AbortSignal, blockerPid?: number): Promise<void> {
+	const finished = new AbortController();
+	const stop = signal ? AbortSignal.any([finished.signal, signal]) : finished.signal;
+	const waiting = pollLockWait(count, stop, blockerPid);
+	onTestFinished(async () => {
+		finished.abort();
+		await waiting.catch(() => {});
+	});
+	return waiting;
+}
+
+async function pollLockWait(count: number, signal: AbortSignal, blockerPid: number | undefined) {
+	while (true) {
+		signal.throwIfAborted();
+		const [waiting] = await runOnPostgres(
+			query((db) =>
+				db.execute<{ count: number }>(
+					blockerPid === undefined
+						? sql`select count(*)::int as count from pg_stat_activity
+						where datname = current_database() and wait_event_type = 'Lock'`
+						: sql`with recursive blocked(pid) as (
+						select ${blockerPid}::int
+						union
+						select activity.pid from pg_stat_activity as activity
+						join blocked on blocked.pid = any(pg_blocking_pids(activity.pid))
+						where activity.datname = current_database() and activity.wait_event_type = 'Lock'
+					)
+					select count(*)::int as count from blocked where pid <> ${blockerPid}`,
+					"objects",
+				),
 			),
+			{ signal },
 		);
 		if ((waiting?.count ?? 0) >= count) return;
-		await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_INTERVAL_MS));
+		await delay(LOCK_WAIT_POLL_INTERVAL_MS, undefined, { signal });
 	}
-	throw new Error(`Fewer than ${count} connections ever waited on a lock`);
 }
 
 /**
@@ -102,26 +124,43 @@ export async function waitUntilWaitingOnLocks(count: number): Promise<void> {
 export function holdTransaction<A>(
 	work: Effect.Effect<A, unknown, TestInfrastructure | Transaction>,
 	afterRelease: Effect.Effect<unknown, unknown, TestInfrastructure | Transaction> = Effect.void,
-): { held: Promise<A>; release: () => Promise<void> } {
+): {
+	held: Promise<A>;
+	release: () => Promise<void>;
+	waitForWaiters: (count: number, signal?: AbortSignal) => Promise<void>;
+} {
 	const released = Promise.withResolvers<void>();
-	const held = Promise.withResolvers<A>();
+	const acquired = Promise.withResolvers<{ value: A; pid: number }>();
+	const held = acquired.promise.then(({ value }) => value);
 	const finished = runOnPostgres(
 		transaction(
-			work.pipe(
-				Effect.tap((value) => Effect.sync(() => held.resolve(value))),
-				Effect.tap(() => Effect.promise(() => released.promise)),
-				Effect.tap(() => afterRelease),
-			),
+			Effect.gen(function* () {
+				const [backend] = yield* query((db) =>
+					db.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`, "objects"),
+				);
+				if (!backend) return yield* Effect.die("Postgres returned no backend pid");
+				const value = yield* work;
+				acquired.resolve({ value, pid: backend.pid });
+				yield* Effect.promise(() => released.promise);
+				yield* afterRelease;
+			}),
 		),
 	).then(() => {});
-	finished.catch(held.reject);
+	void finished.catch(acquired.reject);
 	const release = () => {
 		released.resolve();
 		return finished;
 	};
 	// A failure has already reached the case through `held` or `release`.
 	onTestFinished(() => release().catch(() => {}));
-	return { held: held.promise, release };
+	return {
+		held,
+		release,
+		waitForWaiters: async (count, signal) => {
+			const { pid } = await acquired.promise;
+			return observeLockWait(count, signal, pid);
+		},
+	};
 }
 
 /** The same service with its methods returning promises. */
@@ -180,22 +219,3 @@ export const noDatabase: Layer.Layer<Database> = Layer.succeed(Database, {
 	execute: () => Effect.die(new Error("This test has no database")),
 	transaction: transactional((use) => use),
 });
-
-/**
- * A connection pool nothing is expected to reach, for a layer that asks for
- * one but should not use it. Any query, or any other use, throws.
- */
-export const noDatabaseClient: Layer.Layer<PgClient.PgClient | SqlClient.SqlClient> = (() => {
-	const unusable = (): never => {
-		throw new Error("This test has no database client");
-	};
-	// Symbol-keyed reads are how Effect inspects a value it is handed, not use.
-	const client = new Proxy(unusable, {
-		get: (target, property) =>
-			typeof property === "symbol" ? Reflect.get(target, property) : unusable(),
-	});
-	return Layer.mergeAll(
-		Layer.succeed(PgClient.PgClient, client as unknown as PgClient.PgClient),
-		Layer.succeed(SqlClient.SqlClient, client as unknown as SqlClient.SqlClient),
-	);
-})();

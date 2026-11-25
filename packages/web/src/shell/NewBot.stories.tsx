@@ -6,7 +6,7 @@ import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { Dialog } from "@/ui/dialog.tsx";
 import { NewBotDialog } from "./NewBot.tsx";
-import { growthDesk, projectsWithBots, revenue } from "./story-fixtures.ts";
+import { growthDesk, projectsWithBots, revenue } from "./story-fixtures.test-support.ts";
 
 const WORKSPACE = revenue.workspaceId;
 const API = import.meta.env.VITE_API_URL;

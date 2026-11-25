@@ -234,12 +234,12 @@ export function endedAs(state: TurnState): Ended {
 }
 
 /** Told when the lifecycle finds a failed turn that a write/delete tool call may have changed things for. */
-const UNCERTAIN_WRITE_OR_DELETE = userText`The reply stopped after a tool that can make changes may have run, so it was not started again. Check what the tool did before asking again.`;
+export const UNCERTAIN_WRITE_OR_DELETE = userText`The reply stopped after a tool that can make changes may have run, so it was not started again. Check what the tool did before asking again.`;
 
 const ended = refused("The turn has already ended");
 
 /** What members are told of a turn that stopped `runs` times before it could finish. */
-const gaveUpAfter = (runs: number) =>
+export const gaveUpAfter = (runs: number) =>
 	userText`The turn stopped ${runs} times before it could finish`;
 
 function reopen(state: TurnState, executionId: string | null): Transition {

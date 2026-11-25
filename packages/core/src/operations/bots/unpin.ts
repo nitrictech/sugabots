@@ -10,13 +10,24 @@ import { defineOperation } from "../operation.ts";
 export const unpin = defineOperation(botsContracts["bots.unpin"], (principal, input, call) =>
 	Effect.gen(function* () {
 		const bots = yield* Bots.Service;
-		return yield* named(principal, input.botId, call, (principal, bot, call) =>
-			Effect.gen(function* () {
-				const reach = yield* proveReachesBot(principal, bot);
-				const forMember = yield* proveActsForMember(principal);
-				const approved = yield* proveApproved(principal, call, approvalRule("bots.unpin"), input);
-				return yield* bots.setPinned(forMember, reach, false, approved);
-			}),
+		return yield* named(
+			principal,
+			input.botId,
+			call,
+			input,
+			(principal, bot, call, approvedInput) =>
+				Effect.gen(function* () {
+					const reach = yield* proveReachesBot(principal, bot);
+					const forMember = yield* proveActsForMember(principal);
+					const approved = yield* proveApproved(
+						principal,
+						call,
+						approvalRule("bots.unpin"),
+						approvedInput,
+						bot,
+					);
+					return yield* bots.setPinned(forMember, reach, false, approved);
+				}),
 		);
 	}),
 );

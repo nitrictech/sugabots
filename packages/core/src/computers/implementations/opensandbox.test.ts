@@ -48,12 +48,17 @@ describe("OpenSandbox creation failures", () => {
 
 	it("destroys a computer whose setup fails, and reports the setup's failure even when destroying fails", async () => {
 		const kill = vi.fn().mockRejectedValue(new Error("Kill failed"));
-		vi.spyOn(Sandbox, "create").mockResolvedValue({
+		const sandbox: Pick<Sandbox, "kill"> & { commands: Pick<Sandbox["commands"], "run"> } = {
 			commands: {
-				run: async () => ({ exitCode: 127, logs: { stderr: [{ text: "groupadd: not found" }] } }),
+				run: async () => ({
+					exitCode: 127,
+					logs: { stdout: [], stderr: [{ text: "groupadd: not found", timestamp: 0 }] },
+					result: [],
+				}),
 			},
 			kill,
-		} as unknown as Sandbox);
+		};
+		vi.spyOn(Sandbox, "create").mockResolvedValue(sandbox as Sandbox);
 		const result = await createComputer();
 		expect(kill).toHaveBeenCalledOnce();
 		expect(Result.isFailure(result)).toBe(true);

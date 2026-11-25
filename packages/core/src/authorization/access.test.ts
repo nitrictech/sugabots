@@ -1,74 +1,126 @@
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { Effect } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
-import { bot, member, membership, workspace } from "../database/schema.ts";
-import { closeDatabase, onDatabase } from "../database/testing.ts";
-import { reachesBotFor } from "./access.ts";
+import { bot, placedChat, project } from "../database/schema.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { named } from "../proofs/proof.ts";
+import { proveReachesBot } from "../proofs/reaches-bot.ts";
+import { proveReachesChat } from "../proofs/reaches-chat.ts";
+import { proveReachesProject } from "../proofs/reaches-project.ts";
+import { authenticators, buildWorld, principals } from "../proofs/world.test-support.ts";
+import { reachesBotFor, reachesChatFor, reachesProjectFor } from "./access.ts";
 
-describe.skipIf(!process.env.DATABASE_URL)("reach written as SQL", () => {
+describe("reach written as SQL", () => {
 	afterAll(async () => {
 		await closeDatabase();
 	});
 
-	// Drizzle leaves the table off the columns of a query over one table, so
-	// this selects the rule beside the bot from a query over bots alone.
-	it("is selected beside each bot from a query over bots alone", async () => {
-		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: stamp, slug: `reach-${stamp}` })
-				.returning(),
-		);
-		const [ada, sam] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Ada", email: `ada-${stamp}@example.com` },
-					{ name: "Sam", email: `sam-${stamp}@example.com` },
-				])
-				.returning(),
-		);
-		if (!space || !ada || !sam) throw new Error("could not create the fixtures");
+	it("agrees with the member reach provers for bots, projects and chats", async () => {
+		const { a, b } = await buildWorld();
 		await onDatabase((db) =>
-			db.insert(membership).values([
-				{ workspaceId: space.id, memberId: ada.id, role: "editor" },
-				{ workspaceId: space.id, memberId: sam.id, role: "editor" },
-			]),
+			db.update(project).set({ deleting: true }).where(eq(project.id, a.helper.defaultProject)),
 		);
-		await onDatabase((db) =>
-			db.insert(bot).values([
-				{
-					workspaceId: space.id,
-					name: "Public",
-					handle: `public-${stamp}`,
-					color: "green",
-					eyes: "pill",
-					visibility: "public",
-					createdById: sam.id,
-				},
-				{
-					workspaceId: space.id,
-					name: "Sam's",
-					handle: `sams-${stamp}`,
-					color: "sky",
-					eyes: "pill",
-					visibility: "personal",
-					createdById: sam.id,
-				},
-			]),
-		);
+		const as = principals(await authenticators());
+		const editor = await as.member(a.ed);
+		const viewer = await as.member(a.vi);
+		const outsider = await as.member(a.erin);
+		const cases = [
+			{
+				member: editor,
+				botId: a.pub.id,
+				projectId: a.project,
+				chatId: a.chat,
+				expected: [true, true, true],
+			},
+			{
+				member: viewer,
+				botId: a.pub.id,
+				projectId: a.pub.defaultProject,
+				chatId: a.pubChat,
+				expected: [true, true, true],
+			},
+			{
+				member: outsider,
+				botId: a.pub.id,
+				projectId: a.project,
+				chatId: a.chat,
+				expected: [true, false, false],
+			},
+			{
+				member: viewer,
+				botId: a.personal.id,
+				projectId: a.assistant.defaultProject,
+				chatId: a.assistantChat,
+				expected: [false, false, false],
+			},
+			{
+				member: viewer,
+				botId: a.assistant.id,
+				projectId: a.assistant.defaultProject,
+				chatId: a.assistantChat,
+				expected: [false, false, false],
+			},
+			{
+				member: editor,
+				botId: a.system.id,
+				projectId: a.project,
+				chatId: a.chat,
+				expected: [false, true, true],
+			},
+			{
+				member: editor,
+				botId: a.assistant.id,
+				projectId: a.assistant.defaultProject,
+				chatId: a.assistantChat,
+				expected: [true, true, true],
+			},
+			{
+				member: editor,
+				botId: a.helper.id,
+				projectId: a.otherProject,
+				chatId: a.otherChat,
+				expected: [false, true, true],
+			},
+			{
+				member: viewer,
+				botId: b.bot.id,
+				projectId: b.project,
+				chatId: b.chat,
+				expected: [false, false, false],
+			},
+		];
 
-		const rows = await onDatabase((db) =>
-			db
-				.select({ name: bot.name, reached: reachesBotFor(bot.id, ada.id) })
-				.from(bot)
-				.where(eq(bot.workspaceId, space.id))
-				.orderBy(asc(bot.name)),
-		);
-
-		expect(rows).toEqual([
-			{ name: "Public", reached: true },
-			{ name: "Sam's", reached: false },
-		]);
+		for (const { member, botId, projectId, chatId, expected } of cases) {
+			const [row] = await onDatabase((db) =>
+				db
+					.select({
+						bot: reachesBotFor(bot.id, member.member),
+						project: reachesProjectFor(project.id, member.member),
+						chat: reachesChatFor(placedChat, member.member),
+					})
+					.from(bot)
+					.innerJoin(project, eq(project.id, projectId))
+					.innerJoin(placedChat, eq(placedChat.id, chatId))
+					.where(eq(bot.id, botId)),
+			);
+			const proved = await named(member, botId, projectId, chatId, (member, bot, project, chat) =>
+				Effect.all([
+					proveReachesBot(member, bot).pipe(
+						Effect.as(true),
+						Effect.catchTag("ResourceHidden", () => Effect.succeed(false)),
+					),
+					proveReachesProject(member, project).pipe(
+						Effect.as(true),
+						Effect.catchTag("ResourceHidden", () => Effect.succeed(false)),
+					),
+					proveReachesChat(member, chat).pipe(
+						Effect.as(true),
+						Effect.catchTag("ResourceHidden", () => Effect.succeed(false)),
+					),
+				]),
+			).pipe(runOnPostgres);
+			expect(proved).toEqual(expected);
+			expect([row?.bot, row?.project, row?.chat]).toEqual(proved);
+		}
 	});
 });

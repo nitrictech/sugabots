@@ -32,18 +32,20 @@ import { createEgressUrlValidator, Egress, urlValidation } from "../network/egre
 import { ConnectorSignIn } from "./connector-sign-in.ts";
 import { ConnectorStore } from "./connector-store.ts";
 import { Connectors } from "./connectors.ts";
+import { listServerTools } from "./mcp.ts";
+import { startOAuthServer } from "./oauth-server.test-support.ts";
 
 /**
  * The connectors service over the real store and Postgres, talking to a real
  * MCP server in this process, given proofs by the real provers for an admin
- * who manages a public bot's connectors. Only the OAuth exchange with an
- * authorization server is a double, since none runs here. Who may do what is
- * the operations' tests'.
+ * who manages a public bot's connectors, and a second server in this process
+ * that signs in with OAuth. Who may do what is the operations' tests'.
  */
 
 let http: Server;
 let serverUrl: string;
 let requestsReceived = 0;
+let oauthServer: Awaited<ReturnType<typeof startOAuthServer>>;
 
 beforeAll(async () => {
 	http = createServer(async (request, response) => {
@@ -65,11 +67,13 @@ beforeAll(async () => {
 	});
 	await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
 	serverUrl = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
+	oauthServer = await startOAuthServer();
 });
 
 afterAll(async () => {
 	http.closeAllConnections();
 	await new Promise<void>((resolve) => http.close(() => resolve()));
+	await oauthServer.close();
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgres", () => {
@@ -92,10 +96,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 			service: Connectors.Interface,
 			proofs: { canManage: CanManageProject<P, J>; canRead: CanReadConnectors<P, J> },
 		) => Effect.Effect<A, E, Database>,
-		options: {
-			allowPrivateNetwork?: boolean;
-			signIn?: Partial<ConnectorSignIn.Interface>;
-		} = {},
+		options: ConnectorsOptions = {},
 	): Promise<A> => {
 		const principal = administrator;
 		const service = await runOnPostgres(
@@ -113,34 +114,47 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 		);
 	};
 
-	const connectorsLayer = (options: {
+	/**
+	 * How the connectors service is built: whether egress allows private
+	 * addresses, what the servers' requests go through (the network by
+	 * default), and OAuth either as the real sign-in over the real store or as
+	 * the double these cases stand in with, which `signIn` overrides in part.
+	 */
+	interface ConnectorsOptions {
 		allowPrivateNetwork?: boolean;
-		signIn?: Partial<ConnectorSignIn.Interface>;
-	}) =>
-		Connectors.layerNoDeps.pipe(
+		egressFetch?: typeof fetch;
+		signIn?: Partial<ConnectorSignIn.Interface> | "real";
+	}
+
+	const connectorsLayer = ({
+		allowPrivateNetwork = true,
+		egressFetch = fetch,
+		signIn,
+	}: ConnectorsOptions) => {
+		const egress = Layer.succeed(Egress.Service, {
+			providers: { for: () => egressFetch },
+			validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork })),
+			oauth: egressFetch,
+			webFetch: egressFetch,
+		});
+		return Connectors.layerNoDeps.pipe(
 			Layer.provide([
 				ConnectorStore.layer,
 				unimplemented(ProjectComputers.Service, {}),
-				Layer.succeed(ConnectorSignIn.Service, {
-					clients: Effect.succeed({
-						for: () => ({ sentTokens: () => new Set<string>(), fetch }),
-					}),
-					begin: () => Effect.succeed({ authorizationUrl: "https://auth.example/authorize" }),
-					finish: () => Effect.void,
-					...options.signIn,
-				}),
-				Layer.succeed(Egress.Service, {
-					providers: { for: () => fetch },
-					validateProviderUrl: urlValidation(
-						createEgressUrlValidator({
-							allowPrivateNetwork: options.allowPrivateNetwork ?? true,
+				signIn === "real"
+					? ConnectorSignIn.layerNoDeps.pipe(Layer.provide([ConnectorStore.layer, egress]))
+					: Layer.succeed(ConnectorSignIn.Service, {
+							clients: Effect.succeed({
+								for: () => ({ sentTokens: () => new Set<string>(), fetch }),
+							}),
+							begin: () => Effect.succeed({ authorizationUrl: "https://auth.example/authorize" }),
+							finish: () => Effect.void,
+							...signIn,
 						}),
-					),
-					oauth: fetch,
-					webFetch: fetch,
-				}),
+				egress,
 			]),
 		);
+	};
 
 	/**
 	 * An OAuth connector to `url` waiting on the sign-in whose state is
@@ -170,7 +184,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 	const finishing = (
 		state: string,
 		callback: { code?: string; error?: string; errorDescription?: string },
-		signIn?: Partial<ConnectorSignIn.Interface>,
+		signIn?: ConnectorsOptions["signIn"],
 		wrongSessionConnectorId?: string,
 	) =>
 		managing(
@@ -217,7 +231,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 	const listed = () => managing((service, { canRead }) => service.list(canRead));
 
 	/** The connector `connectorId` of the project, with its tools. */
-	const shown = (connectorId: string, options?: { allowPrivateNetwork?: boolean }) =>
+	const shown = (connectorId: string, options?: ConnectorsOptions) =>
 		managing(
 			(service, { canRead }) =>
 				named(connectorId, (connector) =>
@@ -234,7 +248,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 			options,
 		);
 
-	const testing = (connectorId: string, options?: { allowPrivateNetwork?: boolean }) =>
+	const testing = (connectorId: string, options?: ConnectorsOptions) =>
 		managing(
 			(service, { canManage }) =>
 				named(connectorId, (connector) =>
@@ -288,23 +302,22 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 		expect(await listed()).toEqual([]);
 	});
 
-	it("records a server it cannot reach in its own words, keeping the network's out", async () => {
-		const unreachable =
-			"The server could not be reached. Check the address and port, and that the server is running";
+	it("records what the protocol says of a server it cannot reach, keeping the network's words out", async () => {
+		const networkDetail = "connect ECONNREFUSED 10.9.8.7:1234";
+		const refusing: typeof fetch = async () => {
+			throw new TypeError("fetch failed", { cause: new Error(networkDetail) });
+		};
 		const made = await managing((service, { canManage }) =>
 			service.create(canManage, { name: "Gone", url: "http://127.0.0.1:9/mcp" }),
 		);
+		const said = await listServerTools({ url: "http://127.0.0.1:9/mcp", headers: {} }, refusing);
+		if (said.ok) throw new Error("The server was reached");
 
-		const tested = await testing(made.id);
+		const tested = await testing(made.id, { egressFetch: refusing });
 
-		expect(tested).toMatchObject({ reachable: false, error: unreachable });
-		const [stored] = await onDatabase((db) =>
-			db
-				.select({ error: connector.lastTestError })
-				.from(connector)
-				.where(eq(connector.id, made.id)),
-		);
-		expect(stored?.error).toBe(unreachable);
+		expect(tested).toMatchObject({ reachable: false, error: said.reason });
+		expect(JSON.stringify(tested)).not.toContain(networkDetail);
+		expect(await shown(made.id)).toMatchObject({ status: "error", lastTestError: said.reason });
 	});
 
 	it("adds an HTTP endpoint without sending it a request", async () => {
@@ -384,17 +397,33 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 	});
 
 	describe("finishing a sign-in", () => {
-		it("signs in as the member who finished it, learns the connector's tools and names the project", async () => {
-			const made = await waitingOnSignIn(`${serverUrl}/open`, "state-ok");
-			const finishedBy: string[] = [];
-			const finish: ConnectorSignIn.Interface["finish"] = (...[, , , , memberId]) =>
-				Effect.sync(() => void finishedBy.push(memberId));
+		it("signs in as the member who finished it, with the token it exchanged, learns the connector's tools and names the project", async () => {
+			const started = await managing(
+				(service, { canManage }) =>
+					service.connectBuiltIn(canManage, { name: "Wiki", url: oauthServer.serverUrl }),
+				{ signIn: "real" },
+			);
+			const state = new URL(started.authorizationUrl).searchParams.get("state");
+			if (!state) throw new Error("The authorization URL carried no state");
+			// Somebody else added it, so whose sign-in it is shows apart from who added it.
+			await onDatabase((db) =>
+				db
+					.update(connector)
+					.set({ installedById: editorId })
+					.where(eq(connector.id, started.connectorId)),
+			);
+			const before = await shown(started.connectorId, { signIn: "real" });
 
-			const outcome = await finishing("state-ok", { code: "the-code" }, { finish });
+			const outcome = await finishing(state, { code: "the-code" }, "real");
 
+			expect(before).toMatchObject({ signedIn: false, tools: [] });
 			expect(outcome).toEqual({ kind: "done", at: { workspaceId, projectId } });
-			expect(finishedBy).toEqual([adminId]);
-			expect(await shown(made.id)).toMatchObject({ tools: [{ name: "lookup" }] });
+			expect(await shown(started.connectorId, { signIn: "real" })).toMatchObject({
+				signedIn: true,
+				signedInAs: { id: adminId },
+				tools: [{ name: "lookup" }],
+			});
+			expect(oauthServer.tokenRequests.at(-1)?.get("code")).toBe("the-code");
 		});
 
 		it("does not finish for anybody but the member who started it", async () => {

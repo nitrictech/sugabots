@@ -5,7 +5,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { askerColumns } from "../../authentication/turn-facts.ts";
 import { transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
-import { EventStore } from "../../database/events/store.ts";
+import { inMemoryEventStore } from "../../database/events/testing.ts";
 import {
 	bot,
 	chatParticipant,
@@ -45,7 +45,7 @@ import {
  * itself and frees its lane, as its workflow would.
  */
 describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", async () => {
-	const services = await chatServicesForTests(EventBus.inProcess({ store: EventStore.inMemory() }));
+	const services = await chatServicesForTests(EventBus.inProcess({ store: inMemoryEventStore() }));
 	const call = await servedOperations({ chats: services });
 	const drive = runOver(services);
 	const runs = onPostgres(Context.get(services, TurnRuns.Service));
@@ -131,7 +131,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 		chatId = chat.id;
 		await onDatabase((db) => db.insert(chatParticipant).values({ chatId, memberId: samId }));
 		const asSam = asMember(call, samId);
-		post = (content) => asSam.post({ chatId, messageId: crypto.randomUUID(), content });
+		post = (content) => asSam.send({ chatId, retryKey: crypto.randomUUID(), message: content });
 	});
 
 	/** The turn of `botId` running in the chat, as its workflow holds it. */

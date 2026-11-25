@@ -22,12 +22,12 @@ export interface Interface {
 	readonly fetch: <P, W, X>(
 		canFetch: CanUseWeb<P, W, typeof WEB_FETCH_TOOL>,
 		input: InputOf<"web.fetch">,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [W], "web.fetch">,
 	) => Effect.Effect<OutputOf<"web.fetch">, WebToolOff>;
 	readonly search: <P, W, X>(
 		canSearch: CanUseWeb<P, W, typeof WEB_SEARCH_TOOL>,
 		input: InputOf<"web.search">,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [W], "web.search">,
 	) => Effect.Effect<OutputOf<"web.search">, WebToolOff | ResourceHidden>;
 }
 

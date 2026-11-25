@@ -7,7 +7,6 @@ import {
 import {
 	ActionForbidden,
 	ApprovalRefused,
-	BotCannotReach,
 	ResourceHidden,
 } from "@sugabots/contracts/errors/proofs";
 import {
@@ -305,7 +304,7 @@ describe.skipIf(!process.env.DATABASE_URL)("written file tools, against Postgres
 		expect(await filesIn(chatId)).toMatchObject([{ id: report.id, currentVersion: 1 }]);
 	});
 
-	it("refuses a run's file write once its bot loses the project", async () => {
+	it("ends a run's turn without asking the model or writing its file once its bot loses the project", async () => {
 		const replacement = await seedBot(workspaceId);
 		const projectId = await seedProject(workspaceId, { leadBotId: botId, bots: [replacement.id] });
 		const runChat = await queueRun(projectId, "routine");
@@ -332,9 +331,6 @@ describe.skipIf(!process.env.DATABASE_URL)("written file tools, against Postgres
 
 		expect(ran.outcomes).toEqual([{ _tag: "Finished" }]);
 		expect(requests).toEqual([]);
-		await expect(loop.call(ran.principal, "files.write", input)).rejects.toBeInstanceOf(
-			BotCannotReach,
-		);
 		expect(await filesIn(runChat)).toEqual([]);
 	});
 

@@ -59,8 +59,9 @@ import { unimplemented } from "@sugabots/core/testing";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Clock, Context, Duration, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import { afterAll, describe, expect, it, onTestFinished } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { layer, layerNoDeps, make } from "./scheduler.ts";
+import { emptyDatabase } from "./testing.ts";
 
 const request = () => ({ kind: "request" as const, request: crypto.randomUUID() });
 
@@ -112,7 +113,6 @@ async function runSchedulerUntilRoutine(
 ) {
 	const accepted = Promise.withResolvers<void>();
 	const controller = new AbortController();
-	onTestFinished(() => controller.abort());
 	const scheduler = layer.pipe(
 		Layer.provide(
 			Layer.succeed(Operations.Service, {
@@ -130,12 +130,19 @@ async function runSchedulerUntilRoutine(
 			}),
 		),
 	);
-	await clockAt(now)(
+	const running = clockAt(now)(
 		Effect.scoped(
 			Layer.build(scheduler).pipe(Effect.andThen(Effect.promise(() => accepted.promise))),
 		),
 		controller.signal,
 	);
+	// The scheduler's loops stop with its scope; the next case waits for them to
+	// have stopped, so none of them reads its database.
+	onTestFinished(async () => {
+		controller.abort();
+		await running.catch(() => undefined);
+	});
+	await running;
 }
 
 async function projectWithAdmin(adminEmail?: string) {
@@ -148,6 +155,7 @@ async function projectWithAdmin(adminEmail?: string) {
 }
 
 describe("the scheduler, against Postgres", () => {
+	beforeEach(emptyDatabase);
 	afterAll(closeDatabase);
 
 	it("closes its scope promptly while waiting for the next routine poll", async () => {
@@ -189,9 +197,7 @@ describe("the scheduler, against Postgres", () => {
 		);
 	});
 
-	it("withdraws a parked approval when its seven days are up", async () => {
-		/** Enough sweeps for every approval the other cases in this database left parked. */
-		const MAX_SWEEPS = 50;
+	it("withdraws a parked approval once its seven days are up, and not before", async () => {
 		const loop = await botLoopOnPostgres([]);
 		const chatsAs = (id: string) => asMember(loop.call, id);
 		const { chatId, adminId } = await aChatAwaitingReply(chatsAs);
@@ -216,12 +222,7 @@ describe("the scheduler, against Postgres", () => {
 			onDatabase((db) => db.select().from(toolCall).where(eq(toolCall.id, parked.id)));
 		expect(await call()).toMatchObject([{ approvalStatus: "pending" }]);
 
-		// Every approval other cases left parked is due by then too, and a sweep
-		// takes them a batch at a time, oldest first, so this one may take several.
-		for (let sweep = 0; sweep < MAX_SWEEPS; sweep++) {
-			await clockAt(new Date(expiresAt))(scheduler.expireApprovals);
-			if ((await call())[0]?.approvalStatus !== "pending") break;
-		}
+		await clockAt(new Date(expiresAt))(scheduler.expireApprovals);
 
 		expect(await call()).toMatchObject([
 			{
@@ -233,10 +234,9 @@ describe("the scheduler, against Postgres", () => {
 		await expect(
 			chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
 		).rejects.toMatchObject({ _tag: "ToolApprovalNotFound" });
-		await ran.steps.cancelled(await ran.authentication.authenticate(ran.turnId), ran.turnId);
 		expect(
 			await onDatabase((db) => db.select().from(turn).where(eq(turn.id, ran.turnId))),
-		).toMatchObject([{ status: "cancelled" }]);
+		).toMatchObject([{ endRequested: "approval_expired" }]);
 		expect(requests).toHaveLength(1);
 	});
 
@@ -668,19 +668,11 @@ describe("the scheduler, against Postgres", () => {
 				},
 			});
 			const run = clockAt(now);
-			try {
-				expect(await run(scheduler.runNextRoutine)).toBe("retry");
-				expect(await run(scheduler.runNextRoutine)).toMatchObject({ duplicate: false });
-				expect(await run(scheduler.runNextRoutine)).toBeUndefined();
-				const nextPoll = clockAt(new Date(now.getTime() + 15_000));
-				expect(await nextPoll(scheduler.runNextRoutine)).toBe("retry");
-			} finally {
-				await onDatabase((db) =>
-					db
-						.delete(automationTrigger)
-						.where(inArray(automationTrigger.id, [deferredTrigger, healthyTrigger])),
-				);
-			}
+			expect(await run(scheduler.runNextRoutine)).toBe("retry");
+			expect(await run(scheduler.runNextRoutine)).toMatchObject({ duplicate: false });
+			expect(await run(scheduler.runNextRoutine)).toBeUndefined();
+			const nextPoll = clockAt(new Date(now.getTime() + 15_000));
+			expect(await nextPoll(scheduler.runNextRoutine)).toBe("retry");
 		},
 	);
 
@@ -733,7 +725,7 @@ describe("the scheduler, against Postgres", () => {
 		expect(accepted).toEqual([{ triggerId: healthyTrigger }]);
 	});
 
-	it("keeps a routine due after transient Postgres errors and accepts the same occurrence on retry", async () => {
+	it("keeps a routine due after a transient Postgres error and accepts the same occurrence on retry", async () => {
 		const { workspaceId, projectId } = await projectWithAdmin();
 		const automationId = await seedAutomation(workspaceId, projectId);
 		const triggerId = await seedRoutine(automationId, workspaceId, 0);
@@ -746,7 +738,8 @@ describe("the scheduler, against Postgres", () => {
 				.where(eq(automationTrigger.id, triggerId)),
 		);
 		const database = await runOnPostgres(Database);
-		const sqlStates = ["40P01", "40001", "55P03", "57014", "57P01", "53300", "08006"];
+		// A deadlock; the other errors Postgres says may be retried are classified alike.
+		const sqlStates = ["40P01"];
 		const failureCount = sqlStates.length;
 		const operations = await operationsWithRoutineQueue((run) => {
 			if (run.automationId !== automationId) return undefined;

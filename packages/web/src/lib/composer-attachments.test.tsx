@@ -4,10 +4,10 @@ import { userText } from "@sugabots/errors";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { client } from "@/client.test-support.ts";
 import { sendReadiness, useComposerAttachments } from "@/lib/composer-attachments.ts";
-import { client } from "@/test-client.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const chatId = "0199a3a0-0000-7000-8000-0000000000e1";
 const fileId = "0199a3a0-0000-7000-8000-0000000000f1";
@@ -108,7 +108,6 @@ beforeEach(() => {
 afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
-	vi.clearAllMocks();
 });
 
 describe("useComposerAttachments", () => {

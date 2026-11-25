@@ -24,6 +24,7 @@ import {
 	ConnectorNotFound,
 	ConnectorOAuthStartFailed,
 	GitHubAppNotInstalled,
+	GitHubDeliveryIdInvalid,
 	GitHubRequestFailed,
 	NotGitHubConnector,
 	ProjectHasGitHubConnector,
@@ -280,8 +281,7 @@ export const connectorsContracts = {
 		},
 	),
 	"gitHubWebhooks.delivery": OperationContract.make("gitHubWebhooks.delivery", {
-		description:
-			"Read what a delivery its GitHub app signed says happened at one of the app's repositories.",
+		description: "Accept a signed GitHub delivery and start the connector's matching automations.",
 		input: Schema.Struct({
 			connectorId: uuidSchema,
 			/** GitHub's name for the event, from its `X-GitHub-Event` header. */
@@ -292,8 +292,8 @@ export const connectorsContracts = {
 			body: Schema.String,
 		}),
 		output: deliveredActivitySchema,
-		errors: [ResourceHidden],
-		changes: false,
+		errors: [ResourceHidden, GitHubDeliveryIdInvalid],
+		changes: true,
 	}),
 } as const;
 

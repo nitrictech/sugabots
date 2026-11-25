@@ -1,24 +1,19 @@
 import { testMember } from "@sugabots/contracts/testing";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { Effect } from "effect";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { client } from "@/client.test-support.ts";
 import { useMembersReachingProject } from "@/lib/projects.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import { useChangeRole } from "@/lib/workspace.ts";
-import { client } from "@/test-client.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const workspaceId = "0199a3a0-0000-7000-8000-0000000009a1";
 const projectId = "0199a3a0-0000-7000-8000-0000000009a2";
 const juno = testMember({ id: "0199a3a0-0000-7000-8000-0000000009a3", name: "Juno Park" });
-
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
-});
 
 describe("changing what somebody may do", () => {
 	it("refreshes who reaches a project after a workspace role change", async () => {

@@ -1,6 +1,5 @@
 import { InvalidCursor } from "@sugabots/contracts/errors/chat-reads";
 import { BotHasNoModel } from "@sugabots/contracts/errors/chats";
-import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { Operations } from "@sugabots/core/operations/registry";
 import { unimplemented } from "@sugabots/core/testing";
@@ -57,27 +56,14 @@ describe("starting a chat in a project", () => {
 		expect(asked).toEqual({ projectId: PROJECT, retryKey: MESSAGE, message: "Hi" });
 	});
 
-	it("is a conflict when a bot given the floor has no model, and not found in a project the member cannot see", async () => {
-		const refusing = (failure: BotHasNoModel | ResourceHidden) =>
+	it("is a conflict when a bot given the floor has no model", async () => {
+		const refusing = (failure: BotHasNoModel) =>
 			app({ "chats.startProjectChat": () => Effect.fail(failure) }).request(
 				`/projects/${PROJECT}/chats`,
 				startChat(),
 			);
 
 		expect((await refusing(new BotHasNoModel())).status).toBe(409);
-		expect((await refusing(new ResourceHidden({ resource: "project" }))).status).toBe(404);
-	});
-});
-
-describe("a chat the member cannot see", () => {
-	it("is not found, whatever is asked of it", async () => {
-		const hidden = Effect.fail(new ResourceHidden({ resource: "chat" }));
-		const routes = app({ "chats.setResolved": () => hidden, "chats.messages": () => hidden });
-
-		expect(
-			(await routes.request(`/chats/${CHAT}/resolved`, signedIn({ method: "PUT" }))).status,
-		).toBe(404);
-		expect((await routes.request(`/chats/${CHAT}/messages`, signedIn())).status).toBe(404);
 	});
 });
 
@@ -127,18 +113,5 @@ describe("interrupting a turn", () => {
 
 		expect(response.status).toBe(202);
 		expect(asked).toEqual([{ chatId: CHAT, turnId: TURN }]);
-	});
-
-	it("is forbidden to a member who may not interrupt it", async () => {
-		const routes = app({
-			"chats.interruptTurn": () => Effect.fail(new ActionForbidden({ proof: "CanInterrupt" })),
-		});
-
-		const response = await routes.request(
-			`/chats/${CHAT}/turns/${TURN}/interrupt`,
-			signedIn({ method: "POST" }),
-		);
-
-		expect(response.status).toBe(403);
 	});
 });

@@ -22,6 +22,8 @@ import { type ParticipantRow, participantColumns, toMessage } from "../store/par
 /** Enough of a message to answer from; the whole of a long one would crowd out the others. */
 const MATCH_CHARACTERS = 1_500;
 
+export const EMPTY_HISTORY_SEARCH = "Give words to look for, a time range, or both.";
+
 type HistorySearchInput = Omit<InputOf<"chats.searchHistory">, "chat">;
 type HistorySearchResult = OutputOf<"chats.searchHistory">;
 type HistoryMatch = Extract<HistorySearchResult, { messages: unknown }>["messages"][number];
@@ -33,10 +35,10 @@ type HistoryScope<P, Location> =
 export const searchHistory = Effect.fn("ChatHistory.searchHistory")(function* <P, Location, X>(
 	scope: HistoryScope<P, Location>,
 	{ query: words, after, before }: HistorySearchInput,
-	approved: Approved<P, X>,
+	approved: Approved<P, X, [Location], "chats.searchHistory">,
 ): Effect.fn.Return<HistorySearchResult, never, Database> {
 	if (!words && !after && !before) {
-		return { refused: "Give words to look for, a time range, or both." };
+		return { refused: EMPTY_HISTORY_SEARCH };
 	}
 	const principal = approved.principal.value;
 	const turnBot =

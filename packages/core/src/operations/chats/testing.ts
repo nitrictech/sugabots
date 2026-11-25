@@ -7,28 +7,12 @@ import {
 } from "@sugabots/contracts";
 import type { UploadInterrupted } from "@sugabots/contracts/errors/chats";
 import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
-import { Effect, type Stream } from "effect";
-import { seedSession } from "../../authentication/seed.test-support.ts";
-import { SessionAuthentication } from "../../authentication/session.ts";
-import { runOnPostgres } from "../../database/testing.ts";
+import type { Stream } from "effect";
 import type { MemberSession } from "../../principal.ts";
+import { signedIn } from "../../proofs/world.test-support.ts";
 import type { CallOperation } from "../testing.ts";
 
-/** better-auth's reading of a request that carries no session cookie. */
-const noCookie: SessionAuthentication.CookiesInterface = { read: () => Effect.succeed(undefined) };
-
-/** `memberId` signed in, as the session authenticator builds them from a bearer token's row. */
-export async function signedIn(memberId: string): Promise<MemberSession> {
-	const sessions = await runOnPostgres(
-		Effect.provide(SessionAuthentication.Service, SessionAuthentication.layer),
-	);
-	const { token } = await seedSession(memberId);
-	return runOnPostgres(
-		sessions
-			.authenticate(new Headers({ authorization: `Bearer ${token}` }))
-			.pipe(Effect.provideService(SessionAuthentication.Cookies, noCookie)),
-	);
-}
+export { signedIn };
 
 /**
  * What `memberId`, signed in, does in chats through the HTTP API, each a call
@@ -51,30 +35,13 @@ export function asMember(call: CallOperation, memberId: string) {
 		startInterview: (botId: string) => as("chats.startInterview", { botId }),
 		openAutomationFeed: (input: { workspace: string; automationId: string }) =>
 			as("chats.openAutomationFeed", input),
-		startProjectChat: (input: { projectId: string; messageId: string; content: string }) =>
-			as("chats.startProjectChat", {
-				projectId: input.projectId,
-				retryKey: input.messageId,
-				message: input.content,
-			}),
+		startProjectChat: (input: InputOf<"chats.startProjectChat">) =>
+			as("chats.startProjectChat", input),
 		renameChat: (input: { chatId: string; name: string }) => as("chats.renameChat", input),
 		setResolved: (input: { chatId: string; resolved: boolean }) => as("chats.setResolved", input),
 		markRead: (chatId: string) => as("chats.markRead", { chatId }),
 		markNestedChatRead: (chatId: string) => as("chats.markNestedChatRead", { chatId }),
-		post: (input: {
-			chatId: string;
-			messageId: string;
-			content: string;
-			attachments?: readonly string[];
-			replyTo?: string;
-		}) =>
-			as("chats.send", {
-				chatId: input.chatId,
-				retryKey: input.messageId,
-				message: input.content,
-				...(input.attachments && { attachments: input.attachments }),
-				...(input.replyTo && { replyTo: input.replyTo }),
-			}),
+		send: (input: InputOf<"chats.send">) => as("chats.send", input),
 		/** Reactions to messages, by the message's id. */
 		reactions: {
 			add: (messageId: string, emoji: string) => as("chats.react", { messageId, emoji }),

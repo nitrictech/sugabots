@@ -78,7 +78,7 @@ export const sound = define({
 });
 
 // A missing entry.
-// @ts-expect-error
+// @ts-expect-error TS2345
 export const missingEntry = define({
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
@@ -104,7 +104,7 @@ export const unregistered = define({
 		botLoop: heldBackFromBots,
 	},
 	// An entry for an operation nobody registered.
-	// @ts-expect-error
+	// @ts-expect-error TS2322
 	"chats.misspelt": { http: { kind: "heldBack", reason: "Stand-in." }, botLoop: heldBackFromBots },
 });
 
@@ -114,7 +114,7 @@ export const noReason = define({
 		botLoop: resolveChatTool,
 	},
 	// `heldBack` with no reason.
-	// @ts-expect-error
+	// @ts-expect-error TS2322
 	"chats.rename": { http: { kind: "heldBack" }, botLoop: heldBackFromBots },
 	"events.followChat": {
 		http: { kind: "heldBack", reason: "Stand-in." },
@@ -132,7 +132,7 @@ export const blankReason = define({
 		botLoop: heldBackFromBots,
 	},
 	// `heldBack` with a blank reason.
-	// @ts-expect-error
+	// @ts-expect-error TS2322
 	"events.followChat": { http: { kind: "heldBack", reason: "  " }, botLoop: heldBackFromBots },
 });
 
@@ -146,7 +146,7 @@ export const typedReason = define({
 		botLoop: heldBackFromBots,
 	},
 	// A reason typed as `string`, which nobody wrote here.
-	// @ts-expect-error
+	// @ts-expect-error TS2322
 	"events.followChat": {
 		http: { kind: "heldBack", reason: computedReason },
 		botLoop: heldBackFromBots,
@@ -154,14 +154,14 @@ export const typedReason = define({
 });
 
 export const covers = define({
-	// Covered by itself.
-	// @ts-expect-error
+	// The covering operation is absent from the manifest.
+	// @ts-expect-error TS2322
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: { kind: "coveredBy", operation: "chats.setResolved", reason: "Stand-in." },
+		botLoop: { kind: "coveredBy", operation: "chats.unknown", reason: "Stand-in." },
 	},
 	// Covered by an operation the bot loop holds back.
-	// @ts-expect-error
+	// @ts-expect-error TS2322
 	"chats.rename": {
 		http: { kind: "offered", endpoint: "chats.renameChat" },
 		botLoop: { kind: "coveredBy", operation: "events.followChat", reason: "Stand-in." },
@@ -172,27 +172,10 @@ export const covers = define({
 	},
 });
 
-export const chained = define({
-	"chats.setResolved": {
-		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: resolveChatTool,
-	},
-	"chats.rename": {
-		http: { kind: "offered", endpoint: "chats.renameChat" },
-		botLoop: { kind: "coveredBy", operation: "chats.setResolved", reason: "Stand-in." },
-	},
-	// Covered by an operation that is itself covered: a chain.
-	// @ts-expect-error
-	"events.followChat": {
-		http: { kind: "heldBack", reason: "Stand-in." },
-		botLoop: { kind: "coveredBy", operation: "chats.rename", reason: "Stand-in." },
-	},
-});
-
 export const misspeltEndpoint = define({
 	"chats.setResolved": {
 		// A misspelt endpoint.
-		// @ts-expect-error
+		// @ts-expect-error TS2322
 		http: { kind: "offered", endpoint: "chats.archiveChats" },
 		botLoop: resolveChatTool,
 	},
@@ -207,11 +190,11 @@ export const misspeltEndpoint = define({
 });
 
 // A contract filed under another operation's name.
-// @ts-expect-error
+// @ts-expect-error TS2344
 export const misfiled = defineManifest<{ "chats.rename": typeof setResolved }>();
 
 // Two operations naming one endpoint.
-// @ts-expect-error
+// @ts-expect-error TS2345
 export const sharedEndpoint = define({
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
@@ -227,28 +210,11 @@ export const sharedEndpoint = define({
 	},
 });
 
-export const calledByLoop = define({
-	"chats.setResolved": {
-		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: { kind: "calledByLoop" },
-	},
-	// Covered by an operation the loop calls itself, which no model is offered.
-	// @ts-expect-error
-	"chats.rename": {
-		http: { kind: "offered", endpoint: "chats.renameChat" },
-		botLoop: { kind: "coveredBy", operation: "chats.setResolved", reason: "Stand-in." },
-	},
-	"events.followChat": {
-		http: { kind: "heldBack", reason: "Stand-in." },
-		botLoop: heldBackFromBots,
-	},
-});
-
 export const unbounded = define({
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
 		// A tool that doesn't say in which bounds it is offered.
-		// @ts-expect-error
+		// @ts-expect-error TS2322
 		botLoop: { kind: "offered", tool: "resolve_chat", approval: { kind: "never" } },
 	},
 	"chats.rename": {
@@ -273,7 +239,7 @@ export const managesWithoutAsking = define({
 			tool: "rename_chat",
 			offeredIn: "chatBounds",
 			// Managing a project in chat bounds without the asker's approval.
-			// @ts-expect-error
+			// @ts-expect-error TS2322
 			approval: { kind: "never" },
 		},
 	},
@@ -284,7 +250,7 @@ export const managesWithoutAsking = define({
 			tool: "follow_chat",
 			offeredIn: "ownChats",
 			// A bot's own settings changed in its own chats by tool access, not the asker.
-			// @ts-expect-error
+			// @ts-expect-error TS2322
 			approval: { kind: "byToolAccess" },
 		},
 	},

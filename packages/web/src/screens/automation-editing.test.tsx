@@ -3,10 +3,9 @@ import { InternalServerError } from "@sugabots/contracts/http";
 import { formatTime } from "@sugabots/contracts/routine-schedule-label";
 import { automationTriggers, type TestAutomationTrigger } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { today } from "@/lib/routine-schedule.ts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	apiAnswers,
 	bots,
@@ -16,10 +15,11 @@ import {
 	open,
 	personalAssistant,
 	triager,
-} from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+} from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
+import { today } from "@/lib/routine-schedule.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const researcher = bots.find((bot) => bot.handle === "customer-research");
 if (!researcher) throw new Error("fixture");
@@ -72,11 +72,6 @@ const churnReport: BotsAutomation = {
 
 beforeEach(() => {
 	apiAnswers();
-});
-
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
 });
 
 /** An automation's own page, where it is set up. */
@@ -209,6 +204,15 @@ async function pickTime(chip: number, minutesPastMidnight: number) {
 	await waitFor(() => expect(trigger.textContent).toBe(formatTime(minutesPastMidnight)));
 }
 
+async function fillNewAutomation(name: string, instructions: string) {
+	fireEvent.change(await screen.findByLabelText("Name"), { target: { value: name } });
+	fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
+	fireEvent.change(await screen.findByLabelText("Instructions"), {
+		target: { value: instructions },
+	});
+	fireEvent.click(screen.getByRole("button", { name: "Done" }));
+}
+
 describe("a bot's automations", () => {
 	it("makes an automation for the bot it was begun from, then opens its page", async () => {
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -216,23 +220,16 @@ describe("a bot's automations", () => {
 			Effect.succeed({ automation: morningBrief.automation, secrets: [] }),
 		);
 		const { router } = mount(newPage);
-		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Triage sweep" } });
-		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
-		fireEvent.change(await screen.findByLabelText("Instructions"), {
-			target: { value: "Sweep the queue." },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Done" }));
-		expect(screen.getByText("No routines")).toBeDefined();
-		expect(screen.getByText("No triggers")).toBeDefined();
+		await fillNewAutomation("Triage sweep", "Sweep the queue.");
+		screen.getByText("No routines");
+		screen.getByText("No triggers");
 		const routine = await addRoutine();
 		fireEvent.click(within(routine).getByRole("radio", { name: "Weekly" }));
 		fireEvent.click(within(routine).getByRole("checkbox", { name: "Thursday" }));
 		await pickTime(1, 10 * 60);
-		expect(
-			within(routine).getByText(/^Runs every week on Mon and Thu at 10:00, your time \(.+\)\.$/),
-		).toBeDefined();
+		within(routine).getByText(/^Runs every week on Mon and Thu at 10:00, your time \(.+\)\.$/);
 		fireEvent.click(within(routine).getByRole("button", { name: "Add routine" }));
-		expect(await screen.findByRole("button", { name: /^Mon Thu at 10:00/ })).toBeDefined();
+		await screen.findByRole("button", { name: /^Mon Thu at 10:00/ });
 		fireEvent.click(screen.getByRole("button", { name: "Create automation" }));
 
 		await waitFor(() =>
@@ -269,12 +266,7 @@ describe("a bot's automations", () => {
 			Effect.succeed({ automation: morningBrief.automation, secrets: [] }),
 		);
 		mount(newPage);
-		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Quarter close" } });
-		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
-		fireEvent.change(await screen.findByLabelText("Instructions"), {
-			target: { value: "Close the quarter." },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		await fillNewAutomation("Quarter close", "Close the quarter.");
 		await addRoutine();
 		fireEvent.click(screen.getByRole("radio", { name: "Monthly" }));
 		// Found once: a role query reads the whole page, and the loop can click a month's worth of days.
@@ -286,9 +278,7 @@ describe("a bot's automations", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Add a time" }));
 
 		expect(screen.getByRole("status", { name: "Every" }).textContent).toBe("3 months");
-		expect(
-			screen.getByText(/^Runs every 3 months on the last day at 9:00 and 13:00, your time/),
-		).toBeDefined();
+		screen.getByText(/^Runs every 3 months on the last day at 9:00 and 13:00, your time/);
 		fireEvent.click(screen.getByRole("button", { name: "Add routine" }));
 		fireEvent.click(await screen.findByRole("button", { name: "Create automation" }));
 
@@ -327,7 +317,7 @@ describe("a bot's automations", () => {
 	it("lets a member make an automation for their Personal Assistant", async () => {
 		mount(`/suga/bots/${personalAssistant.handle}/automations/new`);
 
-		expect(await screen.findByLabelText("Name")).toBeDefined();
+		await screen.findByLabelText("Name");
 		expect(screen.queryByText("Automations not found")).toBeNull();
 	});
 
@@ -354,16 +344,9 @@ describe("a bot's automations", () => {
 		);
 		serveAutomation(webhook);
 		const { router } = mount(`/suga/bots/${linear.handle}/automations/new`);
-		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Sentry issues" } });
-		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
-		fireEvent.change(await screen.findByLabelText("Instructions"), {
-			target: { value: "Fix what you can." },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		await fillNewAutomation("Sentry issues", "Fix what you can.");
 		const adding = await addTrigger("Webhook");
-		expect(
-			within(adding).getByText(/^With no secret, anyone who has the address can run it\./),
-		).toBeDefined();
+		within(adding).getByText(/^With no secret, anyone who has the address can run it\./);
 		fireEvent.change(within(adding).getByLabelText("Signing secret"), {
 			target: { value: "whsec_0123456789abcdefghijklmnop" },
 		});
@@ -391,9 +374,7 @@ describe("a bot's automations", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe(nestedChatPage(webhook)));
 		const panel = await showPanel();
 		fireEvent.click(await within(panel).findByRole("button", { name: /^Webhook/ }));
-		expect(
-			await screen.findByText(new RegExp(`/webhooks/triggers/${webhook.automation.id}$`)),
-		).toBeDefined();
+		await screen.findByText(new RegExp(`/webhooks/triggers/${webhook.automation.id}$`));
 		const secret = await screen.findByLabelText("Signing secret");
 		await waitFor(() =>
 			expect((secret as HTMLInputElement).value).toBe("whsec_0123456789abcdefghijklmnop"),
@@ -405,12 +386,7 @@ describe("a bot's automations", () => {
 			Effect.succeed({ automation: morningBrief.automation, secrets: [] }),
 		);
 		mount(newPage);
-		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Stripe events" } });
-		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
-		fireEvent.change(await screen.findByLabelText("Instructions"), {
-			target: { value: "Reconcile the payment." },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		await fillNewAutomation("Stripe events", "Reconcile the payment.");
 		await addTrigger("Webhook");
 		fireEvent.click(screen.getByRole("button", { name: "Source: Generic" }));
 		fireEvent.click(await screen.findByRole("menuitemradio", { name: "Stripe" }));
@@ -421,7 +397,7 @@ describe("a bot's automations", () => {
 		});
 		expect(screen.queryByText("A secret needs at least 16 characters.")).toBeNull();
 		fireEvent.click(screen.getByRole("button", { name: "Add trigger" }));
-		expect(await screen.findByRole("button", { name: /^Webhook/ })).toBeDefined();
+		await screen.findByRole("button", { name: /^Webhook/ });
 		fireEvent.click(screen.getByRole("button", { name: "Create automation" }));
 
 		await waitFor(() =>
@@ -454,7 +430,7 @@ describe("a bot's automations", () => {
 		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
 
-		expect(await screen.findByText(/Send the key in the X-API-Key header\./)).toBeDefined();
+		await screen.findByText(/Send the key in the X-API-Key header\./);
 		const header = screen.getByLabelText("Header");
 		fireEvent.change(header, { target: { value: " X-Signup-Key " } });
 		fireEvent.blur(header);
@@ -518,7 +494,7 @@ describe("a bot's automations", () => {
 		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
 
-		expect(await screen.findByRole("button", { name: "Source: GitHub" })).toBeDefined();
+		await screen.findByRole("button", { name: "Source: GitHub" });
 		expect(screen.queryByLabelText("Delivery ID header")).toBeNull();
 	});
 
@@ -574,23 +550,16 @@ describe("a bot's automations", () => {
 			Effect.succeed({ automation: morningBrief.automation, secrets: [] }),
 		);
 		mount(newPage);
-		fireEvent.change(await screen.findByLabelText("Name"), {
-			target: { value: "Labelled issues" },
-		});
-		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
-		fireEvent.change(await screen.findByLabelText("Instructions"), {
-			target: { value: "Fix what you can." },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		await fillNewAutomation("Labelled issues", "Fix what you can.");
 		await addTrigger("Webhook");
 		fireEvent.click(screen.getByRole("button", { name: "Add test" }));
 		expect(screen.getByRole("button", { name: "Add trigger" })).toHaveProperty("disabled", true);
 		fireEvent.change(screen.getByLabelText("JSON path"), { target: { value: "data.labels.name" } });
 		fireEvent.change(screen.getByLabelText("Accepted value 1"), { target: { value: "10x" } });
 		fireEvent.click(screen.getByRole("button", { name: "Save test" }));
-		expect(await screen.findByRole("button", { name: "Edit test 1" })).toBeDefined();
+		await screen.findByRole("button", { name: "Edit test 1" });
 		fireEvent.click(screen.getByRole("button", { name: "Add trigger" }));
-		expect(await screen.findByRole("button", { name: /^Webhook/ })).toBeDefined();
+		await screen.findByRole("button", { name: /^Webhook/ });
 		fireEvent.click(screen.getByRole("button", { name: "Create automation" }));
 
 		await waitFor(() =>
@@ -661,9 +630,7 @@ describe("a bot's automations", () => {
 				payload: { secret: null },
 			}),
 		);
-		expect(
-			await screen.findByText(/^With no secret, anyone who has the address can run it\./),
-		).toBeDefined();
+		await screen.findByText(/^With no secret, anyone who has the address can run it\./);
 	});
 
 	it("saves Slack's signing secret pasted over the one it had once the field is left", async () => {
@@ -678,7 +645,7 @@ describe("a bot's automations", () => {
 		await openPanel(slack);
 		await openTrigger(/^Webhook/);
 
-		expect(await screen.findByText(/Request URL, and paste its Signing Secret\./)).toBeDefined();
+		await screen.findByText(/Request URL, and paste its Signing Secret\./);
 		const secret = await screen.findByLabelText("Signing secret");
 		await waitFor(() =>
 			expect((secret as HTMLInputElement).value).toBe("whsec_0123456789abcdefghijklmnop"),
@@ -712,7 +679,7 @@ describe("a bot's automations", () => {
 		const key = await screen.findByLabelText("Key");
 		fireEvent.change(key, { target: { value: "sk_rt_short" } });
 		fireEvent.blur(key);
-		expect(screen.getByText("A secret needs at least 16 characters.")).toBeDefined();
+		screen.getByText("A secret needs at least 16 characters.");
 		expect(client.api.automations.rotateSecret).not.toHaveBeenCalled();
 		fireEvent.change(key, { target: { value: "sk_rt_0123456789abcdef" } });
 		expect(screen.queryByText("A secret needs at least 16 characters.")).toBeNull();
@@ -891,7 +858,7 @@ describe("a bot's automations", () => {
 		await openPanel(hourly);
 		const routine = await openTrigger(/^Custom schedule/);
 
-		expect(within(routine).getByText("15 */2 * * *")).toBeDefined();
+		within(routine).getByText("15 */2 * * *");
 		expect(within(routine).getByRole("radio", { name: "Daily" })).toHaveProperty("checked", false);
 		fireEvent.click(within(routine).getByRole("radio", { name: "Daily" }));
 		fireEvent.click(within(routine).getByRole("button", { name: "Save" }));
@@ -987,7 +954,7 @@ describe("a bot's automations", () => {
 			true,
 		);
 
-		expect(within(panel).getByText("Weekdays at 8:00")).toBeDefined();
+		within(panel).getByText("Weekdays at 8:00");
 		expect(within(panel).queryByRole("button", { name: /^Weekdays at 8:00/ })).toBeNull();
 		expect(within(panel).queryByRole("button", { name: "Add routine" })).toBeNull();
 		expect(within(panel).queryByRole("button", { name: "Add trigger" })).toBeNull();

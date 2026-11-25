@@ -5,7 +5,10 @@ import {
 	PAGE_THEME_FROM_FRAGMENT,
 	withLeadingTags,
 } from "@sugabots/contracts/file-pages";
+import { PageAuthentication } from "@sugabots/core/authentication/page";
 import { FilePages } from "@sugabots/core/files/pages";
+import { Ids } from "@sugabots/core/ids/ids";
+import { Operations } from "@sugabots/core/operations/registry";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { processLayer } from "@sugabots/core/tiers";
 import { Effect, Layer, Option, Schema } from "effect";
@@ -26,7 +29,9 @@ export const contentPageRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const router = yield* HttpRouter.HttpRouter;
 		const serverSettings = yield* ServerSettings.Service;
-		const pages = yield* FilePages.Service;
+		const pageAddresses = yield* PageAuthentication.Service;
+		const operations = yield* Operations.Service;
+		const ids = yield* Ids.Service;
 		const { contentOrigin } = serverSettings;
 		if (!contentOrigin) return;
 		const sentToContentOrigin = contentOriginMatcher(contentOrigin);
@@ -49,13 +54,23 @@ export const contentPageRoutes = Layer.effectDiscard(
 				if (!sentToContentOrigin(request)) return HttpServerResponse.empty({ status: 404 });
 				const token = tokenIn(request.url);
 				if (!token) return HttpServerResponse.empty({ status: 404 });
-				return yield* pages.open(token).pipe(
+				return yield* Effect.gen(function* () {
+					const principal = yield* pageAddresses.open(token);
+					return yield* operations["files.servePage"](
+						principal,
+						{ fileId: principal.file },
+						{
+							kind: "request",
+							request: yield* ids.next,
+						},
+					);
+				}).pipe(
 					Effect.map(({ html }) =>
 						HttpServerResponse.html(
 							`${withLeadingTags(html, PAGE_THEME_FROM_FRAGMENT)}${PAGE_HEIGHT_REPORT}`,
 						).pipe(HttpServerResponse.setHeaders(headers)),
 					),
-					Effect.catchTag("FilePageUnavailable", () =>
+					Effect.catchTag(["PageAddressUnavailable", "ResourceHidden"], () =>
 						Effect.succeed(
 							HttpServerResponse.text(
 								"This page's address has expired. Open it again in Sugabots.",

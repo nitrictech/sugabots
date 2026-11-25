@@ -68,17 +68,17 @@ export interface Interface {
 	) => Effect.Effect<void, NoComputerProvider>;
 	readonly runCommand: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [C], "computers.runCommand">,
 		input: InputOf<"computers.runCommand">,
 	) => Effect.Effect<OutputOf<"computers.runCommand">, NoComputerProvider>;
 	readonly readFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [C], "computers.readFile">,
 		input: InputOf<"computers.readFile">,
 	) => Effect.Effect<OutputOf<"computers.readFile">, NoComputerProvider>;
 	readonly writeFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [C], "computers.writeFile">,
 		input: InputOf<"computers.writeFile">,
 	) => Effect.Effect<OutputOf<"computers.writeFile">, NoComputerProvider>;
 	/**
@@ -88,7 +88,7 @@ export interface Interface {
 	 */
 	readonly copyChatFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [C], "computers.copyChatFile">,
 		input: InputOf<"computers.copyChatFile">,
 	) => Effect.Effect<OutputOf<"computers.copyChatFile">, NoComputerProvider>;
 	/**
@@ -98,13 +98,13 @@ export interface Interface {
 	 */
 	readonly shareFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [C], "computers.shareFile">,
 		input: InputOf<"computers.shareFile">,
 	) => Effect.Effect<OutputOf<"computers.shareFile">, NoComputerProvider>;
 	/** Calls one of the browser tools in the bot's browser in the chat. */
 	readonly useBrowser: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [C], "computers.useBrowser">,
 		input: InputOf<"computers.useBrowser">,
 	) => Effect.Effect<OutputOf<"computers.useBrowser">, NoComputerProvider>;
 }

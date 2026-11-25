@@ -24,45 +24,59 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 	let store: EventStore.Interface;
 	const stream = `chat:relay-${Date.now()}` as const satisfies EventStream;
 	const buses: EventBus.Interface[] = [];
+	const subscriptions: AbortController[] = [];
 
 	beforeAll(async () => {
 		store = await runOnPostgres(EventStore.make);
 	});
 
+	/** A bus whose relay is listening: what is published after this is heard. */
 	async function processBus(): Promise<EventBus.Interface> {
+		const relay = await databaseForTests.runPromise(postgresEventRelay(store));
+		let listening: Promise<unknown> = Promise.resolve();
 		const bus = EventBus.inProcess({
 			store,
-			relay: await databaseForTests.runPromise(postgresEventRelay(store)),
+			relay: {
+				broadcast: relay.broadcast,
+				listen: async (receive) => {
+					const stop = relay.listen(receive);
+					listening = stop;
+					return stop;
+				},
+			},
 		});
 		buses.push(bus);
+		await listening;
 		return bus;
 	}
 
 	afterAll(async () => {
+		for (const subscription of subscriptions) subscription.abort();
 		await Promise.all(buses.map((bus) => bus.close()));
 		await closeDatabase();
 	});
 
-	/** Collects deliveries on a stream until `count` have arrived. */
-	function collect(bus: EventBus.Interface, count: number): Promise<EventBus.Delivery[]> {
-		return new Promise((resolve, reject) => {
-			const stop = new AbortController();
-			const taken: EventBus.Delivery[] = [];
-			const timer = setTimeout(() => {
-				stop.abort();
-				reject(new Error(`only ${taken.length} of ${count} arrived`));
-			}, 3_000);
-			void (async () => {
-				for await (const delivery of bus.subscribe(stream, { signal: stop.signal })) {
-					taken.push(delivery);
-					if (taken.length === count) {
-						clearTimeout(timer);
-						stop.abort();
-						resolve(taken);
-					}
+	/** A subscriber to the stream, kept until the file ends, whose deliveries so far `reached` hands back once there are `count`. */
+	function subscriberTo(bus: EventBus.Interface) {
+		const stop = new AbortController();
+		subscriptions.push(stop);
+		const deliveries: EventBus.Delivery[] = [];
+		const waiting: Array<{ count: number; resolve: (heard: EventBus.Delivery[]) => void }> = [];
+		void (async () => {
+			for await (const delivery of bus.subscribe(stream, { signal: stop.signal })) {
+				deliveries.push(delivery);
+				for (const { count, resolve } of waiting) {
+					if (deliveries.length === count) resolve([...deliveries]);
 				}
-			})();
-		});
+			}
+		})();
+		return {
+			reached: (count: number) =>
+				new Promise<EventBus.Delivery[]>((resolve) => {
+					if (deliveries.length >= count) resolve(deliveries.slice(0, count));
+					else waiting.push({ count, resolve });
+				}),
+		};
 	}
 
 	/** Stores `event` through the outbox, which hands it to `bus` once committed. */
@@ -76,31 +90,41 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 		await runOnPostgres(outbox.publish([{ stream, event }]));
 	}
 
-	/** Listening is set up in the background; a publish before it is up would be missed. */
-	async function listening(): Promise<void> {
-		await new Promise((resolve) => setTimeout(resolve, 200));
-	}
+	const changed = (chatId: string) => streamEvent("chat.changed", { chatId });
 
-	it("delivers a committed event to the other process's subscribers, once", async () => {
-		const writer = await processBus();
-		const reader = await processBus();
-		await listening();
-		const heardByReader = collect(reader, 1);
-		const heardByWriter = collect(writer, 1);
-		await committedThrough(writer, streamEvent("chat.changed", { chatId: "t" }));
+	it("delivers each committed event to the other process's subscribers once, and the writer's own only locally", async () => {
+		const first = await processBus();
+		const second = await processBus();
+		const heardByFirst = subscriberTo(first);
+		const heardBySecond = subscriberTo(second);
 
-		const [written] = await heardByWriter;
-		expect(await heardByReader).toEqual([written]);
-		expect(written).toMatchObject({ seq: expect.any(Number), event: { type: "chat.changed" } });
-		// Nothing else arrives: the writer does not hear its own notice back.
-		await new Promise((resolve) => setTimeout(resolve, 200));
+		// Each writes after it has heard the other's event, so every subscriber's
+		// order is fixed, and a notice coming back to its own writer would show
+		// up ahead of the other's event, which reaches that process after it.
+		await committedThrough(first, changed("by-first"));
+		await heardBySecond.reached(1);
+		await committedThrough(second, changed("by-second"));
+		await heardByFirst.reached(2);
+		await committedThrough(first, changed("by-first-again"));
+
+		const asHeard = (deliveries: EventBus.Delivery[]) =>
+			deliveries.map(({ event }) => event.type === "chat.changed" && event.chatId);
+		const expected = ["by-first", "by-second", "by-first-again"];
+		const [atFirst, atSecond] = [await heardByFirst.reached(3), await heardBySecond.reached(3)];
+		expect(asHeard(atFirst)).toEqual(expected);
+		expect(asHeard(atSecond)).toEqual(expected);
+		expect(atFirst.map(({ seq }) => seq)).toEqual(atSecond.map(({ seq }) => seq));
+		expect(atFirst.map(({ seq }) => seq)).toEqual([
+			expect.any(Number),
+			expect.any(Number),
+			expect.any(Number),
+		]);
 	});
 
 	it("carries an ephemeral event, and fetches a durable one too large to carry", async () => {
 		const writer = await processBus();
 		const reader = await processBus();
-		await listening();
-		const heard = collect(reader, 2);
+		const heard = subscriberTo(reader);
 
 		await writer.publish(
 			stream,
@@ -121,7 +145,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 		});
 		await committedThrough(writer, large);
 
-		const deliveries = await heard;
+		const deliveries = await heard.reached(2);
 		expect(deliveries[0]).toEqual({ event: expect.objectContaining({ type: "message.delta" }) });
 		expect(deliveries[1]).toMatchObject({ seq: expect.any(Number), event: large });
 	});
@@ -129,9 +153,9 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 
 /** A connection whose `LISTEN` succeeds and then hears nothing, as through PgBouncer. */
 const deafListener = unimplemented(PgClient.PgClient, {
-	listen: () => Queue.unbounded<{ payload: string }>(),
+	listen: () => Queue.unbounded<never>(),
 	notify: () => Effect.void,
-} as unknown as Partial<PgClient.PgClient>);
+});
 
 describe("the event relay, listening on a connection that hears nothing", () => {
 	it("fails with NoticesNotHeard instead of listening in silence", async () => {

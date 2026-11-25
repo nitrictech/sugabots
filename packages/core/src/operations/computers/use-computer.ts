@@ -1,4 +1,5 @@
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import type { InputOf } from "@sugabots/contracts/operations";
 import { computersContracts } from "@sugabots/contracts/operations/computers";
 import { Effect } from "effect";
 import { TurnComputers } from "../../chats/tools/computer/turn-computers.ts";
@@ -14,6 +15,14 @@ import { type CanUseChatComputer, proveCanUseChatComputer } from "../../proofs/c
 import { named } from "../../proofs/proof.ts";
 import { type Call, defineOperation } from "../operation.ts";
 
+type ComputerOperation =
+	| "computers.runCommand"
+	| "computers.readFile"
+	| "computers.writeFile"
+	| "computers.copyChatFile"
+	| "computers.shareFile"
+	| "computers.useBrowser";
+
 /**
  * A bot's work on its computer: the computer of the project its turn's chat
  * is in. Each call proves the bot may use it, as `CanUseChatComputer`
@@ -21,28 +30,33 @@ import { type Call, defineOperation } from "../operation.ts";
  * Personal Assistant's rule or an inherited one says so, then does `work`.
  * Any principal but a bot in a turn reaches no computer this way.
  */
-const usingComputer = <A, E, R>(
+const usingComputer = <N extends ComputerOperation, A, E, R>(
 	principal: Principal,
 	call: Call,
-	rule: ApprovalRule<OrdinaryApproval>,
-	approvalInput: unknown,
+	rule: ApprovalRule<OrdinaryApproval, N>,
+	approvalInput: InputOf<NoInfer<N>>,
 	work: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [C], N>,
 	) => Effect.Effect<A, E, R>,
 ) =>
 	Effect.gen(function* () {
 		if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun") {
 			return yield* new ResourceHidden({ resource: "computer" });
 		}
-		return yield* named(principal, principal.chat, call, (principal, chat, call) =>
-			Effect.gen(function* () {
-				const canUse = yield* proveCanUseChatComputer(principal, chat);
-				const computers = yield* TurnComputers.Service;
-				yield* computers.requireComputer(canUse);
-				const approved = yield* proveApproved(principal, call, rule, approvalInput);
-				return yield* work(canUse, approved);
-			}),
+		return yield* named(
+			principal,
+			principal.chat,
+			call,
+			approvalInput,
+			(principal, chat, call, approvedInput) =>
+				Effect.gen(function* () {
+					const canUse = yield* proveCanUseChatComputer(principal, chat);
+					const computers = yield* TurnComputers.Service;
+					yield* computers.requireComputer(canUse);
+					const approved = yield* proveApproved(principal, call, rule, approvedInput, chat);
+					return yield* work(canUse, approved);
+				}),
 		);
 	});
 
@@ -128,8 +142,8 @@ export const useBrowser = defineOperation(
 			usingComputer(
 				principal,
 				call,
-				{ ...approvalRule("computers.useBrowser"), tool: input.tool },
-				input.arguments,
+				approvalRule("computers.useBrowser"),
+				input,
 				(canUse, approved) => computers.useBrowser(canUse, approved, input),
 			),
 		),

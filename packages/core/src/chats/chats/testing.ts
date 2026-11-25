@@ -12,7 +12,7 @@ export async function startBotChat(
 ) {
 	return chats.startProjectChat({
 		projectId: await runOnPostgres(defaultProjectOf(input.botId)),
-		messageId: input.messageId,
-		content: input.content,
+		retryKey: input.messageId,
+		message: input.content,
 	});
 }

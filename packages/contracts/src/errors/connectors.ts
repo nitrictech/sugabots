@@ -211,3 +211,17 @@ export class GitHubRequestFailed
 			: userText`GitHub refused the project's sign-in. Someone who manages the project can check its GitHub connector in the project's settings.`;
 	}
 }
+
+export class GitHubDeliveryIdInvalid
+	extends Schema.TaggedError<GitHubDeliveryIdInvalid>()("GitHubDeliveryIdInvalid", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The GitHub delivery id is missing or longer than the trigger identity allows";
+	}
+	get userMessage() {
+		return userText`The delivery has no usable id`;
+	}
+}

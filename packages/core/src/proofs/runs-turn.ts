@@ -22,6 +22,7 @@ export interface RunsTurn<P, T> extends Proof<"RunsTurn", [P, T]> {
 	/** T's chat, and its workspace, which services take from here. */
 	readonly chat: string;
 	readonly workspace: string;
+	readonly project: string;
 	/** Which execution of T P is, which each write it guards checks is still the current one. */
 	readonly execution: number;
 }
@@ -56,6 +57,7 @@ export const proveRunsTurn = <P, C, T>(reach: ReachesChat<P, C>, turnId: Named<T
 			turn: turnId,
 			chat: facts.chat,
 			workspace: facts.workspace,
+			project: reach.project.id,
 			execution: acting.executionNumber,
 		});
 		return proof;

@@ -70,7 +70,7 @@ export interface Interface {
 	readonly readForTurn: <P, F, X>(
 		reach: ReachesFile<P, F>,
 		input: Omit<InputOf<"chats.readChatFile">, "file" | "chat">,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [F], "chats.readChatFile">,
 	) => Effect.Effect<OutputOf<"chats.readChatFile">, ResourceHidden>;
 }
 

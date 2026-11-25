@@ -118,13 +118,11 @@ describe("provider headers", () => {
 				{ name: "X-WORKSPACE", value: "three" },
 			],
 		});
-		expect(Result.isFailure(result)).toBe(true);
-		if (Result.isFailure(result)) {
-			expect(SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues).toEqual([
-				{ path: ["customHeaders", 1, "name"], message: "Header names must be unique" },
-				{ path: ["customHeaders", 2, "name"], message: "Header names must be unique" },
-			]);
-		}
+		if (Result.isSuccess(result)) throw new Error("Expected decoding to fail");
+		expect(SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues).toEqual([
+			{ path: ["customHeaders", 1, "name"], message: "Header names must be unique" },
+			{ path: ["customHeaders", 2, "name"], message: "Header names must be unique" },
+		]);
 	});
 
 	it("limits custom headers to twenty", () => {

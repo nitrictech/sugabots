@@ -128,6 +128,7 @@ describe.for(implementations.filter(({ skip }) => !skip))("blob store, on $name"
 		});
 
 		expect(await blobs.get(key)).toMatchObject({ contentType: "image/png", size: 2 });
+		expect([...(await bytesOf(key))]).toEqual([1, 2]);
 	});
 
 	it("ends a read whose blob is replaced by a shorter one before it is read", async () => {

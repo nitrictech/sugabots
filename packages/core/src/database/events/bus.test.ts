@@ -7,7 +7,7 @@ import {
 } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
 import { EventBus } from "./bus.ts";
-import { EventStore } from "./store.ts";
+import { inMemoryEventStore } from "./testing.ts";
 
 /**
  * The bus, without an HTTP layer. `events.test.ts` beside the routes proves the
@@ -68,7 +68,7 @@ const types = (deliveries: EventBus.Delivery[]) =>
 
 /** A bus over a memory store, and `commit`, which stores an event and delivers it as the outbox does. */
 function bus() {
-	const store = EventStore.inMemory();
+	const store = inMemoryEventStore();
 	const events = EventBus.inProcess({ store });
 	const commit = (stream: EventStream, event: StreamEvent & { type: DurableEventType }) =>
 		events.publishCommitted([store.record(stream, event)]);
@@ -137,7 +137,7 @@ describe("publish and subscribe", () => {
 			releaseFirst = resolve;
 		});
 		const relayed: unknown[] = [];
-		const store = EventStore.inMemory();
+		const store = inMemoryEventStore();
 		const events = EventBus.inProcess({
 			store,
 			relay: {
@@ -259,7 +259,7 @@ describe("resume", () => {
 
 describe("slow subscribers", () => {
 	it("are dropped with a reset rather than buffered forever", async () => {
-		const events = EventBus.inProcess({ store: EventStore.inMemory(), maxBuffered: 3 });
+		const events = EventBus.inProcess({ store: inMemoryEventStore(), maxBuffered: 3 });
 		const iterator = events.subscribe(STREAM)[Symbol.asyncIterator]();
 
 		// One read, so the subscriber exists and is registered. It then sits on

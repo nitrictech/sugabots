@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
 import type { ConnectorTool, NewConnector } from "@sugabots/contracts";
 import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { seedConnector, seedMember } from "../../authentication/seed.test-support.ts";
+import { query } from "../../database/database.ts";
 import {
 	bot as botTable,
 	connector,
@@ -12,16 +15,19 @@ import {
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
+	holdTransaction,
 	onDatabase,
 	type Promised,
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
 import { signedIn } from "../../operations/chats/testing.ts";
+import { underWorkspaceLock } from "../../proofs/workspace-lock.ts";
 import { Secrets } from "../../secrets/secrets.ts";
 import { connectorIn, connectorsIn } from "./connector-reads.ts";
 import { ConnectorStore } from "./connector-store.ts";
 import { GITHUB_CONNECTOR_TOOLS } from "./github/github-tools.ts";
+import { SignInRequired, storedOAuthProvider } from "./oauth.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () => {
 	let connectors: Promised<ConnectorStore.Interface>;
@@ -405,6 +411,10 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 			},
 			{ kind: "since", version: null },
 		);
+		const [row] = await onDatabase((db) =>
+			db.select({ hash: connector.oauthState }).from(connector).where(eq(connector.id, made.id)),
+		);
+		expect(row?.hash).toBe(createHash("sha256").update("state-1").digest("hex"));
 		expect(await connectors.byOauthState("state-1", session)).toEqual({
 			workspaceId,
 			projectId,
@@ -427,6 +437,160 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 		});
 		expect(await connectors.byOauthState("state-1", session)).toBeUndefined();
 		expect((await shown(made.id))?.signedIn).toBe(true);
+	});
+
+	describe("connector sign-in during membership removal", () => {
+		const tokens = { tokens: { access_token: "token", token_type: "bearer" } };
+		const removeSigner = (signer: Awaited<ReturnType<typeof signedIn>>) =>
+			underWorkspaceLock(signer, workspaceId, () =>
+				Effect.gen(function* () {
+					const store = yield* ConnectorStore.Service;
+					yield* query((db) =>
+						db
+							.delete(membership)
+							.where(
+								and(
+									eq(membership.workspaceId, workspaceId),
+									eq(membership.memberId, signer.member),
+								),
+							),
+					);
+					yield* store.signOutSignedInBy(workspaceId, signer.member);
+				}),
+			).pipe(Effect.provide(ConnectorStore.layer));
+
+		it("refuses OAuth sign-in and GitHub installation once their signer was removed", async () => {
+			const signer = await signedIn(memberId);
+			const { id: oauth } = await create({
+				name: "Linear",
+				url: "https://mcp.linear.app/mcp",
+				auth: "oauth",
+			});
+			const github = await seedConnector(workspaceId, projectId, {
+				github: { appCredentialEncrypted: "sealed" },
+			});
+			const removing = holdTransaction(
+				query((db) =>
+					db
+						.select({ id: workspace.id })
+						.from(workspace)
+						.where(eq(workspace.id, workspaceId))
+						.for("no key update"),
+				),
+				Effect.gen(function* () {
+					yield* query((db) =>
+						db
+							.delete(membership)
+							.where(
+								and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId)),
+							),
+					);
+				}),
+			);
+			await removing.held;
+
+			const signingIn = connectors.saveOauthRecord(workspaceId, oauth, tokens, {
+				kind: "signIn",
+				version: null,
+				signedInById: signer.member,
+			});
+			const installing = connectors.installed(workspaceId, github, {
+				installationId: 1,
+				account: "support",
+				installedById: signer.member,
+			});
+			await removing.waitForWaiters(2);
+			await removing.release();
+
+			expect(await signingIn).toBeUndefined();
+			expect(await installing).toBe(false);
+			expect(await connectors.oauthRecord(workspaceId, oauth)).toBeUndefined();
+		});
+
+		it("clears a sign-in that commits before the membership removal", async () => {
+			const signer = await signedIn(memberId);
+			const { id: oauth } = await create({
+				name: "Linear",
+				url: "https://mcp.linear.app/mcp",
+				auth: "oauth",
+			});
+			const signingIn = holdTransaction(
+				Effect.flatMap(ConnectorStore.Service, (store) =>
+					store.saveOauthRecord(workspaceId, oauth, tokens, {
+						kind: "signIn",
+						version: null,
+						signedInById: signer.member,
+					}),
+				).pipe(Effect.provide(ConnectorStore.layer)),
+			);
+			expect(await signingIn.held).toBeTypeOf("string");
+
+			const removing = runOnPostgres(removeSigner(signer));
+			await signingIn.waitForWaiters(1);
+			await signingIn.release();
+			await removing;
+
+			expect(await connectors.oauthRecord(workspaceId, oauth)).toBeUndefined();
+			expect(await shown(oauth)).toMatchObject({ signedIn: false, signedInAs: null });
+		});
+
+		it("refuses stale refresh callbacks after removal and a new sign-in", async () => {
+			const { id: oauth } = await create({
+				name: "Linear",
+				url: "https://mcp.linear.app/mcp",
+				auth: "oauth",
+			});
+			let version = await connectors.saveOauthRecord(workspaceId, oauth, tokens, {
+				kind: "signIn",
+				version: null,
+				signedInById: memberId,
+			});
+			const refreshing = storedOAuthProvider(
+				{
+					load: () => connectors.oauthRecord(workspaceId, oauth),
+					save: async (record) => {
+						const saved = await connectors.saveOauthRecord(workspaceId, oauth, record, {
+							kind: "since",
+							version: version ?? null,
+						});
+						if (saved === undefined) return false;
+						version = saved;
+						return true;
+					},
+					now: async () => new Date(),
+				},
+				{ redirectUrl: "https://sugabots.test/callback", clientName: "Sugabots" },
+			);
+			expect(await refreshing.tokens()).toMatchObject({ access_token: "token" });
+
+			await runOnPostgres(removeSigner(await signedIn(memberId)));
+			const replacement = await seedMember(workspaceId, "admin");
+			await connectors.saveOauthRecord(
+				workspaceId,
+				oauth,
+				{
+					tokens: { access_token: "replacement", token_type: "bearer" },
+				},
+				{ kind: "signIn", signedInById: replacement, version: null },
+			);
+
+			await expect(
+				refreshing.saveClientInformation?.({
+					client_id: "old-client",
+					issuer: "https://auth.example.com",
+				}),
+			).rejects.toBeInstanceOf(SignInRequired);
+			await expect(
+				refreshing.saveTokens({
+					access_token: "refreshed",
+					token_type: "bearer",
+				}),
+			).rejects.toBeInstanceOf(SignInRequired);
+			expect(await connectors.oauthRecord(workspaceId, oauth)).toMatchObject({
+				tokens: { access_token: "replacement" },
+			});
+			expect(await shown(oauth)).toMatchObject({ signedIn: true, signedInAs: { id: replacement } });
+		});
 	});
 
 	it("hands the caller the URL and the secret as a header", async () => {

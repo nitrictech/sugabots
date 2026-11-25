@@ -16,24 +16,38 @@
 import type { ComputerMadeMeanwhile } from "@sugabots/contracts/errors/computers";
 import type { NotInWorkspace } from "@sugabots/contracts/errors/projects";
 import type { SubscriptionInUse } from "@sugabots/contracts/errors/workspace";
-import { OperationContract } from "@sugabots/contracts/operations";
+import { type InputOf, OperationContract } from "@sugabots/contracts/operations";
 import { WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "@sugabots/contracts/operations/web";
 import { Context, Effect, Layer, Schema } from "effect";
+import type { Usage } from "../accounting/usage.ts";
+import type { Accounts } from "../accounts/accounts.ts";
 import type { WorkspaceGuide } from "../chats/assistant/workspace-guide.ts";
+import type { AutomationRunner } from "../chats/automations/automation-runner.ts";
+import type { Automations } from "../chats/automations/automations.ts";
 import type { ProjectAutomations } from "../chats/automations/project-automations.ts";
+import type { AutomationStore } from "../chats/automations/store.ts";
+import type { ChatDetailsView } from "../chats/chat-details-view.ts";
 import type { ChatFiles } from "../chats/chats/chat-files.ts";
 import type { ChatView } from "../chats/chats/chat-view.ts";
 import type { Chats } from "../chats/chats/chats.ts";
+import type { FloorControl } from "../chats/floor/floor-control.ts";
 import type { Reactions } from "../chats/reactions/reactions.ts";
+import type { DesktopViewer } from "../chats/tools/browser/viewer.ts";
 import type { TurnComputers } from "../chats/tools/computer/turn-computers.ts";
+// biome-ignore lint/style/noRestrictedImports: Type-checks the store without exporting it from Turns.
+import type { TurnStore } from "../chats/turns/store.ts";
+// biome-ignore lint/style/noRestrictedImports: Type-checks the store without exporting it from Turns.
+import type { ToolCallStore } from "../chats/turns/tool-calls/store.ts";
 import type { Turns } from "../chats/turns/turns.ts";
 import type { ComputerNetwork } from "../computers/computer-network.ts";
 import type { ComputerProviderSetup } from "../computers/computer-provider-setup.ts";
 import type { ProjectComputerSetup } from "../computers/project-computer-setup.ts";
+import type { ProjectComputers } from "../computers/project-computers.ts";
 import { Transaction } from "../database/database.ts";
 import type { Files } from "../files/files.ts";
+import type { FilePages } from "../files/pages.ts";
 import type { Notifications } from "../notifications/notifications.ts";
-import { defineOperation } from "../operations/operation.ts";
+import { type Call, defineOperation } from "../operations/operation.ts";
 import type {
 	BotForAsker,
 	MemberSession,
@@ -43,14 +57,18 @@ import type {
 } from "../principal.ts";
 import type { ConnectorCalls } from "../providers/connectors/connector-calls.ts";
 import type { Connectors } from "../providers/connectors/connectors.ts";
+import type { GitHubApps } from "../providers/connectors/github/github-app.ts";
 import type { GitHubConnectors } from "../providers/connectors/github/github-connectors.ts";
+import type { GitHubUninstalls } from "../providers/connectors/github/uninstalls.ts";
 import type { ModelProviders } from "../providers/model-providers/model-providers.ts";
 import type { SearchProviders } from "../providers/search-providers/search-providers.ts";
 import type { Web } from "../providers/web/web.ts";
+import type { Streams } from "../streams/streams.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import type { Bots } from "../workspaces/bots/bots.ts";
 import type { Membership } from "../workspaces/membership/membership.ts";
 import type { Projects } from "../workspaces/projects/projects.ts";
+import type { WorkspaceTimeZone } from "../workspaces/time-zone/workspace-time-zone.ts";
 import type { WorkspaceSetup } from "../workspaces/workspace-setup/workspace-setup.ts";
 import { proveActsForMember } from "./acts-for-member.ts";
 import type { Approved as RecordedApproval } from "./approved.ts";
@@ -64,8 +82,13 @@ import { proveCanUseChatComputer } from "./can-use-computer.ts";
 import type { CanUseConnector } from "./can-use-connector.ts";
 import { proveCanUseWeb } from "./can-use-web.ts";
 import { proveCanManageChats } from "./chat-permissions.ts";
-import { proveWorkspaceDeletionStarted } from "./deletion-started.ts";
+import {
+	proveDeletionRecorded,
+	proveProjectDeletionRecorded,
+	proveWorkspaceDeletionStarted,
+} from "./deletion-started.ts";
 import type { DoesStoredWork } from "./does-stored-work.ts";
+import { proveEndsTurn } from "./ends-turn.ts";
 import { proveInWorkspace as proveRealInWorkspace } from "./in-workspace.ts";
 import { proveIsMember } from "./is-member.ts";
 import { proveCanChangeMembership, proveCanDeleteWorkspace } from "./membership-changes.ts";
@@ -77,18 +100,13 @@ import {
 	proveCanChangeChat as proveRealCanChangeChat,
 	proveCanManageProject as proveRealCanManageProject,
 	proveCanTakePart as proveRealCanTakePart,
-	type CanChangeChat as RealCanChangeChat,
-	type CanManageProject as RealCanManageProject,
 } from "./project-permissions.ts";
 import { defineProof, type Named, named, type Proof } from "./proof.ts";
 import { proveReachSet } from "./reach-set.ts";
 import { proveReachesAutomation } from "./reaches-automation.ts";
 import { proveReachesAutomationTrigger } from "./reaches-automation-trigger.ts";
 import { proveReachesBot } from "./reaches-bot.ts";
-import {
-	proveReachesChat as proveRealReachesChat,
-	type ReachesChat as RealReachesChat,
-} from "./reaches-chat.ts";
+import { proveReachesChat as proveRealReachesChat } from "./reaches-chat.ts";
 import { proveReachesComputerProvider } from "./reaches-computer-provider.ts";
 import { proveReachesConnector } from "./reaches-connector.ts";
 import {
@@ -97,20 +115,36 @@ import {
 	proveReachesMessageFile,
 } from "./reaches-file.ts";
 import { proveReachesMessage } from "./reaches-message.ts";
-import {
-	proveReachesProject as proveRealReachesProject,
-	type ReachesProject as RealReachesProject,
-} from "./reaches-project.ts";
+import { proveReachesModelProvider } from "./reaches-model-provider.ts";
+import { proveReachesPage } from "./reaches-page.ts";
+import { proveReachesProject as proveRealReachesProject } from "./reaches-project.ts";
 import {
 	proveReachesProjectAutomation,
 	proveRestrictableAutomation,
 } from "./reaches-project-automation.ts";
+import { proveReachesSearchProvider } from "./reaches-search-provider.ts";
 import { proveReachesSetupBot } from "./reaches-setup-bot.ts";
-import type { RunsTurn } from "./runs-turn.ts";
+import { proveRunsTurn, type RunsTurn } from "./runs-turn.ts";
 import { proveSignedByGitHubApp } from "./signed-by-github-app.ts";
 import { proveCanInterrupt, proveCanSteer } from "./turn-control.ts";
 import { underWorkspaceLock } from "./workspace-lock.ts";
 import { proveCanManageWorkspace, proveCanReadWorkspace } from "./workspace-permissions.ts";
+
+const proveRealApproved = <
+	P,
+	X,
+	N extends Exclude<ApprovedOperation, "connectors.callTool">,
+	const Targets extends [unknown, ...unknown[]],
+>(
+	principal: Named<P, Principal>,
+	call: Named<X, Call>,
+	rule: ApprovalRule<OrdinaryApproval, N>,
+	input: InputOf<NoInfer<N>>,
+	...targets: { [Index in keyof Targets]: Named<Targets[Index], string> }
+) =>
+	named(input, <I>(input: Named<I, InputOf<NoInfer<N>>>) =>
+		proveNamedApproval<P, X, N, I, Targets>(principal, call, rule, input, ...targets),
+	);
 
 interface ReachesProject<P, J> extends Proof<"ReachesProject", [P, J]> {
 	readonly project: Named<J, string>;
@@ -183,9 +217,9 @@ declare const otherChatId: string;
 const ReachesChatProof = defineProof("ReachesChat");
 export const proveHere = <P, C>(principal: Named<P, Principal>, chat: Named<C, string>) => {
 	const proof: ReachesChat<P, C> = ReachesChatProof.prove([principal, chat], { chat });
-	// @ts-expect-error
+	// @ts-expect-error TS2322 Swapping the names changes which principal reaches which chat.
 	const swapped: ReachesChat<C, P> = ReachesChatProof.prove([principal, chat], { chat });
-	// @ts-expect-error
+	// @ts-expect-error TS2322 Reach cannot stand in for permission to take part.
 	const otherKind: CanTakePart<P, C> = ReachesChatProof.prove([principal, chat], { reach: proof });
 	return [proof, swapped, otherKind];
 };
@@ -197,19 +231,19 @@ export const mistakes = named(principal, chatId, otherChatId, (principal, chatA,
 		const canTakePartA = proveCanTakePart(reachA);
 
 		// A raw chat id handed to a service that wants a named one.
-		// @ts-expect-error
+		// @ts-expect-error TS2345
 		yield* chats.rename(chatId, canTakePartA);
 
 		// A proof about chat A used for chat B.
-		// @ts-expect-error
+		// @ts-expect-error TS2345
 		yield* chats.setResolved(reachB, true, canTakePartA);
 
 		// `CanTakePart` where `CanChangeChat` is needed.
-		// @ts-expect-error
+		// @ts-expect-error TS2345
 		yield* chats.rename(chatA, canTakePartA);
 
 		// A spread copy of a named value, with another value.
-		// @ts-expect-error
+		// @ts-expect-error TS2739
 		yield* chats.post({ ...chatA, value: otherChatId }, canTakePartA);
 
 		yield* chats.post(chatA, canTakePartA);
@@ -223,7 +257,7 @@ export const membershipMistakes = named(principal, "workspace", (principal, work
 		const membership = yield* proveInWorkspace(principal, workspace);
 
 		// A spread copy of `InWorkspace` with another role.
-		// @ts-expect-error
+		// @ts-expect-error TS2739
 		yield* memberships.promote({ ...membership, role: "owner" });
 
 		yield* memberships.promote(membership);
@@ -231,64 +265,31 @@ export const membershipMistakes = named(principal, "workspace", (principal, work
 );
 
 // A named value returned out of `named`.
-// @ts-expect-error
+// @ts-expect-error TS2322
 export const escaped = named(chatId, (chat) => Effect.succeed(chat));
-
-export const projectMistakes = named(
-	principal,
-	"project",
-	"other project",
-	(principal, project, otherProject) =>
-		Effect.gen(function* () {
-			const reach = yield* proveReachesProject(principal, project);
-			const otherReach = yield* proveReachesProject(principal, otherProject);
-
-			// A `ReachesProject` for project J paired with a permission for J′.
-			// @ts-expect-error
-			yield* projects.archive(reach, proveCanManageProject(otherReach));
-
-			yield* projects.archive(reach, proveCanManageProject(reach));
-		}),
-);
-
-export const approvalMistakes = named(
-	principal,
-	"tool call",
-	"other tool call",
-	(principal, call, otherCall) =>
-		Effect.gen(function* () {
-			const approved = yield* proveApproved(principal, call);
-
-			// `Approved<P, X1>` used for X2.
-			// @ts-expect-error
-			yield* toolCalls.run(otherCall, approved);
-
-			yield* toolCalls.run(call, approved);
-		}),
-);
 
 declare const memberOnly: (principal: MemberSession) => Effect.Effect<void>;
 declare const botForAsker: BotForAsker;
 
 // A `MemberSession`-only operation called with a `BotForAsker`.
-// @ts-expect-error
+// @ts-expect-error TS2739
 export const botAsMember = memberOnly(botForAsker);
 
 // Building a `Principal` literal.
-// @ts-expect-error
+// @ts-expect-error TS2739
 export const forged: MemberSession = { _tag: "MemberSession", member: "someone" };
 
 declare const session: MemberSession;
 // A spread copy of a principal, with another member.
-// @ts-expect-error
+// @ts-expect-error TS2739
 export const copied: MemberSession = { ...session, member: "someone else" };
 
 // A spread copy of a bot's principal, with wider bounds.
-// @ts-expect-error
+// @ts-expect-error TS2739
 export const widened: BotForAsker = { ...botForAsker, bounds: { kind: "member" } };
 
 // Building system work naming another chat.
-// @ts-expect-error
+// @ts-expect-error TS2741
 export const forgedWork: SystemWork = {
 	_tag: "SystemWork",
 	workspace: "workspace",
@@ -297,7 +298,7 @@ export const forgedWork: SystemWork = {
 
 declare const page: PageAddress;
 // A spread copy of a page address, opening another page.
-// @ts-expect-error
+// @ts-expect-error TS2739
 export const otherPage: PageAddress = { ...page, file: "another file" };
 
 class CurrentRequest extends Context.Service<CurrentRequest, { readonly id: string }>()(
@@ -318,7 +319,7 @@ class Lookup extends Context.Service<Lookup, { readonly describe: Effect.Effect<
 
 // `processLayer` over a layer that needs a request-tier service.
 export const capturesRequest = processLayer(
-	// @ts-expect-error
+	// @ts-expect-error TS2345 The layer that builds Lookup reads a request-tier service.
 	Layer.effect(
 		Lookup,
 		Effect.gen(function* () {
@@ -336,7 +337,7 @@ export const capturesRequestPiped = Layer.effect(
 		return { describe: Effect.log(request.id) };
 	}),
 ).pipe(
-	// @ts-expect-error
+	// @ts-expect-error TS2345 Piping through processLayer still rejects the request dependency.
 	processLayer,
 );
 
@@ -352,13 +353,13 @@ export const processOnly = processLayer(
 
 // A layer that provides a request-tier service, built from a whole context.
 export const providesRequest = processLayer(
-	// @ts-expect-error
+	// @ts-expect-error TS2345 A whole context cannot hide a request-tier service.
 	Layer.succeedContext(Context.make(CurrentRequest, { id: "one request's" })),
 );
 
 // The database's open transaction is request tier too, however it is imported.
 export const providesTransaction = processLayer(
-	// @ts-expect-error
+	// @ts-expect-error TS2345 The context contains the request's open transaction.
 	Layer.succeedContext(
 		Context.make(Transaction, { beforeCommit: [], batches: new Map(), afterCommit: [] }),
 	),
@@ -367,7 +368,7 @@ export const providesTransaction = processLayer(
 // An outer `Layer.unwrap` that reads a request-tier service while choosing a layer
 // that is fine itself.
 export const choosesWhileReadingRequest = processLayer(
-	// @ts-expect-error
+	// @ts-expect-error TS2345 The outer layer reads the request while choosing a process layer.
 	Layer.unwrap(
 		Effect.gen(function* () {
 			const request = yield* CurrentRequest;
@@ -391,7 +392,7 @@ export const choosesWhileReadingProcess = processLayer(
 
 // `Layer.fromBuild` and `Layer.effectDiscard`, which take no service to build.
 export const buildsFromRequest = processLayer(
-	// @ts-expect-error
+	// @ts-expect-error TS2345 The build needs a request even though its output is process-tier.
 	Layer.fromBuild(() =>
 		Effect.map(CurrentRequest, (request) =>
 			Context.make(Lookup, { describe: Effect.log(request.id) }),
@@ -400,7 +401,7 @@ export const buildsFromRequest = processLayer(
 );
 
 export const discardsAfterRequest = processLayer(
-	// @ts-expect-error
+	// @ts-expect-error TS2345 Discarding the result does not remove the request dependency.
 	Layer.effectDiscard(Effect.flatMap(CurrentRequest, (request) => Effect.log(request.id))),
 );
 
@@ -413,72 +414,19 @@ const setResolved = OperationContract.make("chats.setResolved", {
 });
 
 // An operation's body failing with an error its contract doesn't list.
-// @ts-expect-error
+// @ts-expect-error TS2322
 export const undeclaredError = defineOperation(setResolved, () => Effect.fail("refused"));
 
 // An operation's body reading an input field its contract doesn't have.
-// @ts-expect-error
+// @ts-expect-error TS2339
 export const unknownInput = defineOperation(setResolved, (_, input) => Effect.log(input.chatName));
 
 export const declared = defineOperation(setResolved, (_, input) => Effect.log(input.chatId));
 
 export const assumesToolCall = defineOperation(setResolved, (_, __, call) =>
 	// An operation's body reading a tool call's id from a call that may be an HTTP request.
-	// @ts-expect-error
+	// @ts-expect-error TS2339
 	Effect.log(call.toolCall),
-);
-
-// The real provers, misused the same ways.
-
-declare const realProjects: {
-	readonly rename: <P, J>(
-		reach: RealReachesProject<P, J>,
-		access: RealCanManageProject<P, J>,
-	) => Effect.Effect<void>;
-};
-declare const realChats: {
-	readonly setResolved: <P, C>(
-		reach: RealReachesChat<P, C>,
-		access: RealCanChangeChat<P, C>,
-	) => Effect.Effect<void>;
-};
-
-export const realProjectMistakes = named(
-	principal,
-	"project",
-	"other project",
-	(principal, project, otherProject) =>
-		Effect.gen(function* () {
-			const reach = yield* proveRealReachesProject(principal, project);
-			const managesOther = yield* proveRealCanManageProject(
-				yield* proveRealReachesProject(principal, otherProject),
-			);
-
-			// `CanManageProject` proven for J′, handed over with the reach of J.
-			// @ts-expect-error
-			yield* realProjects.rename(reach, managesOther);
-
-			yield* realProjects.rename(reach, yield* proveRealCanManageProject(reach));
-		}),
-);
-
-export const realChatMistakes = named(
-	principal,
-	chatId,
-	otherChatId,
-	(principal, chat, otherChat) =>
-		Effect.gen(function* () {
-			const reach = yield* proveRealReachesChat(principal, chat);
-			const changesOther = yield* proveRealCanChangeChat(
-				yield* proveRealReachesChat(principal, otherChat),
-			);
-
-			// `CanChangeChat` proven for another chat.
-			// @ts-expect-error
-			yield* realChats.setResolved(reach, changesOther);
-
-			yield* realChats.setResolved(reach, yield* proveRealCanChangeChat(reach));
-		}),
 );
 
 declare const projectsService: Projects.Interface;
@@ -493,32 +441,46 @@ export const projectsServiceMistakes = underWorkspaceLock(principal, "workspace"
 				const canChange = yield* proveCanChangeProjectMembers(lock, reach);
 				const addBotApproval = approvalRule("projects.addBot");
 				const input = { projectId: project.value, botId: bot.value };
-				const approved = yield* proveRealApproved(lock.principal, call, addBotApproval, input);
-				const approvedForOther = yield* proveRealApproved(other, call, addBotApproval, input);
+				const approved = yield* proveRealApproved(
+					lock.principal,
+					call,
+					addBotApproval,
+					input,
+					project,
+					bot,
+				);
+				const approvedForOther = yield* proveRealApproved(
+					other,
+					call,
+					addBotApproval,
+					input,
+					project,
+					bot,
+				);
 
 				// A project's members changed with a reach proved for a principal named outside the lock.
-				// @ts-expect-error
+				// @ts-expect-error TS2345
 				yield* proveCanChangeProjectMembers(lock, yield* proveRealReachesProject(other, project));
 
 				// A bot proven reached by another principal, added to a project this one may change.
-				// @ts-expect-error
+				// @ts-expect-error TS2345
 				yield* projectsService.addBot(canChange, yield* proveReachesBot(other, bot), approved);
 
 				// A bot added for a bot's call another principal's approval allowed.
 				const reachesBot = yield* proveReachesBot(lock.principal, bot);
-				// @ts-expect-error
+				// @ts-expect-error TS2345 The approval belongs to a different principal.
 				yield* projectsService.addBot(canChange, reachesBot, approvedForOther);
 
 				// A project deleted with the proof that its members may be changed, not that it may be deleted.
-				// @ts-expect-error
+				// @ts-expect-error TS2739
 				yield* projectsService.remove(canChange);
 
 				// A project's members listed with no proof that it is reached, only its id.
-				// @ts-expect-error
+				// @ts-expect-error TS2740
 				yield* projectsService.members(project);
 
 				// A member added by a write taken out of the transaction that holds the lock.
-				// @ts-expect-error
+				// @ts-expect-error TS2322
 				const outsideTheLock: Effect.Effect<void, NotInWorkspace> = projectsService.addMember(
 					canChange,
 					member,
@@ -554,15 +516,15 @@ export const computersServiceMistakes = named(
 			const canManage = yield* proveRealCanManageProject(reach);
 
 			// A workspace's computer providers listed by whoever may read the workspace, not manage it.
-			// @ts-expect-error
+			// @ts-expect-error TS2345
 			yield* computerProviderSetup.list(canRead);
 
 			// A project's allowed hosts changed by its managers outside member bounds, with `CanManageProject`.
-			// @ts-expect-error
+			// @ts-expect-error TS2345
 			yield* computerNetwork.addProjectHost(canManage, "example.com");
 
 			// A project's computer reset by whoever reaches the project, not whoever manages it.
-			// @ts-expect-error
+			// @ts-expect-error TS2739
 			yield* projectComputerSetup.reset(reach);
 
 			yield* computerProviderSetup.list(canManageWorkspace);
@@ -580,28 +542,34 @@ declare const guides: WorkspaceGuide.Interface;
 declare const modelProvidersService: ModelProviders.Interface;
 declare const searchProvidersService: SearchProviders.Interface;
 
-export const providersServiceMistakes = named(principal, "workspace", (principal, workspace) =>
-	Effect.gen(function* () {
-		const inWorkspace = yield* proveRealInWorkspace(principal, workspace);
-		const canRead = yield* proveCanReadWorkspace(inWorkspace);
-		const canManage = yield* proveCanManageWorkspace(inWorkspace);
-		const reach = proveReachSet(inWorkspace);
+export const providersServiceMistakes = named(
+	principal,
+	"workspace",
+	"provider",
+	(principal, workspace, provider) =>
+		Effect.gen(function* () {
+			const inWorkspace = yield* proveRealInWorkspace(principal, workspace);
+			const canRead = yield* proveCanReadWorkspace(inWorkspace);
+			const canManage = yield* proveCanManageWorkspace(inWorkspace);
+			const reach = proveReachSet(inWorkspace);
 
-		// @ts-expect-error The workspace guide needs the approval proof for the call.
-		yield* guides.guide(canRead, reach);
+			// @ts-expect-error TS2554 The workspace guide needs the approval proof for the call.
+			yield* guides.guide(canRead, reach);
 
-		// A provider's key changed with the proof that the workspace may be read, not that its providers may be managed.
-		// @ts-expect-error
-		yield* modelProvidersService.update(canRead, "provider", { apiKey: "key" });
+			// A provider's key changed with the proof that the workspace may be read, not that its providers may be managed.
+			// @ts-expect-error TS2739
+			yield* modelProvidersService.update(canRead, { apiKey: "key" });
 
-		// A search provider removed with no proof, only the workspace's id.
-		// @ts-expect-error
-		yield* searchProvidersService.remove(workspace);
+			// A search provider removed with no proof, only the workspace's id.
+			// @ts-expect-error TS2740
+			yield* searchProvidersService.remove(workspace);
 
-		yield* modelProvidersService.update(canManage, "provider", { apiKey: "key" });
-		yield* modelProvidersService.listEnabledModels(canRead);
-		yield* searchProvidersService.remove(canManage);
-	}),
+			yield* modelProvidersService.update(yield* proveReachesModelProvider(canManage, provider), {
+				apiKey: "key",
+			});
+			yield* modelProvidersService.listEnabledModels(canRead);
+			yield* searchProvidersService.remove(yield* proveReachesSearchProvider(canManage));
+		}),
 );
 
 declare const botsService: Bots.Interface;
@@ -617,28 +585,34 @@ export const botsServiceMistakes = named(
 				const canRestrict = yield* proveCanRestrictBot(principal, bot);
 				const reach = yield* proveReachesBot(principal, bot);
 				const otherActsForMember = yield* proveActsForMember(other);
-				const approved = yield* proveRealApproved(principal, call, approvalRule("bots.pin"), {
-					botId: bot.value,
-				});
+				const approved = yield* proveRealApproved(
+					principal,
+					call,
+					approvalRule("bots.pin"),
+					{
+						botId: bot.value,
+					},
+					bot,
+				);
 
 				// A bot deleted with the proof that it may be managed, not that it may be deleted.
-				// @ts-expect-error
+				// @ts-expect-error TS2345
 				yield* botsService.beginRemoval(canManage);
 
 				// A bot deleted with the proof that it may be restricted, not that it may be deleted.
-				// @ts-expect-error
+				// @ts-expect-error TS2345
 				yield* botsService.beginRemoval(canRestrict);
 
 				// A bot changed with the proof that an admin may restrict it, which changes nothing of it.
-				// @ts-expect-error
+				// @ts-expect-error TS2741
 				yield* botsService.update(canRestrict, {});
 
 				// A bot pinned for one principal with another's proof that it reaches it.
-				// @ts-expect-error
+				// @ts-expect-error TS2345
 				yield* botsService.setPinned(otherActsForMember, reach, true, approved);
 
 				// A bot pinned with no proof the call was approved.
-				// @ts-expect-error
+				// @ts-expect-error TS2554
 				yield* botsService.setPinned(yield* proveActsForMember(principal), reach, true);
 
 				yield* botsService.setPinned(yield* proveActsForMember(principal), reach, true, approved);
@@ -654,11 +628,11 @@ export const botDeletionMistakes = underWorkspaceLock(principal, "workspace", (l
 			const managedOutside = yield* proveCanManageBot(other, bot);
 
 			// A bot deleted with an authority proved for a principal named outside the lock.
-			// @ts-expect-error
+			// @ts-expect-error TS2345
 			yield* proveCanDeleteBot(lock, managedOutside);
 
 			// A bot made personal with no proof made under its workspace's lock.
-			// @ts-expect-error
+			// @ts-expect-error TS2741
 			yield* botsService.update(canManage, { visibility: "personal" }, canManage);
 
 			yield* botsService.beginRemoval(yield* proveCanDeleteBot(lock, canManage));
@@ -697,26 +671,26 @@ export const projectAutomationsServiceMistakes = named(
 				timezone: "UTC",
 			} as const;
 
-			// @ts-expect-error
+			// @ts-expect-error TS2739 Reaching the project does not authorize creating an automation.
 			yield* automationsService.create(reach, member, settings);
 
-			// @ts-expect-error
+			// @ts-expect-error TS2739 Creating an automation with a routine requires approval for that call.
 			yield* automationsService.createWithRoutine(canManage, member, settings, routine);
 
-			// @ts-expect-error
+			// @ts-expect-error TS2739 Changing an automation from a chat requires approval for that call.
 			yield* automationsService.updateInChat(canManage, automation, target, member, {}, routine);
 
 			yield* automationsService.create(canManage, member, settings);
 
 			// An automation run with the proof that its project may be managed, not that a run may be started there.
-			// @ts-expect-error
+			// @ts-expect-error TS2345
 			yield* automationsService.run(canManage, automation, target, "request");
 
 			// An automation changed at will by an admin who may only switch it off.
-			// @ts-expect-error
+			// @ts-expect-error TS2739
 			yield* automationsService.update(canRestrict, automation, target, member, { name: "Mine" });
 
-			// @ts-expect-error
+			// @ts-expect-error TS2345 The target proves reach to a different automation.
 			yield* automationsService.remove(canManage, otherAutomation, target);
 
 			yield* automationsService.run(
@@ -735,11 +709,11 @@ export const projectAutomationsServiceMistakes = named(
 						automation,
 						trigger,
 					);
-					// @ts-expect-error
+					// @ts-expect-error TS2345 The target proves reach to a different trigger.
 					yield* automationsService.removeTrigger(canManage, otherTrigger, reached.target);
 					yield* automationsService.removeTrigger(canManage, trigger, reached.target);
 
-					// @ts-expect-error
+					// @ts-expect-error TS2740 A named trigger does not prove the webhook call reached it.
 					yield* automationsService.acceptWebhook(trigger, { headers: {}, payload: {} });
 
 					yield* automationsService.acceptWebhook(yield* proveCallsWebhook(principal, trigger), {
@@ -763,20 +737,20 @@ export const membershipServiceMistakes = underWorkspaceLock(principal, "workspac
 			const otherInWorkspace = yield* proveRealInWorkspace(other, lock.workspace);
 
 			// A workspace deleted with the proof that it may be read, not that its owner deletes it.
-			// @ts-expect-error
+			// @ts-expect-error TS2741
 			yield* membershipService.delete(canRead);
 
 			// A member taken out by a write taken out of the transaction that holds the lock.
-			// @ts-expect-error
+			// @ts-expect-error TS2322
 			const outsideTheLock: Effect.Effect<{ cleanupPending: boolean }, SubscriptionInUse> =
 				membershipService.beginRemoval(canRemove);
 
 			// A membership changed by a principal proved in the workspace outside the lock, with no lock of its own.
-			// @ts-expect-error
+			// @ts-expect-error TS2345
 			yield* proveCanChangeMembership(otherInWorkspace, member, { kind: "removal" });
 
 			// A member's own workspaces listed with only the principal, not the proof a member is signed in.
-			// @ts-expect-error
+			// @ts-expect-error TS2740
 			yield* membershipService.workspaces(lock.principal);
 
 			yield* outsideTheLock;
@@ -799,11 +773,11 @@ export const notificationsServiceMistakes = named(
 			const reachedByOther = yield* proveRealReachesProject(other, project);
 
 			// A member's level set in a project another principal was proved to reach.
-			// @ts-expect-error
+			// @ts-expect-error TS2345
 			yield* notificationsService.setLevel(isMember, reachedByOther, "all");
 
 			// A member's settings read with only the principal, not the proof a member is signed in.
-			// @ts-expect-error
+			// @ts-expect-error TS2740
 			yield* notificationsService.settings(principal);
 
 			const reached = yield* proveRealReachesProject(principal, project);
@@ -817,7 +791,7 @@ export const workspaceDeletionMistakes = underWorkspaceLock(principal, "workspac
 			const canDelete = yield* proveCanDeleteWorkspace(lock);
 
 			// A workspace's deletion proved with no lock, from its owner's place in it.
-			// @ts-expect-error
+			// @ts-expect-error TS2345
 			yield* proveCanDeleteWorkspace(yield* proveRealInWorkspace(other, lock.workspace));
 
 			yield* membershipService.beginDeletion(canDelete);
@@ -825,7 +799,7 @@ export const workspaceDeletionMistakes = underWorkspaceLock(principal, "workspac
 			if (!started) return;
 
 			// A recorded deletion still needs its workspace's lock to finish.
-			// @ts-expect-error
+			// @ts-expect-error TS2322
 			const outsideTheLock: Effect.Effect<void, ComputerMadeMeanwhile> =
 				membershipService.delete(started);
 
@@ -851,20 +825,20 @@ export const connectorsServiceMistakes = named(
 			const canManage = yield* proveRealCanManageProject(reach);
 
 			// A connector removed with the proof that its project's connectors may be read, not managed.
-			// @ts-expect-error
+			// @ts-expect-error TS2741
 			yield* connectorsService.remove(canRead, connector, target);
 
 			// A project's connectors listed with no proof that they may be read, only that it is reached.
-			// @ts-expect-error
+			// @ts-expect-error TS2741
 			yield* connectorsService.list(reach);
 
 			// A delivery read with the proof that its project is reached, not that its GitHub app signed it.
-			// @ts-expect-error
+			// @ts-expect-error TS2741
 			yield* gitHubConnectorsService.readDelivery(reach, delivery);
 
-			// @ts-expect-error
+			// @ts-expect-error TS2345 The target proves reach to a different connector.
 			yield* connectorsService.remove(canManage, otherConnector, target);
-			// @ts-expect-error
+			// @ts-expect-error TS2345 The raw connector id cannot be bound to the proved target.
 			yield* connectorsService.remove(canManage, "connector", target);
 
 			yield* connectorsService.remove(canManage, connector, target);
@@ -877,9 +851,12 @@ export const connectorsServiceMistakes = named(
 );
 
 import {
+	type ApprovalRule,
+	type ApprovedOperation,
 	approvalRule,
+	type OrdinaryApproval,
 	proveComputerRequestApproved,
-	proveApproved as proveRealApproved,
+	proveApproved as proveNamedApproval,
 } from "./approved.ts";
 
 declare const chatsService: Chats.Interface;
@@ -905,37 +882,68 @@ export const chatServicesMistakes = named(
 				const canTakePart = yield* proveRealCanTakePart(reach);
 
 				const resolveApproval = approvalRule("chats.setResolved");
-				const approved = yield* proveRealApproved(principal, call, resolveApproval, {
-					chatId: chat.value,
-					resolved: true,
-				});
+				const approved = yield* proveRealApproved(
+					principal,
+					call,
+					resolveApproval,
+					{
+						chatId: chat.value,
+						resolved: true,
+					},
+					chat,
+				);
 				const canChange = yield* proveRealCanChangeChat(reach);
 				const newFile = { kind: "markdown", title: "Notes", content: "# Notes" } as const;
-				// @ts-expect-error
+				// @ts-expect-error TS2554 Writing a file requires approval.
 				yield* filesService.create(canChange, newFile);
-				// @ts-expect-error
+				// @ts-expect-error TS2345 Taking part does not authorize writing a file.
 				yield* filesService.create(canTakePart, approved, newFile);
-				// @ts-expect-error
+				// @ts-expect-error TS2554 Listing written files requires approval.
 				yield* filesService.listWritten(reach);
-				// @ts-expect-error
+				// @ts-expect-error TS2554 Resolving a chat requires approval.
 				yield* chatsService.setResolved(reach, true, canChange);
 
 				// `CanChangeChat` proven for another chat, handed over with the reach of this one.
-				// @ts-expect-error
+				// @ts-expect-error TS2345
 				yield* chatsService.setResolved(reach, true, changesOther, approved);
 
 				// A message posted as another principal's member, in a chat this one takes part in.
-				// @ts-expect-error
+				// @ts-expect-error TS2345
 				yield* chatsService.post(yield* proveIsMember(other), canTakePart, posted);
 
 				// A chat renamed with the proof that it may be changed, not that its project's chats may be managed.
-				// @ts-expect-error
+				// @ts-expect-error TS2741
 				yield* chatsService.renameChat(reach, "Renamed", yield* proveRealCanChangeChat(reach));
 
 				// A page of a chat read with the reach of its project, not of the chat.
-				// @ts-expect-error
+				// @ts-expect-error TS2741
 				yield* chatViewService.messages(yield* proveRealReachesProject(principal, chat), firstPage);
 
+				const approvedElsewhere = yield* proveRealApproved(
+					principal,
+					call,
+					resolveApproval,
+					{
+						chatId: otherChat.value,
+						resolved: true,
+					},
+					otherChat,
+				);
+				// @ts-expect-error TS2345 The approval targets a different chat.
+				yield* chatsService.setResolved(reach, true, canChange, approvedElsewhere);
+				yield* named({}, (unrelated) => {
+					// @ts-expect-error TS2345 The named input must match the operation's input.
+					return proveNamedApproval(principal, call, resolveApproval, unrelated, chat);
+				});
+				const approvedList = yield* proveRealApproved(
+					principal,
+					call,
+					approvalRule("files.listWritten"),
+					{},
+					chat,
+				);
+				// @ts-expect-error TS2345 Approval to list files cannot authorize resolving a chat.
+				yield* chatsService.setResolved(reach, true, canChange, approvedList);
 				yield* chatsService.setResolved(reach, true, canChange, approved);
 				yield* chatsService.post(yield* proveIsMember(principal), canTakePart, posted);
 				yield* chatsService.renameChat(reach, "Renamed", yield* proveCanManageChats(reach));
@@ -957,15 +965,15 @@ export const chatFileMistakes = named(
 			);
 			const isMember = yield* proveIsMember(principal);
 
-			// @ts-expect-error
+			// @ts-expect-error TS2554 Reading a written file requires approval.
 			yield* filesService.readWritten(reach);
 
 			// A file deleted with the proof that another file's chats may be managed.
-			// @ts-expect-error
+			// @ts-expect-error TS2345
 			yield* filesService.remove(reach, managesOther);
 
 			// A reaction added with the reach of a chat, not of the message.
-			// @ts-expect-error
+			// @ts-expect-error TS2741
 			yield* reactionsService.add(isMember, yield* proveRealReachesChat(principal, message), "👍");
 
 			yield* filesService.remove(reach, yield* proveCanManageChats(reach));
@@ -982,15 +990,15 @@ export const decisionMistakes = named(principal, otherPrincipal, "call", (princi
 		const changesNothing = () => Effect.void;
 
 		// A call decided as another principal's member than the approver `CanDecide` found.
-		// @ts-expect-error
+		// @ts-expect-error TS2345
 		yield* turnControls.decide(otherMember, canDecide, "deny", changesNothing);
 
 		// A call decided with no proof that the member is its approver, only its id.
-		// @ts-expect-error
+		// @ts-expect-error TS2740
 		yield* turnControls.decide(isMember, call, "deny", changesNothing);
 
 		// A host request granted as another member than the approver `CanDecide` found.
-		// @ts-expect-error
+		// @ts-expect-error TS2345
 		yield* computerNetwork.grantHostRequest(otherMember, canDecide);
 
 		yield* turnControls.decide(isMember, canDecide, "deny", changesNothing);
@@ -1012,19 +1020,19 @@ export const turnControlMistakes = named(
 			const canInterrupt = yield* proveCanInterrupt(isMember, reach, turn);
 
 			// A turn interrupted with the proof that its asker may steer it, which a manager lacks.
-			// @ts-expect-error
+			// @ts-expect-error TS2345
 			yield* turnControls.interrupt(canSteer);
 
 			// A turn interrupted with no proof at all, only its id.
-			// @ts-expect-error
+			// @ts-expect-error TS2740
 			yield* turnControls.interrupt(turn);
 
 			// A message made a steer with the proof that its author may interrupt, not steer.
-			// @ts-expect-error
+			// @ts-expect-error TS2345
 			yield* turnControls.steer(canInterrupt, { messageId: "message", reason: "mention" });
 
 			// Interrupting proved for one principal's member and another's reach of the chat.
-			// @ts-expect-error
+			// @ts-expect-error TS2345
 			yield* proveCanInterrupt(otherMember, reach, turn);
 
 			yield* turnControls.steer(canSteer, { messageId: "message", reason: "mention" });
@@ -1040,41 +1048,54 @@ export const computerUseMistakes = named(
 	otherPrincipal,
 	"chat",
 	(principal, other, chat) =>
-		named({ kind: "request", request: "computer-example" } as const, (call) =>
-			Effect.gen(function* () {
-				const canUse = yield* proveCanUseChatComputer(principal, chat);
-				const otherUses = yield* proveCanUseChatComputer(other, chat);
-				const approved = yield* proveRealApproved(
-					principal,
-					call,
-					approvalRule("computers.runCommand"),
-					command,
-				);
+		named(
+			{ kind: "request", request: "computer-example" } as const,
+			{ host: "example.com" },
+			(call, host) =>
+				Effect.gen(function* () {
+					const canUse = yield* proveCanUseChatComputer(principal, chat);
+					const otherUses = yield* proveCanUseChatComputer(other, chat);
+					const approved = yield* proveRealApproved(
+						principal,
+						call,
+						approvalRule("computers.runCommand"),
+						command,
+						chat,
+					);
 
-				const host = { host: "example.com" };
-				// @ts-expect-error
-				yield* proveComputerRequestApproved(principal, call, host, otherUses);
-				// @ts-expect-error
-				yield* proveComputerRequestApproved(principal, call, host);
-				// @ts-expect-error
-				yield* proveRealApproved(principal, call, approvalRule("computers.requestHost"), host);
+					// @ts-expect-error TS2345 Only the principal that can use the computer may request this host.
+					yield* proveComputerRequestApproved(principal, call, host, otherUses);
+					// @ts-expect-error TS2554 Requesting a host requires authority to use the computer.
+					yield* proveComputerRequestApproved(principal, call, host);
+					yield* proveNamedApproval(
+						principal,
+						call,
+						// @ts-expect-error TS2345 A computer request uses its dedicated approval prover.
+						approvalRule("computers.requestHost"),
+						host,
+						chat,
+					);
 
-				// A command run on the computer another principal may use, with this one's approval.
-				// @ts-expect-error
-				yield* turnComputers.runCommand(otherUses, approved, command);
+					// A command run on the computer another principal may use, with this one's approval.
+					// @ts-expect-error TS2345
+					yield* turnComputers.runCommand(otherUses, approved, command);
 
-				// A command run with no proof that the call may run.
-				// @ts-expect-error
-				yield* turnComputers.runCommand(canUse, canUse, command);
+					// A command run with no proof that the call may run.
+					// @ts-expect-error TS2739
+					yield* turnComputers.runCommand(canUse, canUse, command);
 
-				// A host request read back with the reach of the chat, not the proof the bot may use its computer.
-				const reach = yield* proveRealReachesChat(principal, chat);
-				// @ts-expect-error
-				yield* computerNetwork.requestedHost(reach, approved, "example.com");
+					// A host request read back with the reach of the chat, not the proof the bot may use its computer.
+					const reach = yield* proveRealReachesChat(principal, chat);
+					// @ts-expect-error TS2739 Chat reach does not prove permission to read a computer request.
+					yield* computerNetwork.requestedHost(reach, approved, "example.com");
 
-				yield* turnComputers.runCommand(canUse, approved, command);
-				yield* computerNetwork.requestedHost(canUse, approved, "example.com");
-			}),
+					yield* turnComputers.runCommand(canUse, approved, command);
+					yield* computerNetwork.requestedHost(
+						canUse,
+						yield* proveComputerRequestApproved(principal, call, host, canUse),
+						"example.com",
+					);
+				}),
 		),
 );
 
@@ -1086,7 +1107,7 @@ export const automationFeedProofMistakes = named(
 	(principal, workspace, automation, otherAutomation) =>
 		Effect.gen(function* () {
 			const reach = yield* proveReachesAutomation(principal, workspace, automation);
-			// @ts-expect-error
+			// @ts-expect-error TS2345 The reach proof targets a different automation feed.
 			yield* chatsService.openAutomationFeed(otherAutomation, reach);
 			yield* chatsService.openAutomationFeed(automation, reach);
 		}),
@@ -1105,15 +1126,15 @@ export const chatFileReadProofMistakes = named(
 			const reach = yield* proveReachesFile(principal, file);
 			const input = { file: file.value };
 			const rule = approvalRule("chats.readChatFile");
-			const approvedForOther = yield* proveRealApproved(other, call, rule, input);
-			// @ts-expect-error
+			const approvedForOther = yield* proveRealApproved(other, call, rule, input, file);
+			// @ts-expect-error TS2554 Reading a chat file in a turn requires approval.
 			yield* chatFilesService.readForTurn(reach, {});
-			// @ts-expect-error
+			// @ts-expect-error TS2345 The approval belongs to another principal.
 			yield* chatFilesService.readForTurn(reach, {}, approvedForOther);
 			yield* chatFilesService.readForTurn(
 				reach,
 				{},
-				yield* proveRealApproved(principal, call, rule, input),
+				yield* proveRealApproved(principal, call, rule, input, file),
 			);
 		}),
 );
@@ -1126,14 +1147,14 @@ export const chatAttachmentProofMistakes = named(
 	(principal, chat, file, otherFile) =>
 		Effect.gen(function* () {
 			const reach = yield* proveReachesMessageFile(principal, chat, file);
-			// @ts-expect-error
+			// @ts-expect-error TS2345 The named file must agree with the attachment reach proof.
 			yield* chatFilesService.read(otherFile, reach);
 			yield* chatFilesService.read(file, reach);
 
 			const owns = yield* proveOwnsUnsentAttachment(yield* proveIsMember(principal), chat, file);
-			// @ts-expect-error
+			// @ts-expect-error TS2741 Reaching an attachment does not prove ownership of an unsent upload.
 			yield* chatFilesService.removeUnsentAttachment(file, reach);
-			// @ts-expect-error
+			// @ts-expect-error TS2345 The ownership proof targets another upload.
 			yield* chatFilesService.removeUnsentAttachment(otherFile, owns);
 			yield* chatFilesService.removeUnsentAttachment(file, owns);
 		}),
@@ -1147,11 +1168,11 @@ export const computerProviderTargetMistakes = named(
 	(principal, workspace, provider, otherProvider) =>
 		Effect.gen(function* () {
 			const inWorkspace = yield* proveRealInWorkspace(principal, workspace);
-			// @ts-expect-error
+			// @ts-expect-error TS2739 Workspace membership does not authorize reaching provider settings.
 			yield* proveReachesComputerProvider(inWorkspace, provider);
 			const canManage = yield* proveCanManageWorkspace(inWorkspace);
 			const target = yield* proveReachesComputerProvider(canManage, provider);
-			// @ts-expect-error
+			// @ts-expect-error TS2345 The reach proof targets a different provider.
 			yield* computerProviderSetup.test(canManage, otherProvider, target);
 			yield* computerProviderSetup.test(canManage, provider, target);
 		}),
@@ -1165,11 +1186,11 @@ export const workspaceSetupBotMistakes = named(
 	(principal, workspace, bot, otherBot) =>
 		Effect.gen(function* () {
 			const inWorkspace = yield* proveRealInWorkspace(principal, workspace);
-			// @ts-expect-error
+			// @ts-expect-error TS2739 Workspace membership does not authorize reaching the setup bot.
 			yield* proveReachesSetupBot(inWorkspace, bot);
 			const canManage = yield* proveCanManageWorkspace(inWorkspace);
 			const target = yield* proveReachesSetupBot(canManage, bot);
-			// @ts-expect-error
+			// @ts-expect-error TS2345 The reach proof targets a different setup bot.
 			yield* workspaceSetup.complete(canManage, otherBot, target);
 			yield* workspaceSetup.complete(canManage, bot, target);
 		}),
@@ -1179,7 +1200,7 @@ export const invitationTargetMistakes = underWorkspaceLock(principal, "workspace
 	named("invitation", "other invitation", (invitation, otherInvitation) =>
 		Effect.gen(function* () {
 			const canCancel = yield* proveCanCancelInvitation(lock, invitation);
-			// @ts-expect-error
+			// @ts-expect-error TS2345 The cancellation proof targets a different invitation.
 			yield* membershipService.cancelInvitation(otherInvitation, canCancel);
 			yield* membershipService.cancelInvitation(invitation, canCancel);
 		}),
@@ -1199,14 +1220,26 @@ export const webProofMistakes = named(
 			const input = { url: "https://example.com" };
 			const canFetch = yield* proveCanUseWeb(principal, workspace, WEB_FETCH_TOOL);
 			const canSearch = yield* proveCanUseWeb(principal, workspace, WEB_SEARCH_TOOL);
-			const approved = yield* proveRealApproved(principal, call, approvalRule("web.fetch"), input);
-			const otherApproved = yield* proveRealApproved(other, call, approvalRule("web.fetch"), input);
+			const approved = yield* proveRealApproved(
+				principal,
+				call,
+				approvalRule("web.fetch"),
+				input,
+				workspace,
+			);
+			const otherApproved = yield* proveRealApproved(
+				other,
+				call,
+				approvalRule("web.fetch"),
+				input,
+				workspace,
+			);
 
-			// @ts-expect-error
+			// @ts-expect-error TS2554 Fetching a page requires approval.
 			yield* webService.fetch(canFetch, input);
-			// @ts-expect-error
+			// @ts-expect-error TS2345 Search permission does not grant fetch permission.
 			yield* webService.fetch(canSearch, input, approved);
-			// @ts-expect-error
+			// @ts-expect-error TS2345 Approval from a different principal cannot authorize the fetch.
 			yield* webService.fetch(canFetch, input, otherApproved);
 
 			yield* webService.fetch(canFetch, input, approved);
@@ -1216,13 +1249,23 @@ export const webProofMistakes = named(
 declare const connectorCalls: ConnectorCalls.Interface;
 declare const connectorTurn: RunsTurn<"principal", "turn">;
 declare const connectorUse: CanUseConnector<"principal", "connector">;
-declare const connectorApproval: RecordedApproval<"principal", "call">;
-declare const anotherTurnApproval: RecordedApproval<"other principal", "other call">;
+declare const connectorApproval: RecordedApproval<
+	"principal",
+	"call",
+	["turn", "connector"],
+	"connectors.callTool"
+>;
+declare const anotherTurnApproval: RecordedApproval<
+	"other principal",
+	"other call",
+	["turn", "connector"],
+	"connectors.callTool"
+>;
 
 export const connectorCallMistakes = Effect.gen(function* () {
-	// @ts-expect-error
+	// @ts-expect-error TS2554 A connector call requires the approval recorded for that call.
 	yield* connectorCalls.callTool(connectorTurn, connectorUse);
-	// @ts-expect-error
+	// @ts-expect-error TS2345 The recorded approval belongs to a different turn principal.
 	yield* connectorCalls.callTool(connectorTurn, connectorUse, anotherTurnApproval);
 	yield* connectorCalls.callTool(connectorTurn, connectorUse, connectorApproval);
 });
@@ -1233,24 +1276,222 @@ declare const approvalExpiryWork: DoesStoredWork<"principal", "approval", "appro
 
 export const approvalWithdrawalMistakes = underWorkspaceLock(principal, "workspace", (lock) =>
 	Effect.gen(function* () {
-		// @ts-expect-error
+		// @ts-expect-error TS2740 Withdrawing approvals after reach changes requires the workspace lock.
 		yield* approvalWithdrawals.afterReachChange(lock.workspace);
-		// @ts-expect-error
+		// @ts-expect-error TS2345 Approval expiry requires approval-expiry work.
 		yield* approvalWithdrawals.expire(routineWork);
 		yield* approvalWithdrawals.afterReachChange(lock);
 		yield* approvalWithdrawals.expire(approvalExpiryWork);
 	}),
 );
 
+declare const searchApproval: RecordedApproval<
+	"principal",
+	"call",
+	["turn"],
+	"connectors.searchTools"
+>;
+declare const otherSearchApproval: RecordedApproval<
+	"other principal",
+	"other call",
+	["turn"],
+	"connectors.searchTools"
+>;
+
 export const connectorSearchMistakes = Effect.gen(function* () {
-	// @ts-expect-error
+	// @ts-expect-error TS2554 Connector tool search requires approval.
 	yield* connectorCalls.searchTools(connectorTurn, "issues");
-	// @ts-expect-error
-	yield* connectorCalls.searchTools(connectorTurn, anotherTurnApproval, "issues");
-	yield* connectorCalls.searchTools(connectorTurn, connectorApproval, "issues");
+	// @ts-expect-error TS2345 The recorded approval belongs to a different turn principal.
+	yield* connectorCalls.searchTools(connectorTurn, otherSearchApproval, "issues");
+	yield* connectorCalls.searchTools(connectorTurn, searchApproval, "issues");
 });
 
 export const computerAvailabilityMistake = Effect.gen(function* () {
-	// @ts-expect-error
+	// @ts-expect-error TS2345 A computer id does not prove permission to use the chat's computer.
 	yield* turnComputers.requireComputer("computer-id");
 });
+
+declare const turnRecords: Turns.Records.Interface;
+declare const turnStore: TurnStore.Interface;
+declare const toolCallStore: ToolCallStore.Interface;
+declare const stepTools: Turns.Tools.Interface;
+declare const stepOperations: Parameters<Turns.Tools.Interface["forStep"]>[1];
+declare const loadedStep: Parameters<Turns.Tools.Interface["forStep"]>[2];
+declare const recorder: Turns.Tools.ToolCallRecorder;
+declare const lostEnding: Parameters<Turns.Records.Interface["endLost"]>[1];
+
+export const turnRecordMistakes = named(principal, "chat", "turn", (principal, chat, turn) =>
+	Effect.gen(function* () {
+		const running = yield* proveRunsTurn(yield* proveRealReachesChat(principal, chat), turn);
+		const ending = yield* proveEndsTurn(principal, turn);
+
+		// @ts-expect-error TS2739 Loading step data requires a running turn.
+		yield* turnRecords.load(ending, 0);
+		// @ts-expect-error TS2345 Ending lost work requires authority to end the turn.
+		yield* turnRecords.endLost(running, lostEnding);
+		// @ts-expect-error TS2739 Checking the current execution requires a running turn.
+		yield* turnStore.current(ending);
+		// @ts-expect-error TS2739 Claiming a tool call requires a running turn.
+		yield* toolCallStore.claim(ending, "call");
+		// @ts-expect-error TS2739 Offering tools for a step requires a running turn.
+		yield* stepTools.forStep(ending, stepOperations, loadedStep, recorder);
+
+		yield* turnRecords.load(running, 0);
+		yield* turnRecords.endLost(ending, lostEnding);
+		yield* turnStore.current(running);
+		yield* toolCallStore.claim(running, "call");
+		yield* stepTools.forStep(running, stepOperations, loadedStep, recorder);
+	}),
+);
+
+declare const streams: Streams.Interface;
+declare const details: ChatDetailsView.Interface;
+declare const desktop: DesktopViewer.Interface;
+declare const usage: Usage.Interface;
+declare const timeZone: WorkspaceTimeZone.Interface;
+declare const apps: GitHubApps.Interface;
+declare const accounts: Accounts.Interface;
+declare const filePages: FilePages.Interface;
+declare const floor: FloorControl.Interface;
+declare const month: Parameters<Usage.Interface["month"]>[1];
+declare const committed: Parameters<FloorControl.Interface["giveFloor"]>[0];
+
+export const reachServiceMistakes = named(
+	principal,
+	otherPrincipal,
+	"chat",
+	"bot",
+	(principal, other, chat, bot) =>
+		Effect.gen(function* () {
+			const reachedChat = yield* proveRealReachesChat(principal, chat);
+			const reachedBot = yield* proveReachesBot(other, bot);
+			const otherMember = yield* proveIsMember(other);
+			const canTakePart = yield* proveRealCanTakePart(reachedChat);
+
+			// @ts-expect-error TS2740 Listening to a chat requires proven reach to that chat.
+			streams.hearingChat(chat);
+			// @ts-expect-error TS2740 Listening to a member's stream requires a signed-in member.
+			streams.hearingOwn(other);
+			// @ts-expect-error TS2345 The member reporting typing must be the one taking part.
+			yield* streams.reportTyping(canTakePart, otherMember);
+			// @ts-expect-error TS2740 Reading chat details requires proven reach to the chat.
+			yield* details.get(chat);
+			// @ts-expect-error TS2345 The computer's bot and chat must be reached by the same principal.
+			yield* desktop.openComputer(reachedChat, reachedBot);
+			// @ts-expect-error TS2740 Reading a referral link requires a signed-in member.
+			yield* accounts.referralLink(other);
+			// @ts-expect-error TS2740 Resetting a referral link requires a signed-in member.
+			yield* accounts.resetReferralLink(other);
+			// @ts-expect-error TS2740 Giving up the floor requires proven reach to the chat.
+			yield* floor.giveFloor(committed, chat);
+
+			streams.hearingChat(reachedChat);
+			streams.hearingOwn(otherMember);
+			yield* streams.reportTyping(canTakePart, yield* proveIsMember(principal));
+			yield* details.get(reachedChat);
+			yield* desktop.openComputer(reachedChat, yield* proveReachesBot(principal, bot));
+			yield* accounts.referralLink(otherMember);
+			yield* accounts.resetReferralLink(otherMember);
+			yield* floor.giveFloor(committed, reachedChat);
+		}),
+);
+
+export const workspaceServiceMistakes = named(
+	principal,
+	"workspace",
+	"project",
+	"file",
+	(principal, workspace, project, file) =>
+		Effect.gen(function* () {
+			const inWorkspace = yield* proveRealInWorkspace(principal, workspace);
+			const canRead = yield* proveCanReadWorkspace(inWorkspace);
+			const canManage = yield* proveCanManageWorkspace(inWorkspace);
+			const reachedProject = yield* proveRealReachesProject(principal, project);
+
+			// @ts-expect-error TS2739 Listening to a workspace requires knowing which resources it offers this principal.
+			yield* streams.hearingIn(inWorkspace);
+			// @ts-expect-error TS2345 Reading usage requires workspace management permission.
+			yield* usage.month(canRead, month);
+			// @ts-expect-error TS2345 Reading the time zone setting requires workspace management permission.
+			yield* timeZone.get(canRead);
+			// @ts-expect-error TS2739 Starting a GitHub app requires project management permission.
+			yield* apps.start(reachedProject, undefined);
+			// @ts-expect-error TS2740 Making a page address requires proven reach to its file.
+			yield* filePages.address(file, 1);
+
+			yield* streams.hearingIn(proveReachSet(inWorkspace));
+			yield* usage.month(canManage, month);
+			yield* timeZone.get(canManage);
+			yield* apps.start(yield* proveRealCanManageProject(reachedProject), undefined);
+			yield* filePages.address(yield* proveReachesFile(principal, file), 1);
+		}),
+);
+
+declare const runner: AutomationRunner.Interface;
+declare const automationStore: AutomationStore.Interface;
+declare const projectComputers: ProjectComputers.Interface;
+declare const uninstalls: GitHubUninstalls.Interface;
+declare const pauseWork: DoesStoredWork<"principal", "automation", "pauseAfterFailures">;
+declare const sleepWork: DoesStoredWork<"principal", "computer", "computerSleep">;
+declare const uninstallWork: DoesStoredWork<"principal", "uninstall", "gitHubUninstall">;
+
+export const storedWorkMistakes = Effect.gen(function* () {
+	// @ts-expect-error TS2345 Pause work cannot authorize running a due routine.
+	yield* runner.runDueRoutine(pauseWork);
+	// @ts-expect-error TS2345 Due-routine work cannot authorize pausing an automation.
+	yield* automationStore.pauseAfterFailures(routineWork);
+	// @ts-expect-error TS2345 Due-routine work cannot authorize sleeping a computer.
+	yield* projectComputers.sleepIfIdle(routineWork);
+	// @ts-expect-error TS2345 Due-routine work cannot authorize uninstalling a GitHub app.
+	yield* uninstalls.uninstall(routineWork);
+
+	yield* runner.runDueRoutine(routineWork);
+	yield* automationStore.pauseAfterFailures(pauseWork);
+	yield* projectComputers.sleepIfIdle(sleepWork);
+	yield* uninstalls.uninstall(uninstallWork);
+});
+
+export const pageServingMistakes = named(page, "file", (principal, file) =>
+	Effect.gen(function* () {
+		const reach = yield* proveReachesFile(principal, file);
+		// @ts-expect-error TS2741 File reach does not authorize serving a page version.
+		yield* filesService.servePage(reach);
+		yield* filesService.servePage(yield* proveReachesPage(principal, file));
+	}),
+);
+
+declare const connectorEvents: Automations.ConnectorEventsInterface;
+declare const activity: Parameters<Automations.ConnectorEventsInterface["accept"]>[1];
+
+export const connectorEventMistakes = named(principal, "connector", (principal, connector) =>
+	Effect.gen(function* () {
+		// @ts-expect-error TS2740 A named connector does not prove which GitHub app signed the delivery.
+		yield* connectorEvents.accept(connector, activity);
+		yield* connectorEvents.accept(yield* proveSignedByGitHubApp(principal, connector), activity);
+	}),
+);
+
+export const computerDeletionMistakes = named("workspace", "project", (workspace, project) =>
+	Effect.gen(function* () {
+		const workspaceDeletion = yield* proveDeletionRecorded(workspace);
+		const projectDeletion = yield* proveProjectDeletionRecorded(workspace, project);
+		if (!workspaceDeletion || !projectDeletion) return;
+		// @ts-expect-error TS2741 Destroying one project's computer requires a recorded project deletion.
+		yield* projectComputers.destroy(workspaceDeletion);
+		// @ts-expect-error TS2345 Destroying all computers requires a recorded workspace deletion.
+		yield* projectComputers.destroyAllIn(projectDeletion);
+		yield* projectComputers.destroy(projectDeletion);
+		yield* projectComputers.destroyAllIn(workspaceDeletion);
+	}),
+);
+
+export const approvalInputMistake = named(principal, projectCall, "bot", (principal, call, bot) =>
+	Effect.gen(function* () {
+		const input = { botId: "bot" };
+		// @ts-expect-error TS2739 The approval input must be named so the proof is bound to it.
+		yield* proveNamedApproval(principal, call, approvalRule("bots.pin"), input, bot);
+		yield* named(input, (input) =>
+			proveNamedApproval(principal, call, approvalRule("bots.pin"), input, bot),
+		);
+	}),
+);

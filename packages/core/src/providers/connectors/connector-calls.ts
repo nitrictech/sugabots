@@ -41,13 +41,13 @@ export interface Interface {
 	>;
 	readonly searchTools: <P, T, X>(
 		turn: RunsTurn<P, T>,
-		approved: Approved<NoInfer<P>, X>,
+		approved: Approved<NoInfer<P>, X, [T], "connectors.searchTools">,
 		query: string,
 	) => Effect.Effect<unknown, ResourceHidden>;
 	readonly callTool: <P, T, K, X>(
 		turn: RunsTurn<P, T>,
 		use: CanUseConnector<NoInfer<P>, K>,
-		approved: Approved<NoInfer<P>, X>,
+		approved: Approved<NoInfer<P>, X, [T, K], "connectors.callTool">,
 	) => Effect.Effect<unknown, ResourceHidden>;
 }
 

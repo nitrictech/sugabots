@@ -3,16 +3,17 @@ import type { AddressInfo } from "node:net";
 import { Server as McpProtocolServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { Effect, Logger, ManagedRuntime, Schema } from "effect";
+import { eq } from "drizzle-orm";
+import { Duration, Effect, Logger, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { effectRunner } from "../../database/database.ts";
-import { noDatabase } from "../../database/testing.ts";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
+import { connector as connectorTable } from "../../database/schema.ts";
+import { closeDatabase, onDatabase, runOnPostgres as run } from "../../database/testing.ts";
 import type { ConnectorTarget } from "../../providers/connectors/connector-target.ts";
 import { connectServer } from "../../providers/connectors/mcp.ts";
 import { oauthClient, SignInRequired } from "../../providers/connectors/oauth.ts";
-import { ConnectorCatalog } from "./connector-catalog.ts";
-import { NO_TURN } from "./testing.ts";
+import { ConnectorCatalog, LISTING_LIFETIME } from "./connector-catalog.ts";
+import { catalogReachFixture } from "./testing.ts";
 
 /**
  * A turn's connector tools against a real MCP server in this process. What
@@ -23,9 +24,17 @@ import { NO_TURN } from "./testing.ts";
 
 let http: Server;
 let url: string;
-let requests = 0;
-const run = effectRunner(ManagedRuntime.make(noDatabase));
+const postsByPath = new Map<string, number>();
+let reach: Awaited<ReturnType<typeof catalogReachFixture>>;
+let wikiId: string;
+let lockedId: string;
+let linearId: string;
+let otherWikiId: string;
+let notesId: string;
+let revisedId: string;
+const ownProject = () => ({ projectId: reach.project, ownProjectId: reach.project });
 
+const LOOKUP_REFUSAL = "No entry for that query.";
 const lookupInput = Schema.Struct({ q: Schema.String });
 
 /** What a connector signed in with OAuth holds, which the SDK sends as a bearer header. */
@@ -54,6 +63,8 @@ function fixtureServer(): McpProtocolServer {
 	server.setRequestHandler(CallToolRequestSchema, (request) => {
 		if (request.params.name === "lookup") {
 			const { q } = Schema.decodeUnknownSync(lookupInput)(request.params.arguments);
+			if (q === "missing")
+				return { isError: true, content: [{ type: "text", text: LOOKUP_REFUSAL }] };
 			return { content: [{ type: "text", text: `found ${q}` }] };
 		}
 		return { content: [{ type: "text", text: "gone" }] };
@@ -68,8 +79,19 @@ async function jsonBody(request: IncomingMessage): Promise<{ method?: string } |
 }
 
 beforeAll(async () => {
+	reach = await catalogReachFixture();
+	[wikiId, lockedId, linearId, otherWikiId, notesId, revisedId] = await Promise.all([
+		reach.connector(),
+		reach.connector(),
+		reach.connector(),
+		reach.connector(reach.otherProject),
+		reach.connector(reach.otherProject),
+		reach.connector(),
+	]);
 	http = createServer(async (request, response) => {
-		requests += 1;
+		if (request.method === "POST" && request.url) {
+			postsByPath.set(request.url, (postsByPath.get(request.url) ?? 0) + 1);
+		}
 		const key = request.headers["x-fixture-key"];
 		const bearer = request.headers.authorization;
 		if (key !== "open-sesame" && bearer !== `Bearer ${ACCESS_TOKEN}`) {
@@ -96,12 +118,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+	await closeDatabase();
 	http.closeAllConnections();
 	await new Promise<void>((resolve) => http.close(() => resolve()));
 });
 
 const target = (extra: Partial<ConnectorTarget> = {}): ConnectorTarget => ({
-	connectorId: "0199a3a0-0000-7000-8000-0000000000f1",
+	connectorId: wikiId,
 	handle: "wiki",
 	kind: "mcp",
 	url,
@@ -128,89 +151,98 @@ function toolsFor(...targets: ConnectorTarget[]) {
 	return offered;
 }
 
+function closeToolsAfterTest(set: ConnectorCatalog.ConnectorToolSet) {
+	onTestFinished(() => set.close());
+	return set;
+}
+
 describe("a turn's connector tools", () => {
+	it("offers only reached connectors at the listed revision", async () => {
+		const offered = toolsFor(
+			target(),
+			target({ connectorId: linearId, handle: "stale", configurationRevision: 2 }),
+			target({ connectorId: otherWikiId, handle: "other_project" }),
+			target({ connectorId: "0199a3a0-0000-7000-8000-0000000000ff", handle: "missing" }),
+		);
+
+		const set = closeToolsAfterTest(
+			await run(offered.forTurn(reach.workspace, ownProject(), reach.side)),
+		);
+		expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
+	});
+
 	it("runs a tool set to allow straight away, a change included", async () => {
 		const offered = toolsFor(target());
 
-		const set = await run(offered.forTurn("w", OWN_PROJECT, NO_TURN));
-		try {
-			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
-			expect(set.tools.wiki__lookup).toMatchObject({ writeOrDelete: false, access: "allow" });
-			expect(set.tools.wiki__wipe).toMatchObject({ writeOrDelete: true, access: "allow" });
-			const result = await set.tools.wiki__lookup?.tool.execute?.({ q: "it" }, {
-				toolCallId: "1",
-				messages: [],
-			} as never);
-			expect(result).toMatchObject({ content: [{ type: "text", text: "found it" }] });
-		} finally {
-			await set.close();
-		}
+		const set = closeToolsAfterTest(
+			await run(offered.forTurn(reach.workspace, ownProject(), reach.side)),
+		);
+		expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
+		expect(set.tools.wiki__lookup).toMatchObject({ writeOrDelete: false, access: "allow" });
+		expect(set.tools.wiki__wipe).toMatchObject({ writeOrDelete: true, access: "allow" });
+		const result = await set.tools.wiki__lookup?.tool.execute?.({ q: "it" }, {
+			toolCallId: "1",
+			messages: [],
+		} as never);
+		expect(result).toMatchObject({ content: [{ type: "text", text: "found it" }] });
 	});
 
 	it("asks before each call to a tool set to ask, a read included", async () => {
 		const offered = toolsFor(target({ toolAccess: { lookup: "ask", wipe: "ask" } }));
 
-		const set = await run(offered.forTurn("w", OWN_PROJECT, NO_TURN));
-		try {
-			expect(set.tools.wiki__lookup).toMatchObject({ writeOrDelete: false, access: "ask" });
-			expect(set.tools.wiki__wipe).toMatchObject({ writeOrDelete: true, access: "ask" });
-		} finally {
-			await set.close();
-		}
+		const set = closeToolsAfterTest(
+			await run(offered.forTurn(reach.workspace, ownProject(), reach.side)),
+		);
+		expect(set.tools.wiki__lookup).toMatchObject({ writeOrDelete: false, access: "ask" });
+		expect(set.tools.wiki__wipe).toMatchObject({ writeOrDelete: true, access: "ask" });
 	});
 
 	it("still offers a tool set to off, so the tools sent to the model stay the same", async () => {
 		const offered = toolsFor(target({ toolAccess: { lookup: "allow", wipe: "off" } }));
 
-		const set = await run(offered.forTurn("w", OWN_PROJECT, NO_TURN));
-		try {
-			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
-			expect(set.tools.wiki__wipe).toMatchObject({ access: "off" });
-		} finally {
-			await set.close();
-		}
+		const set = closeToolsAfterTest(
+			await run(offered.forTurn(reach.workspace, ownProject(), reach.side)),
+		);
+		expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
+		expect(set.tools.wiki__wipe).toMatchObject({ access: "off" });
 	});
 
 	it("treats a tool the server did not list when last asked as its default says", async () => {
 		const offered = toolsFor(target({ toolAccess: {} }));
 
-		const set = await run(offered.forTurn("w", OWN_PROJECT, NO_TURN));
-		try {
-			// `lookup` says it only reads; `wipe` says nothing, so it may change things.
-			expect(set.tools.wiki__lookup).toMatchObject({ access: "allow" });
-			expect(set.tools.wiki__wipe).toMatchObject({ access: "ask" });
-		} finally {
-			await set.close();
-		}
+		const set = closeToolsAfterTest(
+			await run(offered.forTurn(reach.workspace, ownProject(), reach.side)),
+		);
+		// `lookup` says it only reads; `wipe` says nothing, so it may change things.
+		expect(set.tools.wiki__lookup).toMatchObject({ access: "allow" });
+		expect(set.tools.wiki__wipe).toMatchObject({ access: "ask" });
 	});
 
 	it("leaves out a server that will not answer, and keeps the ones that do", async () => {
 		const logged: unknown[] = [];
 		const offered = toolsFor(
 			target({
-				connectorId: "0199a3a0-0000-7000-8000-0000000000f2",
+				connectorId: lockedId,
 				handle: "locked",
 				headers: { "x-fixture-key": "nope" },
 			}),
 			target(),
 		);
 
-		const set = await run(
-			offered
-				.forTurn("w", OWN_PROJECT, NO_TURN)
-				.pipe(Effect.provide(Logger.layer([Logger.make(({ message }) => logged.push(message))]))),
+		const set = closeToolsAfterTest(
+			await run(
+				offered
+					.forTurn(reach.workspace, ownProject(), reach.side)
+					.pipe(Effect.provide(Logger.layer([Logger.make(({ message }) => logged.push(message))]))),
+			),
 		);
-		try {
-			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
-			expect(logged).toContainEqual(["Connector locked left out of the turn", expect.anything()]);
-		} finally {
-			await set.close();
-		}
+		expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
+		expect(logged).toContainEqual(["Connector locked left out of the turn", expect.anything()]);
 	});
 
 	it("adds Linear's upload to a Linear connector, running without asking, and to no other", async () => {
 		const linear = target({
-			connectorId: "0199a3a0-0000-7000-8000-0000000000f3",
+			connectorId: linearId,
 			handle: "linear",
 			url: "https://mcp.linear.app/mcp",
 			toolAccess: {},
@@ -229,32 +261,30 @@ describe("a turn's connector tools", () => {
 			connect: (server, client) => connectServer({ ...server, url }, client),
 		});
 
-		const set = await run(offered.forTurn("w", OWN_PROJECT, NO_TURN));
-		try {
-			expect(Object.keys(set.tools).sort()).toEqual([
-				"linear__lookup",
-				"linear__upload_file",
-				"linear__wipe",
-				"wiki__lookup",
-				"wiki__wipe",
-			]);
-			expect(set.tools.linear__upload_file).toMatchObject({
-				handle: "linear",
-				access: "allow",
-				writeOrDelete: true,
-				remoteToolName: "upload_file",
-			});
-			expect(set.tools.linear__upload_file?.description).toContain(
-				"linear__prepare_attachment_upload",
-			);
-		} finally {
-			await set.close();
-		}
+		const set = closeToolsAfterTest(
+			await run(offered.forTurn(reach.workspace, ownProject(), reach.side)),
+		);
+		expect(Object.keys(set.tools).sort()).toEqual([
+			"linear__lookup",
+			"linear__upload_file",
+			"linear__wipe",
+			"wiki__lookup",
+			"wiki__wipe",
+		]);
+		expect(set.tools.linear__upload_file).toMatchObject({
+			handle: "linear",
+			access: "allow",
+			writeOrDelete: true,
+			remoteToolName: "upload_file",
+		});
+		expect(set.tools.linear__upload_file?.description).toContain(
+			"linear__prepare_attachment_upload",
+		);
 	});
 
 	it("names a connector whose sign-in was refused apart from one that will not answer, and does not offer it to be added", async () => {
 		const linear = target({
-			connectorId: "0199a3a0-0000-7000-8000-0000000000f3",
+			connectorId: linearId,
 			handle: "linear",
 			url: "https://mcp.linear.app/mcp",
 			auth: "oauth",
@@ -275,26 +305,24 @@ describe("a turn's connector tools", () => {
 					: connectServer(server, client),
 		});
 
-		const set = await run(offered.forTurn("w", OWN_PROJECT, NO_TURN));
-		try {
-			expect(set.signInExpired).toEqual([
-				{ handle: "notion", projectId: "p" },
-				{ handle: "linear", projectId: "p" },
-			]);
-			// Notion is still the bot's, so the model isn't told to add it.
-			expect(set.addable.map((builtIn) => builtIn.id)).not.toContain("notion");
-			expect(set.unavailable).toEqual(["locked"]);
-		} finally {
-			await set.close();
-		}
+		const set = closeToolsAfterTest(
+			await run(offered.forTurn(reach.workspace, ownProject(), reach.side)),
+		);
+		expect(set.signInExpired).toEqual([
+			{ handle: "notion", projectId: reach.project },
+			{ handle: "linear", projectId: reach.project },
+		]);
+		// Notion is still the bot's, so the model isn't told to add it.
+		expect(set.addable.map((builtIn) => builtIn.id)).not.toContain("notion");
+		expect(set.unavailable).toEqual(["locked"]);
 	});
 
 	it("offers a project's connectors and the bot's own, the project's where both have a handle", async () => {
 		const projects: Record<string, ConnectorTarget[]> = {
-			project: [target()],
-			own: [
-				target({ connectorId: "0199a3a0-0000-7000-8000-0000000000f4" }),
-				target({ connectorId: "0199a3a0-0000-7000-8000-0000000000f5", handle: "notes" }),
+			[reach.project]: [target()],
+			[reach.otherProject]: [
+				target({ connectorId: otherWikiId }),
+				target({ connectorId: notesId, handle: "notes" }),
 			],
 		};
 		const offered = ConnectorCatalog.from({
@@ -311,27 +339,29 @@ describe("a turn's connector tools", () => {
 			httpClients: { for: () => fetch },
 		});
 
-		const set = await run(
-			offered.forTurn("w", { projectId: "project", ownProjectId: "own" }, NO_TURN),
+		const set = closeToolsAfterTest(
+			await run(
+				offered.forTurn(
+					reach.workspace,
+					{ projectId: reach.project, ownProjectId: reach.otherProject },
+					reach.side,
+				),
+			),
 		);
-		try {
-			expect(Object.keys(set.tools).sort()).toEqual([
-				"notes__lookup",
-				"notes__wipe",
-				"wiki__lookup",
-				"wiki__wipe",
-			]);
-			expect(set.tools.wiki__lookup?.connectorId).toBe(target().connectorId);
-			expect(set.fromProjectAndBot).toBe(true);
-		} finally {
-			await set.close();
-		}
+		expect(Object.keys(set.tools).sort()).toEqual([
+			"notes__lookup",
+			"notes__wipe",
+			"wiki__lookup",
+			"wiki__wipe",
+		]);
+		expect(set.tools.wiki__lookup?.connectorId).toBe(target().connectorId);
+		expect(set.fromProjectAndBot).toBe(true);
 	});
 
 	it("names each connector whose sign-in expired with the project it is signed in again from", async () => {
 		const expired: Record<string, { handle: string }[]> = {
-			project: [{ handle: "notion" }],
-			own: [{ handle: "notion" }, { handle: "linear" }],
+			[reach.project]: [{ handle: "notion" }],
+			[reach.otherProject]: [{ handle: "notion" }, { handle: "linear" }],
 		};
 		const offered = ConnectorCatalog.from({
 			connectors: {
@@ -346,22 +376,32 @@ describe("a turn's connector tools", () => {
 		});
 
 		const set = await run(
-			offered.forTurn("w", { projectId: "project", ownProjectId: "own" }, NO_TURN),
+			offered.forTurn(
+				reach.workspace,
+				{ projectId: reach.project, ownProjectId: reach.otherProject },
+				reach.side,
+			),
 		);
 
 		expect(set.signInExpired).toEqual([
-			{ handle: "notion", projectId: "project" },
-			{ handle: "linear", projectId: "own" },
+			{ handle: "notion", projectId: reach.project },
+			{ handle: "linear", projectId: reach.otherProject },
 		]);
 	});
 
 	describe("from one turn to the next", () => {
 		const callOptions = { toolCallId: "1", messages: [] } as never;
 
-		async function requestsDuring(turn: Promise<unknown>) {
-			const before = requests;
-			await turn;
-			return requests - before;
+		function countedServer(path: string, extra: Partial<ConnectorTarget> = {}) {
+			const connector = target({ ...extra, url: new URL(path, url).href });
+			const requests = () => postsByPath.get(path) ?? 0;
+			return { connector, requests };
+		}
+
+		async function requestsDuring(requests: () => number, turn: () => Promise<unknown>) {
+			const before = requests();
+			await turn();
+			return requests() - before;
 		}
 
 		const turnOn = (
@@ -369,7 +409,7 @@ describe("a turn's connector tools", () => {
 			use: (set: ConnectorCatalog.ConnectorToolSet) => Promise<unknown> = async () => undefined,
 		) =>
 			Effect.gen(function* () {
-				const set = yield* offered.forTurn("w", OWN_PROJECT, NO_TURN);
+				const set = yield* offered.forTurn(reach.workspace, ownProject(), reach.side);
 				try {
 					return yield* Effect.promise(() => use(set));
 				} finally {
@@ -378,12 +418,13 @@ describe("a turn's connector tools", () => {
 			});
 
 		it("asks a server for its tools once, then reaches it only to call one", async () => {
-			const offered = toolsFor(target());
+			const { connector, requests } = countedServer("/cached-listing");
+			const offered = toolsFor(connector);
 			await run(turnOn(offered));
 
-			expect(await requestsDuring(run(turnOn(offered)))).toBe(0);
+			expect(await requestsDuring(requests, () => run(turnOn(offered)))).toBe(0);
 			let result: unknown;
-			const calling = await requestsDuring(
+			const calling = await requestsDuring(requests, () =>
 				run(
 					turnOn(offered, async (set) => {
 						result = await set.tools.wiki__lookup?.tool.execute?.({ q: "it" }, callOptions);
@@ -395,10 +436,32 @@ describe("a turn's connector tools", () => {
 		});
 
 		it("names a connector it couldn't reach, and doesn't wait on it again for a minute", async () => {
-			const offered = toolsFor(target({ handle: "locked", headers: { "x-fixture-key": "nope" } }));
+			const { connector, requests } = countedServer("/cached-refusal", {
+				handle: "locked",
+				headers: { "x-fixture-key": "nope" },
+			});
+			const offered = toolsFor(connector);
 
-			expect(await run(turnOn(offered, async (set) => set.unavailable))).toEqual(["locked"]);
-			expect(await requestsDuring(run(turnOn(offered)))).toBe(0);
+			const checked = await run(
+				Effect.gen(function* () {
+					const unavailable = yield* turnOn(offered, async (set) => set.unavailable);
+					const afterFirstAttempt = requests();
+					yield* TestClock.adjust("59 seconds");
+					yield* turnOn(offered);
+					const beforeExpiry = requests() - afterFirstAttempt;
+					yield* TestClock.adjust("1 second");
+					yield* turnOn(offered);
+					return {
+						unavailable,
+						beforeExpiry,
+						afterExpiry: requests() - afterFirstAttempt - beforeExpiry,
+					};
+				}).pipe(Effect.provide(TestClock.layer())),
+			);
+
+			expect(checked.unavailable).toEqual(["locked"]);
+			expect(checked.beforeExpiry).toBe(0);
+			expect(checked.afterExpiry).toBeGreaterThan(0);
 		});
 
 		it("keeps what a server says about using its tools, with its tool list", async () => {
@@ -413,13 +476,13 @@ describe("a turn's connector tools", () => {
 		it("tells the model what a server said when it refused a call", async () => {
 			const result = await run(
 				turnOn(toolsFor(target()), async (set) =>
-					set.tools.wiki__lookup?.tool.execute?.({}, callOptions),
+					set.tools.wiki__lookup?.tool.execute?.({ q: "missing" }, callOptions),
 				),
 			);
 
 			expect(result).toMatchObject({
 				isError: true,
-				content: [{ type: "text", text: expect.any(String) }],
+				content: [{ type: "text", text: LOOKUP_REFUSAL }],
 			});
 		});
 
@@ -488,7 +551,10 @@ describe("a turn's connector tools", () => {
 		});
 
 		it("asks again once the connector has been edited", async () => {
-			const targets = [target()];
+			const { connector, requests } = countedServer("/revised-connector", {
+				connectorId: revisedId,
+			});
+			const targets = [connector];
 			const offered = ConnectorCatalog.from({
 				connectors: {
 					targetsForProject: () =>
@@ -501,32 +567,41 @@ describe("a turn's connector tools", () => {
 				httpClients: { for: () => fetch },
 			});
 			await run(turnOn(offered));
-			targets[0] = target({ configurationRevision: 2 });
+			await onDatabase((db) =>
+				db
+					.update(connectorTable)
+					.set({ configurationRevision: 2 })
+					.where(eq(connectorTable.id, revisedId)),
+			);
+			targets[0] = { ...connector, configurationRevision: 2 };
 
-			expect(await requestsDuring(run(turnOn(offered)))).toBeGreaterThan(0);
+			expect(await requestsDuring(requests, () => run(turnOn(offered)))).toBeGreaterThan(0);
 		});
 
 		it("asks again once its list is old, so a server's new tools are picked up", async () => {
-			const offered = toolsFor(target());
+			const { connector, requests } = countedServer("/expired-listing");
+			const offered = toolsFor(connector);
+
+			const lifetimeMs = Duration.toMillis(LISTING_LIFETIME);
+			expect(lifetimeMs).toBe(Duration.toMillis(Duration.minutes(15)));
 
 			const later = await run(
 				Effect.gen(function* () {
 					yield* turnOn(offered);
-					const before = requests;
-					yield* TestClock.adjust("14 minutes");
+					const before = requests();
+					yield* TestClock.adjust(Duration.millis(lifetimeMs - 1));
 					yield* turnOn(offered);
-					const fresh = requests - before;
-					yield* TestClock.adjust("2 minutes");
+					const fresh = requests() - before;
+					yield* TestClock.adjust(Duration.millis(1));
 					yield* turnOn(offered);
-					return { fresh, old: requests - before - fresh };
+					return { fresh, old: requests() - before - fresh };
 				}).pipe(Effect.provide(TestClock.layer())),
 			);
 
-			expect(later).toEqual({ fresh: 0, old: expect.any(Number) });
+			expect(later.fresh).toBe(0);
 			expect(later.old).toBeGreaterThan(0);
 		});
 	});
 });
 
 /** A turn in the bot's own default project, so its connectors are that project's alone. */
-const OWN_PROJECT = { projectId: "p", ownProjectId: "p" };

@@ -2,7 +2,7 @@ import type { ListedWrittenFile } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { engineering, growthDesk, revenue } from "@/shell/story-fixtures.ts";
+import { engineering, growthDesk, revenue } from "@/shell/story-fixtures.test-support.ts";
 import {
 	appHandlers,
 	StoryApp,
@@ -11,7 +11,7 @@ import {
 	storyMember,
 	storySecondChatFor,
 	storyWorkspace,
-} from "@/story-app.tsx";
+} from "@/story-app.test-support.tsx";
 
 /*
  * The app on a phone: Home, Approvals and You as tabs along the foot,

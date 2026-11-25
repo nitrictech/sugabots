@@ -1,6 +1,6 @@
 import type { ProviderModelCapability } from "@sugabots/contracts";
 import { jsonSchema, type ToolResultPart, type ToolSet, tool } from "ai";
-import { Cause, Effect, Exit, ManagedRuntime, Option } from "effect";
+import { Cause, Clock, Duration, Effect, Exit, Fiber, ManagedRuntime, Option } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ModelRequests } from "../../accounting/model-requests.ts";
 import { seedMember, seedWorkspace } from "../../authentication/seed.test-support.ts";
@@ -75,16 +75,20 @@ function modelAnswering(
 	provider: ProviderIdentity = OPENAI,
 	capabilities: readonly ProviderModelCapability[] = [],
 	resolve?: ModelProviderStore.Interface["resolve"],
+	renewOAuthTokens: ModelProviderStore.Interface["renewOAuthTokens"] = () =>
+		Effect.die(new Error("Not a ChatGPT provider")),
 ) {
 	const recorded: Recorded[] = [];
 	/** Each request's body, as the provider was sent it. */
 	const sent: Array<Record<string, unknown>> = [];
 	/** Each request's URL, and the base URL its client was bound to. */
 	const addressed: Array<{ url: string; boundTo: string }> = [];
+	/** Each request's headers, by lower-case name. */
+	const headers: Array<Record<string, string>> = [];
 	const answers = [...responses];
 	const model = Models.make({
 		modelProviders: {
-			renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
+			renewOAuthTokens,
 			resolve:
 				resolve ??
 				(() =>
@@ -104,6 +108,7 @@ function modelAnswering(
 		httpClients: {
 			for: (endpoint) => async (url, init) => {
 				addressed.push({ url: String(url), boundTo: endpoint.baseUrl });
+				headers.push(Object.fromEntries(new Headers(init?.headers).entries()));
 				sent.push(JSON.parse(String(init?.body)));
 				return answers.shift()?.(recorded) ?? new Response("No more answers", { status: 500 });
 			},
@@ -118,7 +123,7 @@ function modelAnswering(
 		},
 		registry: { version: "models.dev@test", cost: () => ({ input: 3, output: 15 }) },
 	});
-	return { model, recorded, sent, addressed };
+	return { model, recorded, sent, addressed, headers };
 }
 
 const input: Models.StreamRequest = {
@@ -136,8 +141,12 @@ const input: Models.StreamRequest = {
 	},
 };
 
-/** Reads the whole response: its text, and how it ended. */
-const answer = (model: ReturnType<typeof modelAnswering>["model"], request = input) =>
+/** Reads the whole response: its text, and how it ended, on `clock` unless it is left to the real one. */
+const answer = (
+	model: ReturnType<typeof modelAnswering>["model"],
+	request = input,
+	clock?: Clock.Clock,
+) =>
 	run(
 		Effect.scoped(
 			Effect.gen(function* () {
@@ -150,8 +159,42 @@ const answer = (model: ReturnType<typeof modelAnswering>["model"], request = inp
 				);
 				return { text, finished: yield* Effect.exit(generated.finished) };
 			}),
-		),
+		).pipe((answered) => (clock ? Effect.provideService(answered, Clock.Clock, clock) : answered)),
 	);
+
+/**
+ * A clock whose sleeps last until `wake`, so a case sees how long it was
+ * asked to wait and acts while it waits. `nextSleep` resolves with the
+ * milliseconds of the first sleep.
+ */
+function sleepsUntilWoken() {
+	const woken = Promise.withResolvers<void>();
+	const asked = Promise.withResolvers<number>();
+	const cancelled = Promise.withResolvers<void>();
+	const live = Effect.runSync(Clock.clockWith(Effect.succeed));
+	const clock: Clock.Clock = Object.create(live, {
+		sleep: {
+			value: (duration: Duration.Duration) =>
+				Effect.callback<void>((resume) => {
+					asked.resolve(Duration.toMillis(duration));
+					void woken.promise.then(() => resume(Effect.void));
+					return Effect.sync(() => cancelled.resolve());
+				}),
+		},
+	});
+	/** Resolves once something sleeps, as the case's own effect can wait on. */
+	const sleeping = Effect.callback<number>((resume) => {
+		void asked.promise.then((milliseconds) => resume(Effect.succeed(milliseconds)));
+	});
+	return {
+		clock,
+		nextSleep: asked.promise,
+		sleeping,
+		/** Resolves once the sleep is given up on, rather than woken. */
+		cancelled: cancelled.promise,
+		wake: () => woken.resolve(),
+	};
+}
 
 /**
  * Makes a turn's two steps' requests as the bot loop does: the first, offered
@@ -216,6 +259,95 @@ async function answerAsTheLoop(
 	});
 }
 
+describe("the request a provider is sent", () => {
+	const KEY = "secret";
+	const customHeaders = { "x-workspace": "workspace" };
+	const resolvingTo =
+		(access: Omit<ModelProviderStore.ProviderAccess, "providerId" | "configurationUpdatedAt">) =>
+		() =>
+			Effect.succeed(
+				resolvedModel({ providerId: PROVIDER_ID, ...access, configurationUpdatedAt: new Date(0) }),
+			);
+
+	it.each([
+		{
+			name: "an OpenAI-format provider whose address ends in a slash",
+			apiFormat: "openai",
+			baseUrl: "https://models.example/v1/",
+			boundTo: "https://models.example/v1",
+			url: "https://models.example/v1/chat/completions",
+			authorization: { authorization: `Bearer ${KEY}` },
+		},
+		{
+			name: "an Anthropic-format provider at a bare host",
+			apiFormat: "anthropic",
+			baseUrl: "https://models.example",
+			boundTo: "https://models.example/v1",
+			url: "https://models.example/v1/messages",
+			authorization: { "x-api-key": KEY },
+		},
+		{
+			name: "an Anthropic-format provider whose address ends in /v1/",
+			apiFormat: "anthropic",
+			baseUrl: "https://models.example/v1/",
+			boundTo: "https://models.example/v1",
+			url: "https://models.example/v1/messages",
+			authorization: { "x-api-key": KEY },
+		},
+	] as const)(
+		"goes through the provider's own client to $url, with its key and headers, for $name",
+		async ({ apiFormat, baseUrl, boundTo, url, authorization }) => {
+			const { model, addressed, headers } = modelAnswering(
+				[],
+				OPENAI,
+				[],
+				resolvingTo({
+					builtIn: null,
+					baseUrl,
+					apiFormat,
+					apiKey: KEY,
+					headers: customHeaders,
+				}),
+			);
+
+			await answer(model);
+
+			expect(addressed).toEqual([{ url, boundTo }]);
+			expect(headers[0]).toMatchObject({ ...authorization, ...customHeaders });
+		},
+	);
+
+	it("asks the Codex backend with a ChatGPT subscription's access token and account", async () => {
+		const tokens = {
+			access: "access-token",
+			refresh: "refresh-token",
+			expiresAt: Date.now() + 60 * 60_000,
+			accountId: "account-1",
+		};
+		const { model, addressed, headers } = modelAnswering(
+			[],
+			OPENAI,
+			[],
+			resolvingTo({
+				builtIn: "chatgpt",
+				baseUrl: "https://chatgpt.com/backend-api/codex",
+				apiFormat: "openai",
+				headers: {},
+				oauthTokens: tokens,
+			}),
+			(_workspaceId, _providerId, renew) => renew(tokens),
+		);
+
+		await answer(model, { ...input, model: "gpt-5.5" });
+
+		expect(addressed[0]?.url).toBe("https://chatgpt.com/backend-api/codex/responses");
+		expect(headers[0]).toMatchObject({
+			authorization: "Bearer access-token",
+			"chatgpt-account-id": "account-1",
+		});
+	});
+});
+
 describe("recording model requests", () => {
 	it("records each request a turn makes, as the step it is, with what it used and what it cost", async () => {
 		const { model, recorded } = modelAnswering([toolCall, reply]);
@@ -278,11 +410,18 @@ describe("a rate-limited provider", () => {
 	const rateLimited = (headers: Record<string, string>) => () =>
 		Response.json({ error: { message: "Slow down" } }, { status: 429, headers });
 
-	it("is asked again after the short wait it asks for, and the reply goes on", async () => {
-		const { model, sent } = modelAnswering([rateLimited({ "retry-after-ms": "1" }), reply]);
+	it("is asked again only once the wait it asks for has passed, and the reply goes on", async () => {
+		const { model, sent } = modelAnswering([rateLimited({ "retry-after-ms": "30000" }), reply]);
+		const waiting = sleepsUntilWoken();
+		const answering = answer(model, input, waiting.clock);
 
-		const { text, finished } = await answer(model);
+		const first = await Promise.race([waiting.nextSleep, answering]);
+		const askedWhileWaiting = sent.length;
+		waiting.wake();
+		const { text, finished } = await answering;
 
+		expect(first).toBe(30_000);
+		expect(askedWhileWaiting).toBe(1);
 		expect(text).toBe("Found it.");
 		expect(finished._tag).toBe("Success");
 		expect(sent).toHaveLength(2);
@@ -299,16 +438,24 @@ describe("a rate-limited provider", () => {
 
 	it("stops waiting when the request is aborted, and records it as aborted", async () => {
 		const { model, recorded, sent } = modelAnswering([rateLimited({ "retry-after": "30" }), reply]);
+		const waiting = sleepsUntilWoken();
 
 		await run(
-			Effect.scoped(
-				Effect.gen(function* () {
-					const generated = yield* model.stream(input);
-					yield* Models.forEachDelta(generated.deltas, () => Effect.void);
-				}),
-			).pipe(Effect.timeoutOption("50 millis")),
+			Effect.gen(function* () {
+				const consuming = yield* Effect.forkChild(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const generated = yield* model.stream(input);
+							yield* Models.forEachDelta(generated.deltas, () => Effect.void);
+						}),
+					).pipe(Effect.provideService(Clock.Clock, waiting.clock)),
+				);
+				yield* waiting.sleeping;
+				yield* Fiber.interrupt(consuming);
+			}),
 		);
 
+		await waiting.cancelled;
 		expect(sent).toHaveLength(1);
 		await vi.waitFor(() => expect(recorded).toMatchObject([{ outcome: "aborted" }]));
 	});

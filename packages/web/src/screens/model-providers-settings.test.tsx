@@ -1,13 +1,12 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, MODELS, modelProviders, mount, systemBots } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+import { apiAnswers, MODELS, modelProviders, mount, systemBots } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 beforeEach(() => {
-	vi.clearAllMocks();
 	apiAnswers();
 });
 
@@ -20,14 +19,14 @@ describe("a provider's API key", () => {
 	it("is masked, and replaced without being shown", async () => {
 		mount(`/suga/settings/providers/${openai.id}`);
 
-		expect(await screen.findByText("••••••••")).toBeDefined();
+		await screen.findByText("••••••••");
 		fireEvent.click(screen.getByRole("button", { name: "Replace" }));
 		const field = screen.getByLabelText("OpenAI API key") as HTMLInputElement;
 		expect(field.type).toBe("password");
 		expect(field.value).toBe("");
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-		expect(screen.getByText("••••••••")).toBeDefined();
+		screen.getByText("••••••••");
 	});
 });
 
@@ -48,7 +47,7 @@ describe("when a provider was added", () => {
 		client.api.modelProviders.list.mockReturnValue(Effect.succeed([gateway]));
 		mount(`/suga/settings/providers/${gateway.id}`);
 
-		expect(await screen.findByText(/^Added .+ · Connected by Sam$/)).toBeDefined();
+		await screen.findByText(/^Added .+ · Connected by Sam$/);
 	});
 
 	it("is not said for a built-in provider every workspace starts with, which nobody added", async () => {
@@ -67,7 +66,7 @@ describe("when a provider was added", () => {
 		);
 		mount(`/suga/settings/providers/${openai.id}`);
 
-		expect(await screen.findByText("Connected by Sam")).toBeDefined();
+		await screen.findByText("Connected by Sam");
 		expect(screen.queryByText(/^Added /)).toBeNull();
 	});
 });
@@ -111,7 +110,7 @@ describe("a model's capabilities", () => {
 		});
 		mount(`/suga/settings/providers/${gateway.id}`);
 
-		expect(await screen.findByRole("img", { name: "Vision" })).toBeDefined();
+		await screen.findByRole("img", { name: "Vision" });
 		fireEvent.click(await screen.findByRole("button", { name: "What gpt-5 can do" }));
 		const dialog = await screen.findByRole("dialog", { name: "What it can do" });
 		// gpt-5 reports tools, vision and images: those can go off, the rest are not offered.
@@ -171,7 +170,7 @@ describe("switching off a model bots run on", () => {
 				.getAllByRole("img")
 				.map((face) => face.getAttribute("aria-label")),
 		).toEqual(["Issue Triager", "Linear Handler"]);
-		expect(within(dialog).getByRole("button", { name: sonnet, pressed: true })).toBeDefined();
+		within(dialog).getByRole("button", { name: sonnet, pressed: true });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Move bots and switch off" }));
 
 		await waitFor(() =>
@@ -219,11 +218,9 @@ describe("switching off a provider whose models bots run on", () => {
 		fireEvent.click(await screen.findByRole("switch", { name: `Use ${anthropic.name}` }));
 		const dialog = await screen.findByRole("dialog", { name: `Switch off ${anthropic.name}` });
 		const faces = within(dialog).getByRole("list", { name: `Bots on ${opus}` });
-		expect(within(faces).getByRole("img", { name: "Issue Triager" })).toBeDefined();
-		expect(within(faces).getByRole("img", { name: "Linear Handler" })).toBeDefined();
-		expect(
-			within(dialog).getByRole("button", { name: `Move ${opus} bots to: ${sonnet}` }),
-		).toBeDefined();
+		within(faces).getByRole("img", { name: "Issue Triager" });
+		within(faces).getByRole("img", { name: "Linear Handler" });
+		within(dialog).getByRole("button", { name: `Move ${opus} bots to: ${sonnet}` });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Move bots and switch off" }));
 
 		await waitFor(() =>
@@ -262,9 +259,7 @@ describe("switching off the model system bots run on", () => {
 
 		fireEvent.click(await screen.findByRole("switch", { name: `Bots can use ${opus}` }));
 		const dialog = await screen.findByRole("dialog", { name: `Switch off ${opus}` });
-		expect(
-			within(dialog).getByRole("button", { name: `Move compaction to: ${sonnet}` }),
-		).toBeDefined();
+		within(dialog).getByRole("button", { name: `Move compaction to: ${sonnet}` });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Move and switch off" }));
 
 		await waitFor(() =>

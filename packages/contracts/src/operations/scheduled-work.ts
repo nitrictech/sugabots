@@ -9,7 +9,7 @@ import { OperationContract } from "./operation.ts";
 export const scheduledWorkContracts = {
 	"approvals.expire": OperationContract.make("approvals.expire", {
 		description: "Withdraw an undecided approval once its lifetime ends.",
-		input: Schema.Struct({ approvalId: Schema.String }),
+		input: Schema.Struct({ approvalId: uuidSchema }),
 		output: Schema.Void,
 		errors: [ResourceHidden],
 		changes: true,

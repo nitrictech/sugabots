@@ -1,4 +1,4 @@
-import { Agent, Response as UndiciResponse } from "undici";
+import { Agent, type Dispatcher, Response as UndiciResponse } from "undici";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type ClosableEgressHttpClient,
@@ -7,6 +7,7 @@ import {
 	createEgressHttpClients,
 	type EgressDispatch,
 	type EgressOptions,
+	lookupPinnedTo,
 } from "./egress.ts";
 
 const publicDns = async () => [{ address: "93.184.216.34", family: 4 }];
@@ -94,59 +95,79 @@ describe("provider http client", () => {
 		expect(dispatch).toHaveBeenCalledOnce();
 	});
 
-	it("pins the validated address set in the dispatcher used by Undici", async () => {
-		const dispatcher = new Agent();
-		const dispatcherFactory = vi.fn(() => dispatcher);
-		const dispatch = vi.fn<EgressDispatch>(async () => new Response("ok"));
+	it("gives each validated address set of a name its own connection pool, reuses it, and closes it with the client", async () => {
+		const dispatchers: Dispatcher[] = [];
 		let addresses = [{ address: "93.184.216.34", family: 4 }];
 		const client = httpClient({
 			lookup: async () => addresses,
-			fetch: dispatch,
-			dispatcherFactory,
-		});
-
-		await client("https://models.example/v1/models");
-		addresses = [{ address: "127.0.0.1", family: 4 }];
-
-		expect(dispatcherFactory).toHaveBeenCalledWith("models.example", [
-			{ address: "93.184.216.34", family: 4 },
-		]);
-		expect(dispatch.mock.calls[0]?.[1]?.dispatcher).toBe(dispatcher);
-	});
-
-	it("reuses and closes cached dispatchers", async () => {
-		const close = vi.fn(async () => {});
-		const dispatcher = { close } as unknown as Agent;
-		const dispatcherFactory = vi.fn(() => dispatcher);
-		const client = httpClient({
-			lookup: publicDns,
-			fetch: vi.fn(async () => new Response("ok")),
-			dispatcherFactory,
+			fetch: async (_input, { dispatcher }) => {
+				dispatchers.push(dispatcher);
+				return new Response("ok");
+			},
 		});
 
 		await client("https://models.example/v1/models");
 		await client("https://models.example/v1/chat");
+		addresses = [{ address: "93.184.216.35", family: 4 }];
+		await client("https://models.example/v1/chat");
+		const [first, again, moved] = dispatchers;
 		await client.close();
 
-		expect(dispatcherFactory).toHaveBeenCalledOnce();
-		expect(close).toHaveBeenCalledOnce();
+		expect(again).toBe(first);
+		expect(moved).not.toBe(first);
+		expect(dispatchers.map((dispatcher) => (dispatcher as Agent).closed)).toEqual([
+			true,
+			true,
+			true,
+		]);
+	});
+});
+
+describe("the addresses a connection may use", () => {
+	const validated = [
+		{ address: "93.184.216.34", family: 4 },
+		{ address: "2606:2800:220:1::1", family: 6 },
+	] as const;
+	const asked = (
+		lookup: ReturnType<typeof lookupPinnedTo>,
+		options: Parameters<ReturnType<typeof lookupPinnedTo>>[1],
+	) =>
+		new Promise<unknown[]>((resolve) => {
+			lookup("a-name-that-resolves-elsewhere-now.example", options, (...answer) => resolve(answer));
+		});
+
+	it("are the validated ones whatever name is asked for, all of them when the connection asks for all", async () => {
+		expect(await asked(lookupPinnedTo(validated), { all: true })).toEqual([null, validated]);
+	});
+
+	it("are handed to a connection that wants one in turn, so a retry tries the next", async () => {
+		const lookup = lookupPinnedTo(validated);
+
+		expect([await asked(lookup, {}), await asked(lookup, {}), await asked(lookup, {})]).toEqual([
+			[null, "93.184.216.34", 4],
+			[null, "2606:2800:220:1::1", 6],
+			[null, "93.184.216.34", 4],
+		]);
 	});
 });
 
 describe("what the client answers with", () => {
 	it("is the runtime's own Response, whatever class the dispatcher used, with the final URL kept", async () => {
-		const dispatch = vi.fn(
-			async () =>
-				new UndiciResponse('{"error":"invalid_client"}', {
-					status: 401,
-					headers: { "content-type": "application/json" },
-				}) as unknown as Response,
-		);
+		const finalUrl = "https://auth.example/token/after-redirect";
+		const dispatch = vi.fn(async () => {
+			const answered = new UndiciResponse('{"error":"invalid_client"}', {
+				status: 401,
+				headers: { "content-type": "application/json" },
+			});
+			Object.defineProperty(answered, "url", { value: finalUrl });
+			return answered as Response;
+		});
 		const client = httpClient({ lookup: publicDns, fetch: dispatch });
 
 		const answered = await client("https://auth.example/token");
 
 		expect(answered).toBeInstanceOf(Response);
+		expect(answered.url).toBe(finalUrl);
 		expect(answered.status).toBe(401);
 		expect(answered.headers.get("content-type")).toBe("application/json");
 		expect(await answered.json()).toEqual({ error: "invalid_client" });

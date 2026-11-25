@@ -12,6 +12,7 @@ import { closeDatabase, onDatabase, runOnPostgres } from "../testing.ts";
 import { EventBus } from "./bus.ts";
 import { type CommittedEvent, EventOutbox } from "./outbox.ts";
 import { EventStore } from "./store.ts";
+import { inMemoryEventStore } from "./testing.ts";
 
 /**
  * Both stores, against the same cases.
@@ -32,7 +33,7 @@ function rawEvent(type: DurableEventType, data: Record<string, unknown> = {}): D
 async function storedThroughOutbox(stream: EventStream, stored: DurableEvent): Promise<number> {
 	let committed: CommittedEvent[] = [];
 	const bus = {
-		...EventBus.inProcess({ store: EventStore.inMemory() }),
+		...EventBus.inProcess({ store: inMemoryEventStore() }),
 		publishCommitted: async (events: CommittedEvent[]) => {
 			committed = events;
 		},
@@ -54,7 +55,7 @@ const stores = [
 		name: "memory",
 		skip: false,
 		make: async () => {
-			const store = EventStore.inMemory({ now: () => clock });
+			const store = inMemoryEventStore({ now: () => clock });
 			const append = async (stream: EventStream, stored: DurableEvent) =>
 				store.record(stream, stored).seq;
 			return { store, append };

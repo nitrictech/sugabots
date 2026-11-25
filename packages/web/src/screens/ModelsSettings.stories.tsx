@@ -20,7 +20,7 @@ import {
 	leadResearcher,
 	linearHandler,
 	oncall,
-} from "@/shell/story-fixtures.ts";
+} from "@/shell/story-fixtures.test-support.ts";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
 	AddProviderDialog,

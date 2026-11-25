@@ -2,8 +2,8 @@ import type { NotificationLevel, NotificationSettings } from "@sugabots/contract
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { storyBots } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyProjects, storyWorkspace } from "@/story-app.tsx";
+import { storyBots } from "@/shell/story-fixtures.test-support.ts";
+import { appHandlers, StoryApp, storyProjects, storyWorkspace } from "@/story-app.test-support.tsx";
 
 const API = import.meta.env.VITE_API_URL as string;
 

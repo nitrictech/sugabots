@@ -10,7 +10,7 @@ import {
 	pricingPageReady,
 	pricingPageUploading,
 	signedOrderForm,
-} from "./attachment-story-fixtures.ts";
+} from "./attachment-story-fixtures.test-support.ts";
 import { AttachmentChip } from "./ComposerAttachments.tsx";
 
 /*

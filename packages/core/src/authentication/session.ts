@@ -3,7 +3,7 @@ export * as SessionAuthentication from "./session.ts";
 import { memberStream, streamEvent } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
 import { and, eq, gt, type SQL, sql } from "drizzle-orm";
-import { Context, Effect, ErrorReporter, Layer, Schema } from "effect";
+import { Context, DateTime, Effect, ErrorReporter, Layer, Schema } from "effect";
 import { query, serviceOperations, transaction } from "../database/database.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { session } from "../database/schema.ts";
@@ -128,19 +128,21 @@ export const layer = layerNoDeps;
  * expired, which ends the operation.
  */
 export const expiryOf = (principal: MemberSession) =>
-	query((db) =>
-		db
-			.select({ expiresAt: session.expiresAt })
-			.from(session)
-			.where(
-				and(
-					eq(session.id, principal.session),
-					eq(session.memberId, principal.member),
-					gt(session.expiresAt, sql`now()`),
-				),
-			)
-			.limit(1),
-	).pipe(Effect.map(([row]) => row?.expiresAt));
+	Effect.flatMap(DateTime.nowAsDate, (now) =>
+		query((db) =>
+			db
+				.select({ expiresAt: session.expiresAt })
+				.from(session)
+				.where(
+					and(
+						eq(session.id, principal.session),
+						eq(session.memberId, principal.member),
+						gt(session.expiresAt, now),
+					),
+				)
+				.limit(1),
+		).pipe(Effect.map(([row]) => row?.expiresAt)),
+	);
 
 /**
  * Records that the session `ended.session` of `ended.member` ended, as

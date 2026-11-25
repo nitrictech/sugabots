@@ -45,7 +45,7 @@ const runsTurnRefusals = [
 ] as const;
 
 /** A turn, by its id and its chat's. */
-const aTurn = { chatId: Schema.String, turnId: Schema.String };
+const aTurn = { chatId: uuidSchema, turnId: uuidSchema };
 
 /** A step of a turn, counted from 0: its `step`th model request. */
 const aStep = { ...aTurn, step: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) };
@@ -58,7 +58,7 @@ export const turnsContracts = {
 		output: Schema.Union([
 			Schema.TaggedStruct("Begun", {
 				setting: turnSettingSchema,
-				replyMessageId: Schema.String,
+				replyMessageId: uuidSchema,
 				/** Whether this step's model request was already made, before a restart. */
 				requested: Schema.Boolean,
 				/** The last step's tool calls, each with its result once it has one. */
@@ -137,7 +137,7 @@ export const turnsContracts = {
 		input: Schema.Struct({
 			...aTurn,
 			/** The recorded call. */
-			callId: Schema.String,
+			callId: uuidSchema,
 			outcome: callOutcomeSchema,
 		}),
 		output: Schema.Void,
@@ -232,7 +232,7 @@ export const turnsContracts = {
 		description:
 			"End the turn as failed after it lost its chat or its step died, or as it was asked to end, unless a newer execution took it over.",
 		input: Schema.Struct({
-			turnId: Schema.String,
+			turnId: uuidSchema,
 			/**
 			 * How it ends: failed, telling members `userMessage`, or as it was
 			 * asked to, telling them why (see `TurnEndRequest`).

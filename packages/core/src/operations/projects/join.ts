@@ -11,14 +11,15 @@ export const join = defineOperation(projectsContracts["projects.join"], (princip
 	Effect.gen(function* () {
 		const projects = yield* Projects.Service;
 		return yield* underProjectsLock(principal, input.projectId, (lock) =>
-			named(input.projectId, call, (project, call) =>
+			named(input.projectId, call, input, (project, call, approvedInput) =>
 				Effect.gen(function* () {
 					const canJoin = yield* proveCanJoinProject(lock, project);
 					const approved = yield* proveApproved(
 						lock.principal,
 						call,
 						approvalRule("projects.join"),
-						input,
+						approvedInput,
+						project,
 					);
 					return yield* projects.join(canJoin, approved);
 				}),

@@ -37,6 +37,7 @@ import { TurnAuthentication } from "../authentication/turn.ts";
 import { WebhookAuthentication } from "../authentication/webhook.ts";
 import { runOnPostgres, type TestInfrastructure } from "../database/testing.ts";
 import { FilePages } from "../files/pages.ts";
+import type { Principal } from "../principal.ts";
 import { Secrets } from "../secrets/secrets.ts";
 
 export interface World {
@@ -160,19 +161,30 @@ export type Authenticators = Awaited<ReturnType<typeof authenticators>>;
 /** better-auth's reading of a request that carries no session cookie. */
 const noCookie: SessionAuthentication.CookiesInterface = { read: () => Effect.succeed(undefined) };
 
+export async function signedIn(
+	memberId: string,
+	expiresInSeconds?: number,
+	sessionAuth?: SessionAuthentication.Interface,
+) {
+	const sessions =
+		sessionAuth ??
+		(await runOnPostgres(
+			Effect.provide(SessionAuthentication.Service, SessionAuthentication.layer),
+		));
+	const { token } = await seedSession(memberId, expiresInSeconds);
+	return runOnPostgres(
+		sessions
+			.authenticate(new Headers({ authorization: `Bearer ${token}` }))
+			.pipe(Effect.provideService(SessionAuthentication.Cookies, noCookie)),
+	);
+}
+
 /** Each kind of principal, from its authenticator. */
 export function principals(auth: Authenticators) {
 	return {
 		/** `memberId`, signed in with a session expiring `expiresInSeconds` from now. */
-		member: async (memberId: string, expiresInSeconds?: number) => {
-			const { token } = await seedSession(memberId, expiresInSeconds);
-			// A bearer token is read from its row, so no cookie is read.
-			return runOnPostgres(
-				auth.session
-					.authenticate(new Headers({ authorization: `Bearer ${token}` }))
-					.pipe(Effect.provideService(SessionAuthentication.Cookies, noCookie)),
-			);
-		},
+		member: (memberId: string, expiresInSeconds?: number) =>
+			signedIn(memberId, expiresInSeconds, auth.session),
 		/** `botId` answering a message `askerId` writes in `chatId`. */
 		botFor: async (askerId: string, botId: string, chatId: string) => {
 			const turnId = await seedTurnAnswering(chatId, botId, { member: askerId });
@@ -245,3 +257,50 @@ export const outcome = <A, E extends { readonly _tag: string }>(
 			Effect.catch((failure: E) => Effect.succeed(failure._tag)),
 		),
 	);
+
+export async function everyKindOfPrincipal(world: World, as: ReturnType<typeof principals>) {
+	const { a, b } = world;
+	const outsider = await seedMember(b.workspace, "editor");
+	const adminsAssistant = await seedBot(a.workspace, {
+		assistantOf: a.admin,
+		visibility: "personal",
+	});
+	const adminsAssistantChat = await seedProjectChat(
+		a.workspace,
+		adminsAssistant.defaultProject,
+		a.admin,
+	);
+	return {
+		owner: await as.member(a.owner),
+		admin: await as.member(a.admin),
+		ed: await as.member(a.ed),
+		erin: await as.member(a.erin),
+		vi: await as.member(a.vi),
+		quinn: await as.member(a.quinn),
+		outsider: await as.member(outsider),
+		pubForEd: await as.botFor(a.ed, a.pub.id, a.chat),
+		pubForAdmin: await as.botFor(a.admin, a.pub.id, a.chat),
+		pubInOwnChats: await as.botFor(a.ed, a.pub.id, a.pubChat),
+		helperInK: await as.botFor(a.ed, a.helper.id, a.otherChat),
+		edsAssistant: await as.botFor(a.ed, a.assistant.id, a.assistantChat),
+		adminsAssistant: await as.botFor(a.admin, adminsAssistant.id, adminsAssistantChat),
+		run: (await as.run(a.workspace, a.project, a.pub.id)).principal,
+		webhook: await as.webhook(a.workspace, a.project),
+		computerSleep: (await as.computerSleep(a.workspace, a.project)).principal,
+		compaction: await as.compaction(a.chat, a.pub.id),
+		page: await as.page(a.chat),
+	};
+}
+
+export async function outcomesFor<Key extends string, Result>(
+	principals: Record<Key, Principal>,
+	attempt: (principal: Principal) => Promise<Result>,
+): Promise<Record<Key, Result>> {
+	const entries = await Promise.all(
+		Object.entries<Principal>(principals).map(async ([key, principal]) => [
+			key,
+			await attempt(principal),
+		]),
+	);
+	return Object.fromEntries(entries) as Record<Key, Result>;
+}

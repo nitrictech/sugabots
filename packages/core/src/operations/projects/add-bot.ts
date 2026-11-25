@@ -15,7 +15,7 @@ export const addBot = defineOperation(
 		Effect.gen(function* () {
 			const projects = yield* Projects.Service;
 			return yield* underProjectsLock(principal, input.projectId, (lock) =>
-				named(input.projectId, input.botId, call, (project, bot, call) =>
+				named(input.projectId, input.botId, call, input, (project, bot, call, approvedInput) =>
 					Effect.gen(function* () {
 						const canChange = yield* proveCanChangeProjectMembers(
 							lock,
@@ -27,7 +27,9 @@ export const addBot = defineOperation(
 							lock.principal,
 							call,
 							approvalRule("projects.addBot"),
-							input,
+							approvedInput,
+							project,
+							bot,
 						);
 						return yield* projects.addBot(canChange, reachesBot, approved);
 					}),

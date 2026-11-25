@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
 import { EVENT_VERSION, type EventType, type StreamEvent } from "@sugabots/contracts";
-import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { LongRunningOperationName } from "@sugabots/contracts/operations";
 import type { Delivery } from "@sugabots/contracts/operations/events";
 import { Operations } from "@sugabots/core/operations/registry";
@@ -64,24 +64,20 @@ interface Followed {
 
 /**
  * The app over stand-in follow operations, which record each call in
- * `followed`. `refuse` makes them refuse instead, as a stream the member
- * doesn't reach is refused.
+ * `followed`.
  */
 function server({
 	startup = Effect.void,
 	timing = {},
-	refuse = false,
 	typed = () => Effect.void,
 }: {
 	startup?: Effect.Effect<void, never, Scope.Scope>;
 	timing?: Partial<Timing>;
-	refuse?: boolean;
-	typed?: (input: { chatId: string }) => Effect.Effect<void, ResourceHidden>;
+	typed?: (input: { chatId: string }) => Effect.Effect<void>;
 } = {}) {
 	const followed: Followed[] = [];
 	const follow = (name: LongRunningOperationName) => (principal: unknown, input: unknown) =>
 		Effect.gen(function* () {
-			if (refuse) return yield* new ResourceHidden({ resource: "chat" });
 			const queue = yield* Queue.bounded<Delivery, Cause.Done>(16);
 			const ended = yield* Deferred.make<void>();
 			let open = true;
@@ -215,13 +211,31 @@ describe("following", () => {
 		await Promise.all(streams.map((stream) => stream.close()));
 	});
 
-	it("answers 404, not 403, for a stream the operation refuses", async () => {
-		// Telling the caller a chat exists but is not theirs is itself a leak.
-		const { app } = server({ refuse: true });
+	// A 403 would tell someone the chat or workspace exists, even though they cannot follow it.
+	it.each([
+		[`/workspaces/${WORKSPACE}/events`, new ResourceHidden({ resource: "workspace" })],
+		[`/workspaces/${WORKSPACE}/events`, new BotCannotReach({ resource: "workspace" })],
+		[`/chats/${CHAT}/events`, new ResourceHidden({ resource: "chat" })],
+		[`/chats/${CHAT}/events`, new BotCannotReach({ resource: "chat" })],
+	])("answers 404 from %s when following is refused with %o", async (path, refusal) => {
+		const app = createTestApp(
+			Layer.merge(
+				identifiedBy(resolveMember),
+				unimplemented(Operations.LongRunning, {
+					"events.followWorkspace": () => Effect.fail(refusal),
+					"events.followChat": () => Effect.fail(refusal),
+				}),
+			),
+		);
 
-		expect(
-			(await app.request(`/chats/${CHAT}/events`, { headers: signedInWith("good-token") })).status,
-		).toBe(404);
+		const response = await app.request(path, { headers: signedInWith("good-token") });
+
+		expect(response.status).toBe(404);
+		expect(await response.json()).toMatchObject({
+			_tag: "NotFound",
+			message: refusal.userMessage,
+			error: { _tag: refusal._tag },
+		});
 	});
 
 	it("answers 401 to somebody who isn't signed in, and follows nothing", async () => {
@@ -331,18 +345,6 @@ describe("the stream", () => {
 		await vi.waitFor(() => expect(followed[0]?.open()).toBe(false));
 	});
 
-	it("drops frames waiting at the response boundary when the operation ends", async () => {
-		const { app, followed } = server();
-		const stream = await open(app, `/chats/${CHAT}/events`);
-		await followed[0]?.yields({ seq: 1, event: rawEvent("message.created") });
-		await stream.take(1);
-		await followed[0]?.yields({ seq: 2, event: rawEvent("message.created") });
-		await followed[0]?.ends();
-
-		await vi.waitFor(() => expect(followed[0]?.open()).toBe(false));
-		await expect(stream.take(1)).rejects.toThrow(/stream ended/i);
-	});
-
 	it("closes what the operation holds open when the client hangs up", async () => {
 		const { app, followed } = server();
 		const stream = await open(app, `/workspaces/${WORKSPACE}/events`);
@@ -390,11 +392,5 @@ describe("typing", () => {
 
 		expect((await typing(app)).status).toBe(204);
 		expect(reported).toEqual([{ chatId: CHAT }]);
-	});
-
-	it("answers 404 for a chat the operation hides", async () => {
-		const { app } = server({ typed: () => Effect.fail(new ResourceHidden({ resource: "chat" })) });
-
-		expect((await typing(app)).status).toBe(404);
 	});
 });

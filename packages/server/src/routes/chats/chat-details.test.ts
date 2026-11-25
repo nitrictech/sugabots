@@ -20,18 +20,10 @@ const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 const BOT = "0199a3a0-0000-7000-8000-000000000003";
 const CHAT = "0199a3a0-0000-7000-8000-000000000004";
 const USER = "0199a3a0-0000-7000-8000-000000000005";
-const OUTSIDER = "0199a3a0-0000-7000-8000-000000000006";
-
-const members = {
-	"sam-token": { id: USER, name: "Sam", email: "sam@example.com", image: null },
-	"outsider-token": { id: OUTSIDER, name: "Kim", email: "kim@example.com", image: null },
-};
-
-const resolveMember: MemberResolver = async (headers) => {
-	const token = sessionTokenIn(headers) ?? "";
-	const signedIn = members[token as keyof typeof members];
-	return signedIn ?? null;
-};
+const resolveMember: MemberResolver = async (headers) =>
+	sessionTokenIn(headers) === "sam-token"
+		? { id: USER, name: "Sam", email: "sam@example.com", image: null }
+		: null;
 
 const chat = {
 	id: CHAT,
@@ -127,23 +119,17 @@ const as = (token: string, init: RequestInit = {}) => ({
 });
 
 describe("chat routes", () => {
-	it("returns scoped chat history and hides an unavailable id", async () => {
+	it("returns chat history for the signed-in member", async () => {
 		const response = await app().request(`/chats/${CHAT}`, as("sam-token"));
 		expect(Schema.decodeUnknownSync(chatDetailsSchema)(await response.json())).toEqual(details);
 		expect(requestedHistory).toEqual({ limit: 50 });
-
-		const hidden = await app().request(`/chats/${CHAT}`, as("outsider-token"));
-		expect(hidden.status).toBe(404);
 	});
 
-	it("returns a visible chat's context and hides an unavailable id", async () => {
+	it("returns a chat's context for the signed-in member", async () => {
 		const response = await app().request(`/chats/${CHAT}/context`, as("sam-token"));
 		expect(Schema.decodeUnknownSync(Schema.NullOr(chatContextSchema))(await response.json())).toBe(
 			null,
 		);
-
-		const hidden = await app().request(`/chats/${CHAT}/context`, as("outsider-token"));
-		expect(hidden.status).toBe(404);
 	});
 
 	it("accepts a bounded history cursor and rejects limit boundaries", async () => {

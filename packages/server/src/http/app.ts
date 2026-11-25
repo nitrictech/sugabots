@@ -1,4 +1,5 @@
 import { API_BASE_PATH, InternalServerError, NotFound } from "@sugabots/contracts/http";
+import type { PageAuthentication } from "@sugabots/core/authentication/page";
 import type { SessionAuthentication } from "@sugabots/core/authentication/session";
 import type { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import type { Database } from "@sugabots/core/database/database";
@@ -137,6 +138,7 @@ type ApiInfrastructure =
 	| Authentication.Service
 	| SessionAuthentication.Service
 	| WebhookAuthentication.Service
+	| PageAuthentication.Service
 	| Ids.Service
 	| EventBus.Service
 	| HttpRouter.HttpRouter

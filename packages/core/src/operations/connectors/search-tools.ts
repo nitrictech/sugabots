@@ -20,14 +20,16 @@ export const searchTools = defineOperation(
 				principal.chat,
 				principal.turn,
 				call,
-				(acting, chat, turn, calling) =>
+				input,
+				(acting, chat, turn, calling, approvedInput) =>
 					Effect.gen(function* () {
 						const running = yield* proveRunsTurn(yield* proveReachesChat(acting, chat), turn);
 						const approved = yield* proveApproved(
 							acting,
 							calling,
 							approvalRule("connectors.searchTools"),
-							input,
+							approvedInput,
+							turn,
 						);
 						return yield* calls.searchTools(running, approved, input.query);
 					}),

@@ -189,12 +189,14 @@ class PageAddress extends Authenticated<"PageAddress"> {
 	readonly workspace: string;
 	readonly file: string;
 	readonly version: number;
+	readonly expiresAt: number;
 
 	constructor(fields: Omit<PageAddress, "_tag">) {
 		super("PageAddress");
 		this.workspace = fields.workspace;
 		this.file = fields.file;
 		this.version = fields.version;
+		this.expiresAt = fields.expiresAt;
 		Object.freeze(this);
 	}
 }

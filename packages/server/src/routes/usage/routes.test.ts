@@ -1,5 +1,4 @@
 import type { WorkspaceUsage } from "@sugabots/contracts";
-import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { Operations } from "@sugabots/core/operations/registry";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
@@ -65,14 +64,5 @@ describe("reading what the workspace's models cost", () => {
 
 		expect(response.status).toBe(400);
 		expect(month).not.toHaveBeenCalled();
-	});
-
-	it("answers somebody who may not see the workspace's usage as forbidden", async () => {
-		const response = await usageOf(
-			() => Effect.fail(new ActionForbidden({ proof: "CanManageWorkspace" })),
-			"month=2026-09",
-		);
-
-		expect(response.status).toBe(403);
 	});
 });

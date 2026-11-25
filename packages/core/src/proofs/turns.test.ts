@@ -1,14 +1,26 @@
 import type { JsonValue, ToolApprovalStatus } from "@sugabots/contracts";
 import { connectorToolKey, HOST_REQUEST_TOOL } from "@sugabots/contracts";
+import type { InputOf } from "@sugabots/contracts/operations";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { seedConnector, seedMessage } from "../authentication/seed.test-support.ts";
+import {
+	seedConnector,
+	seedMessage,
+	seedProject,
+	seedProjectChat,
+} from "../authentication/seed.test-support.ts";
 import { connector, projectMember, toolCall, turn } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { Call } from "../operations/operation.ts";
 import type { BotForAsker, Principal } from "../principal.ts";
-import { type ApprovalRule, type OrdinaryApproval, proveApproved } from "./approved.ts";
+import {
+	type ApprovalRule,
+	approvalRule,
+	type OrdinaryApproval,
+	proveApproved,
+	proveConnectorApproved,
+} from "./approved.ts";
 import { proveCanDecide } from "./can-decide.ts";
 import { proveCanUseConnector } from "./can-use-connector.ts";
 import { proveEndsTurn } from "./ends-turn.ts";
@@ -188,19 +200,19 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 
 		it("stops a turn whose asker lost the chat from running, but lets it end", async () => {
 			const { a } = world;
-			const quinnsBot = await as.botFor(a.quinn, a.pub.id, a.chat);
+			const projectId = await seedProject(a.workspace, {
+				leadBotId: a.pub.id,
+				members: [a.quinn],
+			});
+			const chatId = await seedProjectChat(a.workspace, projectId, a.quinn);
+			const quinnsBot = await as.botFor(a.quinn, a.pub.id, chatId);
 			await onDatabase((db) =>
 				db
 					.delete(projectMember)
-					.where(and(eq(projectMember.projectId, a.project), eq(projectMember.memberId, a.quinn))),
+					.where(and(eq(projectMember.projectId, projectId), eq(projectMember.memberId, a.quinn))),
 			);
-			expect(await runs(quinnsBot, a.chat, quinnsBot.turn)).toBe("ResourceHidden");
+			expect(await runs(quinnsBot, chatId, quinnsBot.turn)).toBe("ResourceHidden");
 			expect(await ends(quinnsBot, quinnsBot.turn)).toBe("ok");
-			await onDatabase((db) =>
-				db
-					.insert(projectMember)
-					.values({ workspaceId: a.workspace, projectId: a.project, memberId: a.quinn }),
-			);
 		});
 
 		it("holds for a run's own turns", async () => {
@@ -263,12 +275,14 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 	});
 
 	describe("Approved", () => {
-		const never: ApprovalRule<OrdinaryApproval> = {
+		const never: ApprovalRule<OrdinaryApproval, "web.search"> = {
+			operation: "web.search",
 			tool: "create_issue",
 			approval: { kind: "never" },
 			changes: true,
 		};
-		const always: ApprovalRule<OrdinaryApproval> = {
+		const always: ApprovalRule<OrdinaryApproval, "web.search"> = {
+			operation: "web.search",
 			tool: "create_issue",
 			approval: { kind: "always", approvers: "turn" },
 			changes: true,
@@ -276,25 +290,29 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 		const approved = (
 			principal: Principal,
 			call: Call,
-			rule: ApprovalRule<OrdinaryApproval>,
-			input: unknown,
+			rule: ApprovalRule<OrdinaryApproval, "web.search">,
+			input: InputOf<"web.search">,
 		) =>
 			outcome(
-				named(principal, call, (p, x) => proveApproved(p, x, rule, input).pipe(Effect.asVoid)),
+				named(principal, call, input, "workspace", (p, x, input, workspace) =>
+					proveApproved(p, x, rule, input, workspace).pipe(Effect.asVoid),
+				),
 			);
 		const decidedBy = (
 			principal: Principal,
 			call: Call,
-			rule: ApprovalRule<OrdinaryApproval>,
-			input: unknown,
+			rule: ApprovalRule<OrdinaryApproval, "web.search">,
+			input: InputOf<"web.search">,
 		) =>
 			runOnPostgres(
-				named(principal, call, (p, x) =>
-					proveApproved(p, x, rule, input).pipe(Effect.map((proof) => proof.decidedBy)),
+				named(principal, call, input, "workspace", (p, x, input, workspace) =>
+					proveApproved(p, x, rule, input, workspace).pipe(Effect.map((proof) => proof.decidedBy)),
 				),
 			);
 		const toolCallOf = (id: string): Call => ({ kind: "toolCall", toolCall: id });
-		const input = { title: "Ship it", labels: ["now"] };
+		const input = { query: "Ship it", count: 5 };
+		const seedApprovalCall: typeof seedToolCall = (bot, fields) =>
+			seedToolCall(bot, { input, ...fields });
 
 		it("needs no approval for a member acting for themselves, or a call that needs none", async () => {
 			const { a } = world;
@@ -305,14 +323,45 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			);
 		});
 
+		it("refuses other non-bot principals", async () => {
+			const { a } = world;
+			const request: Call = { kind: "request", request: "request-1" };
+			const principals = [
+				await as.webhook(a.workspace, a.project),
+				await as.compaction(a.chat, a.pub.id),
+				await as.page(a.chat),
+			];
+			for (const principal of principals) {
+				expect(await approved(principal, request, never, input)).toBe("ApprovalRefused");
+			}
+		});
+
+		it("refuses approval when the input names a different chat from the target", async () => {
+			const { a } = world;
+			const member = await as.member(a.ed);
+			const request: Call = { kind: "request", request: "resolve" };
+			const input = { chatId: a.chat, resolved: true };
+			const approveFor = (target: string) =>
+				outcome(
+					named(member, request, input, target, (principal, call, input, chat) =>
+						proveApproved(principal, call, approvalRule("chats.setResolved"), input, chat).pipe(
+							Effect.asVoid,
+						),
+					),
+				);
+
+			expect(await approveFor(a.chat)).toBe("ok");
+			expect(await approveFor(a.otherChat)).toBe("ApprovalRefused");
+		});
+
 		it("runs a call only once an approver still allows it, with the arguments they allowed", async () => {
 			const { a } = world;
 			const edsBot = await as.botFor(a.ed, a.pub.id, a.chat);
-			const pending = await seedToolCall(edsBot);
-			const allowed = await seedToolCall(edsBot, { status: "allowed", decidedBy: a.ed });
-			const byOwner = await seedToolCall(edsBot, { status: "allowed", decidedBy: a.owner });
-			const denied = await seedToolCall(edsBot, { status: "denied", decidedBy: a.ed });
-			const otherTool = await seedToolCall(edsBot, {
+			const pending = await seedApprovalCall(edsBot);
+			const allowed = await seedApprovalCall(edsBot, { status: "allowed", decidedBy: a.ed });
+			const byOwner = await seedApprovalCall(edsBot, { status: "allowed", decidedBy: a.owner });
+			const denied = await seedApprovalCall(edsBot, { status: "denied", decidedBy: a.ed });
+			const otherTool = await seedApprovalCall(edsBot, {
 				status: "allowed",
 				decidedBy: a.ed,
 				tool: "other_tool",
@@ -323,11 +372,11 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			);
 			expect(await approved(edsBot, toolCallOf(pending), always, input)).toBe("ApprovalNeeded");
 			expect(
-				await decidedBy(edsBot, toolCallOf(allowed), always, { labels: ["now"], title: "Ship it" }),
+				await decidedBy(edsBot, toolCallOf(allowed), always, { count: 5, query: "Ship it" }),
 			).toBe(a.ed);
 			expect(await approved(edsBot, toolCallOf(byOwner), always, input)).toBe("ApprovalNeeded");
 			expect(
-				await approved(edsBot, toolCallOf(allowed), always, { ...input, title: "Ship all of it" }),
+				await approved(edsBot, toolCallOf(allowed), always, { ...input, query: "Ship all of it" }),
 			).toBe("ApprovalRefused");
 			expect(await approved(edsBot, toolCallOf(denied), always, input)).toBe("ApprovalRefused");
 			expect(await approved(edsBot, toolCallOf(otherTool), always, input)).toBe("ApprovalRefused");
@@ -352,7 +401,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			if (!installed) throw new Error("No connector");
 			const send = async (name: string, approvalStatus: ToolApprovalStatus | null) => {
 				const tool = connectorToolKey(installed.handle, name);
-				const callId = await seedToolCall(edsBot, { tool, input });
+				const callId = await seedApprovalCall(edsBot, { tool, input });
 				await onDatabase((db) =>
 					db
 						.update(toolCall)
@@ -369,17 +418,18 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 						})
 						.where(eq(toolCall.id, callId)),
 				);
-				const rule: ApprovalRule<OrdinaryApproval> = {
-					tool,
-					approval: { kind: "byToolAccess" },
-					changes: true,
-				};
 				return outcome(
-					named(edsBot, toolCallOf(callId), connectorId, (principal, call, connector) =>
-						Effect.gen(function* () {
-							const use = yield* proveCanUseConnector(principal, connector, name);
-							yield* proveApproved(principal, call, rule, input, use);
-						}),
+					named(
+						edsBot,
+						toolCallOf(callId),
+						connectorId,
+						edsBot.turn,
+						{ connectorId, tool: name, arguments: input },
+						(principal, call, connector, turn, input) =>
+							Effect.gen(function* () {
+								const use = yield* proveCanUseConnector(principal, connector, name);
+								yield* proveConnectorApproved(principal, call, input, turn, use);
+							}),
 					),
 				);
 			};
@@ -395,7 +445,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			const request: Call = { kind: "request", request: "request-4" };
 			expect(await approved(assistant, request, never, input)).toBe("ApprovalNeeded");
 			expect(await approved(assistant, request, { ...never, changes: false }, input)).toBe("ok");
-			const allowed = await seedToolCall(assistant, { status: "allowed", decidedBy: a.ed });
+			const allowed = await seedApprovalCall(assistant, { status: "allowed", decidedBy: a.ed });
 			expect(await approved(assistant, toolCallOf(allowed), never, input)).toBe("ok");
 
 			const { principal: fromOutside } = await as.run(
@@ -412,11 +462,11 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 		it("takes a run's call as approved only from an admin or a manager of its bot", async () => {
 			const { a } = world;
 			const { principal, run, turnId } = await as.run(a.workspace, a.project, a.pub.id);
-			const byAdmin = await seedToolCall(
+			const byAdmin = await seedApprovalCall(
 				{ chat: run.chat, turn: turnId, bot: a.pub.id },
 				{ status: "allowed", decidedBy: a.admin },
 			);
-			const byQuinn = await seedToolCall(
+			const byQuinn = await seedApprovalCall(
 				{ chat: run.chat, turn: turnId, bot: a.pub.id },
 				{ status: "allowed", decidedBy: a.quinn },
 			);

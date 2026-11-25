@@ -7,21 +7,21 @@ describe("a refusal that never reached the API", () => {
 		const failure = failureFromResponse("<html>413 Request Entity Too Large</html>", 413);
 
 		expect(failure).toBeInstanceOf(PayloadTooLarge);
-		expect(failure.message).toBe(
-			"Too large for this server to accept. Whoever runs your Sugabots can raise the upload limit on the web server in front of it",
-		);
+		expect(failure.message).toMatch(/raise the upload limit/);
+		expect(failure.message).not.toContain("<html>");
 	});
 
 	it("keeps the API's own words for a file over the API's limit", () => {
+		const userMessage = "The file exceeds the configured limit";
 		const failure = failureFromResponse(
 			{
 				_tag: "PayloadTooLarge",
-				message: "The file is larger than 30 MB, the most that can be kept",
+				message: userMessage,
 			},
 			413,
 		);
 
 		expect(isApiFailure(failure)).toBe(true);
-		expect(failure.message).toBe("The file is larger than 30 MB, the most that can be kept");
+		expect(failure.message).toBe(userMessage);
 	});
 });

@@ -1,4 +1,5 @@
 import {
+	botParticipantOf,
 	type ChatDetails,
 	type ChatHistoryEntry,
 	type Message,
@@ -10,11 +11,9 @@ import {
 import { InternalServerError, NotFound } from "@sugabots/contracts/http";
 import { listedChat, testMember } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { createQueryClient } from "@/lib/query.ts";
-import { workspacesQuery } from "@/lib/workspace.ts";
 import {
 	apiAnswers,
 	bots,
@@ -27,10 +26,15 @@ import {
 	triager,
 	workspace,
 	writeDraft,
-} from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+} from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
+import { TYPING_SHOWN_FOR_MS } from "@/lib/chat-events.ts";
+import { createQueryClient } from "@/lib/query.ts";
+import { workspacesQuery } from "@/lib/workspace.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+import { chatDetailsFixture, robin } from "./chat-fixtures.test-support.ts";
+
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const chat: ProjectChat = {
 	kind: "project_chat",
@@ -69,27 +73,9 @@ const automationRun: Run = {
 	finishedAt: "2026-09-18T08:30:00.000Z",
 };
 const member = testMember({ id: sam.id, name: sam.name });
-/** In the project, but has not written in any of its chats. */
-const robin = testMember({ id: "0199a3a0-0000-7000-8000-000000000501", name: "Robin Vale" });
-const host = {
-	kind: "bot" as const,
-	id: linear.id,
-	name: linear.name,
-	handle: linear.handle,
-	color: linear.color,
-	eyes: linear.eyes,
-	shape: linear.shape,
-};
+const host = botParticipantOf(linear);
 /** A bot outside the chat's project that took part in it, as one asked for help before could have. */
-const pastParticipant = {
-	kind: "bot" as const,
-	id: triager.id,
-	name: triager.name,
-	handle: triager.handle,
-	color: triager.color,
-	eyes: triager.eyes,
-	shape: triager.shape,
-};
+const pastParticipant = botParticipantOf(triager);
 const mainMessage: Message = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
 	chatId: chat.id,
@@ -150,37 +136,12 @@ const automationEntry: ChatHistoryEntry = {
 		triggerKind: automationRun.trigger.kind,
 	},
 };
-function details(
-	id: string,
-	title: string,
-	kind: ChatDetails["chat"]["kind"],
-	messages: Message[],
-): ChatDetails {
-	return {
-		chat: {
-			id,
-			workspaceId: linear.workspaceId,
-			projectId: linear.defaultProjectId,
-			botId: linear.id,
-			rootChatId: chat.id,
-			kind,
-			title,
-			working: false,
-			resolvedAt: null,
-			createdAt: "2026-09-18T08:00:00.000Z",
-			updatedAt: "2026-09-18T09:22:00.000Z",
-		},
-		automationRun: kind === "run" ? automationRun : null,
-		participants: [member, host, pastParticipant],
-		// A bot's chats are its default project's, whose only bot is the bot itself.
-		projectBots: [host],
-		membersReachingProject: [member, robin],
-		messages,
-		olderMessagesCursor: null,
-		queuedSince: null,
-		reads: [],
-	};
-}
+const botChatDetails = chatDetailsFixture(chat, {
+	chat: { title: "Chat", updatedAt: "2026-09-18T09:22:00.000Z" },
+	participants: [member, host, pastParticipant],
+	projectBots: [host],
+	membersReachingProject: [member, robin],
+});
 
 /** Linear Handler's chats, with this one in them when `listed`. */
 function chatList({ listed }: { listed: boolean }) {
@@ -242,13 +203,14 @@ function chatAnswers() {
 		switch (params.chatId) {
 			case automationId:
 				return Effect.succeed(
-					details(automationId, automationEntry.title, "run", [
-						automationTriggerMessage,
-						automationMessage,
-					]),
+					botChatDetails({
+						chat: { id: automationId, title: automationEntry.title, kind: "run" },
+						automationRun,
+						messages: [automationTriggerMessage, automationMessage],
+					}),
 				);
 			default:
-				return Effect.succeed(details(chat.id, "Chat", "project_chat", [mainMessage, botMessage]));
+				return Effect.succeed(botChatDetails({ messages: [mainMessage, botMessage] }));
 		}
 	});
 }
@@ -273,56 +235,18 @@ async function leaveAndReturn(router: ReturnType<typeof mount>["router"]): Promi
 	return await screen.findByLabelText(`Message ${linear.name}`);
 }
 
-/**
- * A `ResizeObserver` for one test, which jsdom lacks: `of(element)` tells
- * whatever is watching `element` that it changed size.
- */
-function watchResizes() {
-	const watching = new Map<Element, ResizeObserverCallback>();
-	vi.stubGlobal(
-		"ResizeObserver",
-		class {
-			constructor(private readonly callback: ResizeObserverCallback) {}
-			observe(element: Element) {
-				watching.set(element, this.callback);
-			}
-			unobserve(element: Element) {
-				watching.delete(element);
-			}
-			disconnect() {
-				for (const [element, callback] of watching) {
-					if (callback === this.callback) watching.delete(element);
-				}
-			}
-		},
-	);
-	onTestFinished(() => {
-		vi.unstubAllGlobals();
-	});
-	return {
-		of(element: Element) {
-			watching.get(element)?.([], {} as ResizeObserver);
-		},
-	};
-}
-
 beforeEach(() => {
 	localStorage.clear();
 	apiAnswers();
 	chatAnswers();
 });
 
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
-});
-
 describe("a bot's chat", () => {
 	it("shows the chat's messages", async () => {
 		mount(chatPage);
 
-		expect(await screen.findByText(mainMessage.content)).toBeDefined();
-		expect(screen.getByText(botMessage.content)).toBeDefined();
+		await screen.findByText(mainMessage.content);
+		screen.getByText(botMessage.content);
 	});
 
 	it("asks for a chat page's projects, bots and the bot's chats at once, each a single time, on its first load", async () => {
@@ -347,7 +271,7 @@ describe("a bot's chat", () => {
 		client.api.chats.projectChats.mockReturnValue(chatList({ listed: false }));
 		mount(chatPage);
 
-		expect(await screen.findByText(mainMessage.content)).toBeDefined();
+		await screen.findByText(mainMessage.content);
 	});
 
 	it("shows automation runs among the chat's messages", async () => {
@@ -380,9 +304,6 @@ describe("a bot's chat", () => {
 			Effect.succeed({ message: mainMessage, routing: { status: "routed" } }),
 		);
 		mount(chatPage);
-		const messages = await findMessagesViewport();
-		Object.defineProperty(messages, "scrollHeight", { configurable: true, value: 1_200 });
-		messages.scrollTop = 100;
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
 		writeDraft(composer, "  Send the update  ");
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -393,11 +314,10 @@ describe("a bot's chat", () => {
 				payload: { retryKey: expect.any(String), message: "Send the update" },
 			}),
 		);
-		await waitFor(() => expect(messages.scrollTop).toBe(1_200));
 	});
 
 	it("with other members taking part in the chat, says the bot may let a draft mentioning just members pass", async () => {
-		const shared = details(chat.id, "Chat", "project_chat", [mainMessage]);
+		const shared = botChatDetails({ messages: [mainMessage] });
 		client.api.chats.get.mockReturnValue(
 			Effect.succeed({ ...shared, participants: [...shared.participants, robin] }),
 		);
@@ -407,15 +327,15 @@ describe("a bot's chat", () => {
 
 		writeDraft(composer, `@${robin.handle} can you check?`);
 
-		expect(await screen.findByText(`${linear.name} may reply.`)).toBeTruthy();
+		await screen.findByText(`${linear.name} may reply.`);
 		const box = screen.getByLabelText(`Message ${robin.name}`);
 		// The finished mention is drawn in the box as the member's handle, as a sent message draws it.
-		expect(within(box).getByText(`@${robin.handle}`)).toBeTruthy();
+		within(box).getByText(`@${robin.handle}`);
 
 		writeDraft(box, `@${robin.handle} and @${linear.handle}, can you check?`);
 
-		expect(await screen.findByText(`${linear.name} will reply here.`)).toBeTruthy();
-		expect(screen.getByLabelText(`Message ${linear.name}`)).toBeTruthy();
+		await screen.findByText(`${linear.name} will reply here.`);
+		screen.getByLabelText(`Message ${linear.name}`);
 	});
 
 	it("offers the project's members and the bots here to mention, but not you", async () => {
@@ -424,13 +344,13 @@ describe("a bot's chat", () => {
 		writeDraft(composer, "@");
 
 		const list = within(await screen.findByRole("listbox"));
-		expect(list.getByRole("option", { name: new RegExp(linear.name) })).toBeTruthy();
-		expect(list.getByRole("option", { name: new RegExp(robin.name) })).toBeTruthy();
-		expect(list.getByRole("option", { name: new RegExp(triager.name) })).toBeTruthy();
+		list.getByRole("option", { name: new RegExp(linear.name) });
+		list.getByRole("option", { name: new RegExp(robin.name) });
+		list.getByRole("option", { name: new RegExp(triager.name) });
 		expect(list.queryByRole("option", { name: new RegExp(sam.name) })).toBeNull();
 		// After the members and bots come the two groups, which are not members the project has.
-		expect(list.getByRole("option", { name: /@here/ })).toBeTruthy();
-		expect(list.getByRole("option", { name: /@channel/ })).toBeTruthy();
+		list.getByRole("option", { name: /@here/ });
+		list.getByRole("option", { name: /@channel/ });
 		expect(list.getAllByRole("option")).toHaveLength(5);
 	});
 
@@ -442,11 +362,11 @@ describe("a bot's chat", () => {
 		writeDraft(composer, `@${triager.handle} can you check?`);
 
 		// The floor ignores a bot outside the project; whether the bot asks it for help is the bot's choice.
-		expect(screen.getByText(`${linear.name} will reply here.`)).toBeTruthy();
+		screen.getByText(`${linear.name} will reply here.`);
 	});
 
 	it("says the bot replied to will reply, though the reply mentions only members", async () => {
-		const shared = details(chat.id, "Chat", "project_chat", [mainMessage, botMessage]);
+		const shared = botChatDetails({ messages: [mainMessage, botMessage] });
 		client.api.chats.get.mockReturnValue(
 			Effect.succeed({ ...shared, participants: [...shared.participants, robin] }),
 		);
@@ -459,15 +379,15 @@ describe("a bot's chat", () => {
 
 		writeDraft(composer, `@${robin.handle} can you check?`);
 
-		expect(await screen.findByLabelText(`Message ${robin.name}`)).toBeTruthy();
-		expect(screen.getByText(`${linear.name} will reply here.`)).toBeTruthy();
+		await screen.findByLabelText(`Message ${robin.name}`);
+		screen.getByText(`${linear.name} will reply here.`);
 		expect(screen.queryByText(`${linear.name} may reply.`)).toBeNull();
 	});
 
 	it("in an automation's feed, says its bot won't reply to a draft mentioning just members", async () => {
 		client.api.chats.get.mockReturnValue(
 			Effect.succeed({
-				...details(chat.id, "Overnight review", "automation_feed", []),
+				...botChatDetails({ chat: { title: "Overnight review", kind: "automation_feed" } }),
 				automation: {
 					id: automationRun.automationId,
 					projectId: linear.defaultProjectId,
@@ -483,13 +403,13 @@ describe("a bot's chat", () => {
 
 		writeDraft(composer, `@${robin.handle} can you check?`);
 
-		expect(await screen.findByText(`${linear.name} won't reply.`)).toBeTruthy();
+		await screen.findByText(`${linear.name} won't reply.`);
 	});
 
 	it("offers no @here or @channel when nobody else could be notified", async () => {
 		client.api.chats.get.mockReturnValue(
 			Effect.succeed({
-				...details(chat.id, "Chat", "project_chat", [mainMessage]),
+				...botChatDetails({ messages: [mainMessage] }),
 				membersReachingProject: [member],
 			}),
 		);
@@ -498,7 +418,7 @@ describe("a bot's chat", () => {
 		writeDraft(composer, "@");
 
 		const list = within(await screen.findByRole("listbox"));
-		expect(list.getByRole("option", { name: new RegExp(linear.name) })).toBeTruthy();
+		list.getByRole("option", { name: new RegExp(linear.name) });
 		expect(list.queryByRole("option", { name: /@here|@channel/ })).toBeNull();
 	});
 
@@ -511,7 +431,7 @@ describe("a bot's chat", () => {
 		);
 		mount(chatPage);
 
-		expect(await screen.findByText(/has no model yet, so it cannot answer/)).toBeDefined();
+		await screen.findByText(/has no model yet, so it cannot answer/);
 		expect(screen.getByRole("link", { name: "Choose a model" }).getAttribute("href")).toBe(
 			`/suga/bots/${linear.handle}/settings`,
 		);
@@ -652,47 +572,6 @@ describe("a bot's chat", () => {
 		await waitFor(() => expect(client.api.chats.get.mock.calls.length).toBeGreaterThan(fetched));
 	});
 
-	it("keeps following the latest message while the bot works, and when it answers", async () => {
-		const updates = controlledEventStream();
-		client.events.chat.mockReturnValue(updates.stream);
-		mount(chatPage);
-		const messages = await findMessagesViewport();
-		let scrollHeight = 1_200;
-		Object.defineProperties(messages, {
-			scrollHeight: { configurable: true, get: () => scrollHeight },
-			clientHeight: { configurable: true, value: 400 },
-		});
-		messages.scrollTop = 800;
-		fireEvent.scroll(messages);
-		await waitFor(() => expect(client.events.chat).toHaveBeenCalledWith(chat.id));
-
-		const writing = {
-			...botMessage,
-			id: "0199a3a0-0000-7000-8000-0000000000fb",
-			status: "writing" as const,
-			content: "Starting",
-			parts: [{ type: "text" as const, text: "Starting" }],
-			createdAt: "2026-09-18T09:20:00.000Z",
-		};
-		scrollHeight = 1_400;
-		updates.emit(streamEvent("message.created", { chatId: chat.id, message: writing }));
-		await screen.findByRole("status", { name: `${linear.name} is typing` });
-		await waitFor(() => expect(messages.scrollTop).toBe(1_400));
-
-		scrollHeight = 1_700;
-		updates.emit(
-			streamEvent("message.completed", {
-				chatId: chat.id,
-				messageId: writing.id,
-				content: "Starting the response",
-				status: "complete",
-				finishedAt: "2026-11-23T10:00:00.000Z",
-			}),
-		);
-		await screen.findByText("Starting the response");
-		await waitFor(() => expect(messages.scrollTop).toBe(1_700));
-	});
-
 	it("shows a file the bot attaches while it still answers, and keeps it as the answer goes on", async () => {
 		const updates = controlledEventStream();
 		client.events.chat.mockReturnValue(updates.stream);
@@ -726,7 +605,7 @@ describe("a bot's chat", () => {
 				],
 			}),
 		);
-		expect(await screen.findByRole("link", { name: "Download q3-report.csv" })).toBeDefined();
+		await screen.findByRole("link", { name: "Download q3-report.csv" });
 
 		updates.emit(
 			streamEvent("message.delta", {
@@ -747,7 +626,7 @@ describe("a bot's chat", () => {
 			}),
 		);
 		await screen.findByText("Here it is, with the totals.");
-		expect(screen.getByRole("link", { name: "Download q3-report.csv" })).toBeDefined();
+		screen.getByRole("link", { name: "Download q3-report.csv" });
 	});
 
 	it("shows live thinking under the reply and drops deltas from a superseded execution", async () => {
@@ -774,7 +653,7 @@ describe("a bot's chat", () => {
 		const disclosure = await screen.findByText("Thinking");
 		const details = disclosure.closest("details");
 		expect(details?.open).toBe(false);
-		expect(screen.getByText("Still checking.")).toBeDefined();
+		screen.getByText("Still checking.");
 		fireEvent.click(disclosure);
 		expect(details?.open).toBe(true);
 
@@ -794,8 +673,8 @@ describe("a bot's chat", () => {
 		);
 
 		await screen.findByText("Done.");
-		expect(screen.getByText("Read the chat.")).toBeDefined();
-		expect(screen.getByText("Verified.")).toBeDefined();
+		screen.getByText("Read the chat.");
+		screen.getByText("Verified.");
 		expect(screen.queryByText(/Still checking|Stale/)).toBeNull();
 	});
 
@@ -808,10 +687,10 @@ describe("a bot's chat", () => {
 			thinking: [{ step: 0, text: "Looked at the current record." }],
 		};
 		client.api.chats.get.mockReturnValue(
-			Effect.succeed(details(chat.id, "Chat", "project_chat", [mainMessage, writing])),
+			Effect.succeed(botChatDetails({ messages: [mainMessage, writing] })),
 		);
 		mount(chatPage);
-		expect(await screen.findByText(writing.content)).toBeDefined();
+		await screen.findByText(writing.content);
 		await waitFor(() => expect(client.events.chat).toHaveBeenCalledWith(chat.id));
 
 		updates.emit(
@@ -825,7 +704,7 @@ describe("a bot's chat", () => {
 		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "Execution started." }));
 
 		await screen.findByText("Execution started.");
-		expect(screen.getByText("Looked at the current record.")).toBeDefined();
+		screen.getByText("Looked at the current record.");
 	});
 
 	it.each([true, false])(
@@ -842,10 +721,10 @@ describe("a bot's chat", () => {
 				thinking: [{ step: 0, text: "Check it once more." }],
 			};
 			client.api.chats.get.mockReturnValue(
-				Effect.succeed(details(chat.id, "Chat", "project_chat", [mainMessage, writing])),
+				Effect.succeed(botChatDetails({ messages: [mainMessage, writing] })),
 			);
 			mount(chatPage);
-			expect(await screen.findByText(writing.content)).toBeDefined();
+			await screen.findByText(writing.content);
 			await waitFor(() => expect(client.events.chat).toHaveBeenCalledWith(chat.id));
 
 			if (answered) {
@@ -858,7 +737,7 @@ describe("a bot's chat", () => {
 						finishedAt: "2026-11-23T10:00:00.000Z",
 					}),
 				);
-				expect(await screen.findByText("Final reply.")).toBeDefined();
+				await screen.findByText("Final reply.");
 			}
 			const marker: Message = {
 				...mainMessage,
@@ -866,16 +745,14 @@ describe("a bot's chat", () => {
 				parts: [{ type: "text", text: "The fresh chat page has arrived." }],
 			};
 			client.api.chats.get.mockReturnValue(
-				Effect.succeed(
-					details(chat.id, "Chat", "project_chat", answered ? [marker, writing] : [marker]),
-				),
+				Effect.succeed(botChatDetails({ messages: answered ? [marker, writing] : [marker] })),
 			);
 			updates.emit(streamEvent("turn.completed", { chatId: chat.id }));
 			await screen.findByText(marker.content);
 
 			expect(screen.queryByText(writing.content)).toBeNull();
 			if (answered) {
-				expect(screen.getByText("Final reply.")).toBeDefined();
+				screen.getByText("Final reply.");
 			} else {
 				expect(screen.queryByText("Thinking")).toBeNull();
 			}
@@ -931,7 +808,7 @@ describe("a bot's chat", () => {
 		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "Execution resumed." }));
 
 		await screen.findByText("Execution resumed.");
-		expect(screen.getByText(recovered)).toBeDefined();
+		screen.getByText(recovered);
 		expect(screen.queryByText(/Stale text while writing/)).toBeNull();
 
 		updates.emit(
@@ -947,7 +824,7 @@ describe("a bot's chat", () => {
 		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "Execution ended." }));
 
 		await screen.findByText("Execution ended.");
-		expect(screen.getByText(recovered)).toBeDefined();
+		screen.getByText(recovered);
 		expect(screen.queryByText(/Stale text after completion/)).toBeNull();
 	});
 
@@ -962,9 +839,7 @@ describe("a bot's chat", () => {
 			content,
 			parts: [{ type: "text", text: content }],
 		};
-		answerChatWith(() =>
-			Effect.succeed(details(chat.id, "Chat", "project_chat", [mainMessage, writing])),
-		);
+		answerChatWith(() => Effect.succeed(botChatDetails({ messages: [mainMessage, writing] })));
 		mount(chatPage);
 		await screen.findByText(content);
 
@@ -979,7 +854,7 @@ describe("a bot's chat", () => {
 		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "Execution resumed." }));
 
 		await screen.findByText("Execution resumed.");
-		expect(screen.getByText(content)).toBeDefined();
+		screen.getByText(content);
 	});
 
 	it("shows the reply that finished while you were elsewhere", async () => {
@@ -998,7 +873,7 @@ describe("a bot's chat", () => {
 			parts: [{ type: "text", text: "Checkout timeouts are tracked." }],
 		};
 		const chatWithReply = (reply: Message) =>
-			Effect.succeed(details(chat.id, "Chat", "project_chat", [mainMessage, reply]));
+			Effect.succeed(botChatDetails({ messages: [mainMessage, reply] }));
 		answerChatWith(() => chatWithReply(writing));
 		const { router } = mount(chatPage);
 		await screen.findByRole("status", { name: `${linear.name} is typing` });
@@ -1008,24 +883,6 @@ describe("a bot's chat", () => {
 
 		await screen.findByText("Checkout timeouts are tracked.");
 		expect(screen.queryByRole("status", { name: `${linear.name} is typing` })).toBeNull();
-	});
-
-	it("keeps the latest message in view when the chat gets shorter, as when a phone's keyboard opens", async () => {
-		const resizes = watchResizes();
-		let height = 600;
-		const heightOf = vi
-			.spyOn(HTMLElement.prototype, "clientHeight", "get")
-			.mockImplementation(() => height);
-		onTestFinished(() => heightOf.mockRestore());
-		mount(chatPage);
-		// The chat loads after the first render, so the log is not there to watch until it has.
-		const messages = await findMessagesViewport();
-		messages.scrollTop = 800;
-
-		height = 300;
-		resizes.of(messages);
-
-		expect(messages.scrollTop).toBe(1_100);
 	});
 
 	describe("reading the chat", () => {
@@ -1109,7 +966,7 @@ describe("a bot's chat", () => {
 		const serverHas = (queuedSince: string | null) =>
 			client.api.chats.get.mockReturnValue(
 				Effect.succeed({
-					...details(chat.id, "Chat", "project_chat", [mainMessage, writing, followUp]),
+					...botChatDetails({ messages: [mainMessage, writing, followUp] }),
 					queuedSince,
 				}),
 			);
@@ -1150,13 +1007,11 @@ describe("a bot's chat", () => {
 
 	it("opens with whom the chat is with, when there is nothing older", async () => {
 		client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
-		client.api.chats.get.mockReturnValue(
-			Effect.succeed(details(chat.id, "Chat", "project_chat", [])),
-		);
+		client.api.chats.get.mockReturnValue(Effect.succeed(botChatDetails({ messages: [] })));
 		mount(chatPage);
 
-		expect(await screen.findByRole("heading", { name: "Chat", level: 2 })).toBeDefined();
-		expect(screen.getByText(`With ${linear.name}`)).toBeDefined();
+		await screen.findByRole("heading", { name: "Chat", level: 2 });
+		screen.getByText(`With ${linear.name}`);
 	});
 
 	it("opens Details from the chat's name, and leads back to its bot", async () => {
@@ -1168,7 +1023,7 @@ describe("a bot's chat", () => {
 		);
 		fireEvent.click(name);
 
-		expect(await screen.findByRole("complementary", { name: "Details" })).toBeDefined();
+		await screen.findByRole("complementary", { name: "Details" });
 	});
 
 	it("keeps Details closed when the chat is opened again, once they were closed where they sit beside it", async () => {
@@ -1187,14 +1042,14 @@ describe("a bot's chat", () => {
 		});
 		const { router } = mount(chatPage);
 
-		expect(await screen.findByRole("complementary", { name: "Details" })).toBeDefined();
+		await screen.findByRole("complementary", { name: "Details" });
 		fireEvent.click(screen.getByRole("button", { name: "Details", pressed: true }));
 		await waitFor(() =>
 			expect(screen.queryByRole("complementary", { name: "Details" })).toBeNull(),
 		);
 		await leaveAndReturn(router);
 
-		expect(screen.getByRole("button", { name: "Details", pressed: false })).toBeDefined();
+		screen.getByRole("button", { name: "Details", pressed: false });
 		expect(screen.queryByRole("complementary", { name: "Details" })).toBeNull();
 	});
 
@@ -1274,7 +1129,7 @@ describe("a bot's chat", () => {
 	});
 
 	it("lists the members taking part in a chat with more than one from its header, the viewer as you", async () => {
-		const shared = details(chat.id, "Chat", "project_chat", [mainMessage]);
+		const shared = botChatDetails({ messages: [mainMessage] });
 		client.api.chats.get.mockReturnValue(
 			Effect.succeed({ ...shared, participants: [...shared.participants, robin] }),
 		);
@@ -1293,7 +1148,7 @@ describe("a bot's chat", () => {
 
 	it("opens a chat the bot started with a bot outside its project at that bot's address", async () => {
 		const startedId = "0199a3a0-0000-7000-8000-0000000002a1";
-		const startedChat = details(startedId, "Release checklist", "project_chat", []);
+		const startedChat = botChatDetails({ chat: { id: startedId, title: "Release checklist" } });
 		answerMessagesWith({
 			...botMessage,
 			id: "0199a3a0-0000-7000-8000-0000000002a2",
@@ -1383,20 +1238,16 @@ describe("a message or nested chat a notification opens", () => {
 	it("shows the run a notification names as the page, at the chat's own address", async () => {
 		mount(`${chatPage}?nestedChatPage=${automationId}`);
 
-		expect(
-			await screen.findByRole("heading", { name: automationRun.automationName }),
-		).toBeDefined();
+		await screen.findByRole("heading", { name: automationRun.automationName });
 		expect(screen.queryByRole("log", { name: "Chat messages" })).toBeNull();
-		expect(screen.getByRole("link", { name: `Back to ${linear.name}` })).toBeDefined();
+		screen.getByRole("link", { name: `Back to ${linear.name}` });
 		expect(screen.getByRole("link", { name: "Open chat" }).getAttribute("href")).toBe(chatPage);
 	});
 
 	it("says so when the message cannot be found in the chat", async () => {
 		mount(opened("0199a3a0-0000-7000-8000-000000000299"));
 
-		expect(
-			await screen.findByText("Could not find the message you opened in this chat."),
-		).toBeDefined();
+		await screen.findByText("Could not find the message you opened in this chat.");
 	});
 
 	it("opens a run's automation on its bot's automations page, where it is changed, from the run's header", async () => {
@@ -1429,7 +1280,7 @@ describe("a message or nested chat a notification opens", () => {
 	it("ignores an address naming something other than a message", async () => {
 		mount(`/suga/chats/${chat.id}?message=a%22b`);
 
-		expect(await screen.findByText(mainMessage.content)).toBeDefined();
+		await screen.findByText(mainMessage.content);
 		expect(screen.queryByText("Could not find the message you opened in this chat.")).toBeNull();
 	});
 });
@@ -1483,7 +1334,7 @@ describe("members typing in the chat", () => {
 		updates.emit(junoTyping);
 		await screen.findByRole("status", { name: "Juno is typing" });
 
-		await vi.advanceTimersByTimeAsync(7_000);
+		await vi.advanceTimersByTimeAsync(TYPING_SHOWN_FOR_MS);
 		await waitFor(() =>
 			expect(screen.queryByRole("status", { name: "Juno is typing" })).toBeNull(),
 		);

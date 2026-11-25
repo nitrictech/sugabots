@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { expect, fn, type within } from "storybook/test";
 import preview from "#storybook/preview";
 import type { Session } from "@/lib/session.ts";
-import { BOT_PERMISSIONS } from "@/shell/story-fixtures.ts";
+import { BOT_PERMISSIONS } from "@/shell/story-fixtures.test-support.ts";
 import { SignIn } from "./SignIn.tsx";
 import { WorkspaceSetup } from "./WorkspaceSetup.tsx";
 

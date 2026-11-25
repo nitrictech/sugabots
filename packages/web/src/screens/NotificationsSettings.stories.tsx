@@ -2,7 +2,7 @@ import type { NotificationPreferences, NotificationSettings } from "@sugabots/co
 import { HttpResponse, http } from "msw";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, StoryApp, storyProjects, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyProjects, storyWorkspace } from "@/story-app.test-support.tsx";
 
 const API = import.meta.env.VITE_API_URL as string;
 

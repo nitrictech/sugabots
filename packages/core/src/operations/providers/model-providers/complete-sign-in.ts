@@ -3,6 +3,7 @@ import { providersContracts } from "@sugabots/contracts/operations/providers";
 import { Effect } from "effect";
 import { proveInWorkspace } from "../../../proofs/in-workspace.ts";
 import { named } from "../../../proofs/proof.ts";
+import { proveReachesModelProvider } from "../../../proofs/reaches-model-provider.ts";
 import { proveCanManageWorkspace } from "../../../proofs/workspace-permissions.ts";
 import { ModelProviders } from "../../../providers/model-providers/model-providers.ts";
 import { workspaceIdOf } from "../../../workspaces/workspace-reference.ts";
@@ -16,21 +17,25 @@ export const completeSignIn = defineOperation(
 			const workspaceId = yield* workspaceIdOf(input.workspace).pipe(
 				Effect.mapError(() => new ProviderSignInAttemptInvalid()),
 			);
-			return yield* named(principal, workspaceId, (principal, workspace) =>
-				Effect.gen(function* () {
-					const canManage = yield* proveInWorkspace(principal, workspace).pipe(
-						Effect.flatMap(proveCanManageWorkspace),
-						Effect.mapError(() => new ProviderSignInAttemptInvalid()),
-					);
-					return yield* modelProviders
-						.completeSignIn(canManage, input.providerId, input.attempt)
-						.pipe(
-							Effect.catchTags({
-								ModelProviderNotFound: () => Effect.fail(new ProviderSignInAttemptInvalid()),
-								ResourceHidden: () => Effect.fail(new ProviderSignInAttemptInvalid()),
-							}),
+			return yield* named(
+				principal,
+				workspaceId,
+				input.providerId,
+				(principal, workspace, provider) =>
+					Effect.gen(function* () {
+						const canManage = yield* proveInWorkspace(principal, workspace).pipe(
+							Effect.flatMap(proveCanManageWorkspace),
+							Effect.mapError(() => new ProviderSignInAttemptInvalid()),
 						);
-				}),
+						return yield* proveReachesModelProvider(canManage, provider)
+							.pipe(Effect.flatMap((reach) => modelProviders.completeSignIn(reach, input.attempt)))
+							.pipe(
+								Effect.catchTags({
+									ModelProviderNotFound: () => Effect.fail(new ProviderSignInAttemptInvalid()),
+									ResourceHidden: () => Effect.fail(new ProviderSignInAttemptInvalid()),
+								}),
+							);
+					}),
 			);
 		}),
 );

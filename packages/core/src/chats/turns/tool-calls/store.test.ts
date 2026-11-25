@@ -1,9 +1,11 @@
 import { ToolApprovalConflict } from "@sugabots/contracts/errors/approvals";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { userText } from "@sugabots/errors";
+import { jsonSchema, tool } from "ai";
 import { eq } from "drizzle-orm";
 import { Context, Duration, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { BlobStore } from "../../../blob-store/blob-store.ts";
 import { query } from "../../../database/database.ts";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
 import {
@@ -27,11 +29,12 @@ import { asMember } from "../../../operations/chats/testing.ts";
 import { type CallOperation, servedOperations } from "../../../operations/testing.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
 import { chatServicesForTests, lanesForTests } from "../../testing.ts";
+import { recordedCallOf } from "../../tools/recorded-call.ts";
 import { releaseParkedLanes } from "../cancel-sweep.ts";
-import { TurnRecords } from "../records.ts";
+import { MISSING_APPROVAL_RECORD, TurnRecords } from "../records.ts";
 import { TurnSignals } from "../signals.ts";
 import {
-	aChatAwaitingReply,
+	aChatWithConnectorAwaitingReply,
 	asTheLoop,
 	endTurn,
 	type OpenedTurnForTests,
@@ -42,8 +45,18 @@ import {
 	runOver,
 	writeReply,
 } from "../testing.ts";
+import type { ToolCallRecorder } from "../tools.ts";
 import { Turns } from "../turns.ts";
-import { type ApprovalBinding, ToolCallStore } from "./store.ts";
+import { INTERRUPTED_CALL } from "./lifecycle.ts";
+import { MAX_RESULT_CHARACTERS } from "./long-results.ts";
+import { READ_INTERRUPTED, recorded, refused, TOOL_THREW } from "./recorded.ts";
+import {
+	APPROVED_CALL_MISMATCH,
+	APPROVED_CONNECTOR_CHANGED,
+	APPROVED_TOOL_TURNED_OFF,
+	type ApprovalBinding,
+	ToolCallStore,
+} from "./store.ts";
 
 /**
  * Tool calls against Postgres: what recording and finishing a call write, how
@@ -68,7 +81,6 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	/** The operations over chat services whose turns' workflows hear decisions through `signals`. */
 	const signalledBy = async (signals: TurnSignals.Interface) =>
 		servedOperations({ chats: await chatServicesForTests(bus, signals) });
-	const detailsAs = (memberId: string) => asMember(call, memberId);
 	const chatsAs = (memberId: string) => asMember(call, memberId);
 	let workspaceId: string;
 	let botId: string;
@@ -82,7 +94,8 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, botId, adminId, chatId, connectorId } = await aChatAwaitingReply(chatsAs));
+		({ workspaceId, botId, adminId, chatId, connectorId } =
+			await aChatWithConnectorAwaitingReply(chatsAs));
 		const [running] = await runOnPostgres(runningTurns(chatId));
 		if (!running) throw new Error("no turn running");
 		opened = await run(openTurn(running));
@@ -220,6 +233,75 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		expect(closed?.finishedAt).not.toBeNull();
 	});
 
+	const recorder: ToolCallRecorder = {
+		open: (call) =>
+			Effect.promise(() =>
+				run(
+					asTheLoop(opened, (runsTurn) =>
+						Effect.flatMap(TurnRecords.Service, (records) =>
+							records.recordToolCall(runsTurn, { ...call, step: 0 }),
+						),
+					),
+				),
+			),
+		close: (id, outcome) =>
+			Effect.promise(async () => {
+				await close(id, outcome);
+			}),
+		startApproved: () => Effect.die(new Error("The tool does not ask for approval")),
+	};
+
+	it("records a write before sending it and keeps its whole output when the model can only read the start", async () => {
+		const input = { body: "Release notes" };
+		const output = "x".repeat(MAX_RESULT_CHARACTERS + 1);
+		let sentId: string | undefined;
+		const wrapped = recorded(
+			"wiki__post",
+			tool({
+				inputSchema: jsonSchema({}),
+				execute: async (_input, { context }) => {
+					sentId = recordedCallOf(context);
+					if (!sentId) throw new Error("The call reached its tool without an id");
+					expect(await storedCall(sentId)).toMatchObject({
+						status: "running",
+						input,
+						writeOrDelete: true,
+					});
+					return output;
+				},
+			}),
+			{
+				chatId,
+				run,
+				writeOrDelete: true,
+				files: {
+					write: () =>
+						new BlobStore.Unavailable({
+							operation: "put",
+							provider: "postgres",
+							cause: "offline",
+						}),
+				},
+				recorder,
+			},
+		);
+
+		const result = await wrapped.execute?.(input, {
+			toolCallId: "sdk-post",
+			messages: [],
+			context: undefined,
+		});
+
+		expect(result).toMatchObject({ longResult: true });
+		if (!sentId) throw new Error("The tool was not sent");
+		expect(await storedCall(sentId)).toMatchObject({
+			tool: "wiki__post",
+			sdkToolCallId: "sdk-post",
+			status: "completed",
+			output,
+		});
+	});
+
 	it("keeps the images a call showed the model counted, not their data", async () => {
 		const id = await fetchCall();
 
@@ -233,13 +315,67 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		expect(closed?.output).toEqual({ text: "The image chart.png.", images: "1 shown" });
 	});
 
-	it("closes a failed call with the error and no output", async () => {
-		const id = await fetchCall();
+	it("keeps a refusal as a failed call in the chat", async () => {
+		const reason = userText`The bot cannot use this tool.`;
+		const wrapped = refused(
+			"wiki__lookup",
+			tool({ inputSchema: jsonSchema({}), execute: async () => "Unexpected output" }),
+			reason,
+			{ chatId, run, recorder, files: { write: () => Effect.die("No file expected") } },
+		);
 
-		const closed = await close(id, { error: userText`Host did not resolve` });
+		await wrapped.execute?.({}, { toolCallId: "sdk-refused", messages: [], context: undefined });
 
-		expect(closed).toMatchObject({ status: "failed", output: null, error: "Host did not resolve" });
+		expect(
+			await onDatabase((db) =>
+				db.select().from(toolCall).where(eq(toolCall.turnId, opened.turnId)),
+			),
+		).toMatchObject([{ tool: "wiki__lookup", status: "failed", output: null, error: reason }]);
 	});
+
+	it.each([
+		{ kind: "a thrown error", interrupt: false, writeOrDelete: false, error: TOOL_THREW },
+		{ kind: "an interrupted read", interrupt: true, writeOrDelete: false, error: READ_INTERRUPTED },
+		{ kind: "an interrupted write", interrupt: true, writeOrDelete: true, error: INTERRUPTED_CALL },
+	])(
+		"keeps the user message for $kind on the call",
+		async ({ interrupt, writeOrDelete, error }) => {
+			const controller = new AbortController();
+			const wrapped = recorded(
+				"wiki__lookup",
+				tool({
+					inputSchema: jsonSchema({}),
+					execute: async (): Promise<{ ok: boolean }> => {
+						if (interrupt) controller.abort();
+						throw new Error("Connector disconnected");
+					},
+				}),
+				{
+					chatId,
+					run,
+					recorder,
+					writeOrDelete,
+					files: { write: () => Effect.die("No file expected") },
+				},
+			);
+
+			await wrapped.execute?.(
+				{},
+				{
+					toolCallId: "sdk-failed",
+					messages: [],
+					context: undefined,
+					abortSignal: controller.signal,
+				},
+			);
+
+			expect(
+				await onDatabase((db) =>
+					db.select().from(toolCall).where(eq(toolCall.turnId, opened.turnId)),
+				),
+			).toMatchObject([{ tool: "wiki__lookup", status: "failed", output: null, error }]);
+		},
+	);
 
 	it("composes the call into the reply's parts where it was made", async () => {
 		await run(writeReply(opened, "Looking"));
@@ -252,7 +388,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			}),
 		);
 
-		const details = await detailsAs(adminId).get(chatId);
+		const details = await chatsAs(adminId).get(chatId);
 		const reply = details?.messages.find((message) => message.id === opened.replyMessageId);
 
 		expect(reply?.parts).toEqual([
@@ -272,7 +408,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 		expect(await start({ ...asked, input: { title: "A different issue" } })).toMatchObject({
 			_tag: "Refused",
-			reason: expect.stringContaining("already claimed"),
+			reason: APPROVED_CALL_MISMATCH,
 		});
 		expect(await start(asked)).toEqual({ _tag: "Send", id: allowed?.id });
 		// Started already, so starting it again, as an execution resuming the
@@ -280,7 +416,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		expect(await start(asked)).toMatchObject({ _tag: "Interrupted", id: allowed?.id });
 		expect(await start({ ...asked, toolCallId: "sdk-create-never-parked" })).toMatchObject({
 			_tag: "Refused",
-			reason: expect.stringContaining("no approval record"),
+			reason: MISSING_APPROVAL_RECORD,
 		});
 	});
 
@@ -344,7 +480,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 		expect(await start(asked)).toMatchObject({
 			_tag: "Refused",
-			reason: expect.stringContaining("configuration changed"),
+			reason: APPROVED_CONNECTOR_CHANGED,
 		});
 	});
 
@@ -360,7 +496,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 		expect(await start(asked)).toMatchObject({
 			_tag: "Refused",
-			reason: expect.stringContaining("turned off"),
+			reason: APPROVED_TOOL_TURNED_OFF,
 		});
 	});
 

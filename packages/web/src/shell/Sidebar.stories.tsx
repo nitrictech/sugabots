@@ -4,7 +4,7 @@ import { expect, fn, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
 import { SessionContext } from "@/lib/session.ts";
-import { appHandlers, storyMember } from "@/story-app.tsx";
+import { appHandlers, storyMember } from "@/story-app.test-support.tsx";
 import { IconRail } from "./IconRail.tsx";
 import { OwnerSidebar } from "./OwnerSidebar.tsx";
 import { SidebarView } from "./Sidebar.tsx";
@@ -16,7 +16,7 @@ import {
 	growthDesk,
 	linearHandler,
 	revenue,
-} from "./story-fixtures.ts";
+} from "./story-fixtures.test-support.ts";
 
 const suga = {
 	id: "0199a3a0-0000-7000-8000-000000000001",

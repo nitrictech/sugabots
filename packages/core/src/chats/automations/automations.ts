@@ -2,6 +2,7 @@ export * as Automations from "./automations.ts";
 
 import type { AcceptedRun } from "@sugabots/contracts";
 import { Context, type Effect, Layer } from "effect";
+import type { SignedByGitHubApp } from "../../proofs/signed-by-github-app.ts";
 import type { RepositoryActivity } from "../../providers/connectors/github/github-events.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { ChatStore } from "../store/store.ts";
@@ -10,21 +11,17 @@ import { AutomationStore } from "./store.ts";
 
 /**
  * Runs connector automations for what happened at their connectors' services.
- * The service's signature on the delivery is what admits it, checked before
- * this is asked, so this asks for no principal.
  */
 export interface ConnectorEventsInterface {
 	/**
 	 * Accepts a run of each enabled automation `activity` runs through
-	 * `connectorId`, while the connector has the repository. A delivery
+	 * the connector `signed` names, while the connector has the repository. A delivery
 	 * GitHub sends again starts no new runs.
 	 */
-	readonly accept: (input: {
-		workspaceId: string;
-		connectorId: string;
-		deliveryId: string;
-		activity: RepositoryActivity;
-	}) => Effect.Effect<AcceptedRun[]>;
+	readonly accept: <P, K>(
+		signed: SignedByGitHubApp<P, K>,
+		input: { deliveryId: string; activity: RepositoryActivity },
+	) => Effect.Effect<AcceptedRun[]>;
 }
 
 export class ConnectorEvents extends Context.Service<ConnectorEvents, ConnectorEventsInterface>()(

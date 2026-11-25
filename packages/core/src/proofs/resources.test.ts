@@ -1,14 +1,17 @@
 import { createHmac } from "node:crypto";
+import { WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "@sugabots/contracts/operations/web";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedComputer, seedConnector } from "../authentication/seed.test-support.ts";
-import { bot } from "../database/schema.ts";
+import { bot, searchProvider } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { Principal } from "../principal.ts";
 import { encryptAppCredential } from "../providers/connectors/github/credential.ts";
+import { SearchProviderStore } from "../providers/search-providers/search-provider-store.ts";
 import { type ComputerUse, proveCanUseComputer } from "./can-use-computer.ts";
 import { proveCanUseConnector } from "./can-use-connector.ts";
+import { proveCanUseWeb } from "./can-use-web.ts";
 import { named } from "./proof.ts";
 import {
 	type Authenticators,
@@ -134,6 +137,39 @@ describe("connectors and computers", () => {
 				{ access: "allow", writeOrDelete: false },
 			]);
 		});
+	});
+
+	it("proves web access only with a workspace provider and a bot's tool switched on", async () => {
+		const { a, b } = world;
+		const principal = await as.botFor(a.ed, a.pub.id, a.chat);
+		const uses = (workspaceId: string, tool: typeof WEB_FETCH_TOOL | typeof WEB_SEARCH_TOOL) =>
+			outcome(
+				named(principal, workspaceId, (principal, workspace) =>
+					proveCanUseWeb(principal, workspace, tool).pipe(Effect.asVoid),
+				).pipe(Effect.provide(SearchProviderStore.layer)),
+			);
+
+		expect(await uses(a.workspace, WEB_SEARCH_TOOL)).toBe("WebToolOff");
+		const apiKeyEncrypted = auth.secrets.encrypt("test-search-key");
+		await onDatabase((db) =>
+			db.insert(searchProvider).values({
+				workspaceId: a.workspace,
+				builtIn: "brave",
+				baseUrl: "https://search.example.com",
+				enabled: true,
+				apiKeyEncrypted,
+			}),
+		);
+		expect(await uses(a.workspace, WEB_SEARCH_TOOL)).toBe("ok");
+		await onDatabase((db) =>
+			db
+				.update(bot)
+				.set({ disabledTools: [WEB_SEARCH_TOOL] })
+				.where(eq(bot.id, a.pub.id)),
+		);
+		expect(await uses(a.workspace, WEB_SEARCH_TOOL)).toBe("WebToolOff");
+		expect(await uses(a.workspace, WEB_FETCH_TOOL)).toBe("ok");
+		expect(await uses(b.workspace, WEB_FETCH_TOOL)).toBe("ResourceHidden");
 	});
 
 	describe("CanUseComputer", () => {

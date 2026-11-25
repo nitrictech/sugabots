@@ -547,7 +547,7 @@ export const make = Effect.gen(function* () {
 								...call,
 								writeOrDelete: started.writeOrDelete,
 							})
-						: ({ _tag: "Refused", reason: "The call has no approval record" } as const);
+						: ({ _tag: "Refused", reason: MISSING_APPROVAL_RECORD } as const);
 				}),
 			).pipe(Effect.provideContext(database)),
 		askForApprovals: (runsTurn, step, approvals) =>
@@ -678,8 +678,10 @@ const logTurnFailure = <P, T>(runsTurn: RunsTurn<P, T>, why: string) =>
  * process stopped: it is not sent again.
  */
 
+export const MISSING_APPROVAL_RECORD = "The call has no approval record";
+
 /** What a call is told when its tool changed since an execution sent it, so it isn't sent again. */
-const CHANGED_SINCE_SENT = userText`This call was cut short, and its tool has changed since, so it wasn't sent again. Check what it did before asking for it again.`;
+export const CHANGED_SINCE_SENT = userText`This call was cut short, and its tool has changed since, so it wasn't sent again. Check what it did before asking for it again.`;
 
 /** What a call is told that this execution of the turn has sent already. */
 const SENT_ALREADY = userText`This call was sent already, so it wasn't sent again.`;

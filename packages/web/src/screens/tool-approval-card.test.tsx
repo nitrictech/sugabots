@@ -2,14 +2,14 @@ import type { ToolCallPart } from "@sugabots/contracts";
 import { Conflict } from "@sugabots/contracts/http";
 import { userText } from "@sugabots/errors";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { client } from "@/client.test-support.ts";
 import { createQueryClient } from "@/lib/query.ts";
-import { client } from "@/test-client.ts";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const bot = {
 	name: "Linear Handler",
@@ -69,19 +69,14 @@ beforeEach(() => {
 	client.api.approvals.decide.mockReturnValue(Effect.undefined);
 });
 
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
-});
-
 describe("an approval request", () => {
 	it("says who wants to use what, shows the request, and allows it once", async () => {
 		const approval = client.api.approvals.decide;
 		show(asking({ team: "Platform" }));
 
 		const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
-		expect(within(card).getByText("Linear Handler wants to use Linear")).toBeDefined();
-		expect(within(card).getByText("Platform")).toBeDefined();
+		within(card).getByText("Linear Handler wants to use Linear");
+		within(card).getByText("Platform");
 		fireEvent.click(inCard(/^Allow/));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
@@ -143,9 +138,9 @@ describe("an approval request", () => {
 		);
 
 		const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
-		expect(within(card).getByText("Field7")).toBeDefined();
-		expect(within(card).getByText("Name")).toBeDefined();
-		expect(within(card).getByText("Theo Hart")).toBeDefined();
+		within(card).getByText("Field7");
+		within(card).getByText("Name");
+		within(card).getByText("Theo Hart");
 		expect(within(card).getAllByRole("columnheader", { name: "Id" })).toHaveLength(1);
 		expect(within(card).getAllByRole("row")).toHaveLength(3);
 		expect(within(card).queryByText(/"name"/)).toBeNull();
@@ -157,7 +152,7 @@ describe("an approval request", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Review" }));
 		const request = await screen.findByRole("dialog", { name: "Update issue" });
-		expect(within(request).getByText("Platform")).toBeDefined();
+		within(request).getByText("Platform");
 		fireEvent.click(within(request).getByRole("button", { name: /^Allow/ }));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
@@ -179,7 +174,7 @@ describe("an approval request", () => {
 	it("says it waits on someone with permission when the reader cannot answer", () => {
 		show(asking({ team: "Platform" }), false);
 
-		expect(screen.getByText("Waiting for someone with permission to answer this.")).toBeDefined();
+		screen.getByText("Waiting for someone with permission to answer this.");
 		expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
 	});
 
@@ -199,13 +194,11 @@ describe("an approval request", () => {
 			);
 
 			const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
-			expect(within(card).getByText("Platform")).toBeDefined();
+			within(card).getByText("Platform");
 			expect(within(card).queryByRole("button", { name: /^(Allow|Deny)/ })).toBeNull();
-			expect(
-				within(card).getByText(`${status === "allowed" ? "Allowed" : "Denied"} by Mia Chen`, {
-					exact: false,
-				}),
-			).toBeDefined();
+			within(card).getByText(`${status === "allowed" ? "Allowed" : "Denied"} by Mia Chen`, {
+				exact: false,
+			});
 			// An answer already in the history is read, not announced as it loads.
 			expect(within(card).queryByRole("status")).toBeNull();
 		},

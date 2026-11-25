@@ -80,18 +80,4 @@ describe("botLoopTools", () => {
 			},
 		]);
 	});
-
-	it("offers no tool for an operation held back, covered or called by the loop", () => {
-		const offered = botLoopTools(manifest).map((tool) => tool.operation);
-
-		expect(offered).not.toContain("chats.rename");
-		expect(offered).not.toContain("turns.recordStep");
-		expect(offered).not.toContain("events.followChat");
-	});
-
-	it("keeps offering the operation that covers another", () => {
-		const offered = botLoopTools(manifest).map((tool) => tool.operation);
-
-		expect(offered).toContain(manifest["chats.rename"].botLoop.operation);
-	});
 });

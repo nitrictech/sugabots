@@ -3,8 +3,13 @@ import { listedConnector, type TestConnector } from "@sugabots/contracts/testing
 import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, connectorHandlers, StoryApp, storyProjects } from "../story-app.tsx";
+import { revenue } from "@/shell/story-fixtures.test-support.ts";
+import {
+	appHandlers,
+	connectorHandlers,
+	StoryApp,
+	storyProjects,
+} from "../story-app.test-support.tsx";
 
 /*
  * One connector on its own page under its project: who connected it and what
@@ -513,9 +518,11 @@ export const Editor = meta.story({
 /** On a phone: the header's own Back at the top, and no second one under it. */
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
-	play: async ({ canvas, canvasElement }) => {
-		await expect(await canvas.findByRole("link", { name: /^Back/ })).toBeInTheDocument();
-		await expect(canvasElement.querySelector("[data-page-back]")).toBeNull();
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByRole("heading", { name: "Linear", level: 1 })).toBeVisible();
+		const backLinks = await canvas.findAllByRole("link", { name: /^Back/ });
+		await expect(backLinks).toHaveLength(1);
+		await expect(backLinks[0]).toBeVisible();
 	},
 });
 

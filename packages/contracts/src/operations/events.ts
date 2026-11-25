@@ -49,7 +49,7 @@ export const eventsContracts = {
 			"Follow what changes in this workspace: each event about a chat, project, bot or membership the member reaches, as it happens.",
 		input: Schema.Struct({ workspace: workspaceIdOrSlugSchema, since }),
 		output: deliverySchema,
-		errors: [ResourceHidden, ActionForbidden],
+		errors: [ResourceHidden, BotCannotReach, ActionForbidden],
 	}),
 	"events.followChat": OperationContract.makeLongRunning("events.followChat", {
 		description: "Follow what changes in this chat, as it happens.",

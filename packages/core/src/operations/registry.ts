@@ -134,3 +134,10 @@ export const make = Effect.gen(function* () {
 });
 
 export const layerNoDeps = processLayer(Layer.effectContext(make));
+
+/**
+ * makeOfferStepTools builds the loop's turns.offerStepTools operation.
+ * It returns live callbacks owned by the step, so it has no portable
+ * contract or exposure manifest entry.
+ */
+export { makeOfferStepTools } from "./turns/index.ts";

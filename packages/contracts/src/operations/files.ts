@@ -59,6 +59,13 @@ const writeErrors = [
 ] as const;
 
 export const filesContracts = {
+	"files.servePage": OperationContract.make("files.servePage", {
+		description: "Serve the version of an HTML page that its content-origin address opens.",
+		input: Schema.Struct({ fileId }),
+		output: Schema.Struct({ title: Schema.String, html: Schema.String }),
+		errors: [ResourceHidden],
+		changes: false,
+	}),
 	"files.listWritten": OperationContract.make("files.listWritten", {
 		description:
 			"List the documents and pages written in the project this chat works in, newest first.",
@@ -125,7 +132,13 @@ const modelOnly = {
  */
 const inTurn = { kind: "offered", offeredIn: "everywhere", approval: { kind: "never" } } as const;
 
+const contentOriginOnly = {
+	kind: "heldBack",
+	reason: "Only the content origin serves pages from their secret addresses.",
+} as const;
+
 export const filesExposure = {
+	"files.servePage": { http: contentOriginOnly, botLoop: contentOriginOnly },
 	"files.listWritten": { http: modelOnly, botLoop: { ...inTurn, tool: FILE_LIST_TOOL } },
 	"files.readWritten": { http: modelOnly, botLoop: { ...inTurn, tool: FILE_READ_TOOL } },
 	"files.write": { http: modelOnly, botLoop: { ...inTurn, tool: FILE_WRITE_TOOL } },

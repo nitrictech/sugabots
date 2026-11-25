@@ -13,7 +13,7 @@ import {
 	linearHandler,
 	oncall,
 	revenue,
-} from "@/shell/story-fixtures.ts";
+} from "@/shell/story-fixtures.test-support.ts";
 import { WorkspaceMemberSettings } from "./WorkspaceMemberSettings.tsx";
 
 const workspace = {

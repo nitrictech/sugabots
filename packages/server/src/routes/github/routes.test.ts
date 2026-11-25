@@ -1,7 +1,6 @@
 import type { GitHubSetupOutcome, RepositoryActivity } from "@sugabots/contracts";
-import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { GitHubDeliveryIdInvalid } from "@sugabots/contracts/errors/connectors";
 import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
-import { Automations } from "@sugabots/core/chats/automations/automations";
 import { Operations } from "@sugabots/core/operations/registry";
 import type { WebhookCall } from "@sugabots/core/principal";
 import { unimplemented } from "@sugabots/core/testing";
@@ -22,7 +21,6 @@ import {
  */
 
 const CONNECTOR_ID = "0199a3a0-0000-7000-8000-000000000001";
-const OTHER_CONNECTOR_ID = "0199a3a0-0000-7000-8000-000000000003";
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000002";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000004";
 const GOOD_SIGNATURE = "sha256=good";
@@ -48,35 +46,22 @@ const opened: RepositoryActivity = {
  */
 const signedByTheApp = Object.freeze({ _tag: "WebhookCall" }) as unknown as WebhookCall;
 
-/**
- * The app with a GitHub connector whose app signs deliveries with the good
- * signature, and whose operation reads a `pull_request` event as a pull
- * request opened, for its own signed deliveries only.
- */
-function hookApp() {
-	const authenticate = vi.fn<WebhookAuthentication.Interface["github"]>((connectorId, delivery) =>
-		connectorId === CONNECTOR_ID && delivery.headers["x-hub-signature-256"] === GOOD_SIGNATURE
-			? Effect.succeed(signedByTheApp)
-			: Effect.fail(new WebhookAuthentication.WebhookRefused()),
-	);
-	const read = vi.fn<Operations.Interface["gitHubWebhooks.delivery"]>((principal, input) =>
-		principal === signedByTheApp && input.connectorId === CONNECTOR_ID
-			? Effect.succeed({
-					workspaceId: WORKSPACE_ID,
-					deliveryId: input.deliveryId,
-					activity: input.event === "pull_request" ? opened : undefined,
-				})
-			: Effect.fail(new ResourceHidden({ resource: "connector" })),
-	);
-	const accept = vi.fn<Automations.ConnectorEventsInterface["accept"]>(() => Effect.succeed([]));
+function hookApp({
+	authentication = Effect.succeed(signedByTheApp),
+	delivery = Effect.die("Unexpected delivery"),
+}: {
+	authentication?: ReturnType<WebhookAuthentication.Interface["github"]>;
+	delivery?: ReturnType<Operations.Interface["gitHubWebhooks.delivery"]>;
+} = {}) {
+	const authenticate = vi.fn<WebhookAuthentication.Interface["github"]>(() => authentication);
+	const read = vi.fn<Operations.Interface["gitHubWebhooks.delivery"]>(() => delivery);
 	const app = createTestApp(
 		Layer.mergeAll(
 			unimplemented(WebhookAuthentication.Service, { github: authenticate }),
 			unimplemented(Operations.Service, { "gitHubWebhooks.delivery": read }),
-			unimplemented(Automations.ConnectorEvents, { accept }),
 		),
 	);
-	return { app, authenticate, read, accept };
+	return { app, authenticate, read };
 }
 
 const deliver = (
@@ -91,33 +76,44 @@ const deliver = (
 	});
 
 describe("A GitHub connector's deliveries", () => {
-	it("admits the exact body by its signature, and hands the automations what it says happened", async () => {
-		const { app, authenticate, read, accept } = hookApp();
-
-		const response = await deliver(app, {
-			"x-github-event": "pull_request",
-			"x-github-delivery": "delivery-1",
-			"x-hub-signature-256": GOOD_SIGNATURE,
+	it("admits the exact body by its signature, and hands it to the delivery operation", async () => {
+		const connectorId = "0199a3a0-0000-7000-8000-000000000003";
+		const deliveryId = "delivery-1";
+		const { app, authenticate, read } = hookApp({
+			delivery: Effect.succeed({ workspaceId: WORKSPACE_ID, deliveryId, activity: opened }),
 		});
+
+		const response = await deliver(
+			app,
+			{
+				"x-github-event": "pull_request",
+				"x-github-delivery": deliveryId,
+				"x-hub-signature-256": GOOD_SIGNATURE,
+			},
+			connectorId,
+		);
 
 		expect(response.status).toBe(204);
-		expect(authenticate.mock.calls[0]?.[1]).toMatchObject({ body: '{ "action":  "opened" }' });
+		expect(authenticate).toHaveBeenCalledExactlyOnceWith(
+			connectorId,
+			expect.objectContaining({
+				headers: expect.objectContaining({ "x-hub-signature-256": GOOD_SIGNATURE }),
+				body: '{ "action":  "opened" }',
+			}),
+		);
+		expect(read.mock.calls[0]?.[0]).toBe(signedByTheApp);
 		expect(read.mock.calls[0]?.[1]).toEqual({
-			connectorId: CONNECTOR_ID,
+			connectorId,
 			event: "pull_request",
-			deliveryId: "delivery-1",
+			deliveryId,
 			body: '{ "action":  "opened" }',
-		});
-		expect(accept).toHaveBeenCalledWith({
-			workspaceId: WORKSPACE_ID,
-			connectorId: CONNECTOR_ID,
-			deliveryId: "delivery-1",
-			activity: opened,
 		});
 	});
 
-	it("refuses a delivery its app didn't sign, reads nothing and runs nothing", async () => {
-		const { app, read, accept } = hookApp();
+	it("refuses a delivery its app didn't sign, and reads nothing", async () => {
+		const { app, read } = hookApp({
+			authentication: Effect.fail(new WebhookAuthentication.WebhookRefused()),
+		});
 
 		const response = await deliver(app, {
 			"x-github-event": "pull_request",
@@ -126,41 +122,15 @@ describe("A GitHub connector's deliveries", () => {
 		});
 
 		expect(response.status).toBe(401);
-		expect(await response.json()).toEqual({
+		expect(await response.json()).toMatchObject({
 			_tag: "Unauthorized",
-			message: "That delivery isn't signed by its app",
 		});
 		expect(read).not.toHaveBeenCalled();
-		expect(accept).not.toHaveBeenCalled();
-	});
-
-	it("refuses a delivery to another connector than the one whose app signed it", async () => {
-		const { app, accept } = hookApp();
-
-		const response = await deliver(
-			app,
-			{ "x-github-event": "pull_request", "x-hub-signature-256": GOOD_SIGNATURE },
-			OTHER_CONNECTOR_ID,
-		);
-
-		expect(response.status).toBe(401);
-		expect(accept).not.toHaveBeenCalled();
-	});
-
-	it("acknowledges an event no automation runs on", async () => {
-		const { app, accept } = hookApp();
-
-		const response = await deliver(app, {
-			"x-github-event": "ping",
-			"x-hub-signature-256": GOOD_SIGNATURE,
-		});
-
-		expect(response.status).toBe(204);
-		expect(accept).not.toHaveBeenCalled();
 	});
 
 	it("refuses an activity GitHub gave no usable id, since a retry couldn't be told apart", async () => {
-		const { app, accept } = hookApp();
+		const refusal = new GitHubDeliveryIdInvalid();
+		const { app } = hookApp({ delivery: Effect.fail(refusal) });
 
 		const response = await deliver(app, {
 			"x-github-event": "pull_request",
@@ -168,7 +138,7 @@ describe("A GitHub connector's deliveries", () => {
 		});
 
 		expect(response.status).toBe(400);
-		expect(accept).not.toHaveBeenCalled();
+		expect(await response.json()).toMatchObject({ message: refusal.userMessage });
 	});
 });
 

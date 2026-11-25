@@ -42,6 +42,8 @@ const STREAM_HEADERS = {
 
 const STREAM_CONTENT_TYPE = "text/event-stream";
 
+const streamRefusals = { ResourceHidden: NotFound, BotCannotReach: NotFound };
+
 /** How often a stream pings, and how long it lives. */
 export interface Timing {
 	readonly ping: Duration.Input;
@@ -71,7 +73,7 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 						since: resumeFrom(request.headers["last-event-id"]),
 					}),
 					request.source,
-				).pipe(memberOnly, asHttpError({ ResourceHidden: NotFound })),
+				).pipe(memberOnly, asHttpError(streamRefusals)),
 			)
 			.handle("chat", ({ params, request }) =>
 				streamed(
@@ -80,7 +82,7 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 						since: resumeFrom(request.headers["last-event-id"]),
 					}),
 					request.source,
-				).pipe(memberOnly, asHttpError({ ResourceHidden: NotFound, BotCannotReach: NotFound })),
+				).pipe(memberOnly, asHttpError(streamRefusals)),
 			)
 			.handle("me", ({ request }) =>
 				streamed(

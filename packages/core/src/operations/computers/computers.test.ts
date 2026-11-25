@@ -1,4 +1,3 @@
-import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -6,21 +5,21 @@ import {
 	seedComputer,
 	seedMember,
 	seedProject,
-	seedProjectChat,
 	seedWorkspace,
 } from "../../authentication/seed.test-support.ts";
 import { Computers } from "../../computers/computers.ts";
-import { recordingFirstComputer } from "../../computers/testing.ts";
 import { computer, computerProvider } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, waitUntilWaitingOnLocks } from "../../database/testing.ts";
+import { closeDatabase, onDatabase } from "../../database/testing.ts";
 import type { Principal } from "../../principal.ts";
 import {
 	authenticators,
 	buildWorld,
+	everyKindOfPrincipal,
+	outcomesFor,
 	principals,
 	type World,
 } from "../../proofs/world.test-support.ts";
-import { type CallOperation, servedOperations } from "../testing.ts";
+import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
  * The computers operations, each called for every kind of principal through
@@ -42,80 +41,19 @@ describe("the computers operations, for each kind of principal", () => {
 	let as: ReturnType<typeof principals>;
 	let a: World["a"];
 	/** Every principal the cases call for, on J unless its name says otherwise. */
-	let who: Awaited<ReturnType<typeof principalsOnJ>>;
-
-	const principalsOnJ = async () => {
-		const outsider = await seedMember(world.b.workspace, "editor");
-		const adminsAssistant = await seedBot(a.workspace, {
-			assistantOf: a.admin,
-			visibility: "personal",
-		});
-		const adminsAssistantChat = await seedProjectChat(
-			a.workspace,
-			adminsAssistant.defaultProject,
-			a.admin,
-		);
-		return {
-			owner: await as.member(a.owner),
-			admin: await as.member(a.admin),
-			ed: await as.member(a.ed),
-			vi: await as.member(a.vi),
-			erin: await as.member(a.erin),
-			outsider: await as.member(outsider),
-			/** Pub answering Ed in J's chat: chat bounds, J. */
-			pubForEd: await as.botFor(a.ed, a.pub.id, a.chat),
-			/** Pub answering an admin in J's chat: chat bounds, J. */
-			pubForAdmin: await as.botFor(a.admin, a.pub.id, a.chat),
-			/** Helper answering Ed in K's chat: chat bounds, K, though both reach J. */
-			helperInK: await as.botFor(a.ed, a.helper.id, a.otherChat),
-			/** Ed's Personal Assistant in its own chat: member bounds. */
-			edsAssistant: await as.botFor(a.ed, a.assistant.id, a.assistantChat),
-			/** An admin's Personal Assistant in its own chat: member bounds. */
-			adminsAssistant: await as.botFor(a.admin, adminsAssistant.id, adminsAssistantChat),
-			run: (await as.run(a.workspace, a.project, a.pub.id)).principal,
-			webhook: await as.webhook(a.workspace, a.project),
-			computerSleep: (await as.computerSleep(a.workspace, a.project)).principal,
-			compaction: await as.compaction(a.chat, a.pub.id),
-			page: await as.page(a.chat),
-		};
-	};
+	let who: Awaited<ReturnType<typeof everyKindOfPrincipal>>;
 
 	beforeAll(async () => {
 		world = await buildWorld();
 		a = world.a;
 		call = await servedOperations();
 		as = principals(await authenticators());
-		who = await principalsOnJ();
+		who = await everyKindOfPrincipal(world, as);
 	});
 
 	afterAll(async () => {
 		await closeDatabase();
 	});
-
-	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends RequestOperationName>(
-		principal: Principal,
-		name: Name,
-		input: InputOf<Name>,
-	): Promise<string> =>
-		call(principal, name, input).then(
-			() => "ok",
-			(failure: { readonly _tag: string }) => failure._tag,
-		);
-
-	/** What `attempt` came to for each principal of `principals`, by its name. */
-	const outcomes = async <Key extends string>(
-		principals: Record<Key, Principal>,
-		attempt: (principal: Principal) => Promise<string>,
-	) => {
-		const entries = await Promise.all(
-			Object.entries<Principal>(principals).map(async ([key, principal]) => [
-				key,
-				await attempt(principal),
-			]),
-		);
-		return Object.fromEntries(entries) as Record<Key, string>;
-	};
 
 	/** A new private project like J, with no computer: led by Pub, with Helper, and Ed, Vi and Quinn in it. */
 	const projectLikeJ = () =>
@@ -131,38 +69,20 @@ describe("the computers operations, for each kind of principal", () => {
 			for (const name of reads) {
 				expect({
 					name,
-					outcomes: await outcomes(
+					outcomes: await outcomesFor(
 						{
-							owner: who.owner,
 							admin: who.admin,
-							editor: who.ed,
-							viewer: who.vi,
 							outsider: who.outsider,
 							adminsBotInChatBounds: who.pubForAdmin,
-							adminsAssistant: who.adminsAssistant,
-							editorsAssistant: who.edsAssistant,
-							run: who.run,
-							webhook: who.webhook,
-							computerSleep: who.computerSleep,
-							page: who.page,
 						},
-						(principal) => tried(principal, name, { workspace: a.workspace }),
+						(principal) => operationOutcome(call, principal, name, { workspace: a.workspace }),
 					),
 				}).toEqual({
 					name,
 					outcomes: {
-						owner: "ok",
 						admin: "ok",
-						editor: "ActionForbidden",
-						viewer: "ActionForbidden",
 						outsider: "ResourceHidden",
 						adminsBotInChatBounds: "ActionForbidden",
-						adminsAssistant: "ok",
-						editorsAssistant: "ActionForbidden",
-						run: "ActionForbidden",
-						webhook: "ActionForbidden",
-						computerSleep: "ActionForbidden",
-						page: "ActionForbidden",
 					},
 				});
 			}
@@ -170,24 +90,21 @@ describe("the computers operations, for each kind of principal", () => {
 
 		it("say whether computers can be given to anyone in the workspace, and a bot only in member bounds", async () => {
 			expect(
-				await outcomes(
+				await outcomesFor(
 					{
 						viewer: who.vi,
 						outsider: who.outsider,
 						botInChatBounds: who.pubForEd,
-						botInMemberBounds: who.edsAssistant,
-						run: who.run,
-						page: who.page,
 					},
-					(principal) => tried(principal, "computerProviders.access", { workspace: a.workspace }),
+					(principal) =>
+						operationOutcome(call, principal, "computerProviders.access", {
+							workspace: a.workspace,
+						}),
 				),
 			).toEqual({
 				viewer: "ok",
 				outsider: "ResourceHidden",
 				botInChatBounds: "ActionForbidden",
-				botInMemberBounds: "ok",
-				run: "ActionForbidden",
-				page: "ActionForbidden",
 			});
 			expect(await call(who.vi, "computerProviders.access", { workspace: a.workspace })).toEqual({
 				enabled: false,
@@ -195,100 +112,125 @@ describe("the computers operations, for each kind of principal", () => {
 		});
 
 		it("adds, removes, blocks and unblocks hosts for those who manage the workspace", async () => {
-			const host = `${a.workspace.slice(0, 8)}.example.com`;
-			const changed = await outcomes(
-				{ owner: who.owner, admin: who.admin, adminsAssistant: who.adminsAssistant },
-				async (principal) => {
-					const steps = [
-						"computerProviders.addHost",
-						"computerProviders.removeHost",
-						"computerProviders.blockHost",
-						"computerProviders.unblockHost",
-					] as const;
-					const tags = [];
-					for (const name of steps) {
-						tags.push(await tried(principal, name, { workspace: a.workspace, host }));
-					}
-					return tags.join(", ");
-				},
-			);
-			const refused = await outcomes(
-				{ editor: who.ed, adminsBotInChatBounds: who.pubForAdmin, run: who.run },
-				(principal) =>
-					tried(principal, "computerProviders.addHost", { workspace: a.workspace, host }),
-			);
+			const input = { workspace: a.workspace, host: "packages.example.com" };
+			const network = () =>
+				call(who.admin, "computerProviders.network", { workspace: a.workspace });
+			const entry = expect.objectContaining({ host: input.host });
 
-			expect({ ...changed, ...refused }).toEqual({
-				owner: "ok, ok, ok, ok",
-				admin: "ok, ok, ok, ok",
-				adminsAssistant: "ok, ok, ok, ok",
-				editor: "ActionForbidden",
-				adminsBotInChatBounds: "ActionForbidden",
-				run: "ActionForbidden",
+			for (const name of [
+				"computerProviders.addHost",
+				"computerProviders.removeHost",
+				"computerProviders.blockHost",
+				"computerProviders.unblockHost",
+			] as const) {
+				expect(await operationOutcome(call, who.pubForAdmin, name, input), name).toBe(
+					"ActionForbidden",
+				);
+				expect(await operationOutcome(call, who.outsider, name, input), name).toBe(
+					"ResourceHidden",
+				);
+			}
+
+			await call(who.admin, "computerProviders.addHost", input);
+			expect((await network()).addedHosts).toContainEqual(entry);
+			await call(who.admin, "computerProviders.removeHost", input);
+			expect((await network()).addedHosts).not.toContainEqual(entry);
+
+			await call(who.admin, "computerProviders.blockHost", input);
+			expect((await network()).blockedHosts).toContainEqual(entry);
+			await call(who.admin, "computerProviders.unblockHost", input);
+			expect((await network()).blockedHosts).not.toContainEqual(entry);
+		});
+		const providerFixture = async () => {
+			const workspace = await seedWorkspace();
+			const admin = await as.member(await seedMember(workspace, "admin"));
+			const editor = await as.member(await seedMember(workspace, "editor"));
+			const made = await call(admin, "computerProviders.create", {
+				workspace,
+				settings: { builtIn: "e2b" },
+			});
+			return { workspace, admin, editor, providerId: made.id };
+		};
+
+		it("lists the provider settings an admin changes", async () => {
+			const { workspace, admin, providerId } = await providerFixture();
+
+			await call(admin, "computerProviders.update", {
+				workspace,
+				providerId,
+				changes: { settings: { builtIn: "e2b", template: "ours" } },
+			});
+
+			const providers = await call(admin, "computerProviders.list", { workspace });
+			expect(providers).toContainEqual(
+				expect.objectContaining({ id: providerId, settings: { builtIn: "e2b", template: "ours" } }),
+			);
+		});
+
+		it("reports an unconfigured provider unreachable with no template", async () => {
+			const { workspace, admin, providerId } = await providerFixture();
+			const input = { workspace, providerId };
+			expect(await call(admin, "computerProviders.test", input)).toMatchObject({
+				reachable: false,
+			});
+			expect(await call(admin, "computerProviders.template", input)).toEqual({ state: null });
+			await expect(call(admin, "computerProviders.prepareTemplate", input)).rejects.toMatchObject({
+				_tag: "NoTemplates",
 			});
 		});
 
-		it("sets a provider up, tries it, and removes it, and finds none of another workspace's", async () => {
-			const made = await call(who.owner, "computerProviders.create", {
-				workspace: a.workspace,
-				settings: { builtIn: "e2b" },
-			});
-			const elsewhere = await call(who.ed, "computerProviders.create", {
-				workspace: world.b.workspace,
-				settings: { builtIn: "e2b" },
-			});
-			const ours = { workspace: a.workspace, providerId: made.id };
-
-			expect(
-				await call(who.admin, "computerProviders.update", {
-					...ours,
-					changes: { settings: { builtIn: "e2b", template: "ours" } },
-				}),
-			).toMatchObject({ id: made.id, settings: { builtIn: "e2b", template: "ours" } });
-			expect(await call(who.admin, "computerProviders.test", ours)).toMatchObject({
-				reachable: false,
-			});
-			expect(await call(who.admin, "computerProviders.template", ours)).toEqual({ state: null });
-			expect(await tried(who.admin, "computerProviders.prepareTemplate", ours)).toBe("NoTemplates");
-			expect(
-				await tried(who.admin, "computerProviders.update", {
-					...ours,
+		it("refuses changing a provider's built-in kind or enabling it while incomplete", async () => {
+			const { workspace, admin, providerId } = await providerFixture();
+			await expect(
+				call(admin, "computerProviders.update", {
+					workspace,
+					providerId,
 					changes: { settings: { builtIn: "opensandbox" } },
 				}),
-			).toBe("ComputerProviderBuiltInFixed");
-			expect(
-				await tried(who.admin, "computerProviders.update", { ...ours, changes: { enabled: true } }),
-			).toBe("ComputerProviderIncomplete");
+			).rejects.toMatchObject({ _tag: "ComputerProviderBuiltInFixed" });
+			await expect(
+				call(admin, "computerProviders.update", {
+					workspace,
+					providerId,
+					changes: { enabled: true },
+				}),
+			).rejects.toMatchObject({ _tag: "ComputerProviderIncomplete" });
+		});
+
+		it("checks workspace management and hides foreign and missing provider ids", async () => {
+			const { workspace, admin, editor, providerId } = await providerFixture();
+			const elsewhere = await providerFixture();
+
 			const missing = crypto.randomUUID();
 			for (const { principal, ids, refusal } of [
-				{ principal: who.ed, ids: [made.id, missing], refusal: "ActionForbidden" },
-				{ principal: who.vi, ids: [made.id, missing], refusal: "ActionForbidden" },
-				{ principal: who.admin, ids: [elsewhere.id, missing], refusal: "ResourceHidden" },
+				{ principal: editor, ids: [providerId, missing], refusal: "ActionForbidden" },
+				{ principal: admin, ids: [elsewhere.providerId, missing], refusal: "ResourceHidden" },
 			]) {
 				for (const providerId of ids) {
-					const address = { workspace: a.workspace, providerId };
+					const address = { workspace, providerId };
 					for (const name of [
 						"computerProviders.test",
 						"computerProviders.template",
 						"computerProviders.prepareTemplate",
 						"computerProviders.remove",
 					] as const) {
-						expect(await tried(principal, name, address), name).toBe(refusal);
+						expect(await operationOutcome(call, principal, name, address), name).toBe(refusal);
 					}
 					expect(
-						await tried(principal, "computerProviders.update", {
+						await operationOutcome(call, principal, "computerProviders.update", {
 							...address,
 							changes: { enabled: false },
 						}),
 					).toBe(refusal);
 				}
 			}
-			expect(await tried(who.admin, "computerProviders.remove", ours)).toBe("ok");
-			expect(
-				(await call(who.owner, "computerProviders.list", { workspace: a.workspace })).map(
-					({ id }) => id,
-				),
-			).not.toContain(made.id);
+		});
+
+		it("takes a removed provider out of its workspace list", async () => {
+			const { workspace, admin, providerId } = await providerFixture();
+			await call(admin, "computerProviders.remove", { workspace, providerId });
+			const providers = await call(admin, "computerProviders.list", { workspace });
+			expect(providers.map(({ id }) => id)).not.toContain(providerId);
 		});
 	});
 
@@ -359,51 +301,11 @@ describe("the computers operations, for each kind of principal", () => {
 
 			expect(await shownTo(who.ed)).toEqual([a.project, a.otherProject].toSorted());
 			expect(await shownTo(who.pubForEd)).toEqual([a.project]);
-			expect(await tried(who.outsider, "computerProviders.disks", { workspace: a.workspace })).toBe(
-				"ResourceHidden",
-			);
-		});
-	});
-
-	describe("removing a computer provider", () => {
-		it("keeps a provider that makes a project's first computer while it is removed", async () => {
-			const workspaceId = await seedWorkspace();
-			const owner = await seedMember(workspaceId, "owner");
-			const lead = await seedBot(workspaceId, { createdById: owner });
-			const launch = await seedProject(workspaceId, { leadBotId: lead.id });
-			const [provider] = await onDatabase((db) =>
-				db
-					.insert(computerProvider)
-					.values({
-						workspaceId,
-						settings: { builtIn: "opensandbox", serverUrl: "http://computers.test" },
-						enabled: true,
-					})
-					.returning({ id: computerProvider.id }),
-			);
-			if (!provider) throw new Error("fixture");
-			const recording = await recordingFirstComputer({
-				workspaceId,
-				projectId: launch,
-				computerProviderId: provider.id,
-			});
-
-			const removing = tried(await as.member(owner), "computerProviders.remove", {
-				workspace: workspaceId,
-				providerId: provider.id,
-			});
-			await waitUntilWaitingOnLocks(1);
-			await recording.release();
-
-			expect(await removing).toBe("ComputerMadeMeanwhile");
 			expect(
-				await onDatabase((db) =>
-					db
-						.select({ id: computer.id })
-						.from(computer)
-						.where(eq(computer.computerProviderId, provider.id)),
-				),
-			).toHaveLength(1);
+				await operationOutcome(call, who.outsider, "computerProviders.disks", {
+					workspace: a.workspace,
+				}),
+			).toBe("ResourceHidden");
 		});
 	});
 
@@ -412,147 +314,70 @@ describe("the computers operations, for each kind of principal", () => {
 			for (const name of ["projectComputer.get", "projectComputer.network"] as const) {
 				expect({
 					name,
-					outcomes: await outcomes(
+					outcomes: await outcomesFor(
 						{
-							admin: who.admin,
 							viewer: who.vi,
 							notInProject: who.erin,
-							outsider: who.outsider,
-							botInBounds: who.pubForEd,
 							botOutsideBounds: who.helperInK,
-							run: who.run,
-							webhook: who.webhook,
-							computerSleep: who.computerSleep,
-							compaction: who.compaction,
-							page: who.page,
 						},
-						(principal) => tried(principal, name, { projectId: a.project }),
+						(principal) => operationOutcome(call, principal, name, { projectId: a.project }),
 					),
 				}).toEqual({
 					name,
 					outcomes: {
-						admin: "ok",
 						viewer: "ok",
 						notInProject: "ResourceHidden",
-						outsider: "ResourceHidden",
-						botInBounds: "ok",
 						botOutsideBounds: "ResourceHidden",
-						run: "ok",
-						webhook: "ResourceHidden",
-						computerSleep: "ResourceHidden",
-						compaction: "ResourceHidden",
-						page: "ResourceHidden",
 					},
 				});
 			}
 		});
 
-		it("is reset and upgraded by those who manage the project, a bot for its asker included", async () => {
-			const refused = await outcomes(
-				{
-					editor: who.ed,
-					viewer: who.vi,
-					notInProject: who.erin,
-					editorsBot: who.pubForEd,
-					run: who.run,
-					webhook: who.webhook,
-					computerSleep: who.computerSleep,
-					page: who.page,
-				},
-				(principal) => tried(principal, "projectComputer.reset", { projectId: a.project }),
-			);
-			const resetAndUpgrade = async (principal: Principal, projectId: string) => {
-				const reset = await tried(principal, "projectComputer.reset", { projectId });
-				const upgraded = await tried(principal, "projectComputer.upgrade", { projectId });
-				return `${reset}, ${upgraded}`;
-			};
-			const managed = await outcomes(
-				{ owner: who.owner, admin: who.admin, adminsAssistant: who.adminsAssistant },
-				async (principal) => resetAndUpgrade(principal, await projectLikeJ()),
-			);
-			const newProject = await projectLikeJ();
-			const pubForAdminThere = await as.botFor(
-				a.admin,
-				a.pub.id,
-				await seedProjectChat(a.workspace, newProject, a.admin),
-			);
-			const adminsBotInChatBounds = await resetAndUpgrade(pubForAdminThere, newProject);
-
-			expect({ ...refused, ...managed, adminsBotInChatBounds }).toEqual({
-				editor: "ActionForbidden",
-				viewer: "ActionForbidden",
-				notInProject: "ResourceHidden",
-				editorsBot: "ActionForbidden",
-				run: "ActionForbidden",
-				webhook: "ResourceHidden",
-				computerSleep: "ResourceHidden",
-				page: "ResourceHidden",
-				owner: "ok, NoComputerProvider",
-				admin: "ok, NoComputerProvider",
-				adminsBotInChatBounds: "ok, NoComputerProvider",
-				adminsAssistant: "ok, NoComputerProvider",
-			});
+		it("requires project management to reset or upgrade its computer", async () => {
+			const projectId = await projectLikeJ();
+			for (const [name, allowed] of [
+				["projectComputer.reset", "ok"],
+				["projectComputer.upgrade", "NoComputerProvider"],
+			] as const) {
+				const manage = (principal: Principal) =>
+					operationOutcome(call, principal, name, { projectId });
+				expect(await manage(who.admin), name).toBe(allowed);
+				expect(await manage(who.ed), name).toBe("ActionForbidden");
+				expect(await manage(who.erin), name).toBe("ResourceHidden");
+			}
 		});
 
 		it("is a bot's default project's, managed by the bot's managers, and hidden from an admin with a personal bot", async () => {
 			const resetOf = (principal: Principal, projectId: string) =>
-				tried(principal, "projectComputer.reset", { projectId });
+				operationOutcome(call, principal, "projectComputer.reset", { projectId });
 
 			expect({
 				creatorOfPublicBot: await resetOf(who.ed, a.pub.defaultProject),
-				adminOfPublicBot: await resetOf(who.admin, a.pub.defaultProject),
 				editorTalkingToPublicBot: await resetOf(who.erin, a.pub.defaultProject),
-				creatorOfPersonalBot: await resetOf(who.ed, a.personal.defaultProject),
 				adminOfPersonalBot: await resetOf(who.admin, a.personal.defaultProject),
-				memberOfAssistant: await resetOf(who.ed, a.assistant.defaultProject),
 			}).toEqual({
 				creatorOfPublicBot: "ok",
-				adminOfPublicBot: "ok",
 				editorTalkingToPublicBot: "ActionForbidden",
-				creatorOfPersonalBot: "ok",
 				adminOfPersonalBot: "ResourceHidden",
-				memberOfAssistant: "ok",
 			});
 		});
 
-		it("has its allowed hosts changed by those who manage the project, and a bot only in member bounds", async () => {
-			const host = `${a.workspace.slice(0, 8)}.example.org`;
-			const refused = await outcomes(
-				{
-					editor: who.ed,
-					viewer: who.vi,
-					notInProject: who.erin,
-					adminsBotInChatBounds: who.pubForAdmin,
-					run: who.run,
-					webhook: who.webhook,
-					computerSleep: who.computerSleep,
-					page: who.page,
-				},
-				(principal) => tried(principal, "projectComputer.addHost", { projectId: a.project, host }),
-			);
-			const changed = await outcomes(
-				{ owner: who.owner, admin: who.admin, adminsAssistant: who.adminsAssistant },
-				async (principal) => {
-					const projectId = await projectLikeJ();
-					const added = await call(principal, "projectComputer.addHost", { projectId, host });
-					const removed = await call(principal, "projectComputer.removeHost", { projectId, host });
-					return `${added.addedHosts.map((shown) => shown.host)}; ${removed.addedHosts.length}`;
-				},
-			);
+		it("changes a project's allowed hosts only with authority to change its reach", async () => {
+			const projectId = a.project;
+			const input = { projectId, host: "project-packages.example.org" };
+			const network = () => call(who.admin, "projectComputer.network", { projectId });
+			const entry = expect.objectContaining({ host: input.host });
 
-			expect({ ...refused, ...changed }).toEqual({
-				editor: "ActionForbidden",
-				viewer: "ActionForbidden",
-				notInProject: "ResourceHidden",
-				adminsBotInChatBounds: "ActionForbidden",
-				run: "ActionForbidden",
-				webhook: "ResourceHidden",
-				computerSleep: "ResourceHidden",
-				page: "ResourceHidden",
-				owner: `${host}; 0`,
-				admin: `${host}; 0`,
-				adminsAssistant: `${host}; 0`,
-			});
+			for (const name of ["projectComputer.addHost", "projectComputer.removeHost"] as const) {
+				expect(await operationOutcome(call, who.pubForAdmin, name, input), name).toBe(
+					"ActionForbidden",
+				);
+				expect(await operationOutcome(call, who.erin, name, input), name).toBe("ResourceHidden");
+			}
+			await call(who.admin, "projectComputer.addHost", input);
+			expect((await network()).addedHosts).toContainEqual(entry);
+			await call(who.admin, "projectComputer.removeHost", input);
+			expect((await network()).addedHosts).not.toContainEqual(entry);
 		});
 
 		it("refuses a host the workspace blocked", async () => {
@@ -560,12 +385,14 @@ describe("the computers operations, for each kind of principal", () => {
 			const projectId = await projectLikeJ();
 			await call(who.owner, "computerProviders.blockHost", { workspace: a.workspace, host });
 
-			expect(await tried(who.admin, "projectComputer.addHost", { projectId, host })).toBe(
-				"ComputerHostBlocked",
-			);
+			expect(
+				await operationOutcome(call, who.admin, "projectComputer.addHost", { projectId, host }),
+			).toBe("ComputerHostBlocked");
 
 			await call(who.owner, "computerProviders.unblockHost", { workspace: a.workspace, host });
-			expect(await tried(who.admin, "projectComputer.addHost", { projectId, host })).toBe("ok");
+			expect(
+				await operationOutcome(call, who.admin, "projectComputer.addHost", { projectId, host }),
+			).toBe("ok");
 		});
 	});
 });

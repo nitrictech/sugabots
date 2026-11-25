@@ -9,13 +9,10 @@ import {
 	createRouter,
 	RouterProvider,
 } from "@tanstack/react-router";
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { Effect } from "effect";
 import { type ReactNode, useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { findBot, useUpdateBot } from "@/lib/bots.ts";
-import { useMembersReachingProject, useProjectBots } from "@/lib/projects.ts";
-import { createQueryClient } from "@/lib/query.ts";
+import { describe, expect, it, vi } from "vitest";
 import {
 	bots,
 	juno,
@@ -25,15 +22,13 @@ import {
 	projects,
 	sam,
 	triager,
-} from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+} from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
+import { findBot, useUpdateBot } from "@/lib/bots.ts";
+import { useMembersReachingProject, useProjectBots } from "@/lib/projects.ts";
+import { createQueryClient } from "@/lib/query.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
-
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
-});
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 describe("findBot", () => {
 	const someoneElses = {
@@ -122,11 +117,13 @@ describe("quick changes to bots", () => {
 		client.api.bots.list.mockReturnValue(Effect.succeed(bots));
 		const { result } = await renderUpdates(createQueryClient());
 
-		act(() => result.current.triager.mutate({ name: "First" }));
-		act(() => result.current.triager.mutate({ name: "Second" }));
-		await waitFor(() => expect(client.api.bots.update).toHaveBeenCalledTimes(1));
-		await new Promise((resolve) => setTimeout(resolve, 20));
-		expect(client.api.bots.update).toHaveBeenCalledTimes(1);
+		await act(async () => {
+			result.current.triager.mutate({ name: "First" });
+			result.current.triager.mutate({ name: "Second" });
+		});
+		expect(client.api.bots.update.mock.calls).toEqual([
+			[{ params: { botId: triager.id }, payload: { name: "First" } }],
+		]);
 
 		first.answer(Effect.succeed({ ...triager, name: "First" }));
 

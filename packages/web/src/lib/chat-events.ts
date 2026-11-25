@@ -68,7 +68,7 @@ const TYPING_SIGNAL_INTERVAL_MS = 3_000;
  * How long a member is shown typing after they last said so. Long enough for
  * the next signal to arrive late without them flickering out.
  */
-const TYPING_SHOWN_FOR_MS = 2 * TYPING_SIGNAL_INTERVAL_MS;
+export const TYPING_SHOWN_FOR_MS = 2 * TYPING_SIGNAL_INTERVAL_MS;
 
 /** A member the chat's events said is typing, and until when they are shown. */
 interface TypingMember {

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { FILE_WRITE_TOOL, START_CHAT_TOOL } from "@sugabots/contracts";
 import { seedProject, seedProjectChat } from "@sugabots/core/authentication/seed.test-support";
-import { aChatAwaitingReply, runningTurns } from "@sugabots/core/chats/turns/testing";
+import { aChatWithConnectorAwaitingReply, runningTurns } from "@sugabots/core/chats/turns/testing";
 import {
 	automation,
 	bot,
@@ -39,7 +39,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a tool's writes after an interrupt",
 	afterAll(closeDatabase);
 
 	beforeEach(async () => {
-		({ chatId, workspaceId, botId, adminId, connectorId } = await aChatAwaitingReply(chatsAs));
+		({ chatId, workspaceId, botId, adminId, connectorId } =
+			await aChatWithConnectorAwaitingReply(chatsAs));
 		const [placed] = await onDatabase((db) =>
 			db
 				.select({ projectId: placedChat.projectId })
@@ -131,10 +132,10 @@ describe.skipIf(!process.env.DATABASE_URL)("a tool's writes after an interrupt",
 			await seedProject(workspaceId, { leadBotId: botId, members: [adminId] }),
 			adminId,
 		);
-		await chatsAs(adminId).post({
+		await chatsAs(adminId).send({
 			chatId: inProject,
-			messageId: randomUUID(),
-			content: "Resolve this, please.",
+			retryKey: randomUUID(),
+			message: "Resolve this, please.",
 		});
 		const principal = await runningThenInterrupted(inProject);
 

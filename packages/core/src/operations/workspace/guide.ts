@@ -22,18 +22,24 @@ export const guide = defineOperation(
 				return yield* new ResourceHidden({ resource: "workspace" });
 			}
 			const guides = yield* WorkspaceGuide.Service;
-			return yield* named(principal, principal.workspace, call, (principal, workspace, call) =>
-				Effect.gen(function* () {
-					const inWorkspace = yield* proveInWorkspace(principal, workspace);
-					const canRead = yield* proveCanReadWorkspace(inWorkspace);
-					const approved = yield* proveApproved(
-						principal,
-						call,
-						approvalRule("workspaces.guide"),
-						input,
-					);
-					return yield* guides.guide(canRead, proveReachSet(inWorkspace), approved);
-				}),
+			return yield* named(
+				principal,
+				principal.workspace,
+				call,
+				input,
+				(principal, workspace, call, approvedInput) =>
+					Effect.gen(function* () {
+						const inWorkspace = yield* proveInWorkspace(principal, workspace);
+						const canRead = yield* proveCanReadWorkspace(inWorkspace);
+						const approved = yield* proveApproved(
+							principal,
+							call,
+							approvalRule("workspaces.guide"),
+							approvedInput,
+							workspace,
+						);
+						return yield* guides.guide(canRead, proveReachSet(inWorkspace), approved);
+					}),
 			);
 		}),
 );

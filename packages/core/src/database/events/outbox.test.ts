@@ -4,10 +4,10 @@ import { Data, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { batchedBeforeCommit, query, transaction } from "../database.ts";
 import { event } from "../schema.ts";
-import { closeDatabase, runOnPostgres } from "../testing.ts";
+import { closeDatabase, runOnPostgres, waitUntilWaitingOnLocks } from "../testing.ts";
 import { EventBus } from "./bus.ts";
 import { type CommittedEvent, EventOutbox, type PendingEvent } from "./outbox.ts";
-import { EventStore } from "./store.ts";
+import { inMemoryEventStore } from "./testing.ts";
 
 class Abandoned extends Data.TaggedError("Abandoned") {}
 
@@ -19,7 +19,7 @@ class Abandoned extends Data.TaggedError("Abandoned") {}
 
 describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
 	const bus = {
-		...EventBus.inProcess({ store: EventStore.inMemory() }),
+		...EventBus.inProcess({ store: inMemoryEventStore() }),
 		publishCommitted: vi.fn(async (_events: CommittedEvent[]) => {}),
 	};
 	const { publish } = Effect.runSync(
@@ -136,10 +136,12 @@ describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
 		const second = runOnPostgres(transaction(publish([marked(2)]))).then(() => {
 			secondCommitted = true;
 		});
-		await new Promise((resolve) => setTimeout(resolve, 20));
-		expect(secondCommitted).toBe(false);
-
-		releaseFirst();
+		try {
+			await waitUntilWaitingOnLocks(1);
+			expect(secondCommitted).toBe(false);
+		} finally {
+			releaseFirst();
+		}
 		await Promise.all([first, second]);
 
 		const [firstEvent, secondEvent] = deliveries().map(([committed]) => committed);

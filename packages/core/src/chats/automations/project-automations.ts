@@ -72,7 +72,7 @@ export interface Interface {
 	/** The project's automations, by name, each with how it stands. */
 	readonly list: <P, J, X>(
 		reach: ReachesProject<P, J>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [J], "automations.list" | "automations.listInChat">,
 	) => Effect.Effect<ListedAutomationDefinition[]>;
 	/**
 	 * Names and states of the automations an admin may pause in a personal
@@ -100,7 +100,7 @@ export interface Interface {
 	>;
 	readonly createWithRoutine: <P, J, X>(
 		canManage: CanManageProject<P, J>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [J], "automations.createWithRoutine">,
 		input: Pick<NewAutomation, "name" | "instructions">,
 		routine: RoutineInput,
 	) => Effect.Effect<Automation, AutomationNameTaken | InvalidRoutineSchedule | FenceRefusal>;
@@ -119,7 +119,7 @@ export interface Interface {
 		canManage: CanManageProject<P, J>,
 		automation: Named<A, string>,
 		target: ReachesProjectAutomation<P, J, A>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [J, A], "automations.updateInChat">,
 		input: AutomationUpdate,
 		routine: RoutineInput | undefined,
 	) => Effect.Effect<
@@ -163,10 +163,10 @@ export interface Interface {
 	 * Rewrites one of an automation's triggers, which keeps its kind. A webhook's
 	 * secret is kept unless one is brought; one made for it is returned.
 	 */
-	readonly updateTrigger: <P, J, T>(
+	readonly updateTrigger: <P, J, A, T>(
 		canManage: CanManageProject<P, J>,
 		trigger: Named<T, string>,
-		target: ReachesAutomationTrigger<P, J, T>,
+		target: ReachesAutomationTrigger<P, J, A, T>,
 		input: AutomationTriggerInput,
 	) => Effect.Effect<
 		Defined,
@@ -178,16 +178,16 @@ export interface Interface {
 		| WebhookDeliveryIdHeaderRejected
 		| AutomationRepositoryNotConnected
 	>;
-	readonly removeTrigger: <P, J, T>(
+	readonly removeTrigger: <P, J, A, T>(
 		canManage: CanManageProject<P, J>,
 		trigger: Named<T, string>,
-		target: ReachesAutomationTrigger<P, J, T>,
+		target: ReachesAutomationTrigger<P, J, A, T>,
 	) => Effect.Effect<Automation, AutomationNotFound | AutomationTriggerNotFound>;
 	/** A webhook trigger's current secret. */
-	readonly currentSecret: <P, J, T>(
+	readonly currentSecret: <P, J, A, T>(
 		canManage: CanManageProject<P, J>,
 		trigger: Named<T, string>,
-		target: ReachesAutomationTrigger<P, J, T>,
+		target: ReachesAutomationTrigger<P, J, A, T>,
 	) => Effect.Effect<
 		AutomationCurrentSecret,
 		AutomationNotFound | AutomationTriggerNotFound | AutomationTriggerRejected
@@ -196,10 +196,10 @@ export interface Interface {
 	 * Replaces a webhook trigger's secret with `secret`, with a new one when
 	 * it is absent, or with none when it is null, and returns it.
 	 */
-	readonly replaceSecret: <P, J, T>(
+	readonly replaceSecret: <P, J, A, T>(
 		canManage: CanManageProject<P, J>,
 		trigger: Named<T, string>,
-		target: ReachesAutomationTrigger<P, J, T>,
+		target: ReachesAutomationTrigger<P, J, A, T>,
 		secret: string | null | undefined,
 	) => Effect.Effect<
 		string | null,
@@ -334,25 +334,25 @@ export const make = Effect.gen(function* () {
 		updateTrigger: (_canManage, trigger, target, input) =>
 			operation(
 				"updateTrigger",
-				writes.updateTrigger(scopeOf(target, target.automation), trigger.value, input),
+				writes.updateTrigger(scopeOf(target, target.automation.value), trigger.value, input),
 			),
 
 		removeTrigger: (_canManage, trigger, target) =>
 			operation(
 				"removeTrigger",
-				writes.removeTrigger(scopeOf(target, target.automation), trigger.value),
+				writes.removeTrigger(scopeOf(target, target.automation.value), trigger.value),
 			),
 
 		currentSecret: (_canManage, trigger, target) =>
 			operation(
 				"currentSecret",
-				writes.currentSecret(scopeOf(target, target.automation), trigger.value),
+				writes.currentSecret(scopeOf(target, target.automation.value), trigger.value),
 			),
 
 		replaceSecret: (_canManage, trigger, target, secret) =>
 			operation(
 				"replaceSecret",
-				writes.replaceSecret(scopeOf(target, target.automation), trigger.value, secret),
+				writes.replaceSecret(scopeOf(target, target.automation.value), trigger.value, secret),
 			),
 
 		run: (canRun, automation, target, requestId) =>
@@ -393,6 +393,8 @@ function projectOf<J>(reach: { workspace: string; project: Named<J, string> }) {
 	return { id: reach.project.value, workspaceId: reach.workspace };
 }
 
-function holdApprovedTurn<P, X>(approved: Approved<P, X>) {
+function holdApprovedTurn<P, X, Targets extends readonly unknown[]>(
+	approved: Approved<P, X, Targets, "automations.createWithRoutine" | "automations.updateInChat">,
+) {
 	return holdTurnOf(approved.principal.value);
 }

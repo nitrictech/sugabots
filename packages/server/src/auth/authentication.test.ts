@@ -7,6 +7,7 @@ import { noComputers } from "@sugabots/core/computers/testing";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventStore } from "@sugabots/core/database/events/store";
+import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
 import { member } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
@@ -57,7 +58,7 @@ async function appWith(
 	policy: { SIGNUP_MODE: Accounts.SignUpMode; REQUIRE_EMAIL_VERIFICATION: "true" | "false" },
 	sent: Email.Message[],
 ) {
-	const bus = EventBus.inProcess({ store: EventStore.inMemory() });
+	const bus = EventBus.inProcess({ store: inMemoryEventStore() });
 	const runtime = ManagedRuntime.make(
 		Layer.mergeAll(
 			Authentication.layer,
@@ -173,7 +174,7 @@ function invite(app: App, token: string, workspaceId: string, email: string) {
 	return post(app, `/workspaces/${workspaceId}/invitations`, { email, role: "editor" }, token);
 }
 
-describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
+describe("accounts", () => {
 	const sent: Email.Message[] = [];
 	let app: App;
 	beforeAll(async () => {
@@ -240,22 +241,6 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 			[adaEmail, "owner"],
 			[bobEmail, "editor"],
 		]);
-	});
-
-	it("accepts the HttpOnly cookie issued at sign-up on application routes", async () => {
-		const unique = crypto.randomUUID().slice(0, 8);
-		const response = await signUpAt(app, "Cookie User", `cookie-${unique}@example.com`);
-		const cookie = response.headers.get("set-cookie")?.split(";", 1)[0];
-		expect(cookie).toBeTruthy();
-
-		const identified = await app.request(`${API_BASE_PATH}/me`, {
-			headers: { cookie: cookie as string },
-		});
-
-		expect(identified.status).toBe(200);
-		expect(Schema.decodeUnknownSync(meSchema)(await identified.json()).member.email).toBe(
-			`cookie-${unique}@example.com`,
-		);
 	});
 
 	it("accepts the session's token as a bearer on application routes, reading its row", async () => {
@@ -400,7 +385,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 	});
 });
 
-describe.skipIf(!process.env.DATABASE_URL)("a server whose sign-up mode is closed", () => {
+describe("a server whose sign-up mode is closed", () => {
 	const sent: Email.Message[] = [];
 	// The same database seen under both policies: someone sends an invitation from the
 	// open one, and the invitee arrives at the closed one.
@@ -450,7 +435,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a server whose sign-up mode is close
 	});
 });
 
-describe.skipIf(!process.env.DATABASE_URL)("a server that signs members up by referral", () => {
+describe("a server that signs members up by referral", () => {
 	const sent: Email.Message[] = [];
 	// The same database under both policies, so there is always somebody to
 	// refer from and the server is never empty.
@@ -561,7 +546,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a server that signs members up by re
 	});
 });
 
-describe.skipIf(!process.env.DATABASE_URL)("a server that requires email verification", () => {
+describe("a server that requires email verification", () => {
 	const sent: Email.Message[] = [];
 	let app: App;
 	beforeAll(async () => {

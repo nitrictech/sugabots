@@ -3,7 +3,7 @@ import { testMember } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, leadResearcher, storyBots } from "@/shell/story-fixtures.ts";
+import { growthDesk, leadResearcher, storyBots } from "@/shell/story-fixtures.test-support.ts";
 import {
 	appHandlers,
 	chatPath,
@@ -12,7 +12,7 @@ import {
 	storyChatFor,
 	storyMember,
 	storyWorkspace,
-} from "@/story-app.tsx";
+} from "@/story-app.test-support.tsx";
 
 /*
  * A bot's automations, opened from the sidebar: each with the bot that runs it

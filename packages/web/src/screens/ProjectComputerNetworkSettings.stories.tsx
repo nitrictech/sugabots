@@ -4,9 +4,9 @@ import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
 import { expect, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
-import { storyBots } from "@/shell/story-fixtures.ts";
+import { storyBots } from "@/shell/story-fixtures.test-support.ts";
 import { SettingsPage } from "@/ui/settings-page.tsx";
-import { storyProjects } from "../story-app.tsx";
+import { storyProjects } from "../story-app.test-support.tsx";
 import { ProjectComputerNetworkSettings } from "./ProjectComputerNetworkSettings.tsx";
 
 const project = storyProjects[0] as Project;

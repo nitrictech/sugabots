@@ -1,23 +1,18 @@
 import type { ProjectChat } from "@sugabots/contracts";
 import { listedChat } from "@sugabots/contracts/testing";
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { apiAnswers, mount, onWideScreen, projects, workspace } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 import { chooseWorkspace } from "@/lib/workspace.ts";
-import { apiAnswers, mount, onWideScreen, projects, workspace } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 beforeEach(() => {
 	apiAnswers();
 	localStorage.clear();
 	chooseWorkspace(workspace.id);
-});
-
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
 });
 
 describe("a project's own sidebar", () => {
@@ -51,7 +46,7 @@ describe("a project's own sidebar", () => {
 
 		fireEvent.click(await screen.findByRole("button", { name: /^Resolved\s*1$/, expanded: false }));
 		const resolved = await screen.findByRole("region", { name: "Resolved" });
-		expect(within(resolved).getByRole("button", { name: `Reopen: ${chat.title}` })).toBeDefined();
+		within(resolved).getByRole("button", { name: `Reopen: ${chat.title}` });
 		// Chats holds only what is still open, so with none it is gone.
 		const chats = screen.queryByRole("region", { name: "Chats" });
 		expect(

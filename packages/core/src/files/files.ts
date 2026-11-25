@@ -60,6 +60,7 @@ import type { CanManageChats } from "../proofs/chat-permissions.ts";
 import type { CanChangeChat } from "../proofs/project-permissions.ts";
 import type { ReachesChat } from "../proofs/reaches-chat.ts";
 import type { ReachesFile } from "../proofs/reaches-file.ts";
+import type { ReachesPage } from "../proofs/reaches-page.ts";
 import type { ReachesProject } from "../proofs/reaches-project.ts";
 import { processLayer, Tier } from "../tiers.ts";
 
@@ -93,6 +94,9 @@ export interface Interface {
 		reach: ReachesFile<P, F>,
 		version: number,
 	) => Effect.Effect<WrittenFile, ResourceHidden>;
+	readonly servePage: <P, F>(
+		reach: ReachesPage<P, F>,
+	) => Effect.Effect<{ title: string; html: string }, ResourceHidden>;
 	/** Deletes the written file with every version of it; its stored content is removed after. */
 	readonly remove: <P, F>(
 		reach: ReachesFile<P, F>,
@@ -100,15 +104,15 @@ export interface Interface {
 	) => Effect.Effect<void, ResourceHidden>;
 	readonly listWritten: <P, C, X>(
 		reach: ReachesChat<P, C>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [C], "files.listWritten">,
 	) => Effect.Effect<ListedWrittenFile[]>;
 	readonly readWritten: <P, F, X>(
 		reach: ReachesFile<P, F>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [F], "files.readWritten">,
 	) => Effect.Effect<WrittenFile, ResourceHidden>;
 	readonly create: <P, C, X>(
 		canChange: CanChangeChat<P, C>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [C], "files.write">,
 		input: NewWrittenFile,
 	) => Effect.Effect<
 		FileWritten,
@@ -116,7 +120,7 @@ export interface Interface {
 	>;
 	readonly replace: <P, F, X>(
 		canChange: CanChangeFile<P, F>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [F], "files.write">,
 		input: ReplaceWrittenFile,
 	) => Effect.Effect<
 		FileWritten,
@@ -130,7 +134,7 @@ export interface Interface {
 	>;
 	readonly edit: <P, F, X>(
 		canChange: CanChangeFile<P, F>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [F], "files.edit">,
 		input: EditWrittenFile,
 	) => Effect.Effect<
 		FileWritten,
@@ -219,6 +223,16 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const found = yield* writtenFileIn(reach);
 					return yield* shownOrHidden(atVersion(found, version));
+				}),
+			),
+
+		servePage: (reach) =>
+			operation(
+				"servePage",
+				Effect.gen(function* () {
+					const found = yield* requireWrittenFile(reach.file.value, reach.chat);
+					const shown = yield* shownOrHidden(atVersion(found, reach.version));
+					return { title: shown.title, html: shown.content };
 				}),
 			),
 
@@ -323,8 +337,8 @@ interface FileWriter {
 	readonly toolCallId: string;
 }
 
-const fileWriter = <P, X>(
-	approved: Approved<P, X>,
+const fileWriter = <P, X, Target>(
+	approved: Approved<P, X, [Target], "files.write" | "files.edit">,
 ): Effect.Effect<FileWriter, ActionForbidden | ApprovalRefused> =>
 	Effect.gen(function* () {
 		const principal = approved.principal.value;
@@ -445,20 +459,6 @@ const withContent = <E, R>(
 		);
 	});
 
-/**
- * Version `version` of a written file, read without asking who wants it:
- * only for a caller that has already authorized the read, as an encrypted page
- * address has (see `pages.ts`). `undefined` when there is no such file or
- * version.
- */
-export const readVersionUnchecked =
-	(blobs: BlobStore.Interface) => (fileId: string, version: number) =>
-		Effect.gen(function* () {
-			const found = yield* writtenFileWithId(fileId);
-			if (!found) return undefined;
-			return yield* atVersionIn(blobs)(found, version);
-		});
-
 /** A version's content as kept in the blob store. */
 interface StoredContent {
 	versionId: string;
@@ -526,8 +526,6 @@ const requireWrittenFile = (fileId: string, chatId: string, lock = false) =>
 			() => new ResourceHidden({ resource: "file" }),
 		),
 	);
-
-const writtenFileWithId = (fileId: string) => writtenFileWhere(fileId, undefined);
 
 /** Files with the chat each was made in and the bot that made it, for a scope to narrow. */
 const writtenFilesWithCreator = (db: Executor) =>

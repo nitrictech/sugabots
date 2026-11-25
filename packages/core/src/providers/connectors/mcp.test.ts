@@ -110,12 +110,18 @@ describe("listing a server's tools", () => {
 	});
 
 	it("reports a server that is not there in its own words, keeping the network's for the logs", async () => {
-		const found = await listServerTools({ url: "http://127.0.0.1:9/mcp", headers: {} }, fetch);
+		const networkDetail = "connect ECONNREFUSED 10.9.8.7:1234";
+		const unreachable: typeof fetch = async () => {
+			throw new TypeError("fetch failed", { cause: new Error(networkDetail) });
+		};
+
+		const found = await listServerTools({ url, headers: {} }, unreachable);
 
 		expect(found).toMatchObject({
 			ok: false,
 			reason:
 				"The server could not be reached. Check the address and port, and that the server is running",
 		});
+		expect(JSON.stringify(found.ok ? found : found.reason)).not.toContain(networkDetail);
 	});
 });

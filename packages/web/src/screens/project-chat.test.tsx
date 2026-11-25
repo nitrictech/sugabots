@@ -8,9 +8,9 @@ import {
 import { Conflict } from "@sugabots/contracts/http";
 import { listedChat, type TestConnector, testMember } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
-import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	apiAnswers,
 	bots,
@@ -19,10 +19,12 @@ import {
 	sam,
 	serveConnectors,
 	writeDraft,
-} from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+} from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+import { chatDetailsFixture, robin } from "./chat-fixtures.test-support.ts";
+
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 /*
  * A project's chat and its automation are the project's, not its lead bot's:
@@ -36,8 +38,6 @@ const leadParticipant = botParticipantOf(lead);
 /** Another of the project's bots. */
 const other = bots.find((bot) => bot.id !== lead.id) as (typeof bots)[number];
 const otherParticipant = botParticipantOf(other);
-/** One of the project's members. */
-const robin = testMember({ id: "0199a3a0-0000-7000-8000-0000000003d1", name: "Robin Vale" });
 const chatId = "0199a3a0-0000-7000-8000-0000000003e1";
 const feedId = "0199a3a0-0000-7000-8000-0000000003e2";
 const runChatId = "0199a3a0-0000-7000-8000-0000000003e3";
@@ -111,41 +111,20 @@ function expiredConnector(id: string, projectId: string, name: string): TestConn
 	};
 }
 
-function details(
-	id: string,
-	kind: ChatDetails["chat"]["kind"],
-	more: Partial<ChatDetails> = {},
-): ChatDetails {
-	return {
-		chat: {
-			id,
-			workspaceId: project.workspaceId,
-			projectId: project.id,
-			// In a project members made, no chat is with a bot of its own, not even a run.
-			botId: null,
-			rootChatId: kind === "run" ? feedId : id,
-			kind,
-			title: kind === "run" ? run.automationName : chat.title,
-			working: false,
-			resolvedAt: null,
-			createdAt: at,
-			updatedAt: at,
-		},
-		automationRun: null,
-		participants: [leadParticipant],
-		projectBots: [leadParticipant, otherParticipant],
-		membersReachingProject: [robin],
-		messages: [],
-		olderMessagesCursor: null,
-		queuedSince: null,
-		reads: [],
-		...more,
-	};
-}
+const projectChatDetails = chatDetailsFixture(chat, {
+	participants: [leadParticipant],
+	projectBots: [leadParticipant, otherParticipant],
+	membersReachingProject: [robin],
+});
+const runDetails = projectChatDetails({
+	chat: { id: runChatId, rootChatId: feedId, title: run.automationName, kind: "run" },
+	automationRun: run,
+});
 
 const chats: Record<string, ChatDetails> = {
-	[chatId]: details(chatId, "project_chat", { messages: [result] }),
-	[feedId]: details(feedId, "automation_feed", {
+	[chatId]: projectChatDetails({ messages: [result] }),
+	[feedId]: projectChatDetails({
+		chat: { id: feedId, rootChatId: feedId, kind: "automation_feed" },
 		automation: {
 			id: automationId,
 			projectId: project.id,
@@ -154,7 +133,7 @@ const chats: Record<string, ChatDetails> = {
 			pausedAfterFailures: false,
 		},
 	}),
-	[runChatId]: details(runChatId, "run", { automationRun: run }),
+	[runChatId]: runDetails,
 };
 
 /** The automation's own page, among the project's automations. */
@@ -179,11 +158,6 @@ beforeEach(() => {
 	);
 });
 
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
-});
-
 describe("a project's chat", () => {
 	it("shows the project's computer, which its lead bot works on whether or not it has one of its own", async () => {
 		client.api.computerProviders.access.mockReturnValue(Effect.succeed({ enabled: true }));
@@ -191,7 +165,7 @@ describe("a project's chat", () => {
 
 		fireEvent.click(await screen.findByRole("button", { name: "Details" }));
 		const sidebar = await screen.findByRole("complementary", { name: "Details" });
-		expect(await within(sidebar).findByRole("button", { name: "Not running" })).toBeDefined();
+		await within(sidebar).findByRole("button", { name: "Not running" });
 	});
 
 	it("says who will answer a draft that mentions someone: the bots it mentions, else the lead, which may let one for members pass", async () => {
@@ -200,10 +174,10 @@ describe("a project's chat", () => {
 		expect(screen.queryByText(/will reply here/)).toBeNull();
 
 		writeDraft(composer, `@${other.handle} can you check?`);
-		expect(await screen.findByText(`${other.name} will reply here.`)).toBeDefined();
+		await screen.findByText(`${other.name} will reply here.`);
 
 		writeDraft(composer, `@${robin.handle} can you check?`);
-		expect(await screen.findByText(`${lead.name} may reply.`)).toBeDefined();
+		await screen.findByText(`${lead.name} may reply.`);
 	});
 
 	it("promises no reply to a draft for members when the lead has no model to answer with", async () => {
@@ -214,7 +188,7 @@ describe("a project's chat", () => {
 
 		writeDraft(await screen.findByRole("textbox"), `@${robin.handle} can you check?`);
 
-		expect(await screen.findByLabelText(`Message ${robin.name}`)).toBeDefined();
+		await screen.findByLabelText(`Message ${robin.name}`);
 		expect(screen.queryByText(`${lead.name} may reply.`)).toBeNull();
 	});
 
@@ -226,11 +200,9 @@ describe("a project's chat", () => {
 		const composer = await screen.findByRole("textbox");
 
 		writeDraft(composer, `@${other.handle} can you check?`);
-		expect(
-			await screen.findByText(`${other.name} has no model yet, so it cannot answer.`, {
-				exact: false,
-			}),
-		).toBeDefined();
+		await screen.findByText(`${other.name} has no model yet, so it cannot answer.`, {
+			exact: false,
+		});
 		const send = screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement;
 		expect(send.disabled).toBe(true);
 		expect(screen.queryByText(`${other.name} will reply here.`)).toBeNull();
@@ -248,16 +220,14 @@ describe("a project's chat", () => {
 
 		writeDraft(composer, `@${lead.handle} can you check?`);
 
-		expect(await screen.findByText(`${lead.name} will reply here.`)).toBeDefined();
+		await screen.findByText(`${lead.name} will reply here.`);
 	});
 
 	it("offers to sign one of the project's connectors in again once its sign-in expired", async () => {
 		serveConnectors(expiredConnector("0199a3a0-0000-7000-8000-0000000003f2", project.id, "Linear"));
 		mount(`/suga/projects/${project.slug}/${chatId}`);
 
-		expect(
-			await screen.findByRole("button", { name: `Sign in to Linear for ${project.name}` }),
-		).toBeDefined();
+		await screen.findByRole("button", { name: `Sign in to Linear for ${project.name}` });
 	});
 
 	it("warns that its lead bot can't use one of the bot's own connectors once its sign-in expired", async () => {
@@ -266,9 +236,7 @@ describe("a project's chat", () => {
 		);
 		mount(`/suga/projects/${project.slug}/${chatId}`);
 
-		expect(
-			await screen.findByText(`${lead.name} can't use Sentry until you sign in again.`),
-		).toBeDefined();
+		await screen.findByText(`${lead.name} can't use Sentry until you sign in again.`);
 	});
 
 	it("says on a phone whose sign-in expired when the project and its lead bot each have a connector of the same name", async () => {
@@ -278,14 +246,10 @@ describe("a project's chat", () => {
 		);
 		mount(`/suga/projects/${project.slug}/${chatId}`);
 
-		expect(await screen.findByText(`${project.name}'s Linear sign-in expired.`)).toBeDefined();
-		expect(await screen.findByText(`${lead.name}'s Linear sign-in expired.`)).toBeDefined();
-		expect(
-			screen.getByRole("button", { name: `Sign in to Linear for ${project.name}` }),
-		).toBeDefined();
-		expect(
-			screen.getByRole("button", { name: `Sign in to Linear for ${lead.name}` }),
-		).toBeDefined();
+		await screen.findByText(`${project.name}'s Linear sign-in expired.`);
+		await screen.findByText(`${lead.name}'s Linear sign-in expired.`);
+		screen.getByRole("button", { name: `Sign in to Linear for ${project.name}` });
+		screen.getByRole("button", { name: `Sign in to Linear for ${lead.name}` });
 	});
 
 	it("warns of a new lead bot's expired connector though the old lead's warning was closed", async () => {
@@ -309,15 +273,13 @@ describe("a project's chat", () => {
 		);
 		await act(() => queries.invalidateQueries({ queryKey: ["projects"] }));
 
-		expect(
-			await screen.findByText(`${newLead.name} can't use Notion until you sign in again.`),
-		).toBeDefined();
+		await screen.findByText(`${newLead.name} can't use Notion until you sign in again.`);
 	});
 
 	it("titles its computer's desktop with the project", async () => {
 		mount(`/suga/projects/${project.slug}/${chatId}?desktop=true`);
 
-		expect(await screen.findByRole("region", { name: `${project.name}'s computer` })).toBeDefined();
+		await screen.findByRole("region", { name: `${project.name}'s computer` });
 	});
 });
 
@@ -331,11 +293,9 @@ describe("a project's new chat", () => {
 		const composer = await screen.findByLabelText(`Message ${project.name}`);
 
 		writeDraft(composer, "Check the prices");
-		expect(
-			await screen.findByText(`${lead.name} has no model yet, so it cannot answer.`, {
-				exact: false,
-			}),
-		).toBeDefined();
+		await screen.findByText(`${lead.name} has no model yet, so it cannot answer.`, {
+			exact: false,
+		});
 		const start = screen.getByRole("button", { name: "Start chat" }) as HTMLButtonElement;
 		expect(start.disabled).toBe(true);
 
@@ -372,10 +332,10 @@ describe("a project's new chat", () => {
 		writeDraft(composer, "@");
 
 		const list = within(await screen.findByRole("listbox"));
-		expect(await list.findByRole("option", { name: new RegExp(robin.name) })).toBeDefined();
+		await list.findByRole("option", { name: new RegExp(robin.name) });
 		expect(list.queryByRole("option", { name: new RegExp(sam.name) })).toBeNull();
-		expect(list.getByRole("option", { name: /@here/ })).toBeDefined();
-		expect(list.getByRole("option", { name: /@channel/ })).toBeDefined();
+		list.getByRole("option", { name: /@here/ });
+		list.getByRole("option", { name: /@channel/ });
 	});
 });
 
@@ -387,7 +347,7 @@ describe("a project's automation feed, at its own address", () => {
 
 		const automations = await screen.findByRole("link", { name: "Automations" });
 		expect(automations.getAttribute("href")).toBe(`/suga/projects/${project.slug}/automations`);
-		expect(await screen.findByText(`Runs as ${lead.name}. Each run posts here.`)).toBeDefined();
+		await screen.findByText(`Runs as ${lead.name}. Each run posts here.`);
 	});
 
 	it("says only the lead answers in its feed, whichever other bot is mentioned", async () => {
@@ -395,11 +355,11 @@ describe("a project's automation feed, at its own address", () => {
 		const composer = await screen.findByLabelText(`Message ${lead.name} about this automation`);
 
 		writeDraft(composer, `@${other.handle} can you check?`);
-		expect(await screen.findByText(`${lead.name} will reply here.`)).toBeDefined();
+		await screen.findByText(`${lead.name} will reply here.`);
 		expect(screen.queryByText(`${other.name} will reply here.`)).toBeNull();
 
 		writeDraft(screen.getByRole("textbox"), `@${robin.handle} can you check?`);
-		expect(await screen.findByText(`${lead.name} won't reply.`)).toBeDefined();
+		await screen.findByText(`${lead.name} won't reply.`);
 	});
 
 	it("leads from a run's page to the automation's settings among the project's", async () => {
@@ -420,10 +380,10 @@ describe("a project's automation feed, at its own address", () => {
 				{ type: "file", id: fileId, name: "prices.csv", contentType: "text/csv", size: 512 },
 			],
 		};
-		const ranWithReport = details(runChatId, "run", {
-			automationRun: run,
+		const ranWithReport: ChatDetails = {
+			...runDetails,
 			messages: [report],
-		});
+		};
 		client.api.chats.get.mockImplementation(({ params }: { params: { chatId: string } }) =>
 			Effect.succeed(params.chatId === runChatId ? ranWithReport : chats[params.chatId]),
 		);
@@ -455,7 +415,7 @@ describe("a project's automation feed, at its own address", () => {
 		serveFailedRun();
 		mount(`${feedPage}?nestedChatPage=${runChatId}`);
 
-		expect(await screen.findByRole("link", { name: "Fix connector" })).toBeDefined();
+		await screen.findByRole("link", { name: "Fix connector" });
 		expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
 	});
 
@@ -518,9 +478,7 @@ function serveFailedRun() {
 	);
 	client.api.chats.get.mockImplementation(({ params }: { params: { chatId: string } }) =>
 		Effect.succeed(
-			params.chatId === runChatId
-				? details(runChatId, "run", { automationRun: failed })
-				: chats[params.chatId],
+			params.chatId === runChatId ? { ...runDetails, automationRun: failed } : chats[params.chatId],
 		),
 	);
 }

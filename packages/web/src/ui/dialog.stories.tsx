@@ -54,8 +54,9 @@ export const Scrim = meta.story({
 	play: async ({ canvas, canvasElement, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Disconnect Anthropic" }));
 		const { body } = canvasElement.ownerDocument;
-		await within(body).findByRole("dialog", { name: "Disconnect Anthropic?" });
+		const dialog = await within(body).findByRole("dialog", { name: "Disconnect Anthropic?" });
 
-		await expect(body.querySelector('[data-slot="dialog-overlay"]')).not.toBeNull();
+		await expect(dialog).toBeVisible();
+		await expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
 	},
 });

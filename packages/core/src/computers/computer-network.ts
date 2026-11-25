@@ -118,7 +118,7 @@ export interface Interface {
 	 */
 	readonly requestedHost: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [C], "computers.requestHost">,
 		host: string,
 	) => Effect.Effect<OutputOf<"computers.requestHost">, ComputerHostBlocked>;
 }

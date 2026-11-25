@@ -1,7 +1,7 @@
 import { HttpResponse, http } from "msw";
 import { expect, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, StoryApp, storyMember, storyWorkspace } from "../story-app.tsx";
+import { appHandlers, StoryApp, storyMember, storyWorkspace } from "../story-app.test-support.tsx";
 
 /*
  * Settings as the app shows them: the grouped sections down the left, the open

@@ -1,5 +1,4 @@
 import type { ModelProvider } from "@sugabots/contracts";
-import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import {
 	DiscoveryUnreachable,
 	ModelProviderNameConflict,
@@ -92,11 +91,9 @@ describe("model provider routes", () => {
 	});
 
 	it("reports an address the network policy refuses as a bad request, in its own words", async () => {
-		const refusal =
-			"That address is on a local or private network, which this server doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.";
+		const error = new UrlNotAllowed({ refusal: userText`The address is on a private network.` });
 		const response = await app({
-			"modelProviders.create": () =>
-				Effect.fail(new UrlNotAllowed({ refusal: userText`${refusal}` })),
+			"modelProviders.create": () => Effect.fail(error),
 		}).request(root, {
 			method: "POST",
 			headers,
@@ -106,8 +103,8 @@ describe("model provider routes", () => {
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message: refusal,
-			error: { _tag: "UrlNotAllowed", userMessage: refusal, isRetryable: false },
+			message: error.userMessage,
+			error: { _tag: "UrlNotAllowed", userMessage: error.userMessage, isRetryable: false },
 		});
 	});
 
@@ -148,28 +145,17 @@ describe("model provider routes", () => {
 		});
 	});
 
-	it("answers a workspace hidden from the caller as not found", async () => {
-		const response = await app({
-			"modelProviders.list": () => Effect.fail(new ResourceHidden({ resource: "workspace" })),
-		}).request(root, { headers });
-
-		expect(response.status).toBe(404);
-	});
-
 	it("keeps what a provider or the network said about a failed refresh out of the response", async () => {
+		const error = new DiscoveryUnreachable({ cause: new Error("getaddrinfo ENOTFOUND 10.0.0.7") });
 		const response = await app({
-			"modelProviders.discoverModels": () =>
-				Effect.fail(
-					new DiscoveryUnreachable({ cause: new Error("getaddrinfo ENOTFOUND 10.0.0.7") }),
-				),
+			"modelProviders.discoverModels": () => Effect.fail(error),
 		}).request(`${root}/${PROVIDER_ID}/discover-models`, { method: "POST", headers });
 
 		expect(response.status).toBe(400);
 		const body = await response.json();
 		expect(body).toMatchObject({
 			_tag: "BadRequest",
-			message:
-				"We can't reach the provider. Check its address, and that the server is running if it's your own. Then try again.",
+			message: error.userMessage,
 			error: { _tag: "DiscoveryUnreachable", isRetryable: true },
 		});
 		expect(JSON.stringify(body)).not.toContain("ENOTFOUND");

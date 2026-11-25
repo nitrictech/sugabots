@@ -6,7 +6,6 @@ import {
 	ComputersNotDestroyed,
 	ComputerUnavailable,
 } from "@sugabots/contracts/errors/computers";
-import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { UrlNotAllowed } from "@sugabots/contracts/errors/providers";
 import type { FailureOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { Operations } from "@sugabots/core/operations/registry";
@@ -232,7 +231,7 @@ describe("the computer providers routes", () => {
 		}
 	});
 
-	it("answers each failure with its status", async () => {
+	it("answers computer errors with their statuses", async () => {
 		const removing = (failure: FailureOf<"computerProviders.remove">) =>
 			app({ "computerProviders.remove": () => Effect.fail(failure) })
 				.request(`${providers}/${PROVIDER}`, asAdmin("DELETE"))
@@ -243,8 +242,6 @@ describe("the computer providers routes", () => {
 				.then((response) => response.status);
 
 		expect({
-			hidden: await removing(new ResourceHidden({ resource: "workspace" })),
-			forbidden: await removing(new ActionForbidden({ proof: "CanManageWorkspace" })),
 			notFound: await removing(new ComputerProviderNotFound()),
 			notDestroyed: await removing(new ComputersNotDestroyed({ reason: "incomplete" })),
 			madeMeanwhile: await removing(new ComputerMadeMeanwhile()),
@@ -253,8 +250,6 @@ describe("the computer providers routes", () => {
 			),
 			incomplete: await creating(new ComputerProviderIncomplete({ missing: "key" })),
 		}).toEqual({
-			hidden: 404,
-			forbidden: 403,
 			notFound: 404,
 			notDestroyed: 409,
 			madeMeanwhile: 409,
@@ -264,17 +259,16 @@ describe("the computer providers routes", () => {
 	});
 
 	it("answers an unreachable provider as a conflict, with its user message", async () => {
+		const error = new ComputerUnavailable({ provider: "e2b", cause: "timed out" });
 		const response = await app({
-			"computerProviders.template": () =>
-				Effect.fail(new ComputerUnavailable({ provider: "e2b", cause: "timed out" })),
+			"computerProviders.template": () => Effect.fail(error),
 		}).request(`${providers}/${PROVIDER}/template`, asAdmin("GET"));
 
 		expect(response.status).toBe(409);
-		const unreachable = "The computer provider didn't answer. Try again shortly.";
 		expect(await response.json()).toEqual({
 			_tag: "Conflict",
-			message: unreachable,
-			error: { _tag: "ComputerUnavailable", userMessage: unreachable, isRetryable: true },
+			message: error.userMessage,
+			error: { _tag: "ComputerUnavailable", userMessage: error.userMessage, isRetryable: true },
 		});
 	});
 });

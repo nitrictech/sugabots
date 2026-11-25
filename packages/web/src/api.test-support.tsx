@@ -28,11 +28,11 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { fireEvent, render } from "@testing-library/react";
 import { Effect } from "effect";
 import { onTestFinished, vi } from "vitest";
+import { client } from "@/client.test-support.ts";
 import { REDUCED_MOTION, SIDE_BY_SIDE } from "@/lib/media.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import type { Session } from "@/lib/session.ts";
 import { AppRouterProvider, createAppRouter } from "@/router.tsx";
-import { client } from "@/test-client.ts";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
 
 /**
@@ -43,10 +43,10 @@ import { TooltipProvider } from "@/ui/tooltip.tsx";
  * and the same mock object. A test file opts in with one line:
  *
  * ```ts
- * vi.mock("@/api.ts", () => import("@/test-client.ts"));
+ * vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
  * ```
  *
- * — note that it is `test-client.ts` and not this file that stands in for the
+ * — note that it is `client.test-support.ts` and not this file that stands in for the
  * API. This one imports the router, and the router imports `@/api.ts`, so
  * mocking with *this* module would make the mock load the thing it replaces.
  *

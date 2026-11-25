@@ -1,12 +1,15 @@
 import { handleFromName } from "@sugabots/contracts";
 import { eq, inArray, sql } from "drizzle-orm";
-import { Context } from "effect";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { webhookCallForTests } from "../../authentication/testing.ts";
 import { EventBus } from "../../database/events/bus.ts";
-import { EventStore } from "../../database/events/store.ts";
+import { inMemoryEventStore } from "../../database/events/testing.ts";
 import { automationRun, bot as botTable, connector } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
+import { named } from "../../proofs/proof.ts";
+import { proveSignedByGitHubApp } from "../../proofs/signed-by-github-app.ts";
 import type { RepositoryActivity } from "../../providers/connectors/github/github-events.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { chatServicesForTests } from "../testing.ts";
@@ -26,9 +29,9 @@ const opened: RepositoryActivity = {
 
 /** Automations run by what happens at their bot's GitHub app's repositories, against Postgres. */
 describe.skipIf(!process.env.DATABASE_URL)("connector automations, against Postgres", async () => {
-	const services = await chatServicesForTests(EventBus.inProcess({ store: EventStore.inMemory() }));
+	const services = await chatServicesForTests(EventBus.inProcess({ store: inMemoryEventStore() }));
 	const call = await servedOperations({ chats: services });
-	const events = onPostgres(Context.get(services, Automations.ConnectorEvents));
+	const events = Context.get(services, Automations.ConnectorEvents);
 	let automations: ReturnType<typeof automationsAs>;
 	let admin: Awaited<ReturnType<typeof anAutomationAdmin>>;
 	let connectorId: string;
@@ -56,7 +59,19 @@ describe.skipIf(!process.env.DATABASE_URL)("connector automations, against Postg
 		);
 
 	const deliver = (deliveryId: string, activity = opened) =>
-		events.accept({ workspaceId: admin.workspaceId, connectorId, deliveryId, activity });
+		runOnPostgres(
+			named(
+				webhookCallForTests({
+					workspace: admin.workspaceId,
+					source: { kind: "github", connector: connectorId, project: admin.ownProjectId },
+				}),
+				connectorId,
+				(principal, connector) =>
+					Effect.flatMap(proveSignedByGitHubApp(principal, connector), (signed) =>
+						events.accept(signed, { deliveryId, activity }),
+					),
+			),
+		);
 
 	it("takes only a repository its bot's GitHub app has, written as the connector has it", async () => {
 		await expect(repositoryAutomation("acme/infra", ["push"])).rejects.toMatchObject({

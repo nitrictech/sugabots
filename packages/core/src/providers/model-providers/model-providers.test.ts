@@ -252,8 +252,10 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("switches a provider on without asking it anything", async () => {
-		const setup = await setupWith(() => {
-			throw new Error("Switching a provider on sent a request");
+		const asked: string[] = [];
+		const setup = await setupWith((url) => {
+			asked.push(url);
+			return new Response(null, { status: 503 });
 		});
 
 		const saved = await setup.update({
@@ -263,6 +265,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		});
 
 		expect(saved).toMatchObject({ active: true });
+		expect(asked).toEqual([]);
 	});
 
 	it("names who connected a provider until its key is taken away, whether it is on or off", async () => {

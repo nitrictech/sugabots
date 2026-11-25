@@ -6,12 +6,13 @@ import type {
 	OutputOf,
 	RequestOperationName,
 } from "@sugabots/contracts/operations";
-import { Cause, Context, Duration, Effect, Exit, Layer, Queue, Scope, Stream } from "effect";
+import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Queue, Scope, Stream } from "effect";
 import { Accounts } from "../accounts/accounts.ts";
 import { chatServicesForTests } from "../chats/testing.ts";
 import { noComputers } from "../computers/testing.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventStore } from "../database/events/store.ts";
+import { inMemoryEventStore } from "../database/events/testing.ts";
 import { runOnPostgres, type TestInfrastructure } from "../database/testing.ts";
 import { Email } from "../email/email.ts";
 import type { Principal } from "../principal.ts";
@@ -30,6 +31,32 @@ export type CallOperation = <Name extends RequestOperationName>(
 	name: Name,
 	input: InputOf<Name>,
 ) => Promise<OutputOf<Name>>;
+
+export function operationOutcome<Name extends RequestOperationName>(
+	call: CallOperation,
+	principal: Principal,
+	name: Name,
+	input: InputOf<Name>,
+): Promise<string> {
+	return requestOutcome(call(principal, name, input));
+}
+
+export async function requestOutcome(request: Promise<unknown>): Promise<string> {
+	try {
+		await request;
+		return "ok";
+	} catch (failure) {
+		if (
+			typeof failure === "object" &&
+			failure !== null &&
+			"_tag" in failure &&
+			typeof failure._tag === "string"
+		) {
+			return failure._tag;
+		}
+		throw failure;
+	}
+}
 
 /** The chat services the operations are built over, as `chatServicesForTests` composes them. */
 export type ChatServicesForTests = Awaited<ReturnType<typeof chatServicesForTests>>;
@@ -72,6 +99,7 @@ export interface ServedOver {
 	 * have missed; by default as a server does.
 	 */
 	readonly streamsTiming?: Streams.TimingInterface;
+	readonly clock?: Clock.Clock;
 }
 
 /** Email that goes nowhere, for cases that send some but read none. */
@@ -133,13 +161,17 @@ export async function servedRegistry(over: ServedOver = {}): Promise<{
 	follow: FollowOperation;
 	longRunning: Operations.LongRunningInterface;
 }> {
+	const withClock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+		over.clock ? Effect.provideService(effect, Clock.Clock, over.clock) : effect;
 	const built = await buildOperationRegistries(over);
 	const operations = Context.get(built, Operations.Service);
 	const longRunning = Context.get(built, Operations.LongRunning);
 	return {
 		longRunning,
 		call: (principal, name, input) =>
-			runOnPostgres(operations[name](principal, input, { kind: "request", request: randomUUID() })),
+			runOnPostgres(
+				withClock(operations[name](principal, input, { kind: "request", request: randomUUID() })),
+			),
 		follow: (principal, name, input) =>
 			runOnPostgres(
 				Effect.gen(function* () {
@@ -168,15 +200,15 @@ export async function servedRegistry(over: ServedOver = {}): Promise<{
 						);
 					const following: Following<OutputOf<typeof name>> = {
 						next: async (within = FOLLOW_WAIT) => {
-							const taken = await Effect.runPromise(take(within));
+							const taken = await Effect.runPromise(withClock(take(within)));
 							if (taken === "quiet") throw new Error(`${name} yielded nothing in time`);
 							return taken;
 						},
-						quiet: (within = QUIET_WAIT) => Effect.runPromise(take(within)),
+						quiet: (within = QUIET_WAIT) => Effect.runPromise(withClock(take(within))),
 						close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
 					};
 					return following;
-				}),
+				}).pipe(withClock),
 			),
 	};
 }
@@ -186,7 +218,7 @@ export async function operationsForTests(over: ServedOver = {}): Promise<Operati
 }
 
 async function buildOperationRegistries(over: ServedOver) {
-	const bus = EventBus.inProcess({ store: EventStore.inMemory() });
+	const bus = EventBus.inProcess({ store: inMemoryEventStore() });
 	const chats = over.chats ?? (await chatServicesForTests(bus));
 	const outside = Layer.mergeAll(
 		noComputers,

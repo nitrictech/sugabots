@@ -43,7 +43,11 @@ describe("Routine schedules", () => {
 	it("rejects six-field expressions and unknown timezones", async () => {
 		await expect(
 			Effect.runPromise(
-				upcomingOccurrences({ repeat: "cron", expression: "0 0 9 * * 1-5" }, "UTC", new Date()),
+				upcomingOccurrences(
+					{ repeat: "cron", expression: "0 0 9 * * 1-5" },
+					"UTC",
+					new Date("2026-09-18T00:00:00Z"),
+				),
 			),
 		).rejects.toThrow(InvalidRoutineSchedule);
 		await expect(
@@ -51,7 +55,7 @@ describe("Routine schedules", () => {
 				upcomingOccurrences(
 					{ repeat: "cron", expression: "0 9 * * *" },
 					"Not/A_Timezone",
-					new Date(),
+					new Date("2026-09-18T00:00:00Z"),
 				),
 			),
 		).rejects.toThrow(InvalidRoutineSchedule);

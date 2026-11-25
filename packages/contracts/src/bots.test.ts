@@ -1,7 +1,9 @@
 import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { botColorSchema, botUpdateSchema, newBotSchema } from "./bots.ts";
+import { BOT_NAME_MAX_LENGTH, botColorSchema, botUpdateSchema, newBotSchema } from "./bots.ts";
 
+const MAX_TOOL_KEY_LENGTH = 64;
+const MAX_DISABLED_TOOLS = 32;
 const request = { name: "Issue triager", model: "example/model" };
 
 describe("bot request contracts", () => {
@@ -22,14 +24,20 @@ describe("bot request contracts", () => {
 		).toBe(false);
 		expect(
 			Result.isSuccess(
-				Schema.decodeResult(newBotSchema)({ ...request, disabledTools: ["x".repeat(65)] }),
+				Schema.decodeResult(newBotSchema)({
+					...request,
+					disabledTools: ["x".repeat(MAX_TOOL_KEY_LENGTH + 1)],
+				}),
 			),
 		).toBe(false);
 		expect(
 			Result.isSuccess(
 				Schema.decodeResult(newBotSchema)({
 					...request,
-					disabledTools: Array.from({ length: 33 }, (_, index) => `tool-${index}`),
+					disabledTools: Array.from(
+						{ length: MAX_DISABLED_TOOLS + 1 },
+						(_, index) => `tool-${index}`,
+					),
 				}),
 			),
 		).toBe(false);
@@ -46,11 +54,11 @@ describe("bot request contracts", () => {
 		expect(
 			Schema.decodeUnknownSync(newBotSchema)({
 				...request,
-				name: `  ${"x".repeat(64)}  `,
+				name: `  ${"x".repeat(BOT_NAME_MAX_LENGTH)}  `,
 				disabledTools: [" web_search "],
 				extra: true,
 			}),
-		).toEqual({ ...request, name: "x".repeat(64), disabledTools: ["web_search"] });
+		).toEqual({ ...request, name: "x".repeat(BOT_NAME_MAX_LENGTH), disabledTools: ["web_search"] });
 		for (const fields of [
 			{ name: "  " },
 			{ disabledTools: ["  "] },

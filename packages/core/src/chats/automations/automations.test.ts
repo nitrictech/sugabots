@@ -4,7 +4,6 @@ import type {
 	AutomationTriggerInput,
 	AutomationUpdate,
 	AutomationWriteResult,
-	NewAutomation,
 	RunPageQuery,
 } from "@sugabots/contracts";
 import {
@@ -24,6 +23,7 @@ import { Accounts } from "../../accounts/accounts.ts";
 import { query } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
+import { inMemoryEventStore } from "../../database/events/testing.ts";
 import {
 	automationRun,
 	automationTrigger,
@@ -66,6 +66,7 @@ import {
 	runningTurns,
 	runOver,
 } from "../turns/testing.ts";
+import { LAST_REPLY_DESTINATION } from "./acceptance.ts";
 import {
 	AutomationTriggerConflict,
 	AutomationTriggerKindChanged,
@@ -76,13 +77,19 @@ import {
 } from "./automation.ts";
 import { AutomationRunner } from "./automation-runner.ts";
 import { AutomationSettlement } from "./settlement.ts";
-import { anAutomationAdmin, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
+import {
+	anAutomationAdmin,
+	automationsAs as createAndListAs,
+	finishTurnsIn,
+	releaseRun,
+	startRunning,
+} from "./testing.ts";
 import type { Delivery } from "./webhook-auth.ts";
 
 type AutomationAddress = Pick<InputOf<"automations.update">, "projectId" | "automationId">;
 
 describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", async () => {
-	const bus = EventBus.inProcess({ store: EventStore.inMemory() });
+	const bus = EventBus.inProcess({ store: inMemoryEventStore() });
 	const services = await chatServicesForTests(bus);
 	const call = await servedOperations({ chats: services });
 	/**
@@ -128,9 +135,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			async (input: InputOf<Name>) =>
 				runOnPostgres(operations[name](await signIn(memberId), input, aRequest()));
 		return {
-			list: as("automations.list"),
-			create: ({ projectId }: { projectId: string }, input: NewAutomation) =>
-				as("automations.create")({ projectId, ...input }),
+			...createAndListAs(call, memberId),
 			update: (automation: AutomationAddress, changes: AutomationUpdate) =>
 				as("automations.update")({ ...automation, changes }),
 			remove: as("automations.remove"),
@@ -155,7 +160,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 	};
 	/** As an admin of the automations' workspace. */
 	let automations: ReturnType<typeof automationsAs>;
-	let view: ReturnType<typeof automationsAs>;
 	/**
 	 * A call to a webhook as its route makes it: authenticated by the webhook
 	 * authenticator, then its operation called for the call that made. A
@@ -223,7 +227,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 	};
 	/** The automation's runs, newest first, as the project's runs list them. */
 	const runsOf = async (addressed: { projectId: string; automationId: string }) =>
-		(await view.listProjectRuns({ projectId: addressed.projectId })).items.filter(
+		(await automations.listProjectRuns({ projectId: addressed.projectId })).items.filter(
 			(run) => run.automationId === addressed.automationId,
 		);
 	/** The automation's triggers, as its project's automations list them. */
@@ -273,7 +277,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 	beforeEach(async () => {
 		({ workspaceId, botId, memberId, ownProjectId, projectId } = await anAutomationAdmin());
 		automations = automationsAs(memberId);
-		view = automationsAs(memberId);
 	});
 
 	// A run's history holds its automation back from being deleted on its own, but
@@ -303,7 +306,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(await runsIn()).toEqual([]);
 	});
 
-	it("creates scoped automations started by a routine or a webhook, and admits a webhook's callers by its secret", async () => {
+	it("lists an automation with a routine and gives it no webhook secret", async () => {
 		const scheduled = await automations.create(
 			{ projectId: ownProjectId },
 			{
@@ -323,6 +326,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			{ kind: "routine", nextScheduledAt: expect.any(String) },
 		]);
 
+		expect(await automations.list({ projectId: ownProjectId })).toMatchObject([
+			{ id: scheduled.automation.id },
+		]);
+	});
+
+	it("admits webhook calls only with the current secret", async () => {
 		const webhook = await automations.create(
 			{ projectId: ownProjectId },
 			{
@@ -373,7 +382,29 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(
 			await webhooks.accept({ triggerId: "not-a-uuid", delivery: bearerDelivery(rotatedSecret) }),
 		).toBeUndefined();
-		expect(await view.list({ projectId: ownProjectId })).toHaveLength(2);
+		expect(await automations.list({ projectId: ownProjectId })).toMatchObject([
+			{ id: webhook.automation.id },
+		]);
+	});
+
+	it("tells the bot its last reply goes to the automation's feed", async () => {
+		const { automation } = await automations.create(
+			{ projectId: ownProjectId },
+			{
+				name: "Overnight briefing",
+				instructions: "Check for new releases.",
+				triggers: [{ kind: "webhook" }],
+			},
+		);
+		const accepted = await automations.run({
+			projectId: ownProjectId,
+			automationId: automation.id,
+			requestId: crypto.randomUUID(),
+		});
+		const details = await asMember(call, memberId).get(accepted.chatId);
+
+		const instruction = details.messages.find(({ author }) => author.kind === "automation_trigger");
+		expect(instruction?.content).toContain(LAST_REPLY_DESTINATION);
 	});
 
 	it("runs only the calls meeting a webhook's filter, which a later write keeps unless it brings another", async () => {
@@ -1302,7 +1333,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			});
 		}
 
-		const first = await view.listProjectRuns(
+		const first = await automations.listProjectRuns(
 			{ projectId: ownProjectId },
 			{
 				limit: 2,
@@ -1311,7 +1342,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(first?.items).toHaveLength(2);
 		expect(first?.nextCursor).toEqual(expect.any(String));
 		if (!first?.nextCursor) throw new Error("First execution page has no cursor");
-		const second = await view.listProjectRuns(
+		const second = await automations.listProjectRuns(
 			{ projectId: ownProjectId },
 			{
 				limit: 2,
@@ -1322,7 +1353,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(second?.nextCursor).toBeNull();
 		expect(second?.items[0]?.id).not.toBe(first?.items[1]?.id);
 		await expect(
-			view.listProjectRuns(
+			automations.listProjectRuns(
 				{ projectId: ownProjectId },
 				{
 					limit: 2,
@@ -1351,9 +1382,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		await runOnce(automationsAs(other.memberId), other.ownProjectId, "Elsewhere");
 		await automations.remove({ projectId: ownProjectId, automationId: second.automationId });
 
-		const page = await view.listProjectRuns({ projectId: ownProjectId });
+		const page = await automations.listProjectRuns({ projectId: ownProjectId });
 
-		expect(page.items.map((run) => run.id)).toEqual([second.runId, first.runId]);
+		expect(page.items).toMatchObject([
+			{ id: second.runId, automationId: second.automationId, automationName: "Removed" },
+			{ id: first.runId, automationId: first.automationId, automationName: "Kept" },
+		]);
 		expect(page.nextCursor).toBeNull();
 	});
 
@@ -1393,6 +1427,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 		it("lists how each automation stands for those who read its runs, and not for an administrator of a personal bot", async () => {
 			const automation = await anAutomationWithARun();
+			const runError = userText`It broke.`;
 			const neverRun = await automations.create(
 				{ projectId: ownProjectId },
 				{ name: "Unrun", instructions: "Run.", triggers: [{ kind: "webhook" }] },
@@ -1400,13 +1435,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			await onDatabase((db) =>
 				db
 					.update(automationRun)
-					.set({ state: "failed", error: userText`It broke.`, finishedAt: new Date() })
+					.set({ state: "failed", error: runError, finishedAt: new Date() })
 					.where(eq(automationRun.automationId, automation.automationId)),
 			);
-			const statusOf = (listed: Awaited<ReturnType<typeof view.list>>, id: string) =>
+			const statusOf = (listed: Awaited<ReturnType<typeof automations.list>>, id: string) =>
 				listed.filter((one) => "instructions" in one).find((one) => one.id === id)?.status;
 
-			const listed = await view.list({ projectId: ownProjectId });
+			const listed = await automations.list({ projectId: ownProjectId });
 			expect(statusOf(listed, automation.automationId)).toEqual({
 				failing: true,
 				latestRun: {
@@ -1414,7 +1449,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 					state: "failed",
 					posted: false,
 					acceptedAt: expect.any(String),
-					error: "It broke.",
+					error: runError,
 				},
 			});
 			expect(statusOf(listed, neverRun.automation.id)).toEqual({ failing: false, latestRun: null });
@@ -1422,7 +1457,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			// Paused by hand, it is not failing, whatever its last run did.
 			await automations.update(automation, { state: "paused" });
 			expect(
-				statusOf(await view.list({ projectId: ownProjectId }), automation.automationId),
+				statusOf(await automations.list({ projectId: ownProjectId }), automation.automationId),
 			).toEqual(expect.objectContaining({ failing: false }));
 
 			await makePersonal(botId);
@@ -1445,18 +1480,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 		it("refuses an editor the approval an automation's run asks for, which only an administrator gives", async () => {
 			const automation = await anAutomationWithARun();
-			await startRunning(runner, automation.automationId);
-			const [runChat] = await onDatabase((db) =>
-				db
-					.select({ id: automationRun.chatId })
-					.from(automationRun)
-					.where(eq(automationRun.automationId, automation.automationId)),
-			);
-			if (!runChat) throw new Error("The run has no chat");
-			const [run] = await runOnPostgres(runningTurns(runChat.id));
-			if (!run) throw new Error("The run asked for no turn");
-			const prepared = await drive(prepareTurn(run));
-			const pending = await parkForApproval(prepared);
+			const { pending } = await startAndParkRun(automation.automationId);
 			const decision = { toolCallId: pending.id, decision: "allow_once" as const };
 			const approvalsAs = (memberId: string) => asMember(call, memberId);
 
@@ -1487,17 +1511,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			);
 			const automationId = created.automation.id;
 			await automations.run({ projectId, automationId, requestId: crypto.randomUUID() });
-			await startRunning(runner, automationId);
-			const [runChat] = await onDatabase((db) =>
-				db
-					.select({ id: automationRun.chatId })
-					.from(automationRun)
-					.where(eq(automationRun.automationId, automationId)),
-			);
-			if (!runChat) throw new Error("The run has no chat");
-			const [run] = await runOnPostgres(runningTurns(runChat.id));
-			if (!run) throw new Error("The run asked for no turn");
-			const pending = await parkForApproval(await drive(prepareTurn(run)));
+			const { chatId, pending } = await startAndParkRun(automationId);
 			const [parked] = await onDatabase((db) =>
 				db.select({ reply: toolCall.messageId }).from(toolCall).where(eq(toolCall.id, pending.id)),
 			);
@@ -1508,7 +1522,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			/** What `id` sees of the call: on the Approvals page, in the count, in the run's chat and on its project. */
 			const seenBy = async (id: string) => {
 				const view = chatViewAs(id);
-				const details = await view.get(runChat.id);
+				const details = await view.get(chatId);
 				const marks = await view.attentionMarks(workspaceId);
 				return {
 					waiting: (await view.approvals(workspaceId)).waiting.map(({ call }) => call.id),
@@ -1561,18 +1575,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 		it("decides a run's approval once whoever holds its turn's row lets go, as settling does", async () => {
 			const automation = await anAutomationWithARun();
-			await startRunning(runner, automation.automationId);
-			const [runChat] = await onDatabase((db) =>
-				db
-					.select({ id: automationRun.chatId })
-					.from(automationRun)
-					.where(eq(automationRun.automationId, automation.automationId)),
-			);
-			if (!runChat) throw new Error("The run has no chat");
-			const [run] = await runOnPostgres(runningTurns(runChat.id));
-			if (!run) throw new Error("The run asked for no turn");
-			const prepared = await drive(prepareTurn(run));
-			const pending = await parkForApproval(prepared);
+			const { prepared, pending } = await startAndParkRun(automation.automationId);
 			const holding = holdTransaction(
 				query((db) => db.select().from(turn).where(eq(turn.id, prepared.turnId)).for("update")),
 			);
@@ -1586,7 +1589,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				.then(() => {
 					decided = true;
 				});
-			await new Promise((resolve) => setTimeout(resolve, 200));
+			await waitUntilWaitingOnLocks(1);
 			expect(decided).toBe(false);
 
 			await holding.release();
@@ -1594,6 +1597,15 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			expect(decided).toBe(true);
 		});
 	});
+
+	async function startAndParkRun(automationId: string) {
+		const { execution } = await startRunning(runner, automationId);
+		const [run] = await runOnPostgres(runningTurns(execution.chatId));
+		if (!run) throw new Error("The run asked for no turn");
+		const prepared = await drive(prepareTurn(run));
+		const pending = await parkForApproval(prepared);
+		return { chatId: execution.chatId, prepared, pending };
+	}
 
 	/** Parks one call to a new connector of the bot's for approval, as the turn's step does. */
 	async function parkForApproval(prepared: PreparedTurnForTests) {

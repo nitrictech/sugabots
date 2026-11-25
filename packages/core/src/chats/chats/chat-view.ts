@@ -984,7 +984,7 @@ function runAttentionTerms(db: Executor, input: AttentionScope) {
 /** How many answered approvals the approvals page lists, newest first. */
 const ANSWERED_APPROVALS = 50;
 /** At most this many waiting approvals are listed; more than this many waiting is a backlog to clear in its chats. */
-const WAITING_APPROVALS = 100;
+export const WAITING_APPROVALS = 100;
 
 /**
  * The tool calls waiting on a decision the member `approver` describes may

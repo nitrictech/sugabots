@@ -22,17 +22,23 @@ export const saveInstructions = defineOperation(
 			if (principal._tag !== "BotForAsker") return yield* new ResourceHidden({ resource: "bot" });
 			const bots = yield* Bots.Service;
 			const { webAppUrl } = yield* ServerSettings.Service;
-			const saved = yield* named(principal, principal.bot, call, (principal, bot, call) =>
-				Effect.gen(function* () {
-					const canManage = yield* proveCanManageBot(principal, bot);
-					const approved = yield* proveApproved(
-						principal,
-						call,
-						approvalRule("bots.saveInstructions"),
-						input,
-					);
-					return yield* bots.saveInstructions(canManage, input, approved);
-				}),
+			const saved = yield* named(
+				principal,
+				principal.bot,
+				call,
+				input,
+				(principal, bot, call, approvedInput) =>
+					Effect.gen(function* () {
+						const canManage = yield* proveCanManageBot(principal, bot);
+						const approved = yield* proveApproved(
+							principal,
+							call,
+							approvalRule("bots.saveInstructions"),
+							approvedInput,
+							bot,
+						);
+						return yield* bots.saveInstructions(canManage, input, approved);
+					}),
 			);
 			const workspaceSlug = yield* workspaceSlugOf(principal.workspace);
 			return {

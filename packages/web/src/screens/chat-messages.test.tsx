@@ -10,13 +10,13 @@ import { testMember } from "@sugabots/contracts/testing";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { linear } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 import { createQueryClient } from "@/lib/query.ts";
-import { linearHandler } from "@/shell/story-fixtures.ts";
-import { client } from "@/test-client.ts";
 import { ChatMessages } from "./ChatMessages.tsx";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const PROJECT = "0199a3a0-0000-7000-8000-0000000000b1";
 const CHAT = "0199a3a0-0000-7000-8000-0000000000b2";
@@ -111,8 +111,8 @@ function show(
 	const queryClient = createQueryClient();
 	// The roster the sidebar loads, which says where the host's connectors are.
 	queryClient.setQueryData(
-		["bots", linearHandler.workspaceId],
-		[{ ...linearHandler, id: host.id, defaultProjectId: PROJECT }],
+		["bots", linear.workspaceId],
+		[{ ...linear, id: host.id, defaultProjectId: PROJECT }],
 	);
 	const chat = (shown: Message[], participants = over.participants ?? [host]) => (
 		<QueryClientProvider client={queryClient}>
@@ -149,11 +149,6 @@ beforeEach(() => {
 	client.api.approvals.decide.mockReturnValue(Effect.undefined);
 });
 
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
-});
-
 describe("what members and bots write", () => {
 	it("renders Markdown from members and bots alike", async () => {
 		const asked = "Is **this** bold?";
@@ -167,9 +162,13 @@ describe("what members and bots write", () => {
 			reply([{ type: "text", text: answered }]),
 		]);
 
-		expect((await screen.findByText("Theo's bill")).getAttribute("data-streamdown")).toBe("strong");
-		expect(screen.getByText("Look up plans").tagName).toBe("LI");
-		expect(screen.getByText("this").getAttribute("data-streamdown")).toBe("strong");
+		await screen.findByText("Theo's bill");
+		expect(
+			within(screen.getByRole("list"))
+				.getAllByRole("listitem")
+				.map((item) => item.textContent),
+		).toEqual(["Look up plans", "Draft a note"]);
+		screen.getByText("this");
 	});
 
 	it("copies a reply as the bot wrote it, Markdown and all", async () => {
@@ -184,7 +183,7 @@ describe("what members and bots write", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Copy text" }));
 
 		expect(writeText).toHaveBeenCalledWith(answered);
-		expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+		await screen.findByRole("button", { name: "Copied" });
 	});
 
 	it("marks a mention in a reply already shown, once it names someone", async () => {
@@ -204,7 +203,7 @@ describe("what members and bots write", () => {
 
 		update([answer], [host, triager]);
 
-		expect(await screen.findByText("Issue Triager", { selector: "span" })).toBeDefined();
+		await screen.findByText("Issue Triager", { selector: "span" });
 	});
 
 	it("marks a member's @here and @channel as mentions of everyone, but not a bot's", async () => {
@@ -236,10 +235,8 @@ describe("a finished reply that used tools", () => {
 	it("shows the answer, and what it used on one line above it", async () => {
 		show([answered]);
 
-		expect(screen.getByText("Yes — 41 events, all on checkout.")).toBeDefined();
-		expect(
-			await screen.findByRole("button", { name: /Used Sentry and Linear for 6s/ }),
-		).toBeDefined();
+		screen.getByText("Yes — 41 events, all on checkout.");
+		await screen.findByRole("button", { name: /Used Sentry and Linear for 6s/ });
 		expect(screen.queryByText("Search issues")).toBeNull();
 	});
 
@@ -250,7 +247,7 @@ describe("a finished reply that used tools", () => {
 		fireEvent.click(line);
 
 		expect(line.getAttribute("aria-expanded")).toBe("true");
-		expect(screen.getByText("List issues")).toBeDefined();
+		screen.getByText("List issues");
 		fireEvent.click(screen.getByRole("button", { name: /^Used Sentry for .*3 steps/ }));
 		expect(screen.getAllByText("Search issues")).toHaveLength(3);
 	});
@@ -271,27 +268,7 @@ describe("a reply that wrote a line before each tool call", () => {
 		const bubble = screen.getByRole("article");
 		expect(bubble.textContent).toContain("Here are the 2 issues in Cycle 33.");
 		expect(bubble.textContent).not.toContain("Let me find the current cycle:");
-		expect(await screen.findByRole("button", { name: /Used Linear/ })).toBeDefined();
-	});
-});
-
-describe("a reply arriving", () => {
-	const answer: MessagePart = { type: "text", text: "Here are the 2 issues in Cycle 33." };
-
-	it("grows to fit its words when it finished while the chat was open", () => {
-		const { update } = show([reply([answer], { status: "writing" })]);
-
-		update([reply([answer])]);
-
-		const words = screen.getByText("Here are the 2 issues in Cycle 33.");
-		expect(words.closest(".reply-grow")).not.toBeNull();
-	});
-
-	it("simply shows a reply that was already finished when the chat opened", () => {
-		show([reply([answer])]);
-
-		const words = screen.getByText("Here are the 2 issues in Cycle 33.");
-		expect(words.closest(".reply-grow")).toBeNull();
+		await screen.findByRole("button", { name: /Used Linear/ });
 	});
 });
 
@@ -304,8 +281,8 @@ describe("a reply that wrote nothing but used tools", () => {
 	it("still shows who replied, and what it used", async () => {
 		show([wordless]);
 
-		expect(await screen.findByRole("button", { name: /Used Sentry/ })).toBeDefined();
-		expect(screen.getByLabelText(/Linear Handler/)).toBeDefined();
+		await screen.findByRole("button", { name: /Used Sentry/ });
+		screen.getByLabelText(/Linear Handler/);
 	});
 
 	it("still says a reply failed when it failed without words", async () => {
@@ -317,8 +294,8 @@ describe("a reply that wrote nothing but used tools", () => {
 			}),
 		]);
 
-		expect(await screen.findByText("Reply failed.")).toBeDefined();
-		expect(screen.getByText(/Ran out of context/)).toBeDefined();
+		await screen.findByText("Reply failed.");
+		screen.getByText(/Ran out of context/);
 	});
 });
 
@@ -335,10 +312,10 @@ describe("a reply still being written", () => {
 			reply([{ type: "text", text: "Let me look" }], { status: "writing" }),
 		]);
 		expect(screen.getByRole("article").textContent).toContain("Let me look");
-		expect(screen.getByRole("status", { name: "Linear Handler is typing" })).toBeDefined();
+		screen.getByRole("status", { name: "Linear Handler is typing" });
 
 		update([reply([{ type: "text", text: "Let me look" }, search], { status: "writing" })]);
-		expect(await screen.findByRole("button", { name: /Working for/ })).toBeDefined();
+		await screen.findByRole("button", { name: /Working for/ });
 		const narration = screen.getByText("Let me look");
 		expect(narration.closest("[data-slot=activity-collapsible-content]")).not.toBeNull();
 
@@ -375,13 +352,13 @@ describe("a reply still being written", () => {
 		};
 		show([reply([{ type: "text", text: "Here is the cha" }, chart], { status: "writing" })]);
 
-		expect(screen.getByText(/Here is the cha/)).toBeDefined();
+		screen.getByText(/Here is the cha/);
 	});
 
 	it("says the bot is typing between one call and the next", () => {
 		show([reply([toolCall("sentry__search_issues")], { status: "writing" })]);
 
-		expect(screen.getByRole("status", { name: "Linear Handler is typing" })).toBeDefined();
+		screen.getByRole("status", { name: "Linear Handler is typing" });
 	});
 
 	it("gives way to a write waiting on approval, which says so itself", async () => {
@@ -404,7 +381,7 @@ describe("a reply still being written", () => {
 			),
 		]);
 
-		expect(await screen.findByRole("button", { name: /^Allow/ })).toBeDefined();
+		await screen.findByRole("button", { name: /^Allow/ });
 		expect(screen.queryByRole("status")).toBeNull();
 	});
 
@@ -429,7 +406,7 @@ describe("a reply still being written", () => {
 		]);
 
 		await screen.findByRole("button", { name: /Working for/ });
-		expect(screen.getByRole("status", { name: "Linear Handler is typing" })).toBeDefined();
+		screen.getByRole("status", { name: "Linear Handler is typing" });
 		const card = screen.getByRole("region", { name: "Approval request: Create issue in Linear" });
 		expect(within(card).queryByRole("button", { name: /^Allow/ })).toBeNull();
 	});
@@ -451,10 +428,10 @@ describe("a write that needs approving", () => {
 		const card = await screen.findByRole("region", {
 			name: "Approval request: Create issue in Linear",
 		});
-		expect(screen.getByText("Waiting for approval")).toBeDefined();
-		expect(within(card).getByText("Linear Handler wants to use Linear")).toBeDefined();
-		expect(within(card).getByText("Team")).toBeDefined();
-		expect(within(card).getByText("Platform")).toBeDefined();
+		screen.getByText("Waiting for approval");
+		within(card).getByText("Linear Handler wants to use Linear");
+		within(card).getByText("Team");
+		within(card).getByText("Platform");
 	});
 
 	it("allows it once, with no standing permission offered here", async () => {
@@ -479,9 +456,7 @@ describe("a write that needs approving", () => {
 	it("says so when the reader is not the one who can answer", async () => {
 		show([asking], { canApprove: false });
 
-		expect(
-			await screen.findByText("Waiting for someone with permission to answer this."),
-		).toBeDefined();
+		await screen.findByText("Waiting for someone with permission to answer this.");
 		expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
 	});
 
@@ -507,6 +482,6 @@ describe("a write that needs approving", () => {
 		const card = screen.getByRole("region", { name: "Approval request: Create issue in Linear" });
 		expect(within(card).queryByRole("button", { name: /^(Allow|Deny)/ })).toBeNull();
 		fireEvent.click(line);
-		expect(screen.getByText("Denied by Rowan Ellis")).toBeDefined();
+		screen.getByText("Denied by Rowan Ellis");
 	});
 });

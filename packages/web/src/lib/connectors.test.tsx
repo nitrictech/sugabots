@@ -7,21 +7,16 @@ import {
 } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { Effect } from "effect";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { bots, pendingAnswer, projects } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 import { useConnectorActions, useMarkedConnectors } from "@/lib/connectors.ts";
 import { createQueryClient } from "@/lib/query.ts";
-import { bots, pendingAnswer, projects } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
-
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
-});
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const project = projects[0] as (typeof projects)[number];
 /** Two of the project's bots, each with connectors of its own. */
@@ -149,11 +144,13 @@ describe("quick changes to what bots may do with a connector's tools", () => {
 			.mockReturnValueOnce(Effect.succeed(undefined));
 		const { choose } = renderActions();
 
-		choose("allow");
-		choose("off");
-		await waitFor(() => expect(client.api.connectors.update).toHaveBeenCalledTimes(1));
-		await new Promise((resolve) => setTimeout(resolve, 20));
-		expect(client.api.connectors.update).toHaveBeenCalledTimes(1);
+		await act(async () => {
+			choose("allow");
+			choose("off");
+		});
+		expect(client.api.connectors.update.mock.calls.map(([request]) => request.payload)).toEqual([
+			{ toolAccess: { create_issue: "allow" } },
+		]);
 
 		first.answer(Effect.succeed(undefined));
 

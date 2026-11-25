@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	ENDED_BEFORE_IT_RAN,
 	FollowUp,
+	gaveUpAfter,
 	MAX_TURN_RUNS,
 	RUN_ENDED,
 	runsAgainAfterFailure,
@@ -11,6 +12,7 @@ import {
 	TurnEvent,
 	type TurnState,
 	transition,
+	UNCERTAIN_WRITE_OR_DELETE,
 } from "./lifecycle.ts";
 
 /**
@@ -92,7 +94,7 @@ describe("reopening a turn for another run", () => {
 			_tag: "Next",
 			state: {
 				status: "failed",
-				userMessage: expect.stringContaining("tool that can make changes"),
+				userMessage: UNCERTAIN_WRITE_OR_DELETE,
 			},
 			followUp: { _tag: "End" },
 		});
@@ -103,7 +105,7 @@ describe("reopening a turn for another run", () => {
 			_tag: "Next",
 			state: {
 				status: "failed",
-				userMessage: `The turn stopped ${MAX_TURN_RUNS} times before it could finish`,
+				userMessage: gaveUpAfter(MAX_TURN_RUNS),
 			},
 		});
 		expect(reopen(failedTurn({ runs: MAX_TURN_RUNS - 1 }))).toMatchObject({
@@ -131,7 +133,7 @@ describe("beginning a step", () => {
 			_tag: "Next",
 			state: {
 				status: "failed",
-				userMessage: `The turn stopped ${MAX_TURN_RUNS} times before it could finish`,
+				userMessage: gaveUpAfter(MAX_TURN_RUNS),
 			},
 			followUp: { _tag: "End" },
 		});

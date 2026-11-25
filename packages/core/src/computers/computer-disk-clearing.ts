@@ -29,7 +29,7 @@ export interface Clearing {
 }
 
 /** Ids of the chat folders and home folders in a computer. */
-interface WorkFolders {
+export interface WorkFolders {
 	readonly chatIds: readonly string[];
 	readonly botIds: readonly string[];
 }
@@ -38,24 +38,16 @@ interface WorkFolders {
  * Linux caps the script, a single bash argument, at 128 KiB, and each
  * folder adds up to 85 bytes. The rest wait for the next clearing.
  */
-export const MAX_FOLDERS_CLEARED_AT_ONCE = 1_000;
+const MAX_FOLDERS_CLEARED_AT_ONCE = 1_000;
 
 /**
- * Removes folders in {@link clearingOrder} until the work directory's disk is less than
- * `belowShare` full. Only call it while no lease is held, or a running
- * command could lose its folder.
+ * Finds what can be deleted, in {@link clearingOrder}, and returns the
+ * separate effect that removes those folders while the work directory's disk
+ * is at least `belowShare` full. Only run it while no lease is held, or a
+ * running command could lose its folder.
  */
-export function freeDiskSpace(
-	computer: Computers.Computer,
-	workspaceId: string,
-	belowShare: number,
-): Effect.Effect<Clearing, Computers.Unavailable, Database> {
-	return prepareDiskClearing(computer, workspaceId, belowShare).pipe(Effect.flatten);
-}
-
-/** prepareDiskClearing finds what can be deleted and returns the separate deletion effect. */
 export function prepareDiskClearing(
-	computer: Computers.Computer,
+	computer: Pick<Computers.Computer, "exec">,
 	workspaceId: string,
 	belowShare: number,
 ) {
@@ -80,7 +72,7 @@ export function prepareDiskClearing(
  * chats, last because anything new reopens them. Chats go oldest
  * last turn first. A chat with an active turn is never cleared.
  */
-function clearingOrder(
+export function clearingOrder(
 	workspaceId: string,
 	folders: WorkFolders,
 ): Effect.Effect<readonly Clearable[], never, Database> {
@@ -189,7 +181,7 @@ const STOP_REMOVING_AFTER_SECONDS = 90;
 const ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const CHAT_FOLDER = new RegExp(`^${Computers.CHATS_DIRECTORY}/(${ID})$`);
 
-function workFoldersIn(computer: Computers.Computer) {
+function workFoldersIn(computer: Pick<Computers.Computer, "exec">) {
 	return Effect.map(
 		computer.exec(
 			`find ${Computers.CHATS_DIRECTORY} ${Computers.BOTS_DIRECTORY} -mindepth 1 -maxdepth 1 -type d 2>/dev/null; exit 0`,

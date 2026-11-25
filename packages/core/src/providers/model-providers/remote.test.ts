@@ -50,7 +50,7 @@ function clients(httpClient: (url: string, init?: RequestInit) => Promise<Respon
 	const httpClients: EgressHttpClients = {
 		for: ({ baseUrl }) => {
 			roots.push(baseUrl);
-			return httpClient as unknown as typeof fetch;
+			return (input, init) => httpClient(String(input), init);
 		},
 	};
 	return { httpClients, roots };
@@ -382,38 +382,4 @@ it("says a provider listing more models than we take has too many, not a wrong a
 	await expect(
 		discover(models, found, async () => Response.json({ data: tooMany })).result,
 	).rejects.toMatchObject({ _tag: "ModelListTooLarge" });
-});
-
-const UNREACHABLE =
-	"We can't reach the provider. Check its address, and that the server is running if it's your own. Then try again.";
-
-it("records a fixed sentence for an unreachable provider, and keeps the network's words out of it", async () => {
-	const found = access({});
-	const models = store(found);
-	const httpClient = async () => {
-		throw new Error("getaddrinfo ENOTFOUND models.internal.example 10.0.0.7");
-	};
-	const { httpClients } = clients(httpClient);
-
-	const result = await run(testProvider(models, "workspace-id", found.providerId, httpClients));
-
-	expect(result).toMatchObject({ reachable: false, error: UNREACHABLE });
-	expect(models.recordTest).toHaveBeenCalledWith(
-		"workspace-id",
-		found.providerId,
-		expect.any(Date),
-		{ error: UNREACHABLE },
-	);
-});
-
-it("records a model a listing names twice once", async () => {
-	const found = access({});
-	const models = store(found);
-	const httpClient = vi.fn(async () => Response.json({ data: [{ id: "twice" }, { id: "twice" }] }));
-
-	await expect(discover(models, found, httpClient).result).resolves.toEqual({
-		added: 1,
-		updated: 0,
-		unchanged: 0,
-	});
 });

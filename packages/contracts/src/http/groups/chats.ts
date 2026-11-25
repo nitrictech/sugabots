@@ -24,7 +24,7 @@ import {
 	newMessageSchema,
 	reactionEmojiSchema,
 } from "../../messages.ts";
-import { uuidOrStringSchema } from "../../uuid.ts";
+import { uuidOrStringSchema, uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict, PayloadTooLarge, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
@@ -112,7 +112,7 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		 * is safe; how the turn ends arrives on the chat's event stream.
 		 */
 		HttpApiEndpoint.post("interruptTurn", "/chats/:chatId/turns/:turnId/interrupt", {
-			params: { chatId: Schema.String, turnId: Schema.String },
+			params: { chatId: uuidSchema, turnId: uuidSchema },
 			success: HttpApiSchema.Empty(202),
 			error: refused,
 		}),

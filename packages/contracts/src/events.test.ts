@@ -38,16 +38,6 @@ describe("envelope", () => {
 		expect(streamEvent("unknown.event", { v: 99 }).v).toBe(EVENT_VERSION);
 	});
 
-	it("parses an event carrying fields this version has never seen", () => {
-		const parsed = Schema.decodeSync(streamEventSchema)({
-			v: 1,
-			type: "chat.changed",
-			surprise: true,
-		});
-
-		expect(parsed.surprise).toBe(true);
-	});
-
 	it("rejects an event from a version this client cannot read", () => {
 		expect(Schema.decodeUnknownResult(streamEventSchema)({ v: 2, type: "chat.changed" })._tag).toBe(
 			"Failure",

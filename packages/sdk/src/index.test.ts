@@ -1,11 +1,9 @@
 import { Unauthorized } from "@sugabots/contracts/http";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createClient, isApiFailure } from "./index.ts";
 
 type FetchMock = ReturnType<typeof respondWith>;
-
-afterEach(() => vi.unstubAllGlobals());
 
 const ME = {
 	id: "0199a3a0-0000-7000-8000-000000000001",
@@ -98,7 +96,7 @@ describe("api", () => {
 
 		const failure = await Effect.runPromise(Effect.flip(client.api.me()));
 
-		expect(isApiFailure(failure)).toBe(false);
+		expect(failure).toMatchObject({ _tag: "HttpClientError", reason: { _tag: "DecodeError" } });
 	});
 
 	it("fails when a successful response does not match the endpoint's schema", async () => {
@@ -106,25 +104,6 @@ describe("api", () => {
 
 		const failure = await Effect.runPromise(Effect.flip(client.api.me()));
 
-		expect(isApiFailure(failure)).toBe(false);
-	});
-});
-
-describe("auth", () => {
-	it("signs in with the session cookie and keeps no token of its own", async () => {
-		const localStorage = { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() };
-		vi.stubGlobal("window", { localStorage });
-		vi.stubGlobal("localStorage", localStorage);
-		const seen: Request[] = [];
-		const fetch = vi.fn(async (...args: Parameters<typeof globalThis.fetch>) => {
-			seen.push(new Request(...args));
-			return Response.json({ user: { id: "u1" } });
-		});
-		const client = createClient({ baseUrl: "http://api.test", fetch });
-
-		await client.auth.signIn({ email: "sam@example.com", password: "correct-horse-battery" });
-
-		expect(seen[0]?.credentials).toBe("include");
-		expect(localStorage.setItem).not.toHaveBeenCalled();
+		expect(failure).toMatchObject({ _tag: "SchemaError" });
 	});
 });

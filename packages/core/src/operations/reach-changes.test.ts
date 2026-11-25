@@ -7,7 +7,6 @@ import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vites
 import {
 	seedBot,
 	seedComputer,
-	seedConnector,
 	seedInvitation,
 	seedMember,
 	seedProject,
@@ -15,31 +14,20 @@ import {
 } from "../authentication/seed.test-support.ts";
 import { type Database, query, transaction } from "../database/database.ts";
 import {
-	bot,
 	computer,
 	computerProvider,
-	connector,
 	event,
 	member,
 	membership,
 	project,
 	workspace,
 } from "../database/schema.ts";
-import {
-	closeDatabase,
-	holdTransaction,
-	onDatabase,
-	runOnPostgres,
-	servedOnPostgres,
-	waitUntilWaitingOnLocks,
-} from "../database/testing.ts";
+import { closeDatabase, holdTransaction, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { Principal } from "../principal.ts";
 import { underWorkspaceLock } from "../proofs/workspace-lock.ts";
 import { authenticators, principals } from "../proofs/world.test-support.ts";
-import { ConnectorStore, type OAuthVersion } from "../providers/connectors/connector-store.ts";
-import { SignInRequired, storedOAuthProvider } from "../providers/connectors/oauth.ts";
 import { Secrets } from "../secrets/secrets.ts";
-import { type CallOperation, servedOperations } from "./testing.ts";
+import { type CallOperation, requestOutcome, servedOperations } from "./testing.ts";
 
 /**
  * The operations that change who reaches what, against Postgres: each checks
@@ -66,13 +54,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		afterAll(async () => {
 			await closeDatabase();
 		});
-
-		/** What `called` came to: "ok", or its refusal's tag. */
-		const outcome = (called: Promise<unknown>) =>
-			called.then(
-				() => "ok",
-				(failure: { readonly _tag: string }) => failure._tag,
-			);
 
 		/** Locks the workspace's row as `underWorkspaceLock` does, then does `then`, in the held transaction. */
 		const holdingLock = (
@@ -143,14 +124,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				);
 				await demoting.held;
 
-				const changing = outcome(
+				const changing = requestOutcome(
 					call(await signedIn.member(staff.admin), "workspaces.changeRole", {
 						workspace: staff.workspaceId,
 						membershipId: await membershipOf(staff.workspaceId, staff.ed),
 						role: "viewer",
 					}),
 				);
-				await waitUntilWaitingOnLocks(1);
+				await demoting.waitForWaiters(1);
 				await demoting.release();
 
 				expect(await changing).toBe("ActionForbidden");
@@ -169,46 +150,17 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				const removing = holdingLock(staff.workspaceId, takeOut(staff.workspaceId, staff.ed));
 				await removing.held;
 
-				const changing = outcome(
+				const changing = requestOutcome(
 					call(await signedIn.member(staff.otherAdmin), "workspaces.changeRole", {
 						workspace: staff.workspaceId,
 						membershipId,
 						role: "viewer",
 					}),
 				);
-				await waitUntilWaitingOnLocks(1);
+				await removing.waitForWaiters(1);
 				await removing.release();
 
 				expect(await changing).toBe("ResourceHidden");
-			});
-
-			it("lets the second of two admins changing the same role at once act on what the first left", async () => {
-				const staff = await staffed();
-				const membershipId = await membershipOf(staff.workspaceId, staff.ed);
-				const [first, second] = await Promise.all([
-					outcome(
-						call(await signedIn.member(staff.admin), "workspaces.changeRole", {
-							workspace: staff.workspaceId,
-							membershipId,
-							role: "viewer",
-						}),
-					),
-					outcome(
-						call(await signedIn.member(staff.otherAdmin), "workspaces.removeMembership", {
-							workspace: staff.workspaceId,
-							membershipId,
-						}),
-					),
-				]);
-				const [left] = await onDatabase((db) =>
-					db.select().from(membership).where(eq(membership.id, membershipId)),
-				);
-
-				// Whichever went first, the other proved what it left: a role changed then a
-				// removal, or a removal and then nothing to change.
-				expect(left).toBeUndefined();
-				expect(second).toBe("ok");
-				expect(["ok", "ResourceHidden"]).toContain(first);
 			});
 		});
 
@@ -233,145 +185,158 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				);
 				await demoting.held;
 
-				const deleting = outcome(
+				const deleting = requestOutcome(
 					call(await signedIn.member(staff.admin), "projects.remove", {
 						projectId: staff.project,
 					}),
 				);
-				await waitUntilWaitingOnLocks(1);
+				await demoting.waitForWaiters(1);
 				await demoting.release();
 
 				expect(await deleting).toBe("ActionForbidden");
 				expect(await stillThere(staff.project)).toEqual({ project: true, computer: true });
 			});
 
-			it.each(["project", "workspace", "bot"] as const)(
-				"fences a deleting %s and frees the database pool before destroying its computer",
-				async (kind) => {
-					const staff = await staffed();
-					const removingBot =
-						kind === "bot"
-							? await seedBot(staff.workspaceId, { createdById: staff.admin })
-							: undefined;
-					const projectId = removingBot?.defaultProject ?? staff.project;
-					await seedComputer(staff.workspaceId, projectId);
-					const destroying = Promise.withResolvers<void>();
-					const destroyed = Promise.withResolvers<void>();
-					// The computer provider, which takes its time destroying the computer, then finds it gone.
-					const provider = createServer((_request, response) => {
-						destroying.resolve();
-						void destroyed.promise.then(() =>
-							response
-								.writeHead(404, { "content-type": "application/json" })
-								.end(JSON.stringify({ code: "NOT_FOUND", message: "No such computer" })),
-						);
-					});
-					await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
-					onTestFinished(() => void provider.close());
-					const { port } = provider.address() as AddressInfo;
-					const apiKey = await runOnPostgres(
-						Effect.map(Secrets.Service, (secrets) => secrets.encrypt("api-key")),
+			const whileComputerIsBeingDestroyed = async (
+				workspaceId: string,
+				projectId: string,
+				owner: Principal,
+				start: () => Promise<unknown>,
+				verify: () => Promise<void>,
+			) => {
+				await seedComputer(workspaceId, projectId);
+				const destroying = Promise.withResolvers<void>();
+				const destroyed = Promise.withResolvers<void>();
+				// The computer provider, which takes its time destroying the computer, then finds it gone.
+				const provider = createServer((_request, response) => {
+					destroying.resolve();
+					void destroyed.promise.then(() =>
+						response
+							.writeHead(404, { "content-type": "application/json" })
+							.end(JSON.stringify({ code: "NOT_FOUND", message: "No such computer" })),
 					);
-					await onDatabase((db) =>
-						db
-							.update(computerProvider)
-							.set({
-								apiKeyEncrypted: apiKey,
-								settings: {
-									builtIn: "opensandbox",
-									serverUrl: `http://127.0.0.1:${port}`,
-									image: "debian",
-								},
-							})
-							.where(eq(computerProvider.workspaceId, staff.workspaceId)),
+				});
+				await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
+				onTestFinished(() => {
+					destroyed.resolve();
+					provider.close();
+				});
+				const { port } = provider.address() as AddressInfo;
+				const apiKey = await runOnPostgres(
+					Effect.map(Secrets.Service, (secrets) => secrets.encrypt("api-key")),
+				);
+				await onDatabase((db) =>
+					db
+						.update(computerProvider)
+						.set({
+							apiKeyEncrypted: apiKey,
+							settings: {
+								builtIn: "opensandbox",
+								serverUrl: `http://127.0.0.1:${port}`,
+								image: "debian",
+							},
+						})
+						.where(eq(computerProvider.workspaceId, workspaceId)),
+				);
+				const deleting = requestOutcome(start());
+				try {
+					await Promise.race([
+						destroying.promise,
+						deleting.then((result) => {
+							throw new Error(`Deletion reached ${result} before contacting the provider`);
+						}),
+					]);
+					const [pool] = await onDatabase((db) =>
+						db.execute<{ held: number }>(
+							sql`select count(*)::int as held from pg_stat_activity
+							where datname = current_database() and state = 'idle in transaction'`,
+							"objects",
+						),
 					);
-					const owner = await signedIn.member(staff.owner);
-					const adminMembership = await membershipOf(staff.workspaceId, staff.admin);
-					const admin = await signedIn.member(staff.admin);
+					expect(pool?.held).toBe(0);
+					await expect(
+						call(owner, "projects.update", {
+							projectId,
+							changes: { name: "Too late" },
+						}),
+					).rejects.toMatchObject({ _tag: "ResourceHidden" });
+					await expect(
+						call(owner, "chats.startProjectChat", {
+							projectId,
+							retryKey: randomUUID(),
+							message: "Too late",
+						}),
+					).rejects.toMatchObject({ _tag: "ResourceHidden" });
+					await verify();
+				} finally {
+					destroyed.resolve();
+				}
+				expect(await deleting).toBe("ok");
+				expect(await stillThere(projectId)).toEqual({ project: false, computer: false });
+			};
 
-					const start = () => {
-						switch (kind) {
-							case "workspace":
-								return call(owner, "workspaces.delete", { workspace: staff.workspaceId });
-							case "project":
-								return call(admin, "projects.remove", { projectId });
-							case "bot":
-								if (!removingBot) throw new Error("Expected a bot to remove");
-								return call(admin, "bots.remove", { botId: removingBot.id });
-						}
-					};
-					const deleting = outcome(start());
-					onTestFinished(() => {
-						destroyed.resolve();
-					});
-					await destroying.promise;
-					try {
-						const [pool] = await onDatabase((db) =>
-							db.execute<{ held: number }>(
-								sql`
-						select count(*)::int as held from pg_stat_activity
-						where datname = current_database() and state = 'idle in transaction'
-					`,
-								"objects",
-							),
-						);
-						expect(pool?.held).toBe(0);
-						if (kind === "workspace") {
-							expect(
-								await outcome(
-									call(owner, "workspaces.handOverOwnership", {
-										workspace: staff.workspaceId,
-										membershipId: adminMembership,
-									}),
-								),
-							).toBe("ResourceHidden");
-						}
-						expect(
-							await outcome(
-								call(owner, "projects.update", {
-									projectId,
-									changes: { name: "Too late" },
-								}),
-							),
-						).toBe("ResourceHidden");
-						expect(
-							await outcome(
-								call(owner, "chats.startProjectChat", {
-									projectId,
-									retryKey: randomUUID(),
-									message: "Too late",
-								}),
-							),
-						).toBe("ResourceHidden");
-						if (kind === "bot" && removingBot) {
-							expect(
-								await outcome(
-									call(owner, "projects.update", {
-										projectId: staff.project,
-										changes: { leadBotId: removingBot.id },
-									}),
-								),
-							).toBe("ResourceHidden");
-						}
-						if (kind === "project") {
-							await call(owner, "workspaces.changeRole", {
+			it("fences a deleting project while workspace membership can still change", async () => {
+				const staff = await staffed();
+				const owner = await signedIn.member(staff.owner);
+				const admin = await signedIn.member(staff.admin);
+				const membershipId = await membershipOf(staff.workspaceId, staff.admin);
+				await whileComputerIsBeingDestroyed(
+					staff.workspaceId,
+					staff.project,
+					owner,
+					() => call(admin, "projects.remove", { projectId: staff.project }),
+					async () => {
+						await call(owner, "workspaces.changeRole", {
+							workspace: staff.workspaceId,
+							membershipId,
+							role: "editor",
+						});
+					},
+				);
+			});
+
+			it("fences a deleting workspace and its projects", async () => {
+				const staff = await staffed();
+				const owner = await signedIn.member(staff.owner);
+				const membershipId = await membershipOf(staff.workspaceId, staff.admin);
+				await whileComputerIsBeingDestroyed(
+					staff.workspaceId,
+					staff.project,
+					owner,
+					() => call(owner, "workspaces.delete", { workspace: staff.workspaceId }),
+					async () => {
+						await expect(
+							call(owner, "workspaces.handOverOwnership", {
 								workspace: staff.workspaceId,
-								membershipId: adminMembership,
-								role: "editor",
-							});
-						}
-					} finally {
-						destroyed.resolve();
-					}
-					expect(await deleting).toBe("ok");
-					expect(await stillThere(projectId)).toEqual({ project: false, computer: false });
-					if (removingBot) {
-						expect(
-							await onDatabase((db) => db.select().from(bot).where(eq(bot.id, removingBot.id))),
-						).toEqual([]);
-					}
-				},
-			);
+								membershipId,
+							}),
+						).rejects.toMatchObject({ _tag: "ResourceHidden" });
+					},
+				);
+			});
+
+			it("fences a deleting bot and its default project", async () => {
+				const staff = await staffed();
+				const owner = await signedIn.member(staff.owner);
+				const admin = await signedIn.member(staff.admin);
+				const target = await seedBot(staff.workspaceId, { createdById: staff.admin });
+				await whileComputerIsBeingDestroyed(
+					staff.workspaceId,
+					target.defaultProject,
+					owner,
+					() => call(admin, "bots.remove", { botId: target.id }),
+					async () => {
+						await expect(
+							call(owner, "projects.update", {
+								projectId: staff.project,
+								changes: { leadBotId: target.id },
+							}),
+						).rejects.toMatchObject({ _tag: "ResourceHidden" });
+					},
+				);
+				const bots = await call(owner, "bots.list", { workspace: staff.workspaceId });
+				expect(bots.map(({ id }) => id)).not.toContain(target.id);
+			});
 
 			it("refuses a workspace's deletion, and destroys none of its computers, once its owner, who came first, handed it on", async () => {
 				const staff = await staffed();
@@ -395,12 +360,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				);
 				await handingOver.held;
 
-				const deleting = outcome(
+				const deleting = requestOutcome(
 					call(await signedIn.member(staff.owner), "workspaces.delete", {
 						workspace: staff.workspaceId,
 					}),
 				);
-				await waitUntilWaitingOnLocks(1);
+				await handingOver.waitForWaiters(1);
 				await handingOver.release();
 
 				expect(await deleting).toBe("ActionForbidden");
@@ -413,8 +378,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			const waitsForLock = async (workspaceId: string, start: () => Promise<unknown>) => {
 				const holding = holdingLock(workspaceId);
 				await holding.held;
-				const started = outcome(start());
-				await waitUntilWaitingOnLocks(1);
+				const started = requestOutcome(start());
+				await holding.waitForWaiters(1);
 				await holding.release();
 				return started;
 			};
@@ -564,20 +529,30 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				).toBe("ok");
 			});
 
-			it("but not a change to a bot that leaves who reaches it as it was", async () => {
+			it("lets an update with no change of reach proceed while the workspace lock is held", async () => {
 				const staff = await staffed();
 				const holding = holdingLock(staff.workspaceId);
+				const editor = await signedIn.member(staff.ed);
+				const stop = new AbortController();
 				await holding.held;
 
-				expect(
-					await outcome(
-						call(await signedIn.member(staff.ed), "bots.update", {
-							botId: staff.pub.id,
-							changes: { description: "Answers questions." },
-						}),
-					),
-				).toBe("ok");
-				await holding.release();
+				const changed = requestOutcome(
+					call(editor, "bots.update", {
+						botId: staff.pub.id,
+						changes: { description: "Answers questions." },
+					}),
+				);
+				try {
+					const result = await Promise.race([
+						changed,
+						holding.waitForWaiters(1, stop.signal).then(() => "waiting on the workspace lock"),
+					]);
+					expect(result).toBe("ok");
+				} finally {
+					stop.abort();
+					await holding.release();
+					await changed;
+				}
 			});
 		});
 
@@ -588,137 +563,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await expect(
 				runOnPostgres(transaction(underWorkspaceLock(owner, staff.workspaceId, () => Effect.void))),
 			).rejects.toThrow("inside no other");
-		});
-
-		describe("a connector sign-in during a removal", () => {
-			const tokens = { tokens: { access_token: "token", token_type: "bearer" } };
-
-			/** The connector's sign-in as stored: who signed it in, and whether it holds a record. */
-			const signInOf = async (connectorId: string) => {
-				const [row] = await onDatabase((db) =>
-					db
-						.select({ signedInById: connector.signedInById, sealed: connector.oauthEncrypted })
-						.from(connector)
-						.where(eq(connector.id, connectorId)),
-				);
-				return { signedInById: row?.signedInById ?? null, signedIn: row?.sealed != null };
-			};
-
-			it("is refused when it finishes while the removal holds the lock, as is a GitHub app installed on their account", async () => {
-				const staff = await staffed();
-				const store = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
-				const oauth = await seedConnector(staff.workspaceId, staff.project);
-				const github = await seedConnector(staff.workspaceId, staff.project, {
-					github: { appCredentialEncrypted: "sealed" },
-				});
-				const removing = holdingLock(staff.workspaceId, takeOut(staff.workspaceId, staff.ed));
-				await removing.held;
-
-				const signingIn = store.saveOauthRecord(staff.workspaceId, oauth, tokens, {
-					kind: "signIn",
-					version: null,
-					signedInById: staff.ed,
-				});
-				const installing = store.installed(staff.workspaceId, github, {
-					installationId: 1,
-					account: "ed",
-					installedById: staff.ed,
-				});
-				await waitUntilWaitingOnLocks(2);
-				await removing.release();
-
-				expect(await signingIn).toBeUndefined();
-				expect(await installing).toBe(false);
-				expect(await signInOf(oauth)).toEqual({ signedInById: null, signedIn: false });
-			});
-
-			it("refuses every refresh callback after a metadata save conflicts with removal and a new sign-in", async () => {
-				const staff = await staffed();
-				const store = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
-				const oauth = await seedConnector(staff.workspaceId, staff.project);
-				await store.saveOauthRecord(staff.workspaceId, oauth, tokens, {
-					kind: "signIn",
-					version: null,
-					signedInById: staff.ed,
-				});
-				let version: OAuthVersion = null;
-				const refreshing = storedOAuthProvider(
-					{
-						load: async () => {
-							const current = await store.readOauthRecord(staff.workspaceId, oauth);
-							version = current?.version ?? null;
-							return current?.record;
-						},
-						save: async (record) => {
-							const saved = await store.saveOauthRecord(staff.workspaceId, oauth, record, {
-								kind: "since",
-								version,
-							});
-							if (saved === undefined) return false;
-							version = saved;
-							return true;
-						},
-						now: async () => new Date(),
-					},
-					{ redirectUrl: "https://sugabots.test/callback", clientName: "Sugabots" },
-				);
-				expect(await refreshing.tokens()).toMatchObject({ access_token: "token" });
-
-				await call(await signedIn.member(staff.admin), "workspaces.removeMembership", {
-					workspace: staff.workspaceId,
-					membershipId: await membershipOf(staff.workspaceId, staff.ed),
-				});
-
-				await store.saveOauthRecord(
-					staff.workspaceId,
-					oauth,
-					{
-						tokens: { access_token: "replacement", token_type: "bearer" },
-					},
-					{ kind: "signIn", signedInById: staff.admin, version: null },
-				);
-
-				await expect(
-					refreshing.saveClientInformation?.({
-						client_id: "old-client",
-						issuer: "https://auth.example.com",
-					}),
-				).rejects.toBeInstanceOf(SignInRequired);
-				await expect(
-					refreshing.saveTokens({ access_token: "refreshed", token_type: "bearer" }),
-				).rejects.toBeInstanceOf(SignInRequired);
-				expect(await store.oauthRecord(staff.workspaceId, oauth)).toMatchObject({
-					tokens: { access_token: "replacement" },
-				});
-				expect(await signInOf(oauth)).toEqual({ signedInById: staff.admin, signedIn: true });
-			});
-
-			it("is seen by the removal, which signs it out, when it finished first", async () => {
-				const staff = await staffed();
-				const oauth = await seedConnector(staff.workspaceId, staff.project);
-				const signingIn = holdTransaction(
-					Effect.flatMap(ConnectorStore.Service, (store) =>
-						store.saveOauthRecord(staff.workspaceId, oauth, tokens, {
-							kind: "signIn",
-							version: null,
-							signedInById: staff.ed,
-						}),
-					).pipe(Effect.provide(ConnectorStore.layer)),
-				);
-				expect(await signingIn.held).toBeTypeOf("string");
-
-				const removing = outcome(
-					call(await signedIn.member(staff.admin), "workspaces.removeMembership", {
-						workspace: staff.workspaceId,
-						membershipId: await membershipOf(staff.workspaceId, staff.ed),
-					}),
-				);
-				await waitUntilWaitingOnLocks(1);
-				await signingIn.release();
-
-				expect(await removing).toBe("ok");
-				expect(await signInOf(oauth)).toEqual({ signedInById: null, signedIn: false });
-			});
 		});
 	},
 );

@@ -1,11 +1,6 @@
-import {
-	GITHUB_SETUP_RETURN_PATH,
-	type GitHubSetupOutcome,
-	MAX_IDEMPOTENCY_KEY_CHARACTERS,
-} from "@sugabots/contracts";
+import { GITHUB_SETUP_RETURN_PATH, type GitHubSetupOutcome } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound, Unauthorized } from "@sugabots/contracts/http";
 import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
-import { Automations } from "@sugabots/core/chats/automations/automations";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Operations } from "@sugabots/core/operations/registry";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
@@ -107,7 +102,6 @@ export const gitHubWebhookRoutes = HttpApiBuilder.group(ServerApi, "gitHubWebhoo
 		const webhooks = yield* WebhookAuthentication.Service;
 		const operations = yield* Operations.Service;
 		const ids = yield* Ids.Service;
-		const connectorEvents = yield* Automations.ConnectorEvents;
 		// Raw, since the signature is over the body exactly as sent.
 		return handlers.handleRaw("delivery", ({ params, request }) =>
 			Effect.gen(function* () {
@@ -120,7 +114,7 @@ export const gitHubWebhookRoutes = HttpApiBuilder.group(ServerApi, "gitHubWebhoo
 					.github(params.connectorId, { headers, body })
 					.pipe(Effect.mapError(refused));
 				const call = { kind: "request", request: yield* ids.next } as const;
-				const delivered = yield* operations["gitHubWebhooks.delivery"](
+				yield* operations["gitHubWebhooks.delivery"](
 					principal,
 					{
 						connectorId: params.connectorId,
@@ -129,18 +123,13 @@ export const gitHubWebhookRoutes = HttpApiBuilder.group(ServerApi, "gitHubWebhoo
 						body,
 					},
 					call,
-				).pipe(Effect.mapError(refused));
-				if (!delivered.activity) return HttpServerResponse.empty({ status: 204 });
-				const { deliveryId } = delivered;
-				if (!deliveryId || deliveryId.length > MAX_IDEMPOTENCY_KEY_CHARACTERS) {
-					return yield* new BadRequest({ message: userText`The delivery has no usable id` });
-				}
-				yield* connectorEvents.accept({
-					workspaceId: delivered.workspaceId,
-					connectorId: params.connectorId,
-					deliveryId,
-					activity: delivered.activity,
-				});
+				).pipe(
+					Effect.mapError((error) =>
+						error._tag === "GitHubDeliveryIdInvalid"
+							? new BadRequest({ message: error.userMessage })
+							: refused(),
+					),
+				);
 				return HttpServerResponse.empty({ status: 204 });
 			}),
 		);

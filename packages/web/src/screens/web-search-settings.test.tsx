@@ -2,10 +2,10 @@ import type { SearchProvider } from "@sugabots/contracts";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, linear, mount } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+import { apiAnswers, linear, mount } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const route = client.api.searchProviders;
 
@@ -43,7 +43,6 @@ function openAdvanced() {
 }
 
 beforeEach(() => {
-	vi.clearAllMocks();
 	apiAnswers();
 });
 
@@ -73,7 +72,7 @@ describe("the Web search settings", () => {
 
 		const providers = openAdvanced();
 		expect(within(providers).getByRole("radio", { name: /Exa/ })).toHaveProperty("checked", true);
-		expect(screen.getByText(/Without one, searches use Exa's free tier/)).toBeDefined();
+		screen.getByText(/Without one, searches use Exa's free tier/);
 	});
 
 	it("changes provider from the list, keeping the switch as it was", async () => {
@@ -92,7 +91,7 @@ describe("the Web search settings", () => {
 		expect(route.replace.mock.calls[0]?.[0]).toMatchObject({
 			payload: { builtIn: "searxng", enabled: true },
 		});
-		expect(await screen.findByRole("heading", { name: "SearXNG" })).toBeDefined();
+		await screen.findByRole("heading", { name: "SearXNG" });
 	});
 
 	it("switches the web off on a swap to a provider that needs a key, until it has one", async () => {
@@ -111,7 +110,7 @@ describe("the Web search settings", () => {
 		expect(route.replace.mock.calls[0]?.[0]).toMatchObject({
 			payload: { builtIn: "brave", enabled: false },
 		});
-		expect(await screen.findByRole("heading", { name: "Brave Search" })).toBeDefined();
+		await screen.findByRole("heading", { name: "Brave Search" });
 		const power = await searchSwitch();
 		await waitFor(() => expect(power.getAttribute("aria-checked")).toBe("false"));
 		expect(power).toHaveProperty("disabled", true);
@@ -127,7 +126,7 @@ describe("the Web search settings", () => {
 		mount("/suga/settings/search");
 
 		expect(await searchSwitch()).toHaveProperty("disabled", true);
-		expect(screen.getByText("Brave Search needs an API key first. Add it below.")).toBeDefined();
+		screen.getByText("Brave Search needs an API key first. Add it below.");
 		const key = screen.getByLabelText("API key");
 		key.focus();
 		fireEvent.change(key, { target: { value: "brave-key" } });
@@ -135,7 +134,7 @@ describe("the Web search settings", () => {
 
 		await waitFor(() => expect(route.update).toHaveBeenCalledOnce());
 		expect(route.update.mock.calls[0]?.[0]).toMatchObject({ payload: { apiKey: "brave-key" } });
-		expect(await screen.findByText("••••••••")).toBeDefined();
+		await screen.findByText("••••••••");
 
 		const power = await searchSwitch();
 		await waitFor(() => expect(power).toHaveProperty("disabled", false));
@@ -163,7 +162,7 @@ describe("the Web search settings", () => {
 		await waitFor(() =>
 			expect(route.update.mock.calls[0]?.[0]).toMatchObject({ payload: { apiKey: null } }),
 		);
-		expect(await screen.findByPlaceholderText("Paste your key")).toBeDefined();
+		await screen.findByPlaceholderText("Paste your key");
 	});
 
 	it("runs a test search and says how it went", async () => {
@@ -175,16 +174,14 @@ describe("the Web search settings", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /Test search/ }));
 
-		expect(await screen.findByText("Search works")).toBeDefined();
+		await screen.findByText("Search works");
 	});
 
 	it("tells an editor the pane is for administrators", async () => {
 		apiAnswers({ role: "editor" });
 		mount("/suga/settings/search");
 
-		expect(
-			await screen.findByText("Only workspace administrators can manage web search."),
-		).toBeDefined();
+		await screen.findByText("Only workspace administrators can manage web search.");
 		expect(route.get).not.toHaveBeenCalled();
 	});
 });

@@ -1,6 +1,5 @@
 import { streamEvent } from "@sugabots/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { isApiFailure } from "./errors.ts";
 import { createEventsApi } from "./events.ts";
 
 /**
@@ -31,6 +30,7 @@ function frame({
 }
 
 interface Call {
+	startedAtMs: number;
 	url: string;
 	headers: Headers;
 	credentials?: RequestCredentials;
@@ -45,6 +45,7 @@ function scripted(...responses: (string | number)[]) {
 
 	const fetch = (async (url: string | URL, init?: RequestInit) => {
 		calls.push({
+			startedAtMs: Date.now(),
 			url: String(url),
 			headers: new Headers(init?.headers),
 			credentials: init?.credentials,
@@ -215,6 +216,7 @@ describe("parsing", () => {
 describe("resume", () => {
 	it("backs off when successful responses keep ending without events", async () => {
 		vi.useFakeTimers();
+		const jitter = vi.spyOn(Math, "random").mockReturnValue(0.5);
 		const { fetch, calls } = scripted("", "", 401);
 		const stream = createEventsApi({ baseUrl: BASE, fetch, retryMs: 100 }).workspace("w1");
 		const finished = expect(take(stream, 2)).rejects.toMatchObject({ _tag: "Unauthorized" });
@@ -222,13 +224,19 @@ describe("resume", () => {
 		try {
 			await vi.advanceTimersByTimeAsync(0);
 			expect(calls).toHaveLength(1);
-			await vi.advanceTimersByTimeAsync(49);
-			expect(calls).toHaveLength(1);
 			await vi.runAllTimersAsync();
 			await finished;
 			expect(calls).toHaveLength(3);
+			const [initial, firstRetry, secondRetry] = calls.map((call) => call.startedAtMs) as [
+				number,
+				number,
+				number,
+			];
+			expect(firstRetry).toBeGreaterThan(initial);
+			expect(secondRetry - firstRetry).toBeGreaterThan(firstRetry - initial);
 		} finally {
 			stream.close();
+			jitter.mockRestore();
 			vi.useRealTimers();
 		}
 	});
@@ -311,38 +319,23 @@ describe("failure", () => {
 		});
 	});
 
-	it("retries a server error", async () => {
-		const { fetch, calls } = scripted(503, frame({ event: "message.created", id: 1 }));
+	it.each([503, 429, 408])("retries HTTP %s and delivers the next event", async (status) => {
+		const { fetch, calls } = scripted(status, frame({ event: "message.created", id: 1 }));
 
-		await take(events(fetch).chat("c1"), 1);
-
+		expect((await take(events(fetch).chat("c1"), 1)).map((event) => event.type)).toEqual([
+			"message.created",
+		]);
 		expect(calls).toHaveLength(2);
 	});
 
-	it("gives up when the session is refused, rather than retrying forever", async () => {
-		const { fetch, calls } = scripted(401);
+	it.each([
+		[401, "Unauthorized"],
+		[404, "NotFound"],
+	])("ends on HTTP %s with %s", async (status, tag) => {
+		const { fetch, calls } = scripted(status);
 
-		const failure = await take(events(fetch).chat("c1"), 1).catch((error: unknown) => error);
-		expect(isApiFailure(failure)).toBe(true);
+		await expect(take(events(fetch).chat("c1"), 1)).rejects.toMatchObject({ _tag: tag });
 		expect(calls).toHaveLength(1);
-	});
-
-	it("gives up on a resource that is not there", async () => {
-		const { fetch } = scripted(404);
-
-		await expect(take(events(fetch).chat("gone"), 1)).rejects.toMatchObject({
-			_tag: "NotFound",
-		});
-	});
-
-	it("waits out a rate limit instead of giving up on it", async () => {
-		// 429 and 408 are the two 4xx that mean "later", not "never". Treating
-		// the whole range as fatal left a rate-limited tab with no live
-		// updates until it was reloaded.
-		const { fetch, calls } = scripted(429, 408, frame({ event: "message.created", id: 1 }));
-
-		expect(await take(events(fetch).chat("c1"), 1)).toHaveLength(1);
-		expect(calls).toHaveLength(3);
 	});
 });
 

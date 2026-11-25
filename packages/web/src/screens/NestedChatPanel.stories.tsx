@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, linearHandler, revenue } from "@/shell/story-fixtures.ts";
+import { growthDesk, linearHandler, revenue } from "@/shell/story-fixtures.test-support.ts";
 import { NestedChatPanel } from "./NestedChatPanel.tsx";
 
 const CHAT = "0199a3a0-0000-7000-8000-000000000401";

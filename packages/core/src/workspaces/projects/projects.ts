@@ -75,7 +75,7 @@ export interface Interface {
 		canCreate: CanCreateProjects<P, W>,
 		lead: ReachesBot<P, B>,
 		details: Omit<NewProject, "leadBotId">,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [W, B], "projects.create">,
 	) => Effect.Effect<
 		Project,
 		InvalidProjectDetails | UnusableProjectName | ProjectSlugTaken | BotNotPublic | FenceRefusal,
@@ -98,8 +98,8 @@ export interface Interface {
 	readonly beginRemoval: <P, J>(
 		canDelete: CanDeleteProject<P, J>,
 	) => Effect.Effect<ProjectComputers.Project, never, Transaction>;
-	readonly remove: <W>(
-		started: ProjectDeletionStarted<W, "project">,
+	readonly remove: <W, J>(
+		started: ProjectDeletionStarted<W, J, "project">,
 	) => Effect.Effect<void, ComputerMadeMeanwhile, Transaction>;
 	/** The members in the project, by name. */
 	readonly members: <P, J>(reach: ReachesProject<P, J>) => Effect.Effect<ProjectMember[]>;
@@ -132,7 +132,7 @@ export interface Interface {
 	 */
 	readonly join: <P, J, X>(
 		canJoin: CanJoinProject<P, J>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [J], "projects.join">,
 	) => Effect.Effect<Project, ResourceHidden | FenceRefusal, Transaction>;
 	/** The project's bots, by name, as the member acting sees them. */
 	readonly bots: <P, J>(reach: ReachesProject<P, J>) => Effect.Effect<Bot[]>;
@@ -140,7 +140,7 @@ export interface Interface {
 	readonly addBot: <P, J, B, X>(
 		canChange: CanChangeProjectMembers<P, J>,
 		bot: ReachesBot<P, B>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [J, B], "projects.addBot">,
 	) => Effect.Effect<void, BotNotPublic | FenceRefusal, Transaction>;
 	/** Refused for the project's lead bot, until another is chosen. */
 	readonly removeBot: <P, J, B>(
@@ -244,10 +244,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		remove: ({ workspaceId, projectId }) =>
+		remove: ({ workspace, project }) =>
 			operation(
 				"remove",
 				Effect.gen(function* () {
+					const workspaceId = workspace.value;
+					const projectId = project.value;
 					yield* Transaction;
 					yield* ProjectComputers.lockWithoutComputer({ workspaceId, projectId });
 					yield* store.remove(workspaceId, projectId);

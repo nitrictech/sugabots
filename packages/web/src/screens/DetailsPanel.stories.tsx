@@ -10,8 +10,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk } from "@/shell/story-fixtures.ts";
-import { storyModel } from "@/story-app.tsx";
+import { growthDesk } from "@/shell/story-fixtures.test-support.ts";
+import { storyModel } from "@/story-app.test-support.tsx";
 import { DetailsPanel } from "./DetailsPanel.tsx";
 
 const WORKSPACE = growthDesk.workspaceId;

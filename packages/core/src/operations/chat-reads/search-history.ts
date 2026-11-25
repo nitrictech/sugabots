@@ -22,20 +22,18 @@ export const searchHistory = defineOperation(
 			targetChat,
 			principal.workspace,
 			call,
-			(principal, target, workspace, call) =>
+			input,
+			(principal, target, workspace, call, approvedInput) =>
 				Effect.gen(function* () {
 					const chatReach = yield* proveReachesChat(principal, target);
-					const approval = proveApproved(
-						principal,
-						call,
-						approvalRule("chats.searchHistory"),
-						input,
-					);
+					const rule = approvalRule("chats.searchHistory");
 					if (chat === "all") {
 						const reach = proveReachSet(yield* proveInWorkspace(principal, workspace));
-						return yield* searchMessages({ kind: "all", reach }, search, yield* approval);
+						const approval = yield* proveApproved(principal, call, rule, approvedInput, workspace);
+						return yield* searchMessages({ kind: "all", reach }, search, approval);
 					}
-					return yield* searchMessages({ kind: "chat", reach: chatReach }, search, yield* approval);
+					const approval = yield* proveApproved(principal, call, rule, approvedInput, target);
+					return yield* searchMessages({ kind: "chat", reach: chatReach }, search, approval);
 				}),
 		);
 	},

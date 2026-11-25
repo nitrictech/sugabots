@@ -20,8 +20,8 @@ import { Context, Effect, Layer, type Scope } from "effect";
 import { type Database, effectRunner } from "../../database/database.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import type { Operations } from "../../operations/registry.ts";
-import type { BotPrincipal } from "../../principal.ts";
 import { canWriteFilesInChat } from "../../proofs/can-change-file.ts";
+import type { RunsTurn } from "../../proofs/runs-turn.ts";
 import { ConnectorCalls } from "../../providers/connectors/connector-calls.ts";
 import { SearchProviderStore } from "../../providers/search-providers/search-provider-store.ts";
 import { ServerSettings } from "../../server-settings/server-settings.ts";
@@ -176,10 +176,10 @@ export interface Interface {
 	/**
 	 * The tools step `turn` offers.
 	 */
-	readonly forStep: (
-		principal: BotPrincipal,
+	readonly forStep: <P, T>(
+		running: RunsTurn<P, T>,
 		operations: Operations.Interface,
-		turn: StepTurn,
+		turn: Omit<StepTurn, "turnId" | "executionNumber">,
 		recorder: ToolCallRecorder,
 	) => Effect.Effect<StepTools, never, Scope.Scope>;
 }
@@ -199,16 +199,23 @@ export const make = Effect.gen(function* () {
 	const database = yield* Effect.context<Database>();
 	const runInTurn = effectRunner({ runPromiseExit: Effect.runPromiseExitWith(database) });
 
-	const forStep: Interface["forStep"] = (principal, operations, turn, recorder) =>
+	const forStep: Interface["forStep"] = (running, operations, prepared, recorder) =>
 		Effect.gen(function* () {
+			const principal = running.principal.value;
+			if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun") {
+				return yield* Effect.die(new Error("RunsTurn has no bot principal"));
+			}
+			const turn = { ...prepared, turnId: running.turn.value, executionNumber: running.execution };
 			const { setting } = turn;
-			const webEnabled = (yield* searchProviders.resolve(setting.chat.workspaceId)) !== undefined;
+			const { workspace: workspaceId, chat: chatId, project: projectId } = running;
+			const botId = principal.bot;
+			const webEnabled = (yield* searchProviders.resolve(workspaceId)) !== undefined;
 			const computer = yield* turnComputers.forStep(principal, {
-				workspaceId: setting.chat.workspaceId,
-				projectId: setting.projectId,
+				workspaceId,
+				projectId,
 				turnId: turn.turnId,
-				chatId: setting.chat.id,
-				botId: setting.bot.id,
+				chatId,
+				botId,
 				color: setting.bot.color,
 				naturalBrowsing: setting.bot.naturalBrowsing,
 				acceptsImages: setting.bot.acceptsImages,
@@ -218,9 +225,9 @@ export const make = Effect.gen(function* () {
 						turns.attachFile(
 							{
 								turnId: turn.turnId,
-								chatId: setting.chat.id,
-								workspaceId: setting.chat.workspaceId,
-								botId: setting.bot.id,
+								chatId,
+								workspaceId,
+								botId,
 								messageId: turn.replyMessageId,
 								executionNumber: turn.executionNumber,
 							},
@@ -230,7 +237,7 @@ export const make = Effect.gen(function* () {
 			});
 			const connectors = yield* connectorCalls.offer(
 				principal,
-				{ projectId: setting.projectId, ownProjectId: setting.bot.defaultProjectId },
+				{ projectId, ownProjectId: setting.bot.defaultProjectId },
 				{
 					files,
 					computer: computer.atPlace,
@@ -245,7 +252,7 @@ export const make = Effect.gen(function* () {
 				recorder,
 				files: stepFiles,
 				run: runInTurn,
-				chatId: setting.chat.id,
+				chatId,
 			};
 			const dispatched = operationTools(
 				principal,

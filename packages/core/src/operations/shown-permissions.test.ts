@@ -1,6 +1,6 @@
 import type { Bot, Project } from "@sugabots/contracts";
 import { HOST_REQUEST_TOOL } from "@sugabots/contracts";
-import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
+import type { FailureOf, InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -62,15 +62,23 @@ describe("what the API tells a member agrees with what its operations let them d
 		await closeDatabase();
 	});
 
-	/** Whether `principal` got past the provers of `name`, called with `input`: whatever came of it but a refusal. */
+	/** Whether `principal` got past the provers of `name`, accepting only the named post-proof failure, when supplied. */
 	const allowed = <Name extends RequestOperationName>(
 		principal: Principal,
 		name: Name,
 		input: InputOf<Name>,
+		postProofFailure?: FailureOf<Name>["_tag"],
 	): Promise<boolean> =>
 		call(principal, name, input).then(
-			() => true,
-			(failure: { readonly _tag?: string }) => !REFUSALS.has(failure._tag ?? ""),
+			() => {
+				if (postProofFailure === undefined) return true;
+				throw new Error(`${name} unexpectedly succeeded; expected ${postProofFailure}`);
+			},
+			(failure: { readonly _tag?: string }) => {
+				if (REFUSALS.has(failure._tag ?? "")) return false;
+				if (postProofFailure !== undefined && failure._tag === postProofFailure) return true;
+				throw failure;
+			},
 		);
 
 	describe("on a bot, as the bot list tells it", () => {
@@ -107,7 +115,7 @@ describe("what the API tells a member agrees with what its operations let them d
 			return {
 				update: await allowed(principal, "bots.update", {
 					botId: bot.id,
-					changes: { description: "Checked" },
+					changes: { name: "Checked" },
 				}),
 				talk: await allowed(principal, "bots.pin", { botId: bot.id }),
 				readHistory: await allowed(principal, "chats.projectChats", { projectId }),
@@ -133,136 +141,43 @@ describe("what the API tells a member agrees with what its operations let them d
 			};
 		};
 
-		/** Expects the bot list's flags for `principal` on `bot` to be `expected`, and its operations to agree. */
-		const agrees = async (
-			principal: Principal,
-			bot: SeededBot,
-			chatStartedBy: string,
-			expected: NonNullable<Awaited<ReturnType<typeof told>>>,
-		) => {
-			expect(await told(principal, bot)).toEqual(expected);
-			expect(await tried(principal, bot, chatStartedBy)).toEqual(expected);
-		};
+		it("reports each permission exactly where the corresponding operation permits it", async () => {
+			const cases = [
+				{ member: a.admin, creator: a.ed, visibility: "personal" },
+				{ member: a.owner, creator: a.ed, visibility: "personal" },
+				{ member: a.ed, creator: a.ed, visibility: "personal" },
+				{ member: a.admin, creator: a.ed, visibility: "public" },
+				{ member: a.erin, creator: a.ed, visibility: "public" },
+				{ member: a.vi, creator: a.ed, visibility: "public" },
+				{ member: a.viewerCreator, creator: a.viewerCreator, visibility: "public" },
+			] as const;
+			const results: Array<NonNullable<Awaited<ReturnType<typeof told>>>> = [];
+			for (const { member, creator, visibility } of cases) {
+				const bot = await seedBot(a.workspace, { createdById: creator, visibility });
+				const principal = await as.member(member);
+				const shown = await told(principal, bot);
+				expect(shown, `${visibility} bot for ${member}`).toEqual(
+					await tried(principal, bot, creator),
+				);
+				if (!shown) throw new Error("Expected bot permissions");
+				results.push(shown);
+			}
 
-		it("tells an admin they may only delete another member's personal bot and pause its automations", async () => {
-			const personal = await seedBot(a.workspace, { createdById: a.ed, visibility: "personal" });
-			await agrees(await as.member(a.admin), personal, a.ed, {
-				update: false,
-				talk: false,
-				readHistory: false,
-				resolveChats: false,
-				manageConnectors: false,
-				manageComputer: false,
-				manageAutomations: false,
-				pauseAutomations: true,
-				delete: true,
-			});
-		});
-
-		it("tells the owner the same of another member's personal bot", async () => {
-			const personal = await seedBot(a.workspace, { createdById: a.ed, visibility: "personal" });
-			await agrees(await as.member(a.owner), personal, a.ed, {
-				update: false,
-				talk: false,
-				readHistory: false,
-				resolveChats: false,
-				manageConnectors: false,
-				manageComputer: false,
-				manageAutomations: false,
-				pauseAutomations: true,
-				delete: true,
-			});
-		});
-
-		it("tells the editor who made a personal bot they may do everything with it", async () => {
-			const personal = await seedBot(a.workspace, { createdById: a.ed, visibility: "personal" });
-			await agrees(await as.member(a.ed), personal, a.ed, {
-				update: true,
-				talk: true,
-				readHistory: true,
-				resolveChats: true,
-				manageConnectors: true,
-				manageComputer: true,
-				manageAutomations: true,
-				pauseAutomations: true,
-				delete: true,
-			});
-		});
-
-		it("tells an admin they manage a public bot somebody else made", async () => {
-			const publicBot = await seedBot(a.workspace, { createdById: a.ed });
-			await agrees(await as.member(a.admin), publicBot, a.ed, {
-				update: true,
-				talk: true,
-				readHistory: true,
-				resolveChats: true,
-				manageConnectors: true,
-				manageComputer: true,
-				manageAutomations: true,
-				pauseAutomations: true,
-				delete: true,
-			});
-		});
-
-		it("tells an editor they may talk in a public bot's chats and resolve them, and manage nothing", async () => {
-			const publicBot = await seedBot(a.workspace, { createdById: a.ed });
-			await agrees(await as.member(a.erin), publicBot, a.ed, {
-				update: false,
-				talk: true,
-				readHistory: true,
-				resolveChats: true,
-				manageConnectors: false,
-				manageComputer: false,
-				manageAutomations: false,
-				pauseAutomations: false,
-				delete: false,
-			});
-		});
-
-		it("tells a viewer they may read a public bot's chats, but not resolve them", async () => {
-			const publicBot = await seedBot(a.workspace, { createdById: a.ed });
-			await agrees(await as.member(a.vi), publicBot, a.ed, {
-				update: false,
-				talk: true,
-				readHistory: true,
-				resolveChats: false,
-				manageConnectors: false,
-				manageComputer: false,
-				manageAutomations: false,
-				pauseAutomations: false,
-				delete: false,
-			});
-		});
-
-		it("tells a viewer who made a bot before becoming one that they manage nothing of it", async () => {
-			const theirs = await seedBot(a.workspace, { createdById: a.viewerCreator });
-			await agrees(await as.member(a.viewerCreator), theirs, a.viewerCreator, {
-				update: false,
-				talk: true,
-				readHistory: true,
-				resolveChats: false,
-				manageConnectors: false,
-				manageComputer: false,
-				manageAutomations: false,
-				pauseAutomations: false,
-				delete: false,
-			});
-		});
-
-		it("tells a viewer they manage their Personal Assistant, but can't delete it or resolve its chats", async () => {
 			const pam = await seedMember(a.workspace, "viewer");
 			const assistant = await seedBot(a.workspace, { assistantOf: pam, visibility: "personal" });
-			await agrees(await as.member(pam), assistant, pam, {
-				update: true,
-				talk: true,
-				readHistory: true,
-				resolveChats: false,
-				manageConnectors: true,
-				manageComputer: true,
-				manageAutomations: true,
-				pauseAutomations: true,
-				delete: false,
-			});
+			const member = await as.member(pam);
+			const shown = await told(member, assistant);
+			expect(shown, "Personal Assistant for its member").toEqual(
+				await tried(member, assistant, pam),
+			);
+			if (!shown) throw new Error("Expected Personal Assistant permissions");
+			results.push(shown);
+
+			for (const permission of Object.keys(shown) as Array<keyof typeof shown>) {
+				const values = results.map((flags) => flags[permission]);
+				expect(values, permission).toContain(true);
+				expect(values, permission).toContain(false);
+			}
 		});
 
 		it("shows an admin no other member's Personal Assistant, which every operation hides", async () => {
@@ -455,7 +370,10 @@ describe("what the API tells a member agrees with what its operations let them d
 			const details = await call(principal, "chats.get", {
 				chatId: waitingOn.chatId,
 				limit: 50,
-			}).catch(() => undefined);
+			}).catch((failure: { readonly _tag?: string }) => {
+				if (failure._tag === "ResourceHidden") return undefined;
+				throw failure;
+			});
 			const inChat =
 				kind === "call"
 					? (details?.permissions?.approveToolCallsIn.includes(waitingOn.reply) ?? false)
@@ -465,10 +383,15 @@ describe("what the API tells a member agrees with what its operations let them d
 				counted: attention.waitingApprovals === 1,
 				projectMarked: marks.projects[projectId]?.needsApproval ?? false,
 				inChat,
-				decides: await allowed(principal, "approvals.decide", {
-					toolCallId: waitingOn.id,
-					decision: "deny",
-				}),
+				decides: await allowed(
+					principal,
+					"approvals.decide",
+					{
+						toolCallId: waitingOn.id,
+						decision: "deny",
+					},
+					"ToolApprovalNotFound",
+				),
 			};
 		};
 

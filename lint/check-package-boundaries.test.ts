@@ -131,8 +131,4 @@ describe("the package boundary check", () => {
 			]);
 		},
 	);
-
-	it("finds no import crossing a boundary in this repository", () => {
-		expect(boundaryViolations(join(import.meta.dirname, ".."))).toEqual([]);
-	});
 });

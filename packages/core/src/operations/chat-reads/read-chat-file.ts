@@ -14,7 +14,7 @@ export const readChatFile = defineOperation(
 			return new ResourceHidden({ resource: "file" });
 		}
 		const { file: fileId, chat: chatId, ...read } = input;
-		return named(principal, fileId, call, (principal, file, call) =>
+		return named(principal, fileId, call, input, (principal, file, call, approvedInput) =>
 			Effect.gen(function* () {
 				const files = yield* ChatFiles.Service;
 				const reach = yield* chatId === undefined
@@ -24,7 +24,8 @@ export const readChatFile = defineOperation(
 					principal,
 					call,
 					approvalRule("chats.readChatFile"),
-					input,
+					approvedInput,
+					file,
 				);
 				return yield* files.readForTurn(reach, read, approved);
 			}),

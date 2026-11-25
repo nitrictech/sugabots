@@ -17,18 +17,24 @@ export const listWritten = defineOperation(
 			if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun") {
 				return yield* new ResourceHidden({ resource: "chat" });
 			}
-			return yield* named(principal, principal.chat, call, (principal, chat, call) =>
-				Effect.gen(function* () {
-					const reach = yield* proveReachesChat(principal, chat);
-					const approved = yield* proveApproved(
-						principal,
-						call,
-						approvalRule("files.listWritten"),
-						input,
-					);
-					const written = yield* files.listWritten(reach, approved);
-					return { files: written.map(listing) };
-				}),
+			return yield* named(
+				principal,
+				principal.chat,
+				call,
+				input,
+				(principal, chat, call, approvedInput) =>
+					Effect.gen(function* () {
+						const reach = yield* proveReachesChat(principal, chat);
+						const approved = yield* proveApproved(
+							principal,
+							call,
+							approvalRule("files.listWritten"),
+							approvedInput,
+							chat,
+						);
+						const written = yield* files.listWritten(reach, approved);
+						return { files: written.map(listing) };
+					}),
 			);
 		}),
 );
@@ -38,18 +44,24 @@ export const readWritten = defineOperation(
 	(principal, input, call) =>
 		Effect.gen(function* () {
 			const files = yield* Files.Service;
-			return yield* named(principal, input.fileId.toLowerCase(), call, (principal, file, call) =>
-				Effect.gen(function* () {
-					const reach = yield* proveReachesWrittenFile(principal, file);
-					const approved = yield* proveApproved(
-						principal,
-						call,
-						approvalRule("files.readWritten"),
-						input,
-					);
-					const written = yield* files.readWritten(reach, approved);
-					return { status: "found" as const, ...listing(written), content: written.content };
-				}),
+			return yield* named(
+				principal,
+				input.fileId.toLowerCase(),
+				call,
+				input,
+				(principal, file, call, approvedInput) =>
+					Effect.gen(function* () {
+						const reach = yield* proveReachesWrittenFile(principal, file);
+						const approved = yield* proveApproved(
+							principal,
+							call,
+							approvalRule("files.readWritten"),
+							approvedInput,
+							file,
+						);
+						const written = yield* files.readWritten(reach, approved);
+						return { status: "found" as const, ...listing(written), content: written.content };
+					}),
 			);
 		}),
 );

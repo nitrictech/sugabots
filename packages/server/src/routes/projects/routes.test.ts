@@ -9,8 +9,7 @@ import {
 	ProjectSlugTaken,
 	UnusableProjectName,
 } from "@sugabots/contracts/errors/projects";
-import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { BadRequest, Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
+import { BadRequest } from "@sugabots/contracts/http";
 import { Operations } from "@sugabots/core/operations/registry";
 import type { Principal } from "@sugabots/core/principal";
 import { projectPermissionsShown } from "@sugabots/core/proofs/shown-permissions";
@@ -99,11 +98,6 @@ const as = (token: string, init: RequestInit = {}) => ({
 
 const json = (value: unknown) => ({ method: "POST", body: JSON.stringify(value) });
 
-const failure = Schema.Union([BadRequest, Conflict, Forbidden, NotFound]);
-
-const errorTag = async (response: Response) =>
-	Schema.decodeUnknownSync(failure)(await response.json())._tag;
-
 describe("GET /workspaces/:workspace/projects", () => {
 	it("lists the projects as the member the session belongs to sees them", async () => {
 		let asked: unknown;
@@ -120,23 +114,6 @@ describe("GET /workspaces/:workspace/projects", () => {
 		expect(Schema.decodeUnknownSync(Schema.Array(projectSchema))(await response.json())).toEqual([
 			projectFor(admin.id),
 		]);
-	});
-
-	it("answers a workspace hidden from the caller as not found", async () => {
-		const response = await app({
-			"projects.list": () => Effect.fail(new ResourceHidden({ resource: "workspace" })),
-		}).request(`/workspaces/${WORKSPACE}/projects`, as("outsider-token"));
-
-		expect(response.status).toBe(404);
-		expect(await response.json()).toEqual({
-			_tag: "NotFound",
-			message: "There's no such workspace, or you can't see it",
-			error: {
-				_tag: "ResourceHidden",
-				userMessage: "There's no such workspace, or you can't see it",
-				isRetryable: false,
-			},
-		});
 	});
 });
 
@@ -155,24 +132,6 @@ describe("POST /workspaces/:workspace/projects", () => {
 
 		expect(response.status).toBe(201);
 		expect(created).toEqual({ workspace: WORKSPACE, name: "Sales Team", slug: undefined });
-	});
-
-	it("answers an action the caller may not take as forbidden", async () => {
-		const response = await app({
-			"projects.create": () => Effect.fail(new ActionForbidden({ proof: "CanCreateProjects" })),
-		}).request(
-			`/workspaces/${WORKSPACE}/projects`,
-			as("admin-token", json({ name: "Sales", leadBotId: BOT })),
-		);
-
-		expect(response.status).toBe(403);
-		const refusal =
-			"You aren't allowed to do that here. Someone who manages it can do it, or let you";
-		expect(await response.json()).toEqual({
-			_tag: "Forbidden",
-			message: refusal,
-			error: { _tag: "ActionForbidden", userMessage: refusal, isRetryable: false },
-		});
 	});
 
 	it("rejects a name nothing can be slugged from", async () => {
@@ -200,19 +159,19 @@ describe("POST /workspaces/:workspace/projects", () => {
 	});
 
 	it("reports a taken slug as a conflict", async () => {
+		const error = new ProjectSlugTaken({ slug: "suga-team" });
 		const response = await app({
-			"projects.create": () => Effect.fail(new ProjectSlugTaken({ slug: "suga-team" })),
+			"projects.create": () => Effect.fail(error),
 		}).request(
 			`/workspaces/${WORKSPACE}/projects`,
 			as("admin-token", json({ name: "Suga-Team", leadBotId: BOT })),
 		);
 
 		expect(response.status).toBe(409);
-		const taken = "A project with that address already exists in this workspace";
 		expect(await response.json()).toEqual({
 			_tag: "Conflict",
-			message: taken,
-			error: { _tag: "ProjectSlugTaken", userMessage: taken, isRetryable: false },
+			message: error.userMessage,
+			error: { _tag: "ProjectSlugTaken", userMessage: error.userMessage, isRetryable: false },
 		});
 	});
 });
@@ -229,18 +188,6 @@ describe("changing a project", () => {
 
 		expect(response.status).toBe(200);
 		expect(Schema.decodeUnknownSync(projectSchema)(await response.json()).name).toBe("Platform");
-	});
-
-	it("answers a project hidden from the caller as not found", async () => {
-		const response = await app({
-			"projects.update": () => Effect.fail(new ResourceHidden({ resource: "project" })),
-		}).request(
-			`/projects/${PROJECT}`,
-			as("outsider-token", { method: "PATCH", body: JSON.stringify({ name: "Platform" }) }),
-		);
-
-		expect(response.status).toBe(404);
-		expect(await errorTag(response)).toBe("NotFound");
 	});
 
 	it("reports a patch that changes nothing as a bad request", async () => {

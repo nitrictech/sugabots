@@ -37,7 +37,6 @@ const CanUseConnectorProof = defineProof("CanUseConnector");
 const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, string>) =>
 	Effect.gen(function* () {
 		const hidden = new ResourceHidden({ resource: "connector" });
-		const acting = principal.value;
 		const [row] = isUuid(id.value)
 			? yield* query((db) =>
 					db
@@ -58,6 +57,7 @@ const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, strin
 				)
 			: [];
 		if (!row?.enabled) return yield* hidden;
+		const mayWrite = yield* connectorAccess(principal.value, id.value, row.projectId);
 		const reach: ReachesEnabledConnector<P, K> = ReachesEnabledConnectorProof.prove(
 			[principal, id],
 			{
@@ -69,12 +69,17 @@ const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, strin
 				handle: row.handle,
 			},
 		);
+		return { row, reach, mayWrite };
+	});
+
+const connectorAccess = (acting: Principal, id: string, projectId: string) =>
+	Effect.gen(function* () {
+		const hidden = new ResourceHidden({ resource: "connector" });
 		if (acting._tag === "WebhookCall") {
-			if (acting.source.kind !== "github" || acting.source.connector !== id.value)
-				return yield* hidden;
-			return { row, reach, mayWrite: true };
+			if (acting.source.kind !== "github" || acting.source.connector !== id) return yield* hidden;
+			return true;
 		}
-		const facts = yield* query((db) => reachFacts(db, row.projectId, whoActs(acting)));
+		const facts = yield* query((db) => reachFacts(db, projectId, whoActs(acting)));
 		if (!facts) return yield* hidden;
 		const botsOwn =
 			(acting._tag === "BotForAsker" || acting._tag === "AutomationRun") &&
@@ -93,13 +98,10 @@ const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, strin
 		}
 		const member =
 			acting._tag === "MemberSession" || acting._tag === "BotForAsker" ? facts.member : undefined;
-		return {
-			row,
-			reach,
-			mayWrite:
-				acting._tag === "AutomationRun" ||
-				(member !== undefined && mayInProjectAs(member, facts.project, "project.change")),
-		};
+		return (
+			acting._tag === "AutomationRun" ||
+			(member !== undefined && mayInProjectAs(member, facts.project, "project.change"))
+		);
 	});
 
 export const proveCanReachConnector = <P, K>(

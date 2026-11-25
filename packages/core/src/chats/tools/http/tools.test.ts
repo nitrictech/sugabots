@@ -1,9 +1,8 @@
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { effectRunner } from "../../../database/database.ts";
-import { noDatabase } from "../../../database/testing.ts";
+import { closeDatabase, runOnPostgres as run } from "../../../database/testing.ts";
 import type { ConnectorTarget } from "../../../providers/connectors/connector-target.ts";
 import {
 	type ClosableEgressHttpClients,
@@ -11,7 +10,7 @@ import {
 } from "../../../providers/network/egress.ts";
 import { ConnectorCatalog } from "../connector-catalog.ts";
 import { withRecordedCall } from "../recorded-call.ts";
-import { NO_TURN } from "../testing.ts";
+import { catalogReachFixture } from "../testing.ts";
 
 /**
  * An HTTP connector's method tools against a server in this process,
@@ -32,9 +31,12 @@ let http: Server;
 let base: string;
 let clients: ClosableEgressHttpClients;
 let received: Received[] = [];
-const run = effectRunner(ManagedRuntime.make(noDatabase));
+let reach: Awaited<ReturnType<typeof catalogReachFixture>>;
+let connectorId: string;
 
 beforeAll(async () => {
+	reach = await catalogReachFixture();
+	connectorId = await reach.connector();
 	http = createServer(async (request, response) => {
 		let body = "";
 		for await (const chunk of request) body += chunk;
@@ -60,6 +62,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+	await closeDatabase();
 	await clients.close();
 	http.closeAllConnections();
 	await new Promise<void>((resolve) => http.close(() => resolve()));
@@ -70,7 +73,7 @@ beforeEach(() => {
 });
 
 const target = (extra: Partial<ConnectorTarget> = {}): ConnectorTarget => ({
-	connectorId: "0199a3a0-0000-7000-8000-0000000000f3",
+	connectorId,
 	handle: "alerts",
 	kind: "http",
 	url: base,
@@ -90,7 +93,15 @@ async function toolsFor(connector: ConnectorTarget) {
 		},
 		httpClients: clients,
 	});
-	return (await run(offered.forTurn("w", { projectId: "p", ownProjectId: "p" }, NO_TURN))).tools;
+	return (
+		await run(
+			offered.forTurn(
+				reach.workspace,
+				{ projectId: reach.project, ownProjectId: reach.project },
+				reach.side,
+			),
+		)
+	).tools;
 }
 
 async function call(connector: ConnectorTarget, method: string, input: unknown) {

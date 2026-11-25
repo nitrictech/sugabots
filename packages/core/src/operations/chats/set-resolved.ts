@@ -12,18 +12,24 @@ export const setResolved = defineOperation(
 	(principal, input, call) =>
 		Effect.gen(function* () {
 			const chats = yield* Chats.Service;
-			return yield* named(principal, input.chatId, call, (principal, chat, call) =>
-				Effect.gen(function* () {
-					const reach = yield* proveReachesChat(principal, chat);
-					const canChange = yield* proveCanChangeChat(reach);
-					const approved = yield* proveApproved(
-						principal,
-						call,
-						approvalRule("chats.setResolved"),
-						input,
-					);
-					return yield* chats.setResolved(reach, input.resolved, canChange, approved);
-				}),
+			return yield* named(
+				principal,
+				input.chatId,
+				call,
+				input,
+				(principal, chat, call, approvedInput) =>
+					Effect.gen(function* () {
+						const reach = yield* proveReachesChat(principal, chat);
+						const canChange = yield* proveCanChangeChat(reach);
+						const approved = yield* proveApproved(
+							principal,
+							call,
+							approvalRule("chats.setResolved"),
+							approvedInput,
+							chat,
+						);
+						return yield* chats.setResolved(reach, input.resolved, canChange, approved);
+					}),
 			);
 		}),
 );

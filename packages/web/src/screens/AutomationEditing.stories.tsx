@@ -11,8 +11,13 @@ import {
 	linearHandler,
 	oncall,
 	storyBots,
-} from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyChatDetails, storyWorkspace } from "../story-app.tsx";
+} from "@/shell/story-fixtures.test-support.ts";
+import {
+	appHandlers,
+	StoryApp,
+	storyChatDetails,
+	storyWorkspace,
+} from "../story-app.test-support.tsx";
 
 /*
  * Making and changing automations on a bot's Automations page: one set up in the

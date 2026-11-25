@@ -2,7 +2,10 @@ export * as SearchProviderStore from "./search-provider-store.ts";
 
 import type { NewSearchProvider, SearchProviderUpdate } from "@sugabots/contracts";
 import { DEFAULT_SEARCH_BUILT_IN, searchBuiltInProvider } from "@sugabots/contracts";
-import { SearchProviderApiKeyRequired } from "@sugabots/contracts/errors/providers";
+import {
+	SearchProviderApiKeyRequired,
+	SearchProviderNotFound,
+} from "@sugabots/contracts/errors/providers";
 import type { UserText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
@@ -35,9 +38,10 @@ export interface Interface {
 	) => Effect.Effect<SearchProviderRow, SearchProviderApiKeyRequired>;
 	readonly update: (
 		workspaceId: string,
+		providerId: string,
 		changes: SearchProviderUpdate,
 	) => Effect.Effect<SearchProviderRow | undefined, SearchProviderApiKeyRequired>;
-	readonly remove: (workspaceId: string) => Effect.Effect<boolean>;
+	readonly remove: (workspaceId: string, providerId: string) => Effect.Effect<boolean>;
 	/**
 	 * Records how a test of the configuration last updated at `testedAt` went,
 	 * `error` saying why it failed, unless the provider has been reconfigured
@@ -45,11 +49,15 @@ export interface Interface {
 	 */
 	readonly recordTest: (
 		workspaceId: string,
+		providerId: string,
 		testedAt: Date,
 		error?: UserText,
 	) => Effect.Effect<void>;
 	/** How to search, enabled or not, for a test; nothing while a required key is missing. */
-	readonly access: (workspaceId: string) => Effect.Effect<SearchProviderAccess | undefined>;
+	readonly access: (
+		workspaceId: string,
+		providerId: string,
+	) => Effect.Effect<SearchProviderAccess | undefined, SearchProviderNotFound>;
 	/** {@link Interface.access} only while search is enabled, for a turn. */
 	readonly resolve: (workspaceId: string) => Effect.Effect<SearchProviderAccess | undefined>;
 }
@@ -132,7 +140,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		update: (workspaceId, changes) =>
+		update: (workspaceId, providerId, changes) =>
 			operation(
 				"update",
 				transaction(
@@ -145,7 +153,12 @@ export const make = Effect.gen(function* () {
 									apiKeyEncrypted: searchProvider.apiKeyEncrypted,
 								})
 								.from(searchProvider)
-								.where(eq(searchProvider.workspaceId, workspaceId))
+								.where(
+									and(
+										eq(searchProvider.workspaceId, workspaceId),
+										eq(searchProvider.id, providerId),
+									),
+								)
 								.for("update"),
 						);
 						if (!current) return undefined;
@@ -175,7 +188,12 @@ export const make = Effect.gen(function* () {
 									lastTestedAt: configurationChanged ? null : undefined,
 									lastTestError: configurationChanged ? null : undefined,
 								})
-								.where(eq(searchProvider.workspaceId, workspaceId))
+								.where(
+									and(
+										eq(searchProvider.workspaceId, workspaceId),
+										eq(searchProvider.id, providerId),
+									),
+								)
 								.returning(),
 						);
 						return row;
@@ -183,18 +201,20 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		remove: (workspaceId) =>
+		remove: (workspaceId, providerId) =>
 			operation(
 				"remove",
 				query((db) =>
 					db
 						.delete(searchProvider)
-						.where(eq(searchProvider.workspaceId, workspaceId))
+						.where(
+							and(eq(searchProvider.workspaceId, workspaceId), eq(searchProvider.id, providerId)),
+						)
 						.returning({ id: searchProvider.id }),
 				).pipe(Effect.map((rows) => rows.length > 0)),
 			),
 
-		recordTest: (workspaceId, testedAt, error) =>
+		recordTest: (workspaceId, providerId, testedAt, error) =>
 			operation(
 				"recordTest",
 				Effect.gen(function* () {
@@ -206,6 +226,7 @@ export const make = Effect.gen(function* () {
 							.where(
 								and(
 									eq(searchProvider.workspaceId, workspaceId),
+									eq(searchProvider.id, providerId),
 									stillConfiguredAs(searchProvider.updatedAt, testedAt),
 								),
 							),
@@ -213,10 +234,16 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		access: (workspaceId) =>
+		access: (workspaceId, providerId) =>
 			operation(
 				"access",
-				Effect.map(searchProviderRowOf(workspaceId), (row) => (row ? toAccess(row) : undefined)),
+				searchProviderRowOf(workspaceId, providerId).pipe(
+					Effect.filterOrFail(
+						(row) => row !== undefined,
+						() => new SearchProviderNotFound(),
+					),
+					Effect.map(toAccess),
+				),
 			),
 
 		resolve: (workspaceId) =>

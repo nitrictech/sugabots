@@ -20,18 +20,24 @@ export const listInChat = defineOperation(
 			const automations = yield* ProjectAutomations.Service;
 			const place = yield* automationProject(principal, "read");
 			const showAutomation = yield* showAutomationAt(place);
-			return yield* named(principal, place.id, call, (principal, project, call) =>
-				Effect.gen(function* () {
-					const reach = yield* proveReachesProject(principal, project);
-					const approved = yield* proveApproved(
-						principal,
-						call,
-						approvalRule("automations.listInChat"),
-						input,
-					);
-					const listed = yield* automations.list(reach, approved);
-					return { automations: listed.map(showAutomation) };
-				}),
+			return yield* named(
+				principal,
+				place.id,
+				call,
+				input,
+				(principal, project, call, approvedInput) =>
+					Effect.gen(function* () {
+						const reach = yield* proveReachesProject(principal, project);
+						const approved = yield* proveApproved(
+							principal,
+							call,
+							approvalRule("automations.listInChat"),
+							approvedInput,
+							project,
+						);
+						const listed = yield* automations.list(reach, approved);
+						return { automations: listed.map(showAutomation) };
+					}),
 			);
 		}),
 );
@@ -43,26 +49,32 @@ export const createWithRoutine = defineOperation(
 			const automations = yield* ProjectAutomations.Service;
 			const place = yield* automationProject(principal, "change");
 			const showAutomation = yield* showAutomationAt(place);
-			return yield* named(principal, place.id, call, (principal, project, call) =>
-				Effect.gen(function* () {
-					const canManage = yield* proveCanManageProject(
-						yield* proveReachesProject(principal, project),
-					);
-					const approved = yield* proveApproved(
-						principal,
-						call,
-						approvalRule("automations.createWithRoutine"),
-						input,
-					);
-					const { name, instructions, routineExpression } = input;
-					const created = yield* automations.createWithRoutine(
-						canManage,
-						approved,
-						{ name, instructions },
-						cronRoutine(routineExpression, place.timeZone),
-					);
-					return { automation: showAutomation(created) };
-				}),
+			return yield* named(
+				principal,
+				place.id,
+				call,
+				input,
+				(principal, project, call, approvedInput) =>
+					Effect.gen(function* () {
+						const canManage = yield* proveCanManageProject(
+							yield* proveReachesProject(principal, project),
+						);
+						const approved = yield* proveApproved(
+							principal,
+							call,
+							approvalRule("automations.createWithRoutine"),
+							approvedInput,
+							project,
+						);
+						const { name, instructions, routineExpression } = input;
+						const created = yield* automations.createWithRoutine(
+							canManage,
+							approved,
+							{ name, instructions },
+							cronRoutine(routineExpression, place.timeZone),
+						);
+						return { automation: showAutomation(created) };
+					}),
 			);
 		}),
 );
@@ -79,7 +91,8 @@ export const updateInChat = defineOperation(
 				place.id,
 				input.automationId,
 				call,
-				(principal, project, automation, call) =>
+				input,
+				(principal, project, automation, call, approvedInput) =>
 					Effect.gen(function* () {
 						const { reach, target } = yield* proveReachesProjectAutomation(
 							principal,
@@ -91,7 +104,9 @@ export const updateInChat = defineOperation(
 							principal,
 							call,
 							approvalRule("automations.updateInChat"),
-							input,
+							approvedInput,
+							project,
+							automation,
 						);
 						const { name, instructions, paused, routineExpression } = input;
 						const updated = yield* automations.updateInChat(

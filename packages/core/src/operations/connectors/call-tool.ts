@@ -22,7 +22,7 @@ export const callTool = defineOperation(
 				input.connectorId,
 				call,
 				(acting, turn, connector, calling) =>
-					named(principal.chat, (chat) =>
+					named(principal.chat, input, (chat, approvedInput) =>
 						Effect.gen(function* () {
 							const running = yield* proveRunsTurn(yield* proveReachesChat(acting, chat), turn);
 							const described = calls.described(principal, input.connectorId, input.tool);
@@ -32,8 +32,7 @@ export const callTool = defineOperation(
 								running,
 								connector,
 								calling,
-								input.tool,
-								input.arguments,
+								approvedInput,
 								described && {
 									revision: described.connectorRevision,
 									described: described.described,

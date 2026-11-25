@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -14,11 +14,14 @@ import { bot, member, placedChat, project } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { Principal } from "../principal.ts";
 import { workspaceOfInvitation } from "../workspaces/workspace-reference.ts";
+import { proveCanCancelInvitation } from "./can-cancel-invitation.ts";
 import { proveHoldsInvitation } from "./holds-invitation.ts";
 import { proveInWorkspace } from "./in-workspace.ts";
 import {
 	type MembershipChange,
 	proveCanChangeMembership,
+	proveCanDeleteWorkspace,
+	proveCanHandOverOwnership,
 	proveCanInvite,
 } from "./membership-changes.ts";
 import { named } from "./proof.ts";
@@ -28,12 +31,15 @@ import {
 	proveCanCreateBots,
 	proveCanCreateProjects,
 	proveCanManageWorkspace,
+	proveCanReadWorkspace,
 } from "./workspace-permissions.ts";
 import {
 	type Authenticators,
 	authenticators,
 	buildWorld,
+	everyKindOfPrincipal,
 	outcome,
+	outcomesFor,
 	principals,
 	type World,
 } from "./world.test-support.ts";
@@ -106,16 +112,6 @@ describe("the workspace and who is in it", () => {
 				manage: "ok",
 				createBots: "ok",
 				createProjects: "ok",
-			});
-			expect(await permissions(await as.member(a.ed))).toEqual({
-				manage: forbidden,
-				createBots: "ok",
-				createProjects: "ok",
-			});
-			expect(await permissions(await as.member(a.vi))).toEqual({
-				manage: forbidden,
-				createBots: forbidden,
-				createProjects: forbidden,
 			});
 			expect(await permissions(await as.botFor(a.owner, a.pub.id, a.chat))).toEqual({
 				manage: forbidden,
@@ -254,6 +250,100 @@ describe("the workspace and who is in it", () => {
 		});
 	});
 
+	it("reads workspace details for signed-in members and bots in member bounds", async () => {
+		const { a } = world;
+		const { vi, outsider, pubForEd, edsAssistant, run, webhook, computerSleep, compaction, page } =
+			await everyKindOfPrincipal(world, as);
+		expect(
+			await outcomesFor(
+				{ vi, outsider, pubForEd, edsAssistant, run, webhook, computerSleep, compaction, page },
+				(principal) =>
+					outcome(
+						named(principal, a.workspace, (principal, workspace) =>
+							proveInWorkspace(principal, workspace).pipe(
+								Effect.flatMap(proveCanReadWorkspace),
+								Effect.asVoid,
+							),
+						),
+					),
+			),
+		).toEqual({
+			vi: "ok",
+			outsider: "ResourceHidden",
+			pubForEd: "ActionForbidden",
+			edsAssistant: "ok",
+			run: "ActionForbidden",
+			webhook: "ActionForbidden",
+			computerSleep: "ActionForbidden",
+			compaction: "ActionForbidden",
+			page: "ActionForbidden",
+		});
+	});
+
+	it("lets an admin cancel an editor's invitation and leaves an admin's invitation to the owner", async () => {
+		const { a } = world;
+		const adminInvitation = await seedInvitation(a.workspace, a.owner, {
+			email: "admin@example.com",
+			role: "admin",
+		});
+		const editorInvitation = await seedInvitation(a.workspace, a.owner, {
+			email: "editor@example.com",
+			role: "editor",
+		});
+		const cancelledInvitation = await seedInvitation(a.workspace, a.owner, {
+			email: "cancelled@example.com",
+			role: "editor",
+			status: "canceled",
+		});
+		const cancels = (principal: Principal, invitationId: string) =>
+			outcome(
+				underWorkspaceLock(principal, a.workspace, (lock) =>
+					named(invitationId, (invitation) =>
+						proveCanCancelInvitation(lock, invitation).pipe(Effect.asVoid),
+					),
+				),
+			);
+		const admin = await as.member(a.admin);
+		const owner = await as.member(a.owner);
+		expect(await cancels(admin, editorInvitation)).toBe("ok");
+		expect(await cancels(admin, adminInvitation)).toBe("ActionForbidden");
+		expect(await cancels(owner, adminInvitation)).toBe("ok");
+		expect(await cancels(owner, cancelledInvitation)).toBe("ResourceHidden");
+		expect(await cancels(owner, crypto.randomUUID())).toBe("ResourceHidden");
+		expect(
+			await cancels(
+				await as.member(await seedMember(world.b.workspace, "editor")),
+				adminInvitation,
+			),
+		).toBe("ResourceHidden");
+	});
+
+	it("proves ownership hand-over and deletion only for the owner", async () => {
+		const { a, b } = world;
+		const owner = await as.member(a.owner);
+		const admin = await as.member(a.admin);
+		const outsider = await as.member(await seedMember(b.workspace, "editor"));
+		const handOver = (principal: Principal) =>
+			outcome(
+				underWorkspaceLock(principal, a.workspace, (lock) =>
+					named(a.admin, (target) => proveCanHandOverOwnership(lock, target).pipe(Effect.asVoid)),
+				),
+			);
+		const remove = (principal: Principal) =>
+			outcome(
+				underWorkspaceLock(principal, a.workspace, (lock) =>
+					proveCanDeleteWorkspace(lock).pipe(Effect.asVoid),
+				),
+			);
+
+		expect(await handOver(owner)).toBe("ok");
+		expect(await handOver(admin)).toBe("ActionForbidden");
+		expect(await handOver(outsider)).toBe("ResourceHidden");
+		expect(await remove(owner)).toBe("ok");
+		expect(await remove(admin)).toBe("ActionForbidden");
+		expect(await remove(outsider)).toBe("ResourceHidden");
+	});
+
 	describe("HoldsInvitation", () => {
 		/** The account rules of a server that requires members to verify their email, and of one that doesn't. */
 		const verifying = { requireEmailVerification: true };
@@ -323,11 +413,7 @@ describe("the workspace and who is in it", () => {
 					Effect.gen(function* () {
 						const reach = proveReachSet(yield* proveInWorkspace(p, w));
 						const rows = yield* query((db) =>
-							db
-								.select({ id: project.id })
-								.from(project)
-								.where(reach.reachesProject(project.id))
-								.orderBy(asc(project.id)),
+							db.select({ id: project.id }).from(project).where(reach.reachesProject(project.id)),
 						);
 						return rows.map((row) => row.id).sort();
 					}),

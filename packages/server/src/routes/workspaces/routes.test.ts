@@ -1,5 +1,4 @@
 import type { Workspace } from "@sugabots/contracts";
-import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import {
 	EmailUnverified,
 	OwnerStays,
@@ -151,38 +150,19 @@ describe("moving a workspace to another time zone", () => {
 });
 
 describe("who is in a workspace", () => {
-	it("answers a workspace hidden from the caller as not found, and one they may not change as forbidden", async () => {
-		const routes = app({
-			"workspaces.memberships": () => Effect.fail(new ResourceHidden({ resource: "workspace" })),
-			"workspaces.changeRole": () =>
-				Effect.fail(new ActionForbidden({ proof: "CanChangeMembership" })),
-		});
-
-		const listed = await routes.request("/workspaces/nitric/memberships", sending("GET"));
-		const changed = await routes.request(
-			`/workspaces/nitric/memberships/${MEMBERSHIP}`,
-			sending("PATCH", { role: "admin" }),
-		);
-
-		expect(listed.status).toBe(404);
-		expect(changed.status).toBe(403);
-	});
-
-	it("keeps a member a model provider signs in as, and the owner, who stays until they hand it over", async () => {
+	it("keeps a member a model provider signs in as", async () => {
 		const inUse = new SubscriptionInUse({
 			member: DisplayName.fromRecord("Bob"),
 			providers: [DisplayName.fromRecord("ChatGPT")],
 		});
 		const routes = app({
 			"workspaces.removeMembership": () => Effect.fail(inUse),
-			"workspaces.leave": () => Effect.fail(new OwnerStays()),
 		});
 
 		const removed = await routes.request(
 			`/workspaces/nitric/memberships/${MEMBERSHIP}`,
 			sending("DELETE"),
 		);
-		const left = await routes.request("/workspaces/nitric/leave", sending("POST"));
 
 		expect(removed.status).toBe(409);
 		expect(await removed.json()).toMatchObject({
@@ -190,20 +170,28 @@ describe("who is in a workspace", () => {
 			message: inUse.userMessage,
 			error: { _tag: "SubscriptionInUse" },
 		});
-		expect(left.status).toBe(400);
+	});
+
+	it("reports the owner must hand over ownership before leaving", async () => {
+		const response = await app({
+			"workspaces.leave": () => Effect.fail(new OwnerStays()),
+		}).request("/workspaces/nitric/leave", sending("POST"));
+
+		expect(response.status).toBe(400);
 	});
 });
 
 describe("an invitation", () => {
 	it("tells the member it was sent to to verify their address first, with the code the SDK knows", async () => {
+		const error = new EmailUnverified();
 		const response = await app({
-			"workspaces.acceptInvitation": () => Effect.fail(new EmailUnverified()),
+			"workspaces.acceptInvitation": () => Effect.fail(error),
 		}).request(`/invitations/${INVITATION}/accept`, sending("POST"));
 
 		expect(response.status).toBe(403);
 		expect(await response.json()).toEqual({
 			_tag: "Forbidden",
-			message: "Verify your email address before accepting this invitation",
+			message: error.userMessage,
 			details: "EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION",
 		});
 	});

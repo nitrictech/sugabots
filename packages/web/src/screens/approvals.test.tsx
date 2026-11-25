@@ -1,11 +1,11 @@
 import type { AnsweredApproval, ApprovalRequest, ToolCallPart } from "@sugabots/contracts";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, linear, mount, projects } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { apiAnswers, linear, mount, projects } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const project = projects[0] as (typeof projects)[number];
 const host = {
@@ -71,11 +71,6 @@ beforeEach(() => {
 	client.api.approvals.decide.mockReturnValue(Effect.undefined);
 });
 
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
-});
-
 describe("Approvals", () => {
 	it("says how a request in the address was answered, with the way back to Approvals", async () => {
 		mount(`/suga/approvals/${answered.call.id}`);
@@ -83,7 +78,7 @@ describe("Approvals", () => {
 		const article = await screen.findByRole("article", {
 			name: /^Approval request/,
 		});
-		expect(within(article).getByText(/Allowed by Mia Chen/)).toBeDefined();
+		within(article).getByText(/Allowed by Mia Chen/);
 		expect(within(article).queryByRole("button", { name: /^Allow/ })).toBeNull();
 		expect(
 			within(article).getByRole("link", { name: "Back to Approvals" }).getAttribute("href"),
@@ -103,7 +98,7 @@ describe("Approvals", () => {
 		await waitFor(() => expect(client.api.approvals.decide).toHaveBeenCalled());
 		await waitFor(() => expect(screen.queryByRole("article", { name: /Update issue/ })).toBeNull());
 		expect(screen.getAllByRole("link", { name: /Update issue/ })).toHaveLength(2);
-		expect(screen.getByText(/^Nothing waiting/)).toBeDefined();
+		screen.getByText(/^Nothing waiting/);
 	});
 
 	it("opens a request raised in an automation's run at the automation's feed, naming the run", async () => {

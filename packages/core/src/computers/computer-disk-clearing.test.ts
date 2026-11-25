@@ -10,10 +10,10 @@ import { Ids } from "../ids/ids.ts";
 import { defaultProjectOf } from "../workspaces/projects/project-reads.ts";
 import {
 	BOT_CACHES,
-	type Clearing,
-	freeDiskSpace,
-	MAX_FOLDERS_CLEARED_AT_ONCE,
+	clearingOrder,
+	prepareDiskClearing,
 	SET_ASIDE_DIRECTORY,
+	type WorkFolders,
 } from "./computer-disk-clearing.ts";
 import { Computers } from "./computers.ts";
 import { removeWorkVolumes } from "./testing.ts";
@@ -24,6 +24,12 @@ const SLOW = 180_000;
 const ALWAYS_FULL = 0;
 /** A disk with any space free is less than entirely full, so clearing stops at once. */
 const NEVER_FULL = 1;
+/** More folders than one clearing removes, so the rest wait for the next. */
+const BACKLOG = 1_200;
+
+/** Clears `computer` of what may go, while its disk is at least `belowShare` full. */
+const freeDiskSpace = (computer: Computers.Computer, workspaceId: string, belowShare: number) =>
+	prepareDiskClearing(computer, workspaceId, belowShare).pipe(Effect.flatten);
 
 describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against Postgres", () => {
 	let workspaceId: string;
@@ -40,41 +46,8 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 
 	const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
 
-	/**
-	 * What clearing a computer holding the folders of `chatIds` and of the bots
-	 * `botIds` removes, in order, while its disk stays full.
-	 */
-	const clearedFrom = async (folders: {
-		chatIds: readonly string[];
-		botIds: readonly string[];
-	}): Promise<Clearing["cleared"]> => {
-		const output = (text: string): Computers.Execution => ({
-			exitCode: 0,
-			stdout: { text, truncated: false },
-			stderr: { text: "", truncated: false },
-		});
-		const computer = {
-			exec: (command: string) =>
-				Effect.succeed(
-					command.startsWith("find ")
-						? output(
-								[
-									...folders.chatIds.map((id) => `${Computers.CHATS_DIRECTORY}/${id}`),
-									...folders.botIds.map((id) => `${Computers.BOTS_DIRECTORY}/${id}`),
-								].join("\n"),
-							)
-						: // Every path the script removes, as its `remove` prints each one deleted.
-							output(
-								command
-									.split("\n")
-									.flatMap((line) => /^remove (.+)$/.exec(line)?.[1] ?? [])
-									.join("\n"),
-							),
-				),
-		} as unknown as Computers.Computer;
-		const clearing = await runOnPostgres(freeDiskSpace(computer, workspaceId, ALWAYS_FULL));
-		return clearing.cleared;
-	};
+	/** What may be cleared from the folders of the chats `chatIds` and the bots `botIds`, in the order it goes. */
+	const clearable = (folders: WorkFolders) => runOnPostgres(clearingOrder(workspaceId, folders));
 
 	async function aTurn(chatId: string, startedAt: Date, status: TurnStatus = "done") {
 		const [trigger] = await onDatabase((db) =>
@@ -180,7 +153,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 		const newerResolved = await aChat(true, at(20));
 		const olderResolved = await aChat(true, at(120));
 
-		const order = await clearedFrom({
+		const order = await clearable({
 			chatIds: [newerResolved, newerRun, olderResolved, deleted, olderRun],
 			botIds: [botId, deletedBot],
 		});
@@ -201,9 +174,9 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 		const running = await anAutomationRun("running", at(600));
 		const waitingForApproval = await aChat(true, at(600), "waiting");
 
-		expect(await clearedFrom({ chatIds: [open, running, waitingForApproval], botIds: [] })).toEqual(
-			[],
-		);
+		const order = await clearable({ chatIds: [open, running, waitingForApproval], botIds: [] });
+
+		expect(order).toEqual([]);
 	});
 
 	/**
@@ -360,9 +333,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 		it(
 			"clears a backlog a batch at a time, leaving the rest for the next clearing",
 			async () => {
-				const deleted = Array.from({ length: MAX_FOLDERS_CLEARED_AT_ONCE + 1 }, () =>
-					crypto.randomUUID(),
-				);
+				const deleted = Array.from({ length: BACKLOG }, () => crypto.randomUUID());
 				await run(
 					[
 						`mkdir -p ${Computers.CHATS_DIRECTORY}`,
@@ -372,10 +343,13 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 				);
 
 				const first = await runOnPostgres(freeDiskSpace(computer, workspaceId, ALWAYS_FULL));
+				const leftAfterFirst = (await chatFolders()).length;
 				const second = await runOnPostgres(freeDiskSpace(computer, workspaceId, ALWAYS_FULL));
 
-				expect(first.cleared).toHaveLength(MAX_FOLDERS_CLEARED_AT_ONCE);
-				expect(second.cleared).toHaveLength(1);
+				expect(first.cleared.length).toBeGreaterThan(0);
+				expect(leftAfterFirst).toBe(BACKLOG - first.cleared.length);
+				expect(leftAfterFirst).toBeGreaterThan(0);
+				expect(second.cleared).toHaveLength(leftAfterFirst);
 				expect(await chatFolders()).toEqual([]);
 			},
 			SLOW,

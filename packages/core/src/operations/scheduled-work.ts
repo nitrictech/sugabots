@@ -23,8 +23,8 @@ export const scheduledWorkOperations = {
 	"deletions.finish": defineOperation(contracts["deletions.finish"], (caller, { id }) =>
 		named(caller, id, (principal, target) =>
 			Effect.gen(function* () {
-				const { workspace, work } = yield* proveDoesStoredWork(principal, target, "deletion");
-				yield* finishDeletion(caller, workspace, { kind: work.targetKind, id: work.id });
+				const { workspace, work, id } = yield* proveDoesStoredWork(principal, target, "deletion");
+				yield* finishDeletion(caller, workspace, { kind: work.targetKind, id: id.value });
 			}),
 		),
 	),

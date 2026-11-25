@@ -5,11 +5,18 @@ import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	apiAnswers,
+	linear,
+	mount,
+	projects,
+	serveConnectors,
+	triager,
+} from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 import { browser } from "@/lib/connectors.ts";
-import { apiAnswers, linear, mount, projects, serveConnectors, triager } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const project = projects[0] as (typeof projects)[number];
 const route = client.api.connectors;
@@ -63,7 +70,6 @@ const wikiAt = (access: ConnectorAccess): TestConnector => ({
 });
 
 beforeEach(() => {
-	vi.clearAllMocks();
 	apiAnswers();
 });
 
@@ -136,7 +142,7 @@ describe("a bot's Connectors page", () => {
 		await showConnectors();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
-		expect(within(row).getByText("Not signed in yet")).toBeDefined();
+		within(row).getByText("Not signed in yet");
 		fireEvent.click(within(row).getByRole("button", { name: "Sign in" }));
 
 		await waitFor(() => expect(go).toHaveBeenCalledWith("https://wiki.example/authorize"));
@@ -160,14 +166,14 @@ describe("a bot's Connectors page", () => {
 		mount(wikiPage);
 
 		const account = await screen.findByRole("region", { name: "Account" });
-		expect(within(account).getByText("Signed in as")).toBeDefined();
-		expect(within(account).getByText("Kim")).toBeDefined();
+		within(account).getByText("Signed in as");
+		within(account).getByText("Kim");
 		cleanup();
 
 		mount(connectorsPage);
 		await showConnectors();
 		const row = await screen.findByRole("article", { name: "Wiki" });
-		expect(within(row).getByText(/· Signed in as Kim$/)).toBeDefined();
+		within(row).getByText(/· Signed in as Kim$/);
 		expect(within(account).queryByRole("button", { name: "Sign in" })).toBeNull();
 		cleanup();
 
@@ -175,7 +181,7 @@ describe("a bot's Connectors page", () => {
 		mount(wikiPage);
 
 		const notYet = await screen.findByRole("region", { name: "Account" });
-		expect(within(notYet).getByRole("button", { name: "Sign in" })).toBeDefined();
+		within(notYet).getByRole("button", { name: "Sign in" });
 	});
 
 	it("adds any other server by name and address", async () => {
@@ -207,7 +213,7 @@ describe("a bot's Connectors page", () => {
 				secret: "Bearer abc123",
 			},
 		});
-		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
+		await screen.findByRole("article", { name: "Wiki" });
 		expect(route.update).not.toHaveBeenCalled();
 	});
 
@@ -248,7 +254,7 @@ describe("a bot's Connectors page", () => {
 		fireEvent.change(within(step).getByLabelText("Access token"), { target: { value: "abc123" } });
 		fireEvent.click(within(step).getByRole("button", { name: "Test" }));
 
-		expect(await within(step).findByText("Connector answered")).toBeDefined();
+		await within(step).findByText("Connector answered");
 		expect(route.testUnsaved.mock.calls[0]?.[0]).toMatchObject({
 			payload: {
 				url: "https://wiki.example.com/mcp",
@@ -275,7 +281,7 @@ describe("a bot's Connectors page", () => {
 		});
 		fireEvent.click(within(step).getByRole("radio", { name: "Sign in" }));
 		fireEvent.click(within(step).getByRole("button", { name: "Sign in" }));
-		expect(await within(step).findByText("The server didn't start a sign-in.")).toBeDefined();
+		await within(step).findByText("The server didn't start a sign-in.");
 
 		fireEvent.click(within(step).getByRole("radio", { name: "Token" }));
 
@@ -319,20 +325,18 @@ describe("a bot's Connectors page", () => {
 		await openedWiki();
 
 		expect(router.state.location.pathname).toBe(wikiPage);
-		expect(screen.getByText("Connected by Sam")).toBeDefined();
+		screen.getByText("Connected by Sam");
 		const reading = screen.getByRole("region", { name: "Tools that read" });
-		expect(within(reading).getByText("All 1 read tool")).toBeDefined();
+		within(reading).getByText("All 1 read tool");
 		expect(
 			(within(reading).getByRole("radio", { name: "Allowed" }) as HTMLInputElement).checked,
 		).toBe(true);
 		const changes = screen.getByRole("region", { name: "Tools that make changes" });
-		expect(within(changes).getByText("All 1 change tool")).toBeDefined();
+		within(changes).getByText("All 1 change tool");
 		// Each tool is on Individual tools, not here.
 		expect(screen.queryByText("search_pages")).toBeNull();
 		// A server added by its address is told apart by it.
-		expect(screen.getByText(wiki.url)).toBeDefined();
-		// The page's header leads back to the list; the page adds no Back of its own.
-		expect(document.querySelector("[data-page-back]")).toBeNull();
+		screen.getByText(wiki.url);
 		expect(
 			screen
 				.getAllByRole("link", { name: "Connectors" })
@@ -392,7 +396,7 @@ describe("a bot's Connectors page", () => {
 			within(screen.getByRole("group", { name: "wipe" })).getByRole("radio", { name: "Off" }),
 		);
 
-		expect(await screen.findByText("Nope")).toBeDefined();
+		await screen.findByText("Nope");
 		expect(
 			(
 				within(screen.getByRole("group", { name: "wipe" })).getByRole("radio", {
@@ -423,7 +427,7 @@ describe("a bot's Connectors page", () => {
 		expect(
 			(within(changes).getByRole("radio", { name: "Ask first" }) as HTMLInputElement).checked,
 		).toBe(true);
-		expect(screen.getByText("1 changed")).toBeDefined();
+		screen.getByText("1 changed");
 		fireEvent.click(within(changes).getByRole("radio", { name: "Allowed" }));
 
 		await waitFor(() =>
@@ -452,16 +456,16 @@ describe("a bot's Connectors page", () => {
 
 		await openIndividualTools();
 		const changed = screen.getByRole("region", { name: "Changed (1)" });
-		expect(within(changed).getByRole("group", { name: "wipe_all" })).toBeDefined();
-		expect(within(changed).getByText("Default: ask first")).toBeDefined();
-		expect(screen.getByRole("region", { name: "Tools that make changes" })).toBeDefined();
+		within(changed).getByRole("group", { name: "wipe_all" });
+		within(changed).getByText("Default: ask first");
+		screen.getByRole("region", { name: "Tools that make changes" });
 
 		// Searching narrows every group.
 		fireEvent.change(screen.getByRole("searchbox", { name: "Search tools" }), {
 			target: { value: "more" },
 		});
 		await waitFor(() => expect(screen.queryByRole("region", { name: "Changed (1)" })).toBeNull());
-		expect(screen.getByRole("group", { name: "wipe_more" })).toBeDefined();
+		screen.getByRole("group", { name: "wipe_more" });
 		fireEvent.change(screen.getByRole("searchbox", { name: "Search tools" }), {
 			target: { value: "" },
 		});
@@ -480,9 +484,8 @@ describe("a bot's Connectors page", () => {
 		await openedWiki();
 
 		await openIndividualTools();
-		const backBar = document.querySelector<HTMLElement>("[data-page-back]");
-		if (backBar) fireEvent.click(within(backBar).getByRole("button", { name: "Wiki" }));
-		expect(await screen.findByRole("region", { name: "Tools that read" })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Wiki" }));
+		await screen.findByRole("region", { name: "Tools that read" });
 		expect(screen.queryByRole("heading", { name: "Individual tools" })).toBeNull();
 	});
 
@@ -500,7 +503,7 @@ describe("a bot's Connectors page", () => {
 		await showConnectors();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
-		expect(within(row).getByText("Custom: 1 allowed, 1 off")).toBeDefined();
+		within(row).getByText("Custom: 1 allowed, 1 off");
 	});
 
 	it("offers nothing to set for a connector with no tools found yet", async () => {
@@ -509,7 +512,7 @@ describe("a bot's Connectors page", () => {
 		await showConnectors();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
-		expect(within(row).getByText("No actions found yet")).toBeDefined();
+		within(row).getByText("No actions found yet");
 		expect(within(row).queryByRole("button", { name: /all tools/ })).toBeNull();
 	});
 
@@ -532,7 +535,7 @@ describe("a bot's Connectors page", () => {
 		await openedWiki();
 		// Why, beside Test, with the way to fix it, so nothing moves under it.
 		expect(screen.getByRole("alert").textContent).toMatch(/needs an access token/);
-		expect(screen.getByRole("link", { name: "How to fix this" })).toBeDefined();
+		screen.getByRole("link", { name: "How to fix this" });
 		fireEvent.click(screen.getByRole("button", { name: "Add access token" }));
 		fireEvent.change(screen.getByLabelText("Wiki secret"), { target: { value: "abc123" } });
 		fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -569,7 +572,7 @@ describe("a bot's Connectors page", () => {
 		);
 
 		fireEvent.click(screen.getByRole("button", { name: "Disconnect Wiki" }));
-		expect(await screen.findByRole("heading", { name: "Disconnect Wiki?" })).toBeDefined();
+		await screen.findByRole("heading", { name: "Disconnect Wiki?" });
 		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
 		await waitFor(() =>
 			expect(route.remove).toHaveBeenCalledWith({
@@ -583,7 +586,7 @@ describe("a bot's Connectors page", () => {
 		serveConnectors();
 		mount(wikiPage);
 
-		expect(await screen.findByText("No such connector here")).toBeDefined();
+		await screen.findByText("No such connector here");
 	});
 
 	it("lets an editor see connectors and their tools, with nothing to change", async () => {
@@ -600,7 +603,7 @@ describe("a bot's Connectors page", () => {
 		await openedWiki();
 		expect(screen.queryByRole("radio")).toBeNull();
 		expect(screen.queryByRole("button", { name: "Disconnect Wiki" })).toBeNull();
-		expect(screen.getByRole("button", { name: "Test connector" })).toBeDefined();
+		screen.getByRole("button", { name: "Test connector" });
 		expect(screen.queryByRole("button", { name: "Add secret" })).toBeNull();
 		await openIndividualTools();
 		expect(screen.getAllByText("search_pages").length).toBeGreaterThan(0);
@@ -616,7 +619,7 @@ describe("coming back from a connector sign-in", () => {
 			`/connectors/oauth/return?workspace=${project.workspaceId}&project=${linear.defaultProjectId}`,
 		);
 
-		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
+		await screen.findByRole("article", { name: "Wiki" });
 		expect(router.state.location.href).toBe(connectorsPage);
 	});
 
@@ -626,35 +629,31 @@ describe("coming back from a connector sign-in", () => {
 			`/connectors/oauth/return?workspace=${project.workspaceId}&project=${linear.defaultProjectId}&oauth_error=refused`,
 		);
 
-		expect(
-			await screen.findByText(
-				"Signing in did not finish: The server's sign-in was refused or cancelled.",
-			),
-		).toBeDefined();
+		await screen.findByText(
+			"Signing in did not finish: The server's sign-in was refused or cancelled.",
+		);
 		await waitFor(() => expect(router.state.location.href).toBe(connectorsPage));
 
 		await router.navigate({
 			to: "/$workspace/bots/$bot/connectors",
 			params: { workspace: "suga", bot: triager.handle },
 		});
-		expect(
-			await screen.findByRole("navigation", { name: `${triager.name}'s pages` }),
-		).toBeDefined();
-		expect(await screen.findByRole("button", { name: "Add connector" })).toBeDefined();
+		await screen.findByRole("navigation", { name: `${triager.name}'s pages` });
+		await screen.findByRole("button", { name: "Add connector" });
 		expect(screen.queryByText(/Signing in did not finish/)).toBeNull();
 	});
 
 	it("says what went wrong when the sign-in never reached a bot", async () => {
 		mount("/connectors/oauth/return?oauth_error=unknown_state");
 
-		expect(await screen.findByText("The sign-in could not be found. Try again.")).toBeDefined();
-		expect(screen.getByRole("link", { name: "Return to workspace" })).toBeDefined();
+		await screen.findByText("The sign-in could not be found. Try again.");
+		screen.getByRole("link", { name: "Return to workspace" });
 	});
 
 	it("never shows text from the address in place of a code", async () => {
 		mount("/connectors/oauth/return?oauth_error=Call+555-0100+to+verify+your+account");
 
-		expect(await screen.findByText("Something went wrong. Try again.")).toBeDefined();
+		await screen.findByText("Something went wrong. Try again.");
 		expect(screen.queryByText(/555-0100/)).toBeNull();
 	});
 });

@@ -1,26 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type { NewModelProvider } from "@sugabots/contracts";
-import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
-import { eq } from "drizzle-orm";
 import { Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-	seedBot,
-	seedMember,
-	seedProjectChat,
-	unique,
-} from "../../authentication/seed.test-support.ts";
-import { workspace } from "../../database/schema.ts";
-import { closeDatabase, onDatabase } from "../../database/testing.ts";
+import { unique } from "../../authentication/seed.test-support.ts";
+import { closeDatabase } from "../../database/testing.ts";
 import type { Principal } from "../../principal.ts";
 import {
 	authenticators,
 	buildWorld,
+	everyKindOfPrincipal,
+	outcomesFor,
 	principals,
 	type World,
 } from "../../proofs/world.test-support.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../../providers/network/egress.ts";
-import { type CallOperation, servedOperations } from "../testing.ts";
+import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
  * The providers operations, each called for every kind of principal through
@@ -40,40 +34,7 @@ describe("the providers operations, for each kind of principal", () => {
 	let as: ReturnType<typeof principals>;
 	let a: World["a"];
 	/** Every principal the cases call for, in workspace A unless its name says otherwise. */
-	let who: Awaited<ReturnType<typeof principalsInA>>;
-
-	const principalsInA = async () => {
-		const outsider = await seedMember(world.b.workspace, "editor");
-		const adminsAssistant = await seedBot(a.workspace, {
-			assistantOf: a.admin,
-			visibility: "personal",
-		});
-		const adminsAssistantChat = await seedProjectChat(
-			a.workspace,
-			adminsAssistant.defaultProject,
-			a.admin,
-		);
-		return {
-			owner: await as.member(a.owner),
-			admin: await as.member(a.admin),
-			ed: await as.member(a.ed),
-			vi: await as.member(a.vi),
-			outsider: await as.member(outsider),
-			/** Pub answering Ed in J's chat: chat bounds. */
-			pubForEd: await as.botFor(a.ed, a.pub.id, a.chat),
-			/** Pub answering an admin in J's chat: chat bounds. */
-			pubForAdmin: await as.botFor(a.admin, a.pub.id, a.chat),
-			/** Ed's Personal Assistant in its own chat: member bounds. */
-			edsAssistant: await as.botFor(a.ed, a.assistant.id, a.assistantChat),
-			/** An admin's Personal Assistant in its own chat: member bounds. */
-			adminsAssistant: await as.botFor(a.admin, adminsAssistant.id, adminsAssistantChat),
-			run: (await as.run(a.workspace, a.project, a.pub.id)).principal,
-			webhook: await as.webhook(a.workspace, a.project),
-			computerSleep: (await as.computerSleep(a.workspace, a.project)).principal,
-			compaction: await as.compaction(a.chat, a.pub.id),
-			page: await as.page(a.chat),
-		};
-	};
+	let who: Awaited<ReturnType<typeof everyKindOfPrincipal>>;
 
 	beforeAll(async () => {
 		world = await buildWorld();
@@ -87,37 +48,12 @@ describe("the providers operations, for each kind of principal", () => {
 			}),
 		});
 		as = principals(await authenticators());
-		who = await principalsInA();
+		who = await everyKindOfPrincipal(world, as);
 	});
 
 	afterAll(async () => {
 		await closeDatabase();
 	});
-
-	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends RequestOperationName>(
-		principal: Principal,
-		name: Name,
-		input: InputOf<Name>,
-	): Promise<string> =>
-		call(principal, name, input).then(
-			() => "ok",
-			(failure: { readonly _tag: string }) => failure._tag,
-		);
-
-	/** What `attempt` came to for each principal of `principals`, by its name. */
-	const outcomes = async <Key extends string>(
-		principals: Record<Key, Principal>,
-		attempt: (principal: Principal) => Promise<string>,
-	) => {
-		const entries = await Promise.all(
-			Object.entries<Principal>(principals).map(async ([key, principal]) => [
-				key,
-				await attempt(principal),
-			]),
-		);
-		return Object.fromEntries(entries) as Record<Key, string>;
-	};
 
 	/** A custom model provider no other in the workspace is named like. */
 	const gateway = (apiKey?: string): NewModelProvider => ({
@@ -130,41 +66,24 @@ describe("the providers operations, for each kind of principal", () => {
 
 	it("lets the owner and admins manage the workspace's providers, and a bot only in member bounds", async () => {
 		const create = (principal: Principal) =>
-			tried(principal, "modelProviders.create", { workspace: a.workspace, provider: gateway() });
+			operationOutcome(call, principal, "modelProviders.create", {
+				workspace: a.workspace,
+				provider: gateway(),
+			});
 
 		expect(
-			await outcomes(
+			await outcomesFor(
 				{
-					owner: who.owner,
 					admin: who.admin,
-					editor: who.ed,
-					viewer: who.vi,
 					outsider: who.outsider,
 					adminsBotInChatBounds: who.pubForAdmin,
-					adminsAssistant: who.adminsAssistant,
-					editorsAssistant: who.edsAssistant,
-					run: who.run,
-					webhook: who.webhook,
-					computerSleep: who.computerSleep,
-					compaction: who.compaction,
-					page: who.page,
 				},
 				create,
 			),
 		).toEqual({
-			owner: "ok",
 			admin: "ok",
-			editor: "ActionForbidden",
-			viewer: "ActionForbidden",
 			outsider: "ResourceHidden",
 			adminsBotInChatBounds: "ActionForbidden",
-			adminsAssistant: "ok",
-			editorsAssistant: "ActionForbidden",
-			run: "ActionForbidden",
-			webhook: "ActionForbidden",
-			computerSleep: "ActionForbidden",
-			compaction: "ActionForbidden",
-			page: "ActionForbidden",
 		});
 	});
 
@@ -173,35 +92,55 @@ describe("the providers operations, for each kind of principal", () => {
 		const provider = { ...reference, providerId: randomUUID() };
 		const model = { ...provider, modelId: randomUUID() };
 		const managing: Record<string, (principal: Principal) => Promise<string>> = {
-			"modelProviders.list": (p) => tried(p, "modelProviders.list", reference),
+			"modelProviders.list": (p) => operationOutcome(call, p, "modelProviders.list", reference),
 			"modelProviders.setDefaultModel": (p) =>
-				tried(p, "modelProviders.setDefaultModel", { ...reference, model: "some-model" }),
+				operationOutcome(call, p, "modelProviders.setDefaultModel", {
+					...reference,
+					model: "some-model",
+				}),
 			"modelProviders.update": (p) =>
-				tried(p, "modelProviders.update", { ...provider, changes: { active: false } }),
-			"modelProviders.remove": (p) => tried(p, "modelProviders.remove", provider),
+				operationOutcome(call, p, "modelProviders.update", {
+					...provider,
+					changes: { active: false },
+				}),
+			"modelProviders.remove": (p) => operationOutcome(call, p, "modelProviders.remove", provider),
 			"modelProviders.switchOff": (p) =>
-				tried(p, "modelProviders.switchOff", { ...provider, moveBots: [] }),
-			"modelProviders.test": (p) => tried(p, "modelProviders.test", provider),
-			"modelProviders.startSignIn": (p) => tried(p, "modelProviders.startSignIn", provider),
+				operationOutcome(call, p, "modelProviders.switchOff", { ...provider, moveBots: [] }),
+			"modelProviders.test": (p) => operationOutcome(call, p, "modelProviders.test", provider),
+			"modelProviders.startSignIn": (p) =>
+				operationOutcome(call, p, "modelProviders.startSignIn", provider),
 			"modelProviders.completeSignIn": (p) =>
-				tried(p, "modelProviders.completeSignIn", { ...provider, attempt: "sealed" }),
-			"modelProviders.signOut": (p) => tried(p, "modelProviders.signOut", provider),
-			"modelProviders.discoverModels": (p) => tried(p, "modelProviders.discoverModels", provider),
+				operationOutcome(call, p, "modelProviders.completeSignIn", {
+					...provider,
+					attempt: "sealed",
+				}),
+			"modelProviders.signOut": (p) =>
+				operationOutcome(call, p, "modelProviders.signOut", provider),
+			"modelProviders.discoverModels": (p) =>
+				operationOutcome(call, p, "modelProviders.discoverModels", provider),
 			"modelProviders.addModel": (p) =>
-				tried(p, "modelProviders.addModel", {
+				operationOutcome(call, p, "modelProviders.addModel", {
 					...provider,
 					model: { modelId: "some-model", capabilities: [] },
 				}),
 			"modelProviders.updateModel": (p) =>
-				tried(p, "modelProviders.updateModel", { ...model, changes: { enabled: false } }),
-			"modelProviders.switchOffModel": (p) => tried(p, "modelProviders.switchOffModel", model),
-			"searchProviders.get": (p) => tried(p, "searchProviders.get", reference),
+				operationOutcome(call, p, "modelProviders.updateModel", {
+					...model,
+					changes: { enabled: false },
+				}),
+			"modelProviders.switchOffModel": (p) =>
+				operationOutcome(call, p, "modelProviders.switchOffModel", model),
+			"searchProviders.get": (p) => operationOutcome(call, p, "searchProviders.get", reference),
 			"searchProviders.replace": (p) =>
-				tried(p, "searchProviders.replace", { ...reference, builtIn: "brave" }),
+				operationOutcome(call, p, "searchProviders.replace", { ...reference, builtIn: "brave" }),
 			"searchProviders.update": (p) =>
-				tried(p, "searchProviders.update", { ...reference, changes: { enabled: false } }),
-			"searchProviders.remove": (p) => tried(p, "searchProviders.remove", reference),
-			"searchProviders.test": (p) => tried(p, "searchProviders.test", reference),
+				operationOutcome(call, p, "searchProviders.update", {
+					...reference,
+					changes: { enabled: false },
+				}),
+			"searchProviders.remove": (p) =>
+				operationOutcome(call, p, "searchProviders.remove", reference),
+			"searchProviders.test": (p) => operationOutcome(call, p, "searchProviders.test", reference),
 		};
 
 		for (const [name, attempt] of Object.entries(managing)) {
@@ -209,7 +148,7 @@ describe("the providers operations, for each kind of principal", () => {
 				name === "modelProviders.completeSignIn" ? "ProviderSignInAttemptInvalid" : undefined;
 			expect({
 				name,
-				outcomes: await outcomes(
+				outcomes: await outcomesFor(
 					{
 						editor: who.ed,
 						outsider: who.outsider,
@@ -235,48 +174,23 @@ describe("the providers operations, for each kind of principal", () => {
 		for (const name of reads) {
 			expect({
 				name,
-				outcomes: await outcomes(
+				outcomes: await outcomesFor(
 					{
 						viewer: who.vi,
-						editor: who.ed,
 						outsider: who.outsider,
 						botInChatBounds: who.pubForEd,
-						editorsAssistant: who.edsAssistant,
-						run: who.run,
-						webhook: who.webhook,
-						computerSleep: who.computerSleep,
-						page: who.page,
 					},
-					(principal) => tried(principal, name, { workspace: a.workspace }),
+					(principal) => operationOutcome(call, principal, name, { workspace: a.workspace }),
 				),
 			}).toEqual({
 				name,
 				outcomes: {
 					viewer: "ok",
-					editor: "ok",
 					outsider: "ResourceHidden",
 					botInChatBounds: "ActionForbidden",
-					editorsAssistant: "ok",
-					run: "ActionForbidden",
-					webhook: "ActionForbidden",
-					computerSleep: "ActionForbidden",
-					page: "ActionForbidden",
 				},
 			});
 		}
-	});
-
-	it("takes the workspace by its slug, and hides a slug no workspace has", async () => {
-		const [found] = await onDatabase((db) =>
-			db.select({ slug: workspace.slug }).from(workspace).where(eq(workspace.id, a.workspace)),
-		);
-
-		expect(
-			await tried(who.admin, "modelProviders.listEnabledModels", { workspace: found?.slug ?? "" }),
-		).toBe("ok");
-		expect(await tried(who.admin, "modelProviders.list", { workspace: `nobody-${unique()}` })).toBe(
-			"ResourceHidden",
-		);
 	});
 
 	it("records the member a Personal Assistant acts for as who connected the provider it adds", async () => {

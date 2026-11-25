@@ -3,12 +3,13 @@ import { eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { TurnAuthentication } from "../../../authentication/turn.ts";
+import { violatedUniqueConstraint } from "../../../database/errors.ts";
 import { toolCall, turn } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { asMember } from "../../../operations/chats/testing.ts";
 import { servedOperations } from "../../../operations/testing.ts";
 import { chatServicesForTests } from "../../testing.ts";
-import { TurnRecords } from "../records.ts";
+import { CHANGED_SINCE_SENT, TurnRecords } from "../records.ts";
 import {
 	aChatAwaitingReply,
 	asTheLoop,
@@ -17,6 +18,8 @@ import {
 	runningTurns,
 	runOver,
 } from "../testing.ts";
+
+import { INTERRUPTED_CALL } from "./lifecycle.ts";
 
 /**
  * Each tool call is recorded as sent before it is sent, once, under its
@@ -101,7 +104,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			};
 			await onDatabase((db) => db.insert(toolCall).values(unstepped));
 
-			await expect(onDatabase((db) => db.insert(toolCall).values(unstepped))).rejects.toThrow();
+			await expect(onDatabase((db) => db.insert(toolCall).values(unstepped))).rejects.toSatisfy(
+				(error: unknown) => violatedUniqueConstraint(error) === "tool_call_unstepped_call_idx",
+			);
 		});
 
 		it("records a call with its step and the model's id, to be sent", async () => {
@@ -121,13 +126,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(again).toEqual({
 				_tag: "Interrupted",
 				id: first.id,
-				error: expect.stringContaining("Check what it did"),
+				error: INTERRUPTED_CALL,
 			});
 			const calls = await callsOfTurn();
 			expect(calls).toHaveLength(1);
 			expect(calls[0]).toMatchObject({
 				status: "failed",
-				error: expect.stringContaining("Check what it did"),
+				error: INTERRUPTED_CALL,
 			});
 			const [stored] = await onDatabase((db) =>
 				db.select().from(turn).where(eq(turn.id, opened.turnId)),
@@ -148,15 +153,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				record(opened, true, bound),
 			]);
 
-			// Neither is sent: the first finds the tool changed and ends the call, the
-			// second finds it ended.
-			for (const outcome of [again, alsoAgain]) {
-				expect(outcome._tag).not.toBe("Send");
-				expect(outcome).toMatchObject({ id: first.id });
-				expect(JSON.stringify(outcome)).toContain("has changed");
-			}
+			expect([again, alsoAgain]).toEqual(
+				expect.arrayContaining([
+					{ _tag: "NotSent", id: first.id, error: CHANGED_SINCE_SENT },
+					{ _tag: "Finished", id: first.id, outcome: { error: CHANGED_SINCE_SENT } },
+				]),
+			);
+
 			expect(await callsOfTurn()).toMatchObject([
-				{ id: first.id, status: "failed", error: expect.stringContaining("tool has changed") },
+				{ id: first.id, status: "failed", error: CHANGED_SINCE_SENT },
 			]);
 			const [stored] = await onDatabase((db) =>
 				db.select().from(turn).where(eq(turn.id, opened.turnId)),

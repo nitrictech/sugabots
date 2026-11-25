@@ -1,10 +1,8 @@
-import { uuidSchema } from "@sugabots/contracts/uuid";
-
 export * as FilePages from "./pages.ts";
 
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { Context, Data, DateTime, Effect, Layer, Schema } from "effect";
-import { BlobStore } from "../blob-store/blob-store.ts";
+import { uuidSchema } from "@sugabots/contracts/uuid";
+import { Context, DateTime, Effect, Layer, Schema } from "effect";
 import { serviceOperations } from "../database/database.ts";
 import type { ReachesFile } from "../proofs/reaches-file.ts";
 import { Secrets } from "../secrets/secrets.ts";
@@ -30,8 +28,6 @@ export interface Interface {
 		reach: ReachesFile<P, F>,
 		version: number,
 	) => Effect.Effect<string | undefined, ResourceHidden>;
-	/** The page an address's token names, while the address is good. */
-	readonly open: (token: string) => Effect.Effect<Page, PageUnavailable>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/FilePages") {
@@ -43,7 +39,6 @@ export const make = Effect.gen(function* () {
 	const serverSettings = yield* ServerSettings.Service;
 	const secrets = yield* Secrets.Service;
 	const files = yield* Files.Service;
-	const readVersion = Files.readVersionUnchecked(yield* BlobStore.Service);
 
 	return Service.of({
 		address: (reach, version) =>
@@ -68,25 +63,6 @@ export const make = Effect.gen(function* () {
 					return `${contentOrigin}${PAGE_PATH}/${token}`;
 				}),
 			),
-
-		open: (token) =>
-			operation(
-				"open",
-				Effect.gen(function* () {
-					const address = yield* Effect.try({
-						try: () =>
-							Schema.decodeUnknownSync(pageAddressSchema)(
-								JSON.parse(secrets.decrypt(token, SECRET_PURPOSE)),
-							),
-						catch: () => new PageUnavailable(),
-					});
-					const now = yield* DateTime.nowAsDate;
-					if (address.expiresAt <= now.getTime()) return yield* new PageUnavailable();
-					const shown = yield* readVersion(address.fileId, address.version);
-					if (shown?.kind !== "html") return yield* new PageUnavailable();
-					return { title: shown.title, html: shown.content };
-				}),
-			),
 	});
 });
 
@@ -100,11 +76,6 @@ export const PAGE_PATH = "/pages";
 /** How long an address stays good. Long enough to load a page, short enough that a copied address soon stops working. */
 const ADDRESS_LIFETIME_MS = 10 * 60 * 1000;
 
-interface Page {
-	title: string;
-	html: string;
-}
-
 /** The use page addresses are encrypted for, so no other value encrypted with the same key opens as one. */
 export const SECRET_PURPOSE = "file-page-address";
 
@@ -117,6 +88,3 @@ export const pageAddressSchema = Schema.Struct({
 });
 
 type PageAddress = typeof pageAddressSchema.Type;
-
-/** The address was never given out, has been tampered with, has expired, or names a page that is gone. */
-export class PageUnavailable extends Data.TaggedError("FilePageUnavailable") {}

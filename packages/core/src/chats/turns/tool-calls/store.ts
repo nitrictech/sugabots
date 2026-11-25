@@ -568,18 +568,16 @@ export const make = Effect.gen(function* () {
 									.for("update"),
 							);
 							if (!approvedConnector) {
-								return yield* refuse("The connector's configuration changed after approval");
+								return yield* refuse(APPROVED_CONNECTOR_CHANGED);
 							}
 							// Choosing what bots may do with a tool leaves the revision alone, so
 							// a tool somebody turned off after the approval is caught here.
 							if (approvedConnector.toolAccess[binding.remoteToolName] === "off") {
-								return yield* refuse("The tool was turned off after approval");
+								return yield* refuse(APPROVED_TOOL_TURNED_OFF);
 							}
 						}
 						if (!sameCallAsApproved(row, input)) {
-							return refusedExecution(
-								"The call was already claimed, or no longer matches what was approved",
-							);
+							return refusedExecution(APPROVED_CALL_MISMATCH);
 						}
 						const running = yield* apply(row, ToolCallEvent.BeginExecution());
 						if (!running) return refusedExecution("The call is not approved for execution");
@@ -694,6 +692,11 @@ export const layer = processLayer(Layer.effect(Service, make));
 const MAX_STORED_JSON_CHARACTERS = 64_000;
 
 type ToolCallOutcome = { output: unknown } | { error: UserText };
+
+export const APPROVED_CALL_MISMATCH =
+	"The call was already claimed, or no longer matches what was approved";
+export const APPROVED_CONNECTOR_CHANGED = "The connector's configuration changed after approval";
+export const APPROVED_TOOL_TURNED_OFF = "The tool was turned off after approval";
 
 /**
  * What an approved call must still match when it runs, beyond its tool and

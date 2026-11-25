@@ -1,6 +1,7 @@
 export * as Egress from "./egress.ts";
 
 import { lookup as nodeLookup } from "node:dns/promises";
+import type { LookupFunction } from "node:net";
 import { BlockList, isIP } from "node:net";
 import { type UserText, userText } from "@sugabots/errors";
 import { Config, Context, Data, Effect, Layer } from "effect";
@@ -110,7 +111,6 @@ export interface EgressOptions {
 	allowPrivateNetwork?: boolean;
 	lookup?: (hostname: string) => Promise<Array<{ address: string; family: number }>>;
 	fetch?: EgressDispatch;
-	dispatcherFactory?: (hostname: string, addresses?: ResolvedAddress[]) => Dispatcher;
 }
 
 const MAX_DISPATCHERS = 100;
@@ -164,7 +164,6 @@ export function createEgressHttpClient({
 	allowPrivateNetwork = false,
 	lookup = resolveHostname,
 	fetch: dispatch = dispatchWithUndici,
-	dispatcherFactory = pinnedDispatcher,
 }: EgressOptions = {}): ClosableEgressHttpClient {
 	const dispatchers = new Map<string, Dispatcher>();
 
@@ -180,7 +179,7 @@ export function createEgressHttpClient({
 			dispatchers.delete(key);
 			dispatchers.set(key, dispatcher);
 		} else {
-			dispatcher = dispatcherFactory(hostname, addresses);
+			dispatcher = pinnedDispatcher(hostname, addresses);
 			dispatchers.set(key, dispatcher);
 			if (dispatchers.size > MAX_DISPATCHERS) {
 				const oldest = dispatchers.entries().next().value;
@@ -349,26 +348,37 @@ export function isPrivateAddress(address: string, family: 4 | 6) {
 }
 
 function pinnedDispatcher(hostname: string, addresses?: ResolvedAddress[]): Dispatcher {
-	let nextAddress = 0;
 	return new Agent({
 		connect: addresses
 			? {
 					servername: isIP(hostname) ? undefined : hostname,
-					lookup: (_requestedHostname, options, callback) => {
-						if (options.all) {
-							callback(null, addresses);
-							return;
-						}
-						const selected = addresses[nextAddress++ % addresses.length];
-						if (!selected) {
-							callback(new Error("Hostname did not resolve"), "", 0);
-							return;
-						}
-						callback(null, selected.address, selected.family);
-					},
+					lookup: lookupPinnedTo(addresses),
 				}
 			: undefined,
 	});
+}
+
+/**
+ * The `lookup` a connection resolves its host with, as Node's `net` calls it,
+ * answering with `addresses`, the ones already checked against the private
+ * ranges, whatever name is asked for: so a name that resolves elsewhere by the
+ * time the connection is made is never connected to. A connection that wants
+ * one address is handed them in turn.
+ */
+export function lookupPinnedTo(addresses: readonly ResolvedAddress[]): LookupFunction {
+	let nextAddress = 0;
+	return (_requestedHostname, options, callback) => {
+		if (options.all) {
+			callback(null, [...addresses]);
+			return;
+		}
+		const selected = addresses[nextAddress++ % addresses.length];
+		if (!selected) {
+			callback(new Error("Hostname did not resolve"), "", 0);
+			return;
+		}
+		callback(null, selected.address, selected.family);
+	};
 }
 
 /**

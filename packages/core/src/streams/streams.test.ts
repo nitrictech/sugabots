@@ -10,8 +10,9 @@ import {
 } from "@sugabots/contracts";
 import type { Delivery } from "@sugabots/contracts/operations/events";
 import { and, eq, sql } from "drizzle-orm";
-import { type Duration, Effect, Exit, Layer, Scope, Stream } from "effect";
-import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
+import { Clock, Duration, Effect, Exit, Fiber, Layer, Queue, Scope, Stream } from "effect";
+import { TestClock } from "effect/testing";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import {
 	addMembership,
 	seedBot,
@@ -28,6 +29,7 @@ import { Audience } from "../database/events/audience.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { EventStore } from "../database/events/store.ts";
+import { inMemoryEventStore } from "../database/events/testing.ts";
 import { projectMember, session } from "../database/schema.ts";
 import { closeDatabase, holdTransaction, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { Operations } from "../operations/registry.ts";
@@ -51,7 +53,9 @@ import { Streams } from "./streams.ts";
 describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again", () => {
 	/** How many subscriptions to each stream the bus holds. */
 	const subscribed = new Map<EventStream, number>();
-	const inProcess = EventBus.inProcess({ store: EventStore.inMemory() });
+	/** What waits for a stream's last subscription to end. */
+	const awaitingNone = new Map<EventStream, Array<() => void>>();
+	const inProcess = EventBus.inProcess({ store: inMemoryEventStore() });
 	const bus: EventBus.Interface = {
 		...inProcess,
 		async *subscribe(stream, options) {
@@ -59,26 +63,45 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			try {
 				yield* inProcess.subscribe(stream, options);
 			} finally {
-				subscribed.set(stream, (subscribed.get(stream) ?? 0) - 1);
+				const left = (subscribed.get(stream) ?? 0) - 1;
+				subscribed.set(stream, left);
+				if (left === 0) for (const wake of awaitingNone.get(stream) ?? []) wake();
 			}
 		},
 	};
+	/** Resolves once the bus holds no subscription to `stream`. */
+	const noneSubscribed = (stream: EventStream) =>
+		new Promise<void>((resolve) => {
+			if ((subscribed.get(stream) ?? 0) === 0) return resolve();
+			awaitingNone.set(stream, [...(awaitingNone.get(stream) ?? []), resolve]);
+		});
 	let call: CallOperation;
 	let follow: FollowOperation;
 	let longRunning: Operations.LongRunningInterface;
+	const clockScope = Scope.makeUnsafe();
+	let clock: TestClock.TestClock;
+	let followOnTestClock: FollowOperation;
+	const catchUp = "1 second";
 	let signedIn: ReturnType<typeof principals>;
 	let outbox: EventOutbox.Interface;
 	/** An outbox whose deliveries reach no bus this process listens to, as another's can fail to. */
 	let unheard: EventOutbox.Interface;
 	let stored: EventStore.Interface;
-	const open: Following<Delivery>[] = [];
 
 	beforeAll(async () => {
 		const chats = await chatServicesForTests(bus);
 		({ call, follow, longRunning } = await servedRegistry({
 			chats,
 			bus: Layer.succeed(EventBus.Service, bus),
-			streamsTiming: { catchUp: "1 second" },
+			streamsTiming: { catchUp },
+		}));
+		clock = await Effect.runPromise(Scope.provide(TestClock.make(), clockScope));
+		await Effect.runPromise(clock.setTime(Date.UTC(2000, 0, 1)));
+		({ follow: followOnTestClock } = await servedRegistry({
+			chats,
+			bus: Layer.succeed(EventBus.Service, bus),
+			streamsTiming: { catchUp },
+			clock,
 		}));
 		signedIn = principals(await authenticators());
 		const outboxOver = (over: EventBus.Interface) =>
@@ -89,21 +112,26 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				),
 			);
 		outbox = await outboxOver(bus);
-		unheard = await outboxOver(EventBus.inProcess({ store: EventStore.inMemory() }));
+		unheard = await outboxOver(EventBus.inProcess({ store: inMemoryEventStore() }));
 		stored = await runOnPostgres(EventStore.make);
 	});
 
 	afterAll(async () => {
-		await Promise.all(open.map((following) => following.close()));
+		await Effect.runPromise(Scope.close(clockScope, Exit.void));
 		await closeDatabase();
 	});
 
-	/** Starts following, closed when the file ends. */
-	const following: FollowOperation = async (principal, name, input) => {
-		const started = await follow(principal, name, input);
-		open.push(started as Following<Delivery>);
-		return started;
-	};
+	/** Starts following, closed when the case finishes. */
+	const closingAfterTest =
+		(start: FollowOperation): FollowOperation =>
+		async (principal, name, input) => {
+			const started = await start(principal, name, input);
+			onTestFinished(() => started.close());
+			return started;
+		};
+	const following: FollowOperation = (...args) => closingAfterTest(follow)(...args);
+	const followingOnTestClock: FollowOperation = (...args) =>
+		closingAfterTest(followOnTestClock)(...args);
 
 	/** Stores `event` on `stream` and delivers it, as the outbox does once its transaction commits. */
 	const commit = (stream: EventStream, event: StreamEvent & { type: DurableEventType }) =>
@@ -117,12 +145,6 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 	const nextType = async (stream: Following<Delivery>) => {
 		const next = await stream.next();
 		return next === "ended" ? next : next.event.type;
-	};
-
-	/** What `stream` sends next before it goes quiet: an event's type, `ended`, or `quiet`. */
-	const sendsNext = async (stream: Following<Delivery>) => {
-		const next = await stream.quiet();
-		return typeof next === "string" ? next : next.event.type;
 	};
 
 	/**
@@ -200,16 +222,21 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				workspace: world.workspace,
 			});
 
+			const stream = workspaceStream(world.workspace);
 			await commit(
-				workspaceStream(world.workspace),
+				stream,
 				Audience.forChat(world.chat, streamEvent("chat.changed", { chatId: world.chat })),
 			);
+			// Everyone hears this, so had Erin heard the first she would hear it before.
+			const sentinel = streamEvent("chat.changed", { chatId: "sentinel" });
+			await commit(stream, Audience.forWorkspace(sentinel));
 
 			const heard = await ed.next();
 			expect(heard !== "ended" && heard.event).toEqual(
 				streamEvent("chat.changed", { chatId: world.chat }),
 			);
-			expect(await sendsNext(erin)).toBe("quiet");
+			const erinHeard = await erin.next();
+			expect(erinHeard !== "ended" && erinHeard.event).toEqual(sentinel);
 		});
 
 		it("sends an event about no chat to those who reach its project, and one about a bot or a membership to those who reach it", async () => {
@@ -221,29 +248,31 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				workspace: world.workspace,
 			});
 			const stream = workspaceStream(world.workspace);
-			const changed = streamEvent("chat.changed", { chatId: world.chat });
+			/** An event each follower tells apart by the audience it was sent to. */
+			const changed = (audience: string) => streamEvent("chat.changed", { chatId: audience });
 
-			await commit(stream, Audience.forProject(world.project, changed));
-			await commit(stream, Audience.forBot(world.mine.id, changed));
-			await commit(stream, Audience.forBot(world.spare.id, changed));
-			await commit(stream, Audience.forWorkspace(changed));
+			await commit(stream, Audience.forProject(world.project, changed("J")));
+			await commit(stream, Audience.forBot(world.mine.id, changed("Mine")));
+			await commit(stream, Audience.forBot(world.spare.id, changed("Spare")));
+			await commit(stream, Audience.forWorkspace(changed("workspace")));
 			// Nobody is named, so nobody hears it.
-			await commit(stream, changed);
-			await commit(stream, Audience.forWorkspace(streamEvent("chat.changed", { chatId: "last" })));
+			await commit(stream, changed("nobody"));
+			await commit(stream, Audience.forWorkspace(changed("last")));
 
+			/** The audiences of what `heard` sends, up to the last. */
 			const heardBy = async (heard: Following<Delivery>) => {
 				const audiences: unknown[] = [];
 				for (;;) {
 					const next = await heard.next();
 					if (next === "ended") break;
-					audiences.push(next.seq);
+					audiences.push(next.event.chatId);
 					if (next.event.chatId === "last") break;
 				}
-				return audiences.length;
+				return audiences;
 			};
 			// Ed reaches J, his personal bot, and Spare; Erin only Spare.
-			expect(await heardBy(ed)).toBe(5);
-			expect(await heardBy(erin)).toBe(3);
+			expect(await heardBy(ed)).toEqual(["J", "Mine", "Spare", "workspace", "last"]);
+			expect(await heardBy(erin)).toEqual(["Spare", "workspace", "last"]);
 		});
 
 		it("hears about a bot made after it started, once it has proved again", async () => {
@@ -341,34 +370,36 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			world: Awaited<ReturnType<typeof staffed>>,
 			prove: Effect.Effect<Streams.Hearing>,
 			catchUp: Duration.Input,
+			clockOverride?: Clock.Clock,
 		) => {
 			const principal = await signedIn.member(world.ed);
 			const scope = Scope.makeUnsafe();
 			onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
-			const running = await runOnPostgres(
-				Scope.provide(scope)(
-					Effect.flatMap(Streams.Service, (streams) =>
-						streams.follow({
-							principal,
-							stream: workspaceStream(world.workspace),
-							since: undefined,
-							workspace: world.workspace,
-							prove,
-						}),
-					).pipe(
-						Effect.provide(
-							Streams.layer.pipe(
-								Layer.provide(
-									Layer.mergeAll(
-										Layer.succeed(EventBus.Service, bus),
-										Layer.succeed(EventStore.Service, stored),
-										Layer.succeed(Streams.Timing, { catchUp }),
-									),
+			const start = Scope.provide(scope)(
+				Effect.flatMap(Streams.Service, (streams) =>
+					streams.follow({
+						principal,
+						stream: workspaceStream(world.workspace),
+						since: undefined,
+						workspace: world.workspace,
+						prove,
+					}),
+				).pipe(
+					Effect.provide(
+						Streams.layer.pipe(
+							Layer.provide(
+								Layer.mergeAll(
+									Layer.succeed(EventBus.Service, bus),
+									Layer.succeed(EventStore.Service, stored),
+									Layer.succeed(Streams.Timing, { catchUp }),
 								),
 							),
 						),
 					),
 				),
+			);
+			const running = await runOnPostgres(
+				clockOverride ? Effect.provideService(start, Clock.Clock, clockOverride) : start,
 			);
 			return { ...running, principal };
 		};
@@ -436,6 +467,19 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 
 		it("ends the operation by its deadline when a session read is stalled", async () => {
 			const world = await staffed();
+			const interval = "400 millis";
+			const scope = Scope.makeUnsafe();
+			onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
+			const sessionClock = await Effect.runPromise(Scope.provide(TestClock.make(), scope));
+			const sleeps = await Effect.runPromise(Queue.unbounded<Duration.Duration>());
+			const observingClock: Clock.Clock = {
+				...sessionClock,
+				sleep: (duration) =>
+					Effect.forkChild(sessionClock.sleep(duration), { startImmediately: true }).pipe(
+						Effect.tap(() => Queue.offer(sleeps, duration)),
+						Effect.flatMap(Fiber.join),
+					),
+			};
 			const running = await followWorkspaceWith(
 				world,
 				Effect.succeed({
@@ -444,19 +488,21 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 					projects: { reached: new Set([world.project]), unreached: new Set() },
 					bots: { reached: new Set(), unreached: new Set() },
 				}),
-				"400 millis",
+				interval,
+				observingClock,
 			);
 			const stalled = holdTransaction(
 				query((db) => db.execute(sql`lock table session in access exclusive mode`)),
 			);
 			await stalled.held;
-			try {
-				await expect(
-					Effect.runPromise(running.ended.pipe(Effect.timeout("1 second"))),
-				).resolves.toBeUndefined();
-			} finally {
-				await stalled.release();
-			}
+			const checkDelay = await Effect.runPromise(Queue.take(sleeps));
+			await Effect.runPromise(Queue.take(sleeps));
+			await Effect.runPromise(sessionClock.adjust(checkDelay));
+			await stalled.waitForWaiters(1);
+			await Effect.runPromise(sessionClock.adjust(checkDelay));
+
+			await Effect.runPromise(running.ended);
+			await stalled.release();
 		});
 
 		it("ends a chat's stream when its member is removed from the chat's project, and stops sending its events on the workspace's", async () => {
@@ -568,10 +614,23 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 
 		it("ends itself when its session expires", async () => {
 			const world = await staffed();
-			const expiring = await signedIn.member(world.ed, 1);
-			const stream = await following(expiring, "events.followChat", { chatId: world.chat });
+			const expiring = await signedIn.member(world.ed);
+			const expiresAt = (await Effect.runPromise(clock.currentTimeMillis)) + 750;
+			await onDatabase((db) =>
+				db
+					.update(session)
+					.set({ expiresAt: new Date(expiresAt) })
+					.where(eq(session.id, expiring.session)),
+			);
+			const stream = await followingOnTestClock(expiring, "events.followChat", {
+				chatId: world.chat,
+			});
+			await commit(chatStream(world.chat), streamEvent("chat.changed", { chatId: world.chat }));
+			expect(await nextType(stream)).toBe("chat.changed");
 
-			expect(await stream.next("5 seconds")).toBe("ended");
+			await Effect.runPromise(clock.setTime(expiresAt));
+
+			expect(await nextType(stream)).toBe("ended");
 		});
 
 		it("never sends a session's end to a client", async () => {
@@ -579,20 +638,27 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			const own = await following(await signedIn.member(world.ed), "events.followOwn", {});
 
 			await commit(memberStream(world.ed), streamEvent("session.ended", { sessionId: "another" }));
+			const sentinel = streamEvent("approvals.changed", { toolCallId: randomUUID() });
+			await commit(memberStream(world.ed), sentinel);
 
-			expect(await sendsNext(own)).toBe("quiet");
+			expect(await nextType(own)).toBe(sentinel.type);
 		});
 	});
 
 	describe("what the bus misses, and a client that doesn't keep up", () => {
 		it("ends a chat's stream when its member loses the chat, though the change never reached this process's bus", async () => {
 			const world = await staffed();
-			const ed = await following(await signedIn.member(world.ed), "events.followChat", {
+			const ed = await followingOnTestClock(await signedIn.member(world.ed), "events.followChat", {
 				chatId: world.chat,
 			});
 
+			await commit(chatStream(world.chat), streamEvent("chat.changed", { chatId: world.chat }));
+			expect(await nextType(ed)).toBe("chat.changed");
+
 			await takeEdOut(world);
 			await commitUnheard(workspaceStream(world.workspace), jChanged(world));
+
+			await Effect.runPromise(clock.adjust(Duration.toMillis(catchUp) / 2));
 
 			expect(await nextType(ed)).toBe("ended");
 		});
@@ -600,9 +666,11 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		it("ends when its session is deleted though no event says so", async () => {
 			const world = await staffed();
 			const signedOut = await signedIn.member(world.ed);
-			const own = await following(signedOut, "events.followOwn", {});
+			const own = await followingOnTestClock(signedOut, "events.followOwn", {});
 
 			await onDatabase((db) => db.delete(session).where(eq(session.id, signedOut.session)));
+
+			await Effect.runPromise(clock.adjust(Duration.toMillis(catchUp) / 2));
 
 			expect(await nextType(own)).toBe("ended");
 		});
@@ -642,7 +710,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				memberId: world.ed,
 			});
 			// Its watcher proves again as the change is delivered, apart from the client.
-			await new Promise((resolve) => setTimeout(resolve, 1_000));
+			await runOnPostgres(stream.ended);
 
 			expect(await runOnPostgres(Stream.runCollect(stream.stream))).toEqual([]);
 		});
@@ -666,7 +734,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 
 			await Effect.runPromise(Scope.close(scope, Exit.void));
 
-			await vi.waitFor(() => expect(subscribed.get(chatStream(world.chat))).toBe(0));
+			await noneSubscribed(chatStream(world.chat));
 		});
 	});
 

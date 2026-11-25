@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { query, transaction } from "../database/database.ts";
-import { chat, message, systemChat, turn } from "../database/schema.ts";
+import { chat, message, systemChat } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { BotForAsker } from "../principal.ts";
 import {
@@ -96,10 +96,19 @@ describe("TurnAuthentication", () => {
 			const resumed = await asBotForAsker(turnId);
 
 			expect(resumed.executionNumber).toBe(first.executionNumber + 1);
-			const [stored] = await onDatabase((db) =>
-				db.select({ executionNumber: turn.executionNumber }).from(turn).where(eq(turn.id, turnId)),
+		});
+
+		it("keeps the member who started the chat as asker when its trigger later points to a turn", async () => {
+			const chatId = await seedProjectChat(workspaceId, projectId, samId);
+			const reply = await seedMessage(chatId, { bot: helper.id });
+			const asking = await seedTurn(chatId, lead.id, reply);
+			const otherMember = await seedMember(workspaceId, "editor");
+			const unrelated = await seedTurnAnswering(chatId, helper.id, { member: otherMember });
+			await onDatabase((db) =>
+				db.update(message).set({ turnId: unrelated }).where(eq(message.id, reply)),
 			);
-			expect(stored?.executionNumber).toBe(resumed.executionNumber);
+
+			expect(await asBotForAsker(asking)).toMatchObject({ asker: samId });
 		});
 
 		it("gives a helper, and the asking bot's hand-back, the asking turn's asker", async () => {
@@ -294,22 +303,6 @@ describe("TurnAuthentication", () => {
 	});
 
 	describe("a turn with nobody to act for", () => {
-		it("keeps the asker it was made with, though the turns behind its message change later", async () => {
-			const reply = await seedMessage(chatId, { bot: helper.id });
-			const asking = await seedTurn(chatId, lead.id, reply);
-			const helperTurn = await seedTurnAnswering(chatId, helper.id, { bot: lead.id, turn: asking });
-			const before = await authenticate(asking);
-			// Rewritten into a cycle of turns, which no longer changes who the turn acts for.
-			await onDatabase((db) =>
-				db.update(message).set({ turnId: helperTurn }).where(eq(message.id, reply)),
-			);
-
-			expect(await authenticate(asking)).toMatchObject({
-				_tag: "BotForAsker",
-				asker: before._tag === "BotForAsker" ? before.asker : "an asker",
-			});
-		});
-
 		it("refuses a turn that doesn't exist", async () => {
 			for (const turnId of [randomUUID(), "not-an-id"]) {
 				await expect(authenticate(turnId)).rejects.toMatchObject({

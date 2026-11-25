@@ -246,16 +246,19 @@ describe("the chat event stream", () => {
 			}),
 		);
 
-		expect(posted).toEqual([
-			{
-				stream: chatStream(chatId),
-				event: expect.objectContaining({ type: "message.created", chatId }),
-			},
-			{
-				stream: workspaceStream(workspaceId),
-				event: expect.objectContaining({ type: "chat.changed", chatId }),
-			},
-		]);
+		expect(posted).toEqual(
+			expect.arrayContaining([
+				{
+					stream: chatStream(chatId),
+					event: expect.objectContaining({ type: "message.created", chatId }),
+				},
+				{
+					stream: workspaceStream(workspaceId),
+					event: expect.objectContaining({ type: "chat.changed", chatId }),
+				},
+			]),
+		);
+		expect(posted).toHaveLength(2);
 	});
 
 	it("tells the chat of a cancelled automation run, and the workspace, that it changed", () => {
@@ -283,10 +286,10 @@ const toolCall: ToolCallPart = {
 		status: "allowed",
 		approvers: "chat",
 		decidedByName: "Ada",
-		decidedAt: new Date().toISOString(),
+		decidedAt: new Date(0).toISOString(),
 	},
 	error: null,
 	atOffset: 4,
-	startedAt: new Date().toISOString(),
+	startedAt: new Date(0).toISOString(),
 	finishedAt: null,
 };

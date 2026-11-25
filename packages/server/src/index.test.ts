@@ -49,21 +49,13 @@ describe("loading the server in a fresh process", () => {
 		CHILD_TIMEOUT_MS,
 	);
 
-	it(
-		"imports the floor control first",
-		() => expectCleanExit(importFirst(new URL("chats/floor/floor-control.ts", coreSource))),
-		CHILD_TIMEOUT_MS,
-	);
-
-	it(
-		"imports the bot loop's steps first",
-		() => expectCleanExit(importFirst(new URL("steps.ts", botLoopSource))),
-		CHILD_TIMEOUT_MS,
-	);
-
-	it(
-		"imports the tools a turn's steps offer first",
-		() => expectCleanExit(importFirst(new URL("chats/turns/tools.ts", coreSource))),
+	it.each([
+		["Floor control", new URL("chats/floor/floor-control.ts", coreSource)],
+		["Bot loop steps", new URL("steps.ts", botLoopSource)],
+		["Turn tools", new URL("chats/turns/tools.ts", coreSource)],
+	])(
+		"%s loads without a circular-import failure",
+		(_name, moduleUrl) => expectCleanExit(importFirst(moduleUrl)),
 		CHILD_TIMEOUT_MS,
 	);
 });

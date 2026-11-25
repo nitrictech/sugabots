@@ -2,9 +2,9 @@ import type { Automation } from "@sugabots/contracts";
 import { Conflict, InternalServerError } from "@sugabots/contracts/http";
 import { automationTriggers, type TestConnector } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	apiAnswers,
 	bots,
@@ -17,10 +17,10 @@ import {
 	personalAssistant,
 	serveConnectors,
 	triager,
-} from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+} from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const page = `/suga/bots/${linear.handle}/settings`;
 const webhookAutomation = {
@@ -52,11 +52,6 @@ const scheduledAutomation = {
 } satisfies Automation;
 
 beforeEach(apiAnswers);
-
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
-});
 
 function answers(change: Partial<typeof linear>): void {
 	client.api.bots.update.mockReturnValue(Effect.succeed({ ...linear, ...change }));
@@ -118,8 +113,8 @@ describe("what everybody sees", () => {
 	it("shows the bot as a contact card: its name first, and a way to change its avatar", async () => {
 		mount(page);
 
-		expect(await screen.findByRole("heading", { name: linear.name })).toBeDefined();
-		expect(screen.getByRole("button", { name: "Change avatar" })).toBeDefined();
+		await screen.findByRole("heading", { name: linear.name });
+		screen.getByRole("button", { name: "Change avatar" });
 		expect(screen.queryByRole("tab")).toBeNull();
 	});
 
@@ -128,7 +123,7 @@ describe("what everybody sees", () => {
 
 		const profile = await screen.findByRole("region", { name: "Profile" });
 		await waitFor(() => expect(within(profile).getByText("Sam")).toBeDefined());
-		expect(within(profile).getByText("Added by")).toBeDefined();
+		within(profile).getByText("Added by");
 	});
 
 	it("says a bot nobody added was made with the workspace", async () => {
@@ -136,15 +131,15 @@ describe("what everybody sees", () => {
 		mount(page);
 
 		const profile = await screen.findByRole("region", { name: "Profile" });
-		expect(await within(profile).findByText("With the workspace")).toBeDefined();
+		await within(profile).findByText("With the workspace");
 	});
 
 	it("lists its own tools, each a switch", async () => {
 		mount(page);
 
 		const tools = await screen.findByRole("region", { name: "Built-in tools" });
-		expect(within(tools).getByText("Computer")).toBeDefined();
-		expect(within(tools).getByRole("switch", { name: "Turn off Web search" })).toBeDefined();
+		within(tools).getByText("Computer");
+		within(tools).getByRole("switch", { name: "Turn off Web search" });
 	});
 
 	it("shows the bot's connectors, to be changed on its Connectors page", async () => {
@@ -155,7 +150,7 @@ describe("what everybody sees", () => {
 		mount(page);
 
 		const connectors = await screen.findByRole("region", { name: "Connectors" });
-		expect(await within(connectors).findByText("Linear")).toBeDefined();
+		await within(connectors).findByText("Linear");
 		// A connector that gives the bot no tools gives it nothing to list.
 		expect(within(connectors).queryByText("Wiki")).toBeNull();
 		expect(within(connectors).queryByRole("switch")).toBeNull();
@@ -193,11 +188,11 @@ describe("your Personal Assistant", () => {
 		onWideScreen();
 		mount(`/suga/bots/${personalAssistant.handle}/settings`);
 
-		expect(await screen.findByRole("textbox", { name: "Name" })).toBeDefined();
-		expect(screen.getByRole("button", { name: "Change avatar" })).toBeDefined();
-		expect(screen.getByRole("region", { name: "Connectors" })).toBeDefined();
+		await screen.findByRole("textbox", { name: "Name" });
+		screen.getByRole("button", { name: "Change avatar" });
+		screen.getByRole("region", { name: "Connectors" });
 		const settings = screen.getByRole("region", { name: "Settings" });
-		expect(within(settings).getByRole("link", { name: /^Automations/ })).toBeDefined();
+		within(settings).getByRole("link", { name: /^Automations/ });
 		expect(screen.queryByRole("button", { name: /^Model/ })).toBeNull();
 		expect(screen.queryByRole("textbox", { name: "Instructions" })).toBeNull();
 		expect(screen.queryByRole("region", { name: "Built-in tools" })).toBeNull();
@@ -223,7 +218,7 @@ describe("a viewer", () => {
 	it("reads the model and the instructions rather than editing them", async () => {
 		mount(page);
 
-		expect(await screen.findByText(MODELS[0] as string)).toBeDefined();
+		await screen.findByText(MODELS[0] as string);
 		expect(screen.getByRole("button", { name: /^Model: / })).toHaveProperty("disabled", true);
 		const instructions = await screen.findByRole("textbox", { name: "Instructions" });
 		expect(instructions.hasAttribute("readonly")).toBe(true);
@@ -270,7 +265,7 @@ describe("an admin", () => {
 		expect(settings.getAttribute("href")).toBe(page);
 		fireEvent.click(settings);
 
-		expect(await screen.findByRole("button", { name: "Delete bot" })).toBeDefined();
+		await screen.findByRole("button", { name: "Delete bot" });
 		expect(screen.queryByRole("region", { name: "Connectors" })).toBeNull();
 		expect(client.api.connectors.list).not.toHaveBeenCalled();
 	});
@@ -331,7 +326,7 @@ describe("an admin", () => {
 		fireEvent.change(name, { target: { value: triager.name } });
 		fireEvent.blur(name);
 
-		expect(await screen.findByRole("alert")).toBeDefined();
+		await screen.findByRole("alert");
 		await waitFor(() => expect((name as HTMLInputElement).value).toBe(linear.name));
 	});
 
@@ -420,7 +415,7 @@ describe("an admin", () => {
 		fireEvent.click(within(avatar).getByRole("radio", { name: "rose" }));
 		fireEvent.click(within(avatar).getByRole("button", { name: "Save" }));
 
-		expect(await within(avatar).findByRole("alert")).toBeDefined();
+		await within(avatar).findByRole("alert");
 		expect((within(avatar).getByRole("radio", { name: "rose" }) as HTMLInputElement).checked).toBe(
 			true,
 		);
@@ -437,7 +432,7 @@ describe("an admin", () => {
 	it("counts the instructions against their limit", async () => {
 		mount(page);
 
-		expect(await screen.findByText(/9 of 20,000 characters/)).toBeDefined();
+		await screen.findByText(/9 of 20,000 characters/);
 	});
 
 	it("saves the instructions once the box is left", async () => {
@@ -467,7 +462,7 @@ describe("an admin", () => {
 		fireEvent.change(instructions, { target: { value: "Keep this." } });
 		fireEvent.blur(instructions);
 
-		expect(await screen.findByRole("alert")).toBeDefined();
+		await screen.findByRole("alert");
 		await waitFor(() =>
 			expect(
 				(screen.getByRole("textbox", { name: "Instructions" }) as HTMLTextAreaElement).value,
@@ -507,8 +502,8 @@ describe("an admin", () => {
 			within(models).getByRole("menuitemradio", { name: new RegExp(`^${MODELS[1]}`) }),
 		);
 
-		expect(await screen.findByRole("alert")).toBeDefined();
-		expect(screen.getByRole("button", { name: `Model: ${MODELS[0]}` })).toBeDefined();
+		await screen.findByRole("alert");
+		screen.getByRole("button", { name: `Model: ${MODELS[0]}` });
 	});
 
 	it("switches web search off for the bot, reading pages with it, and back on", async () => {

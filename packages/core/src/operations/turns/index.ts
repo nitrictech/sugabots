@@ -16,6 +16,8 @@ import { recordToolCall } from "./record-tool-call.ts";
 import { recordToolResults } from "./record-tool-results.ts";
 import { startApprovedToolCall } from "./start-approved-tool-call.ts";
 
+export { makeOfferStepTools } from "./offer-step-tools.ts";
+
 export const turnsOperations = {
 	"turns.load": load,
 	"turns.makeModelRequest": makeModelRequest,

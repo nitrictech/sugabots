@@ -11,12 +11,23 @@ export const fetch = defineOperation(webContracts["web.fetch"], (principal, inpu
 	if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun") {
 		return Effect.fail(new ResourceHidden({ resource: "bot" }));
 	}
-	return named(principal, principal.workspace, call, (principal, workspace, call) =>
-		Effect.gen(function* () {
-			const web = yield* Web.Service;
-			const canUseWeb = yield* proveCanUseWeb(principal, workspace, WEB_FETCH_TOOL);
-			const approved = yield* proveApproved(principal, call, approvalRule("web.fetch"), input);
-			return yield* web.fetch(canUseWeb, input, approved);
-		}),
+	return named(
+		principal,
+		principal.workspace,
+		call,
+		input,
+		(principal, workspace, call, approvedInput) =>
+			Effect.gen(function* () {
+				const web = yield* Web.Service;
+				const canUseWeb = yield* proveCanUseWeb(principal, workspace, WEB_FETCH_TOOL);
+				const approved = yield* proveApproved(
+					principal,
+					call,
+					approvalRule("web.fetch"),
+					approvedInput,
+					workspace,
+				);
+				return yield* web.fetch(canUseWeb, input, approved);
+			}),
 	);
 });

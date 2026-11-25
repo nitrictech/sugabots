@@ -13,10 +13,10 @@ export const readDocs = defineOperation(
 		if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun") {
 			return new ResourceHidden({ resource: "chat" });
 		}
-		return named(principal, principal.chat, call, (principal, chat, call) =>
+		return named(principal, principal.chat, call, input, (principal, chat, call, approvedInput) =>
 			Effect.gen(function* () {
 				yield* proveReachesChat(principal, chat);
-				yield* proveApproved(principal, call, approvalRule("chats.readDocs"), input);
+				yield* proveApproved(principal, call, approvalRule("chats.readDocs"), approvedInput, chat);
 				return readDocsPage(input);
 			}),
 		);

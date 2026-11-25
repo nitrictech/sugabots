@@ -1,11 +1,9 @@
-import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	seedAutomation,
 	seedBot,
 	seedConnector,
-	seedMember,
 	seedProject,
 	seedProjectChat,
 	seedWebhookTrigger,
@@ -17,10 +15,12 @@ import type { Principal } from "../../principal.ts";
 import {
 	authenticators,
 	buildWorld,
+	everyKindOfPrincipal,
+	outcomesFor,
 	principals,
 	type World,
 } from "../../proofs/world.test-support.ts";
-import { type CallOperation, servedOperations } from "../testing.ts";
+import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
  * The automations operations, each called for every kind of principal
@@ -40,80 +40,19 @@ describe("the automations operations, for each kind of principal", () => {
 	let call: CallOperation;
 	let as: ReturnType<typeof principals>;
 	let a: World["a"];
-	let who: Awaited<ReturnType<typeof everyPrincipal>>;
-
-	const everyPrincipal = async () => {
-		const outsider = await seedMember(world.b.workspace, "editor");
-		const adminsAssistant = await seedBot(a.workspace, {
-			assistantOf: a.admin,
-			visibility: "personal",
-		});
-		const adminsAssistantChat = await seedProjectChat(
-			a.workspace,
-			adminsAssistant.defaultProject,
-			a.admin,
-		);
-		return {
-			owner: await as.member(a.owner),
-			admin: await as.member(a.admin),
-			ed: await as.member(a.ed),
-			vi: await as.member(a.vi),
-			erin: await as.member(a.erin),
-			outsider: await as.member(outsider),
-			/** Pub answering Ed in J's chat: chat bounds, J. */
-			pubForEd: await as.botFor(a.ed, a.pub.id, a.chat),
-			/** Pub answering an admin in J's chat: chat bounds, J. */
-			pubForAdmin: await as.botFor(a.admin, a.pub.id, a.chat),
-			/** Helper answering Ed in K's chat: chat bounds, K, though both reach J. */
-			helperInK: await as.botFor(a.ed, a.helper.id, a.otherChat),
-			/** Ed's Personal Assistant in its own chat: member bounds. */
-			edsAssistant: await as.botFor(a.ed, a.assistant.id, a.assistantChat),
-			/** An admin's Personal Assistant in its own chat: member bounds. */
-			adminsAssistant: await as.botFor(a.admin, adminsAssistant.id, adminsAssistantChat),
-			run: (await as.run(a.workspace, a.project, a.pub.id)).principal,
-			webhook: await as.webhook(a.workspace, a.project),
-			computerSleep: (await as.computerSleep(a.workspace, a.project)).principal,
-			compaction: await as.compaction(a.chat, a.pub.id),
-			page: await as.page(a.chat),
-		};
-	};
+	let who: Awaited<ReturnType<typeof everyKindOfPrincipal>>;
 
 	beforeAll(async () => {
 		world = await buildWorld();
 		a = world.a;
 		call = await servedOperations();
 		as = principals(await authenticators());
-		who = await everyPrincipal();
+		who = await everyKindOfPrincipal(world, as);
 	});
 
 	afterAll(async () => {
 		await closeDatabase();
 	});
-
-	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends RequestOperationName>(
-		principal: Principal,
-		name: Name,
-		input: InputOf<Name>,
-	): Promise<string> =>
-		call(principal, name, input).then(
-			() => "ok",
-			(failure: { readonly _tag: string }) => failure._tag,
-		);
-
-	/** What `attempt` came to for each principal of `principals`, by its name. */
-	const outcomes = async <Key extends string>(
-		principals: Record<Key, Principal>,
-		attempt: (principal: Principal) => Promise<string>,
-	) => {
-		const entries = await Promise.all(
-			Object.entries<Principal>(principals).map(async ([key, principal]) => [
-				key,
-				await attempt(principal),
-			]),
-		);
-		return Object.fromEntries(entries) as Record<Key, string>;
-	};
 
 	/** A new automation of `projectId`, run only by hand. */
 	const anAutomation = async (projectId: string) => ({
@@ -124,37 +63,21 @@ describe("the automations operations, for each kind of principal", () => {
 	describe("reading a project's automations", () => {
 		it("lists them to whoever reaches the project, within a turn's bounds", async () => {
 			const list = (principal: Principal) =>
-				tried(principal, "automations.list", { projectId: a.project });
+				operationOutcome(call, principal, "automations.list", { projectId: a.project });
 
 			expect(
-				await outcomes(
+				await outcomesFor(
 					{
-						admin: who.admin,
 						viewer: who.vi,
 						notInProject: who.erin,
-						outsider: who.outsider,
-						botInBounds: who.pubForEd,
 						botOutsideBounds: who.helperInK,
-						run: who.run,
-						webhook: who.webhook,
-						computerSleep: who.computerSleep,
-						compaction: who.compaction,
-						page: who.page,
 					},
 					list,
 				),
 			).toEqual({
-				admin: "ok",
 				viewer: "ok",
 				notInProject: "ResourceHidden",
-				outsider: "ResourceHidden",
-				botInBounds: "ok",
 				botOutsideBounds: "ResourceHidden",
-				run: "ok",
-				webhook: "ResourceHidden",
-				computerSleep: "ResourceHidden",
-				compaction: "ResourceHidden",
-				page: "ResourceHidden",
 			});
 		});
 
@@ -164,8 +87,7 @@ describe("the automations operations, for each kind of principal", () => {
 				members: [a.ed, a.vi],
 			});
 			const runs = (principal: Principal) =>
-				tried(principal, "automations.projectRuns", { projectId, limit: 20 });
-			const chatId = await seedProjectChat(a.workspace, projectId, a.ed);
+				operationOutcome(call, principal, "automations.projectRuns", { projectId, limit: 20 });
 			const { principal: run } = await as.run(a.workspace, projectId, a.pub.id);
 			if (run._tag !== "AutomationRun") throw new Error("Expected an automation run");
 			await call(who.admin, "chats.openAutomationFeed", {
@@ -174,31 +96,26 @@ describe("the automations operations, for each kind of principal", () => {
 			});
 
 			expect(
-				await outcomes(
+				await outcomesFor(
 					{
-						admin: who.admin,
 						viewer: who.vi,
-						asker: await as.botFor(a.ed, a.pub.id, chatId),
-						run,
 						notInProject: who.erin,
 						computerSleep: (await as.computerSleep(a.workspace, projectId)).principal,
-						compaction: await as.compaction(chatId, a.pub.id),
 					},
 					runs,
 				),
 			).toEqual({
-				admin: "ok",
 				viewer: "ok",
-				asker: "ok",
-				run: "ok",
 				notInProject: "ResourceHidden",
 				computerSleep: "ResourceHidden",
-				compaction: "ResourceHidden",
 			});
 		});
 
 		it("shows an admin only a personal bot’s automation names and states", async () => {
-			const own = a.personal.defaultProject;
+			const { defaultProject: own } = await seedBot(a.workspace, {
+				createdById: a.ed,
+				visibility: "personal",
+			});
 			const created = await anAutomation(own);
 			const listed = await call(who.admin, "automations.list", { projectId: own });
 
@@ -208,12 +125,14 @@ describe("the automations operations, for each kind of principal", () => {
 			const ownView = await call(who.ed, "automations.list", { projectId: own });
 			expect(ownView[0]).toHaveProperty("instructions");
 			expect({
-				adminsRuns: await tried(who.admin, "automations.projectRuns", {
+				adminsRuns: await operationOutcome(call, who.admin, "automations.projectRuns", {
 					projectId: own,
 					limit: 20,
 				}),
-				editorWhoDidNotMakeIt: await tried(who.erin, "automations.list", { projectId: own }),
-				creator: await tried(who.ed, "automations.list", { projectId: own }),
+				editorWhoDidNotMakeIt: await operationOutcome(call, who.erin, "automations.list", {
+					projectId: own,
+				}),
+				creator: await operationOutcome(call, who.ed, "automations.list", { projectId: own }),
 			}).toEqual({
 				adminsRuns: "ResourceHidden",
 				editorWhoDidNotMakeIt: "ResourceHidden",
@@ -223,53 +142,28 @@ describe("the automations operations, for each kind of principal", () => {
 	});
 
 	describe("managing a project's automations", () => {
-		it("accepts the web app’s automation definition from signed-in project managers", async () => {
-			const create = (principal: Principal, projectId = a.project) =>
-				tried(principal, "automations.create", {
-					projectId,
-					name: `Automation ${unique()}`,
-					instructions: "Handle it.",
-					triggers: [],
-				});
-
-			expect({
-				...(await outcomes(
-					{
-						owner: who.owner,
-						admin: who.admin,
-						editor: who.ed,
-						viewer: who.vi,
-						notInProject: who.erin,
-						adminsBotInChatBounds: who.pubForAdmin,
-						adminsAssistant: who.adminsAssistant,
-						editorsAssistant: who.edsAssistant,
-						run: who.run,
-						webhook: who.webhook,
-						computerSleep: who.computerSleep,
-						compaction: who.compaction,
-						page: who.page,
-					},
-					(principal) => create(principal),
-				)),
-				creatorInBotsOwnProject: await create(who.ed, a.pub.defaultProject),
-				editorInSomeoneElsesBotsProject: await create(who.erin, a.pub.defaultProject),
-			}).toEqual({
-				owner: "ok",
-				admin: "ok",
-				editor: "ActionForbidden",
-				viewer: "ActionForbidden",
-				notInProject: "ResourceHidden",
-				adminsBotInChatBounds: "ActionForbidden",
-				adminsAssistant: "ActionForbidden",
-				editorsAssistant: "ActionForbidden",
-				run: "ActionForbidden",
-				webhook: "ResourceHidden",
-				computerSleep: "ResourceHidden",
-				compaction: "ResourceHidden",
-				page: "ResourceHidden",
-				creatorInBotsOwnProject: "ok",
-				editorInSomeoneElsesBotsProject: "ActionForbidden",
+		it("lists the automation created by a signed-in project manager", async () => {
+			const input = {
+				projectId: a.project,
+				name: `Automation ${unique()}`,
+				instructions: "Summarize open issues.",
+				triggers: [],
+			};
+			await expect(call(who.adminsAssistant, "automations.create", input)).rejects.toMatchObject({
+				_tag: "ActionForbidden",
 			});
+			await expect(call(who.erin, "automations.create", input)).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+			});
+
+			const created = await call(who.admin, "automations.create", input);
+
+			expect(
+				await call(who.admin, "automations.list", { projectId: input.projectId }),
+			).toContainEqual(
+				expect.objectContaining({ name: input.name, instructions: input.instructions }),
+			);
+			expect(created).toMatchObject({ automation: { name: input.name } });
 		});
 
 		it("lets an admin only switch off a personal bot's automations, which they can't otherwise reach", async () => {
@@ -280,25 +174,25 @@ describe("the automations operations, for each kind of principal", () => {
 					...automation,
 					changes: { state: "paused" },
 				}),
-				missingAutomation: await tried(who.admin, "automations.update", {
+				missingAutomation: await operationOutcome(call, who.admin, "automations.update", {
 					...automation,
 					automationId: crypto.randomUUID(),
 					changes: { state: "paused" },
 				}),
-				renaming: await tried(who.admin, "automations.update", {
+				renaming: await operationOutcome(call, who.admin, "automations.update", {
 					...automation,
 					changes: { name: "Mine now" },
 				}),
-				resuming: await tried(who.admin, "automations.update", {
+				resuming: await operationOutcome(call, who.admin, "automations.update", {
 					...automation,
 					changes: { state: "enabled" },
 				}),
-				deleting: await tried(who.admin, "automations.remove", automation),
-				editorWhoDidNotMakeIt: await tried(who.erin, "automations.update", {
+				deleting: await operationOutcome(call, who.admin, "automations.remove", automation),
+				editorWhoDidNotMakeIt: await operationOutcome(call, who.erin, "automations.update", {
 					...automation,
 					changes: { state: "paused" },
 				}),
-				creator: await tried(who.ed, "automations.update", {
+				creator: await operationOutcome(call, who.ed, "automations.update", {
 					...automation,
 					changes: { name: "Renamed" },
 				}),
@@ -340,7 +234,9 @@ describe("the automations operations, for each kind of principal", () => {
 				.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, a.helper.id))),
 		);
 
-		expect(await tried(acting, "automations.list", { projectId })).toBe("BotCannotReach");
+		expect(await operationOutcome(call, acting, "automations.list", { projectId })).toBe(
+			"BotCannotReach",
+		);
 		const missing = crypto.randomUUID();
 		for (const id of [connectorId, missing]) {
 			await expect(
@@ -387,78 +283,105 @@ describe("the automations operations, for each kind of principal", () => {
 		for (const automationId of [foreign.automationId, missing]) {
 			const address = { projectId: a.project, automationId };
 			expect(
-				await tried(who.admin, "automations.addTrigger", {
+				await operationOutcome(call, who.admin, "automations.addTrigger", {
 					...address,
 					trigger: { kind: "webhook", auth: { kind: "bearer" } },
 				}),
-			).toBe("ResourceHidden");
-			expect(await tried(who.admin, "automations.remove", address)).toBe("ResourceHidden");
-			expect(
-				await tried(who.admin, "automations.run", { ...address, requestId: crypto.randomUUID() }),
+				"automations.addTrigger",
 			).toBe("ResourceHidden");
 			expect(
-				await tried(who.admin, "automations.update", { ...address, changes: { state: "paused" } }),
+				await operationOutcome(call, who.admin, "automations.remove", address),
+				"automations.remove",
+			).toBe("ResourceHidden");
+			expect(
+				await operationOutcome(call, who.admin, "automations.run", {
+					...address,
+					requestId: crypto.randomUUID(),
+				}),
+				"automations.run",
+			).toBe("ResourceHidden");
+			expect(
+				await operationOutcome(call, who.admin, "automations.update", {
+					...address,
+					changes: { state: "paused" },
+				}),
+				"automations.update",
 			).toBe("ResourceHidden");
 		}
 		for (const triggerId of [foreignTrigger, sameProjectTrigger, missing]) {
 			const address = { ...local, triggerId };
 			expect(
-				await tried(who.admin, "automations.updateTrigger", {
+				await operationOutcome(call, who.admin, "automations.updateTrigger", {
 					...address,
 					trigger: { kind: "webhook", auth: { kind: "bearer" } },
 				}),
+				"automations.updateTrigger",
 			).toBe("ResourceHidden");
-			expect(await tried(who.admin, "automations.removeTrigger", address)).toBe("ResourceHidden");
-			expect(await tried(who.admin, "automations.getSecret", address)).toBe("ResourceHidden");
 			expect(
-				await tried(who.admin, "automations.rotateSecret", { ...address, secret: undefined }),
+				await operationOutcome(call, who.admin, "automations.removeTrigger", address),
+				"automations.removeTrigger",
+			).toBe("ResourceHidden");
+			expect(
+				await operationOutcome(call, who.admin, "automations.getSecret", address),
+				"automations.getSecret",
+			).toBe("ResourceHidden");
+			expect(
+				await operationOutcome(call, who.admin, "automations.rotateSecret", {
+					...address,
+					secret: undefined,
+				}),
+				"automations.rotateSecret",
 			).toBe("ResourceHidden");
 		}
 		const anotherWorkspace = await seedAutomation(world.b.workspace, world.b.project);
 		for (const automationId of [anotherWorkspace, missing]) {
 			expect(
-				await tried(who.admin, "chats.openAutomationFeed", {
+				await operationOutcome(call, who.admin, "chats.openAutomationFeed", {
 					workspace: a.workspace,
 					automationId,
 				}),
+				"chats.openAutomationFeed",
 			).toBe("ResourceHidden");
 		}
 	});
 
 	describe("automations.run", () => {
-		it("starts a run for anyone in the project but viewers, and for a bot for its asker in its bounds", async () => {
+		it("lists the accepted manual run in its project", async () => {
+			const projectId = await seedProject(a.workspace, { leadBotId: a.pub.id, members: [a.ed] });
+			const target = await anAutomation(projectId);
+			await call(who.ed, "chats.openAutomationFeed", {
+				workspace: a.workspace,
+				automationId: target.automationId,
+			});
+			const accepted = await call(who.ed, "automations.run", {
+				...target,
+				requestId: crypto.randomUUID(),
+			});
+
+			const { items } = await call(who.ed, "automations.projectRuns", {
+				projectId: target.projectId,
+				limit: 20,
+			});
+			expect(items).toContainEqual(
+				expect.objectContaining({
+					id: accepted.runId,
+					chatId: accepted.chatId,
+					automationId: target.automationId,
+					trigger: expect.objectContaining({ kind: "manual" }),
+				}),
+			);
+		});
+
+		it("refuses a viewer who reaches the automation and hides it from a non-member of the project", async () => {
 			const automation = await anAutomation(a.project);
 			const run = (principal: Principal) =>
-				tried(principal, "automations.run", { ...automation, requestId: crypto.randomUUID() });
+				operationOutcome(call, principal, "automations.run", {
+					...automation,
+					requestId: crypto.randomUUID(),
+				});
 
-			expect(
-				await outcomes(
-					{
-						editor: who.ed,
-						admin: who.admin,
-						viewer: who.vi,
-						notInProject: who.erin,
-						botInBounds: who.pubForEd,
-						botOutsideBounds: who.helperInK,
-						run: who.run,
-						webhook: who.webhook,
-						computerSleep: who.computerSleep,
-						page: who.page,
-					},
-					run,
-				),
-			).toEqual({
-				editor: "ok",
-				admin: "ok",
-				viewer: "ActionForbidden",
-				notInProject: "ResourceHidden",
-				botInBounds: "ok",
-				botOutsideBounds: "ResourceHidden",
-				run: "ActionForbidden",
-				webhook: "ResourceHidden",
-				computerSleep: "ResourceHidden",
-				page: "ResourceHidden",
-			});
+			expect(await run(who.vi)).toBe("ActionForbidden");
+			expect(await run(who.erin)).toBe("ResourceHidden");
 		});
 	});
 
@@ -493,16 +416,21 @@ describe("the automations operations, for each kind of principal", () => {
 				return run.chatId;
 			};
 
-			expect(await tried(callFromTrigger, "automations.projectRuns", page)).toBe("ResourceHidden");
+			expect(await operationOutcome(call, callFromTrigger, "automations.projectRuns", page)).toBe(
+				"ResourceHidden",
+			);
 			expect(
-				await tried(callFromTrigger, "chats.openAutomationFeed", {
+				await operationOutcome(call, callFromTrigger, "chats.openAutomationFeed", {
 					workspace: a.workspace,
 					automationId: other.automation,
 				}),
 			).toBe("ResourceHidden");
-			expect(await tried(callFromTrigger, "chats.messages", { chatId: own.feed, limit: 20 })).toBe(
-				"ok",
-			);
+			expect(
+				await operationOutcome(call, callFromTrigger, "chats.messages", {
+					chatId: own.feed,
+					limit: 20,
+				}),
+			).toBe("ok");
 			expect(
 				await call(callFromTrigger, "chats.get", { chatId: chatOf(own.run), limit: 20 }),
 			).toMatchObject({
@@ -517,9 +445,9 @@ describe("the automations operations, for each kind of principal", () => {
 				a.chat,
 				crypto.randomUUID(),
 			]) {
-				expect(await tried(callFromTrigger, "chats.get", { chatId, limit: 20 })).toBe(
-					"ResourceHidden",
-				);
+				expect(
+					await operationOutcome(call, callFromTrigger, "chats.get", { chatId, limit: 20 }),
+				).toBe("ResourceHidden");
 			}
 		});
 
@@ -534,7 +462,11 @@ describe("the automations operations, for each kind of principal", () => {
 				null,
 			);
 			const webhook = (principal: Principal, triggerId: string) =>
-				tried(principal, "automations.webhook", { triggerId, headers: {}, payload: {} });
+				operationOutcome(call, principal, "automations.webhook", {
+					triggerId,
+					headers: {},
+					payload: {},
+				});
 
 			expect({
 				itsOwnTrigger: await webhook(who.webhook, own.trigger),

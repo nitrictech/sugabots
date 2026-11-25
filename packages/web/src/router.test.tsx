@@ -1,8 +1,8 @@
-import { cleanup, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { apiAnswers, mount, prefersReducedMotion } from "@/test-api.tsx";
+import { waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { apiAnswers, mount, prefersReducedMotion } from "@/api.test-support.tsx";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 type TransitionRequest = { update: () => Promise<void>; types: string[] } | (() => Promise<void>);
 
@@ -26,11 +26,6 @@ function recordViewTransitions() {
 
 beforeEach(() => {
 	apiAnswers();
-});
-
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
 });
 
 describe("moving between pages on a phone", () => {

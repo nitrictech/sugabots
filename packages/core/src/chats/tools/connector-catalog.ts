@@ -185,7 +185,7 @@ export interface TurnProjects {
 
 /** What a turn's tools work for and through, for the kinds whose tools are Sugabots' own. */
 export interface TurnSide {
-	readonly principal?: Principal;
+	readonly principal: Principal;
 	readonly turnId: string;
 	readonly botId: string;
 	readonly chatId: string;
@@ -226,7 +226,7 @@ export const layer = layerNoDeps.pipe(
 );
 
 /** Lets a server's changed tools reach turns without the connector being edited. */
-const LISTING_LIFETIME = Duration.minutes(15);
+export const LISTING_LIFETIME = Duration.minutes(15);
 
 /** Spares turns the wait for a server that just failed to answer. */
 const FAILURE_LIFETIME = Duration.minutes(1);
@@ -287,11 +287,7 @@ export function from({
 	 * The connectors of each of `projectIds`, earliest first, leaving out
 	 * those whose handle an earlier one has.
 	 */
-	const connectorsOf = (
-		workspaceId: string,
-		projectIds: readonly string[],
-		principal?: Principal,
-	) =>
+	const connectorsOf = (workspaceId: string, projectIds: readonly string[], principal: Principal) =>
 		Effect.gen(function* () {
 			const taken = new Set<string>();
 			const reached: OwnedTarget[] = [];
@@ -300,12 +296,11 @@ export function from({
 			const gitHub: { connected: Connected; projectId: string }[] = [];
 			for (const projectId of projectIds) {
 				const found = yield* connectors.targetsForProject(workspaceId, projectId);
-				const app =
-					github && principal
-						? yield* gitHubConnectorForProject({ workspaceId, projectId })
-						: undefined;
+				const app = github
+					? yield* gitHubConnectorForProject({ workspaceId, projectId })
+					: undefined;
 				const connected =
-					github && principal && app?.enabled && !everyToolOff(app)
+					github && app?.enabled && !everyToolOff(app)
 						? yield* named(principal, app.id, (acting, id) =>
 								proveCanReachConnector(acting, id).pipe(
 									Effect.flatMap(github.forConnector),
@@ -315,29 +310,31 @@ export function from({
 						: undefined;
 				const isFree = (connector: { handle: string }) => !taken.has(connector.handle);
 				const owned = <Connector>(connector: Connector) => ({ ...connector, projectId });
-				const candidates = found.targets.filter(isFree);
-				const allowed = principal
-					? yield* Effect.filter(candidates, (candidate) =>
-							named(principal, candidate.connectorId, (acting, id) =>
-								proveCanReachConnector(acting, id).pipe(
-									Effect.map((reach) => reach.revision === candidate.configurationRevision),
-									Effect.orElseSucceed(() => false),
-								),
+				const allowed = yield* Effect.filter(found.targets.filter(isFree), (candidate) =>
+					named(principal, candidate.connectorId, (acting, id) =>
+						proveCanReachConnector(acting, id).pipe(
+							Effect.map(
+								(reach) =>
+									reach.workspace === workspaceId &&
+									reach.project === projectId &&
+									reach.revision === candidate.configurationRevision,
 							),
-						)
-					: candidates;
+							Effect.orElseSucceed(() => false),
+						),
+					),
+				);
 				reached.push(...allowed.map(owned));
 				expired.push(...found.signInExpired.filter(isFree).map(owned));
 				installedUrls.push(...found.installedUrls);
 				if (connected && isFree(connected.connector)) {
 					gitHub.push({ connected, projectId });
 				}
-				for (const connector of [
-					...found.targets,
-					...found.signInExpired,
-					...(connected ? [connected.connector] : []),
+				for (const handle of [
+					...found.targets.map(({ handle }) => handle),
+					...found.signInExpired.map(({ handle }) => handle),
+					...(connected ? [connected.connector.handle] : []),
 				]) {
-					taken.add(connector.handle);
+					taken.add(handle);
 				}
 			}
 			return { reached, expired, gitHub, installedUrls };

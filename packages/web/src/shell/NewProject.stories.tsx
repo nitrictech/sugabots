@@ -5,7 +5,7 @@ import { expect, fn, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { Dialog } from "@/ui/dialog.tsx";
 import { NewProjectDialog } from "./NewProject.tsx";
-import { growthDesk, projectsWithBots, revenue } from "./story-fixtures.ts";
+import { growthDesk, projectsWithBots, revenue } from "./story-fixtures.test-support.ts";
 
 const WORKSPACE = revenue.workspaceId;
 

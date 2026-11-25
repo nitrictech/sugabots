@@ -73,8 +73,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				db.select().from(projectAllowedHost).where(eq(projectAllowedHost.workspaceId, workspaceId)),
 			);
 
-		/** An OpenSandbox provider for the workspace, letting computers reach only allowed hosts, never reached. */
-		const enableComputers = async () => {
+		/**
+		 * An OpenSandbox provider for the workspace, never reached, letting
+		 * computers reach only allowed hosts, or every host where `networkMode` says.
+		 */
+		const enableComputers = async (
+			networkMode: "allowed-hosts-only" | "open" = "allowed-hosts-only",
+		) => {
 			const providers = await runOnPostgres(
 				Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer),
 			);
@@ -86,7 +91,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							builtIn: "opensandbox",
 							serverUrl: "https://computers.example.com",
 							image: "sugabots-computer:dev",
-							networkMode: "allowed-hosts-only",
+							networkMode,
 						},
 						enabled: true,
 						apiKey: "never-used",
@@ -136,19 +141,25 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
 		});
 
-		it("offers the browser's tools under their own names, but no host requests while the computer reaches every host", async () => {
-			const { model, requests } = scriptedSteps({ text: ["Hello."] });
+		it.each([
+			["open", false],
+			["allowed-hosts-only", true],
+		] as const)(
+			"offers the browser's tools under their own names, and host requests only in allowed-hosts-only mode (%s)",
+			async (networkMode, asksForHosts) => {
+				await enableComputers(networkMode);
+				const { model, requests } = scriptedSteps({ text: ["Hello."] });
 
-			await loop.runTurn(chatId, { model });
+				await loop.runTurn(chatId, { model });
 
-			expect(requests[0]?.tools).toHaveProperty("browser_navigate");
-			expect(requests[0]?.tools).not.toHaveProperty("browser_take_screenshot");
-			expect(requests[0]?.tools).not.toHaveProperty("browser_*");
-			expect(requests[0]?.tools).not.toHaveProperty(HOST_REQUEST_TOOL);
-		});
+				expect(requests[0]?.tools).toHaveProperty("browser_navigate");
+				expect(requests[0]?.tools).not.toHaveProperty("browser_take_screenshot");
+				expect(Object.hasOwn(requests[0]?.tools ?? {}, HOST_REQUEST_TOOL)).toBe(asksForHosts);
+			},
+		);
 
 		describe("asking for a host", () => {
-			beforeEach(enableComputers);
+			beforeEach(() => enableComputers());
 
 			/** A project members made, led by the bot, with a chat an editor in it asked the bot in. */
 			const anEditorsChat = async () => {
@@ -156,8 +167,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				const projectId = await seedProject(workspaceId, { leadBotId: botId, members: [editorId] });
 				const started = await chatsAs(editorId).startProjectChat({
 					projectId,
-					messageId: crypto.randomUUID(),
-					content: "Fetch the docs from api.example.com.",
+					retryKey: crypto.randomUUID(),
+					message: "Fetch the docs from api.example.com.",
 				});
 				return { editorId, projectId, chatId: started.chat.id };
 			};

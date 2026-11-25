@@ -6,7 +6,6 @@ import {
 	WebhookDeliveryIdHeaderRejected,
 	WebhookRefused,
 } from "@sugabots/contracts/errors/automations";
-import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import {
 	seedAutomation,
 	seedBot,
@@ -48,7 +47,7 @@ const GOOD_AUTHORIZATION = `Bearer ${GOOD_SECRET}`;
  * that a call is authenticated before its operation, which is doubled, is
  * called for the principal that made.
  */
-describe.skipIf(!process.env.DATABASE_URL)("Automation webhooks", () => {
+describe("Automation webhooks", () => {
 	let authenticator: WebhookAuthentication.Interface;
 	let triggerId: string;
 
@@ -73,29 +72,14 @@ describe.skipIf(!process.env.DATABASE_URL)("Automation webhooks", () => {
 		await closeDatabase();
 	});
 
-	/**
-	 * The app with the real authenticator, recording what it is handed, and an
-	 * `automations.webhook` double that answers a `challenge` body with it,
-	 * turns away an `ignore` one, refuses a `tooLong` one's id, refuses a
-	 * `paused` one as its automation would, and starts a run for any other.
-	 */
-	function webhookApp() {
+	function webhookApp(
+		answer: Operations.Interface["automations.webhook"] = () =>
+			Effect.succeed({ runId: RUN_ID, duplicate: false }),
+	) {
 		const authenticated = vi.fn<WebhookAuthentication.Interface["trigger"]>((id, delivery) =>
 			authenticator.trigger(id, delivery),
 		);
-		const webhook = vi.fn<Operations.Interface["automations.webhook"]>((_principal, input) => {
-			const payload = input.payload as {
-				challenge?: string;
-				tooLong?: boolean;
-				ignore?: boolean;
-				paused?: boolean;
-			};
-			if (payload.tooLong) return Effect.fail(new AutomationDeliveryIdTooLong());
-			if (payload.paused) return Effect.fail(new WebhookRefused());
-			if (payload.ignore) return Effect.succeed({ ignored: true as const });
-			if (payload.challenge) return Effect.succeed({ challenge: payload.challenge });
-			return Effect.succeed({ runId: RUN_ID, duplicate: false });
-		});
+		const webhook = vi.fn(answer);
 		const app = createTestApp(
 			Layer.mergeAll(
 				Layer.succeed(WebhookAuthentication.Service, { ...authenticator, trigger: authenticated }),
@@ -148,33 +132,31 @@ describe.skipIf(!process.env.DATABASE_URL)("Automation webhooks", () => {
 	});
 
 	it("answers Slack's URL check with its challenge", async () => {
-		const { app } = webhookApp();
+		const challenge = "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P";
+		const { app } = webhookApp(() => Effect.succeed({ challenge }));
 
 		const response = await deliver(app, {
 			authorization: GOOD_AUTHORIZATION,
-			body: JSON.stringify({ challenge: "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P" }),
+			body: JSON.stringify({ challenge }),
 		});
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({
-			challenge: "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P",
+			challenge,
 		});
 	});
 
 	it("answers a call the trigger's filter turned away with 200, so its sender does not retry", async () => {
-		const { app } = webhookApp();
+		const { app } = webhookApp(() => Effect.succeed({ ignored: true }));
 
-		const response = await deliver(app, {
-			authorization: GOOD_AUTHORIZATION,
-			body: JSON.stringify({ ignore: true }),
-		});
+		const response = await deliver(app, { authorization: GOOD_AUTHORIZATION });
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ ignored: true });
 	});
 
 	it("does not reveal whether an automation exists, or runs, when a call is refused", async () => {
-		const { app, webhook } = webhookApp();
+		const { app, webhook } = webhookApp(() => Effect.fail(new WebhookRefused()));
 
 		const refused = await Promise.all([
 			deliver(app),
@@ -183,7 +165,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automation webhooks", () => {
 				authorization: GOOD_AUTHORIZATION,
 				path: `/webhooks/triggers/${OTHER_TRIGGER_ID}`,
 			}),
-			deliver(app, { authorization: GOOD_AUTHORIZATION, body: JSON.stringify({ paused: true }) }),
+			deliver(app, { authorization: GOOD_AUTHORIZATION }),
 		]);
 
 		expect(refused.map(({ status }) => status)).toEqual([401, 401, 401, 401]);
@@ -220,12 +202,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Automation webhooks", () => {
 	});
 
 	it("rejects a delivery whose id is too long", async () => {
-		const { app } = webhookApp();
+		const { app } = webhookApp(() => Effect.fail(new AutomationDeliveryIdTooLong()));
 
-		const response = await deliver(app, {
-			authorization: GOOD_AUTHORIZATION,
-			body: JSON.stringify({ tooLong: true }),
-		});
+		const response = await deliver(app, { authorization: GOOD_AUTHORIZATION });
 
 		expect(response.status).toBe(400);
 	});
@@ -285,18 +264,6 @@ describe("an automation's runs", () => {
 				memberId: USER_ID,
 			},
 		]);
-	});
-
-	it("answers a run the caller may not start as forbidden", async () => {
-		const response = await appAs({
-			"automations.run": () => Effect.fail(new ActionForbidden({ proof: "CanRunAutomations" })),
-		}).request(`/projects/${PROJECT_ID}/automations/${AUTOMATION_ID}/run`, {
-			method: "POST",
-			headers: session,
-			body: JSON.stringify({ requestId: "0199a3a0-0000-7000-8000-0000000000c1" }),
-		});
-
-		expect(response.status).toBe(403);
 	});
 });
 

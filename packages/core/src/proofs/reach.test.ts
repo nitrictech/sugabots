@@ -1,27 +1,42 @@
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { seedProjectChat } from "../authentication/seed.test-support.ts";
+import {
+	seedConnector,
+	seedProject,
+	seedProjectChat,
+} from "../authentication/seed.test-support.ts";
 import { projectBot, projectMember } from "../database/schema.ts";
-import { closeDatabase, onDatabase } from "../database/testing.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { Principal } from "../principal.ts";
 import { workspaceOfProject } from "../workspaces/workspace-reference.ts";
+import { proveCanJoinProject } from "./can-join-project.ts";
+import { proveCanManageChats } from "./chat-permissions.ts";
 import {
+	proveCanChangeAllowedHosts,
 	proveCanChangeChat,
 	proveCanChangeProjectMembers,
+	proveCanChangeProjectSettings,
+	proveCanDeleteProject,
+	proveCanLeaveProject,
 	proveCanManageProject,
+	proveCanReadConnectors,
+	proveCanRunAutomations,
 	proveCanTakePart,
 } from "./project-permissions.ts";
 import { named } from "./proof.ts";
 import { proveReachesBot } from "./reaches-bot.ts";
 import { proveReachesChat } from "./reaches-chat.ts";
+import { proveReachesConnector } from "./reaches-connector.ts";
 import { proveReachesProject } from "./reaches-project.ts";
 import { underWorkspaceLock } from "./workspace-lock.ts";
 import {
 	type Authenticators,
 	authenticators,
 	buildWorld,
+	everyKindOfPrincipal,
 	outcome,
+	outcomesFor,
 	principals,
 	type World,
 } from "./world.test-support.ts";
@@ -30,11 +45,13 @@ describe("reach and what it permits", () => {
 	let world: World;
 	let auth: Authenticators;
 	let as: ReturnType<typeof principals>;
+	let who: Awaited<ReturnType<typeof everyKindOfPrincipal>>;
 
 	beforeAll(async () => {
 		world = await buildWorld();
 		auth = await authenticators();
 		as = principals(auth);
+		who = await everyKindOfPrincipal(world, as);
 	});
 
 	afterAll(async () => {
@@ -128,36 +145,31 @@ describe("reach and what it permits", () => {
 
 		it("hides the project from a bot whose asker lost it, and tells a bot it can't reach one its asker reaches", async () => {
 			const { a } = world;
-			const quinnsBot = await as.botFor(a.quinn, a.pub.id, a.chat);
-			const helpersTurn = await as.botFor(a.ed, a.helper.id, a.chat);
-			expect(await reachesProject(quinnsBot, a.project)).toBe("ok");
-			expect(await reachesProject(helpersTurn, a.project)).toBe("ok");
+			const projectId = await seedProject(a.workspace, {
+				leadBotId: a.pub.id,
+				bots: [a.helper.id],
+				members: [a.ed, a.quinn],
+			});
+			const chatId = await seedProjectChat(a.workspace, projectId, a.ed);
+			const quinnsBot = await as.botFor(a.quinn, a.pub.id, chatId);
+			const helpersTurn = await as.botFor(a.ed, a.helper.id, chatId);
+			expect(await reachesProject(quinnsBot, projectId)).toBe("ok");
+			expect(await reachesProject(helpersTurn, projectId)).toBe("ok");
 
 			await onDatabase((db) =>
 				db
 					.delete(projectMember)
-					.where(and(eq(projectMember.projectId, a.project), eq(projectMember.memberId, a.quinn))),
+					.where(and(eq(projectMember.projectId, projectId), eq(projectMember.memberId, a.quinn))),
 			);
 			await onDatabase((db) =>
 				db
 					.delete(projectBot)
-					.where(and(eq(projectBot.projectId, a.project), eq(projectBot.botId, a.helper.id))),
+					.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, a.helper.id))),
 			);
 
-			expect(await reachesProject(quinnsBot, a.project)).toBe("ResourceHidden");
-			expect(await reachesProject(helpersTurn, a.project)).toBe("BotCannotReach");
-			expect(await reachesChat(helpersTurn, a.chat)).toBe("BotCannotReach");
-
-			await onDatabase((db) =>
-				db
-					.insert(projectMember)
-					.values({ workspaceId: a.workspace, projectId: a.project, memberId: a.quinn }),
-			);
-			await onDatabase((db) =>
-				db
-					.insert(projectBot)
-					.values({ workspaceId: a.workspace, projectId: a.project, botId: a.helper.id }),
-			);
+			expect(await reachesProject(quinnsBot, projectId)).toBe("ResourceHidden");
+			expect(await reachesProject(helpersTurn, projectId)).toBe("BotCannotReach");
+			expect(await reachesChat(helpersTurn, chatId)).toBe("BotCannotReach");
 		});
 
 		it("lets a Personal Assistant in member bounds reach what its member reaches", async () => {
@@ -174,7 +186,7 @@ describe("reach and what it permits", () => {
 			const { a } = world;
 			const { principal: run } = await as.run(a.workspace, a.project, a.pub.id);
 			const webhook = await as.webhook(a.workspace, a.project);
-			const { principal: sleep } = await as.computerSleep(a.workspace, a.project);
+			const sleep = who.computerSleep;
 			const compaction = await as.compaction(a.chat, a.pub.id);
 			const page = await as.page(a.chat);
 			expect(await reachesProject(run, a.project)).toBe("ok");
@@ -224,6 +236,7 @@ describe("reach and what it permits", () => {
 			expect(await changesChat(edsBot, a.chat)).toBe("ok");
 			expect(await changesChat(run, a.chat)).toBe("ok");
 			expect(await takesPart(compaction, a.chat)).toBe("ActionForbidden");
+			expect(await changesChat(compaction, a.chat)).toBe("ActionForbidden");
 		});
 
 		it("lets the owner and admins manage a project members made, and a bot's managers its default project", async () => {
@@ -276,6 +289,300 @@ describe("reach and what it permits", () => {
 		});
 	});
 
+	it("proves project chat management for the administrator and the bot's manager in its default project", async () => {
+		const { a } = world;
+		const manages = (principal: Principal, chatId: string) =>
+			outcome(
+				named(principal, chatId, (principal, chat) =>
+					proveReachesChat(principal, chat).pipe(
+						Effect.flatMap(proveCanManageChats),
+						Effect.asVoid,
+					),
+				),
+			);
+		const { admin, ed, vi, erin, pubForAdmin, pubForEd, run, page } = who;
+		expect(
+			await outcomesFor({ admin, ed, vi, erin, pubForAdmin, pubForEd, run, page }, (principal) =>
+				manages(principal, a.chat),
+			),
+		).toEqual({
+			admin: "ok",
+			ed: "ActionForbidden",
+			vi: "ActionForbidden",
+			erin: "ResourceHidden",
+			pubForAdmin: "ok",
+			pubForEd: "ActionForbidden",
+			run: "ActionForbidden",
+			page: "ResourceHidden",
+		});
+		expect(await manages(ed, a.pubChat)).toBe("ok");
+		expect(await manages(admin, a.pubChat)).toBe("ok");
+		expect(await manages(erin, a.pubChat)).toBe("ActionForbidden");
+	});
+
+	it("proves connector reads only for principals reaching the named connector's project", async () => {
+		const { a } = world;
+		const connectorId = await seedConnector(a.workspace, a.project);
+		const reads = (principal: Principal, projectId: string, target: string) =>
+			outcome(
+				named(principal, projectId, target, (principal, project, connector) =>
+					proveReachesConnector(principal, project, connector).pipe(
+						Effect.flatMap(({ reach }) => proveCanReadConnectors(reach)),
+						Effect.asVoid,
+					),
+				),
+			);
+		const {
+			admin,
+			vi,
+			erin,
+			outsider,
+			pubForEd,
+			helperInK,
+			edsAssistant,
+			run,
+			webhook,
+			computerSleep,
+			compaction,
+			page,
+		} = who;
+		expect(
+			await outcomesFor(
+				{
+					admin,
+					vi,
+					erin,
+					outsider,
+					pubForEd,
+					helperInK,
+					edsAssistant,
+					run,
+					webhook,
+					computerSleep,
+					compaction,
+					page,
+				},
+				(principal) => reads(principal, a.project, connectorId),
+			),
+		).toEqual({
+			admin: "ok",
+			vi: "ok",
+			erin: "ResourceHidden",
+			outsider: "ResourceHidden",
+			pubForEd: "ok",
+			helperInK: "ResourceHidden",
+			edsAssistant: "ok",
+			run: "ok",
+			webhook: "ResourceHidden",
+			computerSleep: "ResourceHidden",
+			compaction: "ResourceHidden",
+			page: "ResourceHidden",
+		});
+		expect(await reads(admin, a.otherProject, connectorId)).toBe("ResourceHidden");
+		expect(await reads(admin, a.project, crypto.randomUUID())).toBe("ResourceHidden");
+	});
+
+	it("lets a workspace member join a public project or remain in a project they already reach", async () => {
+		const { a } = world;
+		const publicProject = await seedProject(a.workspace, {
+			leadBotId: a.pub.id,
+			visibility: "public",
+		});
+		const join = (principal: Principal, projectId: string) =>
+			outcome(
+				underWorkspaceLock(principal, a.workspace, (lock) =>
+					named(projectId, (project) => proveCanJoinProject(lock, project).pipe(Effect.asVoid)),
+				),
+			);
+		const { ed, erin, outsider, edsAssistant, pubForEd, run, webhook, page } = who;
+
+		expect(await join(erin, publicProject)).toBe("ok");
+		expect(await join(edsAssistant, publicProject)).toBe("ok");
+		expect(await join(outsider, publicProject)).toBe("ResourceHidden");
+		expect(await join(pubForEd, publicProject)).toBe("ResourceHidden");
+		expect(await join(erin, a.project)).toBe("ResourceHidden");
+		expect(await join(ed, a.project)).toBe("ok");
+		expect(await join(pubForEd, a.project)).toBe("ActionForbidden");
+		expect(await join(run, a.project)).toBe("ActionForbidden");
+		expect(await join(webhook, a.project)).toBe("ResourceHidden");
+		expect(await join(page, a.project)).toBe("ResourceHidden");
+		expect(await join(ed, a.pub.defaultProject)).toBe("ResourceHidden");
+	});
+
+	it("lets project members leave, including a viewer and a bot acting in member bounds", async () => {
+		const { a } = world;
+		const leave = (principal: Principal) =>
+			outcome(
+				underWorkspaceLock(principal, a.workspace, (lock) =>
+					named(a.project, (project) =>
+						proveReachesProject(lock.principal, project).pipe(
+							Effect.flatMap((reach) => proveCanLeaveProject(lock, reach)),
+							Effect.asVoid,
+						),
+					),
+				),
+			);
+		const { ed, vi, admin, erin, pubForEd, edsAssistant, run, page } = who;
+
+		expect(
+			await outcomesFor({ ed, vi, admin, erin, pubForEd, edsAssistant, run, page }, leave),
+		).toEqual({
+			ed: "ok",
+			vi: "ok",
+			admin: "ActionForbidden",
+			erin: "ResourceHidden",
+			pubForEd: "ActionForbidden",
+			edsAssistant: "ok",
+			run: "ActionForbidden",
+			page: "ResourceHidden",
+		});
+	});
+
+	it("proves who may start automation runs in a project", async () => {
+		const { a } = world;
+		const { ed, admin, vi, erin, pubForEd, helperInK, run, webhook, computerSleep, page } = who;
+		expect(
+			await outcomesFor(
+				{ ed, admin, vi, erin, pubForEd, helperInK, run, webhook, computerSleep, page },
+				(principal) =>
+					outcome(
+						named(principal, a.project, (principal, project) =>
+							proveReachesProject(principal, project).pipe(
+								Effect.flatMap(proveCanRunAutomations),
+								Effect.asVoid,
+							),
+						),
+					),
+			),
+		).toEqual({
+			ed: "ok",
+			admin: "ok",
+			vi: "ActionForbidden",
+			erin: "ResourceHidden",
+			pubForEd: "ok",
+			helperInK: "ResourceHidden",
+			run: "ActionForbidden",
+			webhook: "ResourceHidden",
+			computerSleep: "ResourceHidden",
+			page: "ResourceHidden",
+		});
+	});
+
+	it("proves who may change a project's allowed hosts", async () => {
+		const { a } = world;
+		const {
+			owner,
+			admin,
+			ed,
+			vi,
+			erin,
+			pubForAdmin,
+			adminsAssistant,
+			run,
+			webhook,
+			computerSleep,
+			page,
+		} = who;
+		expect(
+			await outcomesFor(
+				{
+					owner,
+					admin,
+					ed,
+					vi,
+					erin,
+					pubForAdmin,
+					adminsAssistant,
+					run,
+					webhook,
+					computerSleep,
+					page,
+				},
+				(principal) =>
+					outcome(
+						named(principal, a.project, (principal, project) =>
+							proveReachesProject(principal, project).pipe(
+								Effect.flatMap(proveCanChangeAllowedHosts),
+								Effect.asVoid,
+							),
+						),
+					),
+			),
+		).toEqual({
+			owner: "ok",
+			admin: "ok",
+			ed: "ActionForbidden",
+			vi: "ActionForbidden",
+			erin: "ResourceHidden",
+			pubForAdmin: "ActionForbidden",
+			adminsAssistant: "ok",
+			run: "ActionForbidden",
+			webhook: "ResourceHidden",
+			computerSleep: "ResourceHidden",
+			page: "ResourceHidden",
+		});
+	});
+
+	it("proves who may change settings or delete a project under its workspace lock", async () => {
+		const { a } = world;
+		const {
+			owner,
+			admin,
+			ed,
+			vi,
+			erin,
+			outsider,
+			pubForAdmin,
+			adminsAssistant,
+			edsAssistant,
+			run,
+			webhook,
+			computerSleep,
+			compaction,
+			page,
+		} = who;
+		const cases = [
+			["owner", owner, "ok"],
+			["admin", admin, "ok"],
+			["editor", ed, "ActionForbidden"],
+			["viewer", vi, "ActionForbidden"],
+			["outside project", erin, "ResourceHidden"],
+			["outside workspace", outsider, "ResourceHidden"],
+			["admin's bot in chat bounds", pubForAdmin, "ActionForbidden"],
+			["admin's Personal Assistant", adminsAssistant, "ok"],
+			["editor's Personal Assistant", edsAssistant, "ActionForbidden"],
+			["run", run, "ActionForbidden"],
+			["webhook", webhook, "ResourceHidden"],
+			["computer sleep", computerSleep, "ResourceHidden"],
+			["compaction", compaction, "ResourceHidden"],
+			["page address", page, "ResourceHidden"],
+		] as const;
+		for (const [caseName, principal, expected] of cases) {
+			const change = outcome(
+				underWorkspaceLock(principal, a.workspace, (lock) =>
+					named(a.project, (project) =>
+						proveReachesProject(lock.principal, project).pipe(
+							Effect.flatMap((reach) => proveCanChangeProjectSettings(lock, reach)),
+							Effect.asVoid,
+						),
+					),
+				),
+			);
+			expect(await change, `change settings: ${caseName}`).toBe(expected);
+			const remove = outcome(
+				underWorkspaceLock(principal, a.workspace, (lock) =>
+					named(a.project, (project) =>
+						proveReachesProject(lock.principal, project).pipe(
+							Effect.flatMap((reach) => proveCanDeleteProject(lock, reach)),
+							Effect.asVoid,
+						),
+					),
+				),
+			);
+			expect(await remove, `delete: ${caseName}`).toBe(expected);
+		}
+	});
+
 	describe("ReachesBot", () => {
 		it("lets members reach a public bot, their own personal bot and their own Personal Assistant", async () => {
 			const { a, b } = world;
@@ -312,19 +619,17 @@ describe("reach and what it permits", () => {
 	it("carries the workspace it found, so services take it from the proof", async () => {
 		const { a } = world;
 		const principal = await as.member(a.ed);
-		const found = await outcome(
-			named(principal, a.chat, (p, c) =>
-				proveReachesChat(p, c).pipe(
-					Effect.flatMap((reach) =>
-						Effect.sync(() => {
-							expect(reach.workspace).toBe(a.workspace);
-							expect(reach.project.id).toBe(a.project);
-							expect(reach.as.kind).toBe("member");
-						}),
-					),
+		const found = await runOnPostgres(
+			named(principal, a.chat, (principal, chat) =>
+				proveReachesChat(principal, chat).pipe(
+					Effect.map((reach) => ({
+						workspace: reach.workspace,
+						projectId: reach.project.id,
+						actsAs: reach.as.kind,
+					})),
 				),
 			),
 		);
-		expect(found).toBe("ok");
+		expect(found).toEqual({ workspace: a.workspace, projectId: a.project, actsAs: "member" });
 	});
 });

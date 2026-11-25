@@ -1,7 +1,7 @@
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { NoModelChosen } from "@sugabots/contracts/errors/workspace";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedBot, seedMember, seedWorkspace } from "../../authentication/seed.test-support.ts";
 import {
 	bot,
@@ -167,13 +167,22 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 			).then(([row]) => row?.at);
 		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(ResourceHidden);
 		expect(await setUpAt()).toBeNull();
+		// Signed in on the real clock: a session made on the frozen one has long expired in the database.
+		const admin = await signIn(adminId);
+		const completeAdmin = () =>
+			callOperation(admin, "workspaceSetup.complete", { workspaceId, botId: customBotId });
+		const firstCompletion = new Date("2026-09-15T12:00:00Z");
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			vi.setSystemTime(firstCompletion);
+			await completeAdmin();
+			vi.setSystemTime(new Date("2026-09-15T13:00:00Z"));
+			await completeAdmin();
+		} finally {
+			vi.useRealTimers();
+		}
 
-		await complete(adminId, customBotId);
-		const first = await setUpAt();
-		await complete(adminId, customBotId);
-
-		expect(first).toBeInstanceOf(Date);
-		expect(await setUpAt()).toEqual(first);
+		expect(await setUpAt()).toEqual(firstCompletion);
 	});
 
 	it("refuses editors and viewers before looking up the bot", async () => {

@@ -1,14 +1,14 @@
 import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { revenue } from "@/shell/story-fixtures.ts";
+import { revenue } from "@/shell/story-fixtures.test-support.ts";
 import {
 	appHandlers,
 	StoryApp,
 	storyMember,
 	storyProjects,
 	storyWorkspace,
-} from "../story-app.tsx";
+} from "../story-app.test-support.tsx";
 
 /*
  * A project's settings, a page of its own beside its chats, with its members

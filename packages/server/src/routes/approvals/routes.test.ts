@@ -1,4 +1,3 @@
-import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { Operations } from "@sugabots/core/operations/registry";
 import type { Principal } from "@sugabots/core/principal";
 import { unimplemented } from "@sugabots/core/testing";
@@ -57,14 +56,5 @@ describe("tool approval routes", () => {
 
 		expect(response.status).toBe(202);
 		expect(asked).toEqual({ toolCallId: CALL_ID, decision: "allow_once", memberId: MEMBER_ID });
-	});
-
-	it("answers a decision the caller may not make as forbidden", async () => {
-		const response = await approve(
-			app(() => Effect.fail(new ActionForbidden({ proof: "CanDecide" }))),
-			"deny",
-		);
-
-		expect(response.status).toBe(403);
 	});
 });

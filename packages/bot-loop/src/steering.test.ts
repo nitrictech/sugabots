@@ -9,25 +9,15 @@ import {
 	seedProjectChat,
 	seedWorkspace,
 } from "@sugabots/core/authentication/seed.test-support";
-import { SystemWorkAuthentication } from "@sugabots/core/authentication/system-work";
 import { AutomationRunner } from "@sugabots/core/chats/automations/automation-runner";
 import { startRunning } from "@sugabots/core/chats/automations/testing";
-import type { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
 import { CALL_TOOL } from "@sugabots/core/chats/tools/tool-search/tool";
 import { releaseTurn, runningTurns, waitingTurns } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
-import { EventStore } from "@sugabots/core/database/events/store";
-import {
-	bot,
-	connector,
-	membership,
-	message,
-	projectBot,
-	toolCall,
-	turn,
-} from "@sugabots/core/database/schema";
+import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
+import { bot, membership, message, projectBot, turn } from "@sugabots/core/database/schema";
 import {
 	closeDatabase,
 	onDatabase,
@@ -37,11 +27,20 @@ import {
 import { asMember } from "@sugabots/core/operations/chats/testing";
 import { Models } from "@sugabots/core/providers/models/models";
 import { DisplayName } from "@sugabots/errors";
-import { tool } from "ai";
 import { and, eq } from "drizzle-orm";
-import { Context, Duration, Effect, Option, Schema } from "effect";
-import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { botLoopOnPostgres, type ScriptedStep, scriptedSteps } from "./testing.ts";
+import { Context, Effect } from "effect";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	botLoopOnPostgres,
+	callsOf,
+	controlledClock,
+	parkedCallOf,
+	type ScriptedStep,
+	scriptedSteps,
+	storedTurn,
+	toolResultFor,
+	wikiWipe,
+} from "./testing.ts";
 import type { StepPlace } from "./turn.workflow.ts";
 
 /**
@@ -92,16 +91,11 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 
 	/** `memberId` writes `content` to the bot in the chat, and the message they posted. */
 	const say = (memberId: string, content: string, inChat = chatId) =>
-		chatsAs(memberId).post({
+		chatsAs(memberId).send({
 			chatId: inChat,
-			messageId: randomUUID(),
-			content: `@${handle} ${content}`,
+			retryKey: randomUUID(),
+			message: `@${handle} ${content}`,
 		});
-
-	const storedTurn = async (turnId: string) => {
-		const [row] = await onDatabase((db) => db.select().from(turn).where(eq(turn.id, turnId)));
-		return row;
-	};
 
 	/** The messages that steered the turn `turnId`, in the order they reached it. */
 	const steersOf = async (turnId: string) =>
@@ -110,9 +104,6 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 	/** What the member `memberId` may interrupt in the chat, as the chat's view tells them. */
 	const interruptibleFor = async (memberId: string, inChat = chatId) =>
 		(await chatsAs(memberId).get(inChat)).permissions?.interruptTurns ?? [];
-
-	const callsOf = (turnId: string) =>
-		onDatabase((db) => db.select().from(toolCall).where(eq(toolCall.turnId, turnId)));
 
 	/** A model that answers as `steps` script it, after `before` runs at the start of each request. */
 	const scriptedWith = (
@@ -132,50 +123,9 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 	const readSinceOf = (request: Models.StreamRequest | undefined) =>
 		JSON.stringify(request?.continuationMessages);
 
-	/** A connector tool `wiki__wipe` that may change things, with `access`, running `execute`. */
-	const wikiWipe = (
-		access: "allow" | "ask",
-		execute: () => Promise<unknown>,
-	): ConnectorCatalog.Interface => ({
-		forTurn: () =>
-			Effect.promise(async () => {
-				// What the call may do is read live from the connector, as members set it.
-				await onDatabase((db) =>
-					db
-						.update(connector)
-						.set({ handle: "wiki", toolAccess: { wipe: access } })
-						.where(eq(connector.id, connectorId)),
-				);
-				return {
-					tools: {
-						wiki__wipe: {
-							described: { name: "wipe", readOnly: false, destructive: null },
-							tool: tool({
-								inputSchema: Schema.Struct({}).pipe(
-									Schema.toStandardSchemaV1,
-									Schema.toStandardJSONSchemaV1,
-								),
-								execute,
-							}),
-							writeOrDelete: true,
-							access,
-							connectorId,
-							handle: "wiki",
-							description: "",
-							inputSchema: { type: "object" as const },
-							connectorRevision: 1,
-							remoteToolName: "wipe",
-						},
-					},
-					unavailable: [],
-					signInExpired: [],
-					instructions: {},
-					addable: [],
-					fromProjectAndBot: false,
-					close: async () => undefined,
-				};
-			}),
-	});
+	/** The connector tool `wiki__wipe` of the bot's connector, with `access`, running `execute`. */
+	const wiki = (access: "allow" | "ask", execute: Parameters<typeof wikiWipe>[2]) =>
+		wikiWipe(connectorId, access, execute);
 
 	const wipe: ScriptedStep = {
 		text: ["Wiping."],
@@ -234,35 +184,6 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			expect(reply).toMatchObject({ status: "complete", content: "Hello. Bonjour." });
 		});
 
-		it("withdraws the approval a turn waits for when its asker writes, and reads the message next", async () => {
-			await say(sam, "Wipe the wiki.");
-			const execute = vi.fn(async () => ({ removed: true }));
-			const { model, requests } = scriptedSteps(wipe, { text: [" Left it alone."] });
-			const ran = await loop.runTurn(chatId, { model, connectorTools: wikiWipe("ask", execute) });
-			expect(ran.outcomes).toEqual([
-				{ _tag: "Waiting", approvals: [expect.any(String)], taken: true },
-			]);
-
-			await say(sam, "Actually, don't wipe it.");
-			expect(await callsOf(ran.turnId)).toMatchObject([
-				{ status: "failed", approvalStatus: "denied", decidedById: null },
-			]);
-			const principal = await ran.authentication.authenticate(ran.turnId);
-			const next = await ran.steps.step(ran.run.request, principal, {
-				turnId: ran.turnId,
-				attempt: 0,
-				step: 1,
-			});
-
-			expect(next).toEqual({ _tag: "Finished" });
-			expect(execute).not.toHaveBeenCalled();
-			expect(readSinceOf(requests[1])).toContain("don't wipe it");
-			// Told its approval was withdrawn, not that anyone denied it.
-			expect(readSinceOf(requests[1])).toContain("its approval was withdrawn");
-			expect(readSinceOf(requests[1])).not.toContain("execution-denied");
-			expect(await storedTurn(ran.turnId)).toMatchObject({ status: "done" });
-		});
-
 		it("withdraws only the approvals nobody has decided, and makes the calls already allowed", async () => {
 			await say(sam, "Wipe both wikis.");
 			const execute = vi.fn(async () => ({ removed: true }));
@@ -281,10 +202,10 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 				],
 			};
 			const { model } = scriptedSteps(twoWipes, { text: ["Wiped one."] });
-			const ran = await loop.runTurn(chatId, { model, connectorTools: wikiWipe("ask", execute) });
-			const [allowed, pending] = await callsOf(ran.turnId).then((calls) =>
-				calls.toSorted((left, right) => left.startedAt.getTime() - right.startedAt.getTime()),
-			);
+			const ran = await loop.runTurn(chatId, { model, connectorTools: wiki("ask", execute) });
+			const parked = await callsOf(ran.turnId);
+			const allowed = parked.find(({ sdkToolCallId }) => sdkToolCallId === "first");
+			const pending = parked.find(({ sdkToolCallId }) => sdkToolCallId === "second");
 			if (!allowed || !pending) throw new Error("no calls parked");
 			await chatsAs(sam).decide({ toolCallId: allowed.id, decision: "allow_once" });
 
@@ -301,7 +222,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			expect(settled.get(pending.id)).toMatchObject({ approvalStatus: "denied", status: "failed" });
 		});
 
-		it("reads a steer once, though its step is taken again after a restart", async () => {
+		it("reads a steer once, though the step that read it is taken again after a restart", async () => {
 			await say(sam, "Resolve this chat.");
 			const { model, requests } = scriptedWith(
 				async (request) => {
@@ -319,10 +240,13 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			const place = (step: number): StepPlace => ({ turnId: opened.turnId, attempt: 0, step });
 			const first = await authentication.authenticate(opened.turnId);
 			await steps.step(run.request, first, place(0));
-			await steps.step(run.request, first, place(1));
+			expect(await steps.step(run.request, first, place(1))).toEqual({ _tag: "Continue" });
 
-			// The process restarts: a new execution takes the next step.
+			// The process restarts before the workflow kept step 1's outcome: a new
+			// execution takes step 1 again, then the next.
 			const resumed = await authentication.authenticate(opened.turnId);
+			expect(await steps.step(run.request, resumed, place(1))).toEqual({ _tag: "Continue" });
+			expect(requests).toHaveLength(2);
 			expect(await steps.step(run.request, resumed, place(2))).toEqual({ _tag: "Finished" });
 
 			const times = (request: Models.StreamRequest | undefined) =>
@@ -333,7 +257,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 
 		it("streams thinking, saves it by step, and sends the signed block back after a restart", async () => {
 			await say(sam, "Resolve this chat.");
-			const events = EventBus.inProcess({ store: EventStore.inMemory() });
+			const events = EventBus.inProcess({ store: inMemoryEventStore() });
 			const publish = vi.fn(events.publish);
 			const thinkingProviderOptions = { anthropic: { signature: "signed-thinking" } };
 			const firstModel = scriptedSteps({
@@ -501,45 +425,23 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 	});
 
 	describe("a turn waiting for approval, which gives up its lane while it waits", () => {
-		/** How long a real workflow is given to park or end, which a loaded machine slows. */
-		const WORKFLOW_WAIT_MILLIS = 10_000;
-
 		/**
-		 * Runs the turn in the chat as its real workflow, which parks `wipe` for
-		 * approval and gives up its lane, then answers `answer`.
+		 * Runs the turn in the chat as its real workflow, until it has parked
+		 * `wipe` for approval and given up its lane, then answers `answer`.
 		 */
 		const parkedWorkflow = async (answer: string) => {
 			const execute = vi.fn(async () => ({ removed: true }));
 			const { model, requests } = scriptedSteps(wipe, { text: [answer] });
 			const workflow = await loop.runWorkflow(chatId, {
 				model,
-				connectorTools: wikiWipe("ask", execute),
+				connectorTools: wiki("ask", execute),
 			});
-			onTestFinished(workflow.close);
-			await vi.waitFor(
-				async () => {
-					const polled = await workflow.poll();
-					expect(Option.isSome(polled) && polled.value._tag).toBe("Suspended");
-				},
-				{ timeout: WORKFLOW_WAIT_MILLIS },
-			);
-			const [opened] = await onDatabase((db) =>
-				db.select({ id: turn.id }).from(turn).where(eq(turn.executionId, workflow.executionId)),
-			);
-			if (!opened) throw new Error("no turn opened");
-			expect(await callsOf(opened.id)).toMatchObject([{ approvalStatus: "pending" }]);
+			await workflow.suspended();
+			const { turnId, parked } = await parkedCallOf(workflow.executionId);
+			expect(parked).toMatchObject({ approvalStatus: "pending" });
 			expect(await runOnPostgres(runningTurns(chatId))).toEqual([]);
-			return { workflow, turnId: opened.id, execute, requests };
+			return { workflow, turnId, parked, execute, requests };
 		};
-
-		const completed = (workflow: { poll: () => Promise<Option.Option<{ _tag: string }>> }) =>
-			vi.waitFor(
-				async () => {
-					const polled = await workflow.poll();
-					expect(Option.isSome(polled) && polled.value._tag).toBe("Complete");
-				},
-				{ timeout: WORKFLOW_WAIT_MILLIS },
-			);
 
 		it("is steered by its asker's message, which withdraws the approval, and takes its lane back to read it", async () => {
 			await say(sam, "Wipe the wiki.");
@@ -558,13 +460,17 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 						.where(and(eq(turn.chatId, chatId), eq(turn.botId, botId))),
 				),
 			).toEqual([{ id: turnId }]);
-			await completed(workflow);
+			await workflow.completed();
 			expect(execute).not.toHaveBeenCalled();
 			expect(await callsOf(turnId)).toMatchObject([
 				{ status: "failed", approvalStatus: "denied", decidedById: null },
 			]);
 			expect(readSinceOf(requests[1])).toContain("don't wipe it");
-			expect(readSinceOf(requests[1])).toContain("its approval was withdrawn");
+			// Told its approval was withdrawn, not that anyone denied it.
+			expect(toolResultFor(requests[1], "wipe")).toEqual({
+				type: "error-text",
+				value: expect.stringContaining("its approval was withdrawn"),
+			});
 			expect(await storedTurn(turnId)).toMatchObject({ status: "done" });
 			expect(await runOnPostgres(runningTurns(chatId))).toEqual([]);
 		});
@@ -577,20 +483,20 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			if (!veeRun) throw new Error("no turn for vee");
 
 			const steer = (await say(sam, "Actually, don't wipe it.")).id;
+			await workflow.suspended();
 
 			expect(await steersOf(turnId)).toEqual([steer]);
-			await vi.waitFor(async () =>
-				expect(await runOnPostgres(waitingTurns({ chatId, botId }))).toEqual([
-					expect.objectContaining({
-						triggerMessageId: workflow.request.triggerMessageId,
-						askerId: sam,
-					}),
-				]),
-			);
+			expect(await runOnPostgres(waitingTurns({ chatId, botId }))).toEqual([
+				expect.objectContaining({
+					triggerMessageId: workflow.request.triggerMessageId,
+					askerId: sam,
+				}),
+			]);
 			expect(requests).toHaveLength(1);
 
 			await workflow.releaseLaneOf(veeRun);
-			await completed(workflow);
+			await workflow.laneGranted();
+			await workflow.completed();
 			expect(execute).not.toHaveBeenCalled();
 			expect(readSinceOf(requests[1])).toContain("don't wipe it");
 			expect(await storedTurn(turnId)).toMatchObject({ status: "done" });
@@ -598,7 +504,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 
 		it("gives another member's message a turn of its own, which runs while it waits, then queues for its lane", async () => {
 			await say(sam, "Wipe the wiki.");
-			const { workflow, turnId, execute, requests } = await parkedWorkflow("Wiped.");
+			const { workflow, turnId, parked, execute, requests } = await parkedWorkflow("Wiped.");
 
 			const theirs = (await say(vee, "What's in the wiki?")).id;
 
@@ -614,43 +520,23 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			expect(await storedTurn(turnId)).toMatchObject({ status: "waiting" });
 
 			// Allowed while vee's turn still holds the lane, the turn queues for it.
-			const [parked] = await callsOf(turnId);
-			if (!parked) throw new Error("no call parked");
 			await chatsAs(sam).decide({ toolCallId: parked.id, decision: "allow_once" });
-			await vi.waitFor(async () =>
-				expect(await runOnPostgres(waitingTurns({ chatId, botId }))).toEqual([
-					expect.objectContaining({
-						triggerMessageId: workflow.request.triggerMessageId,
-						askerId: sam,
-					}),
-				]),
-			);
+			await workflow.suspended();
+			expect(await runOnPostgres(waitingTurns({ chatId, botId }))).toEqual([
+				expect.objectContaining({
+					triggerMessageId: workflow.request.triggerMessageId,
+					askerId: sam,
+				}),
+			]);
 			expect(execute).not.toHaveBeenCalled();
 
 			await workflow.releaseLaneOf(veeRun);
-			await completed(workflow);
+			await workflow.laneGranted();
+			await workflow.completed();
 			expect(execute).toHaveBeenCalledOnce();
 			expect(requests).toHaveLength(2);
 			expect(await storedTurn(turnId)).toMatchObject({ status: "done" });
 		});
-
-		/** The parked call's approval comes due, and the scheduler's expiry of it, to run. */
-		const dueToExpire = async (turnId: string) => {
-			const [parked] = await callsOf(turnId);
-			if (!parked?.approvalId) throw new Error("No call parked");
-			const approvalId = parked.approvalId;
-			await onDatabase((db) =>
-				db
-					.update(toolCall)
-					.set({ approvalAskedAt: new Date(Date.now() - Duration.toMillis(Duration.days(8))) })
-					.where(eq(toolCall.id, parked.id)),
-			);
-			const systemWork = await runOnPostgres(
-				Effect.provide(SystemWorkAuthentication.Service, SystemWorkAuthentication.layer),
-			);
-			const principal = await runOnPostgres(systemWork.approvalExpiry(approvalId));
-			return () => loop.call(principal, "approvals.expire", { approvalId });
-		};
 
 		/** In the order `order` says, or both at once. */
 		const inOrder = async (
@@ -667,8 +553,9 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			"withdraws its approval for its asker's steer or its expiry, whichever comes first (%s)",
 			async (order) => {
 				await say(sam, "Wipe the wiki.");
-				const { workflow, turnId, execute, requests } = await parkedWorkflow("Left it alone.");
-				const expire = await dueToExpire(turnId);
+				const { workflow, turnId, parked, execute, requests } =
+					await parkedWorkflow("Left it alone.");
+				const expire = await loop.expiryOf(parked);
 				let steer: string | undefined;
 
 				await inOrder(
@@ -679,13 +566,14 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 					expire,
 				);
 
-				await completed(workflow);
+				await workflow.completed();
 				expect(execute).not.toHaveBeenCalled();
 				const [call] = await callsOf(turnId);
 				const ended = await storedTurn(turnId);
-				if (call?.error === "This approval expired before anyone decided it.") {
+				if (ended?.endRequested === "approval_expired") {
 					expect(order).not.toBe("steer first");
-					expect(ended).toMatchObject({ status: "cancelled", endRequested: "approval_expired" });
+					expect(call).toMatchObject({ status: "failed", approvalStatus: "denied" });
+					expect(ended).toMatchObject({ status: "cancelled" });
 					// Too late to steer the turn, the message gets a turn of its own.
 					expect(await steersOf(turnId)).toEqual([]);
 					expect([
@@ -719,7 +607,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 							),
 				);
 
-				await completed(workflow);
+				await workflow.completed();
 				expect(execute).not.toHaveBeenCalled();
 				expect(await callsOf(turnId)).toMatchObject([
 					{ status: "failed", approvalStatus: "denied" },
@@ -824,34 +712,34 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 
 	describe("interrupts", () => {
 		it("stops a step at once when its asker interrupts it, aborting the write it sent, which members are told to check", async () => {
-			const events = EventBus.inProcess({ store: EventStore.inMemory() });
-			// Only the signal can stop the step: its own reads of the turn are a long way off.
+			const events = EventBus.inProcess({ store: inMemoryEventStore() });
 			afterCommit = (committed) => events.publishCommitted([...committed]);
+			// Only the signal can stop the step: its own reads of the turn wait on a clock nobody moves.
+			const { clock } = await controlledClock();
 			await say(admin, "Wipe the wiki.");
 			let turnId = "";
-			let finished = false;
+			let callSignal: AbortSignal | undefined;
 			// The call never returns by itself, so only stopping the step ends it.
-			const execute = vi.fn(async () => {
+			const execute = vi.fn(async (_input: unknown, options: { abortSignal?: AbortSignal }) => {
+				callSignal = options.abortSignal;
 				await chatsAs(admin).interruptTurn({ chatId, turnId });
-				await new Promise(() => undefined);
-				finished = true;
-				return { removed: true };
+				return new Promise(() => undefined);
 			});
-			const { model, requests } = scriptedSteps(wipe, { text: ["Never asked."] });
+			const { model, requests } = scriptedSteps(wipe);
 
 			const ran = await loop.runTurn(
 				chatId,
-				{ model, events, connectorTools: wikiWipe("allow", execute) },
+				{ model, events, connectorTools: wiki("allow", execute) },
 				{
 					beforeSteps: async (opened) => {
 						turnId = opened;
 					},
-					timing: { checkEvery: Duration.minutes(10) },
+					clock,
 				},
 			);
 
 			expect(ran.outcomes).toEqual([{ _tag: "Finished" }]);
-			expect(finished).toBe(false);
+			expect(callSignal?.aborted).toBe(true);
 			expect(requests).toHaveLength(1);
 			expect(await storedTurn(ran.turnId)).toMatchObject({ status: "cancelled" });
 			const [sent] = await callsOf(ran.turnId);
@@ -860,16 +748,20 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 		});
 
 		it("stops a model request at once when interrupted, keeping what it wrote", async () => {
-			const events = EventBus.inProcess({ store: EventStore.inMemory() });
+			const events = EventBus.inProcess({ store: inMemoryEventStore() });
 			afterCommit = (committed) => events.publishCommitted([...committed]);
+			const { clock } = await controlledClock();
 			await say(sam, "Write an essay.");
 			let turnId = "";
 			const model = Models.fromStream(() =>
 				Effect.map(Effect.abortSignal, (signal) => ({
 					deltas: (async function* () {
 						yield { kind: "text" as const, text: "Once upon" };
+						const aborted = new Promise((resolve) =>
+							signal.addEventListener("abort", resolve, { once: true }),
+						);
 						await chatsAs(admin).interruptTurn({ chatId, turnId });
-						await new Promise((resolve) => signal.addEventListener("abort", resolve));
+						await aborted;
 					})(),
 					finished: Effect.never,
 				})),
@@ -882,7 +774,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 					beforeSteps: async (opened) => {
 						turnId = opened;
 					},
-					timing: { checkEvery: Duration.minutes(10) },
+					clock,
 				},
 			);
 
@@ -917,22 +809,22 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			await say(sam, "Wipe the wiki.");
 			const execute = vi.fn(async () => ({ removed: true }));
 			const { model, requests } = scriptedSteps(wipe, { text: ["Never asked."] });
-			const ran = await loop.runTurn(chatId, { model, connectorTools: wikiWipe("ask", execute) });
+			const ran = await loop.runTurn(chatId, { model, connectorTools: wiki("ask", execute) });
 
 			await chatsAs(admin).interruptTurn({ chatId, turnId: ran.turnId });
 			expect(await storedTurn(ran.turnId)).toMatchObject({ status: "cancelled" });
 			expect(await callsOf(ran.turnId)).toMatchObject([
 				{ status: "failed", approvalStatus: "denied", error: "Turn interrupted" },
 			]);
-			const principal = await ran.authentication.authenticate(ran.turnId).catch(() => undefined);
-			if (principal) {
-				const next = await ran.steps.step(ran.run.request, principal, {
+			// The workflow, told of the interrupt, resumes the turn for its next step.
+			const principal = await ran.authentication.authenticate(ran.turnId);
+			expect(
+				await ran.steps.step(ran.run.request, principal, {
 					turnId: ran.turnId,
 					attempt: 0,
 					step: 1,
-				});
-				expect(next).toEqual({ _tag: "Finished" });
-			}
+				}),
+			).toEqual({ _tag: "Finished" });
 
 			expect(execute).not.toHaveBeenCalled();
 			expect(requests).toHaveLength(1);
@@ -952,7 +844,9 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			);
 			await say(sam, "Ask around.");
 			let turnId = "";
-			// The interrupt commits during the request, which nobody tells the step of.
+			// The interrupt commits during the request, which nobody tells the step of,
+			// and the step's reads of the turn wait on a clock nobody moves.
+			const { clock } = await controlledClock();
 			const { model } = scriptedWith(
 				async () => {
 					await chatsAs(sam).interruptTurn({ chatId, turnId });
@@ -967,7 +861,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 					beforeSteps: async (opened) => {
 						turnId = opened;
 					},
-					timing: { checkEvery: Duration.minutes(10) },
+					clock,
 				},
 			);
 
@@ -998,7 +892,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			const { model } = scriptedSteps(wipe);
 			const ran = await loop.runTurn(chatId, {
 				model,
-				connectorTools: wikiWipe("ask", async () => ({})),
+				connectorTools: wiki("ask", async () => ({})),
 			});
 			const [reply] = await onDatabase((db) =>
 				db.select({ id: message.id }).from(message).where(eq(message.turnId, ran.turnId)),
@@ -1025,7 +919,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			const { model } = scriptedSteps(wipe);
 			const ran = await loop.runTurn(chatId, {
 				model,
-				connectorTools: wikiWipe("ask", async () => ({})),
+				connectorTools: wiki("ask", async () => ({})),
 			});
 
 			await expect(

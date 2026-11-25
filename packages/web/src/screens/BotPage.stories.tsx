@@ -1,9 +1,14 @@
-import type { ListedWrittenFile, Message } from "@sugabots/contracts";
+import {
+	type ListedWrittenFile,
+	type Message,
+	type StreamEvent,
+	streamEvent,
+} from "@sugabots/contracts";
 import { listedChat, type TestConnector, testMember } from "@sugabots/contracts/testing";
 import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, revenue, storyBots } from "@/shell/story-fixtures.ts";
+import { growthDesk, revenue, storyBots } from "@/shell/story-fixtures.test-support.ts";
 import {
 	appHandlers,
 	chatPath,
@@ -15,7 +20,7 @@ import {
 	storyProjectChatDetails,
 	storyProjectChatFor,
 	storyWorkspace,
-} from "../story-app.tsx";
+} from "../story-app.test-support.tsx";
 
 /*
  * A bot's chat as the app shows it: the sidebar with the projects' chats and bots beside it, the
@@ -74,6 +79,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
+		localStorage.clear();
 		msw.use(...appHandlers({ messages: { [growthDesk.id]: saidInChat } }));
 	},
 	render: () => <StoryApp path={chatPath(growthDesk)} />,
@@ -88,6 +94,203 @@ export const Chat = meta.story({
 			await canvas.findByRole("heading", { name: `Working with ${growthDesk.name}`, level: 1 }),
 		).toBeVisible();
 		await expect(canvas.getByRole("button", { name: "Resolve" })).toBeVisible();
+	},
+});
+
+const chatWithHistory = Array.from({ length: 24 }, (_, index) =>
+	said(
+		(index + 32).toString(16),
+		index % 2 === 0 ? "you" : "bot",
+		`Outbound review ${index + 1}: check the account before drafting a reply.`,
+		new Date(Date.UTC(2026, 8, 18, 6, index)).toISOString(),
+	),
+);
+
+const historyHandlers = () => appHandlers({ messages: { [growthDesk.id]: chatWithHistory } });
+
+async function chatViewport(canvas: { findByRole: typeof screen.findByRole }) {
+	const log = await canvas.findByRole("log", { name: "Chat messages" });
+	const viewport = log.parentElement;
+	if (!viewport) throw new Error("Chat messages have no scroll viewport");
+	await waitFor(() => expect(viewport.scrollHeight).toBeGreaterThan(viewport.clientHeight));
+	return viewport;
+}
+
+const distanceFromLatest = (viewport: HTMLElement) =>
+	viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+
+async function scrollBack(viewport: HTMLElement) {
+	const scrolled = new Promise<void>((resolve) =>
+		viewport.addEventListener("scroll", () => resolve(), { once: true }),
+	);
+	viewport.scrollTop = 0;
+	await scrolled;
+}
+
+const thinking = [
+	"Compare the prices each account already has.",
+	"Check when the existing quotes expire.",
+	"Keep the new prices in the same currency.",
+	"Review any trial terms before drafting the replies.",
+].join("\n\n");
+
+/** Expanding a reply at the latest message keeps its newly revealed thinking in view. */
+export const FollowsExpandedThinking = meta.story({
+	beforeEach({ msw }) {
+		const reply = {
+			...said("fd", "bot", "Both quotes are ready.", "2026-09-18T06:24:00.000Z"),
+			thinking: [{ step: 0, text: thinking }],
+		};
+		msw.use(...appHandlers({ messages: { [growthDesk.id]: [...chatWithHistory, reply] } }));
+	},
+	play: async ({ canvas, userEvent }) => {
+		const viewport = await chatViewport(canvas);
+		viewport.style.overflowAnchor = "none";
+		await waitFor(() => expect(distanceFromLatest(viewport)).toBeLessThan(2));
+		const heightWithThinkingClosed = viewport.scrollHeight;
+
+		await userEvent.click(canvas.getByText("Thinking"));
+
+		await expect(canvas.getByText(thinking, { normalizer: (text) => text })).toBeVisible();
+		await waitFor(() => {
+			expect(viewport.scrollHeight).toBeGreaterThan(heightWithThinkingClosed);
+			expect(distanceFromLatest(viewport)).toBeLessThan(2);
+		});
+	},
+});
+
+/** A reader at the foot of the chat keeps seeing the bot's reply as it arrives. */
+export const FollowsTheReply = meta.story({
+	loaders: [
+		() => {
+			const connected = Promise.withResolvers<ReadableStreamDefaultController<Uint8Array>>();
+			const stream = new ReadableStream<Uint8Array>({ start: connected.resolve });
+			const encoder = new TextEncoder();
+			return {
+				stream,
+				async emit(event: StreamEvent) {
+					const controller = await connected.promise;
+					controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+				},
+			};
+		},
+	],
+	beforeEach({ msw, loaded }) {
+		msw.use(
+			http.get(
+				`${API}/chats/:chatId/events`,
+				() => new HttpResponse(loaded.stream, { headers: { "content-type": "text/event-stream" } }),
+			),
+			...historyHandlers(),
+		);
+	},
+	play: async ({ canvas, loaded }) => {
+		const viewport = await chatViewport(canvas);
+		await waitFor(() => expect(distanceFromLatest(viewport)).toBeLessThan(2));
+		const writing = {
+			...said("fe", "bot", "Checking the Northwind accounts.", "2026-09-18T06:25:00.000Z"),
+			status: "writing" as const,
+		};
+		const beforeWriting = viewport.scrollTop;
+		await loaded.emit(streamEvent("message.created", { chatId: writing.chatId, message: writing }));
+		await canvas.findByRole("status", { name: `${growthDesk.name} is typing` });
+		await waitFor(() => {
+			expect(viewport.scrollTop).toBeGreaterThan(beforeWriting);
+			expect(distanceFromLatest(viewport)).toBeLessThan(2);
+		});
+
+		const content = [
+			"Both Northwind accounts are ready to contact.",
+			"Start with the team that already asked for a quote.",
+			"Send the pricing comparison in a separate note.",
+			"Ask whether either team needs a trial workspace.",
+		].join("\n\n");
+		const beforeCompletion = viewport.scrollTop;
+		await loaded.emit(
+			streamEvent("message.completed", {
+				chatId: writing.chatId,
+				messageId: writing.id,
+				content,
+				status: "complete",
+				finishedAt: "2026-09-18T06:26:00.000Z",
+			}),
+		);
+		await canvas.findByText("Ask whether either team needs a trial workspace.");
+		await waitFor(() => {
+			expect(viewport.scrollTop).toBeGreaterThan(beforeCompletion);
+			expect(distanceFromLatest(viewport)).toBeLessThan(2);
+		});
+	},
+});
+
+/** A reader keeps their place in chat history when a phone’s keyboard opens below it. */
+export const FollowsWhenTheViewportShrinks = meta.story({
+	globals: { theme: "light", viewport: { value: "iphone12", isRotated: false } },
+	beforeEach({ msw }) {
+		msw.use(...historyHandlers());
+	},
+	render: () => (
+		<div data-testid="phone-frame">
+			<StoryApp path={chatPath(growthDesk)} />
+		</div>
+	),
+	play: async ({ canvas }) => {
+		const viewport = await chatViewport(canvas);
+		await waitFor(() => expect(distanceFromLatest(viewport)).toBeLessThan(2));
+		const fullHeight = viewport.clientHeight;
+		viewport.style.overflowAnchor = "none";
+		await scrollBack(viewport);
+		const distanceBeforeResize = distanceFromLatest(viewport);
+		await expect(distanceBeforeResize).toBeGreaterThan(fullHeight);
+
+		canvas.getByTestId("phone-frame").style.setProperty("--visible-height", "340px");
+
+		await waitFor(() => {
+			expect(viewport.clientHeight).toBeLessThan(fullHeight);
+			expect(distanceFromLatest(viewport)).toBeCloseTo(distanceBeforeResize, 0);
+		});
+	},
+});
+
+/** Sending while reading older messages brings the new message into view before and after the API answers. */
+export const SendingReturnsToLatest = meta.story({
+	loaders: [() => ({ sendResponse: Promise.withResolvers<void>() })],
+	beforeEach({ msw, loaded }) {
+		const messages = [...chatWithHistory];
+		msw.use(
+			http.post(`${API}/chats/:chatId/messages`, async ({ request }) => {
+				const sent = (await request.json()) as { retryKey: string; message: string };
+				const message = {
+					...said("ff", "you", sent.message, "2026-09-18T06:30:00.000Z"),
+					retryKey: sent.retryKey,
+				};
+				await loaded.sendResponse.promise;
+				messages.push(message);
+				return HttpResponse.json(message, { status: 201 });
+			}),
+			...appHandlers({ messages: { [growthDesk.id]: messages } }),
+		);
+	},
+	play: async ({ canvas, loaded, userEvent }) => {
+		const viewport = await chatViewport(canvas);
+		await waitFor(() => expect(distanceFromLatest(viewport)).toBeLessThan(2));
+		viewport.style.overflowAnchor = "none";
+		const composer = canvas.getByRole("textbox", { name: `Message ${growthDesk.name}` });
+		await userEvent.type(composer, "Please send the draft tomorrow.");
+		await scrollBack(viewport);
+		await expect(distanceFromLatest(viewport)).toBeGreaterThan(viewport.clientHeight);
+
+		try {
+			await userEvent.click(canvas.getByRole("button", { name: "Send message" }));
+			await canvas.findByText("Please send the draft tomorrow.");
+			await waitFor(() => expect(distanceFromLatest(viewport)).toBeLessThan(2));
+
+			await scrollBack(viewport);
+			await expect(distanceFromLatest(viewport)).toBeGreaterThan(viewport.clientHeight);
+		} finally {
+			loaded.sendResponse.resolve();
+		}
+		await waitFor(() => expect(distanceFromLatest(viewport)).toBeLessThan(2));
 	},
 });
 
@@ -577,11 +780,15 @@ export const ReplyToAMessage = meta.story({
 		msw.use(
 			...appHandlers({ messages: { [growthDesk.id]: chat } }),
 			http.post(`${API}/chats/:chatId/messages`, async ({ request }) => {
-				const sent = (await request.json()) as { id: string; message: string; replyTo?: string };
+				const sent = (await request.json()) as {
+					retryKey: string;
+					message: string;
+					replyTo?: string;
+				};
 				const quoted = saidInChat.find((message) => message.id === sent.replyTo);
 				const reply: Message = {
 					...said("10", "you", sent.message, "2026-09-18T06:08:00.000Z"),
-					id: sent.id,
+					retryKey: sent.retryKey,
 					...(quoted && {
 						replyTo: { id: quoted.id, author: quoted.author, preview: quoted.content },
 					}),

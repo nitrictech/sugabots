@@ -15,6 +15,7 @@ import {
 import { userText } from "@sugabots/errors";
 import { Context, Effect, Layer } from "effect";
 import { serviceOperations } from "../../database/database.ts";
+import type { ReachesSearchProvider } from "../../proofs/reaches-search-provider.ts";
 import type { CanManageWorkspace, CanReadWorkspace } from "../../proofs/workspace-permissions.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { Egress } from "../network/egress.ts";
@@ -44,18 +45,18 @@ export interface Interface {
 		provider: NewSearchProvider,
 	) => Effect.Effect<SearchProvider, UrlNotAllowed | SearchProviderApiKeyRequired>;
 	readonly update: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
+		reach: ReachesSearchProvider<P, W>,
 		changes: SearchProviderUpdate,
 	) => Effect.Effect<
 		SearchProvider,
 		SearchProviderNotFound | UrlNotAllowed | SearchProviderApiKeyRequired
 	>;
 	readonly remove: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
+		reach: ReachesSearchProvider<P, W>,
 	) => Effect.Effect<void, SearchProviderNotFound>;
 	/** Sends a query, and records what came back against the configuration that sent it. */
 	readonly test: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
+		reach: ReachesSearchProvider<P, W>,
 	) => Effect.Effect<SearchProviderTestResult, SearchProviderNotFound>;
 }
 
@@ -69,13 +70,6 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("SearchProviders");
 	const providers = yield* SearchProviderStore.Service;
 	const egress = yield* Egress.Service;
-
-	const requireProvider = (workspaceId: string) =>
-		Effect.filterOrFail(
-			searchProviderOf(workspaceId),
-			(provider) => provider !== undefined,
-			() => new SearchProviderNotFound(),
-		);
 
 	return Service.of({
 		get: (canManage) => operation("get", searchProviderOf(canManage.inWorkspace.workspace.value)),
@@ -105,14 +99,14 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		update: (canManage, changes) =>
+		update: (reach, changes) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
 					if (changes.baseUrl) {
 						yield* requireAllowedUrl(egress, changes.baseUrl);
 					}
-					const updated = yield* providers.update(canManage.inWorkspace.workspace.value, changes);
+					const updated = yield* providers.update(reach.workspace.value, reach.providerId, changes);
 					if (!updated) {
 						return yield* new SearchProviderNotFound();
 					}
@@ -120,23 +114,22 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		remove: (canManage) =>
+		remove: (reach) =>
 			operation(
 				"remove",
 				Effect.gen(function* () {
-					if (!(yield* providers.remove(canManage.inWorkspace.workspace.value))) {
+					if (!(yield* providers.remove(reach.workspace.value, reach.providerId))) {
 						return yield* new SearchProviderNotFound();
 					}
 				}),
 			),
 
-		test: (canManage) =>
+		test: (reach) =>
 			operation(
 				"test",
 				Effect.gen(function* () {
-					const workspaceId = canManage.inWorkspace.workspace.value;
-					yield* requireProvider(workspaceId);
-					const access = yield* providers.access(workspaceId);
+					const workspaceId = reach.workspace.value;
+					const access = yield* providers.access(workspaceId, reach.providerId);
 					if (!access) {
 						return {
 							reachable: false,
@@ -154,7 +147,12 @@ export const make = Effect.gen(function* () {
 							),
 						),
 					);
-					yield* providers.recordTest(workspaceId, access.configurationUpdatedAt, tested.error);
+					yield* providers.recordTest(
+						workspaceId,
+						reach.providerId,
+						access.configurationUpdatedAt,
+						tested.error,
+					);
 					return tested;
 				}),
 			),

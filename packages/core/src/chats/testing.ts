@@ -39,6 +39,21 @@ export const lanesForTests = Lanes.make(definitions).pipe(
 	Effect.provideService(WorkflowEngine.WorkflowEngine, engineForTests),
 );
 
+/**
+ * The `TurnSignals` the chat services signal turns' workflows with when a
+ * case gives none, on the test engine, for a case that gives its own but
+ * signals turns it runs no workflow for as these would.
+ */
+export const standInTurnSignals: Turns.TurnSignals.Interface = Effect.runSync(
+	Effect.service(Turns.TurnSignals.Service).pipe(
+		Effect.provide(
+			turnSignalsForTests.pipe(
+				Layer.provide(Layer.succeed(WorkflowEngine.WorkflowEngine, engineForTests)),
+			),
+		),
+	),
+);
+
 /** The test engine and lanes over it, as the services that start and signal workflows need them. */
 const workflowsForTests = Layer.merge(
 	Layer.effect(Lanes.Service, lanesForTests),

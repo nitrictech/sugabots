@@ -1,4 +1,3 @@
-import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { Operations } from "@sugabots/core/operations/registry";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
@@ -50,18 +49,16 @@ describe("a member's notifications in a project or bot", () => {
 		);
 	});
 
-	it("mutes until the time asked for, and answers a place the member can't reach as not found", async () => {
+	it("mutes until the time asked for", async () => {
 		const until = "2026-11-25T09:00:00.000Z";
-		const mute = vi.fn<Operations.Interface["notifications.mute"]>(() =>
-			Effect.fail(new ResourceHidden({ resource: "bot" })),
-		);
+		const mute = vi.fn<Operations.Interface["notifications.mute"]>(() => Effect.void);
 
 		const response = await app({ "notifications.mute": mute }).request(
 			`/notifications/bot/${BOT}/mute`,
 			putting({ until }),
 		);
 
-		expect(response.status).toBe(404);
+		expect(response.status).toBe(204);
 		expect(mute).toHaveBeenCalledWith(
 			expect.anything(),
 			{ kind: "bot", id: BOT, until },

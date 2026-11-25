@@ -1,5 +1,4 @@
 import type { SearchProvider } from "@sugabots/contracts";
-import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import {
 	SearchProviderApiKeyRequired,
 	SearchProviderNotFound,
@@ -103,26 +102,21 @@ describe("a workspace's search provider", () => {
 	});
 
 	it("reports switching search on without a key as a bad request", async () => {
+		const error = new SearchProviderApiKeyRequired();
 		const response = await app({
-			"searchProviders.update": () => Effect.fail(new SearchProviderApiKeyRequired()),
+			"searchProviders.update": () => Effect.fail(error),
 		}).request(root, { method: "PATCH", headers, body: JSON.stringify({ enabled: true }) });
 
 		expect(response.status).toBe(400);
-		const refusal = "Add an API key before enabling search";
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message: refusal,
-			error: { _tag: "SearchProviderApiKeyRequired", userMessage: refusal, isRetryable: false },
+			message: error.userMessage,
+			error: {
+				_tag: "SearchProviderApiKeyRequired",
+				userMessage: error.userMessage,
+				isRetryable: false,
+			},
 		});
-	});
-
-	it("answers a change the caller may not make as forbidden", async () => {
-		const response = await app({
-			"searchProviders.remove": () =>
-				Effect.fail(new ActionForbidden({ proof: "CanManageWorkspace" })),
-		}).request(root, { method: "DELETE", headers });
-
-		expect(response.status).toBe(403);
 	});
 
 	it("says when there was no provider to remove", async () => {

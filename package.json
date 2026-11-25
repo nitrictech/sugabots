@@ -23,7 +23,7 @@
 	"scripts": {
 		"prepare": "effect-tsgo patch --typescript --no-oxlint",
 		"check": "bun run lint && bun run typecheck && bun run test",
-		"lint": "biome ci . && node lint/check-glossary.ts && node lint/check-package-boundaries.ts && node lint/check-service-tiers.ts",
+		"lint": "biome ci . && node lint/check-glossary.ts && node lint/check-package-boundaries.ts && node lint/check-proof-boundaries.ts && node lint/check-service-tiers.ts && node lint/check-type-mistakes.ts",
 		"glossary:report": "node lint/check-glossary.ts --report",
 		"format": "biome check --write .",
 		"typecheck": "tsc --noEmit && bun run --filter '*' typecheck",

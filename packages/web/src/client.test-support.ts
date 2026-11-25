@@ -7,7 +7,7 @@ import { vi } from "vitest";
  * Its own module, importing nothing of the app's, because a test file mocks
  * `@/api.ts` with it — and anything this reached for would be pulled in
  * *through* that mock, back into the module graph it is standing outside of.
- * The fixtures and the mounting live in `test-api.tsx`, which is free to
+ * The fixtures and the mounting live in `api.test-support.tsx`, which is free to
  * import the app because nothing mocks it.
  *
  * The shape mirrors the SDK's generated client: one function per endpoint,

@@ -23,7 +23,7 @@ export const create = defineOperation(
 			const { workspace: reference, leadBotId, ...details } = input;
 			const workspaceId = yield* workspaceIdOf(reference);
 			return yield* underWorkspaceLock(principal, workspaceId, (lock) =>
-				named(leadBotId, call, (leadBot, call) =>
+				named(leadBotId, call, input, (leadBot, call, approvedInput) =>
 					Effect.gen(function* () {
 						const canCreate = yield* proveCanCreateProjects(
 							yield* proveInWorkspace(lock.principal, lock.workspace),
@@ -34,7 +34,9 @@ export const create = defineOperation(
 							lock.principal,
 							call,
 							approvalRule("projects.create"),
-							input,
+							approvedInput,
+							lock.workspace,
+							leadBot,
 						);
 						return yield* projects.create(lock, canCreate, lead, details, approved);
 					}),

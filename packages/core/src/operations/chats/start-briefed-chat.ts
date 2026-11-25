@@ -15,18 +15,24 @@ export const startBriefedChat = defineOperation(
 			if (principal._tag !== "BotForAsker") return yield* new ResourceHidden({ resource: "bot" });
 			const chats = yield* Chats.Service;
 			const recipient = yield* briefRecipient(principal, input.with);
-			return yield* named(principal, recipient.id, call, (principal, bot, call) =>
-				Effect.gen(function* () {
-					const mayBrief = yield* proveMayBrief(principal, bot);
-					if (recipient.model === null) return yield* new BotHasNoModel();
-					const approved = yield* proveApproved(
-						principal,
-						call,
-						approvalRule("chats.startBriefedChat"),
-						input,
-					);
-					return { chat: yield* chats.startBriefedChat(mayBrief, input, approved) };
-				}),
+			return yield* named(
+				principal,
+				recipient.id,
+				call,
+				input,
+				(principal, bot, call, approvedInput) =>
+					Effect.gen(function* () {
+						const mayBrief = yield* proveMayBrief(principal, bot);
+						if (recipient.model === null) return yield* new BotHasNoModel();
+						const approved = yield* proveApproved(
+							principal,
+							call,
+							approvalRule("chats.startBriefedChat"),
+							approvedInput,
+							bot,
+						);
+						return { chat: yield* chats.startBriefedChat(mayBrief, input, approved) };
+					}),
 			);
 		}),
 );

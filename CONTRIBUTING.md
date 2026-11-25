@@ -232,6 +232,7 @@ Commits & PR titles must use `conventional commits` format (i.e. `type(optional 
 
 Storybook is the catalogue of the app's controls, product components, and
 views. Stories live beside the production components in `packages/web/src`.
+Keep story-only support beside the stories in `*.test-support.ts` or `*.test-support.tsx` files.
 
 ### Run Storybook
 

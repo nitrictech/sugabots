@@ -34,10 +34,10 @@ interface ToolFailedResult {
 }
 
 /** What members, and the model, are told of a tool that threw. */
-const TOOL_THREW = userText`The tool failed before it finished.`;
-const READ_INTERRUPTED = userText`The tool stopped before it finished.`;
+export const TOOL_THREW = userText`The tool failed before it finished.`;
+export const READ_INTERRUPTED = userText`The tool stopped before it finished.`;
 
-const RESULT_NOT_GIVEN = userText`The tool finished, but its result could not be given to you.`;
+export const RESULT_NOT_GIVEN = userText`The tool finished, but its result could not be given to you.`;
 
 async function recordedResult(
 	call: Exclude<CallRecord, { _tag: "Send" }>,

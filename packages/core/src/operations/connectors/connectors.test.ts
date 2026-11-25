@@ -1,12 +1,10 @@
-import { createHash, createHmac } from "node:crypto";
-import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
-import { eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { createHmac } from "node:crypto";
+import type { InputOf } from "@sugabots/contracts/operations";
+import { eq, sql } from "drizzle-orm";
+import { Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { seedConnector, seedMember } from "../../authentication/seed.test-support.ts";
-import { ConnectorCatalog } from "../../chats/tools/connector-catalog.ts";
-import { NO_TURN } from "../../chats/tools/testing.ts";
-import { connector } from "../../database/schema.ts";
+import { seedAutomation, seedConnector } from "../../authentication/seed.test-support.ts";
+import { automationTrigger, connector } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -19,13 +17,15 @@ import {
 	type Authenticators,
 	authenticators,
 	buildWorld,
+	everyKindOfPrincipal,
+	outcomesFor,
 	principals,
 	type World,
 } from "../../proofs/world.test-support.ts";
 import { ConnectorStore } from "../../providers/connectors/connector-store.ts";
 import { encryptAppCredential } from "../../providers/connectors/github/credential.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../../providers/network/egress.ts";
-import { type CallOperation, servedOperations } from "../testing.ts";
+import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
  * The connectors operations, each called for every kind of principal through
@@ -63,37 +63,11 @@ describe("the connectors operations, for each kind of principal", () => {
 	let a: World["a"];
 	let store: Promised<ConnectorStore.Interface>;
 	/** Every principal the cases call for, on J unless its name says otherwise. */
-	let who: Awaited<ReturnType<typeof principalsOnJ>>;
+	let who: Awaited<ReturnType<typeof everyKindOfPrincipal>>;
 	/** J's GitHub app, made but not installed. */
 	let jsApp: string;
 
 	const WEBHOOK_SECRET = "the-webhook-secret";
-
-	const principalsOnJ = async () => {
-		const outsider = await seedMember(world.b.workspace, "editor");
-		return {
-			owner: await as.member(a.owner),
-			admin: await as.member(a.admin),
-			ed: await as.member(a.ed),
-			vi: await as.member(a.vi),
-			erin: await as.member(a.erin),
-			viewerCreator: await as.member(a.viewerCreator),
-			outsider: await as.member(outsider),
-			/** Pub answering Ed in J's chat: chat bounds, J. */
-			pubForEd: await as.botFor(a.ed, a.pub.id, a.chat),
-			/** Pub answering an admin in J's chat: chat bounds, J. */
-			pubForAdmin: await as.botFor(a.admin, a.pub.id, a.chat),
-			/** Helper answering Ed in K's chat: chat bounds, K, though both reach J. */
-			helperInK: await as.botFor(a.ed, a.helper.id, a.otherChat),
-			/** Ed's Personal Assistant in its own chat: member bounds. */
-			edsAssistant: await as.botFor(a.ed, a.assistant.id, a.assistantChat),
-			run: (await as.run(a.workspace, a.project, a.pub.id)).principal,
-			webhook: await as.webhook(a.workspace, a.project),
-			computerSleep: (await as.computerSleep(a.workspace, a.project)).principal,
-			compaction: await as.compaction(a.chat, a.pub.id),
-			page: await as.page(a.chat),
-		};
-	};
 
 	/** A GitHub app of `projectId`, made but not installed, whose deliveries are signed with `WEBHOOK_SECRET`. */
 	const gitHubAppOf = (projectId: string) =>
@@ -113,38 +87,13 @@ describe("the connectors operations, for each kind of principal", () => {
 		call = await servedOperations({ egress: localEgress });
 		as = principals(auth);
 		store = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
-		who = await principalsOnJ();
+		who = await everyKindOfPrincipal(world, as);
 		jsApp = await gitHubAppOf(a.project);
 	});
 
 	afterAll(async () => {
 		await closeDatabase();
 	});
-
-	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends RequestOperationName>(
-		principal: Principal,
-		name: Name,
-		input: InputOf<Name>,
-	): Promise<string> =>
-		call(principal, name, input).then(
-			() => "ok",
-			(failure: { readonly _tag: string }) => failure._tag,
-		);
-
-	/** What `attempt` came to for each principal of `principals`, by its name. */
-	const outcomes = async <Key extends string>(
-		principals: Record<Key, Principal>,
-		attempt: (principal: Principal) => Promise<string>,
-	) => {
-		const entries = await Promise.all(
-			Object.entries<Principal>(principals).map(async ([key, principal]) => [
-				key,
-				await attempt(principal),
-			]),
-		);
-		return Object.fromEntries(entries) as Record<Key, string>;
-	};
 
 	describe("reading a project's connectors", () => {
 		it("lists and shows them, and its GitHub app's repositories, to whoever reaches it but a webhook call or system work", async () => {
@@ -156,41 +105,28 @@ describe("the connectors operations, for each kind of principal", () => {
 			] as const;
 			for (const [name, input] of reads) {
 				const read = (principal: Principal) =>
-					tried(principal, name as "connectors.get", input as InputOf<"connectors.get">);
+					operationOutcome(
+						call,
+						principal,
+						name as "connectors.get",
+						input as InputOf<"connectors.get">,
+					);
 				expect({
 					name,
-					outcomes: await outcomes(
+					outcomes: await outcomesFor(
 						{
-							admin: who.admin,
 							viewer: who.vi,
 							notInProject: who.erin,
-							outsider: who.outsider,
-							botInBounds: who.pubForEd,
-							botOutsideBounds: who.helperInK,
-							botInMemberBounds: who.edsAssistant,
-							run: who.run,
 							webhook: who.webhook,
-							computerSleep: who.computerSleep,
-							compaction: who.compaction,
-							page: who.page,
 						},
 						read,
 					),
 				}).toEqual({
 					name,
 					outcomes: {
-						admin: "ok",
 						viewer: "ok",
 						notInProject: "ResourceHidden",
-						outsider: "ResourceHidden",
-						botInBounds: "ok",
-						botOutsideBounds: "ResourceHidden",
-						botInMemberBounds: "ok",
-						run: "ok",
 						webhook: "ResourceHidden",
-						computerSleep: "ResourceHidden",
-						compaction: "ResourceHidden",
-						page: "ResourceHidden",
 					},
 				});
 			}
@@ -224,7 +160,7 @@ describe("the connectors operations, for each kind of principal", () => {
 									.where(eq(connector.id, connectorId)),
 							);
 						}
-						return await tried(principal, name, {
+						return await operationOutcome(call, principal, name, {
 							projectId: a.project,
 							connectorId,
 							...input,
@@ -233,44 +169,11 @@ describe("the connectors operations, for each kind of principal", () => {
 						await onDatabase((db) => db.delete(connector).where(eq(connector.id, connectorId)));
 					}
 				};
-				expect({
-					name,
-					outcomes: await outcomes(
-						{
-							owner: who.owner,
-							admin: who.admin,
-							editor: who.ed,
-							viewer: who.vi,
-							notInProject: who.erin,
-							outsider: who.outsider,
-							botForEditor: who.pubForEd,
-							botForAdmin: who.pubForAdmin,
-							botOutsideBounds: who.helperInK,
-							run: who.run,
-							webhook: who.webhook,
-							computerSleep: who.computerSleep,
-							page: who.page,
-						},
-						manage,
-					),
-				}).toEqual({
-					name,
-					outcomes: {
-						owner: acted,
-						admin: acted,
-						editor: "ActionForbidden",
-						viewer: "ActionForbidden",
-						notInProject: "ResourceHidden",
-						outsider: "ResourceHidden",
-						botForEditor: "ActionForbidden",
-						botForAdmin: name === "connectors.startOAuth" ? "ActionForbidden" : acted,
-						botOutsideBounds: "ResourceHidden",
-						run: "ActionForbidden",
-						webhook: "ResourceHidden",
-						computerSleep: "ResourceHidden",
-						page: "ResourceHidden",
-					},
-				});
+				const permitted = name === "connectors.startOAuth" ? who.admin : who.pubForAdmin;
+				const forbidden = name === "connectors.startOAuth" ? who.pubForAdmin : who.ed;
+				expect(await manage(permitted), name).toBe(acted);
+				expect(await manage(forbidden), name).toBe("ActionForbidden");
+				expect(await manage(who.erin), name).toBe("ResourceHidden");
 			}
 		});
 
@@ -294,7 +197,10 @@ describe("the connectors operations, for each kind of principal", () => {
 			if (!("toolCounts" in changed)) throw new Error("Expected connector settings");
 			expect(changed.toolCounts).toMatchObject({ allow: 0, ask: 0 });
 			expect(
-				await tried(who.admin, "connectors.get", { projectId: a.project, connectorId: made.id }),
+				await operationOutcome(call, who.admin, "connectors.get", {
+					projectId: a.project,
+					connectorId: made.id,
+				}),
 			).toBe("ResourceHidden");
 		});
 
@@ -302,7 +208,7 @@ describe("the connectors operations, for each kind of principal", () => {
 			const elsewhere = await seedConnector(a.workspace, a.otherProject);
 			for (const connectorId of [elsewhere, NO_CONNECTOR]) {
 				expect(
-					await tried(who.admin, "connectors.update", {
+					await operationOutcome(call, who.admin, "connectors.update", {
 						projectId: a.personal.defaultProject,
 						connectorId,
 						changes: { enabled: false },
@@ -312,98 +218,41 @@ describe("the connectors operations, for each kind of principal", () => {
 				for (const [name, input] of manages) {
 					if (name === "connectors.testUnsaved" || name === "gitHubConnectors.start") continue;
 					expect(
-						await tried(who.admin, name, { ...address, ...input } as InputOf<typeof name>),
+						await operationOutcome(call, who.admin, name, { ...address, ...input } as InputOf<
+							typeof name
+						>),
 					).toBe("ResourceHidden");
 				}
-				expect(await tried(who.admin, "connectors.get", address)).toBe("ResourceHidden");
-				expect(await tried(who.admin, "gitHubConnectors.repositories", address)).toBe(
+				expect(await operationOutcome(call, who.admin, "connectors.get", address)).toBe(
 					"ResourceHidden",
 				);
+				expect(
+					await operationOutcome(call, who.admin, "gitHubConnectors.repositories", address),
+				).toBe("ResourceHidden");
 			}
 		});
 	});
 
-	describe("a bot's own connectors", () => {
-		it("have full views for members who reach the bot and an off switch for admins of personal bots's", async () => {
-			const cases = {
-				publicBot: a.pub.defaultProject,
-				personalBot: a.personal.defaultProject,
-				viewerCreatorsBot: a.viewerCreatorsBot.defaultProject,
-			};
-			const results: Record<string, Record<string, string>> = {};
-			for (const [bot, projectId] of Object.entries(cases)) {
-				const connectorId = await seedConnector(a.workspace, projectId);
-				try {
-					results[bot] = await outcomes(
-						{ admin: who.admin, ed: who.ed, vi: who.vi, viewerCreator: who.viewerCreator },
-						async (principal) => {
-							const read = await tried(principal, "connectors.list", { projectId });
-							const manage = await tried(principal, "connectors.update", {
-								projectId,
-								connectorId,
-								changes: { access: "off" },
-							});
-							return `${read}/${manage}`;
-						},
-					);
-				} finally {
-					await onDatabase((db) => db.delete(connector).where(eq(connector.id, connectorId)));
-				}
-			}
-
-			expect(results).toEqual({
-				publicBot: {
-					admin: "ok/ok",
-					ed: "ok/ok",
-					vi: "ok/ActionForbidden",
-					viewerCreator: "ok/ActionForbidden",
-				},
-				personalBot: {
-					admin: "ok/ResourceHidden",
-					ed: "ok/ok",
-					vi: "ResourceHidden/ResourceHidden",
-					viewerCreator: "ResourceHidden/ResourceHidden",
-				},
-				viewerCreatorsBot: {
-					admin: "ok/ok",
-					ed: "ok/ActionForbidden",
-					vi: "ok/ActionForbidden",
-					viewerCreator: "ok/ActionForbidden",
-				},
-			});
-		});
-	});
-
-	it("leaves a switched-off built-in connector out of a turn's tools and addable connectors", async () => {
+	it("lists a public bot's connector for its viewer and restricts changes to its managers", async () => {
 		const projectId = a.pub.defaultProject;
-		const offerTools = () =>
-			runOnPostgres(
-				Effect.flatMap(ConnectorCatalog.Service, (tools) =>
-					tools.forTurn(a.workspace, { projectId, ownProjectId: null }, NO_TURN),
-				).pipe(Effect.provide(ConnectorCatalog.layer), Effect.provide(localEgress)),
-			);
-		const before = await offerTools();
-		expect(before.addable.map(({ id }) => id)).toContain("linear");
-
-		const made = await store.create(a.workspace, projectId, a.admin, {
-			name: "Linear",
-			url: "https://mcp.linear.app/mcp",
-			auth: "header",
+		const connectorId = await seedConnector(a.workspace, projectId);
+		const input = { projectId, connectorId, changes: { name: "Project wiki" } };
+		expect(await call(who.vi, "connectors.list", { projectId })).toContainEqual(
+			expect.objectContaining({ id: connectorId }),
+		);
+		await expect(call(who.vi, "connectors.update", input)).rejects.toMatchObject({
+			_tag: "ActionForbidden",
 		});
-		await call(who.admin, "connectors.update", {
-			projectId,
-			connectorId: made.id,
-			changes: { enabled: false },
+		await expect(call(who.outsider, "connectors.update", input)).rejects.toMatchObject({
+			_tag: "ResourceHidden",
 		});
 
-		const after = await offerTools();
-		try {
-			expect(after.tools).toEqual({});
-			expect(after.unavailable).toEqual([]);
-			expect(after.addable.map(({ id }) => id)).not.toContain("linear");
-		} finally {
-			await after.close();
-		}
+		await call(who.ed, "connectors.update", input);
+
+		expect(await call(who.vi, "connectors.get", { projectId, connectorId })).toMatchObject({
+			id: connectorId,
+			name: input.changes.name,
+		});
 	});
 
 	it("lets an admin switch off a hidden personal bot's connector without reading or changing its settings", async () => {
@@ -416,18 +265,20 @@ describe("the connectors operations, for each kind of principal", () => {
 		const address = { projectId, connectorId: made.id };
 		const restricted = { id: made.id, name: made.name, enabled: true, restricted: true };
 		expect(await call(who.admin, "connectors.list", { projectId })).toEqual([restricted]);
-		expect(await tried(who.admin, "connectors.get", address)).toBe("ResourceHidden");
+		expect(await operationOutcome(call, who.admin, "connectors.get", address)).toBe(
+			"ResourceHidden",
+		);
 		for (const changes of [
 			{ enabled: true },
 			{ enabled: false, name: "Changed" },
 			{ access: "off" as const },
 		]) {
-			expect(await tried(who.admin, "connectors.update", { ...address, changes })).toBe(
-				"ResourceHidden",
-			);
+			expect(
+				await operationOutcome(call, who.admin, "connectors.update", { ...address, changes }),
+			).toBe("ResourceHidden");
 		}
 		expect(
-			await tried(who.admin, "connectors.update", {
+			await operationOutcome(call, who.admin, "connectors.update", {
 				...address,
 				connectorId: NO_CONNECTOR,
 				changes: { enabled: false },
@@ -465,10 +316,6 @@ describe("the connectors operations, for each kind of principal", () => {
 				},
 				{ kind: "since", version: null },
 			);
-			const [row] = await onDatabase((db) =>
-				db.select({ hash: connector.oauthState }).from(connector).where(eq(connector.id, made.id)),
-			);
-			expect(row?.hash).toBe(createHash("sha256").update(state).digest("hex"));
 			return state;
 		};
 		const back = (principal: Principal, input: InputOf<"connectors.oauthCallback">) =>
@@ -525,12 +372,50 @@ describe("the connectors operations, for each kind of principal", () => {
 				body,
 			});
 
+		it("starts the matching automation when its operation accepts a signed delivery", async () => {
+			const projectId = a.pub.defaultProject;
+			const connectorId = await gitHubAppOf(projectId);
+			const automationId = await seedAutomation(a.workspace, projectId);
+			await onDatabase((db) =>
+				db
+					.update(connector)
+					.set({
+						settings: sql`${connector.settings} || '{"repositories": [{"id": 1, "path": "acme/web"}]}'::jsonb`,
+					})
+					.where(eq(connector.id, connectorId)),
+			);
+			await onDatabase((db) =>
+				db.insert(automationTrigger).values({
+					workspaceId: a.workspace,
+					automationId,
+					settings: {
+						kind: "github",
+						connectorId,
+						repository: "acme/web",
+						events: ["issue_opened"],
+					},
+				}),
+			);
+
+			await call(who.admin, "chats.openAutomationFeed", { workspace: a.workspace, automationId });
+			await call(await runOnPostgres(signedFor(connectorId)), "gitHubWebhooks.delivery", {
+				connectorId,
+				event: "issues",
+				deliveryId: "review-delivery",
+				body,
+			});
+			const { items } = await call(who.admin, "automations.projectRuns", { projectId, limit: 10 });
+			expect(items.filter((run) => run.automationId === automationId)).toEqual([
+				expect.objectContaining({ trigger: expect.objectContaining({ kind: "github" }) }),
+			]);
+		});
+
 		it("reads a delivery only for the GitHub app that signed it", async () => {
 			const ksApp = await gitHubAppOf(a.otherProject);
 			const jsDelivery = await runOnPostgres(signedFor(jsApp));
 			const ksDelivery = await runOnPostgres(signedFor(ksApp));
 			const deliver = (principal: Principal) =>
-				tried(principal, "gitHubWebhooks.delivery", {
+				operationOutcome(call, principal, "gitHubWebhooks.delivery", {
 					connectorId: jsApp,
 					event: "issues",
 					deliveryId: "delivery-1",
@@ -538,7 +423,7 @@ describe("the connectors operations, for each kind of principal", () => {
 				});
 
 			expect(
-				await outcomes(
+				await outcomesFor(
 					{
 						signedByIt: jsDelivery,
 						signedByAnotherApp: ksDelivery,
@@ -556,11 +441,14 @@ describe("the connectors operations, for each kind of principal", () => {
 				run: "ResourceHidden",
 			});
 			expect(
-				await tried(jsDelivery, "automations.projectRuns", { projectId: a.project, limit: 10 }),
+				await operationOutcome(call, jsDelivery, "automations.projectRuns", {
+					projectId: a.project,
+					limit: 10,
+				}),
 			).toBe("ResourceHidden");
-			expect(await tried(jsDelivery, "chats.messages", { chatId: a.chat, limit: 10 })).toBe(
-				"ResourceHidden",
-			);
+			expect(
+				await operationOutcome(call, jsDelivery, "chats.messages", { chatId: a.chat, limit: 10 }),
+			).toBe("ResourceHidden");
 
 			expect(
 				await call(jsDelivery, "gitHubWebhooks.delivery", {

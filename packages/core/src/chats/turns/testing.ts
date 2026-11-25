@@ -38,7 +38,7 @@ export { TurnRecords } from "./records.ts";
 export { turnLane } from "./requests.ts";
 export { TurnRuns } from "./runs.ts";
 export { TurnSignals } from "./signals.ts";
-export { type TurnCheckpoint, TurnStore } from "./store.ts";
+export { AUTOMATION_RUN_ENDED, type TurnCheckpoint, TurnStore } from "./store.ts";
 export { ToolCallStore } from "./tool-calls/store.ts";
 
 /**
@@ -298,7 +298,7 @@ function decodeRequest(payload: unknown): TurnRequest {
 }
 
 /**
- * A bot with a connector, whose admin has asked it something in a chat, so
+ * A bot whose admin has asked it something in a chat, so
  * its turn is asked for in the chat.
  */
 export async function aChatAwaitingReply(
@@ -338,8 +338,28 @@ export async function aChatAwaitingReply(
 			.returning({ id: bot.id }),
 	);
 	if (!chatBot) throw new Error("fixture");
+	const started = await startBotChat(chatsAs(adminId), {
+		botId: chatBot.id,
+		messageId: crypto.randomUUID(),
+		content: "What does example.com say?",
+	});
+	const opened = started.chat;
+	return {
+		workspaceId,
+		adminId,
+		botId: chatBot.id,
+		chatId: opened.id,
+	};
+}
+
+export async function aChatWithConnectorAwaitingReply(
+	chatsAs: Parameters<typeof aChatAwaitingReply>[0],
+) {
+	const chat = await aChatAwaitingReply(chatsAs);
+	const { workspaceId, botId, adminId } = chat;
+	const suffix = botId;
 	// The bot's own connector, which its default project holds.
-	const ownProjectId = await runOnPostgres(defaultProjectOf(chatBot.id));
+	const ownProjectId = await runOnPostgres(defaultProjectOf(botId));
 	const [connected] = await onDatabase((db) =>
 		db
 			.insert(connector)
@@ -355,17 +375,5 @@ export async function aChatAwaitingReply(
 			.returning({ id: connector.id }),
 	);
 	if (!connected) throw new Error("fixture");
-	const started = await startBotChat(chatsAs(adminId), {
-		botId: chatBot.id,
-		messageId: crypto.randomUUID(),
-		content: "What does example.com say?",
-	});
-	const opened = started.chat;
-	return {
-		workspaceId,
-		adminId,
-		botId: chatBot.id,
-		connectorId: connected.id,
-		chatId: opened.id,
-	};
+	return { ...chat, connectorId: connected.id };
 }

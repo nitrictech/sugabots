@@ -36,7 +36,7 @@ export interface Interface {
 	readonly guide: <P, W, X>(
 		canRead: CanReadWorkspace<P, W>,
 		reach: ReachSet<P, W>,
-		approved: Approved<NoInfer<P>, X>,
+		approved: Approved<NoInfer<P>, X, [W], "workspaces.guide">,
 	) => Effect.Effect<Guide>;
 }
 

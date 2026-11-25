@@ -1,4 +1,5 @@
 import { Effect, Exit, Layer, Scope, Stream } from "effect";
+import { WebSocket } from "undici";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ComputerProviderStore } from "../../../computers/computer-provider-store.ts";
 import { ComputerSignIn } from "../../../computers/computer-sign-in.ts";
@@ -6,6 +7,7 @@ import { ProjectComputers } from "../../../computers/project-computers.ts";
 import { recordingIds, removeWorkVolumes } from "../../../computers/testing.ts";
 import { EventBus } from "../../../database/events/bus.ts";
 import { EventStore } from "../../../database/events/store.ts";
+import { inMemoryEventStore } from "../../../database/events/testing.ts";
 import {
 	bot as botTable,
 	chatParticipant,
@@ -74,7 +76,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 						Streams.layer.pipe(
 							Layer.provide([
 								Layer.sync(EventBus.Service, () =>
-									EventBus.inProcess({ store: EventStore.inMemory() }),
+									EventBus.inProcess({ store: inMemoryEventStore() }),
 								),
 								EventStore.layer,
 							]),
@@ -303,7 +305,7 @@ async function signsIn({ endpoint, password }: DesktopViewer.OpenDesktop): Promi
 	const socket = new WebSocket(endpoint.url.replace(/^http/, "ws"), {
 		protocols: ["binary"],
 		headers: endpoint.headers,
-	} as unknown as string[]);
+	});
 	socket.binaryType = "arraybuffer";
 	let buffered = new Uint8Array(0);
 	let closed = false;

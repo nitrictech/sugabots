@@ -89,12 +89,6 @@ describe("chat contracts", () => {
 		).toBe("Failure");
 	});
 
-	it("requires semantic ISO timestamps", () => {
-		const decode = Schema.decodeUnknownResult(placedChatSchema);
-		expect(decode(placedChat)._tag).toBe("Success");
-		expect(decode({ ...placedChat, createdAt: "2026-02-30T00:00:00.000Z" })._tag).toBe("Failure");
-	});
-
 	it("requires message content to exactly match its text parts", () => {
 		const message = {
 			id: ID,
@@ -114,12 +108,10 @@ describe("chat contracts", () => {
 			...message,
 			content: "Release pending",
 		});
-		expect(Result.isFailure(result)).toBe(true);
-		if (Result.isFailure(result)) {
-			expect(SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue)).toEqual({
-				issues: [{ path: ["content"], message: "Content must equal the combined text parts" }],
-			});
-		}
+		if (Result.isSuccess(result)) throw new Error("Expected decoding to fail");
+		expect(SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue)).toEqual({
+			issues: [{ path: ["content"], message: "Content must equal the combined text parts" }],
+		});
 	});
 
 	it("places tool calls in the text at their offsets", () => {

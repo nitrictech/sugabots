@@ -2,8 +2,11 @@ import { providersContracts } from "@sugabots/contracts/operations/providers";
 import { Effect } from "effect";
 import { proveInWorkspace } from "../../../proofs/in-workspace.ts";
 import { named } from "../../../proofs/proof.ts";
+import { proveReachesSearchProvider } from "../../../proofs/reaches-search-provider.ts";
 import { proveCanManageWorkspace } from "../../../proofs/workspace-permissions.ts";
+import { Egress } from "../../../providers/network/egress.ts";
 import { SearchProviders } from "../../../providers/search-providers/search-providers.ts";
+import { requireAllowedUrl } from "../../../providers/tested-configuration.ts";
 import { workspaceIdOf } from "../../../workspaces/workspace-reference.ts";
 import { defineOperation } from "../../operation.ts";
 
@@ -18,7 +21,16 @@ export const update = defineOperation(
 					const canManage = yield* proveCanManageWorkspace(
 						yield* proveInWorkspace(principal, workspace),
 					);
-					return yield* searchProviders.update(canManage, input.changes);
+					const { baseUrl } = input.changes;
+					// Invalid addresses are refused even before a workspace has a search provider.
+					const reach = yield* proveReachesSearchProvider(canManage).pipe(
+						Effect.tapError(() =>
+							baseUrl
+								? Effect.flatMap(Egress.Service, (egress) => requireAllowedUrl(egress, baseUrl))
+								: Effect.void,
+						),
+					);
+					return yield* searchProviders.update(reach, input.changes);
 				}),
 			);
 		}),

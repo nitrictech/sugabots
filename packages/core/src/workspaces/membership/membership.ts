@@ -130,8 +130,8 @@ export interface Interface {
 	readonly beginLeaving: <P, W>(
 		canLeave: CanLeaveWorkspace<P, W>,
 	) => Effect.Effect<MembershipDeparture, OwnerStays | SubscriptionInUse, Transaction>;
-	readonly finishRemoval: <W>(
-		started: ProjectDeletionStarted<W, "membership">,
+	readonly finishRemoval: <W, J>(
+		started: ProjectDeletionStarted<W, J, "membership">,
 	) => Effect.Effect<void, ComputerMadeMeanwhile, Transaction>;
 	/**
 	 * Makes the member the workspace's owner, and the owner an administrator,
@@ -172,15 +172,15 @@ export interface Interface {
 	 * addressed to them that waits for them to verify their address says so;
 	 * anything else is hidden.
 	 */
-	readonly alreadyAccepted: <P>(
+	readonly alreadyAccepted: <P, I>(
 		isMember: IsMember<P>,
-		invitationId: string,
+		invitation: Named<I, string>,
 	) => Effect.Effect<{ workspaceId: string }, ResourceHidden | EmailUnverified>;
 	readonly beginDeletion: <P, W>(
 		canDelete: CanDeleteWorkspace<P, W>,
 	) => Effect.Effect<void, never, Transaction>;
 	readonly delete: <W>(
-		started: DeletionStarted<W, "workspace">,
+		started: DeletionStarted<W>,
 	) => Effect.Effect<void, ComputerMadeMeanwhile, Transaction>;
 }
 
@@ -460,10 +460,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		finishRemoval: ({ workspaceId, projectId, targetId: memberId }) =>
+		finishRemoval: ({ workspace, project, targetId: memberId }) =>
 			operation(
 				"finishRemoval",
 				Effect.gen(function* () {
+					const workspaceId = workspace.value;
+					const projectId = project.value;
 					yield* Transaction;
 					yield* ProjectComputers.lockWithoutComputer({ workspaceId, projectId });
 					// A backfilled departure may still have sign-ins and automations to clear.
@@ -669,11 +671,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		alreadyAccepted: (isMember, invitationId) =>
+		alreadyAccepted: (isMember, addressed) =>
 			operation(
 				"alreadyAccepted",
 				Effect.gen(function* () {
 					const hidden = new ResourceHidden({ resource: "invitation" });
+					const invitationId = addressed.value;
 					if (!isUuid(invitationId)) return yield* hidden;
 					const now = yield* DateTime.nowAsDate;
 					const [found] = yield* query((db) =>
@@ -723,11 +726,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		delete: ({ workspaceId }) =>
+		delete: (started) =>
 			operation(
 				"delete",
 				Effect.gen(function* () {
 					yield* Transaction;
+					const workspaceId = started.workspace.value;
 					yield* ProjectComputers.lockWorkspaceWithoutComputers(workspaceId);
 					yield* query((db) => db.delete(workspace).where(eq(workspace.id, workspaceId)));
 					// Every stream in it proves again, and finds it gone.

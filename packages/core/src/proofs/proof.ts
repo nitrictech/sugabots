@@ -215,6 +215,20 @@ export function named<A, B, C, D, Success, Failure, Services>(
 		d: Named<NameD, D>,
 	) => Effect.Effect<Success, Failure, Services>,
 ): Effect.Effect<Success, Failure, Services>;
+export function named<A, B, C, D, E, Success, Failure, Services>(
+	a: A,
+	b: B,
+	c: C,
+	d: D,
+	e: E,
+	body: <NameA, NameB, NameC, NameD, NameE>(
+		a: Named<NameA, A>,
+		b: Named<NameB, B>,
+		c: Named<NameC, C>,
+		d: Named<NameD, D>,
+		e: Named<NameE, E>,
+	) => Effect.Effect<Success, Failure, Services>,
+): Effect.Effect<Success, Failure, Services>;
 export function named(
 	...valuesAndBody: readonly unknown[]
 ): Effect.Effect<unknown, unknown, unknown> {

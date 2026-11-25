@@ -1,6 +1,6 @@
 import { UserText, userText } from "@sugabots/errors";
 import { eq, like } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context, Effect, Schema } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { BlobStore } from "../../blob-store/blob-store.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
@@ -9,7 +9,7 @@ import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../data
 import { asMember } from "../../operations/chats/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
 import { chatServicesForTests } from "../testing.ts";
-import { MAX_TURN_RUNS } from "./lifecycle.ts";
+import { gaveUpAfter, MAX_TURN_RUNS } from "./lifecycle.ts";
 import { TurnRecords } from "./records.ts";
 import { TurnRuns } from "./runs.ts";
 import { TurnStore } from "./store.ts";
@@ -161,16 +161,19 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		);
 	});
 
-	it("gives up on a step a crash keeps cutting short", async () => {
-		expect(await load(opened, 0)).toMatchObject({ _tag: "Begun", requested: false });
-
-		// Each time the step begins again, the turn has stopped once more.
-		for (let again = 1; again < MAX_TURN_RUNS - 1; again++) {
+	it("fails a turn when the same unfinished step reaches the retry limit", async () => {
+		for (let loadNumber = 1; loadNumber < MAX_TURN_RUNS; loadNumber++) {
 			expect(await load(opened, 0)).toMatchObject({ _tag: "Begun" });
 		}
-		expect(await load(opened, 0)).toEqual({ _tag: "Ended" });
 
-		expect(await storedTurn()).toMatchObject({ status: "failed" });
+		expect(await load(opened, 0)).toEqual({ _tag: "Ended" });
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({
+				type: "message.failed",
+				messageId: opened.replyMessageId,
+				error: gaveUpAfter(MAX_TURN_RUNS),
+			}),
+		);
 	});
 
 	it("counts a turn's runs again from its last stop for approvals", async () => {
@@ -208,7 +211,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 				.where(eq(turn.id, opened.turnId)),
 		);
 
-		await expect(load(opened, 0)).rejects.toThrow();
+		await expect(load(opened, 0)).rejects.toBeInstanceOf(Schema.SchemaError);
 	});
 
 	it("ends a turn somebody asked to stop instead of opening it again after a crash", async () => {
@@ -324,7 +327,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			expect.objectContaining({
 				type: "message.failed",
 				messageId: opened.replyMessageId,
-				error: "The reply stopped unexpectedly.",
+				error: stopped,
 			}),
 			expect.objectContaining({ type: "chat.changed", chatId }),
 		]);

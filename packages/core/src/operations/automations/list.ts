@@ -12,22 +12,33 @@ export const list = defineOperation(
 	(principal, input, call) =>
 		Effect.gen(function* () {
 			const automations = yield* ProjectAutomations.Service;
-			return yield* named(principal, input.projectId, call, (principal, project, call) =>
-				proveReachesProject(principal, project).pipe(
-					Effect.flatMap((reach) =>
-						Effect.flatMap(
-							proveApproved(principal, call, approvalRule("automations.listInChat"), input),
-							(approved) => automations.list(reach, approved),
+			return yield* named(
+				principal,
+				input.projectId,
+				call,
+				input,
+				(principal, project, call, approvedInput) =>
+					proveReachesProject(principal, project).pipe(
+						Effect.flatMap((reach) =>
+							Effect.flatMap(
+								proveApproved(
+									principal,
+									call,
+									approvalRule("automations.list"),
+									approvedInput,
+									project,
+								),
+								(approved) => automations.list(reach, approved),
+							),
+						),
+						// An admin restricting a bot they can't talk to sees only names and states.
+						Effect.catchTag("ResourceHidden", (hidden) =>
+							proveCanRestrictBotsProject(principal, project).pipe(
+								Effect.mapError(() => hidden),
+								Effect.flatMap(automations.listSetUp),
+							),
 						),
 					),
-					// An admin restricting a bot they can't talk to sees only names and states.
-					Effect.catchTag("ResourceHidden", (hidden) =>
-						proveCanRestrictBotsProject(principal, project).pipe(
-							Effect.mapError(() => hidden),
-							Effect.flatMap(automations.listSetUp),
-						),
-					),
-				),
 			);
 		}),
 );

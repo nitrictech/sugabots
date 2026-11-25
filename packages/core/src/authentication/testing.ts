@@ -1,5 +1,10 @@
 import { Effect, Layer } from "effect";
-import { authenticated, type BotForAsker } from "../principal.ts";
+import {
+	authenticated,
+	type BotForAsker,
+	type PageAddress,
+	type WebhookCall,
+} from "../principal.ts";
 import { SessionAuthentication } from "./session.ts";
 
 /**
@@ -34,3 +39,9 @@ export const botForAskerForTests = (fields: {
 		executionNumber: 1,
 		bounds: { kind: "chat", project: fields.project },
 	});
+
+export const pageAddressForTests = (fields: Omit<PageAddress, "_tag">): PageAddress =>
+	authenticated.pageAddress(fields);
+
+export const webhookCallForTests = (fields: Omit<WebhookCall, "_tag">): WebhookCall =>
+	authenticated.webhookCall(fields);

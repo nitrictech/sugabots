@@ -22,12 +22,17 @@ export const write = defineOperation(filesContracts["files.write"], (principal, 
 			if (kind === undefined || title === undefined) {
 				return yield* new InvalidFileWrite({ missing: "kindAndTitle" });
 			}
-			return yield* named(principal, principal.chat, call, (principal, chat, call) =>
-				Effect.gen(function* () {
-					const canChange = yield* proveCanChangeChat(yield* proveReachesChat(principal, chat));
-					const approved = yield* proveApproved(principal, call, rule, input);
-					return yield* files.create(canChange, approved, { kind, title, content });
-				}),
+			return yield* named(
+				principal,
+				principal.chat,
+				call,
+				input,
+				(principal, chat, call, approvedInput) =>
+					Effect.gen(function* () {
+						const canChange = yield* proveCanChangeChat(yield* proveReachesChat(principal, chat));
+						const approved = yield* proveApproved(principal, call, rule, approvedInput, chat);
+						return yield* files.create(canChange, approved, { kind, title, content });
+					}),
 			);
 		}
 		if (baseVersion === undefined) return yield* new InvalidFileWrite({ missing: "baseVersion" });
@@ -36,12 +41,13 @@ export const write = defineOperation(filesContracts["files.write"], (principal, 
 			principal.chat,
 			fileId.toLowerCase(),
 			call,
-			(principal, chat, file, call) =>
+			input,
+			(principal, chat, file, call, approvedInput) =>
 				Effect.gen(function* () {
 					const working = yield* proveReachesChat(principal, chat);
 					const reach = yield* proveReachesWrittenFile(principal, file);
 					const canChange = yield* proveCanChangeFile(working, reach);
-					const approved = yield* proveApproved(principal, call, rule, input);
+					const approved = yield* proveApproved(principal, call, rule, approvedInput, file);
 					return yield* files.replace(canChange, approved, {
 						baseVersion,
 						content,
@@ -63,12 +69,19 @@ export const edit = defineOperation(filesContracts["files.edit"], (principal, in
 			principal.chat,
 			input.fileId.toLowerCase(),
 			call,
-			(principal, chat, file, call) =>
+			input,
+			(principal, chat, file, call, approvedInput) =>
 				Effect.gen(function* () {
 					const working = yield* proveReachesChat(principal, chat);
 					const reach = yield* proveReachesWrittenFile(principal, file);
 					const canChange = yield* proveCanChangeFile(working, reach);
-					const approved = yield* proveApproved(principal, call, approvalRule("files.edit"), input);
+					const approved = yield* proveApproved(
+						principal,
+						call,
+						approvalRule("files.edit"),
+						approvedInput,
+						file,
+					);
 					return yield* files.edit(canChange, approved, input);
 				}),
 		);

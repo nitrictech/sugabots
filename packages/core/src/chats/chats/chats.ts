@@ -127,12 +127,12 @@ export interface Interface {
 		reach: ReachesChat<P, C>,
 		resolved: boolean,
 		canChange: CanChangeChat<P, C>,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [C], "chats.setResolved">,
 	) => Effect.Effect<void, ResourceHidden | FenceRefusal>;
 	readonly startBriefedChat: <P, B, X>(
 		mayBrief: MayBrief<P, B>,
 		input: { title: string; brief: string },
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [B], "chats.startBriefedChat">,
 	) => Effect.Effect<
 		BotStartedChat,
 		ApprovalRefused | BotHasNoModel | ResourceHidden | FenceRefusal

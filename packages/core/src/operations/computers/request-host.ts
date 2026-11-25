@@ -22,13 +22,23 @@ export const requestHost = defineOperation(
 			if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun") {
 				return yield* new ResourceHidden({ resource: "computer" });
 			}
-			return yield* named(principal, principal.chat, call, (principal, chat, call) =>
-				Effect.gen(function* () {
-					const canUse = yield* proveCanUseChatComputer(principal, chat);
-					yield* network.refuseBlocked(canUse, input.host);
-					const approved = yield* proveComputerRequestApproved(principal, call, input, canUse);
-					return yield* network.requestedHost(canUse, approved, input.host);
-				}),
+			return yield* named(
+				principal,
+				principal.chat,
+				call,
+				input,
+				(principal, chat, call, approvedInput) =>
+					Effect.gen(function* () {
+						const canUse = yield* proveCanUseChatComputer(principal, chat);
+						yield* network.refuseBlocked(canUse, input.host);
+						const approved = yield* proveComputerRequestApproved(
+							principal,
+							call,
+							approvedInput,
+							canUse,
+						);
+						return yield* network.requestedHost(canUse, approved, input.host);
+					}),
 			);
 		}),
 );

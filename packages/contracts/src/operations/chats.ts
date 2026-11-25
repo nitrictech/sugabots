@@ -202,7 +202,7 @@ export const chatsContracts = {
 	"chats.interruptTurn": OperationContract.make("chats.interruptTurn", {
 		description:
 			"Interrupt a bot's turn in a chat: the step under way ends at once, any approval it waits for is withdrawn, and the turn ends with what it wrote so far. Its asker may interrupt it, and so may anyone who may manage its project and reaches its chat, or for a run's turn, anyone who may approve its calls. Interrupting a turn that has ended changes nothing.",
-		input: Schema.Struct({ chatId: Schema.String, turnId: Schema.String }),
+		input: Schema.Struct({ chatId: uuidSchema, turnId: uuidSchema }),
 		output: Schema.Void,
 		errors: refusals,
 		changes: true,

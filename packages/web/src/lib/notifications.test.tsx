@@ -9,15 +9,15 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { Effect } from "effect";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { pendingAnswer } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 import {
 	useChangeNotificationPreferences,
 	useNotificationsInThisBrowser,
 } from "@/lib/notifications.ts";
 import { createQueryClient } from "@/lib/query.ts";
-import { pendingAnswer } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 vi.mock("@tanstack/react-router", async (original) => ({
 	...(await original<typeof import("@tanstack/react-router")>()),
 	useRouter: () => ({ history: { push: vi.fn() } }),
@@ -46,7 +46,6 @@ afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
 	localStorage.clear();
-	vi.clearAllMocks();
 });
 
 const release = crypto.randomUUID();

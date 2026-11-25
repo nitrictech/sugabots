@@ -1,7 +1,7 @@
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	bot,
 	member,
@@ -240,19 +240,38 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 	});
 
 	it("counts a request cut off long ago as of unknown cost, and leaves one still going out", async () => {
-		const now = Date.now();
-		const cutOff = new Date(now - 20 * 60_000);
-		await recorded(
-			{ startedAt: cutOff, outcome: "started", endedAt: null },
-			{ startedAt: new Date(now - 60_000), outcome: "started", endedAt: null },
-		);
+		// Fixed mid-month, so neither request can fall in another month than the one asked for.
+		const now = new Date("2026-09-15T12:00:00Z");
+		// Signed in on the real clock: a session made on the frozen one has long expired in the database.
+		const admin = await signIn(adminId);
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(now);
+		try {
+			await recorded(
+				{
+					startedAt: new Date(now.getTime() - 20 * 60_000),
+					model: "claude-cut-off",
+					outcome: "started",
+					endedAt: null,
+				},
+				{
+					startedAt: new Date(now.getTime() - 60_000),
+					model: "claude-still-going",
+					outcome: "started",
+					endedAt: null,
+				},
+			);
 
-		const usage = await usageAs(adminId).month({
-			workspace: workspaceId,
-			month: cutOff.toISOString().slice(0, 7),
-		});
+			const usage = await callOperation(admin, "usage.month", {
+				workspace: workspaceId,
+				month: "2026-09",
+			});
 
-		expect(usage.unknownCostRequests).toBe(1);
+			expect(usage.unknownCostRequests).toBe(1);
+			expect(usage.models.map(({ model }) => model)).toEqual(["claude-cut-off"]);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("refuses somebody who may not see what the workspace's models cost", async () => {

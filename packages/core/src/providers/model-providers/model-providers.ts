@@ -40,6 +40,10 @@ import { uuidSchema } from "@sugabots/contracts/uuid";
 import { Clock, Context, DateTime, Effect, Layer, Schema } from "effect";
 import { serviceOperations } from "../../database/database.ts";
 import { proveIsMember } from "../../proofs/is-member.ts";
+import type {
+	ReachesModelProvider,
+	ReachesProviderModel,
+} from "../../proofs/reaches-model-provider.ts";
 import type { CanManageWorkspace, CanReadWorkspace } from "../../proofs/workspace-permissions.ts";
 import { Secrets } from "../../secrets/secrets.ts";
 import { processLayer, Tier } from "../../tiers.ts";
@@ -95,27 +99,23 @@ export interface Interface {
 	 * sign-in. Switching it off, removing its key or moving it fails with
 	 * `ModelInUse` rather than stop offering a model the workspace depends on.
 	 */
-	readonly update: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+	readonly update: <P, W, V>(
+		reach: ReachesModelProvider<P, W, V>,
 		changes: ModelProviderUpdate,
 	) => Effect.Effect<
 		ModelProvider,
 		ModelProviderNotFound | UrlNotAllowed | ProviderActivationRequiresCredential | ModelInUse
 	>;
-	readonly remove: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+	readonly remove: <P, W, V>(
+		reach: ReachesModelProvider<P, W, V>,
 	) => Effect.Effect<void, ModelProviderRemovalNotAllowed | ModelInUse>;
 	/** Lists the provider's models, which costs nothing, and records whether that worked. */
-	readonly test: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+	readonly test: <P, W, V>(
+		reach: ReachesModelProvider<P, W, V>,
 	) => Effect.Effect<ProviderTestResult, ModelProviderNotFound>;
 	/** Asks the provider's sign-in service for a code the member enters to sign it in. */
-	readonly startSignIn: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+	readonly startSignIn: <P, W, V>(
+		reach: ReachesModelProvider<P, W, V>,
 	) => Effect.Effect<
 		ProviderSignInStarted,
 		ActionForbidden | ModelProviderNotFound | ProviderSignInNotOffered | ProviderSignInFailed
@@ -126,9 +126,8 @@ export interface Interface {
 	 * whose role gave `canManage`, and its models are discovered. Hidden once
 	 * they are no longer in the workspace.
 	 */
-	readonly completeSignIn: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+	readonly completeSignIn: <P, W, V>(
+		reach: ReachesModelProvider<P, W, V>,
 		attempt: string | undefined,
 	) => Effect.Effect<
 		ProviderSignInOutcome,
@@ -138,27 +137,22 @@ export interface Interface {
 		| ProviderSignInFailed
 		| ResourceHidden
 	>;
-	readonly signOut: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+	readonly signOut: <P, W, V>(
+		reach: ReachesModelProvider<P, W, V>,
 	) => Effect.Effect<ModelProvider, ModelProviderNotFound | ProviderSignInNotOffered | ModelInUse>;
-	readonly discoverModels: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+	readonly discoverModels: <P, W, V>(
+		reach: ReachesModelProvider<P, W, V>,
 	) => Effect.Effect<void, DiscoveryFailure>;
-	readonly addModel: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+	readonly addModel: <P, W, V>(
+		reach: ReachesModelProvider<P, W, V>,
 		model: Pick<ProviderModel, "modelId" | "capabilities"> &
 			Partial<Pick<ProviderModel, "displayName" | "contextLength">>,
 	) => Effect.Effect<
 		ModelProvider,
 		ModelProviderNotFound | ProviderModelsRequireCredential | ProviderModelAlreadyConfigured
 	>;
-	readonly updateModel: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
-		modelId: string,
+	readonly updateModel: <P, W, V, M>(
+		target: ReachesProviderModel<P, W, V, M>,
 		changes: ProviderModelUpdate,
 	) => Effect.Effect<
 		void,
@@ -173,10 +167,8 @@ export interface Interface {
 	 * default and the system bots to `newBotsTo` and `systemBotsTo`, as
 	 * {@link SettingMoves} says.
 	 */
-	readonly switchOffModel: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
-		modelId: string,
+	readonly switchOffModel: <P, W, V, M>(
+		target: ReachesProviderModel<P, W, V, M>,
 		moves: { moveBotsTo?: string } & SettingMoves,
 	) => Effect.Effect<
 		void,
@@ -190,9 +182,8 @@ export interface Interface {
 	 * Switches a provider off and moves the bots on each `from` model to its
 	 * `to`, as {@link Interface.switchOffModel} does for one model.
 	 */
-	readonly switchOff: <P, W>(
-		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+	readonly switchOff: <P, W, V>(
+		reach: ReachesModelProvider<P, W, V>,
 		moves: { moveBots: readonly BotMove[] } & SettingMoves,
 	) => Effect.Effect<void, ModelProviderNotFound | ModelNotEnabled | ModelInUse>;
 	/** Makes `model`, which the workspace must offer, the one its new bots start on. */
@@ -387,11 +378,13 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		update: (canManage, providerId, changes) =>
+		update: (reach, changes) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
+					const { canManage, provider } = reach;
 					const workspaceId = canManage.inWorkspace.workspace.value;
+					const providerId = provider.value;
 					const current = yield* requireProvider(workspaceId, providerId);
 					if (changes.baseUrl) {
 						yield* requireAllowedUrl(egress, changes.baseUrl);
@@ -435,11 +428,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		remove: (canManage, providerId) =>
+		remove: (reach) =>
 			operation(
 				"remove",
 				Effect.gen(function* () {
-					const workspaceId = canManage.inWorkspace.workspace.value;
+					const workspaceId = reach.canManage.inWorkspace.workspace.value;
+					const providerId = reach.provider.value;
 					const removed = yield* keepingHeldModelsOffered(
 						workspaceId,
 						providers.remove(workspaceId, providerId),
@@ -450,21 +444,23 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		test: (canManage, providerId) =>
+		test: (reach) =>
 			operation(
 				"test",
 				Effect.gen(function* () {
-					const workspaceId = canManage.inWorkspace.workspace.value;
-					yield* requireProvider(workspaceId, providerId);
+					const workspaceId = reach.canManage.inWorkspace.workspace.value;
+					const providerId = reach.provider.value;
 					return yield* testProvider(providers, workspaceId, providerId, egress.providers);
 				}),
 			),
 
-		startSignIn: (canManage, providerId) =>
+		startSignIn: (reach) =>
 			operation(
 				"startSignIn",
 				Effect.gen(function* () {
+					const { canManage, provider } = reach;
 					const workspaceId = canManage.inWorkspace.workspace.value;
+					const providerId = provider.value;
 					const { signIn, http } = yield* requireSignIn(workspaceId, providerId);
 					const session = yield* proveIsMember(canManage.inWorkspace.principal);
 					const code = yield* signIn.requestDeviceCode(http);
@@ -486,11 +482,13 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		completeSignIn: (canManage, providerId, sealed) =>
+		completeSignIn: (reach, sealed) =>
 			operation(
 				"completeSignIn",
 				Effect.gen(function* () {
+					const { canManage, provider } = reach;
 					const workspaceId = canManage.inWorkspace.workspace.value;
+					const providerId = provider.value;
 					const session = yield* proveIsMember(canManage.inWorkspace.principal).pipe(
 						Effect.mapError(() => new ProviderSignInAttemptInvalid()),
 					);
@@ -510,11 +508,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		signOut: (canManage, providerId) =>
+		signOut: (reach) =>
 			operation(
 				"signOut",
 				Effect.gen(function* () {
-					const workspaceId = canManage.inWorkspace.workspace.value;
+					const workspaceId = reach.canManage.inWorkspace.workspace.value;
+					const providerId = reach.provider.value;
 					yield* requireSignIn(workspaceId, providerId);
 					yield* keepingHeldModelsOffered(
 						workspaceId,
@@ -524,22 +523,24 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		discoverModels: (canManage, providerId) =>
+		discoverModels: (reach) =>
 			operation(
 				"discoverModels",
 				fetchProviderModels(
 					providers,
-					canManage.inWorkspace.workspace.value,
-					providerId,
+					reach.canManage.inWorkspace.workspace.value,
+					reach.provider.value,
 					egress.providers,
 				).pipe(Effect.asVoid),
 			),
 
-		addModel: (canManage, providerId, model) =>
+		addModel: (reach, model) =>
 			operation(
 				"addModel",
 				Effect.gen(function* () {
+					const { canManage, provider } = reach;
 					const workspaceId = canManage.inWorkspace.workspace.value;
+					const providerId = provider.value;
 					yield* requireConnectedProvider(workspaceId, providerId);
 					const added = yield* providers.addModels(workspaceId, providerId, [
 						{
@@ -556,14 +557,14 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		updateModel: (canManage, providerId, modelId, changes) =>
+		updateModel: (target, changes) =>
 			operation(
 				"updateModel",
 				Effect.gen(function* () {
-					const workspaceId = canManage.inWorkspace.workspace.value;
-					const provider = yield* requireConnectedProvider(workspaceId, providerId);
-					const configured = provider.models.find((candidate) => candidate.id === modelId);
-					if (changes.capabilities !== undefined && configured?.source === "fetched") {
+					const workspaceId = target.reach.canManage.inWorkspace.workspace.value;
+					const providerId = target.reach.provider.value;
+					const modelId = target.model.value;
+					if (changes.capabilities !== undefined && target.configured.source === "fetched") {
 						return yield* new FetchedModelCapabilitiesImmutable();
 					}
 					const updated = yield* keepingHeldModelsOffered(
@@ -577,20 +578,17 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		switchOffModel: (canManage, providerId, modelId, { moveBotsTo, newBotsTo, systemBotsTo }) =>
+		switchOffModel: (target, { moveBotsTo, newBotsTo, systemBotsTo }) =>
 			operation(
 				"switchOffModel",
 				Effect.gen(function* () {
-					const workspaceId = canManage.inWorkspace.workspace.value;
-					const provider = yield* requireConnectedProvider(workspaceId, providerId);
-					const switchingOff = provider.models.find((candidate) => candidate.id === modelId);
-					if (!switchingOff) {
-						return yield* new ProviderModelNotFound();
-					}
+					const workspaceId = target.reach.canManage.inWorkspace.workspace.value;
+					const providerId = target.reach.provider.value;
+					const modelId = target.model.value;
 					yield* movingOffSwitchedOff(
 						workspaceId,
 						{
-							moves: moveBotsTo ? [{ from: switchingOff.modelId, to: moveBotsTo }] : [],
+							moves: moveBotsTo ? [{ from: target.configured.modelId, to: moveBotsTo }] : [],
 							newBotsTo,
 							systemBotsTo,
 						},
@@ -599,11 +597,13 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		switchOff: (canManage, providerId, { moveBots, newBotsTo, systemBotsTo }) =>
+		switchOff: (reach, { moveBots, newBotsTo, systemBotsTo }) =>
 			operation(
 				"switchOff",
 				Effect.gen(function* () {
+					const { canManage, provider } = reach;
 					const workspaceId = canManage.inWorkspace.workspace.value;
+					const providerId = provider.value;
 					yield* movingOffSwitchedOff(
 						workspaceId,
 						{ moves: moveBots, newBotsTo, systemBotsTo },

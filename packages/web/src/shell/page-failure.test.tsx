@@ -1,8 +1,8 @@
 import { cleanup, screen } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { apiAnswers, mount, onWideScreen } from "@/test-api.tsx";
+import { afterEach, beforeEach, it, vi } from "vitest";
+import { apiAnswers, mount, onWideScreen } from "@/api.test-support.tsx";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 // As a tab opened before a deploy finds it: the chunk is gone, so the import fails.
 vi.mock("@/screens/WorkspaceSettings.tsx", () => {
 	throw new Error("chunk missing");
@@ -23,7 +23,7 @@ it("keeps the sidebar and offers a reload when a page's code fails to download",
 	onWideScreen();
 	mount("/suga/settings");
 
-	expect(await screen.findByText("This page could not load")).toBeDefined();
-	expect(screen.getByRole("button", { name: "Reload" })).toBeDefined();
-	expect(screen.getByRole("navigation", { name: "Sidebar" })).toBeDefined();
+	await screen.findByText("This page could not load");
+	screen.getByRole("button", { name: "Reload" });
+	screen.getByRole("navigation", { name: "Sidebar" });
 });

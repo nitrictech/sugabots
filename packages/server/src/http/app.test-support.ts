@@ -1,14 +1,13 @@
 import type { CurrentUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
+import { PageAuthentication } from "@sugabots/core/authentication/page";
 import type { SessionAuthentication } from "@sugabots/core/authentication/session";
 import { sessionsFromCookies } from "@sugabots/core/authentication/testing";
 import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
-import { Automations } from "@sugabots/core/chats/automations/automations";
 import type { Database } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
-import { EventStore } from "@sugabots/core/database/events/store";
+import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
 import { noDatabase } from "@sugabots/core/database/testing";
-import { FilePages } from "@sugabots/core/files/pages";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Operations } from "@sugabots/core/operations/registry";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
@@ -59,6 +58,7 @@ type TestServices =
 	| Authentication.Service
 	| SessionAuthentication.Service
 	| WebhookAuthentication.Service
+	| PageAuthentication.Service
 	| Ids.Service
 	| ServerSettings.Service
 	| EventBus.Service;
@@ -123,15 +123,14 @@ const fakes: Layer.Layer<TestServices, never, Database> = Layer.mergeAll(
 	unimplemented(Operations.Service, { "workspaces.list": () => Effect.succeed([]) }),
 	// A stream's case supplies the operation it follows.
 	unimplemented(Operations.LongRunning),
-	unimplemented(FilePages.Service),
-	unimplemented(Automations.ConnectorEvents),
+	unimplemented(PageAuthentication.Service),
 	identifiedBy(async () => null),
 	sessionsFromCookies,
 	// A webhook route's case supplies who its calls authenticate as.
 	unimplemented(WebhookAuthentication.Service),
 	Ids.layer,
 	serverSettingsWithWebAppAt(WEB_ORIGIN),
-	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: EventStore.inMemory() })),
+	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: inMemoryEventStore() })),
 );
 
 /** Whose session a test says the cookie in `headers` holds, so HTTP tests run without a database. */

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import type { ComposerAttachment } from "@/lib/composer-attachments.ts";
-import { growthDesk } from "@/shell/story-fixtures.ts";
+import { growthDesk } from "@/shell/story-fixtures.test-support.ts";
 import {
 	acmeRequest,
 	boardPackFailed,
@@ -14,7 +14,7 @@ import {
 	invoicesAtLimit,
 	pricingPageReady,
 	pricingPageUploading,
-} from "./attachment-story-fixtures.ts";
+} from "./attachment-story-fixtures.test-support.ts";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { groupMentionsBy } from "./mentions.tsx";
 

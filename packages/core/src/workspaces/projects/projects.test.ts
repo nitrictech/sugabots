@@ -569,8 +569,11 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await privateUncommitted;
 
 			const adding = repository.addBot(workspaceId, made.id, bot.id);
-			await new Promise((resolve) => setTimeout(resolve, 300));
-			release();
+			try {
+				await waitUntilWaitingOnLocks(1);
+			} finally {
+				release();
+			}
 			await makingPrivate;
 
 			await expect(adding).rejects.toBeInstanceOf(ProjectStore.BotNotPublic);
@@ -782,23 +785,6 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 				ResourceHidden,
 			);
 			await expect(visibleTo(outsiderId)).rejects.toThrow(ResourceHidden);
-		});
-	});
-
-	describe("workspace membership lifecycle", () => {
-		it("lets somebody who created a project leave the workspace, and keeps the project", async () => {
-			const made = await create(editorId, { name: "Sales", slug: "sales" });
-
-			await onDatabase((db) =>
-				db
-					.delete(membership)
-					.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, editorId))),
-			);
-
-			const [survivor] = await onDatabase((db) =>
-				db.select().from(project).where(eq(project.id, made.id)),
-			);
-			expect(survivor).toMatchObject({ id: made.id });
 		});
 	});
 

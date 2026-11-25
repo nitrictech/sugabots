@@ -102,10 +102,10 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 					unimplemented(Turns.ApprovalWithdrawals.Service, { afterReachChange: () => Effect.void }),
 					unimplemented(Projects.Service),
 					unimplemented(ProjectComputers.Service, {
-						destroy: ({ projectId }) =>
+						destroy: ({ project }) =>
 							providerReachable
 								? Effect.sync(() => {
-										destroyedComputers.push(projectId);
+										destroyedComputers.push(project.value);
 									})
 								: Effect.fail(
 										new Computers.Unavailable({ provider: "opensandbox", cause: "unreachable" }),

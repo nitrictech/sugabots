@@ -1,11 +1,11 @@
 import type { WrittenFile } from "@sugabots/contracts";
-import { cleanup, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, mount, projects } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { apiAnswers, mount, projects } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const [teamProject, salesProject] = projects as [
 	(typeof projects)[number],
@@ -36,22 +36,17 @@ beforeEach(() => {
 	client.api.files.versions.mockReturnValue(Effect.succeed([salesPlan.shownVersion]));
 });
 
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
-});
-
 describe("a file opened by its address", () => {
 	it("shows a file among its own project's files", async () => {
 		mount(`/suga/projects/${salesProject.slug}/files/${salesPlan.id}`);
 
-		expect(await screen.findByRole("heading", { name: salesPlan.title })).toBeDefined();
+		await screen.findByRole("heading", { name: salesPlan.title });
 	});
 
 	it("is not shown under another project, whose link and Delete it is not", async () => {
 		mount(`/suga/projects/${teamProject.slug}/files/${salesPlan.id}`);
 
-		expect(await screen.findByText("No such file here")).toBeDefined();
+		await screen.findByText("No such file here");
 		expect(screen.queryByRole("heading", { name: salesPlan.title })).toBeNull();
 	});
 });

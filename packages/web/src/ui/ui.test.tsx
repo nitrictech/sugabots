@@ -19,7 +19,7 @@ describe("IconButton", () => {
 			</TooltipProvider>,
 		);
 
-		expect(screen.getByRole("button", { name: "New chat" })).toBeDefined();
+		screen.getByRole("button", { name: "New chat" });
 	});
 
 	it("can be a link, for a control that navigates rather than acts", () => {

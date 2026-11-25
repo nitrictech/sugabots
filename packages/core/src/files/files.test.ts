@@ -1,8 +1,9 @@
 import { MAX_FILE_CONTENT_CHARACTERS } from "@sugabots/contracts";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { PageAuthentication } from "../authentication/page.ts";
 import { seedMessage, seedTurnAnswering } from "../authentication/seed.test-support.ts";
 import { TurnAuthentication } from "../authentication/turn.ts";
 import { askerColumns } from "../authentication/turn-facts.ts";
@@ -184,16 +185,16 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			});
 			const served = await servedOperations({ serverSettings: settings });
 			const pages = await runOnPostgres(
-				Effect.provide(
-					FilePages.Service,
-					FilePages.layer.pipe(Layer.provide(Layer.succeed(ServerSettings.Service, settings))),
-				),
+				Effect.provide(PageAuthentication.Service, PageAuthentication.layer),
 			);
 			return (memberId: string) => ({
 				address: async (at: { fileId: string; version: number }) =>
 					(await asMember(served, memberId).files.pageAddress(at.fileId, at.version)).url ??
 					undefined,
-				open: (token: string) => runOnPostgres(pages.open(token)),
+				open: async (token: string) => {
+					const principal = await runOnPostgres(pages.open(token));
+					return served(principal, "files.servePage", { fileId: principal.file });
+				},
 			});
 		};
 		const aPage = () => seed({ kind: "html", title: "Chart", content: "<p>chart</p>" });
@@ -250,15 +251,15 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			const good = sealed(Date.now() + 60_000, FilePages.SECRET_PURPOSE);
 			const flipped = `${good.slice(0, -4)}${good.at(-4) === "A" ? "B" : "A"}${good.slice(-3)}`;
 			await expect(pages.open(flipped)).rejects.toMatchObject({
-				_tag: "FilePageUnavailable",
+				_tag: "PageAddressUnavailable",
 			});
 			await expect(
 				pages.open(sealed(Date.now() - 1, FilePages.SECRET_PURPOSE)),
 			).rejects.toMatchObject({
-				_tag: "FilePageUnavailable",
+				_tag: "PageAddressUnavailable",
 			});
 			await expect(pages.open(sealed(Date.now() + 60_000))).rejects.toMatchObject({
-				_tag: "FilePageUnavailable",
+				_tag: "PageAddressUnavailable",
 			});
 			expect(await pages.open(good)).toMatchObject({ title: "Chart" });
 		});

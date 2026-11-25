@@ -13,8 +13,8 @@ import {
 } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { and, eq, sql } from "drizzle-orm";
-import { Effect, Exit, Layer, Scope } from "effect";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { Cause, Effect, Exit, Layer, Metric, Scope } from "effect";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { askerColumns } from "../authentication/turn-facts.ts";
 import { ChatEvent } from "../chats/events.ts";
 import { seedChat } from "../chats/seed.test-support.ts";
@@ -78,6 +78,49 @@ const capturingBus = unimplemented(EventBus.Service, {
 	},
 });
 
+/**
+ * `handled`, and a promise that settles once every fiber it started has
+ * ended: among them the batch of notifications it starts sending in the
+ * background once it commits, which `handled` itself does not wait for. A
+ * fiber inherits what records fiber lifecycles from the one that started it.
+ * The promise rejects with the first of them that failed other than by being
+ * interrupted, as a losing racer is.
+ */
+function joiningWhatItStarts<A, E, R>(handled: Effect.Effect<A, E, R>) {
+	const allEnded = Promise.withResolvers<void>();
+	let running = 0;
+	let returned = false;
+	let failure: { readonly cause: unknown } | undefined;
+	const settleOnceIdle = () => {
+		if (!returned || running > 0) return;
+		if (failure) allEnded.reject(failure.cause);
+		else allEnded.resolve();
+	};
+	const lifecycles: Metric.FiberRuntimeMetricsService = {
+		recordFiberStart: () => {
+			running++;
+		},
+		recordFiberEnd: (_context, exit) => {
+			running--;
+			if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
+				failure ??= { cause: Cause.squash(exit.cause) };
+			}
+			settleOnceIdle();
+		},
+	};
+	return {
+		handled: Effect.provideService(handled, Metric.FiberRuntimeMetrics, lifecycles).pipe(
+			Effect.ensuring(
+				Effect.sync(() => {
+					returned = true;
+					settleOnceIdle();
+				}),
+			),
+		),
+		allEnded: allEnded.promise,
+	};
+}
+
 /** The notifications operations for one member signed in, by the names these cases use. */
 interface NotificationsAs {
 	readonly settings: Promise<NotificationSettings>;
@@ -136,9 +179,19 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				callOperation(principal, "notifications.reportPresence", presence),
 		});
 	};
-	const emit = async (...events: ChatEvent[]) => {
+	/**
+	 * Commits `events` as their handler. Returns the end of the batch of
+	 * notifications they start sending in the background.
+	 */
+	const emitting = async (...events: ChatEvent[]) => {
 		const { handler } = await notifications();
-		await run(transaction(handler(events)));
+		const { handled, allEnded } = joiningWhatItStarts(transaction(handler(events)));
+		await run(handled);
+		return { batchEnded: allEnded };
+	};
+	/** Commits `events` as their handler, and waits for everything they notify to be sent. */
+	const emit = async (...events: ChatEvent[]) => {
+		await (await emitting(...events)).batchEnded;
 	};
 	const sentTo = (memberId: string) =>
 		published
@@ -146,14 +199,6 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				({ stream, event }) => stream === memberStream(memberId) && event.type === "notification",
 			)
 			.map(({ event: { type: _type, v: _version, ...notification } }) => notification);
-	/** Waits for `memberId` to be sent `count` things, then for anything sent alongside them. */
-	const deliveredTo = async (memberId: string, count = 1) => {
-		await vi.waitFor(() => expect(sentTo(memberId).length).toBeGreaterThanOrEqual(count), {
-			timeout: 5_000,
-		});
-		await new Promise((resolve) => setTimeout(resolve, 20));
-		return sentTo(memberId);
-	};
 
 	let workspaceId: string;
 	let workspaceSlug: string;
@@ -360,7 +405,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		await emit(posted);
 
-		expect(await deliveredTo(members.bob.id)).toEqual([
+		expect(sentTo(members.bob.id)).toEqual([
 			{
 				title: `${members.ada.name} mentioned you in Launch`,
 				body: `@${handleFromName(members.bob.name)} can you look at the launch checklist?`,
@@ -381,13 +426,13 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 			await emit(memberPosted(chat, members.ada, text));
 
-			expect(await deliveredTo(members.bob.id)).toEqual([
+			expect(sentTo(members.bob.id)).toEqual([
 				expect.objectContaining({
 					title: `${members.ada.name} mentioned you in Launch`,
 					body: text,
 				}),
 			]);
-			expect(await deliveredTo(members.cy.id)).toHaveLength(1);
+			expect(sentTo(members.cy.id)).toHaveLength(1);
 			expect(sentTo(members.ada.id)).toEqual([]);
 			expect(sentTo(members.outsider.id)).toEqual([]);
 		},
@@ -411,7 +456,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			),
 		);
 
-		expect(await deliveredTo(members.cy.id)).toHaveLength(1);
+		expect(sentTo(members.cy.id)).toHaveLength(1);
 		expect(sentTo(members.bob.id)).toEqual([]);
 	});
 
@@ -440,7 +485,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		);
 		await removing.held;
 
-		await emit(
+		const { batchEnded } = await emitting(
 			memberPosted(
 				chat,
 				members.ada,
@@ -450,8 +495,9 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		// Each notification is checked as it goes, behind the removal under way.
 		await waitUntilWaitingOnLocks(1);
 		await removing.release();
+		await batchEnded;
 
-		expect(await deliveredTo(members.cy.id)).toHaveLength(1);
+		expect(sentTo(members.cy.id)).toHaveLength(1);
 		expect(sentTo(members.bob.id)).toEqual([]);
 	});
 
@@ -488,8 +534,9 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			);
 			expect(pool?.held).toBe(0);
 
-			await service.run(transaction(notifications.handler([event, next])));
-			await vi.waitFor(() => expect(sent).toContain(`${mention} next`));
+			const concurrent = joiningWhatItStarts(transaction(notifications.handler([event, next])));
+			await service.run(concurrent.handled);
+			await concurrent.allEnded;
 			expect(sent).toEqual([`${mention} look`, `${mention} next`]);
 		} finally {
 			unblock.resolve();
@@ -503,7 +550,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		await emit(await botReplied(chat, "@channel I am done."));
 
-		expect(await deliveredTo(members.ada.id)).toEqual([
+		expect(sentTo(members.ada.id)).toEqual([
 			expect.objectContaining({ title: "Scout in Release notes" }),
 		]);
 		expect(sentTo(members.bob.id)).toEqual([]);
@@ -532,7 +579,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			}),
 		);
 
-		expect(await deliveredTo(members.bob.id)).toEqual([
+		expect(sentTo(members.bob.id)).toEqual([
 			expect.objectContaining({
 				title: `${members.ada.name} in Launch`,
 				body: "Shared checklist.pdf",
@@ -573,7 +620,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await emit(resultSharing(["Weekly traction", "Pipeline"]));
 
 		// Each result is notified in its own time, so they may arrive in either order.
-		const delivered = await deliveredTo(members.bob.id, 2);
+		const delivered = sentTo(members.bob.id);
 		expect(delivered).toHaveLength(2);
 		expect(delivered).toEqual(
 			expect.arrayContaining([
@@ -590,7 +637,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		const reply = await botReplied(chat, "The release notes are drafted.", members.ada);
 		await emit(reply);
 
-		expect(await deliveredTo(members.ada.id)).toEqual([
+		expect(sentTo(members.ada.id)).toEqual([
 			{
 				title: "Scout in Release notes",
 				body: "The release notes are drafted.",
@@ -599,7 +646,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				chatId: chat,
 			},
 		]);
-		expect(await deliveredTo(members.cy.id)).toHaveLength(1);
+		expect(sentTo(members.cy.id)).toHaveLength(1);
 		expect(sentTo(members.bob.id)).toEqual([]);
 		expect(sentTo(members.outsider.id)).toEqual([]);
 	});
@@ -612,7 +659,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		await emit(await botReplied(chat, "The checklist is done."));
 
-		expect(await deliveredTo(members.ada.id)).toEqual([
+		expect(sentTo(members.ada.id)).toEqual([
 			expect.objectContaining({ title: "Scout in Launch", body: "The checklist is done." }),
 		]);
 		expect(sentTo(members.bob.id)).toEqual([]);
@@ -629,7 +676,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		await emit(await botReplied(chat, "Done."));
 
-		expect(await deliveredTo(members.ada.id)).toHaveLength(1);
+		expect(sentTo(members.ada.id)).toHaveLength(1);
 		expect(sentTo(members.bob.id)).toEqual([]);
 		expect(sentTo(members.cy.id)).toEqual([]);
 	});
@@ -654,7 +701,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		await emit(await botReplied(chat, "Done."));
 
-		expect(await deliveredTo(members.ada.id)).toHaveLength(1);
+		expect(sentTo(members.ada.id)).toHaveLength(1);
 		expect(sentTo(members.cy.id)).toEqual([]);
 	});
 
@@ -686,7 +733,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		await emit(await botReplied(chat, "Shipped."));
 
-		expect(await deliveredTo(members.bob.id)).toHaveLength(1);
+		expect(sentTo(members.bob.id)).toHaveLength(1);
 		expect(sentTo(members.ada.id)).toEqual([]);
 	});
 
@@ -698,7 +745,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await emit(await botReplied(chat, "Here is the checklist."));
 		await emit(memberPosted(chat, members.ada, "Thanks, Scout."));
 
-		expect(await deliveredTo(members.bob.id)).toEqual([
+		expect(sentTo(members.bob.id)).toEqual([
 			expect.objectContaining({ title: `${members.ada.name} in Launch` }),
 		]);
 	});
@@ -713,7 +760,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		await emit(await botReplied(chat, "Shipped."));
 
-		expect(await deliveredTo(members.bob.id)).toHaveLength(1);
+		expect(sentTo(members.bob.id)).toHaveLength(1);
 		expect(sentTo(members.ada.id)).toEqual([]);
 		const settings = await as(members.bob.id, (service) => service.settings);
 		expect(settings.bots).toEqual({ [botId]: "all" });
@@ -731,7 +778,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		await emit(await botReplied(chat, "Shipped."));
 
-		expect(await deliveredTo(members.ada.id)).toHaveLength(1);
+		expect(sentTo(members.ada.id)).toHaveLength(1);
 		expect(sentTo(members.bob.id)).toEqual([]);
 	});
 
@@ -821,8 +868,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			path: `/${workspaceSlug}/chats/${failedRun}?nestedChatPage=${failedRun}`,
 			chatId: failedRun,
 		};
-		expect(await deliveredTo(members.bob.id)).toEqual([failure]);
-		expect(await deliveredTo(members.ada.id)).toEqual([failure]);
+		expect(sentTo(members.bob.id)).toEqual([failure]);
+		expect(sentTo(members.ada.id)).toEqual([failure]);
 		expect(sentTo(members.cy.id)).toEqual([]);
 	});
 
@@ -834,7 +881,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		await emit(runSettled(run));
 
-		expect(await deliveredTo(members.bob.id)).toEqual([
+		expect(sentTo(members.bob.id)).toEqual([
 			expect.objectContaining({ title: "Digest finished", body: "Scout finished the run." }),
 		]);
 		expect(sentTo(members.ada.id)).toEqual([]);
@@ -901,7 +948,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		const inFeed = await resultPosted(feed);
 		await emit(inFeed);
 
-		expect(await deliveredTo(members.ada.id)).toEqual([
+		expect(sentTo(members.ada.id)).toEqual([
 			{
 				title: "Scout mentioned you in Digest",
 				body: content,
@@ -958,7 +1005,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		await emit(await failedTurn(members.ada), await failedTurn(members.bob));
 
-		expect(await deliveredTo(members.ada.id)).toEqual([
+		expect(sentTo(members.ada.id)).toEqual([
 			expect.objectContaining({
 				title: "Scout couldn't finish its reply",
 				body: "The model is unavailable.",
@@ -1061,7 +1108,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			ChatEvent.TurnSuspended({ chatId: chat, workspaceId, turnId, approvalCallIds: callIds }),
 		);
 
-		expect(await deliveredTo(members.ada.id)).toEqual([
+		expect(sentTo(members.ada.id)).toEqual([
 			{
 				title: "Scout needs your approval",
 				body: "To run post_message in Release notes",
@@ -1089,7 +1136,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			ChatEvent.TurnSuspended({ chatId: chat, workspaceId, turnId, approvalCallIds: callIds }),
 		);
 
-		expect(await deliveredTo(members.ada.id)).toEqual([
+		expect(sentTo(members.ada.id)).toEqual([
 			{
 				title: "Scout needs your approval",
 				body: `To run ${HOST_REQUEST_TOOL} in Launch`,
@@ -1098,7 +1145,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				chatId: chat,
 			},
 		]);
-		expect(await deliveredTo(members.bob.id)).toEqual([
+		expect(sentTo(members.bob.id)).toEqual([
 			{
 				title: "Scout needs your approval",
 				body: "To run post_message in Launch",
@@ -1133,7 +1180,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			ChatEvent.TurnSuspended({ chatId: chat, workspaceId, turnId, approvalCallIds: callIds }),
 		);
 
-		expect(await deliveredTo(members.bob.id)).toEqual([
+		expect(sentTo(members.bob.id)).toEqual([
 			{
 				title: "Scout needs your approval",
 				body: "To let its computer reach docs.example",
@@ -1175,8 +1222,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			path: `/${workspaceSlug}/approvals/${callId}`,
 			chatId: expect.any(String),
 		};
-		expect(await deliveredTo(members.ada.id)).toEqual([asked]);
-		expect(await deliveredTo(members.cy.id)).toEqual([asked]);
+		expect(sentTo(members.ada.id)).toEqual([asked]);
+		expect(sentTo(members.cy.id)).toEqual([asked]);
 		expect(sentTo(members.bob.id)).toEqual([]);
 	});
 });

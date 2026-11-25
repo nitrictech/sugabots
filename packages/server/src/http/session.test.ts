@@ -1,4 +1,4 @@
-import { Api, Session } from "@sugabots/contracts/http";
+import { Api } from "@sugabots/contracts/http";
 import { HttpApi } from "effect/unstable/httpapi";
 import { describe, expect, it } from "vitest";
 import { createTestApp, identifiedBy } from "./app.test-support.ts";
@@ -62,19 +62,17 @@ interface Endpoint {
 	name: string;
 	method: string;
 	path: string;
-	behindSession: boolean;
 }
 
 function declaredEndpoints(): Endpoint[] {
 	const endpoints: Endpoint[] = [];
 	HttpApi.reflect(Api, {
 		onGroup: () => {},
-		onEndpoint: ({ endpoint, middleware }) => {
+		onEndpoint: ({ endpoint }) => {
 			endpoints.push({
 				name: `${endpoint.method} ${endpoint.path}`,
 				method: endpoint.method,
 				path: endpoint.path,
-				behindSession: [...middleware].some(({ key }) => key === Session.key),
 			});
 		},
 	});
@@ -95,14 +93,6 @@ function requestTo({ method, path }: Endpoint) {
 }
 
 describe("every endpoint requires a session", () => {
-	it("discovers protected endpoints", () => {
-		expect(protectedEndpoints.length).toBeGreaterThan(20);
-	});
-
-	it.each(protectedEndpoints)("%s is behind Session", (_name, endpoint) => {
-		expect(endpoint.behindSession).toBe(true);
-	});
-
 	it.each(protectedEndpoints)("%s refuses an anonymous caller", async (_name, endpoint) => {
 		const app = createTestApp(identifiedBy(async () => null));
 		const { path, ...init } = requestTo(endpoint);

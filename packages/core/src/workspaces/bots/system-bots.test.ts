@@ -74,16 +74,18 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 		expect(await placed()).toEqual([{ key: "compact", model: null }]);
 	});
 
-	it("gives each workspace its own set", async () => {
+	it("gives each workspace its own set, whose model is chosen for it alone", async () => {
 		await bots.createSystemBots({ workspaceId, createdById: creatorId });
 		await bots.createSystemBots({ workspaceId: otherWorkspaceId, createdById: creatorId });
 		await bots.setSystemBotModel(workspaceId, "compact", "one-workspace-only");
 
-		const listed = await callOperation(await signedIn.member(creatorId), "systemBots.list", {
-			workspace: otherWorkspaceId,
-		});
-		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
-			{ key: "compact", model: null },
-		]);
+		const principal = await signedIn.member(creatorId);
+		const listedIn = async (workspace: string) =>
+			(await callOperation(principal, "systemBots.list", { workspace })).map(({ key, model }) => ({
+				key,
+				model,
+			}));
+		expect(await listedIn(workspaceId)).toEqual([{ key: "compact", model: "one-workspace-only" }]);
+		expect(await listedIn(otherWorkspaceId)).toEqual([{ key: "compact", model: null }]);
 	});
 });

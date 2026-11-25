@@ -26,7 +26,7 @@ import { useEffect, useState } from "react";
 import { chatItemCreatedAt } from "@/lib/chats.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import { AppRouterProvider, createAppRouter } from "@/router.tsx";
-import { projectsWithBots, storyBots } from "@/shell/story-fixtures.ts";
+import { projectsWithBots, storyBots } from "@/shell/story-fixtures.test-support.ts";
 
 /*
  * The whole app, for a story: the real routes at an address, answered by
@@ -34,7 +34,7 @@ import { projectsWithBots, storyBots } from "@/shell/story-fixtures.ts";
  * as it appears in the app, with its sidebar and settings around it, uses
  * this rather than rendering the screen alone and guessing at its context.
  *
- * Fixtures are the design's example workspace, from `story-fixtures.ts`.
+ * Fixtures are the design's example workspace, from `story-fixtures.test-support.ts`.
  */
 
 const API = import.meta.env.VITE_API_URL as string;

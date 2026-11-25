@@ -40,6 +40,7 @@ import {
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { layer, make } from "./scheduler.ts";
+import { emptyDatabase } from "./testing.ts";
 
 /**
  * Whether the idle sweep can still pause a project's computer after it was woken
@@ -225,6 +226,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		afterAll(closeDatabase);
 
 		beforeEach(async () => {
+			await emptyDatabase();
 			atProvider.clear();
 			beforeCreate = undefined;
 			workKeptApart = false;

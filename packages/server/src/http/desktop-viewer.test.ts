@@ -43,8 +43,6 @@ const scope = Effect.runSync(Scope.make());
 let apiPort: number;
 /** Where the stand-in desktop listens. */
 let desktopPort: number;
-/** Whether the viewer opened next ends at once, as when its member loses access to the desktop. */
-let losesAccess = false;
 
 /** Serves `routes` on an ephemeral port until the tests end, and answers the port. */
 const served = <E, R>(routes: Layer.Layer<never, E, R>) =>
@@ -103,7 +101,11 @@ beforeAll(async () => {
 			}),
 		),
 	);
-	apiPort = await served(
+	apiPort = await serveViewer(Effect.never);
+});
+
+const serveViewer = (ended: Effect.Effect<void>) =>
+	served(
 		testRoutes(
 			Layer.mergeAll(
 				identifiedBy(resolveMember),
@@ -115,13 +117,12 @@ beforeAll(async () => {
 								password: PASSWORD,
 								control: true,
 							}),
-							ended: losesAccess ? Effect.void : Effect.never,
+							ended,
 						}),
 				}),
 			),
 		),
 	);
-});
 
 afterAll(() => Effect.runPromise(Scope.close(scope, Exit.void)));
 
@@ -156,19 +157,15 @@ describe("the desktop viewer's WebSocket", () => {
 	});
 
 	it("closes the socket once the member may no longer see the desktop", async () => {
-		losesAccess = true;
-		try {
-			const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${PATH}`, {
-				headers: { origin: WEB_ORIGIN, cookie: "session=good" },
-			} as unknown as string[]);
-			await new Promise<void>((resolve, reject) => {
-				socket.onclose = () => resolve();
-				socket.onerror = () => reject(new Error("The socket failed"));
-				setTimeout(() => reject(new Error("The socket stayed open")), 5_000);
-			});
-		} finally {
-			losesAccess = false;
-		}
+		const closingPort = await serveViewer(Effect.void);
+		const socket = new WebSocket(`ws://127.0.0.1:${closingPort}${PATH}`, {
+			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
+		} as unknown as string[]);
+		await new Promise<void>((resolve, reject) => {
+			socket.onclose = () => resolve();
+			socket.onerror = () => reject(new Error("The socket failed"));
+			setTimeout(() => reject(new Error("The socket stayed open")), 5_000);
+		});
 	});
 
 	it("closes the socket once the viewer has been open its longest", async () => {

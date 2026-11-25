@@ -2,17 +2,17 @@ import type { Message, MessageReaction } from "@sugabots/contracts";
 import { Forbidden } from "@sugabots/contracts/http";
 import { userText } from "@sugabots/errors";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { Effect } from "effect";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { chatDetails, sam, triager } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 import { chatQuery } from "@/lib/chat-query.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import { useReactions } from "@/lib/reactions.ts";
-import { chatDetails, sam, triager } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const message: Message = {
 	id: "0199a3a0-0000-7000-8000-0000000007a1",
@@ -30,11 +30,6 @@ const message: Message = {
 	content: "Ship it?",
 	createdAt: "2026-09-18T08:00:00.000Z",
 };
-
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
-});
 
 describe("reacting to a message", () => {
 	it("takes a reaction back when clicked twice before the first click shows", async () => {

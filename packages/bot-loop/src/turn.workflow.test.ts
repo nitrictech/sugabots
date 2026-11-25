@@ -1,13 +1,14 @@
 import { botForAskerForTests } from "@sugabots/core/authentication/testing";
 import { TurnAuthentication } from "@sugabots/core/authentication/turn";
 import { Turns } from "@sugabots/core/chats/turns/turns";
+import { promising } from "@sugabots/core/database/testing";
 import type { BotPrincipal } from "@sugabots/core/principal";
 import { Lanes } from "@sugabots/core/workflows/lanes";
-import { Duration, Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
-import { TestClock } from "effect/testing";
-import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { Clock, Duration, Effect, Layer, ManagedRuntime, Schema } from "effect";
+import { DurableDeferred, type WorkflowEngine } from "effect/unstable/workflow";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import * as Signals from "./signals.ts";
+import { controlledClock, observedExecution } from "./testing.ts";
 import {
 	type Opening,
 	type StepOutcome,
@@ -21,7 +22,7 @@ import {
 /**
  * The turn workflow on its own, on the memory engine: the order of its
  * steps, when it authenticates, how it waits for approvals, retries and ends.
- * What each step does is a fake; `turn.test.ts` runs real steps on Postgres.
+ * What each step does is a fake; the files beside this one run real steps on Postgres.
  */
 
 type TurnRequest = Turns.TurnRequests.TurnRequest;
@@ -50,45 +51,6 @@ const authenticate = vi.fn(
 
 const admit = vi.fn<Lanes.Interface["admit"]>(() => Effect.succeed("started" as const));
 
-const runtime = ManagedRuntime.make(
-	turnWorkflow.layer.pipe(
-		Layer.provideMerge(
-			Layer.succeed(
-				TurnSteps,
-				TurnSteps.of({
-					open,
-					step,
-					release: () => Effect.void,
-					cancelled,
-					died,
-					unauthenticated,
-					abandon,
-					announceReleased,
-				}),
-			),
-		),
-		Layer.provideMerge(
-			Layer.succeed(TurnAuthentication.Service, TurnAuthentication.Service.of({ authenticate })),
-		),
-		Layer.provideMerge(
-			Layer.succeed(
-				Lanes.Service,
-				Lanes.Service.of({
-					admit,
-					release,
-					dropWaiting: () => Effect.die("unused"),
-					reconcile: Effect.void,
-				}),
-			),
-		),
-		Layer.provideMerge(WorkflowEngine.layerMemory),
-		Layer.provideMerge(TestClock.layer()),
-	),
-);
-const signals = await runtime.runPromise(Signals.make);
-
-afterAll(() => runtime.dispose());
-
 const request = (): TurnRequest => ({
 	chatId: crypto.randomUUID(),
 	botId: crypto.randomUUID(),
@@ -96,11 +58,79 @@ const request = (): TurnRequest => ({
 	reason: "mention",
 });
 
-const untilSuspended = (executionId: string) =>
-	vi.waitFor(async () => {
-		const polled = await runtime.runPromise(Turn.poll(executionId));
-		expect(Option.isSome(polled) && polled.value._tag).toBe("Suspended");
-	});
+/**
+ * Starts the turn workflow for `asked` on a memory engine and a clock of its
+ * own, until the case finishes, with the fakes standing in for its steps,
+ * authentication and lanes. Returns its execution's id, the signals members'
+ * decisions and interrupts reach it through, the clock, and what the case
+ * waits for of it.
+ */
+async function started(asked: TurnRequest) {
+	const executionId = await Effect.runPromise(Turn.executionId(asked));
+	const execution = observedExecution(executionId);
+	const time = await controlledClock();
+	const runtime = ManagedRuntime.make(
+		turnWorkflow.layer.pipe(
+			Layer.provideMerge(
+				Layer.succeed(
+					TurnSteps,
+					TurnSteps.of({
+						open,
+						step,
+						release: () => Effect.void,
+						cancelled,
+						died,
+						unauthenticated,
+						abandon,
+						announceReleased,
+					}),
+				),
+			),
+			Layer.provideMerge(
+				Layer.succeed(TurnAuthentication.Service, TurnAuthentication.Service.of({ authenticate })),
+			),
+			Layer.provideMerge(
+				Layer.succeed(
+					Lanes.Service,
+					Lanes.Service.of({
+						admit,
+						release,
+						dropWaiting: () => Effect.die("unused"),
+						reconcile: Effect.void,
+					}),
+				),
+			),
+			Layer.provideMerge(execution.engine),
+			Layer.provideMerge(Layer.succeed(Clock.Clock, time.clock)),
+		),
+	);
+	onTestFinished(() => runtime.dispose());
+	const signals = await runtime.runPromise(Signals.make);
+	await runtime.runPromise(Turn.execute(asked, { discard: true }));
+	return {
+		executionId,
+		time,
+		signals: promising<never>(runtime.runPromise)(signals),
+		run: <A, E>(effect: Effect.Effect<A, E, WorkflowEngine.WorkflowEngine>) =>
+			runtime.runPromise(effect),
+		...execution,
+	};
+}
+
+/** How long a turn waits after a failed step before running again, when its provider said nothing. */
+const RETRY_DELAY = Duration.seconds(2);
+
+/**
+ * How long the turn's wait before running again was set for, in milliseconds:
+ * the sleep waiting on its clock. A turn that runs again without one fails the case.
+ */
+const retryWait = (turn: Awaited<ReturnType<typeof started>>) =>
+	Promise.race([
+		turn.time.waiting(1),
+		turn.completed().then(() => {
+			throw new Error("Expected the turn to wait before running again, but it completed");
+		}),
+	]);
 
 /** The places of the steps taken so far, in order. */
 const placesTaken = () => step.mock.calls.map(([, , place]) => place);
@@ -140,9 +170,10 @@ describe("the turn workflow", () => {
 			.mockReturnValueOnce(Effect.succeed({ _tag: "Continue" }));
 		const asked = request();
 
-		await runtime.runPromise(Turn.execute(asked, { discard: true }));
+		const turn = await started(asked);
 
-		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
+		await turn.completed();
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 		expect(open).toHaveBeenCalledWith(asked, 0);
 		expect(authenticate).toHaveBeenCalledWith("turn-1");
 		expect(placesTaken()).toEqual([
@@ -161,19 +192,18 @@ describe("the turn workflow", () => {
 	it("authenticates the turn again each time it resumes, and takes the next step for the new principal", async () => {
 		step.mockReturnValueOnce(Effect.succeed({ _tag: "Waiting", approvals: ["only"], taken: true }));
 		const asked = request();
-		const executionId = await runtime.runPromise(Turn.execute(asked, { discard: true }));
-		await untilSuspended(executionId);
+		const turn = await started(asked);
+		await turn.suspended();
 		expect(authenticate).toHaveBeenCalledTimes(1);
 
-		await runtime.runPromise(
-			signals.decide({
-				executionId,
-				approvalId: "only",
-				decision: { decision: "allow_once", memberId: "sam" },
-			}),
-		);
+		await turn.signals.decide({
+			executionId: turn.executionId,
+			approvalId: "only",
+			decision: { decision: "allow_once", memberId: "sam" },
+		});
 
-		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
+		await turn.completed();
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 		// Resuming ran the workflow's own code again, and with it the authenticator;
 		// the journaled step was not taken again.
 		expect(authenticate).toHaveBeenCalledTimes(2);
@@ -189,13 +219,14 @@ describe("the turn workflow", () => {
 	it("ends an execution a newer one took over without journaling its step, which the next takes", async () => {
 		step.mockReturnValueOnce(Effect.succeed({ _tag: "Superseded" }));
 		const asked = request();
-		const executionId = await runtime.runPromise(Turn.execute(asked, { discard: true }));
-		await untilSuspended(executionId);
+		const turn = await started(asked);
+		await turn.suspended();
 		expect(release).not.toHaveBeenCalled();
 
-		await runtime.runPromise(Turn.resume(executionId));
+		await turn.run(Turn.resume(turn.executionId));
 
-		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
+		await turn.completed();
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 		// The step had no result, so the resumed execution took it, as its own principal.
 		expect(placesTaken()).toEqual([
 			{ turnId: "turn-1", attempt: 0, step: 0 },
@@ -209,18 +240,17 @@ describe("the turn workflow", () => {
 			Effect.succeed({ _tag: "Waiting", approvals: ["only"], taken: false }),
 		);
 		const asked = request();
-		const executionId = await runtime.runPromise(Turn.execute(asked, { discard: true }));
-		await untilSuspended(executionId);
+		const turn = await started(asked);
+		await turn.suspended();
 
-		await runtime.runPromise(
-			signals.decide({
-				executionId,
-				approvalId: "only",
-				decision: { decision: "deny", memberId: "sam" },
-			}),
-		);
+		await turn.signals.decide({
+			executionId: turn.executionId,
+			approvalId: "only",
+			decision: { decision: "deny", memberId: "sam" },
+		});
 
-		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
+		await turn.completed();
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 		expect(placesTaken()).toEqual([
 			{ turnId: "turn-1", attempt: 0, step: 0 },
 			{ turnId: "turn-1", attempt: 0, step: 0 },
@@ -233,9 +263,10 @@ describe("the turn workflow", () => {
 		);
 		const asked = request();
 
-		await runtime.runPromise(Turn.execute(asked, { discard: true }));
+		const turn = await started(asked);
 
-		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
+		await turn.completed();
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 		expect(unauthenticated).toHaveBeenCalledWith(asked, 0);
 		expect(step).not.toHaveBeenCalled();
 	});
@@ -243,16 +274,16 @@ describe("the turn workflow", () => {
 	it("opens a failed turn again once the retry delay has passed, and authenticates it again", async () => {
 		step.mockReturnValueOnce(Effect.succeed({ _tag: "Retry" }));
 		const asked = request();
+		const turn = await started(asked);
 
-		await runtime.runPromise(Turn.execute(asked, { discard: true }));
-		await vi.waitFor(() => expect(step).toHaveBeenCalledTimes(1));
+		expect(await retryWait(turn)).toEqual([Duration.toMillis(RETRY_DELAY)]);
+		expect(step).toHaveBeenCalledOnce();
+		await turn.time.adjust(RETRY_DELAY);
 
-		await vi.waitFor(async () => {
-			await runtime.runPromise(TestClock.adjust(Duration.seconds(2)));
-			expect(step).toHaveBeenCalledTimes(2);
-		});
-		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
+		await turn.completed();
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 		expect(open.mock.calls.map(([, attempt]) => attempt)).toEqual([0, 1]);
+		expect(authenticate).toHaveBeenCalledTimes(2);
 		expect(placesTaken()).toEqual([
 			{ turnId: "turn-1", attempt: 0, step: 0 },
 			{ turnId: "turn-1", attempt: 1, step: 0 },
@@ -261,33 +292,31 @@ describe("the turn workflow", () => {
 	});
 
 	it("waits as long as a rate-limited provider asked before running again", async () => {
-		step.mockReturnValueOnce(Effect.succeed({ _tag: "Retry", after: Duration.seconds(30) }));
+		const askedToWait = Duration.seconds(30);
+		step.mockReturnValueOnce(Effect.succeed({ _tag: "Retry", after: askedToWait }));
 		const asked = request();
-		await runtime.runPromise(Turn.execute(asked, { discard: true }));
-		await vi.waitFor(() => expect(step).toHaveBeenCalledTimes(1));
+		const turn = await started(asked);
+		expect(await retryWait(turn)).toEqual([Duration.toMillis(askedToWait)]);
 
-		let waitedSeconds = 0;
-		await vi.waitFor(
-			async () => {
-				await runtime.runPromise(TestClock.adjust(Duration.seconds(1)));
-				waitedSeconds++;
-				expect(step).toHaveBeenCalledTimes(2);
-			},
-			{ timeout: 5_000, interval: 1 },
-		);
-		expect(waitedSeconds).toBeGreaterThanOrEqual(30);
-		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
+		await turn.time.adjust(Duration.subtract(askedToWait, Duration.millis(1)));
+		expect(step).toHaveBeenCalledOnce();
+		await turn.time.adjust(Duration.millis(1));
+
+		await turn.completed();
+		expect(step).toHaveBeenCalledTimes(2);
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 	});
 
 	it("releases the lane when a turn is cancelled while waiting to retry", async () => {
 		step.mockReturnValueOnce(Effect.succeed({ _tag: "Retry", after: Duration.seconds(30) }));
 		const asked = request();
-		const executionId = await runtime.runPromise(Turn.execute(asked, { discard: true }));
-		await vi.waitFor(() => expect(step).toHaveBeenCalledOnce());
+		const turn = await started(asked);
+		expect(await retryWait(turn)).toEqual([Duration.toMillis(Duration.seconds(30))]);
 
-		await runtime.runPromise(signals.cancel(executionId));
+		await turn.signals.cancel(turn.executionId);
 
-		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
+		await turn.completed();
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 		expect(open.mock.calls.map(([, attempt]) => attempt)).toEqual([0]);
 	});
 
@@ -297,42 +326,40 @@ describe("the turn workflow", () => {
 		);
 		admit.mockReturnValueOnce(Effect.succeed("waiting"));
 		const asked = request();
-		const executionId = await runtime.runPromise(Turn.execute(asked, { discard: true }));
-		await untilSuspended(executionId);
+		const turn = await started(asked);
+		const { executionId } = turn;
+		await turn.suspended();
 		expect(release).toHaveBeenCalledOnce();
 		expect(admit).not.toHaveBeenCalled();
 
 		// The second approval is decided first; the first still waits.
-		await runtime.runPromise(
-			signals.decide({
-				executionId,
-				approvalId: "second",
-				decision: { decision: "deny", memberId: "sam" },
-			}),
-		);
-		await untilSuspended(executionId);
+		await turn.signals.decide({
+			executionId,
+			approvalId: "second",
+			decision: { decision: "deny", memberId: "sam" },
+		});
+		await turn.suspended();
 		expect(release).toHaveBeenCalledOnce();
 		expect(admit).not.toHaveBeenCalled();
 
-		await runtime.runPromise(
-			signals.decide({
-				executionId,
-				approvalId: "first",
-				decision: { decision: "allow_once", memberId: "alex" },
-			}),
-		);
+		await turn.signals.decide({
+			executionId,
+			approvalId: "first",
+			decision: { decision: "allow_once", memberId: "alex" },
+		});
 
-		await vi.waitFor(() => expect(admit).toHaveBeenCalledOnce());
-		await untilSuspended(executionId);
+		await turn.suspended();
+		expect(admit).toHaveBeenCalledOnce();
 		expect(step).toHaveBeenCalledOnce();
 		const granted = Lanes.laneGranted("0/0/0");
-		await runtime.runPromise(
+		await turn.run(
 			DurableDeferred.succeed(granted, {
 				token: DurableDeferred.tokenFromExecutionId(granted, { workflow: Turn, executionId }),
 				value: undefined,
 			}),
 		);
-		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
+		await turn.completed();
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 		expect(admit).toHaveBeenCalledExactlyOnceWith(
 			expect.objectContaining({ whenBusy: "resume", payload: asked, resumeRound: "0/0/0" }),
 		);
@@ -344,23 +371,20 @@ describe("the turn workflow", () => {
 		step.mockReturnValueOnce(Effect.succeed({ _tag: "Waiting", approvals: ["only"], taken: true }));
 		admit.mockReturnValueOnce(Effect.succeed("waiting"));
 		const asked = request();
-		const executionId = await runtime.runPromise(Turn.execute(asked, { discard: true }));
-		await untilSuspended(executionId);
-		await runtime.runPromise(
-			signals.decide({
-				executionId,
-				approvalId: "only",
-				decision: { decision: "allow_once", memberId: "sam" },
-			}),
-		);
-		await vi.waitFor(() => expect(admit).toHaveBeenCalledOnce());
-		await untilSuspended(executionId);
+		const turn = await started(asked);
+		await turn.suspended();
+		await turn.signals.decide({
+			executionId: turn.executionId,
+			approvalId: "only",
+			decision: { decision: "allow_once", memberId: "sam" },
+		});
+		await turn.suspended();
+		expect(admit).toHaveBeenCalledOnce();
 
-		await runtime.runPromise(signals.cancel(executionId));
+		await turn.signals.cancel(turn.executionId);
 
-		await vi.waitFor(() =>
-			expect(cancelled).toHaveBeenCalledWith(expect.objectContaining({ turn: "turn-1" }), "turn-1"),
-		);
+		await turn.completed();
+		expect(cancelled).toHaveBeenCalledWith(expect.objectContaining({ turn: "turn-1" }), "turn-1");
 		expect(step).toHaveBeenCalledTimes(1);
 		expect(admit).toHaveBeenCalledTimes(1);
 	});
@@ -368,20 +392,17 @@ describe("the turn workflow", () => {
 	it("ends the turn when told it was cancelled while it waited", async () => {
 		step.mockReturnValueOnce(Effect.succeed({ _tag: "Waiting", approvals: ["only"], taken: true }));
 		const asked = request();
-		const executionId = await runtime.runPromise(Turn.execute(asked, { discard: true }));
-		await untilSuspended(executionId);
+		const turn = await started(asked);
+		await turn.suspended();
 
-		await runtime.runPromise(signals.cancel(executionId));
+		await turn.signals.cancel(turn.executionId);
 
-		await vi.waitFor(() =>
-			expect(release).toHaveBeenCalledWith({
-				key: Turns.TurnRequests.turnLane(asked),
-				executionId,
-			}),
-		);
-		await vi.waitFor(() =>
-			expect(cancelled).toHaveBeenCalledWith(expect.objectContaining({ turn: "turn-1" }), "turn-1"),
-		);
+		await turn.completed();
+		expect(release).toHaveBeenCalledWith({
+			key: Turns.TurnRequests.turnLane(asked),
+			executionId: turn.executionId,
+		});
+		expect(cancelled).toHaveBeenCalledWith(expect.objectContaining({ turn: "turn-1" }), "turn-1");
 		expect(admit).not.toHaveBeenCalled();
 		expect(step).toHaveBeenCalledTimes(1);
 	});
@@ -398,9 +419,10 @@ describe("the turn workflow", () => {
 		release.mockImplementationOnce(() => Effect.sync(() => void order.push("release")));
 		const asked = request();
 
-		await runtime.runPromise(Turn.execute(asked, { discard: true }));
+		const turn = await started(asked);
 
-		await vi.waitFor(() => expect(announceReleased).toHaveBeenCalledWith(asked));
+		await turn.completed();
+		expect(announceReleased).toHaveBeenCalledWith(asked);
 		expect(died).toHaveBeenCalledWith(expect.objectContaining({ turn: "turn-1" }), "turn-1");
 		// Not by the workflow's id, which every execution of the turn shares.
 		expect(abandon).not.toHaveBeenCalled();
@@ -412,9 +434,9 @@ describe("the turn workflow", () => {
 		died.mockReturnValueOnce(Effect.succeed({ _tag: "Superseded" }));
 		const asked = request();
 
-		const executionId = await runtime.runPromise(Turn.execute(asked, { discard: true }));
+		const turn = await started(asked);
 
-		await untilSuspended(executionId);
+		await turn.suspended();
 		expect(release).not.toHaveBeenCalled();
 		expect(abandon).not.toHaveBeenCalled();
 	});

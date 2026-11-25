@@ -2,6 +2,10 @@ import { providersContracts } from "@sugabots/contracts/operations/providers";
 import { Effect } from "effect";
 import { proveInWorkspace } from "../../../proofs/in-workspace.ts";
 import { named } from "../../../proofs/proof.ts";
+import {
+	proveReachesModelProvider,
+	proveReachesProviderModel,
+} from "../../../proofs/reaches-model-provider.ts";
 import { proveCanManageWorkspace } from "../../../proofs/workspace-permissions.ts";
 import { ModelProviders } from "../../../providers/model-providers/model-providers.ts";
 import { workspaceIdOf } from "../../../workspaces/workspace-reference.ts";
@@ -14,13 +18,22 @@ export const switchOffModel = defineOperation(
 			const modelProviders = yield* ModelProviders.Service;
 			const { workspace: reference, providerId, modelId, ...moves } = input;
 			const workspaceId = yield* workspaceIdOf(reference);
-			return yield* named(principal, workspaceId, (principal, workspace) =>
-				Effect.gen(function* () {
-					const canManage = yield* proveCanManageWorkspace(
-						yield* proveInWorkspace(principal, workspace),
-					);
-					return yield* modelProviders.switchOffModel(canManage, providerId, modelId, moves);
-				}),
+			return yield* named(
+				principal,
+				workspaceId,
+				providerId,
+				modelId,
+				(principal, workspace, provider, model) =>
+					Effect.gen(function* () {
+						const canManage = yield* proveCanManageWorkspace(
+							yield* proveInWorkspace(principal, workspace),
+						);
+						const reach = yield* proveReachesModelProvider(canManage, provider);
+						return yield* modelProviders.switchOffModel(
+							yield* proveReachesProviderModel(reach, model),
+							moves,
+						);
+					}),
 			);
 		}),
 );

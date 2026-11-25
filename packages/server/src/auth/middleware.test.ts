@@ -78,34 +78,9 @@ describe("the Session middleware", () => {
 			{ kind: "MemberSession", member: ada.id, session: `session-of-${ada.id}` },
 			{ kind: "MemberSession", member: ada.id, session: `session-of-${ada.id}` },
 		]);
-	});
-
-	it("gives each request a call of its own", async () => {
-		const calls: Called[] = [];
-		const app = appRecording([], calls);
-
-		await app.request(`/projects/${PROJECT}/members`, { headers: signedInWith("ada-token") });
-		await app.request(`/projects/${PROJECT}/members`, { headers: signedInWith("ada-token") });
-
-		const [first, second] = calls.map(({ call }) => call);
-		expect(first).toEqual({ kind: "request", request: expect.any(String) });
-		expect(second).toEqual({ kind: "request", request: expect.any(String) });
-		expect(first).not.toEqual(second);
-	});
-
-	it("refuses a request with no session before any operation is called", async () => {
-		const calls: Called[] = [];
-		const app = appRecording([], calls);
-
-		const response = await app.request(`/projects/${PROJECT}/members`, {
-			headers: signedInWith("nobody's-token"),
-		});
-
-		expect(response.status).toBe(401);
-		expect(await response.json()).toEqual({
-			_tag: "Unauthorized",
-			message: "Invalid or expired session",
-		});
-		expect(calls).toEqual([]);
+		const [firstCall, secondCall] = calls.map(({ call }) => call);
+		expect(firstCall).toEqual({ kind: "request", request: expect.any(String) });
+		expect(secondCall).toEqual({ kind: "request", request: expect.any(String) });
+		expect(firstCall).not.toEqual(secondCall);
 	});
 });

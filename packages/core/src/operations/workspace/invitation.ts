@@ -30,12 +30,12 @@ export const invitation = defineOperation(
 						);
 			return yield* reading.pipe(
 				Effect.catchTag("ResourceHidden", () =>
-					named(principal, (principal) =>
+					named(principal, input.invitationId, (principal, invitation) =>
 						Effect.flatMap(proveIsMember(principal), (isMember) =>
-							Effect.map(
-								membership.alreadyAccepted(isMember, input.invitationId),
-								({ workspaceId }) => ({ status: "accepted" as const, workspaceId }),
-							),
+							Effect.map(membership.alreadyAccepted(isMember, invitation), ({ workspaceId }) => ({
+								status: "accepted" as const,
+								workspaceId,
+							})),
 						),
 					),
 				),

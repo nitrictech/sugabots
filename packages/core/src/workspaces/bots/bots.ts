@@ -92,21 +92,21 @@ export interface Interface {
 	readonly saveInstructions: <P, B, X>(
 		canManage: CanManageBot<P, B>,
 		written: { readonly instructions: string; readonly description: string },
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [B], "bots.saveInstructions">,
 	) => Effect.Effect<Bot, AssistantInstructionsManaged | BotGone | ResourceHidden | FenceRefusal>;
 	/** Records a deletion after ensuring the bot is free to delete. */
 	readonly beginRemoval: <P, B>(
 		canDelete: CanDeleteBot<P, B>,
 	) => Effect.Effect<string, SystemBotImmutable | LeadsProjects, Transaction>;
-	readonly remove: <W>(
-		started: ProjectDeletionStarted<W, "bot">,
+	readonly remove: <W, J>(
+		started: ProjectDeletionStarted<W, J, "bot">,
 	) => Effect.Effect<void, ComputerMadeMeanwhile, Transaction>;
 	/** Pins the bot to the sidebar of the member `forMember` names, or takes it off. */
 	readonly setPinned: <P, B, X>(
 		forMember: ActsForMember<P>,
 		reach: ReachesBot<P, B>,
 		pinned: boolean,
-		approved: Approved<P, X>,
+		approved: Approved<P, X, [B], "bots.pin" | "bots.unpin">,
 	) => Effect.Effect<Bot, ResourceHidden | FenceRefusal>;
 	/**
 	 * The member's Personal Assistant, made on `model` when they have none. An
@@ -220,10 +220,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		remove: ({ workspaceId, projectId, targetId: botId }) =>
+		remove: ({ workspace, project, targetId: botId }) =>
 			operation(
 				"remove",
 				Effect.gen(function* () {
+					const workspaceId = workspace.value;
+					const projectId = project.value;
 					yield* Transaction;
 					yield* ProjectComputers.lockWithoutComputer({ workspaceId, projectId });
 					yield* store.remove(workspaceId, botId).pipe(Effect.orDie);

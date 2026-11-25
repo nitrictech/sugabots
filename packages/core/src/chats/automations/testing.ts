@@ -76,16 +76,9 @@ export const releaseRun = (run: AutomationRun) =>
 /**
  * A member administering a new workspace with a project, which has no bots
  * yet, and a bot whose default project (`ownProjectId`) holds its own
- * automations; and the queued runs other cases left cancelled, so an
- * automation's next run is the one a case asks for.
+ * automations.
  */
 export async function anAutomationAdmin() {
-	await onDatabase((db) =>
-		db
-			.update(automationRun)
-			.set({ state: "cancelled", finishedAt: new Date() })
-			.where(eq(automationRun.state, "queued")),
-	);
 	const suffix = crypto.randomUUID();
 	const [somebody] = await onDatabase((db) =>
 		db

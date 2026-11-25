@@ -29,9 +29,9 @@ export const acceptInvitation = defineOperation(
 						);
 			return yield* accepting.pipe(
 				Effect.catchTag("ResourceHidden", () =>
-					named(principal, (principal) =>
+					named(principal, input.invitationId, (principal, invitation) =>
 						Effect.flatMap(proveIsMember(principal), (isMember) =>
-							membership.alreadyAccepted(isMember, input.invitationId),
+							membership.alreadyAccepted(isMember, invitation),
 						),
 					),
 				),

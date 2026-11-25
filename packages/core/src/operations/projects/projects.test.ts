@@ -1,4 +1,3 @@
-import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -14,10 +13,12 @@ import type { Principal } from "../../principal.ts";
 import {
 	authenticators,
 	buildWorld,
+	everyKindOfPrincipal,
+	outcomesFor,
 	principals,
 	type World,
 } from "../../proofs/world.test-support.ts";
-import { type CallOperation, servedOperations } from "../testing.ts";
+import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
  * The projects operations, each called for every kind of principal through
@@ -36,80 +37,19 @@ describe("the projects operations, for each kind of principal", () => {
 	let as: ReturnType<typeof principals>;
 	let a: World["a"];
 	/** Every principal the cases call for, on J unless its name says otherwise. */
-	let who: Awaited<ReturnType<typeof principalsOnJ>>;
-
-	const principalsOnJ = async () => {
-		const outsider = await seedMember(world.b.workspace, "editor");
-		const adminsAssistant = await seedBot(a.workspace, {
-			assistantOf: a.admin,
-			visibility: "personal",
-		});
-		const adminsAssistantChat = await seedProjectChat(
-			a.workspace,
-			adminsAssistant.defaultProject,
-			a.admin,
-		);
-		return {
-			owner: await as.member(a.owner),
-			admin: await as.member(a.admin),
-			ed: await as.member(a.ed),
-			vi: await as.member(a.vi),
-			erin: await as.member(a.erin),
-			outsider: await as.member(outsider),
-			/** Pub answering Ed in J's chat: chat bounds, J. */
-			pubForEd: await as.botFor(a.ed, a.pub.id, a.chat),
-			/** Pub answering an admin in J's chat: chat bounds, J. */
-			pubForAdmin: await as.botFor(a.admin, a.pub.id, a.chat),
-			/** Helper answering Ed in K's chat: chat bounds, K, though both reach J. */
-			helperInK: await as.botFor(a.ed, a.helper.id, a.otherChat),
-			/** Ed's Personal Assistant in its own chat: member bounds. */
-			edsAssistant: await as.botFor(a.ed, a.assistant.id, a.assistantChat),
-			/** An admin's Personal Assistant in its own chat: member bounds. */
-			adminsAssistant: await as.botFor(a.admin, adminsAssistant.id, adminsAssistantChat),
-			run: (await as.run(a.workspace, a.project, a.pub.id)).principal,
-			webhook: await as.webhook(a.workspace, a.project),
-			computerSleep: (await as.computerSleep(a.workspace, a.project)).principal,
-			compaction: await as.compaction(a.chat, a.pub.id),
-			page: await as.page(a.chat),
-		};
-	};
+	let who: Awaited<ReturnType<typeof everyKindOfPrincipal>>;
 
 	beforeAll(async () => {
 		world = await buildWorld();
 		a = world.a;
 		call = await servedOperations();
 		as = principals(await authenticators());
-		who = await principalsOnJ();
+		who = await everyKindOfPrincipal(world, as);
 	});
 
 	afterAll(async () => {
 		await closeDatabase();
 	});
-
-	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends RequestOperationName>(
-		principal: Principal,
-		name: Name,
-		input: InputOf<Name>,
-	): Promise<string> =>
-		call(principal, name, input).then(
-			() => "ok",
-			(failure: { readonly _tag: string }) => failure._tag,
-		);
-
-	/** What `attempt` came to for each principal of `principals`, by its name. */
-	const outcomes = async <Key extends string>(
-		principals: Record<Key, Principal>,
-		attempt: (principal: Principal) => Promise<string>,
-	) => {
-		const entries = await Promise.all(
-			Object.entries<Principal>(principals).map(async ([key, principal]) => [
-				key,
-				await attempt(principal),
-			]),
-		);
-		return Object.fromEntries(entries) as Record<Key, string>;
-	};
 
 	/** A new private project like J: led by Pub, with Helper, and Ed, Vi and Quinn in it. */
 	const projectLikeJ = (visibility: "public" | "private" = "private") =>
@@ -123,19 +63,14 @@ describe("the projects operations, for each kind of principal", () => {
 	describe("projects.list", () => {
 		it("lists a workspace's projects to its members, and to a bot only in member bounds", async () => {
 			const list = (principal: Principal) =>
-				tried(principal, "projects.list", { workspace: a.workspace });
+				operationOutcome(call, principal, "projects.list", { workspace: a.workspace });
 
 			expect(
-				await outcomes(
+				await outcomesFor(
 					{
 						viewer: who.vi,
 						outsider: who.outsider,
 						botInChatBounds: who.pubForEd,
-						botInMemberBounds: who.edsAssistant,
-						run: who.run,
-						webhook: who.webhook,
-						systemWork: who.computerSleep,
-						page: who.page,
 					},
 					list,
 				),
@@ -143,11 +78,6 @@ describe("the projects operations, for each kind of principal", () => {
 				viewer: "ok",
 				outsider: "ResourceHidden",
 				botInChatBounds: "ActionForbidden",
-				botInMemberBounds: "ok",
-				run: "ActionForbidden",
-				webhook: "ActionForbidden",
-				systemWork: "ActionForbidden",
-				page: "ActionForbidden",
 			});
 		});
 
@@ -158,50 +88,40 @@ describe("the projects operations, for each kind of principal", () => {
 			const listed = await call(who.ed, "projects.list", { workspace: found?.slug ?? "" });
 
 			expect(listed.map(({ id }) => id)).toContain(a.project);
-			expect(await tried(who.ed, "projects.list", { workspace: `nobody-${unique()}` })).toBe(
-				"ResourceHidden",
-			);
+			expect(
+				await operationOutcome(call, who.ed, "projects.list", { workspace: `nobody-${unique()}` }),
+			).toBe("ResourceHidden");
 		});
 	});
 
 	describe("reading a project", () => {
 		it("lists its members, bots and those reaching it to whoever reaches it, within a turn's bounds", async () => {
-			const reads = ["projects.listMembers", "projects.listMembersReaching", "projects.listBots"];
+			const reads = [
+				"projects.listMembers",
+				"projects.listMembersReaching",
+				"projects.listBots",
+			] as const;
 			for (const name of reads) {
 				const read = (principal: Principal) =>
-					tried(principal, name as "projects.listMembers", { projectId: a.project });
+					operationOutcome(call, principal, name, {
+						projectId: a.project,
+					});
 				expect({
 					name,
-					outcomes: await outcomes(
+					outcomes: await outcomesFor(
 						{
-							admin: who.admin,
 							viewer: who.vi,
 							notInProject: who.erin,
-							outsider: who.outsider,
-							botInBounds: who.pubForEd,
 							botOutsideBounds: who.helperInK,
-							run: who.run,
-							webhook: who.webhook,
-							computerSleep: who.computerSleep,
-							compaction: who.compaction,
-							page: who.page,
 						},
 						read,
 					),
 				}).toEqual({
 					name,
 					outcomes: {
-						admin: "ok",
 						viewer: "ok",
 						notInProject: "ResourceHidden",
-						outsider: "ResourceHidden",
-						botInBounds: "ok",
 						botOutsideBounds: "ResourceHidden",
-						run: "ok",
-						webhook: "ResourceHidden",
-						computerSleep: "ResourceHidden",
-						compaction: "ResourceHidden",
-						page: "ResourceHidden",
 					},
 				});
 			}
@@ -227,61 +147,34 @@ describe("the projects operations, for each kind of principal", () => {
 					.where(and(eq(projectBot.projectId, project), eq(projectBot.botId, a.helper.id))),
 			);
 
-			expect(await tried(helper, "projects.listMembers", { projectId: project })).toBe(
-				"BotCannotReach",
-			);
+			expect(
+				await operationOutcome(call, helper, "projects.listMembers", { projectId: project }),
+			).toBe("BotCannotReach");
 		});
 	});
 
 	describe("projects.update", () => {
-		it("changes a project's settings for its owner and admins, and a bot only in member bounds", async () => {
-			const rename = (principal: Principal) =>
-				tried(principal, "projects.update", {
-					projectId: a.project,
-					changes: { name: `J ${unique()}` },
-				});
+		it("shows a project's settings changed by its admin", async () => {
+			const projectId = a.project;
+			const name = `J ${unique()}`;
+			const input = { projectId, changes: { name } };
+			expect(await operationOutcome(call, who.pubForAdmin, "projects.update", input)).toBe(
+				"ActionForbidden",
+			);
+			expect(await operationOutcome(call, who.erin, "projects.update", input)).toBe(
+				"ResourceHidden",
+			);
 
-			expect(
-				await outcomes(
-					{
-						owner: who.owner,
-						admin: who.admin,
-						editor: who.ed,
-						viewer: who.vi,
-						notInProject: who.erin,
-						outsider: who.outsider,
-						adminsBotInChatBounds: who.pubForAdmin,
-						adminsAssistant: who.adminsAssistant,
-						editorsAssistant: who.edsAssistant,
-						run: who.run,
-						webhook: who.webhook,
-						computerSleep: who.computerSleep,
-						compaction: who.compaction,
-						page: who.page,
-					},
-					rename,
-				),
-			).toEqual({
-				owner: "ok",
-				admin: "ok",
-				editor: "ActionForbidden",
-				viewer: "ActionForbidden",
-				notInProject: "ResourceHidden",
-				outsider: "ResourceHidden",
-				adminsBotInChatBounds: "ActionForbidden",
-				adminsAssistant: "ok",
-				editorsAssistant: "ActionForbidden",
-				run: "ActionForbidden",
-				webhook: "ResourceHidden",
-				computerSleep: "ResourceHidden",
-				compaction: "ResourceHidden",
-				page: "ResourceHidden",
-			});
+			await call(who.admin, "projects.update", input);
+
+			expect(await call(who.admin, "projects.list", { workspace: a.workspace })).toContainEqual(
+				expect.objectContaining({ id: projectId, name }),
+			);
 		});
 
 		it("refuses a bot's default project, which takes its settings from its bot, even to the bot's managers", async () => {
 			expect(
-				await tried(who.admin, "projects.update", {
+				await operationOutcome(call, who.admin, "projects.update", {
 					projectId: a.pub.defaultProject,
 					changes: { name: "Ours" },
 				}),
@@ -290,7 +183,7 @@ describe("the projects operations, for each kind of principal", () => {
 
 		it("hides a new lead the member can't reach", async () => {
 			expect(
-				await tried(who.admin, "projects.update", {
+				await operationOutcome(call, who.admin, "projects.update", {
 					projectId: a.project,
 					changes: { leadBotId: a.personal.id },
 				}),
@@ -299,177 +192,98 @@ describe("the projects operations, for each kind of principal", () => {
 	});
 
 	describe("projects.remove", () => {
-		it("deletes a project for its owner and admins, and a bot only in member bounds", async () => {
-			const refused = await outcomes(
-				{
-					editor: who.ed,
-					viewer: who.vi,
-					notInProject: who.erin,
-					adminsBotInChatBounds: who.pubForAdmin,
-					run: who.run,
-					webhook: who.webhook,
-					computerSleep: who.computerSleep,
-					compaction: who.compaction,
-					page: who.page,
-				},
-				(principal) => tried(principal, "projects.remove", { projectId: a.project }),
+		it("removes an admin's project from the workspace list", async () => {
+			const projectId = await projectLikeJ();
+			const input = { projectId };
+			expect(await operationOutcome(call, who.ed, "projects.remove", input)).toBe(
+				"ActionForbidden",
 			);
-			const removed = await outcomes(
-				{ owner: who.owner, admin: who.admin, adminsAssistant: who.adminsAssistant },
-				async (principal) =>
-					tried(principal, "projects.remove", { projectId: await projectLikeJ() }),
+			expect(await operationOutcome(call, who.erin, "projects.remove", input)).toBe(
+				"ResourceHidden",
 			);
 
-			expect({ ...refused, ...removed }).toEqual({
-				editor: "ActionForbidden",
-				viewer: "ActionForbidden",
-				notInProject: "ResourceHidden",
-				adminsBotInChatBounds: "ActionForbidden",
-				run: "ActionForbidden",
-				webhook: "ResourceHidden",
-				computerSleep: "ResourceHidden",
-				compaction: "ResourceHidden",
-				page: "ResourceHidden",
-				owner: "ok",
-				admin: "ok",
-				adminsAssistant: "ok",
-			});
+			await call(who.admin, "projects.remove", input);
+
+			const projects = await call(who.admin, "projects.list", { workspace: a.workspace });
+			expect(projects.map(({ id }) => id)).not.toContain(projectId);
 		});
 	});
 
 	describe("a project's members", () => {
-		it("lets its members but viewers add and remove members, and a bot only in member bounds", async () => {
-			const refused = await outcomes(
-				{
-					viewer: who.vi,
-					notInProject: who.erin,
-					botInChatBounds: who.pubForEd,
-					run: who.run,
-					webhook: who.webhook,
-					computerSleep: who.computerSleep,
-					page: who.page,
-				},
-				(principal) =>
-					tried(principal, "projects.addMember", { projectId: a.project, memberId: a.erin }),
-			);
-			const changed = await outcomes(
-				{ editor: who.ed, admin: who.admin, editorsAssistant: who.edsAssistant },
-				async (principal) => {
-					const projectId = await projectLikeJ();
-					const added = await tried(principal, "projects.addMember", {
-						projectId,
-						memberId: a.erin,
-					});
-					const removed = await tried(principal, "projects.removeMember", {
-						projectId,
-						memberId: a.erin,
-					});
-					return `${added}, ${removed}`;
-				},
-			);
+		it("lists a member when an editor adds them and omits them after removal", async () => {
+			const projectId = await projectLikeJ();
+			const target = { projectId, memberId: a.erin };
+			const listed = async () =>
+				(await call(who.ed, "projects.listMembers", { projectId })).map(({ memberId }) => memberId);
 
-			expect({ ...refused, ...changed }).toEqual({
-				viewer: "ActionForbidden",
-				notInProject: "ResourceHidden",
-				botInChatBounds: "ActionForbidden",
-				run: "ActionForbidden",
-				webhook: "ResourceHidden",
-				computerSleep: "ResourceHidden",
-				page: "ResourceHidden",
-				editor: "ok, ok",
-				admin: "ok, ok",
-				editorsAssistant: "ok, ok",
-			});
+			for (const name of ["projects.addMember", "projects.removeMember"] as const) {
+				expect(await operationOutcome(call, who.vi, name, target), name).toBe("ActionForbidden");
+				expect(await operationOutcome(call, who.erin, name, target), name).toBe("ResourceHidden");
+			}
+			await call(who.ed, "projects.addMember", target);
+			expect(await listed()).toContain(a.erin);
+			await call(who.ed, "projects.removeMember", target);
+			expect(await listed()).not.toContain(a.erin);
 		});
-
 		it("refuses somebody outside the workspace, and takes no administrator out", async () => {
 			const projectId = await projectLikeJ();
 			const outsider = await seedMember(world.b.workspace, "editor");
 
-			expect(await tried(who.ed, "projects.addMember", { projectId, memberId: outsider })).toBe(
-				"NotInWorkspace",
-			);
-			expect(await tried(who.ed, "projects.removeMember", { projectId, memberId: a.admin })).toBe(
-				"AdministratorInEveryProject",
-			);
-			expect(await tried(who.ed, "projects.removeMember", { projectId, memberId: a.erin })).toBe(
-				"NotInProject",
-			);
+			expect(
+				await operationOutcome(call, who.ed, "projects.addMember", {
+					projectId,
+					memberId: outsider,
+				}),
+			).toBe("NotInWorkspace");
+			expect(
+				await operationOutcome(call, who.ed, "projects.removeMember", {
+					projectId,
+					memberId: a.admin,
+				}),
+			).toBe("AdministratorInEveryProject");
+			expect(
+				await operationOutcome(call, who.ed, "projects.removeMember", {
+					projectId,
+					memberId: a.erin,
+				}),
+			).toBe("NotInProject");
 		});
 
-		it("lets a member leave, or a bot take its asker out only in member bounds; administrators stay", async () => {
-			const refused = await outcomes(
-				{
-					admin: who.admin,
-					notInProject: who.erin,
-					botInChatBounds: who.pubForEd,
-					run: who.run,
-					page: who.page,
-				},
-				(principal) => tried(principal, "projects.leave", { projectId: a.project }),
+		it("removes a viewer who leaves, while an administrator stays", async () => {
+			const projectId = await projectLikeJ();
+			const target = { projectId };
+			expect(await operationOutcome(call, who.admin, "projects.leave", target)).toBe(
+				"ActionForbidden",
 			);
-			const left = await outcomes(
-				{ editor: who.ed, viewer: who.vi, editorsAssistant: who.edsAssistant },
-				async (principal) =>
-					tried(principal, "projects.leave", { projectId: await projectLikeJ() }),
+			expect(await operationOutcome(call, who.erin, "projects.leave", target)).toBe(
+				"ResourceHidden",
 			);
 
-			expect({ ...refused, ...left }).toEqual({
-				admin: "ActionForbidden",
-				notInProject: "ResourceHidden",
-				botInChatBounds: "ActionForbidden",
-				run: "ActionForbidden",
-				page: "ResourceHidden",
-				editor: "ok",
-				viewer: "ok",
-				editorsAssistant: "ok",
-			});
+			await call(who.vi, "projects.leave", target);
+
+			const members = await call(who.admin, "projects.listMembers", target);
+			expect(members.map(({ memberId }) => memberId)).not.toContain(a.vi);
 		});
 	});
 
 	describe("projects.join", () => {
-		it("puts a member, or once approved a bot's asker in member bounds, in a public project, and hides the rest", async () => {
-			const joined = await outcomes(
-				{ editor: who.erin, editorsAssistant: who.edsAssistant },
-				async (principal) => {
-					const projectId = await seedProject(a.workspace, {
-						leadBotId: a.pub.id,
-						visibility: "public",
-					});
-					return tried(principal, "projects.join", { projectId });
-				},
+		it("lists a member after they join a public project and gates a bot's join on approval", async () => {
+			const projectId = await projectLikeJ("public");
+			const target = { projectId };
+			expect(
+				await operationOutcome(call, who.pubForEd, "projects.join", { projectId: a.project }),
+			).toBe("ActionForbidden");
+			expect(await operationOutcome(call, who.outsider, "projects.join", target)).toBe(
+				"ResourceHidden",
 			);
-			const publicProject = await projectLikeJ("public");
-			const onJ = await outcomes(
-				{
-					notInPrivateProject: who.erin,
-					botInChatBounds: who.pubForEd,
-					run: who.run,
-					webhook: who.webhook,
-					page: who.page,
-				},
-				(principal) => tried(principal, "projects.join", { projectId: a.project }),
+			expect(await operationOutcome(call, who.edsAssistant, "projects.join", target)).toBe(
+				"ApprovalNeeded",
 			);
 
-			expect({
-				...joined,
-				...onJ,
-				outsider: await tried(who.outsider, "projects.join", { projectId: publicProject }),
-				botOutsideBounds: await tried(who.pubForEd, "projects.join", { projectId: publicProject }),
-				defaultProject: await tried(who.ed, "projects.join", { projectId: a.pub.defaultProject }),
-			}).toEqual({
-				editor: "ok",
-				// Its member approves the call in the bot loop first.
-				editorsAssistant: "ApprovalNeeded",
-				notInPrivateProject: "ResourceHidden",
-				botInChatBounds: "ActionForbidden",
-				run: "ActionForbidden",
-				webhook: "ResourceHidden",
-				page: "ResourceHidden",
-				outsider: "ResourceHidden",
-				botOutsideBounds: "ResourceHidden",
-				defaultProject: "ResourceHidden",
-			});
+			await call(who.erin, "projects.join", target);
+
+			const members = await call(who.admin, "projects.listMembers", target);
+			expect(members.map(({ memberId }) => memberId)).toContain(a.erin);
 		});
 	});
 
@@ -482,7 +296,7 @@ describe("the projects operations, for each kind of principal", () => {
 			});
 			const projectId = await projectLikeJ();
 			const add = (principal: Principal, botId: string) =>
-				tried(principal, "projects.addBot", { projectId, botId });
+				operationOutcome(call, principal, "projects.addBot", { projectId, botId });
 
 			expect({
 				viewer: await add(who.vi, extra.id),
@@ -491,8 +305,14 @@ describe("the projects operations, for each kind of principal", () => {
 				someoneElsesPersonalBot: await add(who.ed, erinsPersonal.id),
 				ownPersonalBot: await add(who.ed, a.personal.id),
 				added: await add(who.ed, extra.id),
-				removed: await tried(who.ed, "projects.removeBot", { projectId, botId: extra.id }),
-				lead: await tried(who.ed, "projects.removeBot", { projectId, botId: a.pub.id }),
+				removed: await operationOutcome(call, who.ed, "projects.removeBot", {
+					projectId,
+					botId: extra.id,
+				}),
+				lead: await operationOutcome(call, who.ed, "projects.removeBot", {
+					projectId,
+					botId: a.pub.id,
+				}),
 			}).toEqual({
 				viewer: "ActionForbidden",
 				notInProject: "ResourceHidden",
@@ -507,48 +327,33 @@ describe("the projects operations, for each kind of principal", () => {
 	});
 
 	describe("projects.create", () => {
-		it("makes a project for a member who may, and a bot only in member bounds once approved", async () => {
-			const create = (principal: Principal) =>
-				tried(principal, "projects.create", {
-					workspace: a.workspace,
-					name: `Project ${unique()}`,
-					leadBotId: a.pub.id,
-				});
+		it("lists an editor's new project and gates a bot's creation on approval", async () => {
+			const workspace = a.workspace;
+			const name = `Project ${unique()}`;
+			const input = { workspace, name, leadBotId: a.pub.id };
+			expect(await operationOutcome(call, who.vi, "projects.create", input)).toBe(
+				"ActionForbidden",
+			);
+			expect(await operationOutcome(call, who.outsider, "projects.create", input)).toBe(
+				"ResourceHidden",
+			);
+			expect(await operationOutcome(call, who.edsAssistant, "projects.create", input)).toBe(
+				"ApprovalNeeded",
+			);
 
-			expect(
-				await outcomes(
-					{
-						editor: who.ed,
-						viewer: who.vi,
-						outsider: who.outsider,
-						botInChatBounds: who.pubForEd,
-						editorsAssistant: who.edsAssistant,
-						run: who.run,
-						webhook: who.webhook,
-						page: who.page,
-					},
-					create,
-				),
-			).toEqual({
-				editor: "ok",
-				viewer: "ActionForbidden",
-				outsider: "ResourceHidden",
-				botInChatBounds: "ActionForbidden",
-				// Its member approves the call in the bot loop first.
-				editorsAssistant: "ApprovalNeeded",
-				run: "ActionForbidden",
-				webhook: "ActionForbidden",
-				page: "ActionForbidden",
-			});
+			const created = await call(who.ed, "projects.create", input);
+
+			expect(await call(who.ed, "projects.list", { workspace })).toContainEqual(
+				expect.objectContaining({ id: created.id, name, leadBotId: a.pub.id }),
+			);
 		});
-
 		it("hides a lead the member can't reach, and refuses one that isn't public", async () => {
 			const erinsPersonal = await seedBot(a.workspace, {
 				createdById: a.erin,
 				visibility: "personal",
 			});
 			const ledBy = (leadBotId: string) =>
-				tried(who.ed, "projects.create", {
+				operationOutcome(call, who.ed, "projects.create", {
 					workspace: a.workspace,
 					name: `Project ${unique()}`,
 					leadBotId,

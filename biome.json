@@ -135,6 +135,7 @@
 				"!**/*.test.tsx",
 				"!**/testing.ts",
 				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx",
 				"!packages/core/src/**"
 			],
 			"linter": {
@@ -172,7 +173,8 @@
 				"!**/*.test.ts",
 				"!**/*.test.tsx",
 				"!**/testing.ts",
-				"!**/*.test-support.ts"
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
 			],
 			"linter": {
 				"rules": {
@@ -211,7 +213,8 @@
 				"!**/*.test.ts",
 				"!**/*.test.tsx",
 				"!**/testing.ts",
-				"!**/*.test-support.ts"
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
 			],
 			"linter": {
 				"rules": {
@@ -237,7 +240,8 @@
 				"!**/*.test.ts",
 				"!**/*.test.tsx",
 				"!**/testing.ts",
-				"!**/*.test-support.ts"
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
 			],
 			"linter": {
 				"rules": {
@@ -267,6 +271,7 @@
 				"packages/**/src/**/*.test.tsx",
 				"packages/**/src/**/testing.ts",
 				"packages/**/src/**/*.test-support.ts",
+				"packages/**/src/**/*.test-support.tsx",
 				"!packages/core/src/chats/turns/**",
 				"!packages/core/src/**"
 			],
@@ -300,6 +305,7 @@
 				"packages/core/src/**/*.test.tsx",
 				"packages/core/src/**/testing.ts",
 				"packages/core/src/**/*.test-support.ts",
+				"packages/core/src/**/*.test-support.tsx",
 				"!packages/core/src/chats/turns/**"
 			],
 			"linter": {
@@ -331,36 +337,11 @@
 			}
 		},
 		{
-			"includes": ["packages/**/src/**/*.{ts,tsx}", "!packages/core/src/proofs/**"],
-			"plugins": ["./lint/proofs-only-in-proofs.grit"]
-		},
-		{
-			"includes": ["packages/**/src/**/*.{ts,tsx}", "!packages/core/src/proofs/proof.ts"],
-			"plugins": ["./lint/no-proof-assertion.grit"]
-		},
-		{
-			"includes": [
-				"packages/core/src/proofs/**/*.ts",
-				"packages/core/src/authentication/**/*.ts",
-				"packages/core/src/operations/**/*.ts",
-				"packages/core/src/principal.ts",
-				"packages/core/src/tiers.ts",
-				"packages/bot-loop/src/**/*.ts",
-				"packages/contracts/src/operations/**/*.ts",
-				"packages/contracts/src/errors/**/*.ts",
-				"!packages/core/src/proofs/proof.ts"
-			],
-			"plugins": ["./lint/no-double-assertion.grit"]
-		},
-		{
-			"includes": ["packages/**/src/**/*.{ts,tsx}", "!packages/core/src/authentication/**"],
-			"plugins": ["./lint/principals-only-in-authentication.grit"]
-		},
-		{
 			"includes": [
 				"packages/core/src/**/*.ts",
 				"!**/*.test.ts",
 				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx",
 				"!**/testing.ts",
 				"!packages/core/src/database/test-*.ts"
 			],
@@ -374,7 +355,8 @@
 				"!**/*.test.ts",
 				"!**/*.test.tsx",
 				"!**/testing.ts",
-				"!**/*.test-support.ts"
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
 			],
 			"linter": {
 				"rules": {
@@ -427,7 +409,8 @@
 				"!**/*.test.ts",
 				"!**/*.test.tsx",
 				"!**/testing.ts",
-				"!**/*.test-support.ts"
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
 			],
 			"linter": {
 				"rules": {
@@ -484,7 +467,8 @@
 				"!**/*.test.ts",
 				"!**/*.test.tsx",
 				"!**/testing.ts",
-				"!**/*.test-support.ts"
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
 			],
 			"linter": {
 				"rules": {

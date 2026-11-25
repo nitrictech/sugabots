@@ -4,7 +4,7 @@ import type { OutputOf } from "@sugabots/contracts/operations";
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Cause, Effect, Exit, Layer, Queue, Scope, Stream } from "effect";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import {
 	seedBot,
 	seedComputer,
@@ -16,10 +16,11 @@ import {
 import { recordEnded } from "../../authentication/session.ts";
 import { chatServicesForTests } from "../../chats/testing.ts";
 import { DesktopViewer } from "../../chats/tools/browser/viewer.ts";
-import type { Computers } from "../../computers/computers.ts";
+import { Computers } from "../../computers/computers.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventOutbox } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
+import { inMemoryEventStore } from "../../database/events/testing.ts";
 import { bot, chatParticipant, session } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import type { MemberSession } from "../../principal.ts";
@@ -39,22 +40,34 @@ type Opened = OutputOf<"computers.viewDesktop">;
  * changes, within a second here, in case the bus missed one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves again", () => {
-	const bus = EventBus.inProcess({ store: EventStore.inMemory() });
+	const bus = EventBus.inProcess({ store: inMemoryEventStore() });
 	let call: CallOperation;
 	let signedIn: ReturnType<typeof principals>;
 	let streams: Streams.Interface;
-	const scopes: Scope.Closeable[] = [];
 	/** The computers the stand-in shows a desktop on, by the project they are in. */
 	const computers = new Map<string, string>();
 	/** Chats where the stand-in finds the bot gone after the desktop opened. */
 	const leftAfterOpening = new Set<string>();
+
+	const unexpectedComputerCall = () =>
+		Effect.die(new Error("The desktop stand-in owns computer calls"));
+	const desktopComputer = {
+		id: Computers.ComputerId("desktop-test"),
+		exec: unexpectedComputerCall,
+		readFile: unexpectedComputerCall,
+		writeFile: unexpectedComputerCall,
+		downloadFile: unexpectedComputerCall,
+		uploadFile: unexpectedComputerCall,
+		endpoint: unexpectedComputerCall,
+		setNetwork: unexpectedComputerCall,
+	} satisfies Computers.Computer;
 
 	/** Shows a desktop on the computer seeded for the chat's project, whoever may use it. */
 	const standIn = DesktopViewer.Service.of({
 		openComputer: (chat, bot) =>
 			Effect.succeed({
 				id: computers.get(chat.project.id) ?? "",
-				computer: {} as Computers.Computer,
+				computer: desktopComputer,
 				holder: { kind: "viewer", id: randomUUID() },
 				chat: chat.chat.value,
 				bot: { id: bot.bot.value, color: "green" },
@@ -105,21 +118,42 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 	});
 
 	afterAll(async () => {
-		await Promise.all(scopes.map((scope) => Effect.runPromise(Scope.close(scope, Exit.void))));
 		await closeDatabase();
 	});
 
 	/** Opens the viewer for `principal`, as its entrypoint does: its desktop, and whether it has ended. */
 	const view = async (principal: MemberSession, chatId: string, botId: string) => {
 		const scope = await Effect.runPromise(Scope.make());
-		scopes.push(scope);
+		onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
+		const reproofs = await Effect.runPromise(Queue.unbounded<void, Cause.Done>());
+		const observedStreams: Streams.Interface = {
+			...streams,
+			keep: (keeping) =>
+				Effect.suspend(() => {
+					let listening = false;
+					return streams
+						.keep({
+							...keeping,
+							prove: keeping.prove.pipe(
+								Effect.tap(() => (listening ? Queue.offer(reproofs, undefined) : Effect.void)),
+							),
+						})
+						.pipe(
+							Effect.tap(() =>
+								Effect.sync(() => {
+									listening = true;
+								}),
+							),
+						);
+				}),
+		};
 		const viewing = await runOnPostgres(
 			Scope.provide(scope)(
 				viewDesktop
 					.run(principal, { chatId, botId }, { kind: "request", request: randomUUID() })
 					.pipe(
 						Effect.provideService(DesktopViewer.Service, standIn),
-						Effect.provideService(Streams.Service, streams),
+						Effect.provideService(Streams.Service, observedStreams),
 					),
 			),
 		);
@@ -127,6 +161,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 		Effect.runFork(
 			Stream.runForEach(viewing.stream, (opened) => Queue.offer(yielded, opened)).pipe(
 				Effect.andThen(viewing.ended),
+				Effect.ensuring(Queue.end(reproofs)),
 				Effect.ensuring(Queue.end(yielded)),
 				Effect.forkIn(scope),
 			),
@@ -143,13 +178,11 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 						Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.succeed(false) }),
 					),
 				),
-			/** Whether the viewer is still open after a moment. */
-			staysOpen: () =>
+			reproved: () =>
 				Effect.runPromise(
-					Queue.take(yielded).pipe(
-						Effect.as(false),
+					Queue.take(reproofs).pipe(
+						Effect.as(true),
 						Effect.catchIf(Cause.isDone, () => Effect.succeed(false)),
-						Effect.timeoutOrElse({ duration: "300 millis", orElse: () => Effect.succeed(true) }),
 					),
 				),
 		};
@@ -196,13 +229,16 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 		const ed = await view(await signedIn.member(world.ed), world.chat, world.pub.id);
 		const vi = await view(await signedIn.member(world.vi), world.chat, world.pub.id);
 
-		await call(await signedIn.member(world.admin), "projects.removeMember", {
+		const admin = await signedIn.member(world.admin);
+		await call(admin, "projects.removeMember", {
 			projectId: world.project,
 			memberId: world.ed,
 		});
 
 		expect(await ed.ends()).toBe(true);
-		expect(await vi.staysOpen()).toBe(true);
+		expect(await vi.reproved()).toBe(true);
+		await call(admin, "projects.addMember", { projectId: world.project, memberId: world.erin });
+		expect(await vi.reproved()).toBe(true);
 	});
 
 	it("closes when its member leaves while computer cleanup is pending", async () => {
@@ -223,7 +259,10 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 		);
 
 		expect(await leaving.ends()).toBe(true);
-		expect(await staying.staysOpen()).toBe(true);
+		expect(await staying.reproved()).toBe(true);
+		const admin = await signedIn.member(world.admin);
+		await call(admin, "projects.addMember", { projectId: world.project, memberId: world.erin });
+		expect(await staying.reproved()).toBe(true);
 	});
 
 	it("closes a take-over once its member may no longer change things there, though they could still watch", async () => {

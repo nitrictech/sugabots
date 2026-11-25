@@ -14,10 +14,12 @@ export const makeConnectorEvents = Effect.gen(function* () {
 	const acceptTrigger = yield* makeAcceptTrigger;
 
 	return {
-		accept: ({ workspaceId, connectorId, deliveryId, activity }) =>
+		accept: (signed, { deliveryId, activity }) =>
 			operation(
 				"accept",
 				Effect.gen(function* () {
+					const workspaceId = signed.workspace;
+					const connectorId = signed.connector.value;
 					const receivedAt = DateTime.formatIso(yield* DateTime.now);
 					const triggers = yield* triggersFor({
 						workspaceId,

@@ -172,6 +172,8 @@ function triggerMessageContent(
 	return `Automation instructions:\n${instructions}\n\n${resultNote(toMention)}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;
 }
 
+export const LAST_REPLY_DESTINATION = "your last reply is posted in this automation's feed";
+
 /**
  * Tells the bot of a run that its last reply is what members will read, so
  * it writes that reply to them; that it may post nothing when there is nothing
@@ -180,7 +182,7 @@ function triggerMessageContent(
  */
 function resultNote(toMention: MembersToMention): string {
 	return [
-		`When you finish, your last reply is posted in this automation's feed for members to read and answer. Write it to them: what they need to know, or what you want to ask them. Files you write are shown with it; the rest of the work stays in this run.`,
+		`When you finish, ${LAST_REPLY_DESTINATION} for members to read and answer. Write it to them: what they need to know, or what you want to ask them. Files you write are shown with it; the rest of the work stays in this run.`,
 		"If there is nothing worth telling them, end without a last reply, writing nothing after your last tool call: nothing is posted, and the run shows it had nothing to report.",
 		`When something needs a member to act or decide, @mention them in your reply, which notifies them.${mentionNote(toMention)}`,
 	].join(" ");
