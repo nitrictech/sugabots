@@ -55,8 +55,12 @@ const nodeSuggestionsInStep = new Plugin({
 			for (const mark of node.marks) inStep.removeNodeMark(position, mark);
 			for (const mark of marksOfNodeSuggestion(node)) inStep.addNodeMark(position, mark);
 		});
-		// Not a change of the person's own to undo.
-		return inStep.docChanged ? inStep.setMeta("addToHistory", false) : null;
+		if (!inStep.docChanged) return null;
+		// Marks restored after a change from elsewhere are nobody's change here to undo. The attribute
+		// written after a change made here belongs to that change and is undone with it. Marked not to
+		// undo, it would keep the change itself out of undo too: the sync layer records the change and
+		// this as one, undoable or not as the last transaction says.
+		return arrived ? inStep.setMeta("addToHistory", false) : inStep;
 	},
 });
 

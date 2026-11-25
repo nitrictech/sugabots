@@ -2,15 +2,32 @@ import {
 	disableSuggestChanges,
 	enableSuggestChanges,
 } from "@handlewithcare/prosemirror-suggest-changes";
-import { liveDocumentExtensions } from "@sugabots/contracts/live-document";
+import {
+	liveDocumentExtensions,
+	SUGGESTED_DELETION,
+	SUGGESTED_INSERTION,
+	suggestionBy,
+} from "@sugabots/contracts/live-document";
 import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
 import { fitSlideBody, layoutOf, SLIDE_COLUMN } from "@sugabots/contracts/live-slides";
 import { Editor, Extension } from "@tiptap/core";
 import { Collaboration } from "@tiptap/extension-collaboration";
 import type { Node } from "@tiptap/pm/model";
+import type { EditorState, Transaction } from "@tiptap/pm/state";
+import { yUndoPluginKey } from "@tiptap/y-tiptap";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyUpdate, Doc } from "yjs";
-import { changeLayout, keepSlidesFitting, moveSlide, removeSlide, slidesOf } from "./deck.ts";
+import {
+	addSlide,
+	changeLayout,
+	keepSlidesFitting,
+	moveSlideTo,
+	placeOfMovedSlide,
+	proposedChangeOf,
+	removeSlide,
+	slideIndexAt,
+	slidesOf,
+} from "./deck.ts";
 import { dispatchAsOneChange, Suggesting, suggestingAs } from "./suggesting.ts";
 import { pendingSuggestions, settlingSuggestion } from "./suggestions.ts";
 
@@ -73,6 +90,13 @@ const framesOf = (deck: Node) =>
 
 /** The words on each slide, in order, whatever holds them. */
 const wordsOf = (deck: Node) => deck.children.map((slide) => slide.child(0).textContent);
+
+const LAUNCH = "<!-- layout: bullets -->\n\n## Launch\n\n- Brief sales\n- Book the room";
+const THANKS = "<!-- layout: title -->\n\n## Thanks";
+const FOUR = [GOALS, PEOPLE, LAUNCH, THANKS].join("\n\n---\n\n");
+
+/** The title of each slide, in order: the words of its first block. */
+const titlesOf = (deck: Node) => deck.children.map((slide) => slide.child(0).child(0).textContent);
 
 /** Where the frame of the slide at `index` holds its first block. */
 const frameStart = (deck: Node, index: number) => (slidesOf(deck)[index]?.pos ?? 0) + 2;
@@ -260,8 +284,6 @@ describe("a slide's layout, changed", () => {
 });
 
 describe("a suggestion across several slides, settled while a layout suggested between them waits", () => {
-	const LAUNCH = "<!-- layout: bullets -->\n\n## Launch\n\n- Brief sales\n- Book the room";
-
 	/**
 	 * Kim suggests laying slide 2 out in two columns. Then Sam suggests, as one
 	 * suggestion, a word more on the titles of slides 1 and 3, so it reaches
@@ -330,7 +352,7 @@ describe("a deck's slides, moved and removed", () => {
 	it("moves a slide, keeping what it holds", () => {
 		const { kim, sam } = twoPeople();
 
-		const move = moveSlide(kim.state, 0, 1);
+		const move = moveSlideTo(kim.state, 0, 1);
 		if (!move) throw new Error("No move");
 		kim.view.dispatch(move);
 
@@ -338,8 +360,28 @@ describe("a deck's slides, moved and removed", () => {
 			"People and botsPeople typeBots suggest",
 			"GoalsShip on FridayTell support first",
 		]);
-		expect(moveSlide(kim.state, 1, 1)).toBeUndefined();
+		expect(moveSlideTo(kim.state, 1, 2)).toBeUndefined();
+		expect(moveSlideTo(kim.state, 1, 1)).toBeUndefined();
 	});
+
+	it.each([
+		["later", 0, 2, ["People and bots", "Launch", "Goals", "Thanks"]],
+		["earlier", 3, 1, ["Goals", "Thanks", "People and bots", "Launch"]],
+	] as const)(
+		"moves a slide several places %s in one change, keeping the caret in it",
+		(_, from, to, titles) => {
+			const { kim, sam } = twoPeople({ deck: FOUR });
+			const words = wordsOf(kim.state.doc);
+
+			const move = moveSlideTo(kim.state, from, to);
+			if (!move) throw new Error("No move");
+			dispatchAsOneChange(kim, move, "Kim");
+
+			expect(titlesOf(sam.state.doc)).toEqual(titles);
+			expect(wordsOf(sam.state.doc).sort()).toEqual(words.sort());
+			expect(slideIndexAt(kim.state.doc, kim.state.selection.from)).toBe(to);
+		},
+	);
 
 	it("never removes a deck's last slide", () => {
 		const { kim } = twoPeople();
@@ -351,4 +393,424 @@ describe("a deck's slides, moved and removed", () => {
 		expect(kim.state.doc.childCount).toBe(1);
 		expect(removeSlide(kim.state, 0)).toBeUndefined();
 	});
+});
+
+describe("a slide moved several places as a suggestion", () => {
+	/** Kim, suggesting, moves the slide at `from` in a deck of four to stand at `to`. */
+	function suggestedMove(from: number, to: number) {
+		const { kim, sam } = twoPeople({ deck: FOUR });
+		const words = wordsOf(kim.state.doc);
+		enableSuggestChanges(kim.state, kim.view.dispatch);
+		const move = moveSlideTo(kim.state, from, to);
+		if (!move) throw new Error("No move");
+		dispatchAsOneChange(kim, move, "Kim");
+		return { kim, sam, words };
+	}
+
+	/** Each slide's title, and whether somebody proposes adding or removing it. */
+	const proposalsOf = (deck: Node) =>
+		deck.children.map((slide, index) => [titlesOf(deck)[index], proposedChangeOf(slide)]);
+
+	it.each([
+		[
+			"later",
+			0,
+			2,
+			[
+				["Goals", "removing"],
+				["People and bots", undefined],
+				["Launch", undefined],
+				["Goals", "adding"],
+				["Thanks", undefined],
+			],
+		],
+		[
+			"earlier",
+			3,
+			1,
+			[
+				["Goals", undefined],
+				["Thanks", "adding"],
+				["People and bots", undefined],
+				["Launch", undefined],
+				["Thanks", "removing"],
+			],
+		],
+	] as const)(
+		"is one suggestion when %s: the slide proposed for removal where it was, and for adding where it goes",
+		(_, from, to, proposals) => {
+			const { sam } = suggestedMove(from, to);
+
+			expect(proposalsOf(sam.state.doc)).toEqual(proposals);
+			expect(pendingSuggestions(sam.state.doc)).toMatchObject([
+				{ by: { kind: "person", name: "Kim" }, slides: { adds: true, removes: true } },
+			]);
+		},
+	);
+
+	it.each([
+		["later", "accepted", 0, 2, "accept", ["People and bots", "Launch", "Goals", "Thanks"]],
+		["later", "undone", 0, 2, "reject", ["Goals", "People and bots", "Launch", "Thanks"]],
+		["earlier", "accepted", 3, 1, "accept", ["Goals", "Thanks", "People and bots", "Launch"]],
+		["earlier", "undone", 3, 1, "reject", ["Goals", "People and bots", "Launch", "Thanks"]],
+	] as const)(
+		"moved %s and %s, leaves every slide once, in the order it gives",
+		(_, __, from, to, how, titles) => {
+			const { kim, sam, words } = suggestedMove(from, to);
+			const [suggestion] = pendingSuggestions(sam.state.doc);
+			if (!suggestion) throw new Error("No suggestion");
+
+			settlingSuggestion(suggestion.id, how)(sam.state, sam.view.dispatch);
+
+			for (const deck of [sam.state.doc, kim.state.doc]) {
+				expect(pendingSuggestions(deck)).toEqual([]);
+				expect(titlesOf(deck)).toEqual(titles);
+				expect(wordsOf(deck).sort()).toEqual([...words].sort());
+			}
+		},
+	);
+});
+
+describe("a slide moved as a suggestion beside a new slide somebody suggests", () => {
+	/**
+	 * In a deck of four, `proposer` suggests a new slide after the first, so
+	 * it stands second; then Kim, suggesting, moves the slide at `from` to
+	 * stand at `to`.
+	 */
+	function moveBesideNewSlide(proposer: "Kim" | "Sam", from: number, to: number) {
+		const { kim, sam } = twoPeople({ deck: FOUR });
+		const editors = { Kim: kim, Sam: sam };
+		for (const editor of [kim, sam]) enableSuggestChanges(editor.state, editor.view.dispatch);
+		const proposing = editors[proposer];
+		dispatchAsOneChange(proposing, addSlide(proposing.state, 0, "title"), proposer);
+		const before = titlesOf(kim.state.doc);
+		const move = moveSlideTo(kim.state, from, to);
+		if (!move) throw new Error("No move");
+		dispatchAsOneChange(kim, move, "Kim");
+		return { kim, sam, before };
+	}
+
+	/** The suggestions waiting in `deck`, by who made them and what they do to its slides. */
+	const suggestionsIn = (deck: Node) =>
+		pendingSuggestions(deck).map(({ by, slides }) => ({ by: by.name, ...slides }));
+
+	const NEW_SLIDE = { adds: true, removes: false, layout: undefined };
+	const MOVE = { by: "Kim", adds: true, removes: true, layout: undefined };
+
+	it.each([
+		["lands beside Kim's own", "Kim", 4, 2, ["Goals", "", "Thanks", "People and bots", "Launch"]],
+		["lands beside Sam's", "Sam", 4, 2, ["Goals", "", "Thanks", "People and bots", "Launch"]],
+		[
+			"leaves from beside Kim's own",
+			"Kim",
+			2,
+			4,
+			["Goals", "", "Launch", "Thanks", "People and bots"],
+		],
+		["leaves from beside Sam's", "Sam", 2, 4, ["Goals", "", "Launch", "Thanks", "People and bots"]],
+	] as const)(
+		"is a suggestion of its own when it %s, which waits whole however the move is settled",
+		(_, proposer, from, to, moved) => {
+			const { sam, before } = moveBesideNewSlide(proposer, from, to);
+
+			expect(suggestionsIn(sam.state.doc)).toEqual(
+				expect.arrayContaining([{ by: proposer, ...NEW_SLIDE }, MOVE]),
+			);
+			expect(suggestionsIn(sam.state.doc)).toHaveLength(2);
+			// The new slide, the moving slide where it was, and where it goes.
+			expect(sam.state.doc.childCount).toBe(6);
+
+			for (const [how, titles] of [
+				["accept", moved],
+				["reject", before],
+			] as const) {
+				const { kim: settler } = moveBesideNewSlide(proposer, from, to);
+				const move = pendingSuggestions(settler.state.doc).find(({ slides }) => slides?.removes);
+				if (!move) throw new Error("No move");
+				settlingSuggestion(move.id, how)(settler.state, settler.view.dispatch);
+
+				expect(titlesOf(settler.state.doc)).toEqual(titles);
+				expect(suggestionsIn(settler.state.doc)).toEqual([{ by: proposer, ...NEW_SLIDE }]);
+				expect(proposedChangeOf(settler.state.doc.child(1))).toBe("adding");
+			}
+		},
+	);
+});
+
+describe("a person's own suggestion, undone and redone", () => {
+	/** Ends the change being recorded for undo, as a moment's pause between two changes does. */
+	const pause = (editor: Editor) =>
+		yUndoPluginKey.getState(editor.state)?.undoManager.stopCapturing();
+
+	/** Where the title of the slide at `index` ends. */
+	const titleEnd = (deck: Node, index: number) => {
+		const title = partAt(deck, index, 0);
+		return title.at + title.node.nodeSize - 1;
+	};
+
+	/** Somebody's change as a suggestion, made in their editor. */
+	type Suggest = (editor: Editor, name: string) => void;
+
+	/** Makes `change`, one of the deck's own, as `name`'s one suggestion. */
+	const asOne =
+		(change: (state: EditorState) => Transaction | undefined): Suggest =>
+		(editor, name) => {
+			const changing = change(editor.state);
+			if (!changing) throw new Error("No change");
+			dispatchAsOneChange(editor, changing, name);
+		};
+
+	const SUGGESTIONS: [string, Suggest][] = [
+		[
+			"typing",
+			(editor) =>
+				editor.view.dispatch(editor.state.tr.insertText(" now", titleEnd(editor.state.doc, 0))),
+		],
+		["adding a slide", asOne((state) => addSlide(state, 0, "title"))],
+		["removing a slide", asOne((state) => removeSlide(state, 1))],
+		["changing a slide's layout", asOne((state) => changeLayout(state, 0, "columns"))],
+		["moving a slide", asOne((state) => moveSlideTo(state, 0, 2))],
+	];
+
+	it.each(SUGGESTIONS)(
+		"takes back %s whole with one undo, leaving the edit made before it, and brings it back with one redo",
+		(_, suggest) => {
+			const { kim, sam } = twoPeople({ deck: FOUR });
+			pause(kim);
+			kim.view.dispatch(kim.state.tr.insertText("Our ", frameStart(kim.state.doc, 3) + 1));
+			pause(kim);
+			const edited = sam.state.doc.toJSON();
+			enableSuggestChanges(kim.state, kim.view.dispatch);
+			suggest(kim, "Kim");
+			pause(kim);
+			const suggested = sam.state.doc.toJSON();
+			expect(pendingSuggestions(sam.state.doc)).toHaveLength(1);
+
+			kim.commands.undo();
+
+			expect(sam.state.doc.toJSON()).toEqual(edited);
+			expect(kim.state.doc.toJSON()).toEqual(edited);
+
+			kim.commands.redo();
+
+			expect(sam.state.doc.toJSON()).toEqual(suggested);
+			expect(pendingSuggestions(kim.state.doc)).toHaveLength(1);
+		},
+	);
+
+	it.each(SUGGESTIONS)(
+		"leaves somebody else's suggestion when the person undoes %s of their own",
+		(_, suggest) => {
+			const { kim, sam } = twoPeople({ deck: FOUR });
+			pause(kim);
+			for (const editor of [kim, sam]) enableSuggestChanges(editor.state, editor.view.dispatch);
+			sam.view.dispatch(sam.state.tr.insertText(" too", titleEnd(sam.state.doc, 3)));
+			const samsOnly = kim.state.doc.toJSON();
+			suggest(kim, "Kim");
+			pause(kim);
+
+			kim.commands.undo();
+
+			expect(kim.state.doc.toJSON()).toEqual(samsOnly);
+			expect(pendingSuggestions(sam.state.doc)).toMatchObject([{ by: { name: "Sam" } }]);
+		},
+	);
+});
+
+describe("slides added or removed as suggestions one beside another", () => {
+	const ADDED = (state: EditorState, step: number) => addSlide(state, step, "title");
+	const REMOVED = (state: EditorState, step: number) => removeSlide(state, step + 1);
+
+	it.each([
+		["added", "earlier", "accept", ADDED, ["Goals", "", "", "People and bots", "Launch", "Thanks"]],
+		["added", "later", "accept", ADDED, ["Goals", "", "", "People and bots", "Launch", "Thanks"]],
+		["added", "earlier", "reject", ADDED, ["Goals", "", "People and bots", "Launch", "Thanks"]],
+		["added", "later", "reject", ADDED, ["Goals", "", "People and bots", "Launch", "Thanks"]],
+		["removed", "earlier", "accept", REMOVED, ["Goals", "Launch", "Thanks"]],
+		["removed", "later", "accept", REMOVED, ["Goals", "People and bots", "Thanks"]],
+		["removed", "earlier", "reject", REMOVED, ["Goals", "People and bots", "Launch", "Thanks"]],
+		["removed", "later", "reject", REMOVED, ["Goals", "People and bots", "Launch", "Thanks"]],
+	] as const)(
+		"are a suggestion each when %s, so settling the %s with %s leaves the other waiting",
+		(_, which, how, change, titles) => {
+			const { kim, sam } = twoPeople({ deck: FOUR });
+			enableSuggestChanges(kim.state, kim.view.dispatch);
+			for (const step of [0, 1]) {
+				const changing = change(kim.state, step);
+				if (!changing) throw new Error("No change");
+				dispatchAsOneChange(kim, changing, "Kim");
+			}
+			const pending = pendingSuggestions(sam.state.doc);
+			expect(pending).toHaveLength(2);
+			const settling = pending[which === "earlier" ? 0 : 1];
+			if (!settling) throw new Error("No suggestion");
+
+			settlingSuggestion(settling.id, how)(sam.state, sam.view.dispatch);
+
+			expect(titlesOf(sam.state.doc)).toEqual(titles);
+			expect(pendingSuggestions(sam.state.doc)).toHaveLength(1);
+		},
+	);
+});
+
+describe("a slide put in front of a slide somebody proposes removing", () => {
+	/** A slide's title, whether somebody proposes adding or removing it, and who. */
+	type Proposal = readonly [string, "adding" | "removing" | undefined, string | undefined];
+
+	const SLIDE_PROPOSALS = { [SUGGESTED_INSERTION]: true, [SUGGESTED_DELETION]: true };
+
+	const proposalsOf = (deck: Node): Proposal[] =>
+		deck.children.map((slide, index) => {
+			const mark = slide.marks.find(({ type }) => type.name in SLIDE_PROPOSALS);
+			const by = mark ? suggestionBy(String(mark.attrs.id)).name : undefined;
+			return [titlesOf(deck)[index] ?? "", proposedChangeOf(slide), by];
+		});
+
+	/** `proposals` once `who`'s suggestion is accepted, keeping what it adds, or undone, keeping what it removes. */
+	const settled = (proposals: readonly Proposal[], who: string, how: "accept" | "reject") =>
+		proposals.flatMap(([title, change, by]): Proposal[] => {
+			if (by !== who) return [[title, change, by]];
+			const kept = how === "accept" ? change === "adding" : change === "removing";
+			return kept ? [[title, undefined, undefined]] : [];
+		});
+
+	/**
+	 * Kim's change, made where Sam proposes removing the slide at `removing`:
+	 * the deck as it then reads with both suggestions waiting, and where the
+	 * stage shows Kim's slide, as `LiveDeck` picks it, the deck before and after.
+	 */
+	interface InFront {
+		removing: number;
+		change: (state: EditorState) => Transaction | undefined;
+		suggested: Proposal[];
+		shown: (before: Node, after: Node) => number;
+	}
+
+	const IN_FRONT: [string, InFront][] = [
+		[
+			"moved up from its menu",
+			{
+				removing: 1,
+				change: (state) => moveSlideTo(state, 2, 1),
+				suggested: [
+					["Goals", undefined, undefined],
+					["Launch", "adding", "Kim"],
+					["People and bots", "removing", "Sam"],
+					["Launch", "removing", "Kim"],
+					["Thanks", undefined, undefined],
+				],
+				shown: (before, after) => placeOfMovedSlide(before, after, 2, 1),
+			},
+		],
+		[
+			// The drag passes `to` for the gap a slide is dropped in: here the gap above the second slide.
+			"dragged up to the gap above it",
+			{
+				removing: 1,
+				change: (state) => moveSlideTo(state, 3, 1),
+				suggested: [
+					["Goals", undefined, undefined],
+					["Thanks", "adding", "Kim"],
+					["People and bots", "removing", "Sam"],
+					["Launch", undefined, undefined],
+					["Thanks", "removing", "Kim"],
+				],
+				shown: (before, after) => placeOfMovedSlide(before, after, 3, 1),
+			},
+		],
+		[
+			"dragged down to the gap above it",
+			{
+				removing: 2,
+				change: (state) => moveSlideTo(state, 0, 1),
+				suggested: [
+					["Goals", "removing", "Kim"],
+					["People and bots", undefined, undefined],
+					["Goals", "adding", "Kim"],
+					["Launch", "removing", "Sam"],
+					["Thanks", undefined, undefined],
+				],
+				shown: (before, after) => placeOfMovedSlide(before, after, 0, 1),
+			},
+		],
+		[
+			"added after the slide before it",
+			{
+				removing: 1,
+				change: (state) => addSlide(state, 0, "title"),
+				suggested: [
+					["Goals", undefined, undefined],
+					["", "adding", "Kim"],
+					["People and bots", "removing", "Sam"],
+					["Launch", undefined, undefined],
+					["Thanks", undefined, undefined],
+				],
+				// The slide after the one on the stage, which a new slide is added after.
+				shown: () => 1,
+			},
+		],
+	];
+
+	/** Sam proposes removing a slide, then Kim makes `change`, suggesting or editing. */
+	function inFront({ removing, change }: InFront, kimSuggests: boolean) {
+		const { kim, sam } = twoPeople({ deck: FOUR });
+		enableSuggestChanges(sam.state, sam.view.dispatch);
+		if (kimSuggests) enableSuggestChanges(kim.state, kim.view.dispatch);
+		const removal = removeSlide(sam.state, removing);
+		if (!removal) throw new Error("No removal");
+		dispatchAsOneChange(sam, removal, "Sam");
+		const before = kim.state.doc;
+		const kims = change(kim.state);
+		if (!kims) throw new Error("No change");
+		dispatchAsOneChange(kim, kims, "Kim");
+		return { kim, sam, before };
+	}
+
+	it.each(IN_FRONT)(
+		"stands where Kim puts it when %s as a suggestion, shown on the stage, with Sam's removal waiting",
+		(_, putting) => {
+			const { kim, sam, before } = inFront(putting, true);
+
+			expect(proposalsOf(sam.state.doc)).toEqual(putting.suggested);
+			const kims = putting.suggested.find(([, change, by]) => by === "Kim" && change === "adding");
+			expect(proposalsOf(kim.state.doc)[putting.shown(before, kim.state.doc)]).toEqual(kims);
+			expect(pendingSuggestions(sam.state.doc).map(({ by, slides }) => [by.name, slides])).toEqual(
+				expect.arrayContaining([["Sam", { adds: false, removes: true, layout: undefined }]]),
+			);
+		},
+	);
+
+	it.each(
+		IN_FRONT.flatMap(([what, putting]) =>
+			(["Kim", "Sam"] as const).flatMap((who) =>
+				(["accept", "reject"] as const).map((how) => [what, who, how, putting] as const),
+			),
+		),
+	)(
+		"when %s, leaves the order a person expects once %s's suggestion is %sed, the other waiting",
+		(_, who, how, putting) => {
+			const { sam } = inFront(putting, true);
+			const settling = pendingSuggestions(sam.state.doc).find(({ by }) => by.name === who);
+			if (!settling) throw new Error("No suggestion");
+
+			settlingSuggestion(settling.id, how)(sam.state, sam.view.dispatch);
+
+			expect(proposalsOf(sam.state.doc)).toEqual(settled(putting.suggested, who, how));
+			expect(pendingSuggestions(sam.state.doc).map(({ by }) => by.name)).toEqual([
+				who === "Kim" ? "Sam" : "Kim",
+			]);
+		},
+	);
+
+	it.each(IN_FRONT)(
+		"stands where Kim puts it when %s while editing, shown on the stage, with Sam's removal waiting",
+		(_, putting) => {
+			const { kim, sam, before } = inFront(putting, false);
+
+			const made = settled(putting.suggested, "Kim", "accept");
+			expect(proposalsOf(sam.state.doc)).toEqual(made);
+			const kims = putting.suggested.find(([, change, by]) => by === "Kim" && change === "adding");
+			expect(proposalsOf(kim.state.doc)[putting.shown(before, kim.state.doc)]?.[0]).toBe(kims?.[0]);
+		},
+	);
 });

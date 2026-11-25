@@ -1,8 +1,19 @@
 diff --git a/dist/commands.js b/dist/commands.js
-index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..c81f000b6c0a1b5745425f3d4c365b52f7f653de 100644
+index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..0775f8422a42563462a1c5fbb80a3b229a6d2d8f 100644
 --- a/dist/commands.js
 +++ b/dist/commands.js
-@@ -49,7 +49,7 @@ import { getSuggestionMarks } from "./utils.js";
+@@ -42,14 +42,17 @@ import { getSuggestionMarks } from "./utils.js";
+         if (isToRevert) {
+             const { pos: deletionFrom, deleted } = tr.mapping.mapResult(pos);
+             if (deleted) return false;
+-            const deletionTo = findSuggestionMarkEnd(tr.doc.resolve(deletionFrom + child.nodeSize), markTypeToRevert);
++            // Only an inline run carries on past its node. A block is taken
++            // out by itself: a block marked the same way after it belongs to
++            // another suggestion, or is taken out when it is reached.
++            const deletionTo = child.isInline ? findSuggestionMarkEnd(tr.doc.resolve(deletionFrom + child.nodeSize), markTypeToRevert) : deletionFrom + child.nodeSize;
+             // check if the previous and the next text part is a space
+             // if so, we can delete the whole text part
+             const prevChar = tr.doc.textBetween(deletionFrom - 1, deletionFrom, "x", "x");
              const nextChar = // textBetween is fine with negative positions (??),
              // but it errors if passed a position greater than the
              // size of the doc
@@ -11,7 +22,7 @@ index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..c81f000b6c0a1b5745425f3d4c365b52
              const addedRange = prevChar === " " && nextChar === " " ? 1 : 0;
              tr.deleteRange(deletionFrom, deletionTo + addedRange);
              return false;
-@@ -67,9 +67,9 @@ import { getSuggestionMarks } from "./utils.js";
+@@ -67,9 +70,9 @@ import { getSuggestionMarks } from "./utils.js";
          return true;
      });
  }
@@ -23,7 +34,7 @@ index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..c81f000b6c0a1b5745425f3d4c365b52
      for (const mod of existingMods){
          if (mod.attrs["type"] === "attr" && typeof mod.attrs["attrName"] === "string") {
              tr.setNodeAttribute(pos, mod.attrs["attrName"], mod.attrs["previousValue"]);
-@@ -86,24 +86,36 @@ function revertModifications(node, pos, tr) {
+@@ -86,24 +89,36 @@ function revertModifications(node, pos, tr) {
          }
      }
  }
@@ -71,7 +82,7 @@ index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..c81f000b6c0a1b5745425f3d4c365b52
          }
      }
      node.descendants((child, pos)=>{
-@@ -117,14 +129,9 @@ function applyModificationsToTransform(node, tr, dir, suggestionId, from, to) {
+@@ -117,14 +132,9 @@ function applyModificationsToTransform(node, tr, dir, suggestionId, from, to) {
          if (!isModification) {
              return true;
          }
@@ -88,7 +99,7 @@ index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..c81f000b6c0a1b5745425f3d4c365b52
          }
          return true;
      });
-@@ -193,7 +200,7 @@ export function applySuggestionsToRange(doc, from, to) {
+@@ -193,7 +203,7 @@ export function applySuggestionsToRange(doc, from, to) {
          const { deletion, insertion } = getSuggestionMarks(state.schema);
          const tr = state.tr;
          applySuggestionsToTransform(state.doc, tr, insertion, deletion, suggestionId, from, to);
@@ -97,7 +108,7 @@ index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..c81f000b6c0a1b5745425f3d4c365b52
          if (!tr.steps.length) return false;
          tr.setMeta(suggestChangesKey, {
              skip: true
-@@ -249,11 +256,11 @@ export function applySuggestionsToRange(doc, from, to) {
+@@ -249,11 +259,11 @@ export function applySuggestionsToRange(doc, from, to) {
          const { deletion, insertion } = getSuggestionMarks(state.schema);
          const tr = state.tr;
          applySuggestionsToTransform(state.doc, tr, deletion, insertion, suggestionId, from, to);
@@ -110,3 +121,36 @@ index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..c81f000b6c0a1b5745425f3d4c365b52
          dispatch?.(tr);
          return true;
      };
+diff --git a/dist/replaceStep.js b/dist/replaceStep.js
+index 384c02d27667921a4f2e6c495b118f035fa86162..1fcbbe88e494af863126d7b700a48e06a57bb30c 100644
+--- a/dist/replaceStep.js
++++ b/dist/replaceStep.js
+@@ -36,10 +36,13 @@ import { getSuggestionMarks } from "./utils.js";
+     // Check for insertion and deletion marks directly
+     // adjacent to this step's boundaries. If they exist,
+     // we'll use their ids, rather than producing a new one
++    // Only inline neighbours count, which a person types or deletes
++    // in runs: a block put in or taken out whole is a suggestion of
++    // its own, not part of whichever suggestion is beside it.
+     const nodeBefore = doc.resolve(step.from).nodeBefore;
+-    const markBefore = nodeBefore?.marks.find((mark)=>mark.type === deletion || mark.type === insertion) ?? null;
++    const markBefore = nodeBefore?.isInline ? nodeBefore.marks.find((mark)=>mark.type === deletion || mark.type === insertion) ?? null : null;
+     const nodeAfter = doc.resolve(step.to).nodeAfter;
+-    const markAfter = nodeAfter?.marks.find((mark)=>mark.type === deletion || mark.type === insertion) ?? null;
++    const markAfter = nodeAfter?.isInline ? nodeAfter.marks.find((mark)=>mark.type === deletion || mark.type === insertion) ?? null : null;
+     const markId = markBefore?.attrs["id"] ?? markAfter?.attrs["id"] ?? suggestionId;
+     const insertedRanges = [];
+     // Rebase this step's boundaries onto the newest doc
+@@ -175,7 +178,11 @@ import { getSuggestionMarks } from "./utils.js";
+         // Don't allow inserting content within an existing deletion
+         // mark. Instead, shift the proposed insertion to the end
+         // of the deletion.
+-        const insertFrom = findSuggestionMarkEnd($to, deletion);
++        // Only a deleted inline run can be split by an insertion: a
++        // block put in front of a block proposed for removal stays
++        // where it was put.
++        const neighbour = $to.nodeAfter ?? $to.nodeBefore;
++        const insertFrom = neighbour && !neighbour.isInline ? $to.pos : findSuggestionMarkEnd($to, deletion);
+         // We execute the insertion normally, on top of all of the existing
+         // tracked changes.
+         trackedTransaction.replace(insertFrom, insertFrom, step.slice);

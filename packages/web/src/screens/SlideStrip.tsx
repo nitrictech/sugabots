@@ -12,6 +12,7 @@ import { cn } from "cn";
 import { ArrowDown, ArrowUp, Ellipsis, PenLine, Plus, Sparkles, Trash2 } from "lucide-react";
 import { type Ref, useEffect, useMemo, useRef } from "react";
 import { proposedChangeOf } from "@/lib/deck.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { pendingSuggestions } from "@/lib/suggestions.ts";
 import {
 	DropdownMenu,
@@ -22,14 +23,16 @@ import {
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { LayoutPicker } from "./LayoutPicker.tsx";
 import { Face, type Other } from "./live-editor.tsx";
+import { useSlideReordering, useThumbnailDragging } from "./slide-dragging.ts";
 import { SlideDrawing } from "./slide-drawing.tsx";
 
 /**
  * A deck's slides in order, each drawn small from the deck as it is now, with
  * the one on the stage ringed: a column beside the stage, or a row under it
  * on a phone. Each says who else is on it, and whether a suggestion waits in
- * it, and has a menu to move it or delete it. A new slide is added after the
- * one on the stage.
+ * it, and has a menu to move it or delete it. In the column a slide can also
+ * be dragged to a new place; on a phone the menu is the way. A new slide is
+ * added after the one on the stage.
  */
 export function SlideStrip({
 	slides,
@@ -51,7 +54,8 @@ export function SlideStrip({
 	editable: boolean;
 	onSelect: (index: number) => void;
 	onAdd: (layout: SlideLayout) => void;
-	onMove: (index: number, by: -1 | 1) => void;
+	/** Moves the slide at `from` to stand at `to`. */
+	onMove: (from: number, to: number) => void;
 	onRemove: (index: number) => void;
 }) {
 	const shown = useRef<HTMLLIElement>(null);
@@ -59,8 +63,21 @@ export function SlideStrip({
 	useEffect(() => {
 		shown.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
 	}, [current]);
+	const strip = useRef<HTMLElement>(null);
+	const list = useRef<HTMLOListElement>(null);
+	// Tailwind's `md`, from which the `max-md:` classes below leave the strip a column.
+	const column = useMediaQuery(SIDE_BY_SIDE);
+	const draggable = editable && column;
+	const { dragged, dropGap } = useSlideReordering({
+		strip,
+		list,
+		slides,
+		enabled: draggable,
+		onMove,
+	});
 	return (
 		<nav
+			ref={strip}
 			aria-label="Slides"
 			className="flex w-48 shrink-0 flex-col gap-2.5 overflow-y-auto pt-4 pr-3 pb-6 pl-4 max-md:w-auto max-md:flex-row max-md:items-center max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-border max-md:border-t max-md:bg-background max-md:px-4 max-md:pt-3 max-md:pb-5"
 		>
@@ -74,7 +91,7 @@ export function SlideStrip({
 					New slide
 				</LayoutPicker>
 			)}
-			<ol className="m-0 flex list-none flex-col gap-2.5 p-0 max-md:flex-row">
+			<ol ref={list} className="m-0 flex list-none flex-col gap-2.5 p-0 max-md:flex-row">
 				{slides.map((slide, index) => (
 					<Thumbnail
 						// A slide has no lasting id, so its place is its key; its drawing redraws only when it changes.
@@ -88,6 +105,9 @@ export function SlideStrip({
 						others={others.filter((other) => other.slide === index)}
 						serializer={serializer}
 						editable={editable}
+						draggable={draggable}
+						dragged={slide === dragged}
+						dropLine={dropLineOn(index, slides.length, dropGap)}
 						onSelect={onSelect}
 						onMove={onMove}
 						onRemove={onRemove}
@@ -108,6 +128,19 @@ export function SlideStrip({
 	);
 }
 
+/**
+ * Which edge of the thumbnail at `index`, of `count`, the drop line goes on
+ * for the gap `gap` (see `useSlideReordering`): above it, or below the last.
+ */
+function dropLineOn(
+	index: number,
+	count: number,
+	gap: number | undefined,
+): "above" | "below" | undefined {
+	if (gap === index) return "above";
+	return gap === count && index === count - 1 ? "below" : undefined;
+}
+
 /** One slide in the strip. */
 function Thumbnail({
 	ref,
@@ -118,6 +151,9 @@ function Thumbnail({
 	others,
 	serializer,
 	editable,
+	draggable,
+	dragged,
+	dropLine,
 	onSelect,
 	onMove,
 	onRemove,
@@ -130,15 +166,36 @@ function Thumbnail({
 	others: readonly Other[];
 	serializer: DOMSerializer;
 	editable: boolean;
+	/** Whether it can be dragged to a new place. */
+	draggable: boolean;
+	/** Whether it is being dragged, and so drawn faint where it is. */
+	dragged: boolean;
+	/** Where a line marks the place a dragged slide would land. */
+	dropLine: "above" | "below" | undefined;
 	onSelect: (index: number) => void;
-	onMove: (index: number, by: -1 | 1) => void;
+	onMove: (from: number, to: number) => void;
 	onRemove: (index: number) => void;
 }) {
 	const proposed = proposedChangeOf(slide);
 	const suggester = useMemo(() => suggesterOn(slide), [slide]);
+	const frame = useRef<HTMLDivElement>(null);
+	const cover = useRef<HTMLDivElement>(null);
+	useThumbnailDragging({ frame, cover, slide, enabled: draggable });
 	const number = index + 1;
 	return (
-		<li ref={ref} className="flex gap-2 max-md:w-28 max-md:flex-none">
+		<li
+			ref={ref}
+			className={cn("relative flex gap-2 max-md:w-28 max-md:flex-none", dragged && "opacity-40")}
+		>
+			{dropLine && (
+				<span
+					aria-hidden
+					className={cn(
+						"pointer-events-none absolute right-0 left-5.5 h-0.5 rounded-full bg-slide-accent",
+						dropLine === "above" ? "-top-1.5" : "-bottom-1.5",
+					)}
+				/>
+			)}
 			<span
 				aria-hidden
 				className={cn(
@@ -149,6 +206,7 @@ function Thumbnail({
 				{number}
 			</span>
 			<div
+				ref={frame}
 				className={cn(
 					"group relative min-w-0 flex-1 rounded-md",
 					current ? "ring-2 ring-slide-accent" : "ring-1 ring-border-strong",
@@ -157,11 +215,20 @@ function Thumbnail({
 				)}
 			>
 				<SlideDrawing slide={slide} serializer={serializer} hidden className="rounded-md" />
-				<button
-					type="button"
+				{/* biome-ignore lint/a11y/useSemanticElements: Firefox starts a drag on a <button> only from its text, and this one, with none, covers the whole thumbnail. */}
+				<div
+					ref={cover}
+					role="button"
+					tabIndex={0}
 					aria-label={`Slide ${number}${PROPOSED_WORDS[proposed ?? "none"]}: ${titleOf(slide)}`}
 					aria-current={current ? "true" : undefined}
 					onClick={() => onSelect(index)}
+					onKeyDown={(event) => {
+						if (event.key !== "Enter" && event.key !== " ") return;
+						// Space would also scroll the strip.
+						event.preventDefault();
+						onSelect(index);
+					}}
 					className="focus-ring absolute inset-0 cursor-pointer rounded-md"
 				/>
 				{(others.length > 0 || suggester) && (
@@ -197,7 +264,7 @@ function Thumbnail({
 						first={index === 0}
 						last={index === count - 1}
 						only={count <= 1}
-						onMove={(by) => onMove(index, by)}
+						onMove={(by) => onMove(index, index + by)}
 						onRemove={() => onRemove(index)}
 					/>
 				)}

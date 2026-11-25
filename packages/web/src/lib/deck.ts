@@ -150,20 +150,37 @@ function sizeOf(fragment: Fragment, from: number, to: number): number {
 	return size;
 }
 
-/** Moves the slide at `index` one place earlier (`-1`) or later (`1`), keeping the caret in it. */
-export function moveSlide(state: EditorState, index: number, by: -1 | 1): Transaction | undefined {
+/**
+ * Moves the slide at `from` so it stands at `to` among the slides, after the
+ * slide now there when it moves later and before it when it moves earlier,
+ * keeping the caret in it. `undefined` when either isn't a slide's place, or
+ * when they are the same.
+ */
+export function moveSlideTo(state: EditorState, from: number, to: number): Transaction | undefined {
 	const slides = slidesOf(state.doc);
-	const [moving, neighbour] = [slides[index], slides[index + by]];
-	if (!moving || !neighbour) return undefined;
+	const [moving, there] = [slides[from], slides[to]];
+	if (!moving || !there || from === to) return undefined;
 	const { node, pos } = moving;
 	const moved = state.tr;
-	if (by === 1) {
-		moved.insert(neighbour.pos + neighbour.node.nodeSize, node).delete(pos, pos + node.nodeSize);
+	// The step at the later place goes first, so the earlier place hasn't moved for the second.
+	if (to > from) {
+		moved.insert(there.pos + there.node.nodeSize, node).delete(pos, pos + node.nodeSize);
 	} else {
-		moved.delete(pos, pos + node.nodeSize).insert(neighbour.pos, node);
+		moved.delete(pos, pos + node.nodeSize).insert(there.pos, node);
 	}
-	const movedTo = by === 1 ? pos + neighbour.node.nodeSize : neighbour.pos;
+	const movedTo = to > from ? there.pos + there.node.nodeSize - node.nodeSize : there.pos;
 	return moved.setSelection(TextSelection.near(moved.doc.resolve(inside(movedTo))));
+}
+
+/**
+ * Where the slide `moveSlideTo` moved from `from` to `to` stands in `after`,
+ * the deck the move made of `before`. Made as a suggestion, the move leaves
+ * the slide where it was too, proposed for removal until the move is
+ * accepted, so a slide moved later stands one place further on.
+ */
+export function placeOfMovedSlide(before: Node, after: Node, from: number, to: number): number {
+	const keptWhereItWas = after.childCount - before.childCount;
+	return to > from ? to + keptWhereItWas : to;
 }
 
 /** Removes the slide at `index`. `undefined` for a deck's last slide, which a deck can't be without. */

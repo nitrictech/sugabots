@@ -134,6 +134,26 @@ describe("an agent's suggestion in a live document", () => {
 		expect(asMarkdown(accepted(after))).toBe(asMarkdown(document(wanted)));
 	});
 
+	it("puts a paragraph it adds in front of one proposed for removal where its markdown says", () => {
+		const removing = suggested(plan, "# Launch plan\n\n- Write the post");
+
+		const after = suggested(
+			removing,
+			"# Launch plan\n\nBrief sales.\n\nShip on Friday. Tell support first.\n\n- Write the post",
+			"s2:agent:Planner",
+		);
+
+		expect(after.children.map((block) => block.textContent)).toEqual([
+			"Launch plan",
+			"Brief sales.",
+			"Ship on Friday. Tell support first.",
+			"Write the post",
+		]);
+		expect(asMarkdown(accepted(after))).toBe(
+			asMarkdown(document("# Launch plan\n\nBrief sales.\n\n- Write the post")),
+		);
+	});
+
 	it("keeps a suggestion pending elsewhere when a second is made", () => {
 		const first = suggested(
 			plan,
@@ -305,6 +325,25 @@ const QUESTIONS = "<!-- layout: section -->\n\n## Questions";
 
 describe("an agent's suggestion in a deck", () => {
 	const live = deck(slides(TITLE, GOALS, COLUMNS, QUESTIONS));
+
+	it("puts a slide it adds in front of one proposed for removal where its markdown says", () => {
+		const removing = suggested(live, slides(TITLE, COLUMNS, QUESTIONS));
+
+		const after = suggested(
+			removing,
+			slides(TITLE, "<!-- layout: section -->\n\n## Budget", GOALS, COLUMNS, QUESTIONS),
+			"s2:agent:Planner",
+		);
+
+		expect(after.children.map((slide) => slide.child(0).child(0).textContent)).toEqual([
+			"Launch review",
+			"Budget",
+			"Goals",
+			"People and bots",
+			"Questions",
+		]);
+		expect(slideMarks(after).slice(1, 3)).toEqual([["insertion"], ["deletion"]]);
+	});
 
 	it.each([
 		[

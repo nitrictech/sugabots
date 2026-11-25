@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-/** Tailwind's `md`, from which the list and the chat sit side by side. */
+/** Tailwind's `md`, from which the list and the chat sit side by side, as a deck's slides and its stage do. */
 export const SIDE_BY_SIDE = "(min-width: 48rem)";
 
 /** Tailwind's `lg`, from which settings list their sections beside the page rather than as a page of their own. */

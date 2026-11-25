@@ -25,7 +25,8 @@ import {
 	addSlide,
 	changeLayout,
 	LAYOUT_NAMES,
-	moveSlide,
+	moveSlideTo,
+	placeOfMovedSlide,
 	removeSlide,
 	selectSlide,
 	slidesOf,
@@ -342,9 +343,10 @@ function DeckView({
 						// As a suggestion the selection lands after what was added, so the new slide is chosen again.
 						select(current + 1);
 					}}
-					onMove={(index, by) => {
-						change(moveSlide(editor.state, index, by));
-						select(index + by);
+					onMove={(from, to) => {
+						const before = editor.state.doc;
+						change(moveSlideTo(editor.state, from, to));
+						select(placeOfMovedSlide(before, editor.state.doc, from, to));
 					}}
 					onRemove={(index) => change(removeSlide(editor.state, index))}
 				/>
