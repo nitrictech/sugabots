@@ -88,13 +88,21 @@ export async function uploadArtifactImage(
 export const artifactImageSource = (image: ArtifactImageIds): string =>
 	`${client.baseUrl}${artifactImagePath(image)}`;
 
+/** A file the API builds of an artifact people edit live: a document's Word file, or a deck's PowerPoint file or PDF. */
+export type LiveArtifactFile = "word" | "powerpoint" | "pdf";
+
 /**
- * Saves a deck as a .pptx. The API builds the file from its own copy, which
- * holds what everyone has typed.
+ * Saves an artifact people edit live as `file`, which the API names after
+ * its title. The API builds the file from its own copy, which holds what
+ * everyone has typed.
  */
-export function downloadAsPowerPoint(podId: string, artifactId: string) {
+export function downloadLiveArtifactFile(
+	podId: string,
+	artifactId: string,
+	file: LiveArtifactFile,
+) {
 	const link = document.createElement("a");
-	link.href = `${client.baseUrl}/pods/${podId}/artifacts/${artifactId}/powerpoint`;
+	link.href = `${client.baseUrl}/pods/${podId}/artifacts/${artifactId}/${file}`;
 	link.download = "";
 	link.click();
 }

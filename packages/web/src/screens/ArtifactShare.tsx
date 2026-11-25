@@ -7,11 +7,12 @@ import {
 	Lock,
 	type LucideIcon,
 	Presentation,
+	Printer,
 	Users,
 	X,
 } from "lucide-react";
 import { useState } from "react";
-import { downloadAsPowerPoint } from "@/lib/artifacts.ts";
+import { downloadLiveArtifactFile } from "@/lib/artifacts.ts";
 import { Button } from "@/ui/button.tsx";
 import { iconButtonClassName } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
@@ -27,13 +28,21 @@ export interface ExportOption {
 	onSave: () => void;
 }
 
-/** A deck saved as a PowerPoint file, which the API builds from its current, live state. */
-export const powerPointExport = (podId: string, artifactId: string): ExportOption => ({
-	label: "PowerPoint",
-	description: "Editable .pptx presentation",
-	Icon: Presentation,
-	onSave: () => downloadAsPowerPoint(podId, artifactId),
-});
+/** A deck saved as a PowerPoint file or a PDF, which the API builds from its current, live state. */
+export const deckExports = (podId: string, artifactId: string): ExportOption[] => [
+	{
+		label: "PowerPoint",
+		description: "Editable .pptx presentation",
+		Icon: Presentation,
+		onSave: () => downloadLiveArtifactFile(podId, artifactId, "powerpoint"),
+	},
+	{
+		label: "PDF",
+		description: ".pdf file to share or print",
+		Icon: Printer,
+		onSave: () => downloadLiveArtifactFile(podId, artifactId, "pdf"),
+	},
+];
 
 /**
  * Who can open an artifact and how to hand it on: its link, for the people

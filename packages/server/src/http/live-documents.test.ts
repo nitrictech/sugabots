@@ -43,6 +43,7 @@ const ARTIFACT_ID = randomUUID();
 const WORD_PATH = `/api/pods/${POD_ID}/artifacts/${ARTIFACT_ID}/word`;
 const DECK_ID = randomUUID();
 const POWERPOINT_PATH = `/api/pods/${POD_ID}/artifacts/${DECK_ID}/powerpoint`;
+const PDF_PATH = `/api/pods/${POD_ID}/artifacts/${DECK_ID}/pdf`;
 
 const plan: Artifact = {
 	id: ARTIFACT_ID,
@@ -295,6 +296,40 @@ describe.skipIf(!process.env.DATABASE_URL)("a document's live WebSocket", () => 
 	it("gives no PowerPoint file for a document", async () => {
 		const response = await fetch(
 			`http://127.0.0.1:${apiPort}/api/pods/${POD_ID}/artifacts/${ARTIFACT_ID}/powerpoint`,
+			{ headers: { cookie: "session=good" } },
+		);
+
+		expect(response.status).toBe(404);
+	});
+
+	it("downloads a deck as a PDF holding what the live deck holds", async () => {
+		const person = await joinAs("session=good", deck);
+		await Effect.runPromise(
+			live.rewrite(
+				DECK_ID,
+				PLANNER,
+				() =>
+					"<!-- layout: title -->\n\n# Launch review\n\n---\n\n## Goals\n\n- Ship on Friday\n\n---\n\n<!-- layout: section -->\n\n## Next steps",
+			),
+		);
+
+		const response = await fetch(`http://127.0.0.1:${apiPort}${PDF_PATH}`, {
+			headers: { cookie: "session=good" },
+		});
+		const file = new TextDecoder("latin1").decode(await response.arrayBuffer());
+		person.leave();
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-type")).toBe("application/pdf");
+		expect(response.headers.get("content-disposition")).toContain("Launch%20review.pdf");
+		expect(file.startsWith("%PDF-")).toBe(true);
+		// A PDF's page objects are plain text in it: a page for each of the live deck's three slides.
+		expect(file.match(/\/Type \/Page\b(?!s)/g)).toHaveLength(3);
+	});
+
+	it("gives no PDF for a document", async () => {
+		const response = await fetch(
+			`http://127.0.0.1:${apiPort}/api/pods/${POD_ID}/artifacts/${ARTIFACT_ID}/pdf`,
 			{ headers: { cookie: "session=good" } },
 		);
 

@@ -11,6 +11,7 @@ import { API_BASE_PATH, type ArtifactImageIds } from "@sugabots/contracts/http";
 import { LIVE_DOCUMENT_SCHEMA } from "@sugabots/contracts/live-document";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { LiveDocuments } from "@sugabots/core/artifacts/live";
+import { PDF_CONTENT_TYPE, pdfFileOf } from "@sugabots/core/artifacts/pdf";
 import { POWERPOINT_CONTENT_TYPE, powerPointFileOf } from "@sugabots/core/artifacts/powerpoint";
 import { WORD_CONTENT_TYPE, wordFileOf } from "@sugabots/core/artifacts/word";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
@@ -26,8 +27,8 @@ import { storeOutagesAsDefects } from "./errors.ts";
  * web app's editor opens, which joins the person to the artifact's live
  * document for as long as it stays open if the editor was built for the
  * artifact's schema and kind, a document as a Word file, and a deck as a
- * PowerPoint file. Anyone who can read the artifact can edit it and download
- * it.
+ * PowerPoint file or a PDF. Anyone who can read the artifact can edit it and
+ * download it.
  */
 export const liveDocumentRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
@@ -40,12 +41,13 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 		/**
 		 * An image the document or deck keeps, for its file: `undefined` when it
 		 * keeps none under that id, or the one kept isn't of a kind a document
-		 * keeps, which the file shows as its words.
+		 * keeps, or of `kinds` when the file draws only those, which the file
+		 * shows as its words. Such an image isn't read.
 		 */
-		const keptImage = (image: ArtifactImageIds) =>
+		const keptImage = (image: ArtifactImageIds, kinds?: ReadonlySet<ArtifactImageType>) =>
 			artifacts.image(image).pipe(
 				Effect.flatMap(({ contentType, stream }) =>
-					isImageType(contentType)
+					isImageType(contentType) && (kinds?.has(contentType) ?? true)
 						? Effect.map(Stream.runCollect(stream), (chunks) => ({
 								contentType,
 								bytes: Buffer.concat(chunks),
@@ -115,8 +117,8 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 					if (artifact.kind !== download.kind) return yield* new Refused({ status: 404 });
 					// What people have typed, where the artifact is live; its last version otherwise.
 					const markdown = (yield* live.markdown(artifact.id)) ?? artifact.content;
-					const file = yield* download.fileOf(artifact, markdown, (image) =>
-						keptImage(image).pipe(asHolder),
+					const file = yield* download.fileOf(artifact, markdown, (image, kinds) =>
+						keptImage(image, kinds).pipe(asHolder),
 					);
 					return HttpServerResponse.uint8Array(file, { contentType: download.contentType }).pipe(
 						HttpServerResponse.setHeader(
@@ -144,13 +146,15 @@ interface Download {
 	fileOf: <E, R>(
 		artifact: Pick<Artifact, "podId" | "id" | "title">,
 		markdown: string,
+		/** An image the artifact keeps, when it is of `kinds`, which a file that draws only some kinds asks for. */
 		imageOf: (
 			image: ArtifactImageIds,
+			kinds?: ReadonlySet<ArtifactImageType>,
 		) => Effect.Effect<{ contentType: ArtifactImageType; bytes: Uint8Array } | undefined, E, R>,
 	) => Effect.Effect<Uint8Array, E, R>;
 }
 
-/** A document downloads as a Word file, and a deck as a PowerPoint file. */
+/** A document downloads as a Word file, and a deck as a PowerPoint file or a PDF. */
 const DOWNLOADS: readonly Download[] = [
 	{
 		path: "word",
@@ -165,6 +169,13 @@ const DOWNLOADS: readonly Download[] = [
 		contentType: POWERPOINT_CONTENT_TYPE,
 		extension: "pptx",
 		fileOf: powerPointFileOf,
+	},
+	{
+		path: "pdf",
+		kind: "slides",
+		contentType: PDF_CONTENT_TYPE,
+		extension: "pdf",
+		fileOf: pdfFileOf,
 	},
 ];
 

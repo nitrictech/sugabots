@@ -1,4 +1,4 @@
-import { layoutOf } from "@sugabots/contracts/live-slides";
+import { layoutOf, SLIDE_TEXT_STEPS } from "@sugabots/contracts/live-slides";
 import type { DOMSerializer, Node } from "@tiptap/pm/model";
 import { cn } from "cn";
 import { memo, useLayoutEffect, useRef } from "react";
@@ -9,12 +9,6 @@ import { memo, useLayoutEffect, useRef } from "react";
  * Everything on a slide is sized off its width (see the slide styles in
  * `app.css`), so one drawing serves at any size.
  */
-
-/**
- * The sizes a slide's text is drawn at, as parts of its full size, largest
- * first: the first at which it fits the slide is the one it is drawn at.
- */
-const TEXT_STEPS = [1, 0.9, 0.8, 0.7] as const;
 
 /** The style property, on an element holding a slide, that sets the size its text is drawn at. */
 const TEXT_STEP_PROPERTY = "--slide-fit";
@@ -28,7 +22,7 @@ const SLIDE_HEIGHT_PER_WIDTH = 9 / 16;
  * at the smallest. Nothing about it is stored: each drawing works it out.
  */
 export function fitSlideText(holder: HTMLElement, body: HTMLElement): boolean {
-	for (const step of TEXT_STEPS) {
+	for (const step of SLIDE_TEXT_STEPS) {
 		holder.style.setProperty(TEXT_STEP_PROPERTY, String(step));
 		if (fits(body)) return false;
 	}

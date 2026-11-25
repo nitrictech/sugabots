@@ -23,6 +23,11 @@
 		"@alibaba-group/opensandbox": "1.1.0",
 		"@effect/platform-node": "catalog:",
 		"@effect/sql-pg": "catalog:",
+		"@fontsource/jetbrains-mono": "^5.3.0",
+		"@fontsource/noto-sans": "^5.3.0",
+		"@fontsource/noto-sans-math": "^5.3.0",
+		"@fontsource/noto-sans-symbols-2": "^5.3.0",
+		"@fontsource/rubik": "^5.3.0",
 		"@handlewithcare/prosemirror-suggest-changes": "^0.1.8",
 		"@hocuspocus/server": "^4.9.0",
 		"@modelcontextprotocol/sdk": "^1.32.2",
@@ -44,12 +49,14 @@
 		"drizzle-orm": "catalog:",
 		"e2b": "2.64.0",
 		"effect": "catalog:",
+		"fontkit": "^3.0.0",
 		"image-size": "^1.2.1",
 		"jszip": "^3.10.2",
 		"linkedom": "^0.18.15",
 		"marked": "^18.2.1",
 		"mime-types": "^3.0.2",
 		"minisearch": "^7.2.0",
+		"pdfkit": "^0.21.0",
 		"pptxgenjs": "^4.0.1",
 		"turndown": "^7.2.5",
 		"undici": "7.30.1",
@@ -58,10 +65,13 @@
 	},
 	"devDependencies": {
 		"@hocuspocus/provider": "^4.9.0",
+		"@types/fontkit": "^2.0.9",
 		"@types/mime-types": "^3.0.1",
+		"@types/pdfkit": "^0.17.7",
 		"@types/pg": "catalog:",
 		"@types/turndown": "^5.0.6",
 		"mammoth": "^1.13.0",
-		"pg": "^8.23.1"
+		"pg": "^8.23.1",
+		"unpdf": "^2.2.2"
 	}
 }

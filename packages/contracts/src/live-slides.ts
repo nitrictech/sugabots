@@ -39,6 +39,13 @@ export const SPEAKER_NOTES = "speakerNotes";
 /** The layout a slide made without one has. */
 const DEFAULT_LAYOUT: SlideLayout = "bullets";
 
+/**
+ * The sizes a slide's text is drawn at, as parts of its full size, largest
+ * first: the first at which it fits the slide is the one it is drawn at, in
+ * the app and in a file the deck is saved as.
+ */
+export const SLIDE_TEXT_STEPS = [1, 0.9, 0.8, 0.7] as const;
+
 /** The slide's layout, or the default when it holds none this version knows. */
 export const layoutOf = (slide: Node): SlideLayout => layoutIn(slide.attrs);
 
@@ -315,7 +322,7 @@ function draftsOf(content: readonly JSONContent[]): SlideDraft[] {
 					draft.columns.push([]);
 					break;
 				case "notes":
-					draft.notes.push(...said.paragraphs);
+					for (const paragraph of said.paragraphs) draft.notes.push(paragraph);
 					break;
 			}
 		}

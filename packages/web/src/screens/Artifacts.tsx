@@ -31,6 +31,7 @@ import {
 	useState,
 } from "react";
 import {
+	downloadLiveArtifactFile,
 	useArtifact,
 	useArtifacts,
 	useArtifactVersions,
@@ -57,10 +58,10 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
-import { ArtifactShare, type ExportOption, powerPointExport } from "./ArtifactShare.tsx";
+import { ArtifactShare, deckExports, type ExportOption } from "./ArtifactShare.tsx";
 import { ARTIFACT_KINDS } from "./artifact-kinds.tsx";
 import { LiveDeck, type Present } from "./LiveDeck.tsx";
-import { downloadAsWord, LiveDocument } from "./LiveDocument.tsx";
+import { LiveDocument } from "./LiveDocument.tsx";
 import type { Editing, FileImport, LiveArtifact } from "./live-editor.tsx";
 import type { AskedBot } from "./live-editor-overlays.tsx";
 
@@ -378,8 +379,8 @@ const RAW_FILES = {
  * with one's content once the editor is up.
  */
 interface OfficeFile {
-	/** Saving it as one, a row of Share's exports. */
-	exported: ExportOption;
+	/** Saving it as one, and a deck as a PDF too, each a row of Share's exports. */
+	exports: readonly ExportOption[];
 	/** What the item of the ⋯ menu that replaces it with a file's content says. */
 	importLabel: string;
 	/** The files that item's picker offers. */
@@ -395,19 +396,21 @@ function officeFileOf(
 ): OfficeFile {
 	if (kind === "slides") {
 		return {
-			exported: powerPointExport(podId, artifactId),
+			exports: deckExports(podId, artifactId),
 			importLabel: "Import from PowerPoint (.pptx)",
 			accept: ".pptx",
 			onImport,
 		};
 	}
 	return {
-		exported: {
-			label: "Word",
-			description: "Editable .docx document",
-			Icon: FileType,
-			onSave: () => downloadAsWord(podId, artifactId),
-		},
+		exports: [
+			{
+				label: "Word",
+				description: "Editable .docx document",
+				Icon: FileType,
+				onSave: () => downloadLiveArtifactFile(podId, artifactId, "word"),
+			},
+		],
 		importLabel: "Import from Word (.docx)",
 		accept: ".docx",
 		onImport,
@@ -479,7 +482,7 @@ export function ArtifactStageView({
 	const link = () =>
 		new URL(router.buildLocation(artifactLink(pod, artifact.id)).href, window.location.origin).href;
 	const exports: ExportOption[] = [
-		...(officeFile ? [officeFile.exported] : []),
+		...(officeFile?.exports ?? []),
 		{ ...RAW_FILES[artifact.kind], onSave: () => downloadArtifact(artifact) },
 	];
 	return (

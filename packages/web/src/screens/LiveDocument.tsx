@@ -10,7 +10,6 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { apiBaseUrl } from "@/lib/api-url.ts";
 import { uploadArtifactImage } from "@/lib/artifacts.ts";
 import type { KeepImage } from "@/lib/file-import.ts";
 import {
@@ -330,14 +329,3 @@ const EmptyHints = Placeholder.configure({
 });
 
 const WORD_FILE: ImportedFileKind = { name: "Word file", readAs: "a Word document" };
-
-/**
- * Saves the document as a .docx. The API builds the file from its own copy,
- * which holds what everyone has typed.
- */
-export function downloadAsWord(podId: string, artifactId: string) {
-	const link = document.createElement("a");
-	link.href = `${apiBaseUrl}/pods/${podId}/artifacts/${artifactId}/word`;
-	link.download = "";
-	link.click();
-}
