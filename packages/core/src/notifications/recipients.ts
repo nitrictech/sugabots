@@ -107,7 +107,7 @@ function minutesOfDay(time: string): number {
  * A finished message somebody wrote in a project's chat, a bot's included,
  * or an automation's result posted in its automation's feed.
  */
-interface WrittenMessage {
+export interface WrittenMessage {
 	chatId: string;
 	messageId: string;
 	author:

@@ -24,6 +24,7 @@ export const make = Effect.gen(function* () {
 							.where(eq(placedChat.id, chatId)),
 					);
 					if (!placed) return "chatUnavailable" as const;
+					const acceptsAutomationWork = yield* automationAcceptsWork(chatId);
 					const [open] = yield* query((db) =>
 						db
 							.select({ id: workspace.id })
@@ -45,7 +46,7 @@ export const make = Effect.gen(function* () {
 							),
 					);
 					if (!acceptsWork) return "chatUnavailable" as const;
-					return (yield* automationAcceptsWork(chatId)) ? undefined : ("automationEnded" as const);
+					return acceptsAutomationWork ? undefined : ("automationEnded" as const);
 				}),
 			),
 	});

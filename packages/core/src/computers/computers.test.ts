@@ -3,7 +3,7 @@ import { Cause, Effect, Exit, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Ids } from "../ids/ids.ts";
 import { Computers } from "./computers.ts";
-import { removeWorkVolumes } from "./testing.ts";
+import { localComputerEgress, removeWorkVolumes } from "./testing.ts";
 
 /**
  * The same behaviour from every provider, run against the real service.
@@ -57,11 +57,17 @@ const EXEC = { timeout: "30 seconds", maxOutputCharacters: 10_000 } as const;
 const SLOW = 180_000;
 
 const run = <A, E>(effect: Effect.Effect<A, E, Computers.Service>) =>
-	Effect.runPromise(effect.pipe(Effect.provide(Computers.layer.pipe(Layer.provide(Ids.layer)))));
+	Effect.runPromise(
+		effect.pipe(
+			Effect.provide(Computers.layer.pipe(Layer.provide([Ids.layer, localComputerEgress]))),
+		),
+	);
 
 const runExit = <A, E>(effect: Effect.Effect<A, E, Computers.Service>) =>
 	Effect.runPromiseExit(
-		effect.pipe(Effect.provide(Computers.layer.pipe(Layer.provide(Ids.layer)))),
+		effect.pipe(
+			Effect.provide(Computers.layer.pipe(Layer.provide([Ids.layer, localComputerEgress]))),
+		),
 	);
 
 /** A command that succeeds only if an HTTPS request to `host` gets an answer. */

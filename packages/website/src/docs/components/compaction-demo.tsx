@@ -352,11 +352,11 @@ function CompactionStatus({ state }: { state: Step["compaction"] }) {
 			<motion.span
 				animate={state === "working" ? { rotate: [0, -8, 8, 0] } : { rotate: 0 }}
 				transition={state === "working" ? { repeat: Infinity, duration: 1.2 } : undefined}
-				className={cn(state === "idle" && "opacity-40")}
+				className={state === "idle" ? "opacity-40" : undefined}
 			>
 				<BotAvatar size="xs" {...compactorLook} />
 			</motion.span>
-			<span className={cn(state === "idle" && "text-muted-foreground")}>{text}</span>
+			<span className={state === "idle" ? "text-muted-foreground" : undefined}>{text}</span>
 		</div>
 	);
 }

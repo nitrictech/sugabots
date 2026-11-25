@@ -189,7 +189,13 @@ function ConnectorCard({
 						trailing={
 							connector.signedIn ? (
 								<span className="flex min-w-0 items-center gap-3">
-									<ConnectedBy member={isServer ? connector.signedInAs : connector.connectedBy} />
+									<ConnectedBy
+										member={
+											isServer
+												? connector.signedInAs
+												: (connector.signedInAs ?? connector.connectedBy)
+										}
+									/>
 									{canManage &&
 										(isServer ? (
 											connector.auth === "oauth" && (
@@ -429,7 +435,7 @@ function SecretForm({
 				value={secret}
 				onChange={(event) => setSecret(event.target.value)}
 				placeholder={needsToken ? "Paste the access token" : "Paste the new secret"}
-				className="min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-subtle-foreground"
+				className="min-w-0 flex-1 bg-transparent font-mono text-xs rounded-sm text-foreground focus-ring placeholder:text-subtle-foreground"
 			/>
 			<Button type="button" size="sm" variant="ghost" onClick={done}>
 				Cancel
@@ -524,7 +530,7 @@ function ToolSettings({
 	if (kinds.length === 0) {
 		return (
 			<SettingsGroup label="Tools" headingLevel={2}>
-				<SettingsRow label={<span className="text-muted-foreground">No actions found yet</span>} />
+				<SettingsRow label={<span className="text-muted-foreground">No tools found yet</span>} />
 			</SettingsGroup>
 		);
 	}
@@ -540,7 +546,7 @@ function ToolSettings({
 						headingLevel={2}
 						note={
 							kind === "change"
-								? "Ask first sends the action to Approvals before it runs."
+								? "Ask first sends the call to Approvals before it runs."
 								: undefined
 						}
 					>

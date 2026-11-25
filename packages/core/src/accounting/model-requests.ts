@@ -2,9 +2,10 @@ export * as ModelRequests from "./model-requests.ts";
 
 import type { RequestUsage, Usd } from "@sugabots/accounting";
 import type { BuiltInProviderId } from "@sugabots/contracts";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { query, serviceOperations, writtenRow } from "../database/database.ts";
+import { bot } from "../workspaces/sql.ts";
 import { modelRequest } from "./sql.ts";
 
 /**
@@ -33,6 +34,10 @@ export const make = Effect.gen(function* () {
 							workspaceId: request.workspaceId,
 							purpose: request.purpose.name,
 							botId: "botId" in request.purpose ? request.purpose.botId : null,
+							byPersonalAssistant:
+								"botId" in request.purpose
+									? sql<boolean>`exists (select 1 from ${bot} where ${bot.id} = ${request.purpose.botId} and ${bot.assistantOf} is not null)`
+									: false,
 							chatId: "chatId" in request.purpose ? request.purpose.chatId : null,
 							turnId: "turnId" in request.purpose ? request.purpose.turnId : null,
 							step: request.step,

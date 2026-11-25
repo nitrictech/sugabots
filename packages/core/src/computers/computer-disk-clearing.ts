@@ -29,7 +29,7 @@ export interface Clearing {
 }
 
 /** Ids of the chat folders and home folders in a computer. */
-export interface WorkFolders {
+interface WorkFolders {
 	readonly chatIds: readonly string[];
 	readonly botIds: readonly string[];
 }
@@ -72,7 +72,7 @@ export function prepareDiskClearing(
  * chats, last because anything new reopens them. Chats go oldest
  * last turn first. A chat with an active turn is never cleared.
  */
-export function clearingOrder(
+function clearingOrder(
 	workspaceId: string,
 	folders: WorkFolders,
 ): Effect.Effect<readonly Clearable[], never, Database> {

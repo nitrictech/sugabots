@@ -8,7 +8,7 @@ import {
 	useSearch,
 } from "@tanstack/react-router";
 import { useBotWithHandle } from "@/lib/bots.ts";
-import { placeBot, prefetchChat, useAnyChatLocation, useBotChatPlace } from "@/lib/chats.ts";
+import { prefetchChat, useAnyChatLocation, useBotChatPlace } from "@/lib/chats.ts";
 import { botAutomationsLink, botConnectorsLink, botSettingsLink, chatLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { FilesPage } from "@/screens/Files.tsx";
@@ -222,24 +222,32 @@ export const botFileRoute = createRoute({
 	},
 });
 
-/** A chat by its id alone, as a notification names it, which goes on to its bot's address. */
+/**
+ * A chat by its id alone, as a notification or a brief names it, which goes on
+ * to its address: its project's, or its bot's, keeping what the address opens
+ * with it.
+ */
 export const chatByIdRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/chats/$chat",
 	params: { parse: ({ chat }) => ({ chat: decodeRouteId(chat) }) },
 	component: () => {
 		const { chat } = chatByIdRoute.useParams();
-		const search = useSearch({ strict: false });
+		const search = useSearch({ strict: false }) as ChatSearch;
 		const { found, isPending, error } = useAnyChatLocation(chat);
 		if (isPending) return <Panes>{null}</Panes>;
-		const bot = found && placeBot(found);
-		if (!bot) {
+		if (!found) {
 			return (
 				<Panes>
 					<EmptyState title={error ? "Could not load this chat" : "Chat not found"} />
 				</Panes>
 			);
 		}
-		return <Navigate {...chatLink({ bot, chatId: chat })} search={search as ChatSearch} replace />;
+		if ("project" in found) {
+			return (
+				<Navigate {...chatLink({ project: found.project, chatId: chat })} search={search} replace />
+			);
+		}
+		return <Navigate {...chatLink({ bot: found.bot, chatId: chat })} search={search} replace />;
 	},
 });

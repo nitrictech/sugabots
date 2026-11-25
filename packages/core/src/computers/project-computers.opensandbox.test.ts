@@ -9,14 +9,12 @@ import { computer, member, membership, workspace } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import { scheduledWorkOperations } from "../operations/scheduled-work.ts";
-import { Egress } from "../providers/network/egress.ts";
-import { unimplemented } from "../testing.ts";
 import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { ComputerProviderStore } from "./computer-provider-store.ts";
 import { ComputerSignIn } from "./computer-sign-in.ts";
 import { Computers } from "./computers.ts";
 import { ProjectComputers } from "./project-computers.ts";
-import { recordingIds, removeWorkVolumes } from "./testing.ts";
+import { localComputerEgress, recordingIds, removeWorkVolumes } from "./testing.ts";
 
 /**
  * What a project's computer needs of a real OpenSandbox server: containers
@@ -97,14 +95,14 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 				Effect.provide([
 					ComputerSignIn.none,
 					// Docker Hub is asked what the images' tags name, as in production.
-					unimplemented(Egress.Service, { providers: { for: () => fetch } }),
+					localComputerEgress,
 					recordingIds(workNamesMade),
 				]),
 			),
 		);
 		direct = await Effect.runPromise(
 			Effect.map(Computers.Service, (computers) => computers.forAccess(access)).pipe(
-				Effect.provide(Computers.layer.pipe(Layer.provide(Ids.layer))),
+				Effect.provide(Computers.layer.pipe(Layer.provide([Ids.layer, localComputerEgress]))),
 			),
 		);
 	});

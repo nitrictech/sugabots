@@ -131,7 +131,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 		egressFetch = fetch,
 		signIn,
 	}: ConnectorsOptions) => {
-		const egress = Layer.succeed(Egress.Service, {
+		const egress = unimplemented(Egress.Service, {
 			providers: { for: () => egressFetch },
 			validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork })),
 			oauth: egressFetch,
@@ -186,6 +186,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 		callback: { code?: string; error?: string; errorDescription?: string },
 		signIn?: ConnectorsOptions["signIn"],
 		wrongSessionConnectorId?: string,
+		options: Omit<ConnectorsOptions, "signIn"> = {},
 	) =>
 		managing(
 			(service, { canManage }) =>
@@ -208,7 +209,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 						}),
 					);
 				}),
-			{ signIn },
+			{ ...options, signIn },
 		);
 
 	beforeAll(async () => {
@@ -302,19 +303,26 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 		expect(await listed()).toEqual([]);
 	});
 
-	it("records what the protocol says of a server it cannot reach, keeping the network's words out", async () => {
+	it("records on a connected connector what the protocol says once its server can't be reached, keeping the network's words out", async () => {
 		const networkDetail = "connect ECONNREFUSED 10.9.8.7:1234";
 		const refusing: typeof fetch = async () => {
 			throw new TypeError("fetch failed", { cause: new Error(networkDetail) });
 		};
+		const server = { url: `${serverUrl}/mcp`, headers: { "x-fixture-key": "open-sesame" } };
 		const made = await managing((service, { canManage }) =>
-			service.create(canManage, { name: "Gone", url: "http://127.0.0.1:9/mcp" }),
+			service.create(canManage, {
+				name: "Wiki",
+				url: server.url,
+				secretHeader: "x-fixture-key",
+				secret: "open-sesame",
+			}),
 		);
-		const said = await listServerTools({ url: "http://127.0.0.1:9/mcp", headers: {} }, refusing);
-		if (said.ok) throw new Error("The server was reached");
+		const said = await listServerTools(server, refusing);
+		if (said.ok) throw new Error("The refusing transport reached the server");
 
 		const tested = await testing(made.id, { egressFetch: refusing });
 
+		expect(made).toMatchObject({ status: "connected", lastTestError: null });
 		expect(tested).toMatchObject({ reachable: false, error: said.reason });
 		expect(JSON.stringify(tested)).not.toContain(networkDetail);
 		expect(await shown(made.id)).toMatchObject({ status: "error", lastTestError: said.reason });
@@ -424,6 +432,43 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 				tools: [{ name: "lookup" }],
 			});
 			expect(oauthServer.tokenRequests.at(-1)?.get("code")).toBe("the-code");
+		});
+
+		it("exchanges the code under the connector's claim, so nothing saves over the sign-in meanwhile", async () => {
+			const started = await managing(
+				(service, { canManage }) =>
+					service.connectBuiltIn(canManage, { name: "Notes", url: oauthServer.serverUrl }),
+				{ signIn: "real" },
+			);
+			const state = new URL(started.authorizationUrl).searchParams.get("state");
+			if (!state) throw new Error("The authorization URL carried no state");
+			const exchanging = Promise.withResolvers<void>();
+			const answered = Promise.withResolvers<void>();
+			const egressFetch: typeof fetch = async (input, init) => {
+				if (new Request(input, init).url === `${oauthServer.origin}/token`) {
+					exchanging.resolve();
+					await answered.promise;
+				}
+				return fetch(input, init);
+			};
+
+			const finished = finishing(state, { code: "the-code" }, "real", undefined, { egressFetch });
+			await exchanging.promise;
+			const meanwhile = await connectors.claimOauthExchange(
+				workspaceId,
+				started.connectorId,
+				oauthServer.serverUrl,
+			);
+			if (meanwhile !== undefined && meanwhile !== "busy") {
+				await connectors.releaseOauthExchange(workspaceId, started.connectorId, meanwhile);
+			}
+			answered.resolve();
+
+			expect(meanwhile).toBe("busy");
+			expect(await finished).toEqual({ kind: "done", at: { workspaceId, projectId } });
+			expect(await shown(started.connectorId, { signIn: "real" })).toMatchObject({
+				signedIn: true,
+			});
 		});
 
 		it("does not finish for anybody but the member who started it", async () => {

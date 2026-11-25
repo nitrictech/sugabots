@@ -5,8 +5,9 @@ import {
 	type EventType,
 	type StreamEvent,
 } from "@sugabots/contracts";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "./bus.ts";
+import type { EventRelay } from "./relay.ts";
 import { inMemoryEventStore } from "./testing.ts";
 
 /**
@@ -322,5 +323,108 @@ describe("closing the bus", () => {
 		await events.close();
 
 		expect(await parked).toEqual({ done: true, value: undefined });
+	});
+});
+
+describe("listening to other processes", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	/**
+	 * A relay whose first `failures` starts fail, as Postgres refusing
+	 * connections while it restarts does, and which then hands over what
+	 * other processes broadcast through `broadcastFromElsewhere`.
+	 */
+	function relayFailingFirst(failures: number) {
+		let receive: Parameters<EventRelay["listen"]>[0] | undefined;
+		const starts = { tried: 0, stopped: 0 };
+		const relay: EventRelay = {
+			broadcast: async () => {},
+			async listen(onDelivery) {
+				starts.tried++;
+				if (starts.tried <= failures) throw new Error("connection refused");
+				receive = onDelivery;
+				return async () => {
+					starts.stopped++;
+				};
+			},
+		};
+		const broadcastFromElsewhere = (stream: EventStream, delivery: EventBus.Delivery) =>
+			receive?.(stream, delivery);
+		return { relay, starts, broadcastFromElsewhere };
+	}
+
+	it("keeps trying to start, waiting longer each time, and delivers once it has", async () => {
+		vi.useFakeTimers();
+		const { relay, starts, broadcastFromElsewhere } = relayFailingFirst(2);
+		const logged: string[] = [];
+		const events = EventBus.inProcess({
+			store: inMemoryEventStore(),
+			relay,
+			log: (message) => logged.push(message),
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		expect(starts.tried).toBe(1);
+
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(starts.tried).toBe(2);
+		await vi.advanceTimersByTimeAsync(1999);
+		expect(starts.tried).toBe(2);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(starts.tried).toBe(3);
+
+		const subscription = events.subscribe(STREAM)[Symbol.asyncIterator]();
+		const next = subscription.next();
+		broadcastFromElsewhere(STREAM, { seq: 7, event: rawEvent("message.created", { id: "m1" }) });
+
+		expect((await next).value).toEqual({
+			seq: 7,
+			event: rawEvent("message.created", { id: "m1" }),
+		});
+		expect(logged).toEqual([
+			"Listening for other processes' events failed; live updates are local only until it starts. Trying again in 1 s",
+			"Listening for other processes' events failed; live updates are local only until it starts. Trying again in 2 s",
+		]);
+		await events.close();
+		expect(starts.stopped).toBe(1);
+	});
+
+	it("closes without waiting to retry a start that fails after it was asked to close", async () => {
+		vi.useFakeTimers();
+		const { promise: refused, reject: refuse } = Promise.withResolvers<never>();
+		let tried = 0;
+		const relay: EventRelay = {
+			broadcast: async () => {},
+			listen: () => {
+				tried++;
+				return refused;
+			},
+		};
+		const events = EventBus.inProcess({ store: inMemoryEventStore(), relay, log: () => {} });
+		await vi.advanceTimersByTimeAsync(0);
+		let closed = false;
+		const closing = events.close().then(() => {
+			closed = true;
+		});
+
+		refuse(new Error("connection refused"));
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(closed).toBe(true);
+		expect(tried).toBe(1);
+		await closing;
+	});
+
+	it("stops trying once the bus closes", async () => {
+		vi.useFakeTimers();
+		const { relay, starts } = relayFailingFirst(Number.POSITIVE_INFINITY);
+		const events = EventBus.inProcess({ store: inMemoryEventStore(), relay, log: () => {} });
+		await vi.advanceTimersByTimeAsync(0);
+
+		await events.close();
+		await vi.advanceTimersByTimeAsync(120_000);
+
+		expect(starts.tried).toBe(1);
 	});
 });

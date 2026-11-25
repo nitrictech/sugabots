@@ -24,7 +24,7 @@ import {
 } from "@sugabots/contracts/errors/proofs";
 import { and, desc, eq, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { Context, Effect, Layer, Stream } from "effect";
+import { Context, DateTime, Duration, Effect, Layer, Stream } from "effect";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import {
 	commitWrittenFile,
@@ -41,7 +41,9 @@ import {
 	writtenRow,
 } from "../database/database.ts";
 import {
+	automationRun,
 	type BotRow,
+	blobDeletion,
 	bot,
 	type FileRow,
 	type FileVersionRow,
@@ -201,7 +203,7 @@ export const make = Effect.gen(function* () {
 
 	return Service.of({
 		listInProject: (reach) =>
-			operation("listInProject", listedWhere(eq(madeInChat.projectId, reach.project.value))),
+			operation("listInProject", listedWhere(eq(listingChat.projectId, reach.project.value))),
 
 		get: (reach) => operation("get", atCurrentVersion(reach)),
 
@@ -247,7 +249,10 @@ export const make = Effect.gen(function* () {
 			),
 
 		listWritten: (reach, _approved) =>
-			operation("listWritten", listedWrittenFilesWhere(eq(madeInChat.projectId, reach.project.id))),
+			operation(
+				"listWritten",
+				listedWrittenFilesWhere(eq(listingChat.projectId, reach.project.id)),
+			),
 
 		readWritten: (reach, _approved) => operation("readWritten", atCurrentVersion(reach)),
 
@@ -438,6 +443,19 @@ const withContent = <E, R>(
 		const versionId = yield* ids.next;
 		const key = versionKey(fileId, versionId);
 		const contentType = CONTENT_TYPES[kind];
+		// Queued for deletion before the bytes are stored, once the write has had
+		// time to record them, which deletes the queue row: bytes stored by a
+		// process that stopped before recording them are deleted all the same.
+		const now = yield* DateTime.now;
+		const staged = yield* query((db) =>
+			db
+				.insert(blobDeletion)
+				.values({
+					prefix: key,
+					dueAt: DateTime.toDateUtc(DateTime.addDuration(now, STAGED_CONTENT_GRACE)),
+				})
+				.returning({ id: blobDeletion.id }),
+		).pipe(Effect.flatMap(writtenRow("blob_deletion")));
 		const discard = blobs.delete(key).pipe(Effect.ignore);
 		return yield* Effect.uninterruptibleMask((restore) =>
 			Effect.gen(function* () {
@@ -450,9 +468,12 @@ const withContent = <E, R>(
 					Effect.orDie,
 					Effect.onError(() => discard),
 				);
-				const { receipt, usedContent } = yield* record({ versionId, contentType, size }).pipe(
-					Effect.onError(() => discard),
-				);
+				const { receipt, usedContent } = yield* record({
+					versionId,
+					contentType,
+					size,
+					stagedDeletionId: staged.id,
+				}).pipe(Effect.onError(() => discard));
 				if (!usedContent) yield* discard;
 				return receipt;
 			}),
@@ -465,7 +486,12 @@ interface StoredContent {
 	contentType: string;
 	/** In bytes. */
 	size: number;
+	/** The `blob_deletion` row that deletes the content unless a version records it. */
+	stagedDeletionId: string;
 }
+
+/** How long a write has to record the content it stored before the content is deleted. */
+const STAGED_CONTENT_GRACE = Duration.hours(1);
 
 const CONTENT_TYPES: Record<WrittenFileKind, string> = {
 	markdown: "text/markdown; charset=utf-8",
@@ -473,7 +499,7 @@ const CONTENT_TYPES: Record<WrittenFileKind, string> = {
 };
 
 /** Under the file's folder, `files/<fileId>`, which the `file_blob_deletion` trigger queues for deletion with the file. */
-function versionKey(fileId: string, versionId: string): BlobStore.Key {
+export function versionKey(fileId: string, versionId: string): BlobStore.Key {
 	return BlobStore.key("files", fileId, "versions", versionId);
 }
 
@@ -497,6 +523,7 @@ const isWritten = inArray(file.kind, [...WRITTEN_FILE_KINDS]);
 interface FoundFile {
 	file: WrittenFileRow;
 	creator: FileAuthor;
+	outsideRun?: WrittenFile["outsideRun"];
 }
 
 const authorOf = (row: Pick<BotRow, "id" | "name"> | null): FileAuthor =>
@@ -516,7 +543,10 @@ const writtenFileWhere = (
 				.limit(1);
 			return options.lock ? select.for("update", { of: file }) : select;
 		});
-		return row ? { file: asWritten(row.file), creator: authorOf(row.creator) } : undefined;
+		if (!row) return undefined;
+		const outsideRun =
+			row.triggerKind === "github" || row.triggerKind === "webhook" ? row.triggerKind : undefined;
+		return { file: asWritten(row.file), creator: authorOf(row.creator), outsideRun };
 	});
 
 const requireWrittenFile = (fileId: string, chatId: string, lock = false) =>
@@ -530,19 +560,24 @@ const requireWrittenFile = (fileId: string, chatId: string, lock = false) =>
 /** Files with the chat each was made in and the bot that made it, for a scope to narrow. */
 const writtenFilesWithCreator = (db: Executor) =>
 	db
-		.select({ file, creator: { id: bot.id, name: bot.name } })
+		.select({
+			file,
+			creator: { id: bot.id, name: bot.name },
+			triggerKind: automationRun.triggerKind,
+		})
 		.from(file)
 		.innerJoin(placedChat, eq(placedChat.id, file.chatId))
-		.innerJoin(madeInChat, chatOfMadeIn)
+		.innerJoin(listingChat, chatListingIt)
+		.leftJoin(automationRun, eq(automationRun.chatId, file.chatId))
 		.leftJoin(bot, eq(bot.id, file.createdByBotId));
 
 /**
- * The chat a file was made in, joined beside `placedChat`,
- * the chat it was made in: that chat itself, or for an automation's run, the
- * automation's feed, which lists it.
+ * The chat that lists a file, joined beside `placedChat`, the chat it was
+ * made in: that chat itself, or for an automation's run, the automation's
+ * feed.
  */
-const madeInChat = alias(placedChat, "made_in_chat");
-const chatOfMadeIn = eq(madeInChat.id, sql`coalesce(${placedChat.rootChatId}, ${placedChat.id})`);
+const listingChat = alias(placedChat, "listing_chat");
+const chatListingIt = eq(listingChat.id, sql`coalesce(${placedChat.rootChatId}, ${placedChat.id})`);
 
 const listedWrittenFilesWhere = (scope: SQL | undefined) =>
 	Effect.map(
@@ -560,7 +595,7 @@ const listedWrittenFilesWhere = (scope: SQL | undefined) =>
 const isListedMessageFile = and(
 	inArray(file.kind, ["attachment", "bot_attachment"]),
 	isNotNull(file.messageId),
-	eq(file.chatId, madeInChat.id),
+	eq(file.chatId, listingChat.id),
 );
 
 /** The files members see listed where `scope` holds: those bots wrote, and those on messages, newest change first. */
@@ -575,7 +610,7 @@ const listedWhere = (scope: SQL | undefined) =>
 				})
 				.from(file)
 				.innerJoin(placedChat, eq(placedChat.id, file.chatId))
-				.innerJoin(madeInChat, chatOfMadeIn)
+				.innerJoin(listingChat, chatListingIt)
 				.leftJoin(message, eq(message.id, file.messageId))
 				// The bot that wrote it, or that attached it to its reply.
 				.leftJoin(bot, eq(bot.id, sql`coalesce(${file.createdByBotId}, ${message.authorBotId})`))
@@ -656,22 +691,26 @@ const shownOrHidden = <E, R>(shown: Effect.Effect<WrittenFile | undefined, E, R>
 		),
 	);
 
+/** Records the stored content as the file's version `number`, so its staged deletion goes. */
 const insertVersion = (
 	of: WrittenFileRow,
 	number: number,
-	{ versionId, contentType, size }: StoredContent,
+	{ versionId, contentType, size, stagedDeletionId }: StoredContent,
 	botId: string,
 ) =>
-	query((db) =>
-		db.insert(fileVersion).values({
-			id: versionId,
-			fileId: of.id,
-			fileKind: of.kind,
-			number,
-			contentType,
-			size,
-			authorBotId: botId,
-		}),
+	Effect.andThen(
+		query((db) =>
+			db.insert(fileVersion).values({
+				id: versionId,
+				fileId: of.id,
+				fileKind: of.kind,
+				number,
+				contentType,
+				size,
+				authorBotId: botId,
+			}),
+		),
+		query((db) => db.delete(blobDeletion).where(eq(blobDeletion.id, stagedDeletionId))),
 	);
 
 const toListedWrittenFile = (row: WrittenFileRow, creator: FileAuthor): ListedWrittenFile => ({
@@ -698,6 +737,7 @@ const toWrittenFile = (
 	content: string,
 ): WrittenFile => ({
 	...toListedWrittenFile(found.file, found.creator),
+	...(found.outsideRun && { outsideRun: found.outsideRun }),
 	content,
 	shownVersion: toListedFileVersion(version, author),
 });

@@ -10,13 +10,14 @@ import {
 	type Presence,
 	streamEvent,
 } from "@sugabots/contracts";
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
-import { Context, DateTime, Effect, Layer } from "effect";
+import type { UserText } from "@sugabots/errors";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
+import { Context, DateTime, Duration, Effect, Layer, Schedule } from "effect";
 import { reachesChatFor } from "../authorization/access.ts";
 import type { ChatEvent } from "../chats/events.ts";
 import {
 	afterCommit,
-	type Database,
+	Database,
 	type Executor,
 	query,
 	serviceOperations,
@@ -30,6 +31,7 @@ import {
 	notificationDelivery,
 	notificationOverride,
 	notificationSettings,
+	pendingNotification,
 	placedChat,
 	workspace,
 } from "../database/schema.ts";
@@ -47,6 +49,7 @@ import {
 	forFailedReply,
 	forMessage,
 	forReply,
+	type WrittenMessage,
 } from "./recipients.ts";
 
 /**
@@ -88,8 +91,13 @@ export interface Interface {
 	readonly sendTest: <P>(isMember: IsMember<P>) => Effect.Effect<void>;
 	/** Tells the member's other tabs what one of theirs is looking at. */
 	readonly reportPresence: <P>(isMember: IsMember<P>, presence: Presence) => Effect.Effect<void>;
-	/** Notifies members of finished messages and of approvals waiting on them, once they commit. */
+	/**
+	 * Notifies members of finished messages and of approvals waiting on them:
+	 * records what to send with the change, and sends it once that commits.
+	 */
 	readonly handler: DomainEvents.Handler<ChatEvent>;
+	/** Sends what a process that stopped, or a send that failed, left unsent, while it is still news. */
+	readonly sendLeftBehind: Effect.Effect<void>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Notifications") {
@@ -132,8 +140,39 @@ export const make = Effect.gen(function* () {
 					.onConflictDoNothing()
 					.returning({ id: notificationDelivery.deliveryId }),
 			);
-			if (recorded) yield* afterCommit(deliver([addressed]));
+			if (!recorded) return;
+			const context = yield* Effect.context<Database>();
+			yield* afterCommit(
+				sentAndRecorded(chatId, deliveryId, addressed).pipe(
+					Effect.asVoid,
+					Effect.provideContext(context),
+				),
+			);
 		});
+
+	/** Sends `addressed`, recording it sent; one that isn't sent now is sent by the sweep. */
+	const sentAndRecorded = (chatId: string, deliveryId: string, addressed: Addressed) =>
+		deliver([addressed]).pipe(
+			Effect.andThen(
+				Effect.flatMap(DateTime.nowAsDate, (sentAt) =>
+					query((db) =>
+						db
+							.update(notificationDelivery)
+							.set({ sentAt })
+							.where(
+								and(
+									eq(notificationDelivery.chatId, chatId),
+									eq(notificationDelivery.deliveryId, deliveryId),
+									eq(notificationDelivery.memberId, addressed.memberId),
+								),
+							),
+					),
+				),
+			),
+			Effect.catchCause((cause) =>
+				Effect.logWarning("Sending a notification failed; the sweep sends it again", cause),
+			),
+		);
 
 	const deliverAbout = (chatId: string, deliveryId: string, addressed: readonly Addressed[]) =>
 		Effect.forEach(
@@ -150,33 +189,88 @@ export const make = Effect.gen(function* () {
 		);
 
 	const deliverApproval = (
-		event: Extract<ChatEvent, { _tag: "TurnSuspended" }>,
+		waiting: Extract<NotificationCause, { kind: "approval" }>,
 		deliveryId: string,
 		now: Date,
 	) =>
 		transaction(
 			Effect.gen(function* () {
-				yield* shareWorkspaceLock(event.workspaceId);
-				const addressed = yield* query((db) => forApprovals(db, event, now));
+				yield* shareWorkspaceLock(waiting.workspaceId);
+				const addressed = yield* query((db) => forApprovals(db, waiting, now));
 				for (const recipient of addressed)
-					yield* recordDelivery(event.chatId, deliveryId, recipient);
+					yield* recordDelivery(waiting.chatId, deliveryId, recipient);
 			}),
 		);
 
-	const notifyOf = (events: ReadonlyArray<NotifyingEvent>) =>
+	/** Sends a pending notification's notifications, then forgets it. */
+	const send = (pending: PendingNotification) =>
 		Effect.gen(function* () {
 			const now = yield* DateTime.nowAsDate;
-			for (const event of events) {
-				const deliveryId = deliveryIdOf(event);
-				if (deliveryId === undefined) continue;
-				if (event._tag === "TurnSuspended") {
-					yield* deliverApproval(event, deliveryId, now);
-					continue;
-				}
-				const addressed = yield* query((db) => notificationsFor(db, event, now));
-				yield* deliverAbout(event.chatId, deliveryId, addressed);
+			const { cause, chatId, deliveryId } = pending;
+			if (cause.kind === "approval") {
+				yield* deliverApproval(cause, deliveryId, now);
+			} else {
+				const addressed = yield* query((db) => notificationsFor(db, cause, now));
+				yield* deliverAbout(chatId, deliveryId, addressed);
 			}
+			yield* query((db) =>
+				db.delete(pendingNotification).where(eq(pendingNotification.id, pending.id)),
+			);
 		});
+
+	/**
+	 * What a process that stopped, or a send that failed, left: pending
+	 * notifications that have come due, and notifications recorded but never
+	 * sent, while they are still news. Older ones are dropped.
+	 */
+	const sendLeftBehind = Effect.gen(function* () {
+		const now = yield* DateTime.now;
+		const stillNews = DateTime.toDateUtc(DateTime.subtractDuration(now, NEWS_FOR));
+		yield* query((db) =>
+			db.delete(pendingNotification).where(lt(pendingNotification.createdAt, stillNews)),
+		);
+		// Claimed by moving each on, so another process's sweep skips it.
+		const due = yield* query((db) =>
+			db
+				.update(pendingNotification)
+				.set({ dueAt: DateTime.toDateUtc(DateTime.addDuration(now, SEND_GRACE)) })
+				.where(
+					inArray(
+						pendingNotification.id,
+						db
+							.select({ id: pendingNotification.id })
+							.from(pendingNotification)
+							.where(lte(pendingNotification.dueAt, DateTime.toDateUtc(now)))
+							.limit(SWEEP_BATCH)
+							.for("update", { skipLocked: true }),
+					),
+				)
+				.returning(),
+		);
+		for (const pending of due) {
+			yield* send(pending).pipe(
+				Effect.catchCause((cause) =>
+					Effect.logWarning("Sending a pending notification failed; trying again later", cause),
+				),
+			);
+		}
+		const sendAgainBefore = DateTime.toDateUtc(DateTime.subtractDuration(now, SEND_GRACE));
+		// Claimed by marking them sent first: one sent twice shows once, by its tag.
+		const unsent = yield* query((db) =>
+			db
+				.update(notificationDelivery)
+				.set({ sentAt: DateTime.toDateUtc(now) })
+				.where(
+					and(
+						isNull(notificationDelivery.sentAt),
+						lt(notificationDelivery.createdAt, sendAgainBefore),
+						gt(notificationDelivery.createdAt, stillNews),
+					),
+				)
+				.returning(),
+		);
+		yield* deliver(unsent.map(({ memberId, notification }) => ({ memberId, notification })));
+	});
 
 	const settingsOf = (memberId: string) =>
 		Effect.gen(function* () {
@@ -321,16 +415,152 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		handler: (events) => {
-			const notifying = events.filter(isNotifying);
-			return notifying.length === 0
-				? Effect.void
-				: afterCommit(runInBackground(notifyOf(notifying)));
-		},
+		handler: (events) =>
+			Effect.gen(function* () {
+				const now = yield* DateTime.now;
+				const dueAt = DateTime.toDateUtc(DateTime.addDuration(now, SEND_GRACE));
+				const causes = events.filter(isNotifying).flatMap((event) => {
+					const deliveryId = deliveryIdOf(event);
+					return deliveryId === undefined
+						? []
+						: [{ chatId: event.chatId, deliveryId, cause: causeOf(event), dueAt }];
+				});
+				if (causes.length === 0) return;
+				// Written with the change, so its notifications outlive this process.
+				const pending = yield* query((db) =>
+					db.insert(pendingNotification).values(causes).returning(),
+				).pipe(Effect.orDie);
+				yield* afterCommit(runInBackground(Effect.forEach(pending, send, { discard: true })));
+			}),
+
+		sendLeftBehind: operation("sendLeftBehind", sendLeftBehind),
 	});
 });
 
 export const layer = processLayer(Layer.effect(Service, make));
+
+/** How long the process that wrote a notification has to send it before the sweep does. */
+const SEND_GRACE = Duration.seconds(30);
+
+/** How long a notification is still worth sending; past it, one left unsent is dropped. */
+const NEWS_FOR = Duration.minutes(10);
+
+/** How often the sweep looks for notifications left unsent. */
+const SWEEP_INTERVAL = Duration.seconds(30);
+
+/** How many pending notifications one sweep sends at most. */
+const SWEEP_BATCH = 100;
+
+/**
+ * Sends the notifications a process that stopped left unsent, every
+ * {@link SWEEP_INTERVAL} for as long as the layer's scope is open.
+ */
+export const sweepLayer = Layer.effectDiscard(
+	Effect.gen(function* () {
+		const notifications = yield* Service;
+		const database = yield* Effect.service(Database);
+		yield* Effect.forkScoped(
+			notifications.sendLeftBehind.pipe(
+				Effect.provideService(Database, database),
+				Effect.catchCause((cause) =>
+					Effect.logError("Sending notifications left behind failed", cause),
+				),
+				Effect.repeat(Schedule.spaced(SWEEP_INTERVAL)),
+			),
+		);
+	}),
+).pipe(processLayer);
+
+/** What a notifying event says about whom to notify, kept as JSON until its notifications are sent. */
+export type NotificationCause =
+	| { readonly kind: "message"; readonly written: WrittenMessage }
+	| {
+			readonly kind: "reply";
+			readonly chatId: string;
+			readonly turnId: string;
+			readonly messageId: string;
+			readonly content: string;
+	  }
+	| {
+			readonly kind: "approval";
+			readonly workspaceId: string;
+			readonly chatId: string;
+			readonly turnId: string;
+			readonly approvalCallIds: readonly string[];
+			readonly approvalIds?: readonly string[];
+	  }
+	| {
+			readonly kind: "failure";
+			readonly chatId: string;
+			readonly turnId: string;
+			readonly messageId: string;
+			readonly userMessage: UserText;
+	  }
+	| { readonly kind: "run"; readonly chatId: string; readonly rootChatId: string };
+
+type PendingNotification = typeof pendingNotification.$inferSelect;
+
+/** What `event` says about whom to notify. */
+function causeOf(event: NotifyingEvent): NotificationCause {
+	switch (event._tag) {
+		case "MessagePosted": {
+			const { author } = event.message;
+			return {
+				kind: "message",
+				written: {
+					chatId: event.chatId,
+					messageId: event.message.id,
+					author:
+						author.kind === "member"
+							? { kind: "member", memberId: author.id }
+							: author.kind === "bot"
+								? { kind: "bot", botId: author.id }
+								: { kind: "automation" },
+					authorName: messageAuthorName(author),
+					content: event.message.content,
+					fileNames: event.message.parts.flatMap((part) =>
+						part.type === "file" ? [part.name] : [],
+					),
+					fileTitles: event.message.parts.flatMap((part) =>
+						part.type === "written_file" ? [part.title] : [],
+					),
+					repliesTo:
+						event.message.replyTo?.author.kind === "member"
+							? event.message.replyTo.author.id
+							: null,
+					resultOf: event.message.automationResultOf ?? null,
+				},
+			};
+		}
+		case "TurnCompleted":
+			return {
+				kind: "reply",
+				chatId: event.chatId,
+				turnId: event.turnId,
+				messageId: event.messageId,
+				content: event.content,
+			};
+		case "TurnSuspended":
+			return {
+				kind: "approval",
+				workspaceId: event.workspaceId,
+				chatId: event.chatId,
+				turnId: event.turnId,
+				approvalCallIds: event.approvalCallIds,
+				...(event.approvalIds ? { approvalIds: event.approvalIds } : {}),
+			};
+		case "TurnFailed":
+			return {
+				kind: "failure",
+				chatId: event.chatId,
+				turnId: event.turnId,
+				messageId: event.messageId,
+				userMessage: event.userMessage,
+			};
+		case "RunSettled":
+			return { kind: "run", chatId: event.chatId, rootChatId: event.rootChatId };
+	}
+}
 
 type NotifyingEvent = Extract<
 	ChatEvent,
@@ -375,46 +605,18 @@ function isNotifying(event: ChatEvent): event is NotifyingEvent {
 
 const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 	db: Executor,
-	event: Exclude<NotifyingEvent, { _tag: "TurnSuspended" }>,
+	cause: Exclude<NotificationCause, { kind: "approval" }>,
 	now: Date,
 ) {
-	switch (event._tag) {
-		case "MessagePosted": {
-			const { author } = event.message;
-			return yield* forMessage(
-				db,
-				{
-					chatId: event.chatId,
-					messageId: event.message.id,
-					author:
-						author.kind === "member"
-							? { kind: "member", memberId: author.id }
-							: author.kind === "bot"
-								? { kind: "bot", botId: author.id }
-								: { kind: "automation" },
-					authorName: messageAuthorName(author),
-					content: event.message.content,
-					fileNames: event.message.parts.flatMap((part) =>
-						part.type === "file" ? [part.name] : [],
-					),
-					fileTitles: event.message.parts.flatMap((part) =>
-						part.type === "written_file" ? [part.title] : [],
-					),
-					repliesTo:
-						event.message.replyTo?.author.kind === "member"
-							? event.message.replyTo.author.id
-							: null,
-					resultOf: event.message.automationResultOf ?? null,
-				},
-				now,
-			);
-		}
-		case "TurnCompleted":
-			return yield* forReply(db, event, now);
-		case "TurnFailed":
-			return yield* forFailedReply(db, event, now);
-		case "RunSettled":
-			return yield* forAutomationRun(db, event, now);
+	switch (cause.kind) {
+		case "message":
+			return yield* forMessage(db, cause.written, now);
+		case "reply":
+			return yield* forReply(db, cause, now);
+		case "failure":
+			return yield* forFailedReply(db, cause, now);
+		case "run":
+			return yield* forAutomationRun(db, cause, now);
 	}
 });
 

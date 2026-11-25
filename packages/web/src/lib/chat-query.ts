@@ -17,14 +17,24 @@ import { mergeChatMessages } from "@/lib/chat-events.ts";
 import { refreshEveryWorkspaceApprovals } from "@/lib/chats.ts";
 
 /**
- * A message fetched while it streams is behind the deltas already applied: the
- * row is flushed about once a second. Taking the fetched text would make the
- * bubble jump back, so the streamed text stays when it is the longer one.
+ * What to show of a message fetched while the chat's events keep it current,
+ * by which execution of its turn each copy is as of.
+ *
+ * A newer execution's copy wins, ended or written: a turn resumed elsewhere
+ * writes its step again over an older one's text, and one that runs again
+ * reopens a reply that had ended. Within one execution, an ended copy wins
+ * over one still written. Two copies both still written by the same one are
+ * merged: the fetched row is flushed about once a second, behind the deltas
+ * already applied, so the streamed text stays when it is the longer one.
  */
 function keepStreamedText(current: ChatDetails): (fetched: Message) => Message {
 	return (fetched) => {
 		const streamed = current.messages.find((message) => message.id === fetched.id);
-		if (!streamed || fetched.status !== "writing") return fetched;
+		if (!streamed) return fetched;
+		const newer = executionOf(streamed) - executionOf(fetched);
+		if (newer < 0) return fetched;
+		if (newer > 0) return streamed;
+		if (fetched.status !== "writing") return fetched;
 		if (streamed.status !== "writing") return streamed;
 		const textAhead =
 			streamed.content.length > fetched.content.length &&
@@ -42,6 +52,11 @@ function keepStreamedText(current: ChatDetails): (fetched: Message) => Message {
 				: {}),
 		};
 	};
+}
+
+/** Which execution a reply is as of; one with none, as before its first step, comes before any. */
+function executionOf(message: Message): number {
+	return message.execution ?? -1;
 }
 
 /**

@@ -43,6 +43,33 @@ import type { MemberSession } from "../principal.ts";
 import { authenticators, principals } from "../proofs/world.test-support.ts";
 import { Streams } from "./streams.ts";
 
+async function observeWatcherSleeps(clock: Clock.Clock) {
+	const sleeps = await Effect.runPromise(Queue.unbounded<Duration.Duration>());
+	return {
+		clock: {
+			...clock,
+			sleep: (duration) =>
+				Effect.forkChild(clock.sleep(duration), { startImmediately: true }).pipe(
+					Effect.tap(() => Queue.offer(sleeps, duration)),
+					Effect.flatMap(Fiber.join),
+				),
+		} satisfies Clock.Clock,
+		clear: () => Effect.runPromise(Queue.clear(sleeps)),
+		// Session expiry and reach catch-up each schedule a sleep when the watcher starts.
+		waitForInitialSleeps: () =>
+			Effect.runPromise(
+				Queue.take(sleeps).pipe(
+					Effect.tap(() => Queue.take(sleeps)),
+					Effect.timeoutOrElse({
+						duration: "4 seconds",
+						orElse: () =>
+							Effect.die(new Error("Timed out waiting for the stream watcher's first two sleeps")),
+					}),
+				),
+			),
+	};
+}
+
 /**
  * Following streams, the registry's long-running kind of operation, against
  * Postgres: each proves what its member reaches when it starts, sends an event
@@ -80,6 +107,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 	let longRunning: Operations.LongRunningInterface;
 	const clockScope = Scope.makeUnsafe();
 	let clock: TestClock.TestClock;
+	let watcherSleeps: Awaited<ReturnType<typeof observeWatcherSleeps>>;
 	let followOnTestClock: FollowOperation;
 	const catchUp = "1 second";
 	let signedIn: ReturnType<typeof principals>;
@@ -97,11 +125,12 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		}));
 		clock = await Effect.runPromise(Scope.provide(TestClock.make(), clockScope));
 		await Effect.runPromise(clock.setTime(Date.UTC(2000, 0, 1)));
+		watcherSleeps = await observeWatcherSleeps(clock);
 		({ follow: followOnTestClock } = await servedRegistry({
 			chats,
 			bus: Layer.succeed(EventBus.Service, bus),
 			streamsTiming: { catchUp },
-			clock,
+			clock: watcherSleeps.clock,
 		}));
 		signedIn = principals(await authenticators());
 		const outboxOver = (over: EventBus.Interface) =>
@@ -121,17 +150,35 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		await closeDatabase();
 	});
 
-	/** Starts following, closed when the case finishes. */
-	const closingAfterTest =
+	/**
+	 * Starts following, closed when the case finishes, past the `ready` a
+	 * stream that resumes from nowhere starts with.
+	 */
+	const pastReady =
 		(start: FollowOperation): FollowOperation =>
 		async (principal, name, input) => {
 			const started = await start(principal, name, input);
 			onTestFinished(() => started.close());
-			return started;
+			if ("since" in input && input.since !== undefined) return started;
+			const first = await started.next();
+			if (first !== "ended" && (first as Delivery).event.type === "ready") return started;
+			let held: typeof first | undefined = first;
+			const takeHeld = () => {
+				const taken = held;
+				held = undefined;
+				return taken;
+			};
+			return {
+				...started,
+				next: async (within) => takeHeld() ?? started.next(within),
+				quiet: async (within) => takeHeld() ?? started.quiet(within),
+			};
 		};
-	const following: FollowOperation = (...args) => closingAfterTest(follow)(...args);
-	const followingOnTestClock: FollowOperation = (...args) =>
-		closingAfterTest(followOnTestClock)(...args);
+	const following: FollowOperation = (...args) => pastReady(follow)(...args);
+	const followingOnTestClock: FollowOperation = async (...args) => {
+		await watcherSleeps.clear();
+		return pastReady(followOnTestClock)(...args);
+	};
 
 	/** Stores `event` on `stream` and delivers it, as the outbox does once its transaction commits. */
 	const commit = (stream: EventStream, event: StreamEvent & { type: DurableEventType }) =>
@@ -192,6 +239,20 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			world.project,
 			streamEvent("reach.changed", { about: { kind: "project", projectId: world.project } }),
 		);
+
+	it("starts a stream that resumes from nowhere with ready, before what changes after it", async () => {
+		const world = await staffed();
+		const chat = await follow(await signedIn.member(world.ed), "events.followChat", {
+			chatId: world.chat,
+		});
+		onTestFinished(() => chat.close());
+
+		expect(await chat.next()).toEqual({ event: streamEvent("ready") });
+		const changed = streamEvent("chat.changed", { chatId: world.chat });
+		await commit(chatStream(world.chat), changed);
+		const next = await chat.next();
+		expect(next !== "ended" && next.event).toEqual(changed);
+	});
 
 	it("sends a live message delta with its execution and without an event id", async () => {
 		const world = await staffed();
@@ -401,7 +462,9 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			const running = await runOnPostgres(
 				clockOverride ? Effect.provideService(start, Clock.Clock, clockOverride) : start,
 			);
-			return { ...running, principal };
+			// What these cases are about comes after the `ready` the stream starts with.
+			const stream = running.stream.pipe(Stream.filter(({ event }) => event.type !== "ready"));
+			return { ...running, stream, principal };
 		};
 
 		it("keeps ordered reach after an older watcher proof finishes", async () => {
@@ -471,15 +534,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			const scope = Scope.makeUnsafe();
 			onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
 			const sessionClock = await Effect.runPromise(Scope.provide(TestClock.make(), scope));
-			const sleeps = await Effect.runPromise(Queue.unbounded<Duration.Duration>());
-			const observingClock: Clock.Clock = {
-				...sessionClock,
-				sleep: (duration) =>
-					Effect.forkChild(sessionClock.sleep(duration), { startImmediately: true }).pipe(
-						Effect.tap(() => Queue.offer(sleeps, duration)),
-						Effect.flatMap(Fiber.join),
-					),
-			};
+			const sleeps = await observeWatcherSleeps(sessionClock);
 			const running = await followWorkspaceWith(
 				world,
 				Effect.succeed({
@@ -489,14 +544,13 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 					bots: { reached: new Set(), unreached: new Set() },
 				}),
 				interval,
-				observingClock,
+				sleeps.clock,
 			);
 			const stalled = holdTransaction(
 				query((db) => db.execute(sql`lock table session in access exclusive mode`)),
 			);
 			await stalled.held;
-			const checkDelay = await Effect.runPromise(Queue.take(sleeps));
-			await Effect.runPromise(Queue.take(sleeps));
+			const checkDelay = await sleeps.waitForInitialSleeps();
 			await Effect.runPromise(sessionClock.adjust(checkDelay));
 			await stalled.waitForWaiters(1);
 			await Effect.runPromise(sessionClock.adjust(checkDelay));
@@ -628,6 +682,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			await commit(chatStream(world.chat), streamEvent("chat.changed", { chatId: world.chat }));
 			expect(await nextType(stream)).toBe("chat.changed");
 
+			await watcherSleeps.waitForInitialSleeps();
 			await Effect.runPromise(clock.setTime(expiresAt));
 
 			expect(await nextType(stream)).toBe("ended");
@@ -658,6 +713,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			await takeEdOut(world);
 			await commitUnheard(workspaceStream(world.workspace), jChanged(world));
 
+			await watcherSleeps.waitForInitialSleeps();
 			await Effect.runPromise(clock.adjust(Duration.toMillis(catchUp) / 2));
 
 			expect(await nextType(ed)).toBe("ended");
@@ -670,6 +726,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 
 			await onDatabase((db) => db.delete(session).where(eq(session.id, signedOut.session)));
 
+			await watcherSleeps.waitForInitialSleeps();
 			await Effect.runPromise(clock.adjust(Duration.toMillis(catchUp) / 2));
 
 			expect(await nextType(own)).toBe("ended");

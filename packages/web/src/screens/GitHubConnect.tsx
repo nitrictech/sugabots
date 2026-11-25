@@ -74,7 +74,7 @@ export function GitHubConnectStep({
 							value={organization}
 							onChange={(event) => setOrganization(event.target.value)}
 							placeholder="Optional"
-							className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+							className="min-w-0 flex-1 bg-transparent text-sm rounded-sm text-foreground focus-ring placeholder:text-muted-foreground"
 						/>
 					</SettingsControlRow>
 				</SettingsGroup>

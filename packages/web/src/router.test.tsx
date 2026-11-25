@@ -1,6 +1,16 @@
-import { waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { apiAnswers, mount, prefersReducedMotion } from "@/api.test-support.tsx";
+import {
+	apiAnswers,
+	chatDetails,
+	chatWith,
+	mount,
+	prefersReducedMotion,
+	projects,
+	triager,
+} from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 
 vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
@@ -55,5 +65,28 @@ describe("moving between pages on a phone", () => {
 
 		expect(router.state.location.pathname).toBe("/suga/settings/account");
 		expect(started).not.toHaveBeenCalled();
+	});
+});
+
+describe("a chat's address by its id alone", () => {
+	it("goes on to a project's chat, keeping the file it opens", async () => {
+		const project = projects[0];
+		if (!project) throw new Error("The fixtures have no project");
+		const chat = {
+			...chatWith(triager),
+			id: "0199a3a0-0000-7000-8000-0000000c0001",
+			projectId: project.id,
+			title: "Launch plan",
+		};
+		client.api.chats.get.mockReturnValue(Effect.succeed(chatDetails(triager, chat)));
+		const file = "0199a3a0-0000-7000-8000-0000000f0001";
+
+		const { router } = mount(`/suga/chats/${chat.id}?file=${file}`);
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(`/suga/projects/${project.slug}/${chat.id}`),
+		);
+		expect(router.state.location.search).toEqual({ file });
+		expect(screen.queryByText("Chat not found")).toBeNull();
 	});
 });

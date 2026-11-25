@@ -53,6 +53,14 @@ export const modelProvider = pgTable(
 		/** The OAuth tokens of a subscription sign-in, sealed JSON; only a provider that signs in has them. */
 		oauthTokensEncrypted: text("oauth_tokens_encrypted"),
 		/**
+		 * The refresh of its tokens one process is making, and until when the
+		 * others leave it to them: a refresh token is good for one use, and the
+		 * refresh is a call to the sign-in service, which no transaction is held
+		 * across. Null while none is.
+		 */
+		oauthRefreshId: uuid("oauth_refresh_id"),
+		oauthRefreshUntil: timestamp("oauth_refresh_until", { withTimezone: true }),
+		/**
 		 * Who made its subscription sign-in, whose plan it signs in as, so they
 		 * can't leave the workspace, or be removed from it, while it does; null
 		 * while it is signed out.
@@ -302,7 +310,11 @@ export type ToolAccess = Record<string, ConnectorAccess>;
 export type ModelProviderRow = typeof modelProvider.$inferSelect;
 export type ProviderModelRow = typeof providerModel.$inferSelect;
 
-/** GitHub installations pending uninstall, even if the original connector is deleted. */
+/**
+ * GitHub installations pending uninstall, even if the original connector is
+ * deleted. Deleting a connector still installed queues one, by the
+ * `connector_github_uninstall` trigger, whatever deletes it.
+ */
 export const gitHubUninstall = pgTable(
 	"github_uninstall",
 	{

@@ -65,7 +65,20 @@ function connector(
 
 /** One in each state the design draws: allowed, asking, off, failing its test, and not yet signed in. */
 const connectors: TestConnector[] = [
-	connector(1, { name: "Linear", handle: "linear", url: "https://mcp.linear.app/mcp" }),
+	connector(1, {
+		name: "Linear",
+		handle: "linear",
+		url: "https://mcp.linear.app/mcp",
+		auth: "oauth",
+		secretHeader: null,
+		hasSecret: false,
+		signedInAs: {
+			id: "0199a3a0-0000-7000-8000-000000000009",
+			name: "Rowan Alexandria Ellis",
+			email: "rowan@example.com",
+			image: null,
+		},
+	}),
 	{
 		...connector(6, {
 			name: "GitHub",
@@ -179,7 +192,7 @@ export const States = meta.story({
 		await expect(within(github).queryByRole("button")).toBeNull();
 		await expect(
 			within(canvas.getByRole("article", { name: "Linear" })).getByText(
-				"Every tool runs without asking",
+				"Every tool runs without asking · Signed in as Rowan Alexandria Ellis",
 			),
 		).toBeInTheDocument();
 		await expect(

@@ -4,18 +4,21 @@ import {
 	type NotificationSettings,
 	streamEvent,
 } from "@sugabots/contracts";
+import { Unauthorized } from "@sugabots/contracts/http";
+import { userText } from "@sugabots/errors";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { Effect } from "effect";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { pendingAnswer } from "@/api.test-support.tsx";
+import { pendingAnswer, sam } from "@/api.test-support.tsx";
 import { client } from "@/client.test-support.ts";
 import {
 	useChangeNotificationPreferences,
 	useNotificationsInThisBrowser,
 } from "@/lib/notifications.ts";
 import { createQueryClient } from "@/lib/query.ts";
+import { SessionContext } from "@/lib/session.ts";
 
 vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 vi.mock("@tanstack/react-router", async (original) => ({
@@ -69,24 +72,49 @@ function memberStream(...events: ReturnType<typeof streamEvent>[]) {
 	});
 }
 
-const withQueries = ({ children }: { children: ReactNode }) => (
-	<QueryClientProvider client={createQueryClient()}>{children}</QueryClientProvider>
-);
+/** Signed in as Sam; `refresh` is what asking about the session again does. */
+function signedIn(refresh: () => Promise<void> = async () => {}) {
+	return { member: sam, error: undefined, refresh };
+}
+
+/** The browser's notifications as the app runs them: under its query cache and Sam's session. */
+const inApp =
+	(queries = createQueryClient(), session = signedIn()) =>
+	({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={queries}>
+			<SessionContext value={session}>{children}</SessionContext>
+		</QueryClientProvider>
+	);
+
+const withQueries = inApp();
 
 it("refreshes the approvals list on the member’s own stream", async () => {
 	const queries = createQueryClient();
 	const invalidate = vi.spyOn(queries, "invalidateQueries");
 	memberStream(streamEvent("approvals.changed", { toolCallId: crypto.randomUUID() }));
-	renderHook(useNotificationsInThisBrowser, {
-		wrapper: ({ children }) => (
-			<QueryClientProvider client={queries}>{children}</QueryClientProvider>
-		),
-	});
+	renderHook(useNotificationsInThisBrowser, { wrapper: inApp(queries) });
 	await waitFor(() =>
 		expect(invalidate).toHaveBeenCalledWith(
 			expect.objectContaining({ queryKey: ["workspace-approvals"] }),
 		),
 	);
+});
+
+it("asks about the member's session again when their own stream ends with it", async () => {
+	const refresh = vi.fn(async () => {});
+	client.events.me.mockReturnValue({
+		// biome-ignore lint/correctness/useYield: a stream the server refuses yields nothing.
+		async *[Symbol.asyncIterator]() {
+			throw new Unauthorized({ message: userText`Invalid or expired session` });
+		},
+		close: vi.fn(),
+	});
+
+	renderHook(useNotificationsInThisBrowser, {
+		wrapper: inApp(createQueryClient(), signedIn(refresh)),
+	});
+
+	await waitFor(() => expect(refresh).toHaveBeenCalled());
 });
 
 it("shows a notification about a chat none of the member's tabs is looking at", async () => {

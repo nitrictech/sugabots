@@ -17,7 +17,14 @@ import { Turns } from "@sugabots/core/chats/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
 import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
-import { bot, membership, message, projectBot, turn } from "@sugabots/core/database/schema";
+import {
+	automationRun,
+	bot,
+	membership,
+	message,
+	projectBot,
+	turn,
+} from "@sugabots/core/database/schema";
 import {
 	closeDatabase,
 	onDatabase,
@@ -28,7 +35,7 @@ import { asMember } from "@sugabots/core/operations/chats/testing";
 import { Models } from "@sugabots/core/providers/models/models";
 import { DisplayName } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context, Duration, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	botLoopOnPostgres,
@@ -385,6 +392,152 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			expect(await runOnPostgres(waitingTurns({ chatId, botId }))).toEqual([
 				expect.objectContaining({ triggerMessageId: steer, askerId: sam }),
 			]);
+		});
+
+		it("leaves an unread steer in the chat when the turn loses reach", async () => {
+			await say(sam, "Summarise.");
+			const adminPrincipal = await chatsAs(admin).principal();
+			const { model, requests } = scriptedSteps({ text: ["Summary."] });
+			const time = await controlledClock();
+			const workflow = await loop.runWorkflow(
+				chatId,
+				{ model },
+				{
+					clock: time.clock,
+					beforeOperation: async (operation) => {
+						if (operation !== "turns.end") return;
+						await say(sam, "Make it shorter.");
+						await loop.call(adminPrincipal, "projects.removeMember", { projectId, memberId: sam });
+					},
+				},
+			);
+			await workflow.completed();
+
+			expect(requests).toHaveLength(1);
+			expect(readOf(requests[0])).toContain("Summarise.");
+			expect(readOf(requests[0])).not.toContain("Make it shorter.");
+			const details = await chatsAs(admin).get(chatId);
+			expect(details.messages).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ content: expect.stringContaining("Make it shorter.") }),
+					expect.objectContaining({ status: "failed", content: "Summary." }),
+				]),
+			);
+			expect(await runOnPostgres(runningTurns(chatId))).toEqual([]);
+		});
+
+		it.each(["has no asker", "has no model"] as const)(
+			"leaves an unread steer in the chat when the retry %s",
+			async (refusal) => {
+				await say(sam, "Summarise.");
+				const providerDown = new Models.ProviderServerError({
+					provider: DisplayName.fromRecord("Test provider"),
+					model: DisplayName.fromRecord("test-model"),
+					cause: new Error("provider down"),
+				});
+				const { model, requests } = scriptedSteps(providerDown);
+				const time = await controlledClock();
+				const delay = Duration.seconds(2);
+				const workflow = await loop.runWorkflow(
+					chatId,
+					{ model },
+					{
+						clock: time.clock,
+						beforeOperation: async (operation) => {
+							if (operation === "turns.end") await say(sam, "Make it shorter.");
+						},
+					},
+				);
+				await Promise.race([
+					time.waiting(1, delay),
+					workflow.completed().then(() => {
+						throw new Error("Expected a retry after the provider error");
+					}),
+				]);
+				const [retrying] = await onDatabase((db) =>
+					db
+						.select({ steers: turn.steers })
+						.from(turn)
+						.where(eq(turn.executionId, workflow.executionId)),
+				);
+				expect(retrying?.steers).toHaveLength(1);
+				if (refusal === "has no asker") {
+					// Reach changes alone leave the stored asker available to authenticate.
+					await onDatabase((db) =>
+						db
+							.update(turn)
+							.set({ askerId: null })
+							.where(eq(turn.executionId, workflow.executionId)),
+					);
+				} else {
+					await onDatabase((db) => db.update(bot).set({ model: null }).where(eq(bot.id, botId)));
+				}
+				const retryEvents = delivered.length;
+
+				await time.adjust(delay);
+				await workflow.completed();
+
+				expect(requests).toHaveLength(1);
+				expect(readOf(requests[0])).toContain("Summarise.");
+				expect(readOf(requests[0])).not.toContain("Make it shorter.");
+				const details = await chatsAs(admin).get(chatId);
+				expect(details.messages).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({ content: expect.stringContaining("Make it shorter.") }),
+						expect.objectContaining({
+							status: "failed",
+							error: expect.stringContaining(
+								refusal === "has no asker" ? "can't carry on here" : "has no model chosen",
+							),
+						}),
+					]),
+				);
+				expect(delivered.slice(retryEvents)).not.toContainEqual(
+					expect.objectContaining({
+						stream: chatStream(chatId),
+						event: expect.objectContaining({ type: "chat.changed" }),
+					}),
+				);
+			},
+		);
+
+		it("does not hand on an unread steer when lost reach withdraws an approval", async () => {
+			await say(sam, "Wipe the wiki.");
+			const adminPrincipal = await chatsAs(admin).principal();
+			const { model, requests } = scriptedSteps(wipe);
+			const execute = vi.fn(async () => ({}));
+			const time = await controlledClock();
+			const workflow = await loop.runWorkflow(
+				chatId,
+				{ model, connectorTools: wiki("ask", execute) },
+				{
+					clock: time.clock,
+					beforeOperation: async (operation) => {
+						if (operation === "turns.askForApprovals") await say(sam, "Wait for my next message.");
+					},
+				},
+			);
+			await workflow.suspended();
+			await loop.call(adminPrincipal, "projects.removeMember", { projectId, memberId: sam });
+			await workflow.completed();
+
+			expect(requests).toHaveLength(1);
+			expect(readOf(requests[0])).toContain("Wipe the wiki.");
+			expect(readOf(requests[0])).not.toContain("Wait for my next message.");
+			expect(execute).not.toHaveBeenCalled();
+			const details = await chatsAs(admin).get(chatId);
+			expect(details.messages).toContainEqual(
+				expect.objectContaining({
+					status: "cancelled",
+					parts: expect.arrayContaining([
+						expect.objectContaining({
+							tool: "wiki__wipe",
+							approval: expect.objectContaining({ status: "denied" }),
+						}),
+					]),
+				}),
+			);
+			expect(await runOnPostgres(runningTurns(chatId))).toEqual([]);
 		});
 	});
 
@@ -934,6 +1087,51 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 	});
 
 	describe("a run's turns", () => {
+		it("finishes a run as cancelled when its turn was asked to end and its step dies", async () => {
+			const principal = await chatsAs(admin).principal();
+			const { automation } = await loop.call(principal, "automations.create", {
+				projectId,
+				name: "Nightly",
+				instructions: "Summarise the night.",
+				triggers: [],
+			});
+			const run = await loop.call(principal, "automations.run", {
+				projectId,
+				automationId: automation.id,
+				requestId: randomUUID(),
+			});
+			const { execution } = await startRunning(
+				onPostgres(Context.get(loop.services, AutomationRunner.Service)),
+				automation.id,
+			);
+			const { model, requests } = scriptedSteps({ text: ["Summary."] });
+			const time = await controlledClock();
+			const workflow = await loop.runWorkflow(
+				run.chatId,
+				{ model },
+				{
+					clock: time.clock,
+					beforeOperation: async (operation) => {
+						if (operation !== "turns.end") return;
+						await onDatabase((db) =>
+							db.update(turn).set({ endRequested: "run_ended" }).where(eq(turn.chatId, run.chatId)),
+						);
+						throw new Error("The step died before it could end the turn");
+					},
+				},
+			);
+			await workflow.completed();
+
+			expect(requests).toHaveLength(1);
+			expect(readOf(requests[0])).toContain("Summarise the night.");
+			const details = await chatsAs(admin).get(run.chatId);
+			expect(details.messages.at(-1)).toMatchObject({ status: "cancelled", content: "Summary." });
+			const [settled] = await onDatabase((db) =>
+				db.select().from(automationRun).where(eq(automationRun.id, execution.id)),
+			);
+			expect(settled).toMatchObject({ state: "cancelled" });
+		});
+
 		it("read only their trigger and their own replies, not a member's message posted since", async () => {
 			const { automation: created } = await loop.call(
 				await chatsAs(admin).principal(),

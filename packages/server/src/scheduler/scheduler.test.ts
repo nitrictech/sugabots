@@ -18,6 +18,7 @@ import { AutomationRuns } from "@sugabots/core/chats/automations/runs";
 import { AutomationSettlement } from "@sugabots/core/chats/automations/settlement";
 import { chatServicesForTests } from "@sugabots/core/chats/testing";
 import { aChatAwaitingReply } from "@sugabots/core/chats/turns/testing";
+import { localComputerEgress } from "@sugabots/core/computers/testing";
 import { Database, query } from "@sugabots/core/database/database";
 import {
 	automation,
@@ -34,6 +35,7 @@ import {
 } from "@sugabots/core/database/schema";
 import {
 	closeDatabase,
+	holdTransaction,
 	onDatabase,
 	runOnPostgres,
 	servedOnPostgres,
@@ -50,6 +52,7 @@ import {
 	gitHubSetupAt,
 	installedConnector,
 	json,
+	madeConnector,
 	standInGitHub,
 	USER_INSTALLATION_ID,
 	uninstalls,
@@ -301,7 +304,7 @@ describe("the scheduler, against Postgres", () => {
 				.where(eq(computerProvider.workspaceId, workspaceId)),
 		);
 		const admin = await principals(await authenticators()).member(adminId);
-		const operations = await operationsForTests();
+		const operations = await operationsForTests({ egress: localComputerEgress });
 		await expect(
 			runOnPostgres(operations["projects.remove"](admin, { projectId }, request())),
 		).rejects.toMatchObject({ _tag: "ComputerUnavailable" });
@@ -398,7 +401,7 @@ describe("the scheduler, against Postgres", () => {
 				signIn.member(adminId),
 				signIn.member(adminId),
 			]);
-			const operations = await operationsForTests();
+			const operations = await operationsForTests({ egress: localComputerEgress });
 			const gone =
 				departure === "is removed"
 					? operations["workspaces.removeMembership"](
@@ -967,6 +970,119 @@ describe("the scheduler, against Postgres", () => {
 		expect(attempts.get(healthy)).toBe(2);
 		await clockAt(new Date("2026-09-18T12:05:00Z"))(scheduler.pauseFailingAutomations);
 		expect(attempts.get(failing)).toBe(2);
+	});
+
+	it("uninstalls the app of a GitHub connector removed while it was installed", async () => {
+		const { projectId, adminId } = await projectWithAdmin();
+		const attempted: number[] = [];
+		const gitHub = standInGitHub(
+			uninstalls(async (installationId) => {
+				attempted.push(installationId);
+				return new Response(null, { status: 204 });
+			}),
+		);
+		const setup = await gitHubSetupAt(gitHub.fetch, "https://sugabots.example.com");
+		const connectorId = await installedConnector(setup, { projectId, adminId });
+
+		await setup.call(await setup.member(adminId), "connectors.remove", { projectId, connectorId });
+		const [work] = await onDatabase((db) =>
+			db.select().from(gitHubUninstall).where(eq(gitHubUninstall.connectorId, connectorId)),
+		);
+		if (!work) throw new Error("Nothing queued to uninstall the app");
+		const scheduler = await makeScheduler(
+			await operationsForTests({ egress: egressToGitHub(gitHub.fetch) }),
+		);
+		await clockAt(new Date(work.nextAttemptAt.getTime() + 100))(scheduler.uninstallGitHubApps);
+
+		expect(attempted).toEqual([work.installationId]);
+	});
+
+	it("uninstalls an app installed on a member's account who left before it was recorded", async () => {
+		const { workspaceId, projectId, adminId } = await projectWithAdmin();
+		let leaving: (() => Promise<unknown>) | undefined;
+		const gitHub = standInGitHub();
+		// The member leaves while Sugabots asks GitHub about the installation.
+		const leavesWhileAsked: typeof fetch = async (input, init) => {
+			const path = new URL(String(input)).pathname;
+			if (leaving && path === `/app/installations/${USER_INSTALLATION_ID}`) {
+				const leave = leaving;
+				leaving = undefined;
+				await leave();
+			}
+			return gitHub.fetch(input, init);
+		};
+		const setup = await gitHubSetupAt(leavesWhileAsked, "https://sugabots.example.com");
+		const { connectorId, installState } = await madeConnector(setup, { projectId, adminId });
+		const admin = await setup.member(adminId);
+		leaving = () => setup.call(admin, "workspaces.leave", { workspace: workspaceId });
+
+		const outcome = await setup.call(admin, "gitHubConnectors.gitHubAppInstalled", {
+			installationId: USER_INSTALLATION_ID,
+			state: installState,
+		});
+
+		expect(outcome).toMatchObject({ kind: "failed", failure: "expired" });
+		expect(
+			await onDatabase((db) =>
+				db
+					.select({ installationId: gitHubUninstall.installationId })
+					.from(gitHubUninstall)
+					.where(eq(gitHubUninstall.connectorId, connectorId)),
+			),
+		).toEqual([{ installationId: USER_INSTALLATION_ID }]);
+	});
+
+	it("asks GitHub to uninstall a member's app with its queued uninstall unlocked", async () => {
+		const { workspaceId, projectId, adminId } = await projectWithAdmin();
+		const asked = Promise.withResolvers<void>();
+		const answered = Promise.withResolvers<void>();
+		const gitHub = standInGitHub(
+			uninstalls(async () => {
+				asked.resolve();
+				await answered.promise;
+				return json({ message: "Not Found" }, 404);
+			}),
+		);
+		const setup = await gitHubSetupAt(gitHub.fetch, "https://sugabots.example.com");
+		const connectorId = await installedConnector(
+			setup,
+			{ projectId, adminId },
+			USER_INSTALLATION_ID,
+		);
+		await setup.call(await setup.member(adminId), "workspaces.leave", { workspace: workspaceId });
+		const queued = () =>
+			onDatabase((db) =>
+				db.select().from(gitHubUninstall).where(eq(gitHubUninstall.connectorId, connectorId)),
+			);
+		const [work] = await queued();
+		if (!work) throw new Error("Missing queued uninstall");
+		const scheduler = await makeScheduler(
+			await operationsForTests({ egress: egressToGitHub(gitHub.fetch) }),
+		);
+
+		const uninstalling = clockAt(new Date(work.nextAttemptAt.getTime() + 100))(
+			scheduler.uninstallGitHubApps,
+		);
+		await asked.promise;
+		const lockingTheRow = holdTransaction(
+			query((db) =>
+				db
+					.select({ id: gitHubUninstall.id })
+					.from(gitHubUninstall)
+					.where(eq(gitHubUninstall.id, work.id))
+					.for("update", { noWait: true }),
+			),
+		);
+		const rowFree = await lockingTheRow.held.then(
+			() => true,
+			() => false,
+		);
+		await lockingTheRow.release().catch(() => undefined);
+		answered.resolve();
+		await uninstalling;
+
+		expect(rowFree).toBe(true);
+		expect(await queued()).toEqual([]);
 	});
 
 	it("retries a member removal's GitHub uninstall after rebuilding the scheduler", async () => {

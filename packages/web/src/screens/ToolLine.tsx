@@ -203,7 +203,7 @@ function ToolSourceSection({
 						connector={markedConnectors.get(splitToolKey(first.tool).handle)}
 					/>
 					<ActivityTitle>{toolLineText(calls, markedConnectors)}</ActivityTitle>
-					<ActivityDescription className={cn(failed && "text-destructive-text")}>
+					<ActivityDescription className={failed ? "text-destructive-text" : undefined}>
 						{calls.length} steps
 					</ActivityDescription>
 				</ActivityLine>

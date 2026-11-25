@@ -163,7 +163,7 @@ export function WorkspaceSection() {
 												aria-controls={panel}
 												onClick={() => pick(index)}
 												className={cn(
-													"w-full cursor-pointer py-5 text-left text-xl/tight font-semibold tracking-normal transition-colors outline-none focus-visible:text-landing-text",
+													"w-full cursor-pointer py-5 text-left text-xl/tight font-semibold tracking-normal transition-colors outline-none focus-visible:text-landing-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-landing-accent focus-visible:outline-solid",
 													isOpen
 														? "text-landing-text"
 														: "text-landing-muted hover:text-landing-text",

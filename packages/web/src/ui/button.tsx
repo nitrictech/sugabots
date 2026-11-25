@@ -7,7 +7,7 @@ import { cn } from "cn";
  * styled as a button gets `buttonStyles(...)` on its `<a>`, so it stays a link.
  */
 
-export const buttonStyles = cva(
+const buttonVariants = cva(
 	"focus-ring inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-sans font-semibold transition-colors disabled:cursor-default [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
 	{
 		variants: {
@@ -19,7 +19,7 @@ export const buttonStyles = cva(
 				muted: "bg-hover text-foreground hover:bg-hover-strong disabled:text-disabled-foreground",
 				ghost:
 					"font-medium text-muted-foreground hover:bg-hover hover:text-foreground disabled:opacity-50",
-				link: "rounded-md font-medium text-link hover:opacity-80 disabled:text-disabled-foreground",
+				link: "font-medium text-link hover:opacity-80 disabled:text-disabled-foreground",
 				destructive: "font-medium text-destructive-text hover:opacity-80 disabled:opacity-50",
 				/** Text that brightens under the pointer, for a small action beside a list, such as View all. */
 				quiet: "font-normal text-subtle-foreground hover:text-foreground disabled:opacity-50",
@@ -37,9 +37,25 @@ export const buttonStyles = cva(
 	},
 );
 
-type ButtonProps = ButtonPrimitive.Props & VariantProps<typeof buttonStyles>;
+type ButtonVariants = VariantProps<typeof buttonVariants>;
+
+export function buttonStyles(variants?: ButtonVariants) {
+	return cn(buttonVariants(variants));
+}
+
+type ButtonProps = ButtonPrimitive.Props & ButtonVariants;
 
 /** Button styles labelled actions. Use IconButton for icon-only actions requiring a tooltip. */
 export function Button({ className, variant, size, ...props }: ButtonProps) {
-	return <ButtonPrimitive className={cn(buttonStyles({ variant, size }), className)} {...props} />;
+	const defaults = buttonStyles({ variant, size });
+	return (
+		<ButtonPrimitive
+			className={
+				typeof className === "function"
+					? (state) => cn(defaults, className(state))
+					: cn(defaults, className)
+			}
+			{...props}
+		/>
+	);
 }

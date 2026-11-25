@@ -57,11 +57,14 @@ export function ComputerNetworkGroups({
 }) {
 	const [showingTrusted, setShowingTrusted] = useState(false);
 	const open = settings.mode === "open";
+	const approvalNote =
+		"Runs started by a webhook or GitHub event ask for approval before each computer command.";
 	return (
 		<>
 			{open ? (
 				<SettingsGroup
 					label="Network"
+					description={approvalNote}
 					note={
 						settings.blocking
 							? "Switching to allowed hosts only keeps your blocked hosts, and the hosts allowed apply again."
@@ -73,6 +76,7 @@ export function ComputerNetworkGroups({
 			) : (
 				<SettingsGroup
 					label="Network"
+					description={approvalNote}
 					note="Every computer connects to these hosts, and each project or bot adds its own on its Computer page. Blocked hosts still apply. When a bot needs another, it asks in a chat, and someone who manages the project or bot decides."
 				>
 					{modeRow}
@@ -210,7 +214,7 @@ export function AddHostRow({
 					value={draft}
 					onChange={(event) => setDraft(event.target.value)}
 					placeholder="api.example.com or *.example.com"
-					className="min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
+					className="min-w-0 flex-1 bg-transparent font-mono text-xs rounded-sm text-foreground focus-ring placeholder:text-muted-foreground"
 				/>
 				<Button type="submit" variant="link" size="text" disabled={disabled || draft.trim() === ""}>
 					{action}

@@ -3,7 +3,7 @@ import { Alert } from "@/ui/alert.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/ui/dialog.tsx";
 
 const choice =
-	"focus-ring flex-1 p-3.25 text-sm transition-colors hover:bg-chip disabled:cursor-default disabled:opacity-50";
+	"flex-1 focus-visible:outline-hidden focus-visible:inset-shadow-ring p-3.25 text-sm transition-colors hover:bg-chip disabled:cursor-default disabled:opacity-50";
 
 /** A confirmation with Cancel and a red action side by side, like a phone's alert. */
 export function DeleteDialog({
@@ -38,7 +38,7 @@ export function DeleteDialog({
 			<DialogContent
 				showCloseButton={false}
 				initialFocus={cancel}
-				className="max-w-dialog-sm gap-0 overflow-hidden rounded-3xl p-0 text-center sm:max-w-90"
+				className="max-w-(--dialog-compact-max-width) gap-0 overflow-hidden rounded-3xl p-0 text-center sm:max-w-90"
 			>
 				<form
 					className="contents"
@@ -58,7 +58,7 @@ export function DeleteDialog({
 						<button
 							ref={cancel}
 							type="button"
-							className={`${choice} border-border-strong border-r font-medium text-soft-foreground`}
+							className={`${choice} rounded-bl-3xl border-border-strong border-r font-medium text-soft-foreground`}
 							disabled={pending}
 							onClick={() => onOpenChange(false)}
 						>
@@ -66,7 +66,7 @@ export function DeleteDialog({
 						</button>
 						<button
 							type="submit"
-							className={`${choice} font-semibold text-destructive-text`}
+							className={`${choice} rounded-br-3xl font-semibold text-destructive-text`}
 							disabled={pending}
 						>
 							{confirmLabel}

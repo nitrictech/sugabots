@@ -401,7 +401,7 @@ function ModelChoicePage({
 				onChoose={pending ? undefined : (modelId) => void chooseModel(modelId)}
 				empty={providers.isPending ? undefined : "No models are switched on yet."}
 			/>
-			<p className="-mt-5 m-0 px-0.5 text-subtle-foreground text-xs">
+			<p className="mx-0 -mt-5 mb-0 px-0.5 text-subtle-foreground text-xs">
 				Only models that are switched on appear here.
 			</p>
 		</SettingsPage>

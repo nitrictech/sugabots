@@ -19,7 +19,7 @@ import {
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
 import { SettingsRowAlert } from "@/ui/settings-page.tsx";
-import { ProviderFieldRow, valueText } from "./provider-field-row.tsx";
+import { ProviderFieldRow } from "./provider-field-row.tsx";
 
 /**
  * A subscription provider's credential, in place of a key: the member signs
@@ -93,7 +93,7 @@ export function ProviderSignInRow({
 						)
 					}
 				>
-					<span className={valueText}>
+					<span className="block wrap-break-word text-xs text-foreground">
 						{provider.signedIn
 							? provider.signedInAs
 								? `Signed in as ${provider.signedInAs.name}`

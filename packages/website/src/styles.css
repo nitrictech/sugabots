@@ -273,3 +273,12 @@ html[data-os="linux"] [data-for-os="linux"] {
 		transparent 70%
 	);
 }
+
+@utility landing-chat-colours {
+	color: var(--color-landing-text);
+	--border: var(--color-landing-line);
+	--muted-foreground: var(--color-landing-muted);
+	--muted: var(--color-landing-chip);
+	--secondary-foreground: var(--color-landing-secondary);
+	--secondary: var(--color-landing-button);
+}

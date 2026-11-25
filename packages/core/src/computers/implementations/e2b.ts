@@ -1,6 +1,7 @@
 import { userText } from "@sugabots/errors";
 import {
 	CommandExitError,
+	ConnectionConfig,
 	type ConnectionOpts,
 	Sandbox as E2bSandbox,
 	FileNotFoundError,
@@ -10,6 +11,12 @@ import {
 } from "e2b";
 import { Duration, Effect, Redacted } from "effect";
 import type { Ids } from "../../ids/ids.ts";
+import {
+	type Egress,
+	type EgressHttpClient,
+	EgressRefused,
+	workspaceUrlRefusal,
+} from "../../providers/network/egress.ts";
 import { Computers } from "../computers.ts";
 
 /**
@@ -37,15 +44,29 @@ const MIB_PER_GIB = 1024;
 /** How far past its own timeout a command may run before the call gives up on E2B. */
 const EXEC_GRACE = Duration.seconds(15);
 
-export const fromE2b = (access: Computers.E2bAccess, ids: Ids.Interface): Computers.Provider => {
+export const fromE2b = (
+	access: Computers.E2bAccess,
+	ids: Ids.Interface,
+	egress: Pick<Egress.Interface, "providers" | "validateProviderUrl">,
+): Computers.Provider => {
+	const connectionConfig = new ConnectionConfig(access.endpoints);
+	const apiFetch: EgressHttpClient = (input, init) =>
+		egress.providers.for({ baseUrl: connectionConfig.apiUrl })(input, init);
+	const computerOrigin = connectionConfig.sandboxUrl && new URL(connectionConfig.sandboxUrl).origin;
+	const envdFetch: EgressHttpClient = computerOrigin
+		? (input, init) => egress.providers.for({ baseUrl: computerOrigin })(input, init)
+		: Computers.fetchComputerEndpoint(egress);
 	const options = (): ConnectionOpts => ({
 		apiKey: Redacted.value(access.apiKey),
 		...access.endpoints,
+		apiFetch,
+		envdFetch,
 	});
 	const unavailable = (cause: unknown) =>
 		new Computers.Unavailable({
 			provider: "e2b",
 			cause,
+			...(cause instanceof EgressRefused && { reason: workspaceUrlRefusal(cause) }),
 			...(isMissingTemplate(cause) ? { reason: MISSING_TEMPLATE } : {}),
 		});
 	const missingOr = (id: Computers.ComputerId) => (cause: unknown) =>
@@ -88,10 +109,23 @@ export const fromE2b = (access: Computers.E2bAccess, ids: Ids.Interface): Comput
 					catch: unavailable,
 				}),
 		},
-		check: Effect.tryPromise({
-			try: () => E2bSandbox.list({ ...options(), limit: 1 }).nextItems(),
-			catch: unavailable,
-		}).pipe(Effect.asVoid),
+		check: Effect.forEach(
+			[
+				connectionConfig.apiUrl,
+				...(connectionConfig.sandboxUrl ? [connectionConfig.sandboxUrl] : []),
+			],
+			egress.validateProviderUrl,
+			{ discard: true },
+		).pipe(
+			Effect.mapError(unavailable),
+			Effect.andThen(
+				Effect.tryPromise({
+					try: () => E2bSandbox.list({ ...options(), limit: 1 }).nextItems(),
+					catch: unavailable,
+				}),
+			),
+			Effect.asVoid,
+		),
 		create: (spec) =>
 			Effect.tryPromise({
 				try: () =>
@@ -156,6 +190,23 @@ export const fromE2b = (access: Computers.E2bAccess, ids: Ids.Interface): Comput
 				try: (signal) => E2bSandbox.kill(id, { ...options(), signal }),
 				catch: unavailable,
 			}).pipe(Effect.asVoid),
+		labelled: (key, value) =>
+			Effect.tryPromise({
+				try: async () => {
+					const pages = E2bSandbox.list({
+						...options(),
+						query: { metadata: { [key]: value }, state: ["running", "paused"] },
+					});
+					const found: Computers.ComputerId[] = [];
+					while (pages.hasNext) {
+						for (const info of await pages.nextItems()) {
+							found.push(Computers.ComputerId(info.sandboxId));
+						}
+					}
+					return found;
+				},
+				catch: unavailable,
+			}),
 	};
 
 	function toComputer(sandbox: E2bSandbox): Computers.Computer {
@@ -192,7 +243,7 @@ export const fromE2b = (access: Computers.E2bAccess, ids: Ids.Interface): Comput
 				}),
 			uploadFile,
 			endpoint: (port) =>
-				Effect.sync((): Computers.Endpoint => {
+				Effect.sync(() => {
 					const traffic: Record<string, string> = sandbox.trafficAccessToken
 						? { "e2b-traffic-access-token": sandbox.trafficAccessToken }
 						: {};
@@ -208,7 +259,11 @@ export const fromE2b = (access: Computers.E2bAccess, ids: Ids.Interface): Comput
 								},
 							}
 						: { url: `https://${sandbox.getHost(port)}`, headers: traffic };
-				}),
+				}).pipe(
+					Effect.flatMap((endpoint) =>
+						Computers.checkedEndpoint(egress, endpoint).pipe(Effect.mapError(unavailable)),
+					),
+				),
 			setNetwork: (network) =>
 				Effect.tryPromise({
 					try: async () => {

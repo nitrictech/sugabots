@@ -304,10 +304,10 @@ export const make = Effect.gen(function* () {
 
 		updateInChat: (_canManage, automation, target, approved, input, routine) => {
 			const scope = scopeOf(target, automation.value);
-			const guard = holdApprovedTurn(approved);
+			const fence = holdApprovedTurn(approved);
 			const update = routine
-				? writes.updateWithSoleRoutine(scope, input, routine, guard)
-				: writes.update(scope, input, guard);
+				? writes.updateWithSoleRoutine(scope, input, routine, fence)
+				: writes.update(scope, input, fence);
 			return operation(
 				"updateInChat",
 				Effect.map(update, ({ automation }) => automation),

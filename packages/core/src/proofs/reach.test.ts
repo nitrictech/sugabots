@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+	seedAutomation,
 	seedConnector,
 	seedProject,
 	seedProjectChat,
@@ -21,10 +22,12 @@ import {
 	proveCanLeaveProject,
 	proveCanManageProject,
 	proveCanReadConnectors,
+	proveCanReadProjectRuns,
 	proveCanRunAutomations,
 	proveCanTakePart,
 } from "./project-permissions.ts";
 import { named } from "./proof.ts";
+import { proveReachesAutomation } from "./reaches-automation.ts";
 import { proveReachesBot } from "./reaches-bot.ts";
 import { proveReachesChat } from "./reaches-chat.ts";
 import { proveReachesConnector } from "./reaches-connector.ts";
@@ -436,6 +439,47 @@ describe("reach and what it permits", () => {
 			run: "ActionForbidden",
 			page: "ResourceHidden",
 		});
+	});
+
+	it("proves project run reads for a member, a bot for its asker, and a run", async () => {
+		const { a } = world;
+		const { vi, pubForEd, run, webhook, compaction, computerSleep } = who;
+		expect(
+			await outcomesFor({ vi, pubForEd, run, webhook, compaction, computerSleep }, (principal) =>
+				outcome(
+					named(principal, a.project, (principal, project) =>
+						proveReachesProject(principal, project).pipe(
+							Effect.flatMap(proveCanReadProjectRuns),
+							Effect.asVoid,
+						),
+					),
+				),
+			),
+		).toEqual({
+			vi: "ok",
+			pubForEd: "ok",
+			run: "ok",
+			webhook: "ResourceHidden",
+			compaction: "ResourceHidden",
+			computerSleep: "ResourceHidden",
+		});
+	});
+
+	it("hides an automation in an unreached project of the same workspace", async () => {
+		const { a } = world;
+		const reached = await seedAutomation(a.workspace, a.project);
+		const unreached = await seedAutomation(a.workspace, a.otherProject);
+		const provesReach = (automationId: string) =>
+			outcome(
+				named(who.vi, a.workspace, automationId, (principal, workspace, automation) =>
+					proveReachesAutomation(principal, workspace, automation).pipe(Effect.asVoid),
+				),
+			);
+
+		expect({
+			reached: await provesReach(reached),
+			unreached: await provesReach(unreached),
+		}).toEqual({ reached: "ok", unreached: "ResourceHidden" });
 	});
 
 	it("proves who may start automation runs in a project", async () => {

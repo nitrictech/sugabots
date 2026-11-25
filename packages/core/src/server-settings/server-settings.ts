@@ -1,6 +1,7 @@
 export * as ServerSettings from "./server-settings.ts";
 
-import { Config, Context, Data, Effect, Layer, Option } from "effect";
+import { type DomainError, userText } from "@sugabots/errors";
+import { Config, Context, Effect, ErrorReporter, Layer, Option, Schema } from "effect";
 import { processLayer, Tier } from "../tiers.ts";
 
 /** How this server is reached, and whether it runs in production. */
@@ -70,9 +71,16 @@ export const make = Effect.gen(function* () {
 
 export const layer = processLayer(Layer.effect(Service, make));
 
-export class InvalidConfig extends Data.TaggedError("InvalidServerSettings")<{
-	message: string;
-}> {}
+export class InvalidConfig
+	extends Schema.TaggedError<InvalidConfig>()("InvalidServerSettings", { message: Schema.String })
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	get userMessage() {
+		return userText`Sugabots could not start. Ask whoever runs this server to check its addresses.`;
+	}
+}
 
 /**
  * The server at `publicUrl`, with its web app at `webAppUrl` or, when

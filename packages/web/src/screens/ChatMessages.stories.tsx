@@ -114,29 +114,168 @@ function pictureUrl(label: string, hue: number): string {
 	return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
+const thinkingStep = "Compare the quoted unit prices against the current pricing page.";
+const thinkingReply = {
+	...message("0199a3a0-0000-7000-8000-000000000319", host, "The totals match the pricing page."),
+	thinking: [{ step: 0, text: thinkingStep }],
+} satisfies Message;
+
 export const Thinking = meta.story({
 	parameters: { docs: { description: { story: "A bot reply with thinking readers can expand." } } },
+	args: { viewerId: member.id, messages: [thinkingReply] },
+	play: async ({ canvas, userEvent }) => {
+		await expect(canvas.getByRole("article", { name: /^Issue Triager/ })).toHaveAttribute(
+			"aria-busy",
+			"false",
+		);
+		const trigger = canvas.getByRole("button", { name: "Thinking", expanded: false });
+		await expect(canvas.queryByText(thinkingStep)).toBeNull();
+		trigger.focus();
+		await expect(trigger).toHaveFocus();
+		await userEvent.keyboard("{Enter}");
+		await waitFor(() => expect(canvas.getByText(thinkingStep)).toBeVisible());
+	},
+});
+
+const writingReply: Message = { ...thinkingReply, status: "writing", parts: [], content: "" };
+
+const writingStoryParameters = { docs: { story: { inline: false } } };
+
+function freezeWritingClock() {
+	const now = Date.now;
+	const twelveSecondsIntoTheReply = Date.parse(writingReply.createdAt) + 12_000;
+	Date.now = () => twelveSecondsIntoTheReply;
+	return () => {
+		Date.now = now;
+	};
+}
+
+/** Thinking is available before the bot has written any reply text. */
+export const ThinkingWhileWriting = meta.story({
+	args: { messages: [writingReply] },
+	parameters: writingStoryParameters,
+	beforeEach: freezeWritingClock,
+	play: async ({ canvas, userEvent }) => {
+		await expect(canvas.getByText("Working for 12s")).toBeVisible();
+		await userEvent.click(canvas.getByRole("button", { name: "Thinking", expanded: false }));
+		await waitFor(() => expect(canvas.getByText(thinkingStep)).toBeVisible());
+	},
+});
+
+const secondThinkingStep = "Use the contract currency and check the total for each line item.";
+const thirdThinkingStep = "Check whether rounding changes the invoice total.";
+
+/** The disclosure keeps the thinking from each step in order. */
+export const ThinkingAcrossSteps = meta.story({
 	args: {
-		viewerId: member.id,
 		messages: [
 			{
-				...message(
-					"0199a3a0-0000-7000-8000-000000000319",
-					host,
-					"The totals match the pricing page.",
-				),
+				...thinkingReply,
 				thinking: [
-					{ step: 0, text: "Compare the quoted unit prices against the current pricing page." },
+					...thinkingReply.thinking,
+					{ step: 1, text: secondThinkingStep },
+					{ step: 2, text: thirdThinkingStep },
 				],
 			},
 		],
 	},
 	play: async ({ canvas, userEvent }) => {
-		const disclosure = canvas.getByText("Thinking");
-		const details = disclosure.closest("details");
-		await expect(details?.open).toBe(false);
-		await userEvent.click(disclosure);
-		await expect(details?.open).toBe(true);
+		await userEvent.click(canvas.getByRole("button", { name: "Thinking", expanded: false }));
+		for (const text of [thinkingStep, secondThinkingStep, thirdThinkingStep]) {
+			await waitFor(() => expect(canvas.getByText(text)).toBeVisible());
+		}
+	},
+});
+
+const longExportName =
+	"acme-retail-enterprise-pricing-australia-quarter-four-discount-audit-confirmed-2026-09-22.csv";
+
+/** Long thinking wraps in a phone-width chat, including references with no spaces. */
+export const LongThinking = meta.story({
+	globals: { viewport: { value: "iphone12", isRotated: false } },
+	args: {
+		messages: [
+			{
+				...thinkingReply,
+				thinking: [
+					{
+						step: 0,
+						text: `${thinkingStep} The exported pricing table includes discounts by region, so compare rows from the same market and check whether the invoice lists the pre-tax subtotal.\n\nExport: ${longExportName}`,
+					},
+				],
+			},
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Thinking", expanded: false }));
+		await waitFor(() =>
+			expect(canvas.getByText(`Export: ${longExportName}`, { exact: false })).toBeVisible(),
+		);
+	},
+});
+
+const interruptible = {
+	approveComputerRequests: false,
+	approveToolCallsIn: [],
+	interruptTurns: [{ replyId: writingReply.id, turnId: "0199a3a0-0000-7000-8000-000000000321" }],
+};
+const interruptUrl = `${import.meta.env.VITE_API_URL}/chats/${writingReply.chatId}/turns/${interruptible.interruptTurns[0]?.turnId}/interrupt`;
+const interruptName = "Interrupt Issue Triager’s reply";
+
+/** The asker can interrupt a writing reply. The control stays disabled after acceptance. */
+export const MayInterrupt = meta.story({
+	parameters: writingStoryParameters,
+	args: { messages: [writingReply], approvalPermissions: interruptible },
+	beforeEach({ msw }) {
+		msw.use(http.post(interruptUrl, () => new HttpResponse(null, { status: 202 })));
+		return freezeWritingClock();
+	},
+	play: async ({ canvas, userEvent }) => {
+		const button = canvas.getByRole("button", { name: interruptName });
+		await userEvent.click(button);
+		await expect(await canvas.findByText("Interrupting…")).toHaveAttribute("role", "status");
+		await expect(button).toBeDisabled();
+		await expect(canvas.queryByRole("alert")).toBeNull();
+	},
+});
+
+/** A viewer without permission sees the reply while it is being written. */
+export const ViewerCannotInterrupt = meta.story({
+	parameters: writingStoryParameters,
+	beforeEach: freezeWritingClock,
+	args: {
+		viewerId: jay.id,
+		messages: [writingReply],
+		approvalPermissions: { ...interruptible, interruptTurns: [] },
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("article", { name: /^Issue Triager/, busy: true })).toBeVisible();
+		await expect(canvas.queryByRole("button", { name: /Interrupt/ })).toBeNull();
+	},
+});
+
+/** A refusal is announced beside the interrupt control, which remains available. */
+export const InterruptRefused = meta.story({
+	parameters: writingStoryParameters,
+	args: { messages: [writingReply], approvalPermissions: interruptible },
+	beforeEach({ msw }) {
+		msw.use(
+			http.post(interruptUrl, () =>
+				HttpResponse.json(
+					{ _tag: "Forbidden", message: "You may no longer interrupt this reply." },
+					{ status: 403 },
+				),
+			),
+		);
+		return freezeWritingClock();
+	},
+	play: async ({ canvas, userEvent }) => {
+		const button = canvas.getByRole("button", { name: interruptName });
+		await userEvent.click(button);
+		await expect(await canvas.findByRole("alert")).toHaveTextContent(
+			"You may no longer interrupt this reply.",
+		);
+		await expect(button).toBeEnabled();
 	},
 });
 
@@ -608,7 +747,15 @@ export const FailedInTheSidebar = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText("Reply failed.")).toBeInTheDocument();
-		await expect(canvas.getByText("Reply stopped")).toBeInTheDocument();
+		await expect(canvas.getByText("Reply interrupted")).toBeInTheDocument();
+		await expect(canvas.getByRole("article", { name: /, failed$/ })).toHaveAttribute(
+			"aria-busy",
+			"false",
+		);
+		await expect(canvas.getByRole("article", { name: /, interrupted$/ })).toHaveAttribute(
+			"aria-busy",
+			"false",
+		);
 	},
 });
 
@@ -1107,7 +1254,9 @@ export const PeoplesLinks = meta.story({
 
 			await userEvent.click(canvas.getByRole("link", { name: "the docs" }));
 			const warning = await screen.findByRole("dialog", { name: "Open external link?" });
-			await expect(within(warning).getByText("https://example.com/setup")).toBeVisible();
+			await waitFor(() =>
+				expect(within(warning).getByText("https://example.com/setup")).toBeVisible(),
+			);
 			await userEvent.click(within(warning).getByRole("button", { name: "Cancel" }));
 			await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
@@ -1216,17 +1365,17 @@ export const MentionCards = meta.story({
 		const sam = canvas.getByRole("button", { name: "@sam-rivera" });
 		await userEvent.click(sam);
 		const samCard = await page.findByRole("dialog", { name: /Sam Rivera/ });
-		await expect(within(samCard).getByText("@sam-rivera")).toBeVisible();
+		await waitFor(() => expect(within(samCard).getByText("@sam-rivera")).toBeVisible());
 		await expect(within(samCard).getByText("Admin")).toBeVisible();
 		await userEvent.keyboard("{Escape}");
 		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
-		await expect(sam).toHaveFocus();
+		await waitFor(() => expect(sam).toHaveFocus());
 		await expect(closePanel).not.toHaveBeenCalled();
 
 		canvas.getByRole("button", { name: /Issue Triager/ }).focus();
 		await userEvent.keyboard("{Enter}");
 		const botCard = await page.findByRole("dialog", { name: /Issue Triager/ });
-		await expect(within(botCard).getByText("@issue-triager")).toBeVisible();
+		await waitFor(() => expect(within(botCard).getByText("@issue-triager")).toBeVisible());
 		await expect(
 			await within(botCard).findByText(/Sorts new issues by area and urgency/),
 		).toBeVisible();
@@ -1239,7 +1388,7 @@ export const MentionCards = meta.story({
 		const notified = within(hereCard).getByRole("list", { name: "Notifies" });
 		// Sam and the six others: five named, then the rest counted. Not Jay, who wrote it.
 		await expect(within(notified).getAllByRole("listitem")).toHaveLength(5);
-		await expect(within(notified).getByText("Sam Rivera")).toBeVisible();
+		await waitFor(() => expect(within(notified).getByText("Sam Rivera")).toBeVisible());
 		await expect(within(hereCard).queryByText("Jay Park")).toBeNull();
 		await expect(within(hereCard).getByText("and 2 more")).toBeVisible();
 		await userEvent.keyboard("{Escape}");
@@ -1466,7 +1615,9 @@ export const ReactionsAtTheLimit = meta.story({
 		canvas.getByRole("button", { name: "Add reaction" }).focus();
 		await userEvent.keyboard("{Enter}");
 		const picker = await screen.findByRole("dialog", { name: "Add reaction" });
-		await expect(within(picker).getByText(/This message has 20 different reactions/)).toBeVisible();
+		await waitFor(() =>
+			expect(within(picker).getByText(/This message has 20 different reactions/)).toBeVisible(),
+		);
 	},
 });
 

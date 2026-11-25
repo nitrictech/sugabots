@@ -80,6 +80,8 @@ export type ListedFileVersion = typeof listedFileVersionSchema.Type;
 export const writtenFileSchema = Schema.Struct({
 	...listedWrittenFileSchema.fields,
 	content: Schema.String,
+	/** The outside event that started the run where the file was written. */
+	outsideRun: Schema.optionalKey(Schema.Literals(["github", "webhook"])),
 	shownVersion: listedFileVersionSchema,
 });
 export type WrittenFile = typeof writtenFileSchema.Type;

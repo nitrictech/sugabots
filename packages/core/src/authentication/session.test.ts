@@ -1,10 +1,11 @@
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { session } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { seedMember, seedSession, seedWorkspace } from "./seed.test-support.ts";
-import { type CookieSession, SessionAuthentication } from "./session.ts";
+import { type CookieSession, expiryOf, SessionAuthentication } from "./session.ts";
 
 /** `Methods` with better-auth's reading of each request's cookie already given. */
 type WithCookie<Methods> = {
@@ -65,6 +66,43 @@ describe("SessionAuthentication", () => {
 		await expect(
 			runOnPostgres(auth.authenticate(bearer("token-nobody-has"))),
 		).rejects.toBeInstanceOf(SessionAuthentication.SessionInvalid);
+	});
+
+	it("uses the same expiry boundary for bearer, long-running cookie and session rechecks", async () => {
+		const memberId = await seedMember(workspaceId, "editor");
+		const signedIn = await seedSession(memberId);
+		const expiresAt = Date.UTC(2030, 0, 1);
+		await onDatabase((db) =>
+			db
+				.update(session)
+				.set({ expiresAt: new Date(expiresAt) })
+				.where(eq(session.id, signedIn.id)),
+		);
+		cookie = { session: signedIn.id, member: memberId };
+
+		const results = await runOnPostgres(
+			Effect.gen(function* () {
+				yield* TestClock.setTime(expiresAt - 1);
+				const principal = yield* auth.authenticate(bearer(signedIn.token));
+				const before = yield* expiryOf(principal);
+				yield* TestClock.adjust(1);
+				const bearerAtExpiry = yield* Effect.result(auth.authenticate(bearer(signedIn.token)));
+				const cookieAtExpiry = yield* Effect.result(auth.authenticateLongRunning(new Headers()));
+				const recheckAtExpiry = yield* expiryOf(principal);
+				return { before, bearerAtExpiry, cookieAtExpiry, recheckAtExpiry };
+			}).pipe(Effect.provide(TestClock.layer())),
+		);
+
+		expect(results.before).toEqual(new Date(expiresAt));
+		expect(results.bearerAtExpiry).toMatchObject({
+			_tag: "Failure",
+			failure: { _tag: "SessionInvalid" },
+		});
+		expect(results.cookieAtExpiry).toMatchObject({
+			_tag: "Failure",
+			failure: { _tag: "SessionInvalid" },
+		});
+		expect(results.recheckAtExpiry).toBeUndefined();
 	});
 
 	it("takes better-auth's reading of the cookie for an ordinary request", async () => {

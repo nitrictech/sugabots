@@ -9,8 +9,9 @@ import type {
 	StepCall,
 	ToolResultOutput,
 } from "@sugabots/contracts/turns";
-import { Turns } from "@sugabots/core/chats/turns/turns";
+import { logTurnDefect, Turns, turnStoppedUnexpectedly } from "@sugabots/core/chats/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
+import { Ids } from "@sugabots/core/ids/ids";
 import type { Call } from "@sugabots/core/operations/operation";
 import { makeOfferStepTools, Operations } from "@sugabots/core/operations/registry";
 import type { BotPrincipal } from "@sugabots/core/principal";
@@ -22,7 +23,7 @@ import {
 	type StepPlace,
 	type StepResult,
 	Turn,
-	TurnSteps,
+	TurnActivities,
 } from "./turn.workflow.ts";
 
 /**
@@ -57,8 +58,6 @@ export const timing: Timing = {
 	checkEvery: Duration.seconds(15),
 };
 
-/** What members are told of a turn a defect ended, rather than a failure it expects. */
-const TURN_STOPPED_UNEXPECTEDLY = userText`The reply stopped unexpectedly.`;
 /** What members are told of a step that ran past its timeout. */
 const STEP_TIMED_OUT = userText`The reply took too long and was stopped.`;
 /** What members are told of a turn whose approved calls no longer match what was approved. */
@@ -81,12 +80,13 @@ const carryOn: StepOutcome = { _tag: "Continue" };
 /** One of the loop's own calls, which no stored decision approves. */
 const loopCall = (): Call => ({ kind: "request", request: randomUUID() });
 
-/** The turn workflow's steps, which its activities reach through `TurnSteps`, timed as `timing` says. */
+/** Builds the turn workflow's activities, with the step time limits from `timing`. */
 const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 	Layer.effect(
-		TurnSteps,
+		TurnActivities,
 		Effect.gen(function* () {
 			const operations = yield* Operations.Service;
+			const ids = yield* Ids.Service;
 			const runs = yield* Turns.Runs.Service;
 			const tools = yield* Turns.Tools.Service;
 			const offerStepTools = yield* makeOfferStepTools;
@@ -95,18 +95,16 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 			const runOf = (request: Turns.TurnRequests.TurnRequest) =>
 				Effect.map(Turn.executionId(request), (executionId) => ({ executionId, request }));
 
-			/** Ends the turn whose principal no longer reaches its chat, as the principal may. */
 			/**
-			 * Ends the turn as failed, telling members `userMessage`, as its
-			 * principal may whatever it still reaches; one a newer execution took
-			 * over is left to that execution, and this one ends.
+			 * endLost ends the turn after lost reach or a defect, honouring any
+			 * request to end. A superseded execution leaves the turn to its successor.
 			 */
-			const endLost = (principal: BotPrincipal, turnId: string, userMessage: UserText) =>
-				operations["turns.endLost"](
-					principal,
-					{ turnId, ending: { _tag: "Failed", userMessage } },
-					loopCall(),
-				).pipe(
+			const endLost = (
+				principal: BotPrincipal,
+				turnId: string,
+				ending: { _tag: "Failed" | "LostReach"; userMessage: UserText },
+			) =>
+				operations["turns.endLost"](principal, { turnId, ending }, loopCall()).pipe(
 					Effect.as(finished),
 					Effect.catch(
 						(refusal): Effect.Effect<StepResult> =>
@@ -162,7 +160,7 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 						return Effect.succeed({ _tag: "Superseded" });
 					case "ResourceHidden":
 					case "BotCannotReach":
-						return endLost(principal, turnId, LOST_THE_CHAT);
+						return endLost(principal, turnId, { _tag: "LostReach", userMessage: LOST_THE_CHAT });
 				}
 			};
 
@@ -523,14 +521,13 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 					}),
 					Effect.repeat({
 						schedule: Schedule.spaced(checkEvery),
-						until: (stop) => stop !== undefined,
+						until: (stop): stop is NonNullable<typeof stop> => stop !== undefined,
 					}),
-					Effect.map((stop) => stop ?? ("stopped" as const)),
 				);
 				return Effect.raceFirst(heard, read);
 			};
 
-			return TurnSteps.of({
+			return TurnActivities.of({
 				open: (request, _attempt) =>
 					Effect.gen(function* () {
 						const opened = yield* runs.open(yield* runOf(request));
@@ -574,14 +571,29 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 						{ turnId, ending: { _tag: "AsRequested" } },
 						loopCall(),
 					).pipe(Effect.ignore, Effect.ensuring(tools.release(principal))),
-				died: (principal, turnId) => endLost(principal, turnId, TURN_STOPPED_UNEXPECTEDLY),
+				died: (principal, turnId, cause) =>
+					Effect.gen(function* () {
+						const userMessage = yield* logTurnDefect(
+							yield* ids.random,
+							`A step of turn ${turnId} died`,
+							cause,
+						);
+						return yield* endLost(principal, turnId, { _tag: "Failed", userMessage });
+					}),
 				unauthenticated: (request, _attempt) =>
 					Effect.flatMap(runOf(request), (run) =>
-						runs.abandon(run, { status: "failed", userMessage: NOBODY_TO_ACT_FOR }),
+						runs.abandon(run, {
+							status: "failed",
+							userMessage: NOBODY_TO_ACT_FOR,
+							handOnSteers: false,
+						}),
 					),
 				abandon: (request) =>
 					Effect.flatMap(runOf(request), (run) =>
-						runs.abandon(run, { status: "failed", userMessage: TURN_STOPPED_UNEXPECTEDLY }),
+						runs.abandon(run, {
+							status: "failed",
+							userMessage: turnStoppedUnexpectedly(run.executionId),
+						}),
 					),
 				announceReleased: (request) => runs.announceReleased(request),
 			});

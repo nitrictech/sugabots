@@ -184,6 +184,7 @@ export function browserSession(
 		await client.connect(
 			new StreamableHTTPClientTransport(new URL(`${endpoint.url}/mcp`), {
 				requestInit: { headers: endpoint.headers },
+				fetch: endpoint.fetch,
 			}),
 		);
 		if (turn.naturalBrowsing) await browseNaturally(client, botPalettes[turn.color].face);

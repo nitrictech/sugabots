@@ -17,9 +17,11 @@ import { failureFromResponse } from "./errors.ts";
  * A dropped connection is the normal case, not an error: the server hangs up
  * every thirty minutes on purpose. The loop below reconnects with
  * `Last-Event-ID` set to the last event that carried an id, and the server
- * replays what was missed. When it cannot resume from there, or an event with
- * an id cannot be read, the stream yields a `reset` event and starts live, so
- * the consumer reloads what it shows.
+ * replays what was missed. When it cannot resume from there, the server sends
+ * `reset`. A connection with nothing to resume from starts with the server's
+ * `ready`, sent once it knows where the stream starts. Either way the consumer
+ * reloads what it shows. An event with an id that cannot be read yields a
+ * `reset` here, and the next connection starts with `ready`.
  */
 
 export interface EventStream extends AsyncIterable<StreamEvent> {
@@ -80,19 +82,13 @@ function createEventStream(context: StreamContext): EventStream {
 
 	async function* iterate(): AsyncGenerator<StreamEvent> {
 		let attempt = 0;
-		let connected = false;
 		let lastEventId: string | undefined;
 
 		while (!signal.aborted) {
+			let retryAfterMs = 0;
 			try {
 				const body = await connect(context, lastEventId, signal);
-				const reset = connected && lastEventId === undefined;
-				connected = true;
-				for await (const message of readMessages(body, reset)) {
-					if (message === undefined) {
-						yield resetEvent();
-						continue;
-					}
+				for await (const message of readMessages(body)) {
 					attempt = 0;
 
 					const event = Schema.decodeUnknownResult(streamEventSchema)(parseJson(message.data));
@@ -120,9 +116,12 @@ function createEventStream(context: StreamContext): EventStream {
 				) {
 					throw error.failure;
 				}
+				if (error instanceof StreamRefused) retryAfterMs = error.retryAfterMs;
 			}
 			if (!signal.aborted) {
-				await sleep(backoff(context.retryMs, attempt++), signal);
+				// The server's `Retry-After`, as with a 503 while it restarts or a 429,
+				// is the least it asked for; the backoff may wait longer.
+				await sleep(Math.max(backoff(context.retryMs, attempt++), retryAfterMs), signal);
 			}
 		}
 	}
@@ -142,6 +141,8 @@ class StreamRefused {
 	constructor(
 		readonly failure: ApiFailure,
 		readonly status: number,
+		/** How long the response's `Retry-After` asked to wait before trying again; 0 without one. */
+		readonly retryAfterMs = 0,
 	) {}
 }
 
@@ -174,6 +175,7 @@ async function connect(
 		throw new StreamRefused(
 			failureFromResponse(await response.json().catch(() => undefined), response.status),
 			response.status,
+			retryAfterMs(response.headers.get("retry-after"), Date.now()),
 		);
 	}
 	const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
@@ -187,10 +189,7 @@ async function connect(
 	return response.body;
 }
 
-async function* readMessages(
-	body: ReadableStream<Uint8Array>,
-	reset: boolean,
-): AsyncGenerator<Message | undefined> {
+async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<Message> {
 	// A manual reader rather than `for await` over the body: async iteration of
 	// a ReadableStream is not available in every browser this has to run in.
 	const reader = body.getReader();
@@ -203,7 +202,6 @@ async function* readMessages(
 	});
 
 	try {
-		if (reset) yield undefined;
 		while (true) {
 			const { done, value } = await reader.read();
 			if (done) {
@@ -258,6 +256,17 @@ function parseJson(data: string): unknown {
  */
 function isPermanent(status: number): boolean {
 	return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+/**
+ * The wait a `Retry-After` header asks for at `nowMs`: a number of seconds, or
+ * an HTTP date. 0 without one, or with one that cannot be read.
+ */
+function retryAfterMs(header: string | null, nowMs: number): number {
+	if (!header) return 0;
+	const seconds = Number(header);
+	const waitMs = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - nowMs;
+	return Number.isFinite(waitMs) && waitMs > 0 ? waitMs : 0;
 }
 
 /** Exponential, capped, and jittered so a restart does not bring every client back at once. */

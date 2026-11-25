@@ -1,1 +1,0 @@
-ALTER TABLE "turn" ADD COLUMN "steers" jsonb DEFAULT '[]' NOT NULL;

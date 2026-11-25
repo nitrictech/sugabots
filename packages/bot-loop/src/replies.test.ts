@@ -2,19 +2,20 @@ import { randomUUID } from "node:crypto";
 import { ModelRequests } from "@sugabots/core/accounting/model-requests";
 import { startBotChat } from "@sugabots/core/chats/chats/testing";
 import type { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
+import { CALL_TOOL } from "@sugabots/core/chats/tools/tool-search/tool";
 import { aChatWithConnectorAwaitingReply } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
 import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
-import { membership, modelRequest, turn } from "@sugabots/core/database/schema";
+import { bot, membership, modelRequest, turn, workspace } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
 import { Models } from "@sugabots/core/providers/models/models";
 import { emptyRegistry, resolvedModel, streamed } from "@sugabots/core/providers/models/testing";
 import { DisplayName, userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
-import { Duration, Effect } from "effect";
+import { Cause, Duration, Effect, Logger } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Steps from "./steps.ts";
 import {
@@ -23,6 +24,7 @@ import {
 	scriptedSteps,
 	storedReply,
 	storedTurn,
+	toolResultFor,
 	wikiWipe,
 } from "./testing.ts";
 
@@ -48,13 +50,15 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's replies, against Postgres",
 	let connectorId: string;
 	let botId: string;
 	let adminId: string;
+	let workspaceId: string;
 
 	afterAll(async () => {
 		await closeDatabase();
 	});
 
 	beforeEach(async () => {
-		({ chatId, connectorId, botId, adminId } = await aChatWithConnectorAwaitingReply(chatsAs));
+		({ chatId, connectorId, botId, adminId, workspaceId } =
+			await aChatWithConnectorAwaitingReply(chatsAs));
 		delivered.length = 0;
 		afterCommit = undefined;
 	});
@@ -196,6 +200,123 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's replies, against Postgres",
 		);
 	});
 
+	it.each(["model request", "step"] as const)(
+		"shows the log's reference for a defect in a %s",
+		async (where) => {
+			const defect = new Error("Unexpected test defect");
+			const logged: unknown[] = [];
+			const logger = Logger.make(({ message, cause }) => {
+				if (Cause.squash(cause) === defect) logged.push(message);
+			});
+			const time = await controlledClock();
+			const delay = Duration.seconds(2);
+			const { model } = scriptedSteps({ text: ["Example Domain."] });
+			const stream = vi.fn(model.stream);
+			const defectsInModel = where === "model request";
+			if (defectsInModel) stream.mockReturnValueOnce(Effect.die(defect));
+			const workflow = await loop.runWorkflow(
+				chatId,
+				{ model: Models.fromStream(stream) },
+				{
+					clock: time.clock,
+					logger,
+					beforeOperation: async (operation) => {
+						if (!defectsInModel && operation === "turns.end") throw defect;
+					},
+				},
+			);
+			if (defectsInModel) {
+				await Promise.race([
+					time.waiting(1, delay),
+					workflow.completed().then(() => {
+						throw new Error("Expected the turn to wait before retrying, but it completed");
+					}),
+				]);
+			} else {
+				await workflow.completed();
+			}
+
+			expect(stream).toHaveBeenCalledOnce();
+			expect(JSON.stringify(stream.mock.calls[0]?.[0])).toContain("What does example.com say?");
+			const details = await chatsAs(adminId).get(chatId);
+			const reply = details.messages.find(({ author }) => author.kind === "bot");
+			expect(reply).toMatchObject({
+				status: "failed",
+				error: expect.stringMatching(/^The reply stopped unexpectedly\. Reference: [0-9a-f-]+\.$/),
+			});
+			const referenceId = reply?.error?.match(/Reference: ([0-9a-f-]+)\.$/)?.[1];
+			expect(deliveredEvents()).toContainEqual(
+				expect.objectContaining({
+					type: "message.failed",
+					messageId: reply?.id,
+					error: reply?.error,
+				}),
+			);
+			expect(logged).toEqual([expect.arrayContaining([expect.objectContaining({ referenceId })])]);
+
+			if (defectsInModel) {
+				await time.adjust(delay);
+				await workflow.completed();
+				expect(stream).toHaveBeenCalledTimes(2);
+			}
+		},
+	);
+
+	it.each(["the bot has no model", "the chat is unavailable"] as const)(
+		"ends a retry for good when %s at opening",
+		async (reason) => {
+			const time = await controlledClock();
+			const delay = Duration.seconds(2);
+			const { model, requests } = scriptedSteps(providerDown);
+			const workflow = await loop.runWorkflow(chatId, { model }, { clock: time.clock });
+			await Promise.race([
+				time.waiting(1, delay),
+				workflow.completed().then(() => {
+					throw new Error("Expected the turn to wait before retrying, but it completed");
+				}),
+			]);
+			expect(JSON.stringify(requests[0])).toContain("What does example.com say?");
+
+			const [failed] = await onDatabase((db) =>
+				db.select().from(turn).where(eq(turn.executionId, workflow.executionId)),
+			);
+			expect(failed).toMatchObject({ status: "failed", retrying: true });
+			if (!failed) throw new Error("Expected the turn to fail before its retry");
+			const reply = await storedReply(failed.id);
+			const unavailable = reason === "the chat is unavailable";
+			if (unavailable) {
+				await onDatabase((db) =>
+					db.update(workspace).set({ deleting: true }).where(eq(workspace.id, workspaceId)),
+				);
+			} else {
+				await onDatabase((db) => db.update(bot).set({ model: null }).where(eq(bot.id, botId)));
+			}
+			delivered.length = 0;
+
+			await time.adjust(delay);
+			await workflow.completed();
+
+			expect(requests).toHaveLength(1);
+			expect(await storedTurn(failed.id)).toMatchObject({
+				status: "failed",
+				retrying: false,
+				retryAt: null,
+			});
+			expect(deliveredEvents()).toContainEqual(
+				expect.objectContaining({
+					type: "message.failed",
+					messageId: reply?.id,
+					error: unavailable
+						? providerDown.userMessage
+						: expect.stringContaining("has no model chosen"),
+				}),
+			);
+			expect(deliveredEvents()).toContainEqual(
+				expect.objectContaining({ type: "chat.changed", chatId }),
+			);
+		},
+	);
+
 	it("fails the turn for good when its last run fails", async () => {
 		const ran = await loop.runTurn(
 			chatId,
@@ -297,7 +418,51 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's replies, against Postgres",
 				status: "complete",
 				content: "I can.",
 			});
-			expect(JSON.stringify(requests)).toContain("stay silent by writing nothing at all");
+			expect(JSON.stringify(requests)).toContain(
+				"To stay silent, make no tool calls and write nothing.",
+			);
+		});
+
+		it("keeps a completed tool call when the bot writes nothing", async () => {
+			const started = await optionalTurnOn("@sam can you look at this?");
+			const execute = vi.fn(async () => ({ removed: 1 }));
+			const { model, requests } = scriptedSteps(
+				{
+					calls: [
+						{
+							toolCallId: "wipe",
+							toolName: CALL_TOOL,
+							input: { tool: "wiki__wipe", arguments: {} },
+						},
+					],
+				},
+				{},
+			);
+			const workflow = await loop.runWorkflow(started.chat.id, {
+				model,
+				connectorTools: wiki("allow", execute),
+			});
+			await workflow.completed();
+
+			expect(execute).toHaveBeenCalledOnce();
+			expect(toolResultFor(requests[1], "wipe")).toEqual({
+				type: "json",
+				value: { removed: 1 },
+			});
+			const details = await chatsAs(adminId).get(started.chat.id);
+			expect(details.messages[0]?.reactions ?? []).toEqual([]);
+			expect(details.messages).toMatchObject([
+				{ author: { kind: "member" } },
+				{
+					author: { kind: "bot", id: botId },
+					status: "complete",
+					content: "",
+					parts: [{ type: "tool_call", tool: "wiki__wipe", status: "completed" }],
+				},
+			]);
+			expect(deliveredEvents()).toContainEqual(
+				expect.objectContaining({ type: "turn.completed", chatId: started.chat.id }),
+			);
 		});
 	});
 

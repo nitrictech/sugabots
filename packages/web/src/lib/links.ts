@@ -264,8 +264,8 @@ function botChatLink(bot: BotRef, chatId: string, search: ChatLinkSearch) {
 }
 
 /**
- * A bot's chat by its chat's id alone, for a caller that does not know
- * which bot it belongs to; the route finds the bot and goes on to its address.
+ * A chat by its id alone, for a caller that does not know where it belongs;
+ * the route finds its project or bot and goes on to its address.
  */
 export function chatByIdLink(chatId: string, search: ChatLinkSearch = {}) {
 	return linkOptions({

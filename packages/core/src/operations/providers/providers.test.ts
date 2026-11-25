@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import type { NewModelProvider } from "@sugabots/contracts";
-import { Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { unique } from "../../authentication/seed.test-support.ts";
 import { closeDatabase } from "../../database/testing.ts";
@@ -14,6 +13,7 @@ import {
 	type World,
 } from "../../proofs/world.test-support.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../../providers/network/egress.ts";
+import { unimplemented } from "../../testing.ts";
 import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
@@ -40,9 +40,14 @@ describe("the providers operations, for each kind of principal", () => {
 		world = await buildWorld();
 		a = world.a;
 		call = await servedOperations({
-			egress: Layer.succeed(Egress.Service, {
+			egress: unimplemented(Egress.Service, {
 				providers: { for: () => async () => Response.json({ data: [] }) },
-				validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork: true })),
+				validateProviderUrl: urlValidation(
+					createEgressUrlValidator({
+						allowPrivateNetwork: true,
+						lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+					}),
+				),
 				oauth: async () => new Response(null, { status: 503 }),
 				webFetch: async () => new Response(null, { status: 503 }),
 			}),

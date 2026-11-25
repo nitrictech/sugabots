@@ -567,6 +567,15 @@ export const messageSchema = Schema.Struct({
 	parts: Schema.mutable(Schema.Array(messagePartSchema)),
 	thinking: Schema.optional(Schema.Array(stepThinkingSchema)),
 	content: Schema.String,
+	/**
+	 * Which execution of its turn a bot's reply is as of. While it is written,
+	 * the one that wrote its text and thinking so far, once one has begun a
+	 * step: a turn resumed elsewhere writes its step again, so a client merges
+	 * a delta only into text its own execution wrote. Once it has ended, the
+	 * one that ended it: a turn that runs again reopens its reply under a
+	 * newer one, whose writing replaces it.
+	 */
+	execution: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 	/** Why a `failed` reply failed, in the provider's words where it had any. */
 	error: Schema.optional(Schema.String),
 	/** Set on an automation run's result, posted in the automation's feed when the run completed. */

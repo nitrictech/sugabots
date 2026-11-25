@@ -15,7 +15,7 @@ import {
 import { ProviderLogo } from "@sugabots/provider-logos";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { AudioLines, Brain, Eye, Image, Pencil, SmilePlus, Star, Wrench, X } from "lucide-react";
+import { AudioLines, Brain, Eye, Image, Pencil, SmilePlus, Star, Wrench } from "lucide-react";
 import {
 	type CSSProperties,
 	type FormEvent,
@@ -36,7 +36,7 @@ import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { BotColourPicker, EyesGlyph, ShapeGlyph } from "@/shell/AvatarPicker.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { BACK_BUTTON, BackChevron } from "@/ui/back-button.tsx";
+import { BackButton, BackChevron } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
@@ -192,7 +192,7 @@ export function NewBotDialog({ onCreated }: { onCreated: (bot: Bot) => Promise<v
 								autoComplete="off"
 								// biome-ignore lint/a11y/noAutofocus: naming the bot is the one thing the dialog cannot guess.
 								autoFocus
-								className="mt-4 w-full rounded-xl border border-transparent bg-transparent px-3 py-2 text-center font-semibold text-xl text-foreground outline-none transition-colors placeholder:text-subtle-foreground hover:border-border-strong hover:bg-chip"
+								className="mt-4 w-full rounded-xl border border-transparent bg-transparent px-3 py-2 text-center font-semibold text-xl text-foreground focus-ring transition-colors placeholder:text-subtle-foreground hover:border-border-strong hover:bg-chip focus-visible:border-border-strong focus-visible:bg-chip"
 							/>
 							<div className="grid flex-1 place-items-center">
 								<CreationFace avatar={avatar} />
@@ -281,18 +281,9 @@ function PhoneNewBot({
 			>
 				<span className="flex justify-self-start">
 					{customising ? (
-						<button
-							type="button"
-							aria-label="Back"
-							onClick={() => onCustomise(false)}
-							className={BACK_BUTTON}
-						>
-							<BackChevron />
-						</button>
+						<BackButton onClick={() => onCustomise(false)} />
 					) : (
-						<DialogClose aria-label="Close" className={BACK_BUTTON}>
-							<X aria-hidden size={20} strokeWidth={2.25} />
-						</DialogClose>
+						<CloseButton render={<DialogClose />} />
 					)}
 				</span>
 				<span className="font-semibold text-base text-foreground">

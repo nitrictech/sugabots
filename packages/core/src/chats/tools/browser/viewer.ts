@@ -82,7 +82,7 @@ interface OpenedComputer {
  * Sugabots to answer with on their behalf: they never see it.
  */
 export interface OpenDesktop {
-	readonly endpoint: Computers.Endpoint;
+	readonly endpoint: Pick<Computers.Endpoint, "url" | "headers">;
 	readonly password: string;
 	/** Whether the member's clicks and keys reach the desktop. */
 	readonly control: boolean;

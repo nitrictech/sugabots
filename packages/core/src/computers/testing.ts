@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { userText } from "@sugabots/errors";
 import { Effect, Layer } from "effect";
 import { query } from "../database/database.ts";
 import { computer } from "../database/schema.ts";
@@ -19,6 +20,11 @@ export const noComputers = Layer.mergeAll(
 	unimplemented(ComputerSignIn.Service, {}),
 	unimplemented(Egress.Service, {}),
 );
+
+export const localComputerEgress = unimplemented(Egress.Service, {
+	providers: { for: () => fetch },
+	validateProviderUrl: () => Effect.void,
+});
 
 /**
  * Records the project's first computer, made by the provider, in a
@@ -89,28 +95,66 @@ export interface HeldComputer {
 }
 
 /**
- * Holds the creations that start while it is held, until `release`, so a case
- * can act while a provider is part-way through making a computer.
+ * Holds the calls of one kind that start while it is held, until `release`,
+ * so a case can act while a provider is part-way through one.
  */
-export interface CreationHold {
-	/** Resolves once `count` creations have started and are held. */
+export interface ProviderHold {
+	/** Resolves once `count` calls have started and are held. */
 	readonly started: (count: number) => Promise<void>;
 	readonly release: () => void;
 }
 
-interface HeldCreations extends PromiseWithResolvers<void> {
+interface HeldCalls extends PromiseWithResolvers<void> {
 	started: number;
 	onStart: Array<() => void>;
 }
 
+/** Holds calls until released, as {@link ProviderHold} describes, and makes the calls that wait on it. */
+function holdCalls(onRelease: () => void) {
+	const held: HeldCalls = { started: 0, onStart: [], ...Promise.withResolvers<void>() };
+	const hold: ProviderHold = {
+		started: (count) =>
+			new Promise<void>((resolve) => {
+				const check = () => {
+					if (held.started >= count) resolve();
+				};
+				held.onStart.push(check);
+				check();
+			}),
+		release: () => {
+			onRelease();
+			held.resolve();
+		},
+	};
+	const wait = Effect.promise(() => {
+		held.started += 1;
+		for (const check of held.onStart) check();
+		return held.promise;
+	});
+	return { hold, wait };
+}
+
+/** E2B Cloud, which E2B access reaches when it gives no endpoints of its own. */
+const E2B_CLOUD = "e2b-cloud";
+
+/** Which server `access` reaches: the OpenSandbox server's address, or E2B's API address. */
+function endpointOf(access: Computers.ProviderAccess) {
+	return access.provider === "opensandbox"
+		? access.baseUrl
+		: (access.endpoints?.apiUrl ?? E2B_CLOUD);
+}
+
 /**
  * A computer provider that keeps its computers in memory, for tests of what
- * is decided above a provider: leases, sleeping, upgrades. The provider
- * contract is kept: opening a computer that is asleep resumes it, a computer
- * that is gone is missing, and destroying one twice is fine. Its file and
- * port calls die; commands succeed with no output unless the case says
- * otherwise with `answerCommandsWith`, and downloading a file nobody uploaded
- * gives its own path as text.
+ * is decided above a provider: leases, sleeping, upgrades. Each endpoint (see
+ * {@link endpointOf}) keeps its own computers, so one reached at the wrong
+ * endpoint is missing there. The provider contract is kept: opening a
+ * computer that is asleep resumes it, a computer that is gone is missing, and
+ * destroying one twice is fine. Its file and port calls die, but for
+ * uploading a file and downloading one: one uploaded comes back as it was,
+ * and any other gives what {@link serveDownloadsAt} set for its endpoint, or
+ * fails as missing. Commands succeed with no output unless the case says
+ * otherwise with `answerCommandsWith`.
  */
 export function inMemoryComputers(
 	options: { sleepKeeps?: Computers.Capabilities["sleepKeeps"]; workKeptApart?: boolean } = {},
@@ -120,17 +164,32 @@ export function inMemoryComputers(
 		networks: Network[];
 		stoppedForGood: boolean;
 	};
-	const held = new Map<Computers.ComputerId, Held>();
+	const inventories = new Map<string, Map<Computers.ComputerId, Held>>();
+	const inventoryAt = (endpoint: string) => {
+		let inventory = inventories.get(endpoint);
+		if (!inventory) {
+			inventory = new Map();
+			inventories.set(endpoint, inventory);
+		}
+		return inventory;
+	};
+	const downloads = new Map<string, Uint8Array>();
 	const networkWaiters = new Map<Computers.ComputerId, Array<(network: Network) => void>>();
 	let created = 0;
-	let creations: HeldCreations | undefined;
+	let creationHold: Effect.Effect<void> | undefined;
+	const openingHolds = new Map<Computers.ComputerId, Effect.Effect<void>>();
 	let answerCommand = (_computerId: Computers.ComputerId) => 0;
+	let destroyFailures = 0;
 	const missing = (id: Computers.ComputerId) =>
 		new Computers.Missing({ provider: "opensandbox", computerId: id });
 	const unsupported = (call: string) => () =>
 		Effect.die(new Error(`inMemoryComputers has no ${call}`));
 
-	const computerFor = (id: Computers.ComputerId): Computers.Computer => ({
+	const computerFor = (
+		id: Computers.ComputerId,
+		endpoint: string,
+		held: Map<Computers.ComputerId, Held>,
+	): Computers.Computer => ({
 		id,
 		exec: () =>
 			Effect.sync(() => {
@@ -139,8 +198,12 @@ export function inMemoryComputers(
 			}),
 		readFile: unsupported("readFile"),
 		writeFile: unsupported("writeFile"),
-		downloadFile: (path) =>
-			Effect.sync(() => held.get(id)?.uploads.get(path) ?? new TextEncoder().encode(path)),
+		downloadFile: (path) => {
+			const content = held.get(id)?.uploads.get(path) ?? downloads.get(endpoint);
+			return content
+				? Effect.succeed(content)
+				: Effect.fail(new Computers.FileFailed({ path, reason: userText`No such file` }));
+		},
 		uploadFile: (path, content) => Effect.sync(() => void held.get(id)?.uploads.set(path, content)),
 		endpoint: unsupported("endpoint"),
 		setNetwork: (network) =>
@@ -151,94 +214,119 @@ export function inMemoryComputers(
 			}),
 	});
 
-	const provider = (access: Computers.ProviderAccess): Computers.Provider => ({
-		capabilities: {
-			sleepKeeps: options.sleepKeeps ?? "disk",
-			credentials: "host-and-path",
-			blocksHosts: true,
-		},
-		networkMode: access.networkMode,
-		check: Effect.void,
-		create: (spec) =>
-			Effect.gen(function* () {
-				if (creations) {
-					const current = creations;
-					yield* Effect.promise(() => {
-						current.started += 1;
-						for (const check of current.onStart) check();
-						return current.promise;
+	const provider = (access: Computers.ProviderAccess): Computers.Provider => {
+		const endpoint = endpointOf(access);
+		const held = inventoryAt(endpoint);
+		return {
+			capabilities: {
+				sleepKeeps: options.sleepKeeps ?? "disk",
+				credentials: "host-and-path",
+				blocksHosts: true,
+			},
+			networkMode: access.networkMode,
+			check: Effect.void,
+			create: (spec) =>
+				Effect.gen(function* () {
+					if (creationHold) yield* creationHold;
+					created += 1;
+					const id = Computers.ComputerId(`in-memory-${created}`);
+					held.set(id, {
+						id,
+						state: "running",
+						madeFrom: access.provider === "e2b" ? access.template : access.image,
+						spec,
+						networks: [],
+						uploads: new Map(),
+						stoppedForGood: false,
 					});
-				}
-				created += 1;
-				const id = Computers.ComputerId(`in-memory-${created}`);
-				held.set(id, {
-					id,
-					state: "running",
-					madeFrom: access.provider === "e2b" ? access.template : access.image,
-					spec,
-					networks: [],
-					uploads: new Map(),
-					stoppedForGood: false,
-				});
-				return computerFor(id);
-			}),
-		open: (id) =>
-			Effect.gen(function* () {
-				const found = held.get(id);
-				if (!found) return yield* missing(id);
-				if (found.stoppedForGood) {
-					return yield* new Computers.Stopped({ provider: access.provider, computerId: id });
-				}
-				const resumed = found.state === "asleep";
-				found.state = "running";
-				return { computer: computerFor(id), resumed };
-			}),
-		info: (id) =>
-			Effect.gen(function* () {
-				const found = held.get(id);
-				if (!found) return yield* missing(id);
-				return { state: found.state, workKeptApart: options.workKeptApart ?? false };
-			}),
-		sleep: (id) =>
-			Effect.gen(function* () {
-				const found = held.get(id);
-				if (!found) return yield* missing(id);
-				found.state = "asleep";
-			}),
-		destroy: (id) => Effect.sync(() => void held.delete(id)),
-	});
+					return computerFor(id, endpoint, held);
+				}),
+			open: (id) =>
+				Effect.gen(function* () {
+					const opening = openingHolds.get(id);
+					if (opening) yield* opening;
+					const found = held.get(id);
+					if (!found) return yield* missing(id);
+					if (found.stoppedForGood) {
+						return yield* new Computers.Stopped({ provider: access.provider, computerId: id });
+					}
+					const resumed = found.state === "asleep";
+					found.state = "running";
+					return { computer: computerFor(id, endpoint, held), resumed };
+				}),
+			info: (id) =>
+				Effect.gen(function* () {
+					const found = held.get(id);
+					if (!found) return yield* missing(id);
+					return { state: found.state, workKeptApart: options.workKeptApart ?? false };
+				}),
+			sleep: (id) =>
+				Effect.gen(function* () {
+					const found = held.get(id);
+					if (!found) return yield* missing(id);
+					found.state = "asleep";
+				}),
+			destroy: (id) =>
+				destroyFailures > 0
+					? Effect.suspend(() => {
+							destroyFailures -= 1;
+							return Effect.fail(
+								new Computers.Unavailable({ provider: "opensandbox", cause: "refused" }),
+							);
+						})
+					: Effect.sync(() => void held.delete(id)),
+			labelled: (key, value) =>
+				Effect.sync(() =>
+					[...held.values()].filter((one) => one.spec.labels[key] === value).map(({ id }) => id),
+				),
+		};
+	};
 
 	return {
 		layer: Layer.succeed(Computers.Service, { forAccess: provider }),
-		/** The computers the provider has now, oldest first. */
-		computers: (): readonly HeldComputer[] => [...held.values()],
+		/** The computers every endpoint has now, oldest first. */
+		computers: (): readonly HeldComputer[] =>
+			[...inventories.values()]
+				.flatMap((inventory) => [...inventory.values()])
+				.toSorted((a, b) => madeOrder(a.id) - madeOrder(b.id)),
+		/** The computers the endpoint `endpoint` has now, oldest first. */
+		computersAt: (endpoint: string): readonly HeldComputer[] => [...inventoryAt(endpoint).values()],
+		/** Every file downloaded from a computer at `endpoint` from now on, unless uploaded to it, has `content`. */
+		serveDownloadsAt: (endpoint: string, content: Uint8Array) => {
+			downloads.set(endpoint, content);
+		},
 		/** The computer stops without being put to sleep, as when its host shuts down, and can't be opened. */
 		stopForGood: (id: Computers.ComputerId) => {
-			const found = held.get(id);
-			if (found) found.stoppedForGood = true;
+			for (const inventory of inventories.values()) {
+				const found = inventory.get(id);
+				if (found) found.stoppedForGood = true;
+			}
 		},
 		/** Holds every creation from now on until released. */
-		holdCreations: (): CreationHold => {
-			const current: HeldCreations = { started: 0, onStart: [], ...Promise.withResolvers<void>() };
-			creations = current;
-			return {
-				started: (count) =>
-					new Promise<void>((resolve) => {
-						const check = () => {
-							if (current.started >= count) resolve();
-						};
-						current.onStart.push(check);
-						check();
-					}),
-				release: () => {
-					creations = undefined;
-					current.resolve();
-				},
-			};
+		holdCreations: (): ProviderHold => {
+			const { hold, wait } = holdCalls(() => {
+				if (creationHold === wait) creationHold = undefined;
+			});
+			creationHold = wait;
+			return hold;
+		},
+		/** Holds every opening of the computer `id` from now on until released. */
+		holdOpening: (id: Computers.ComputerId): ProviderHold => {
+			const { hold, wait } = holdCalls(() => {
+				if (openingHolds.get(id) === wait) openingHolds.delete(id);
+			});
+			openingHolds.set(id, wait);
+			return hold;
+		},
+		/** The next `count` calls to destroy a computer fail, as when the provider doesn't answer. */
+		failDestroys: (count: number) => {
+			destroyFailures = count;
 		},
 		/** The provider loses the computer, as when its operator deletes it. */
-		lose: (id: Computers.ComputerId) => void held.delete(id),
-		/** How many computers the provider has made, those it no longer has included. */
+		lose: (id: Computers.ComputerId) => {
+			for (const inventory of inventories.values()) inventory.delete(id);
+		},
+		/** How many computers the provider has made, at every endpoint, those it no longer has included. */
 		made: () => created,
 		/** The exit code of each command run in the computer with this id from now on; success by default. */
 		answerCommandsWith: (answer: (computerId: Computers.ComputerId) => number) => {
@@ -250,4 +338,9 @@ export function inMemoryComputers(
 				networkWaiters.set(id, [...(networkWaiters.get(id) ?? []), resolve]);
 			}),
 	};
+}
+
+/** The order {@link inMemoryComputers} made the computer `id` in, from its id. */
+function madeOrder(id: Computers.ComputerId) {
+	return Number(id.slice("in-memory-".length));
 }

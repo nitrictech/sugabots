@@ -8,6 +8,7 @@ import {
 	PRESENCE_LIFETIME_MS,
 	type Presence,
 } from "@sugabots/contracts";
+import { isApiFailure } from "@sugabots/sdk";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { Effect, Schema } from "effect";
@@ -15,6 +16,7 @@ import { useEffect, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { MUTE_LENGTHS, type MuteLength } from "@/lib/notification-choices.ts";
+import { useSession } from "@/lib/session.ts";
 import { refreshEveryWorkspaceApprovals } from "./chats.ts";
 
 /*
@@ -215,6 +217,7 @@ function writeTurnedOn(on: boolean) {
 export function useNotificationsInThisBrowser() {
 	const router = useRouter();
 	const queries = useQueryClient();
+	const { refresh: refreshSession } = useSession();
 
 	useEffect(() => {
 		const stream = client.events.me();
@@ -224,7 +227,12 @@ export function useNotificationsInThisBrowser() {
 				const parsed = Schema.decodeUnknownResult(memberUpdateEventSchema)(event);
 				if (parsed._tag === "Failure") continue;
 				const update = parsed.success;
-				if (update.type === "approvals.changed") {
+				// Before the stream started, or across a reset, approvals may have changed unheard.
+				if (
+					update.type === "approvals.changed" ||
+					update.type === "ready" ||
+					update.type === "reset"
+				) {
 					void refreshEveryWorkspaceApprovals(queries);
 				} else if (update.type === "presence") {
 					rememberLooking(looking, update, Date.now());
@@ -239,10 +247,15 @@ export function useNotificationsInThisBrowser() {
 					showFromThisTab(update, (path) => router.history.push(path));
 				}
 			}
-			// A stream that ends or fails only costs the notifications it would have carried.
-		})().catch(() => {});
+			// A stream that ends or fails only costs the notifications it would have
+			// carried, unless it ended with the member's session, which is asked about again.
+		})().catch((refusal) => {
+			if (isApiFailure(refusal) && refusal._tag === "Unauthorized") {
+				void refreshSession().catch(() => {});
+			}
+		});
 		return () => stream.close();
-	}, [queries, router]);
+	}, [queries, router, refreshSession]);
 }
 
 /**

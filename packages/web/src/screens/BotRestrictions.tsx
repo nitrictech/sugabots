@@ -73,7 +73,9 @@ function Restrictions({
 		<Page title={title} parent={<BotCrumb bot={bot} />} place={{ kind: "owner", owner: { bot } }}>
 			<SettingsPage>
 				{error != null && <Alert>{failureMessage(error)}</Alert>}
-				<SettingsGroup label="Switch off">{children}</SettingsGroup>
+				<SettingsGroup label="Switch off" headingLevel={2}>
+					{children}
+				</SettingsGroup>
 			</SettingsPage>
 		</Page>
 	);

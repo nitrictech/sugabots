@@ -5,7 +5,7 @@ import type {
 	WorkspaceApprovals,
 } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
-import { expect } from "storybook/test";
+import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.test-support.ts";
 import { appHandlers, StoryApp, storyChatFor, storyWorkspace } from "@/story-app.test-support.tsx";
@@ -70,7 +70,28 @@ const answerable = request("01", "awaiting_approval", pending);
 const stopped = request("02", "failed", pending);
 const answered: AnsweredApproval = { ...request("03", "failed", denied), answer: denied };
 
-const approvals: WorkspaceApprovals = { waiting: [answerable, stopped], answered: [answered] };
+const hostApproval = request("04", "awaiting_approval", pending);
+const outside = {
+	...hostApproval,
+	projectName: revenue.name,
+	chatId: null,
+	rootChatId: null,
+	call: {
+		...hostApproval.call,
+		tool: "request_host",
+		input: { host: "api.acme.example" },
+		approval: { ...pending, approvers: "computer-managers" },
+	},
+} satisfies ApprovalRequest;
+const withoutFields = {
+	...outside,
+	call: { ...outside.call, id: "0199a3a0-0000-7000-8000-000000000805", input: null },
+};
+
+const approvals: WorkspaceApprovals = {
+	waiting: [answerable, stopped, outside, withoutFields],
+	answered: [answered],
+};
 
 const meta = preview.meta({
 	title: "Views/ApprovalPage",
@@ -112,6 +133,31 @@ export const NoLongerWaiting = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText(/No longer waiting/, undefined)).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
+	},
+});
+
+/** Computer managers can see the fixed host when they cannot reach the chat. */
+export const OutsideTheChat = meta.story({
+	render: at(outside.call.id),
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByText("api.acme.example")).toBeVisible();
+		await expect(
+			canvas.getByText(/Growth Desk wants the project's computer to reach a new host/),
+		).toBeVisible();
+		await expect(canvas.queryByRole("link", { name: "Open chat" })).toBeNull();
+	},
+});
+
+/** Some approvals have no fields to show outside the chat. */
+export const OutsideTheChatWithoutFields = meta.story({
+	render: at(withoutFields.call.id),
+	play: async ({ canvas }) => {
+		const request = await canvas.findByRole("article", { name: "Approval request: Request host" });
+		const approval = within(request);
+		await expect(request.querySelector("dl")).toBeNull();
+		await expect(approval.queryByRole("link", { name: "Open chat" })).toBeNull();
+		await expect(approval.getByRole("button", { name: "Allow: Request host" })).toBeEnabled();
+		await expect(approval.getByRole("button", { name: "Deny: Request host" })).toBeEnabled();
 	},
 });
 

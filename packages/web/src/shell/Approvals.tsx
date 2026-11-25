@@ -9,6 +9,7 @@ import { PendingApprovalAnswer, RequestChatLink } from "@/screens/ApprovalPage.t
 import { FoldedRequest } from "@/screens/ToolApprovalCard.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ListTime, Page } from "@/shell/Page.tsx";
+import { ConnectorMark } from "@/ui/connector-mark.tsx";
 
 /** How many answered requests show before Show older. */
 const ANSWERED_SHOWN = 10;
@@ -126,7 +127,7 @@ function approvalLink(request: ApprovalRequest) {
  */
 function WaitingCard({ request }: { request: ApprovalRequest }) {
 	const { bot, call } = request;
-	const { action } = useApprovalToolSource(request);
+	const { action, hostRequest } = useApprovalToolSource(request);
 	const { project, askedIn: asked } = useAskedIn(request);
 	const review = useReviewToolCall(request.chatId);
 	return (
@@ -138,13 +139,17 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 				{...approvalLink(request)}
 				className="focus-ring -m-1 flex items-start gap-3 rounded-lg p-1 max-md:items-center"
 			>
-				<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={24} />
+				{hostRequest ? (
+					<ConnectorMark name={action} icon={hostRequest.icon} size="md" />
+				) : (
+					<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={24} />
+				)}
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 					<h3 className="m-0 font-semibold text-sm text-foreground max-md:font-medium max-md:text-base">
 						{action}
 					</h3>
 					<span className="text-subtle-foreground text-xs">
-						{bot.name} asked {asked}
+						{hostRequest ? `${hostRequest.description} · ${asked}` : `${bot.name} asked ${asked}`}
 					</span>
 				</div>
 				<ChevronRight
@@ -173,18 +178,22 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 
 /** A request already answered: which bot, what it would have done, which way it went, and when. */
 function ResolvedRow({ request }: { request: AnsweredApproval }) {
-	const { action } = useApprovalToolSource(request);
+	const { action, hostRequest } = useApprovalToolSource(request);
 	const { bot, answer } = request;
 	return (
 		<Link
 			{...approvalLink(request)}
 			className="focus-ring flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition-colors hover:bg-message-hover max-md:min-h-14 max-md:px-1 max-md:text-sm max-md:active:bg-row-selected"
 		>
-			<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={20} />
+			{hostRequest ? (
+				<ConnectorMark name={action} icon={hostRequest.icon} size="md" />
+			) : (
+				<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={20} />
+			)}
 			{/* On a phone, what it would have done over which bot, as two lines. */}
 			<span className="min-w-0 flex-1 truncate text-muted-foreground max-md:flex max-md:flex-col max-md:gap-0.5">
 				<span className="text-foreground max-md:order-2 max-md:truncate max-md:text-xs max-md:text-subtle-foreground">
-					{bot.name}
+					{hostRequest?.description ?? bot.name}
 				</span>{" "}
 				<span className="max-md:truncate max-md:text-foreground">{action}</span>
 			</span>

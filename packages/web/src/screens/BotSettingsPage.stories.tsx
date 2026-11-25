@@ -1,4 +1,4 @@
-import type { Automation, Bot, ConnectorTool } from "@sugabots/contracts";
+import type { Automation, ConnectorTool } from "@sugabots/contracts";
 import type { TestConnector } from "@sugabots/contracts/testing";
 import { automationTriggers, type TestAutomationTrigger } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
@@ -11,6 +11,7 @@ import {
 	StoryApp,
 	storyModel,
 } from "../story-app.test-support.tsx";
+import { personalBot } from "./BotRestrictions.test-support.ts";
 
 /*
  * A bot's settings, a page of its own beside its chats: its contact card,
@@ -288,33 +289,6 @@ export const Editor = meta.story({
 		await expect(canvas.queryByRole("button", { name: "New bot" })).toBeNull();
 	},
 });
-
-const personalBot: Bot = {
-	...growthDesk,
-	id: "0199a3a0-0000-7000-8000-000000000181",
-	defaultProjectId: "0199a3a0-0000-7000-8000-000000000281",
-	name: "Drafting Desk",
-	handle: "drafting-desk",
-	visibility: "personal",
-	pinned: false,
-	permissions: {
-		update: false,
-		delete: true,
-		talk: false,
-		resources: {
-			openSettings: true,
-			readHistory: false,
-			resolveChats: false,
-			deleteFiles: false,
-			manageConnectors: false,
-			manageComputer: false,
-			useDesktop: false,
-			manageAutomations: false,
-			pauseAutomations: true,
-			runAutomations: false,
-		},
-	},
-};
 
 /** An admin opens another member's personal bot from the directory to reach Delete. */
 export const AdminOnPersonalBot = meta.story({

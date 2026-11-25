@@ -110,7 +110,7 @@ export function ComputerSheet({
 								to="./settings/$section"
 								params={{ section: "computers" }}
 								state={backToChat}
-								className={buttonStyles({ className: "h-11 w-full text-sm" })}
+								className={cn(buttonStyles(), "h-11 w-full")}
 							>
 								Set up computers
 							</Link>

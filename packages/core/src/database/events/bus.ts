@@ -117,12 +117,7 @@ export function inProcess({
 					.broadcast(stream, delivery)
 					.catch((cause) => log("Relaying an event to other processes failed", cause))
 		: async () => {};
-	const listening = relay
-		? relay.listen(deliver).catch((cause) => {
-				log("Listening for other processes' events failed; live updates are local only", cause);
-				return async () => {};
-			})
-		: Promise.resolve(async () => {});
+	const listening = relay ? superviseListening(relay, deliver, log) : undefined;
 
 	/**
 	 * One publish at a time per stream.
@@ -196,8 +191,7 @@ export function inProcess({
 					subscriber.wake?.();
 				}
 			}
-			const stop = await listening;
-			await stop();
+			await listening?.stop();
 		},
 
 		async *subscribe(stream, { since, signal } = {}) {
@@ -263,6 +257,67 @@ export function inProcess({
 					streams.delete(stream);
 				}
 			}
+		},
+	};
+}
+
+/** The wait before the first retry of listening to other processes, doubled after each failure. */
+const FIRST_LISTEN_RETRY_MS = 1000;
+const MAX_LISTEN_RETRY_MS = 60_000;
+
+/**
+ * Listens to other processes through `relay`, retrying a start that fails,
+ * its probe included, with a doubling wait, until it starts or `stop` is
+ * called. A failure is often brief, such as Postgres restarting while the
+ * process starts, so the process serves its own events meanwhile and joins
+ * the others once it can, rather than staying alone until it restarts. Once
+ * listening, the relay replaces a dropped connection itself.
+ */
+function superviseListening(
+	relay: EventRelay,
+	receive: (stream: EventStream, delivery: Delivery) => void,
+	log: (message: string, cause: unknown) => void,
+): { stop(): Promise<void> } {
+	let stopped = false;
+	let stopListening: (() => Promise<void>) | undefined;
+	let cancelWait = () => {};
+
+	const waitToRetry = (milliseconds: number) =>
+		new Promise<void>((resolve) => {
+			const timer = setTimeout(resolve, milliseconds);
+			cancelWait = () => {
+				clearTimeout(timer);
+				resolve();
+			};
+		});
+
+	const starting = (async () => {
+		for (
+			let wait = FIRST_LISTEN_RETRY_MS;
+			!stopped;
+			wait = Math.min(wait * 2, MAX_LISTEN_RETRY_MS)
+		) {
+			try {
+				stopListening = await relay.listen(receive);
+				return;
+			} catch (cause) {
+				// Stopped while this start was under way: there is nothing to wait for.
+				if (stopped) return;
+				log(
+					`Listening for other processes' events failed; live updates are local only until it starts. Trying again in ${wait / 1000} s`,
+					cause,
+				);
+				await waitToRetry(wait);
+			}
+		}
+	})();
+
+	return {
+		async stop() {
+			stopped = true;
+			cancelWait();
+			await starting;
+			await stopListening?.();
 		},
 	};
 }

@@ -164,7 +164,7 @@ export const make = Effect.gen(function* () {
 			reachChanged(reach.workspace, { kind: "project", projectId: reach.project.value }),
 		]);
 
-	const takeOut = <P, J>(reach: ReachesProject<P, J>, memberId: string) =>
+	const removeProjectMember = <P, J>(reach: ReachesProject<P, J>, memberId: string) =>
 		Effect.gen(function* () {
 			yield* Transaction;
 			const outcome = yield* store.removeMember(reach.workspace, reach.project.value, memberId);
@@ -276,10 +276,10 @@ export const make = Effect.gen(function* () {
 			),
 
 		removeMember: (canChange, member) =>
-			operation("removeMember", takeOut(canChange.reach, member.value)),
+			operation("removeMember", removeProjectMember(canChange.reach, member.value)),
 
 		leave: (canLeave) =>
-			operation("leave", takeOut(canLeave.reach, canLeave.member.actor.memberId)),
+			operation("leave", removeProjectMember(canLeave.reach, canLeave.member.actor.memberId)),
 
 		join: (canJoin, approved) =>
 			operation(

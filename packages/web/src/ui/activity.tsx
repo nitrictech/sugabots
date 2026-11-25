@@ -33,7 +33,7 @@ function ActivityLine({
 			data-slot="activity-line"
 			data-status={status}
 			className={cn(
-				"flex w-fit max-w-full min-w-0 items-center gap-2 text-sm text-muted-foreground transition-colors in-[a,button]:cursor-pointer in-[a:hover,button:hover]:text-foreground data-[status=error]:text-destructive data-[status=error]:in-[a:hover,button:hover]:text-destructive data-[status=running]:*:data-[slot=activity-title]:shimmer",
+				"flex w-fit max-w-full min-w-0 items-center gap-2 text-sm text-muted-foreground transition-colors in-[a,button]:cursor-pointer in-[a:hover,button:hover]:text-foreground in-[a:focus-visible,button:focus-visible]:text-foreground data-[status=error]:text-destructive-text data-[status=error]:in-[a:hover,button:hover]:text-destructive-text data-[status=error]:in-[a:focus-visible,button:focus-visible]:text-destructive-text data-[status=running]:*:data-[slot=activity-title]:shimmer",
 				className,
 			)}
 			{...props}
@@ -100,7 +100,7 @@ function ActivityCollapsibleTrigger({ className, children, ...props }: Collapsib
 		<Collapsible.Trigger
 			data-slot="activity-collapsible-trigger"
 			className={cn(
-				"group/activity-collapsible-trigger flex w-fit max-w-full min-w-0 cursor-pointer items-center gap-1 rounded-md text-left text-muted-foreground focus-ring transition-colors hover:text-foreground has-[[data-status=error]]:text-destructive",
+				"group/activity-collapsible-trigger flex w-fit max-w-full min-w-0 cursor-pointer items-center gap-1 rounded-md text-left text-muted-foreground focus-ring transition-colors hover:text-foreground has-[[data-status=error]]:text-destructive-text",
 				className,
 			)}
 			{...props}

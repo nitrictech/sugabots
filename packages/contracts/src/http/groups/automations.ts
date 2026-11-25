@@ -20,7 +20,7 @@ import {
 } from "../../automations.ts";
 import { uuidOrStringSchema, uuidSchema } from "../../uuid.ts";
 import { BadRequest, Conflict, refused, Unauthorized } from "../errors.ts";
-import { Session } from "../middleware.ts";
+import { AUTOMATION_WEBHOOK_MAX_BODY_BYTES, MaxBodyBytes, Session } from "../middleware.ts";
 
 /** A project's automations: a bot's own are its default project's. */
 const inProject = { projectId: uuidSchema };
@@ -120,5 +120,5 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 		payload: Schema.Json,
 		success: webhookAnswers,
 		error: [BadRequest, Unauthorized, Conflict],
-	}),
+	}).annotate(MaxBodyBytes, AUTOMATION_WEBHOOK_MAX_BODY_BYTES),
 ) {}

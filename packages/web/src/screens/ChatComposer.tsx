@@ -442,7 +442,7 @@ export function ChatComposer({
 						type="submit"
 						aria-label={submitLabel}
 						disabled={held || sending || !canSend(value, attachedFiles)}
-						className="focus-ring order-4 ml-auto grid size-7.5 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-90"
+						className="focus-ring order-4 ml-auto grid size-7.5 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full motion-safe:animate-rise"
 					>
 						<ArrowUp size={16} strokeWidth={2.25} className="max-md:size-4.5" />
 					</button>

@@ -9,6 +9,7 @@ import {
 	boolean,
 	check,
 	primaryKey as compositePrimaryKey,
+	index,
 	jsonb,
 	pgTable,
 	text,
@@ -17,8 +18,9 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { chat } from "../chats/sql.ts";
-import { primaryKey, updatedStamp } from "../database/sql.ts";
+import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
 import { bot, member, project } from "../workspaces/sql.ts";
+import type { NotificationCause } from "./notifications.ts";
 
 const notificationLevel = (name: string) => text(name).$type<NotificationLevel>();
 
@@ -87,6 +89,10 @@ export const notificationOverride = pgTable(
 	],
 );
 
+/**
+ * Each notification sent to a member, once: recording it is what keeps it
+ * from going twice, and it is sent once that record commits.
+ */
 export const notificationDelivery = pgTable(
 	"notification_delivery",
 	{
@@ -98,6 +104,36 @@ export const notificationDelivery = pgTable(
 			.notNull()
 			.references(() => member.id, { onDelete: "cascade" }),
 		notification: jsonb("notification").$type<NotificationContent>().notNull(),
+		createdAt: stamp("created_at"),
+		/** When it went to the member's tabs; null until then, so one that didn't is sent again. */
+		sentAt: timestamp("sent_at", { withTimezone: true }),
 	},
-	(table) => [compositePrimaryKey({ columns: [table.chatId, table.deliveryId, table.memberId] })],
+	(table) => [
+		compositePrimaryKey({ columns: [table.chatId, table.deliveryId, table.memberId] }),
+		index("notification_delivery_unsent_idx")
+			.on(table.createdAt)
+			.where(sql`${table.sentAt} is null`),
+	],
+);
+
+/**
+ * A chat event's notifications, not yet all sent: written in the transaction
+ * of the change that causes them, so a process that stops after it commits
+ * leaves them to be sent, and deleted once they have been. `cause` is what
+ * the event says about whom to notify.
+ */
+export const pendingNotification = pgTable(
+	"pending_notification",
+	{
+		id: primaryKey(),
+		chatId: uuid("chat_id")
+			.notNull()
+			.references(() => chat.id, { onDelete: "cascade" }),
+		deliveryId: text("delivery_id").notNull(),
+		cause: jsonb("cause").$type<NotificationCause>().notNull(),
+		createdAt: stamp("created_at"),
+		/** When the sweep next sends it: once whoever wrote it has had time to, then after each try. */
+		dueAt: stamp("due_at"),
+	},
+	(table) => [index("pending_notification_due_idx").on(table.dueAt, table.id)],
 );

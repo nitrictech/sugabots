@@ -8,15 +8,9 @@ import { automation, message, type TurnStatus, turn } from "../database/schema.t
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import { defaultProjectOf } from "../workspaces/projects/project-reads.ts";
-import {
-	BOT_CACHES,
-	clearingOrder,
-	prepareDiskClearing,
-	SET_ASIDE_DIRECTORY,
-	type WorkFolders,
-} from "./computer-disk-clearing.ts";
+import { BOT_CACHES, prepareDiskClearing, SET_ASIDE_DIRECTORY } from "./computer-disk-clearing.ts";
 import { Computers } from "./computers.ts";
-import { removeWorkVolumes } from "./testing.ts";
+import { localComputerEgress, removeWorkVolumes } from "./testing.ts";
 
 const env = process.env;
 const SLOW = 180_000;
@@ -28,8 +22,11 @@ const NEVER_FULL = 1;
 const BACKLOG = 1_200;
 
 /** Clears `computer` of what may go, while its disk is at least `belowShare` full. */
-const freeDiskSpace = (computer: Computers.Computer, workspaceId: string, belowShare: number) =>
-	prepareDiskClearing(computer, workspaceId, belowShare).pipe(Effect.flatten);
+const freeDiskSpace = (
+	computer: Pick<Computers.Computer, "exec">,
+	workspaceId: string,
+	belowShare: number,
+) => prepareDiskClearing(computer, workspaceId, belowShare).pipe(Effect.flatten);
 
 describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against Postgres", () => {
 	let workspaceId: string;
@@ -46,8 +43,32 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 
 	const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
 
-	/** What may be cleared from the folders of the chats `chatIds` and the bots `botIds`, in the order it goes. */
-	const clearable = (folders: WorkFolders) => runOnPostgres(clearingOrder(workspaceId, folders));
+	/**
+	 * What a clearing of a full disk takes, in the order it goes, from a
+	 * computer whose work directory holds the folders of the chats `chatIds`
+	 * and the homes of the bots `botIds`, each with every cache a bot may
+	 * keep. The computer answers every command with all of those paths: as
+	 * the listing of its folders, and as what the clearing deleted.
+	 */
+	const clearable = async ({ chatIds, botIds }: { chatIds: string[]; botIds: string[] }) => {
+		const paths = [
+			...chatIds.map((chatId) => `${Computers.CHATS_DIRECTORY}/${chatId}`),
+			...botIds.flatMap((botId) => [
+				`${Computers.BOTS_DIRECTORY}/${botId}`,
+				...BOT_CACHES.map((cache) => `${Computers.BOTS_DIRECTORY}/${botId}/${cache}`),
+			]),
+		];
+		const holdingPaths: Pick<Computers.Computer, "exec"> = {
+			exec: () =>
+				Effect.succeed({
+					exitCode: 0,
+					stdout: { text: paths.join("\n"), truncated: false },
+					stderr: { text: "", truncated: false },
+				}),
+		};
+		const clearing = await runOnPostgres(freeDiskSpace(holdingPaths, workspaceId, ALWAYS_FULL));
+		return clearing.cleared;
+	};
 
 	async function aTurn(chatId: string, startedAt: Date, status: TurnStatus = "done") {
 		const [trigger] = await onDatabase((db) =>
@@ -199,7 +220,9 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 						size: COMPUTER_OPENSANDBOX_DEFAULT_SIZE,
 						networkMode: "allowed-hosts-only",
 					}),
-				).pipe(Effect.provide(Computers.layer.pipe(Layer.provide(Ids.layer)))),
+				).pipe(
+					Effect.provide(Computers.layer.pipe(Layer.provide([Ids.layer, localComputerEgress]))),
+				),
 			);
 			computer = await Effect.runPromise(
 				provider.create({

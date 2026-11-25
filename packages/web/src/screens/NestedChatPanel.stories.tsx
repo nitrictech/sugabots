@@ -1,88 +1,13 @@
 import type { ChatDetails, ListedAutomationDefinition } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { expect, within } from "storybook/test";
+import { expect, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
+import { SessionContext } from "@/lib/session.ts";
 import { growthDesk, linearHandler, revenue } from "@/shell/story-fixtures.test-support.ts";
+import { storyMember } from "@/story-app.test-support.tsx";
+import { automationRun, CHAT, RUN } from "./NestedChatPanel.test-support.ts";
 import { NestedChatPanel } from "./NestedChatPanel.tsx";
-
-const CHAT = "0199a3a0-0000-7000-8000-000000000401";
-const RUN = "0199a3a0-0000-7000-8000-000000000403";
-const runBot = {
-	kind: "bot" as const,
-	id: growthDesk.id,
-	name: growthDesk.name,
-	handle: growthDesk.handle,
-	color: growthDesk.color,
-	eyes: growthDesk.eyes,
-	shape: growthDesk.shape,
-};
-
-/** An automation run a webhook started, which posted its result in the chat. */
-function automationRun(failed: boolean): ChatDetails {
-	return {
-		chat: {
-			id: RUN,
-			workspaceId: revenue.workspaceId,
-			projectId: revenue.id,
-			botId: growthDesk.id,
-			rootChatId: CHAT,
-			kind: "run",
-			title: "Overnight outbound",
-			working: false,
-			resolvedAt: null,
-			createdAt: "2026-09-18T06:00:00.000Z",
-			updatedAt: "2026-09-18T06:02:00.000Z",
-		},
-		permissions: { approveToolCallsIn: [], approveComputerRequests: true, interruptTurns: [] },
-		participants: [runBot],
-		projectBots: [runBot],
-		membersReachingProject: [],
-		olderMessagesCursor: null,
-		queuedSince: null,
-		reads: [],
-		automationRun: {
-			id: "0199a3a0-0000-7000-8000-000000000404",
-			automationId: "0199a3a0-0000-7000-8000-000000000405",
-			workspaceId: revenue.workspaceId,
-			botId: growthDesk.id,
-			chatId: RUN,
-			rootChatId: CHAT,
-			automationName: "Overnight outbound",
-			instructions: "Queue the overnight leads and draft replies to anyone who answered.",
-			trigger: {
-				kind: "webhook",
-				receivedAt: "2026-09-18T06:00:00.000Z",
-				idempotencyKey: "crm-2026-09-18",
-				payload: { source: "crm", leads: 38 },
-			},
-			state: failed ? "failed" : "completed",
-			error: failed ? "HubSpot did not answer within 30 seconds." : null,
-			posted: !failed,
-			acceptedAt: "2026-09-18T06:00:00.000Z",
-			startedAt: "2026-09-18T06:00:01.000Z",
-			finishedAt: "2026-09-18T06:02:00.000Z",
-		},
-		messages: failed
-			? []
-			: [
-					{
-						id: "0199a3a0-0000-7000-8000-000000000415",
-						chatId: RUN,
-						author: runBot,
-						status: "complete",
-						parts: [
-							{
-								type: "text",
-								text: "Queued 38 leads. Six have replied; drafts are in the outbox.",
-							},
-						],
-						content: "Queued 38 leads. Six have replied; drafts are in the outbox.",
-						createdAt: "2026-09-18T06:02:00.000Z",
-					},
-				],
-	};
-}
 
 function Preview({ children, run }: { children: React.ReactNode; run: ChatDetails }) {
 	const [queryClient] = useState(() => {
@@ -138,7 +63,11 @@ function Preview({ children, run }: { children: React.ReactNode; run: ChatDetail
 		return client;
 	});
 	useEffect(() => () => queryClient.clear(), [queryClient]);
-	return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+	return (
+		<SessionContext value={{ member: storyMember, error: undefined, refresh: async () => {} }}>
+			<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+		</SessionContext>
+	);
 }
 
 const meta = preview.meta({
@@ -169,7 +98,7 @@ export const AutomationRun = meta.story({
 		).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "View webhook payload" }));
 		// The payload opens in a popover, outside the story's own element.
-		await expect(await within(document.body).findByText(/crm-2026-09-18/)).toBeVisible();
+		await waitFor(() => expect(within(document.body).getByText(/crm-2026-09-18/)).toBeVisible());
 	},
 });
 

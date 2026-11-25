@@ -246,7 +246,7 @@ export const make = Effect.gen(function* () {
 			);
 			const fence = holdTurnForToolWrite(executionFence(turn.turnId, turn.executionNumber));
 			const stepFiles: ResultFiles = {
-				write: (file) => files.write({ ...file, guard: fence }),
+				write: (file) => files.write({ ...file, fence }),
 			};
 			const recording = {
 				recorder,

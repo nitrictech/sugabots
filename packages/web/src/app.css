@@ -95,6 +95,7 @@
 	--primary-foreground: light-dark(#ffffff, #0a0a0a);
 	--primary-hover: light-dark(#26262a, #d4d4d8);
 	--switch-on: var(--primary);
+	--switch-thumb: light-dark(#ffffff, var(--subtle-foreground));
 	--primary-tint-border: light-dark(#a1a1aa, #52525b);
 	/*
 	 * `--ring` is a solid colour, because that is what a shadcn-registry
@@ -163,6 +164,8 @@
 
 	/* Separation is by colour and hairline, not shadow; only floating things cast one. */
 	--scrim: rgba(0, 0, 0, 0.55);
+	--dialog-max-width: calc(100% - 20px);
+	--dialog-compact-max-width: min(360px, var(--dialog-max-width));
 	--dialog-shadow:
 		0 30px 80px rgba(0, 0, 0, 0.6),
 		0 0 0 1px light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.06));
@@ -207,6 +210,7 @@
 	--color-chip-strong: var(--chip-strong);
 	--color-tile: var(--tile);
 	--color-switch-on: var(--switch-on);
+	--color-switch-thumb: var(--switch-thumb);
 	--color-destructive-text: var(--destructive-text);
 	--color-destructive-hover: var(--destructive-hover);
 	--color-scrim: var(--scrim);
@@ -669,7 +673,19 @@
 
 @theme {
 	--animate-rise: rise 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+	--animate-copy-confirmation: copy-confirmation 200ms ease-out both;
 	--animate-cards-in: cards-in 240ms cubic-bezier(0.2, 0.6, 0.2, 1) both;
+
+	@keyframes copy-confirmation {
+		from {
+			opacity: 0;
+			scale: 0.5;
+		}
+		to {
+			opacity: 1;
+			scale: 1;
+		}
+	}
 
 	@keyframes rise {
 		from {
@@ -904,11 +920,9 @@
 @utility min-w-card-name {
 	min-width: min(10rem, 100%);
 }
-@utility max-w-dialog {
-	max-width: calc(100% - 20px);
-}
-@utility max-w-dialog-sm {
-	max-width: min(360px, calc(100% - 20px));
+@utility member-markdown {
+	--bot-mono: initial;
+	--bot-tint: initial;
 }
 @utility max-w-attachment-preview {
 	max-width: calc(100% - 10px);

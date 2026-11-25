@@ -13,7 +13,7 @@ import {
 	TooManyUnsentAttachments,
 	UnsentAttachmentsNotFound,
 } from "@sugabots/contracts/errors/chats";
-import { userText } from "@sugabots/errors";
+import { type DomainError, userText } from "@sugabots/errors";
 import {
 	and,
 	count,
@@ -25,7 +25,17 @@ import {
 	type SQLWrapper,
 	sql,
 } from "drizzle-orm";
-import { Config, Context, Data, Duration, Effect, Layer, Option, Schema, Stream } from "effect";
+import {
+	Config,
+	Context,
+	Duration,
+	Effect,
+	ErrorReporter,
+	Layer,
+	Option,
+	Schema,
+	Stream,
+} from "effect";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { type AttachedFileRow, loadFileParts } from "../chats/store/file-parts.ts";
 import {
@@ -36,10 +46,15 @@ import {
 	type Transaction,
 	transaction,
 } from "../database/database.ts";
-import { file, message, unsentAttachment, WRITTEN_FILE_KINDS } from "../database/schema.ts";
+import {
+	blobDeletion,
+	file,
+	message,
+	unsentAttachment,
+	WRITTEN_FILE_KINDS,
+} from "../database/schema.ts";
 import { Ids, isUuid } from "../ids/ids.ts";
 import { processLayer, Tier } from "../tiers.ts";
-import type { UserFacing } from "../user-message.ts";
 
 /**
  * The files kept whole in a chat, which its bots read, and members too
@@ -69,7 +84,7 @@ export interface Interface {
 		 * that keeps it: when it fails, nothing is kept and the failure is
 		 * this write's.
 		 */
-		guard?: Effect.Effect<void, G, Database | Transaction>;
+		fence?: Effect.Effect<void, G, Database | Transaction>;
 	}) => Effect.Effect<FileDescription, E | G | FileTooLarge | BlobStore.Failure>;
 	/**
 	 * Keeps `content` as a file `uploaderId` uploaded to the chat, unsent
@@ -218,17 +233,59 @@ export const make = Effect.gen(function* () {
 		content: BlobStore.Content<E>,
 		source: FileSource,
 		maxSize = Number.POSITIVE_INFINITY,
-		guard: Effect.Effect<void, G, Database | Transaction> = Effect.void,
+		fence: Effect.Effect<void, G, Database | Transaction> = Effect.void,
 	) =>
 		Effect.gen(function* () {
 			const kept = yield* putBlob(chatId, content, maxSize);
 			yield* transaction(
 				Effect.andThen(
-					guard,
+					fence,
 					query((db) => db.insert(file).values({ ...kept, chatId, ...source })),
 				),
 			).pipe(Effect.onError(() => removeBlob(chatId, kept.id)));
 			return kept;
+		});
+
+	/**
+	 * Deletes the rows `remove` deletes, as one transaction that also queues
+	 * their blobs for deletion, then removes the blobs at once, forgetting each
+	 * queue row once its blob has gone: one that can't be removed now, or a
+	 * process that stops first, leaves it to `BlobDeletions`.
+	 */
+	const removedWithBlobs = <E, R>(
+		remove: Effect.Effect<ReadonlyArray<{ id: string; chatId: string }>, E, R>,
+	) =>
+		Effect.gen(function* () {
+			const queued = yield* transaction(
+				Effect.gen(function* () {
+					const removed = yield* remove;
+					if (removed.length === 0) return [];
+					const rows = yield* query((db) =>
+						db
+							.insert(blobDeletion)
+							.values(removed.map(({ id, chatId }) => ({ prefix: fileKey(chatId, id) })))
+							.returning({ id: blobDeletion.id, prefix: blobDeletion.prefix }),
+					);
+					return rows;
+				}),
+			);
+			// After the caller's transaction too, if it runs in one, so a rollback
+			// never leaves a row whose blob has gone.
+			const context = yield* Effect.context<Database>();
+			yield* afterCommit(
+				Effect.forEach(
+					queued,
+					({ id, prefix }) =>
+						blobs.delete(prefix).pipe(
+							Effect.andThen(query((db) => db.delete(blobDeletion).where(eq(blobDeletion.id, id)))),
+							Effect.catchCause((cause) =>
+								Effect.logWarning("Removing a chat file's blob failed; it is deleted later", cause),
+							),
+						),
+					{ discard: true },
+				).pipe(Effect.provideContext(context)),
+			);
+			return queued.length;
 		});
 
 	/** Removes a file's blob, once its row is gone or was never kept; one that cannot be removed goes with the chat's folder. */
@@ -265,10 +322,10 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		write: ({ chatId, toolCallId, content, guard }) =>
+		write: ({ chatId, toolCallId, content, fence }) =>
 			operation(
 				"write",
-				keep(chatId, content, { kind: "tool_result", toolCallId }, undefined, guard),
+				keep(chatId, content, { kind: "tool_result", toolCallId }, undefined, fence),
 			),
 		upload: ({ chatId, uploaderId, name, maxSize, maxUnsent, content }) =>
 			operation(
@@ -407,20 +464,17 @@ export const make = Effect.gen(function* () {
 					Effect.map((byMessage) => byMessage.get(messageId) ?? []),
 				),
 			),
-		removeReplyAttachments: ({ chatId, messageId }) =>
+		removeReplyAttachments: ({ messageId }) =>
 			operation(
 				"removeReplyAttachments",
-				Effect.gen(function* () {
-					const removed = yield* query((db) =>
+				removedWithBlobs(
+					query((db) =>
 						db
 							.delete(file)
 							.where(and(eq(file.messageId, messageId), eq(file.kind, "bot_attachment")))
-							.returning({ id: file.id }),
-					);
-					yield* afterCommit(
-						Effect.forEach(removed, ({ id }) => removeBlob(chatId, id), { discard: true }),
-					);
-				}),
+							.returning({ id: file.id, chatId: file.chatId }),
+					),
+				).pipe(Effect.asVoid),
 			),
 		removeUnsentAttachment: ({ chatId, uploaderId, fileId }) =>
 			operation(
@@ -429,20 +483,21 @@ export const make = Effect.gen(function* () {
 					// The id comes from the uploader's client, and Postgres rejects a
 					// uuid comparison against anything that is not one.
 					if (!isUuid(fileId)) return;
-					const removed = yield* query((db) =>
-						db
-							.delete(file)
-							.where(
-								and(
-									eq(file.id, fileId),
-									eq(file.chatId, chatId),
-									eq(file.uploaderId, uploaderId),
-									unsentAttachment,
-								),
-							)
-							.returning({ id: file.id }),
+					yield* removedWithBlobs(
+						query((db) =>
+							db
+								.delete(file)
+								.where(
+									and(
+										eq(file.id, fileId),
+										eq(file.chatId, chatId),
+										eq(file.uploaderId, uploaderId),
+										unsentAttachment,
+									),
+								)
+								.returning({ id: file.id, chatId: file.chatId }),
+						),
 					);
-					if (removed.length > 0) yield* removeBlob(chatId, fileId);
 				}),
 			),
 		removeUnsentAttachments: (unsentFor) =>
@@ -450,24 +505,22 @@ export const make = Effect.gen(function* () {
 				"removeUnsentAttachments",
 				Effect.gen(function* () {
 					// Measured on the database's clock, which stamped `created_at`.
-					const removed = yield* query((db) =>
-						db
-							.delete(file)
-							.where(
-								and(
-									unsentAttachment,
-									lt(
-										file.createdAt,
-										sql`now() - make_interval(secs => ${Duration.toSeconds(unsentFor)})`,
+					return yield* removedWithBlobs(
+						query((db) =>
+							db
+								.delete(file)
+								.where(
+									and(
+										unsentAttachment,
+										lt(
+											file.createdAt,
+											sql`now() - make_interval(secs => ${Duration.toSeconds(unsentFor)})`,
+										),
 									),
-								),
-							)
-							.returning({ id: file.id, chatId: file.chatId }),
+								)
+								.returning({ id: file.id, chatId: file.chatId }),
+						),
 					);
-					yield* Effect.forEach(removed, ({ id, chatId }) => removeBlob(chatId, id), {
-						discard: true,
-					});
-					return removed.length;
 				}),
 			),
 	});
@@ -528,7 +581,12 @@ type FileSource =
 	| { kind: "attachment"; uploaderId: string; name: string }
 	| { kind: "bot_attachment"; name: string; messageId: string; position: number };
 
-export class TooManyReplyFiles extends Data.TaggedError("TooManyReplyFiles") implements UserFacing {
+export class TooManyReplyFiles
+	extends Schema.TaggedError<TooManyReplyFiles>()("TooManyReplyFiles", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
 	get userMessage() {
 		return userText`A reply can carry at most ${MAX_ATTACHMENTS_PER_MESSAGE} files`;
 	}
@@ -538,6 +596,6 @@ export class TooManyReplyFiles extends Data.TaggedError("TooManyReplyFiles") imp
  * Under the chat's folder, `chats/<chatId>`, which the
  * `chat_blob_deletion` trigger queues for deletion with the chat.
  */
-function fileKey(chatId: string, fileId: string): BlobStore.Key {
+export function fileKey(chatId: string, fileId: string): BlobStore.Key {
 	return BlobStore.key("chats", chatId, "files", fileId);
 }

@@ -220,7 +220,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 							stream: Stream.make(new TextEncoder().encode("long")),
 							contentType: "text/plain",
 						},
-						guard: holdRunningTurn(
+						fence: holdRunningTurn(
 							executionFence(opened.turnId, opened.principal.executionNumber),
 							"share",
 						),

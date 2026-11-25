@@ -1,4 +1,4 @@
-import { pgTable, text } from "drizzle-orm/pg-core";
+import { index, pgTable, text } from "drizzle-orm/pg-core";
 import { primaryKey, stamp } from "../database/sql.ts";
 import type { BlobStore } from "./blob-store.ts";
 
@@ -14,12 +14,22 @@ import type { BlobStore } from "./blob-store.ts";
  * made the `chat` table, and the `file_blob_deletion` trigger in the
  * one that made the `file` table).
  */
-export const blobDeletion = pgTable("blob_deletion", {
-	id: primaryKey(),
-	/** Every blob under this key goes. */
-	prefix: text("prefix").$type<BlobStore.Key>().notNull(),
-	queuedAt: stamp("queued_at"),
-});
+export const blobDeletion = pgTable(
+	"blob_deletion",
+	{
+		id: primaryKey(),
+		/** The blob stored under this key, if any, and every blob under it, go. */
+		prefix: text("prefix").$type<BlobStore.Key>().notNull(),
+		queuedAt: stamp("queued_at"),
+		/**
+		 * When it is next worked on: at once when queued, then, once a worker has
+		 * claimed it, after that worker's lease, so the store is never called with
+		 * a row locked and one whose worker stopped is taken up again.
+		 */
+		dueAt: stamp("due_at"),
+	},
+	(table) => [index("blob_deletion_due_idx").on(table.dueAt, table.id)],
+);
 
 /**
  * Folders whose blobs a migration moved to another key, for the blob store

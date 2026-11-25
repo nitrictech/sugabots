@@ -1,0 +1,114 @@
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index a7d36845d3c0d657fbab9989e619031882026c54..92edf8f38dd740601c633f2d3bb69eb6fb96d13a 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -3965,6 +3965,10 @@ type HttpVersion = '1.1' | '2';
+  * Connection options for requests to the API.
+  */
+ interface ConnectionOpts {
++  /** Transport for control-plane requests. */
++  apiFetch?: typeof fetch;
++  /** Transport for requests to a sandbox. */
++  envdFetch?: typeof fetch;
+   /**
+    * E2B API key to use for authentication.
+    *
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index d11bfaf6d9104252173adee7949a0ba801af9c6b..98e445c74f4b374a42bdef08879ed3e15d22db6f 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -3965,6 +3965,10 @@ type HttpVersion = '1.1' | '2';
+  * Connection options for requests to the API.
+  */
+ interface ConnectionOpts {
++  /** Transport for control-plane requests. */
++  apiFetch?: typeof fetch;
++  /** Transport for requests to a sandbox. */
++  envdFetch?: typeof fetch;
+   /**
+    * E2B API key to use for authentication.
+    *
+diff --git a/dist/index.js b/dist/index.js
+index 087e6b844a24dc50d971d1dffd2267660bab9ed3..b7a10d9c05166a8f3c4d5f79d04026448ce6bc57 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1173,6 +1173,8 @@ var ConnectionConfig = class ConnectionConfig {
+ 		_defineProperty(this, "proxy", void 0);
+ 		_defineProperty(this, "httpVersion", void 0);
+ 		this.apiKey = (opts === null || opts === void 0 ? void 0 : opts.apiKey) || ConnectionConfig.apiKey;
++		this.apiFetch = opts?.apiFetch;
++		this.envdFetch = opts?.envdFetch;
+ 		this.validateApiKey = opts === null || opts === void 0 ? void 0 : opts.validateApiKey;
+ 		this.debug = (_opts$debug = opts === null || opts === void 0 ? void 0 : opts.debug) !== null && _opts$debug !== void 0 ? _opts$debug : ConnectionConfig.debug;
+ 		this.domain = (opts === null || opts === void 0 ? void 0 : opts.domain) || ConnectionConfig.domain;
+@@ -1649,7 +1651,7 @@ var ApiClient = class {
+ 		if (((_opts$requireApiKey = opts.requireApiKey) !== null && _opts$requireApiKey !== void 0 ? _opts$requireApiKey : true) && !config.apiKey && !hasAuthorization) throw new AuthenticationError("API key is required, please visit the API Keys tab at https://e2b.dev/dashboard?tab=keys to get your API key. You can either set the environment variable `E2B_API_KEY` or you can pass it directly to the sandbox like Sandbox.create({ apiKey: 'e2b_...' })");
+ 		this.api = (0, openapi_fetch.default)({
+ 			baseUrl: config.apiUrl,
+-			fetch: withRetry(createApiFetch(config), config.retries, config.requestTimeoutMs),
++			fetch: withRetry(config.apiFetch ?? createApiFetch(config), config.retries, config.requestTimeoutMs),
+ 			headers: _objectSpread2(_objectSpread2(_objectSpread2({}, defaultHeaders), config.apiKey && { "X-API-KEY": config.apiKey }), config.headers),
+ 			querySerializer: { array: {
+ 				style: "form",
+@@ -2304,7 +2306,7 @@ var Filesystem = class {
+ 		_defineProperty(this, "defaultWatchRecursive", false);
+ 		_defineProperty(this, "checkHealth", void 0);
+ 		_defineProperty(this, "uploadFetch", void 0);
+-		const uploadFetch = createEnvdUploadFetch({ proxy: connectionConfig.proxy });
++		const uploadFetch = connectionConfig.envdFetch ?? createEnvdUploadFetch({ proxy: connectionConfig.proxy });
+ 		this.uploadFetch = (request) => uploadFetch(request);
+ 		this.rpc = (0, _connectrpc_connect.createClient)(Filesystem$1, transport);
+ 		this.checkHealth = () => checkSandboxHealth(this.envdApi);
+@@ -6886,8 +6888,8 @@ var Sandbox = class extends SandboxApi {
+ 			"E2b-Sandbox-Id": this.sandboxId,
+ 			"E2b-Sandbox-Port": this.envdPort.toString()
+ 		};
+-		const envdFetch = createEnvdFetch(this.connectionConfig);
+-		const envdRpcFetch = createEnvdRpcFetch(this.connectionConfig);
++		const envdFetch = this.connectionConfig.envdFetch ?? createEnvdFetch(this.connectionConfig);
++		const envdRpcFetch = this.connectionConfig.envdFetch ?? createEnvdRpcFetch(this.connectionConfig);
+ 		const interceptors = (opts === null || opts === void 0 ? void 0 : opts.logger) ? [createRpcLogger(opts.logger)] : void 0;
+ 		const rpcFetch = (url, options) => {
+ 			var _this$connectionConfi, _this$connectionConfi2, _options;
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 97e63cdadf975cd22c37fb349d706388c84f25d2..818ad04baeb8c76167fbf0d1e5638dbc465fcee1 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1138,6 +1138,8 @@ var ConnectionConfig = class ConnectionConfig {
+ 		_defineProperty(this, "proxy", void 0);
+ 		_defineProperty(this, "httpVersion", void 0);
+ 		this.apiKey = (opts === null || opts === void 0 ? void 0 : opts.apiKey) || ConnectionConfig.apiKey;
++		this.apiFetch = opts?.apiFetch;
++		this.envdFetch = opts?.envdFetch;
+ 		this.validateApiKey = opts === null || opts === void 0 ? void 0 : opts.validateApiKey;
+ 		this.debug = (_opts$debug = opts === null || opts === void 0 ? void 0 : opts.debug) !== null && _opts$debug !== void 0 ? _opts$debug : ConnectionConfig.debug;
+ 		this.domain = (opts === null || opts === void 0 ? void 0 : opts.domain) || ConnectionConfig.domain;
+@@ -1614,7 +1616,7 @@ var ApiClient = class {
+ 		if (((_opts$requireApiKey = opts.requireApiKey) !== null && _opts$requireApiKey !== void 0 ? _opts$requireApiKey : true) && !config.apiKey && !hasAuthorization) throw new AuthenticationError("API key is required, please visit the API Keys tab at https://e2b.dev/dashboard?tab=keys to get your API key. You can either set the environment variable `E2B_API_KEY` or you can pass it directly to the sandbox like Sandbox.create({ apiKey: 'e2b_...' })");
+ 		this.api = createClient({
+ 			baseUrl: config.apiUrl,
+-			fetch: withRetry(createApiFetch(config), config.retries, config.requestTimeoutMs),
++			fetch: withRetry(config.apiFetch ?? createApiFetch(config), config.retries, config.requestTimeoutMs),
+ 			headers: _objectSpread2(_objectSpread2(_objectSpread2({}, defaultHeaders), config.apiKey && { "X-API-KEY": config.apiKey }), config.headers),
+ 			querySerializer: { array: {
+ 				style: "form",
+@@ -2263,7 +2265,7 @@ var Filesystem = class {
+ 		_defineProperty(this, "defaultWatchRecursive", false);
+ 		_defineProperty(this, "checkHealth", void 0);
+ 		_defineProperty(this, "uploadFetch", void 0);
+-		const uploadFetch = createEnvdUploadFetch({ proxy: connectionConfig.proxy });
++		const uploadFetch = connectionConfig.envdFetch ?? createEnvdUploadFetch({ proxy: connectionConfig.proxy });
+ 		this.uploadFetch = (request) => uploadFetch(request);
+ 		this.rpc = createClient$1(Filesystem$1, transport);
+ 		this.checkHealth = () => checkSandboxHealth(this.envdApi);
+@@ -6845,8 +6847,8 @@ var Sandbox = class extends SandboxApi {
+ 			"E2b-Sandbox-Id": this.sandboxId,
+ 			"E2b-Sandbox-Port": this.envdPort.toString()
+ 		};
+-		const envdFetch = createEnvdFetch(this.connectionConfig);
+-		const envdRpcFetch = createEnvdRpcFetch(this.connectionConfig);
++		const envdFetch = this.connectionConfig.envdFetch ?? createEnvdFetch(this.connectionConfig);
++		const envdRpcFetch = this.connectionConfig.envdFetch ?? createEnvdRpcFetch(this.connectionConfig);
+ 		const interceptors = (opts === null || opts === void 0 ? void 0 : opts.logger) ? [createRpcLogger(opts.logger)] : void 0;
+ 		const rpcFetch = (url, options) => {
+ 			var _this$connectionConfi, _this$connectionConfi2, _options;

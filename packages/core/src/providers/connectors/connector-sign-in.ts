@@ -1,10 +1,10 @@
 export * as ConnectorSignIn from "./connector-sign-in.ts";
 
 import { setTimeout as delay } from "node:timers/promises";
-
 import { CONNECTOR_SIGN_IN_CALLBACK_PATH } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
-import { Context, Data, DateTime, Effect, Layer } from "effect";
+import { type DomainError, userText } from "@sugabots/errors";
+import { Context, DateTime, Effect, ErrorReporter, Layer, Schema } from "effect";
 import { ServerSettings } from "../../server-settings/server-settings.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { Egress } from "../network/egress.ts";
@@ -217,16 +217,34 @@ export const make = Effect.gen(function* () {
 				}),
 			).pipe(Effect.withSpan("ConnectorSignIn.begin")),
 
+		// Under the exchange's claim, as beginning and refreshing are: the code is
+		// good for one exchange, so nothing may save over the sign-in it finishes
+		// between reading it and saving its tokens.
 		finish: (workspaceId, connectorId, serverUrl, { code, state }, finishedByMemberId) =>
 			Effect.flatMap(Effect.context<never>(), (context) =>
 				Effect.tryPromise({
 					try: (signal) =>
-						finishAuthorization(
-							providerFor(context, workspaceId, connectorId, serverUrl, { finishedByMemberId }),
+						withClaim(
+							context,
+							workspaceId,
+							connectorId,
 							serverUrl,
-							code,
-							state,
-							(input, init) => egress.oauth(input, { ...init, signal }),
+							(claim, fetch) =>
+								finishAuthorization(
+									providerFor(
+										context,
+										workspaceId,
+										connectorId,
+										serverUrl,
+										{ finishedByMemberId },
+										claim,
+									),
+									serverUrl,
+									code,
+									state,
+									fetch,
+								),
+							signal,
 						),
 					catch: (cause) => new SignInFailed({ step: "finish", cause }),
 				}),
@@ -242,12 +260,19 @@ export const layer = layerNoDeps.pipe(Layer.provide(ConnectorStore.layer));
  * The server or its authorization server would not start or finish a
  * sign-in. `cause` says why, for the logs; it is never shown.
  */
-export class SignInFailed extends Data.TaggedError("SignInFailed")<{
-	readonly step: "begin" | "finish";
-	readonly cause: unknown;
-}> {
+export class SignInFailed
+	extends Schema.TaggedError<SignInFailed>()("SignInFailed", {
+		step: Schema.Literals(["begin", "finish"]),
+		cause: Schema.Defect(),
+	})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
 	override get message() {
-		const reason = this.cause instanceof Error ? this.cause.message : String(this.cause);
-		return `Could not ${this.step} signing in: ${reason}`;
+		return `Could not ${this.step} signing in: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}`;
+	}
+	get userMessage() {
+		return userText`Sugabots couldn't complete sign-in for the connector. Check its settings and try again.`;
 	}
 }

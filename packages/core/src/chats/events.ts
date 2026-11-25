@@ -72,6 +72,8 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly turnId: string;
 		readonly botId: string;
 		readonly messageId: string;
+		/** Which execution of the turn ended it, as its reply then is. */
+		readonly execution: number;
 		readonly content: string;
 		readonly finishedAt: Date;
 		/** The prompt's size, and the window it was read with. */
@@ -107,6 +109,8 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly turnId: string;
 		readonly botId: string;
 		readonly messageId: string;
+		/** Which execution of the turn ended it, as its reply then is. */
+		readonly execution: number;
 		/** What members are told went wrong. */
 		readonly userMessage: UserText;
 		readonly willRetry: boolean;
@@ -118,6 +122,8 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly turnId: string;
 		readonly botId: string;
 		readonly messageId: string;
+		/** Which execution of the turn ended it, as its reply then is. */
+		readonly execution: number;
 		readonly content: string;
 		readonly finishedAt: Date;
 	};

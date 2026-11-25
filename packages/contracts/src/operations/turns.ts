@@ -239,6 +239,7 @@ export const turnsContracts = {
 			 */
 			ending: Schema.Union([
 				Schema.TaggedStruct("Failed", { userMessage: UserText.schema }),
+				Schema.TaggedStruct("LostReach", { userMessage: UserText.schema }),
 				Schema.TaggedStruct("AsRequested", {}),
 			]),
 		}),

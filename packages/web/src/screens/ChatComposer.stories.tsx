@@ -383,7 +383,7 @@ export const MentionCardsInTheDraft = meta.story({
 		within(input).getByRole("button", { name: "@here" }).focus();
 		await userEvent.keyboard("{Enter}");
 		const hereCard = await page.findByRole("dialog", { name: "@here" });
-		await expect(within(hereCard).getByText("Sam Rivera")).toBeVisible();
+		await waitFor(() => expect(within(hereCard).getByText("Sam Rivera")).toBeVisible());
 		await userEvent.keyboard("{Escape}");
 		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
 		await expect(args.onSubmit).not.toHaveBeenCalled();

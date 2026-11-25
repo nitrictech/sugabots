@@ -148,7 +148,7 @@ function ImageTile({
 				file={file}
 				url={url}
 				variant="round"
-				className="absolute top-1.5 right-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+				className="absolute top-1.5 right-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 pointer-coarse:size-11 pointer-coarse:[&_svg]:size-5"
 			/>
 		</div>
 	);
@@ -189,7 +189,7 @@ function ImageViewer({
 			onKeyDown={stepWithArrowKeys}
 			// Stretched to its insets, rather than as tall as the picture: on a phone, the picture
 			// alone on black across the whole screen, as a phone's own photos open.
-			className="inset-4 flex h-auto w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-3 p-3 sm:inset-10 sm:max-w-none max-md:inset-0 max-md:gap-0 max-md:rounded-none max-md:bg-black max-md:scheme-dark max-md:px-0 max-md:pt-safe-or-3 max-md:pb-safe-or-4"
+			className="inset-0 flex h-auto w-auto max-w-none flex-col gap-3 p-3 sm:max-w-none md:inset-10 max-md:gap-0 max-md:rounded-none max-md:bg-black max-md:scheme-dark max-md:px-0 max-md:pt-safe-or-3 max-md:pb-safe-or-4"
 		>
 			{/* On a phone, × at the left and Download at the right, the name between them. */}
 			<div className="flex items-center gap-2 pl-1 max-md:gap-3 max-md:px-4">

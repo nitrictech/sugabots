@@ -146,3 +146,34 @@ export const Clear = meta.story({
 		await expect(canvas.getByRole("link", { name: /Send email/ })).toHaveTextContent("Allowed");
 	},
 });
+
+/** HostRequestOutsideTheChat shows what the computer needs to reach and where it was requested. */
+export const HostRequestOutsideTheChat = meta.story({
+	beforeEach({ msw }) {
+		const pending = request("04", "request_host", {
+			status: "pending",
+			approvers: "computer-managers",
+			decidedByName: null,
+			decidedAt: null,
+		});
+		const outside: ApprovalRequest = {
+			...pending,
+			chatId: null,
+			rootChatId: null,
+			projectName: revenue.name,
+			call: { ...pending.call, input: { host: "api.acme.example" } },
+		};
+		msw.use(
+			http.get(`${API}/workspaces/:workspace/chats/approvals`, () =>
+				HttpResponse.json({ waiting: [outside], answered: [] } satisfies WorkspaceApprovals),
+			),
+		);
+	},
+	play: async ({ canvas }) => {
+		const card = within(await canvas.findByRole("article", { name: "Growth Desk: Request host" }));
+		await expect(
+			card.getByText(/Growth Desk wants the project's computer to reach a new host/),
+		).toBeVisible();
+		await expect(card.getByText("api.acme.example")).toBeVisible();
+	},
+});

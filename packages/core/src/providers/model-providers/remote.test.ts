@@ -33,11 +33,12 @@ function store(found: ModelProviderStore.ProviderAccess) {
 	return {
 		synced,
 		access: vi.fn(() => Effect.succeed(found)),
-		syncDiscovered: vi.fn((_workspaceId: string, _providerId: string, models: DiscoveredModel[]) =>
-			Effect.sync(() => {
-				synced.push(models);
-				return { added: models.length, updated: 0 };
-			}),
+		recordDiscovery: vi.fn(
+			(_workspaceId: string, _providerId: string, _testedAt: Date, models: DiscoveredModel[]) =>
+				Effect.sync(() => {
+					synced.push(models);
+					return { added: models.length, updated: 0 };
+				}),
 		),
 		recordTest: vi.fn(() => Effect.void),
 		renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),

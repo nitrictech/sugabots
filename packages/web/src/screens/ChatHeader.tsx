@@ -141,7 +141,8 @@ export function ChatHeader({
 			 * A breadcrumb: the bot, which leads to its page, then the chat's
 			 * title, "Growth Desk / Fernhill pricing".
 			 */}
-			<div className="flex min-w-0 flex-1 items-center max-md:sr-only">
+			<h1 className="sr-only md:hidden">{name}</h1>
+			<div className="hidden min-w-0 flex-1 items-center md:flex">
 				<div data-header-title className="flex min-w-0 items-center gap-1.5">
 					{title !== undefined && (
 						<>
@@ -293,8 +294,7 @@ function HeaderBar({
  * Whose chat it is, in a phone's header, on a pill of glass: its face, if it
  * has one, beside its title, with `sub` under the title, such as a bot's model
  * or where a chat is, each cut short to the room the header leaves. It opens
- * the chat's Details where it has them. Hidden from assistive technology, which
- * reads the header's own title.
+ * the chat's Details where it has them.
  */
 function HeaderBadge({
 	face,
@@ -323,8 +323,7 @@ function HeaderBadge({
 	return onClick ? (
 		<button
 			type="button"
-			aria-hidden
-			tabIndex={-1}
+			aria-label={`Details for ${title}`}
 			onClick={onClick}
 			className={cn(className, "focus-ring active:bg-hover-strong")}
 		>
@@ -481,7 +480,8 @@ export function PlainChatHeader({
 			}
 		>
 			{/* The title, after where it sits: "Support / Refund for Acme". A phone shows the badge in its place. */}
-			<div className="flex min-w-0 flex-1 items-center max-md:sr-only">
+			<h1 className="sr-only md:hidden">{title}</h1>
+			<div className="hidden min-w-0 flex-1 items-center md:flex">
 				<div data-header-title className="flex min-w-0 items-center gap-1.5">
 					{crumbs && (
 						<>

@@ -3,7 +3,7 @@ import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
 // A dialog is portalled to the body, so reaching it means `screen` rather
 // than the story's own canvas.
-import { expect, screen, within } from "storybook/test";
+import { expect, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import {
 	accountManager,
@@ -83,11 +83,7 @@ function SettingsPreview({ children }: { children: ReactNode }) {
 			["bots", workspace.id],
 			[growthDesk, accountManager, leadResearcher, linearHandler, oncall],
 		);
-		client.setQueryData(
-			["project-members", revenue.id],
-			[inProject(rowan), inProject(jay), inProject(mara)],
-		);
-		client.setQueryData(["project-members", engineering.id], [inProject(rowan), inProject(sam)]);
+
 		return client;
 	});
 	useEffect(() => () => queryClient.clear(), [queryClient]);
@@ -123,6 +119,12 @@ const meta = preview.meta({
 	],
 	beforeEach({ msw }) {
 		msw.use(
+			http.get(`${import.meta.env.VITE_API_URL}/projects/${revenue.id}/members`, () =>
+				HttpResponse.json([inProject(rowan), inProject(jay), inProject(mara)]),
+			),
+			http.get(`${import.meta.env.VITE_API_URL}/projects/${engineering.id}/members`, () =>
+				HttpResponse.json([inProject(rowan), inProject(sam)]),
+			),
 			http.get(`${roster}/memberships`, () => HttpResponse.json([rowan, jay, mara, sam])),
 			http.get(`${roster}/invitations`, () => HttpResponse.json([alex])),
 			http.patch(`${roster}/memberships/:membershipId`, () =>
@@ -170,13 +172,14 @@ export const Member = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Mara Kent" })).toBeInTheDocument();
 		await expect(canvas.getByRole("radio", { name: "Editor" })).toBeChecked();
-		await expect(canvas.getByRole("switch", { name: "Mara Kent is in Revenue" })).toHaveAttribute(
-			"aria-checked",
-			"true",
-		);
 		await expect(
-			canvas.getByRole("switch", { name: "Mara Kent is in Engineering" }),
-		).toHaveAttribute("aria-checked", "false");
+			await canvas.findByRole("switch", { name: "Mara Kent is in Revenue", checked: true }),
+		).toBeEnabled();
+		await waitFor(() =>
+			expect(
+				canvas.getByRole("switch", { name: "Mara Kent is in Engineering", checked: false }),
+			).toBeEnabled(),
+		);
 		await expect(canvas.getByRole("button", { name: "Remove from workspace" })).toBeInTheDocument();
 	},
 });
@@ -268,5 +271,26 @@ export const Reading = meta.story({
 		await expect(canvas.queryByRole("radio", { name: "Viewer" })).toBeNull();
 		await expect(canvas.getByRole("switch", { name: "Sam Park is in Engineering" })).toBeDisabled();
 		await expect(canvas.queryByRole("button", { name: "Remove from workspace" })).toBeNull();
+	},
+});
+
+const subscriptionInUse =
+	"ChatGPT signs in with Mara Kent's subscription, so Mara Kent stays until another member signs it in or it's switched to a key.";
+
+/** A member stays when a model provider still uses their subscription. */
+export const RemovalBlocked = meta.story({
+	args: { selectedMembershipId: mara.id },
+	beforeEach({ msw }) {
+		msw.use(
+			http.delete(`${roster}/memberships/${mara.id}`, () =>
+				HttpResponse.json({ _tag: "Conflict", message: subscriptionInUse }, { status: 409 }),
+			),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: "Remove from workspace" }));
+		const dialog = await screen.findByRole("dialog", { name: "Remove Mara Kent?" });
+		await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+		await waitFor(() => expect(within(dialog).getByText(subscriptionInUse)).toBeVisible());
 	},
 });

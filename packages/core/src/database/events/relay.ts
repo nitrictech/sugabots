@@ -1,6 +1,7 @@
 import { PgClient } from "@effect/sql-pg";
 import type { EventStream, StreamEvent } from "@sugabots/contracts";
-import { Data, Deferred, Duration, Effect, Fiber, Queue } from "effect";
+import { type DomainError, userText } from "@sugabots/errors";
+import { Deferred, Duration, Effect, ErrorReporter, Fiber, Queue, Schema } from "effect";
 import { Ids } from "../../ids/ids.ts";
 import type { EventBus } from "./bus.ts";
 import type { EventStore } from "./store.ts";
@@ -60,9 +61,17 @@ interface Probe {
  * a transaction pooler such as PgBouncer, `LISTEN` succeeds on a backend that
  * then goes back to the pool, and nothing it hears reaches this process.
  */
-export class NoticesNotHeard extends Data.TaggedError("NoticesNotHeard") {
+export class NoticesNotHeard
+	extends Schema.TaggedError<NoticesNotHeard>()("NoticesNotHeard", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
 	override get message() {
 		return "The event relay's LISTEN hears nothing, as happens through a transaction pooler such as PgBouncer. Set DATABASE_DIRECT_URL to a direct connection to Postgres.";
+	}
+	get userMessage() {
+		return userText`Live updates are unavailable. Refresh to see the latest changes.`;
 	}
 }
 

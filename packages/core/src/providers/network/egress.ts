@@ -3,17 +3,17 @@ export * as Egress from "./egress.ts";
 import { lookup as nodeLookup } from "node:dns/promises";
 import type { LookupFunction } from "node:net";
 import { BlockList, isIP } from "node:net";
-import { type UserText, userText } from "@sugabots/errors";
-import { Config, Context, Data, Effect, Layer } from "effect";
+import { type DomainError, type UserText, userText } from "@sugabots/errors";
+import { Config, Context, Effect, ErrorReporter, Layer, Schema, type Scope } from "effect";
 import {
 	Agent,
 	type Dispatcher,
 	type RequestInit as UndiciRequestInit,
 	fetch as undiciFetch,
+	WebSocket,
 } from "undici";
 import { ServerSettings } from "../../server-settings/server-settings.ts";
 import { processLayer, Tier } from "../../tiers.ts";
-import type { UserFacing } from "../../user-message.ts";
 
 /** The clients the API reaches the outside world with, each under this server's egress policy. */
 export interface Interface {
@@ -21,6 +21,7 @@ export interface Interface {
 	readonly providers: EgressHttpClients;
 	/** Checks an address a workspace gives for a provider or connector, under the providers' policy. */
 	readonly validateProviderUrl: (url: string) => Effect.Effect<void, EgressRefused>;
+	readonly providerWebSocket: ProviderWebSocket;
 	/**
 	 * Unbound, under the providers' policy. A connector's sign-in goes wherever
 	 * its authorization server says: its well-known documents, then often
@@ -36,8 +37,8 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 }
 
 /**
- * Reads the two policies: the addresses a workspace gives, for its model and
- * search providers and its connectors, may be plain HTTP or on a local network
+ * Reads the two policies: the addresses a workspace gives for its providers
+ * and connectors may be plain HTTP or on a local network
  * outside production unless `ALLOW_UNSAFE_WORKSPACE_URLS` says otherwise, and
  * `web_fetch` may not unless `ALLOW_PRIVATE_WEB_FETCH_NETWORK` says it may.
  * The clients close when the layer does.
@@ -55,6 +56,7 @@ export const make = Effect.gen(function* () {
 		validateProviderUrl: urlValidation(
 			createEgressUrlValidator({ allowPrivateNetwork: allowUnsafeWorkspaceUrls }),
 		),
+		providerWebSocket: createProviderWebSocket({ allowPrivateNetwork: allowUnsafeWorkspaceUrls }),
 		oauth: yield* closedWithLayer(() =>
 			createEgressHttpClient({ allowPrivateNetwork: allowUnsafeWorkspaceUrls }),
 		),
@@ -69,7 +71,7 @@ export const layer = processLayer(Layer.effect(Service, make));
 /**
  * How the API reaches the outside world: `fetch`, with this server's
  * egress policy already applied. Every destination is resolved first and its
- * addresses checked against the private and reserved ranges, the connection is
+ * addresses checked against the server's network policy. The connection is
  * pinned to the addresses that passed, and redirects are never followed on the
  * caller's behalf, since each hop needs the same check.
  *
@@ -95,6 +97,44 @@ export interface ClosableEgressHttpClients extends EgressHttpClients {
 	close(): Promise<void>;
 }
 
+type ProviderWebSocket = (
+	value: string,
+	protocols: string[],
+	headers: Readonly<Record<string, string>>,
+) => Effect.Effect<WebSocket, EgressRefused, Scope.Scope>;
+
+export function createProviderWebSocket({
+	allowPrivateNetwork = false,
+	lookup = resolveHostname,
+	connect = (url, init) => new WebSocket(url, init),
+}: Pick<EgressOptions, "allowPrivateNetwork" | "lookup"> & {
+	connect?: (
+		url: URL,
+		init: { protocols: string[]; headers: Headers; dispatcher: Dispatcher },
+	) => WebSocket;
+} = {}): ProviderWebSocket {
+	return (value, protocols, headers) =>
+		Effect.acquireRelease(
+			Effect.tryPromise({
+				try: () => resolveEgressUrl(value, allowPrivateNetwork, lookup),
+				catch: egressRefusal,
+			}).pipe(
+				Effect.flatMap(({ url, hostname, addresses }) =>
+					Effect.acquireRelease(
+						Effect.sync(() => pinnedDispatcher(hostname, addresses)),
+						(dispatcher) => Effect.promise(() => dispatcher.destroy()),
+					).pipe(
+						Effect.map((dispatcher) => {
+							url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+							return connect(url, { protocols, headers: new Headers(headers), dispatcher });
+						}),
+					),
+				),
+			),
+			(socket) => Effect.sync(() => socket.close()),
+		);
+}
+
 type EgressUrlValidator = (value: string) => Promise<void>;
 
 interface ResolvedAddress {
@@ -117,13 +157,22 @@ const MAX_DISPATCHERS = 100;
 
 const blockedIpv4Addresses = new BlockList();
 const blockedIpv6Addresses = new BlockList();
+const linkLocalAddresses = new BlockList();
+
+linkLocalAddresses.addSubnet("169.254.0.0", 16, "ipv4");
+linkLocalAddresses.addSubnet("fe80::", 10, "ipv6");
+// The same addresses written inside IPv6: IPv4-compatible, and NAT64's well-known prefix.
+linkLocalAddresses.addSubnet("::a9fe:0", 112, "ipv6");
+linkLocalAddresses.addSubnet("64:ff9b::a9fe:0", 112, "ipv6");
+// Cloud metadata services outside link-local ranges: Alibaba Cloud's, and AWS's over IPv6.
+linkLocalAddresses.addAddress("100.100.100.200", "ipv4");
+linkLocalAddresses.addAddress("fd00:ec2::254", "ipv6");
 
 for (const [address, prefix] of [
 	["0.0.0.0", 8],
 	["10.0.0.0", 8],
 	["100.64.0.0", 10],
 	["127.0.0.0", 8],
-	["169.254.0.0", 16],
 	["172.16.0.0", 12],
 	["192.0.0.0", 24],
 	["192.0.2.0", 24],
@@ -153,7 +202,6 @@ for (const [address, prefix] of [
 	["3fff::", 20],
 	["5f00::", 16],
 	["fc00::", 7],
-	["fe80::", 10],
 	["ff00::", 8],
 ] as const) {
 	blockedIpv6Addresses.addSubnet(address, prefix, "ipv6");
@@ -173,7 +221,7 @@ export function createEgressHttpClient({
 			allowPrivateNetwork,
 			lookup,
 		);
-		const key = `${hostname}\n${addresses?.map(({ address, family }) => `${family}:${address}`).join(",") ?? "private"}`;
+		const key = `${hostname}\n${addresses.map(({ address, family }) => `${family}:${address}`).join(",")}`;
 		let dispatcher = dispatchers.get(key);
 		if (dispatcher) {
 			dispatchers.delete(key);
@@ -236,14 +284,29 @@ export function createEgressHttpClients(options: EgressOptions = {}): ClosableEg
 	};
 }
 
+const egressRefusalSchema = Schema.Literals([
+	"outsideBaseUrl",
+	"unresolved",
+	"invalidAddress",
+	"privateNetwork",
+	"linkLocal",
+	"invalidUrl",
+	"notHttp",
+	"credentials",
+	"fragment",
+	"notHttps",
+]);
+
 /**
  * The network policy refused a request before it was sent. Its `userMessage`
  * is also fit for a model whose tool asked for the address.
  */
 export class EgressRefused
-	extends Data.TaggedError("EgressRefused")<{ readonly reason: EgressRefusal }>
-	implements UserFacing
+	extends Schema.TaggedError<EgressRefused>()("EgressRefused", { reason: egressRefusalSchema })
+	implements DomainError
 {
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
 		return `Egress refused: ${this.userMessage}`;
 	}
@@ -252,22 +315,18 @@ export class EgressRefused
 	}
 }
 
-type EgressRefusal =
-	| "outsideBaseUrl"
-	| "unresolved"
-	| "invalidAddress"
-	| "privateNetwork"
-	| "invalidUrl"
-	| "notHttp"
-	| "credentials"
-	| "fragment"
-	| "notHttps";
+export function workspaceUrlRefusal(refusal: EgressRefused): UserText {
+	if (refusal.reason !== "notHttps" && refusal.reason !== "privateNetwork")
+		return refusal.userMessage;
+	return userText`${refusal.userMessage} On a trusted self-hosted server, set ALLOW_UNSAFE_WORKSPACE_URLS=true in the server environment.`;
+}
 
-const EGRESS_REFUSAL_USER_MESSAGES: Record<EgressRefusal, UserText> = {
+const EGRESS_REFUSAL_USER_MESSAGES: Record<typeof egressRefusalSchema.Type, UserText> = {
 	outsideBaseUrl: userText`That address isn't under the configured address, so Sugabots won't send its credentials there. Use an address that starts with the configured address.`,
 	unresolved: userText`Sugabots couldn't find a server with that name. Check the address is spelled correctly, and that the name can be looked up from wherever Sugabots runs.`,
 	invalidAddress: userText`That server's name points to an address Sugabots can't connect to. Check the address, or the server's DNS records.`,
 	privateNetwork: userText`That address is on a local or private network, which this server doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.`,
+	linkLocal: userText`Sugabots blocks link-local and cloud metadata addresses. Use a LAN or public address.`,
 	invalidUrl: userText`That isn't a complete web address. Check it starts with https:// and has no spaces.`,
 	notHttp: userText`Sugabots only connects to web addresses. Use one that starts with https://.`,
 	credentials: userText`That address has a username or password in it, which Sugabots won't send in an address. Remove them, and give the credential as an access token instead.`,
@@ -297,9 +356,12 @@ export function urlValidation(
 	return (url) =>
 		Effect.tryPromise({
 			try: () => validate(url),
-			catch: (cause) =>
-				cause instanceof EgressRefused ? cause : new EgressRefused({ reason: "unresolved" }),
+			catch: egressRefusal,
 		});
+}
+
+function egressRefusal(cause: unknown) {
+	return cause instanceof EgressRefused ? cause : new EgressRefused({ reason: "unresolved" });
 }
 
 export function createEgressUrlValidator({
@@ -318,12 +380,13 @@ async function resolveEgressUrl(
 ) {
 	const url = egressUrl(value, { allowHttp: allowPrivateNetwork });
 	const hostname = url.hostname.replace(/^\[|\]$/g, "");
-	const addresses = allowPrivateNetwork ? undefined : await safeAddresses(hostname, lookup);
-	return { hostname, addresses };
+	const addresses = await safeAddresses(hostname, allowPrivateNetwork, lookup);
+	return { url, hostname, addresses };
 }
 
 async function safeAddresses(
 	hostname: string,
+	allowPrivateNetwork: boolean,
 	lookup: NonNullable<EgressOptions["lookup"]>,
 ): Promise<ResolvedAddress[]> {
 	const addressFamily = isIP(hostname);
@@ -335,26 +398,34 @@ async function safeAddresses(
 		if (isIP(address) !== family || (family !== 4 && family !== 6)) {
 			throw new EgressRefused({ reason: "invalidAddress" });
 		}
-		if (isPrivateAddress(address, family)) throw new EgressRefused({ reason: "privateNetwork" });
+		if (isLinkLocalAddress(address, family)) throw new EgressRefused({ reason: "linkLocal" });
+		if (!allowPrivateNetwork && isPrivateAddress(address, family)) {
+			throw new EgressRefused({ reason: "privateNetwork" });
+		}
 		return { address, family };
 	});
 }
 
-/** Whether `address`, an IP of `family`, is in a private or reserved range egress refuses. */
-export function isPrivateAddress(address: string, family: 4 | 6) {
-	return family === 4
-		? blockedIpv4Addresses.check(address, "ipv4")
-		: blockedIpv6Addresses.check(address, "ipv6");
+function isLinkLocalAddress(address: string, family: 4 | 6) {
+	return linkLocalAddresses.check(address, family === 4 ? "ipv4" : "ipv6");
 }
 
-function pinnedDispatcher(hostname: string, addresses?: ResolvedAddress[]): Dispatcher {
+/** Whether `address`, an IP of `family`, is in a range reserved from public egress. */
+export function isPrivateAddress(address: string, family: 4 | 6) {
+	return (
+		isLinkLocalAddress(address, family) ||
+		(family === 4
+			? blockedIpv4Addresses.check(address, "ipv4")
+			: blockedIpv6Addresses.check(address, "ipv6"))
+	);
+}
+
+function pinnedDispatcher(hostname: string, addresses: ResolvedAddress[]): Dispatcher {
 	return new Agent({
-		connect: addresses
-			? {
-					servername: isIP(hostname) ? undefined : hostname,
-					lookup: lookupPinnedTo(addresses),
-				}
-			: undefined,
+		connect: {
+			servername: isIP(hostname) ? undefined : hostname,
+			lookup: lookupPinnedTo(addresses),
+		},
 	});
 }
 
@@ -365,7 +436,7 @@ function pinnedDispatcher(hostname: string, addresses?: ResolvedAddress[]): Disp
  * time the connection is made is never connected to. A connection that wants
  * one address is handed them in turn.
  */
-export function lookupPinnedTo(addresses: readonly ResolvedAddress[]): LookupFunction {
+function lookupPinnedTo(addresses: readonly ResolvedAddress[]): LookupFunction {
 	let nextAddress = 0;
 	return (_requestedHostname, options, callback) => {
 		if (options.all) {
@@ -406,10 +477,27 @@ async function dispatchWithUndici(
 	input: Parameters<EgressHttpClient>[0],
 	init: Omit<RequestInit, "dispatcher"> & { dispatcher: Dispatcher },
 ): Promise<Response> {
-	return undiciFetch(
-		input as unknown as Parameters<typeof undiciFetch>[0],
-		init as unknown as UndiciRequestInit,
-	) as unknown as Response;
+	if (input instanceof Request) {
+		const { dispatcher, ...requestInit } = init;
+		const request = new Request(input, requestInit);
+		return undiciFetch(request.url, {
+			dispatcher,
+			cache: request.cache,
+			credentials: request.credentials,
+			integrity: request.integrity,
+			keepalive: request.keepalive,
+			mode: request.mode,
+			redirect: "manual",
+			referrer: request.referrer,
+			referrerPolicy: request.referrerPolicy,
+			body: request.body as UndiciRequestInit["body"],
+			duplex: "half",
+			headers: [...request.headers],
+			method: request.method,
+			signal: request.signal,
+		}) as unknown as Response;
+	}
+	return undiciFetch(input, init as unknown as UndiciRequestInit) as unknown as Response;
 }
 
 function egressUrl(value: string, { allowHttp = false }: { allowHttp?: boolean } = {}): URL {

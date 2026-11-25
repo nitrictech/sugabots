@@ -4,7 +4,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ComputerProviderStore } from "../../../computers/computer-provider-store.ts";
 import { ComputerSignIn } from "../../../computers/computer-sign-in.ts";
 import { ProjectComputers } from "../../../computers/project-computers.ts";
-import { recordingIds, removeWorkVolumes } from "../../../computers/testing.ts";
+import {
+	localComputerEgress,
+	recordingIds,
+	removeWorkVolumes,
+} from "../../../computers/testing.ts";
 import { EventBus } from "../../../database/events/bus.ts";
 import { EventStore } from "../../../database/events/store.ts";
 import { inMemoryEventStore } from "../../../database/events/testing.ts";
@@ -18,9 +22,7 @@ import {
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { viewDesktop } from "../../../operations/computers/view-desktop.ts";
 import { authenticators, principals } from "../../../proofs/world.test-support.ts";
-import { Egress } from "../../../providers/network/egress.ts";
 import { Streams } from "../../../streams/streams.ts";
-import { unimplemented } from "../../../testing.ts";
 import { defaultProjectOf } from "../../../workspaces/projects/project-reads.ts";
 import { seedChat } from "../../seed.test-support.ts";
 import { stepOnComputer } from "../computer/testing.ts";
@@ -86,7 +88,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 				Effect.provide(ComputerSignIn.none),
 				Effect.provide(recordingIds(idsHandedOut)),
 				// Registries are asked what an image's tag names, as in production.
-				Effect.provide(unimplemented(Egress.Service, { providers: { for: () => fetch } })),
+				Effect.provide(localComputerEgress),
 			),
 		);
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

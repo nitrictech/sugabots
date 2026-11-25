@@ -647,7 +647,7 @@ export const API_FORMATS = [
 ] as const;
 
 const fieldText =
-	"w-full min-w-0 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground";
+	"w-full min-w-0 bg-transparent font-mono text-xs rounded-sm text-foreground focus-ring placeholder:text-muted-foreground";
 
 function EditableRow({
 	label,

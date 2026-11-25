@@ -71,7 +71,7 @@ function ComputerGroup({ owner, shown }: { owner: ResourceOwner; shown: ProjectC
 
 	if (computer.kind === "none") {
 		return (
-			<SettingsGroup label="Computer">
+			<SettingsGroup label="Computer" headingLevel={2}>
 				<SettingsRow
 					label="No computer yet"
 					sub="One is made the first time a bot here runs a command or uses its browser."
@@ -92,6 +92,7 @@ function ComputerGroup({ owner, shown }: { owner: ResourceOwner; shown: ProjectC
 	return (
 		<SettingsGroup
 			label="Computer"
+			headingLevel={2}
 			note={failure ? failureMessage(failure) : stateNote(computer.state)}
 		>
 			<SettingsRow
@@ -188,7 +189,7 @@ const DISK_NOTES = {
 function DiskGroup({ disk, bots }: { disk: ComputerDisk | null; bots: readonly Bot[] }) {
 	if (!disk) {
 		return (
-			<SettingsGroup label="Disk">
+			<SettingsGroup label="Disk" headingLevel={2}>
 				<SettingsRow
 					label="Not measured yet"
 					sub="It's measured every few minutes while the computer is on."
@@ -198,7 +199,7 @@ function DiskGroup({ disk, bots }: { disk: ComputerDisk | null; bots: readonly B
 	}
 	const botById = new Map(bots.map((bot) => [bot.id, bot]));
 	return (
-		<SettingsGroup label="Disk" note={DISK_NOTES[computerDiskLevel(disk)]}>
+		<SettingsGroup label="Disk" headingLevel={2} note={DISK_NOTES[computerDiskLevel(disk)]}>
 			<SettingsRow
 				label={`${diskSummary(disk)} used`}
 				sub={

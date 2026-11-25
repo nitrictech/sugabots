@@ -1,5 +1,5 @@
 import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { member, membership, workspace } from "../../../database/schema.ts";
 import {
@@ -8,10 +8,10 @@ import {
 	type Promised,
 	runOnPostgres,
 	servedOnPostgres,
-	waitUntilWaitingOnLocks,
 } from "../../../database/testing.ts";
 import { servedOperations } from "../../../operations/testing.ts";
 import { authenticators, principals } from "../../../proofs/world.test-support.ts";
+import { unimplemented } from "../../../testing.ts";
 import { Egress, type EgressHttpClients } from "../../network/egress.ts";
 import { providerIn, providersIn } from "../model-provider-reads.ts";
 import { ModelProviderStore } from "../model-provider-store.ts";
@@ -32,7 +32,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 	/** The sign-in operations, called for the workspace's administrator signed in. */
 	const setup = async () => {
 		const call = await servedOperations({
-			egress: Layer.succeed(Egress.Service, {
+			egress: unimplemented(Egress.Service, {
 				providers: service.clients,
 				validateProviderUrl: () => Effect.void,
 				oauth: async () => new Response(null, { status: 503 }),
@@ -206,15 +206,17 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			const access = await storedAccess();
 			const exchange = openai.holdRefreshes();
 
-			const starting = Promise.all([1, 2, 3].map(() => withAccess(access)));
+			const first = withAccess(access);
+			let others: Promise<Awaited<typeof first>[]>;
 			try {
-				// One turn is exchanging the token; the other two wait on its lock.
+				// One turn is exchanging the token under its claim; the others start
+				// meanwhile and wait for its tokens rather than spend it again.
 				await exchange.started;
-				await waitUntilWaitingOnLocks(2);
+				others = Promise.all([2, 3].map(() => withAccess(access)));
 			} finally {
 				exchange.release();
 			}
-			const ready = await starting;
+			const ready = [await first, ...(await others)];
 
 			expect(openai.refreshesSpent).toEqual(["refresh-0"]);
 			const renewed = openai.issued[0];

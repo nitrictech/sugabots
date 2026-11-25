@@ -1,4 +1,4 @@
-import type { WrittenFileKind } from "@sugabots/contracts";
+import type { WrittenFile, WrittenFileKind } from "@sugabots/contracts";
 import { cn } from "cn";
 import { ChevronDown, ChevronUp, FileText, type LucideIcon, PanelsTopLeft } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
@@ -30,6 +30,39 @@ interface WrittenFileKindView {
 	}) => ReactNode;
 	/** Its content, version `at`, opened large. */
 	Full: (props: { title: string; content: string; at: PageAt }) => ReactNode;
+}
+
+export function OutsideRunPageNote({ source }: { source: NonNullable<WrittenFile["outsideRun"]> }) {
+	return (
+		<span className="block text-muted-foreground text-xs">
+			{source === "github"
+				? "Written by a run started by a GitHub event."
+				: "Written by a run started by a webhook."}
+		</span>
+	);
+}
+
+export function LoadOutsideRunPage({
+	source,
+	children,
+}: {
+	source: NonNullable<WrittenFile["outsideRun"]>;
+	children: ReactNode;
+}) {
+	const [loaded, setLoaded] = useState(false);
+	return (
+		<>
+			<div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-panel p-3">
+				<OutsideRunPageNote source={source} />
+				{!loaded && (
+					<Button variant="secondary" size="sm" onClick={() => setLoaded(true)}>
+						Load page
+					</Button>
+				)}
+			</div>
+			{loaded && children}
+		</>
+	);
 }
 
 export const FILE_KINDS: Record<WrittenFileKind, WrittenFileKindView> = {

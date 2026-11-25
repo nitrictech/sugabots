@@ -93,7 +93,7 @@ export const webExposure = {
 			kind: "offered",
 			tool: WEB_FETCH_TOOL,
 			offeredIn: "everywhere",
-			approval: { kind: "never" },
+			approval: { kind: "outsideRunsOrMemberBounds" },
 		},
 	},
 	"web.search": {

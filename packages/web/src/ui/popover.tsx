@@ -10,7 +10,7 @@ import { cn } from "cn";
 
 /** The panel every popover is drawn as, for one that has to be another element. */
 export const POPOVER_SURFACE =
-	"origin-(--transform-origin) rounded-lg border border-border-strong bg-panel text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95";
+	"origin-(--transform-origin) rounded-lg border border-border-strong bg-panel text-foreground shadow-popover outline-none motion-safe:transition motion-safe:duration-150 motion-safe:data-starting-style:scale-95 motion-safe:data-starting-style:opacity-0 motion-safe:data-ending-style:scale-95 motion-safe:data-ending-style:opacity-0";
 
 export function PopoverContent({
 	side = "bottom",
@@ -30,7 +30,14 @@ export function PopoverContent({
 				collisionPadding={16}
 				className="isolate z-50 outline-none"
 			>
-				<PopoverPrimitive.Popup className={cn(POPOVER_SURFACE, className)} {...props} />
+				<PopoverPrimitive.Popup
+					className={
+						typeof className === "function"
+							? (state) => cn(POPOVER_SURFACE, className(state))
+							: cn(POPOVER_SURFACE, className)
+					}
+					{...props}
+				/>
 			</PopoverPrimitive.Positioner>
 		</PopoverPrimitive.Portal>
 	);

@@ -1,6 +1,7 @@
 import type { BuiltInProviderId } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import {
+	boolean,
 	check,
 	index,
 	integer,
@@ -29,6 +30,11 @@ export const modelRequest = pgTable(
 		workspaceId: uuid("workspace_id").notNull(),
 		purpose: text("purpose").$type<ModelRequests.PurposeName>().notNull(),
 		botId: uuid("bot_id"),
+		/**
+		 * Whether `botId` was a Personal Assistant when the request was made, so
+		 * usage keeps counting it as one after its member has left and it has gone.
+		 */
+		byPersonalAssistant: boolean("by_personal_assistant").notNull().default(false),
 		/** The chat the request served, never a system bot's own chat. */
 		chatId: uuid("chat_id"),
 		turnId: uuid("turn_id"),

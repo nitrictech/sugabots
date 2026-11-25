@@ -61,6 +61,7 @@ export const onDatabase = <A>(run: (db: Executor) => Effect.Effect<A, QueryFailu
 	runOnPostgres(query(run));
 
 const LOCK_WAIT_POLL_INTERVAL_MS = 20;
+const LOCK_WAIT_DEADLINE_MS = 4_000;
 
 /**
  * Waits until `count` connections to this worker's database are waiting on locks.
@@ -70,10 +71,22 @@ export function waitUntilWaitingOnLocks(count: number, signal?: AbortSignal): Pr
 	return observeLockWait(count, signal);
 }
 
-function observeLockWait(count: number, signal?: AbortSignal, blockerPid?: number): Promise<void> {
+function observeLockWait(
+	count: number,
+	signal?: AbortSignal,
+	holder?: Promise<{ pid: number }>,
+): Promise<void> {
 	const finished = new AbortController();
-	const stop = signal ? AbortSignal.any([finished.signal, signal]) : finished.signal;
-	const waiting = pollLockWait(count, stop, blockerPid);
+	const deadline = AbortSignal.timeout(LOCK_WAIT_DEADLINE_MS);
+	const stop = AbortSignal.any([deadline, finished.signal, ...(signal ? [signal] : [])]);
+	const waiting = pollLockWait(count, stop, holder).catch((error: unknown) => {
+		if (deadline.aborted && stop.reason === deadline.reason) {
+			throw new Error(
+				`Timed out waiting for ${count} Postgres connection(s) blocked on ${holder ? "the held transaction" : "locks"}`,
+			);
+		}
+		throw error;
+	});
 	onTestFinished(async () => {
 		finished.abort();
 		await waiting.catch(() => {});
@@ -81,7 +94,13 @@ function observeLockWait(count: number, signal?: AbortSignal, blockerPid?: numbe
 	return waiting;
 }
 
-async function pollLockWait(count: number, signal: AbortSignal, blockerPid: number | undefined) {
+async function pollLockWait(count: number, signal: AbortSignal, holder?: Promise<{ pid: number }>) {
+	const blocker = holder
+		? await runOnPostgres(Effect.tryPromise({ try: () => holder, catch: (error) => error }), {
+				signal,
+			})
+		: undefined;
+	const blockerPid = blocker?.pid;
 	while (true) {
 		signal.throwIfAborted();
 		const [waiting] = await runOnPostgres(
@@ -156,10 +175,7 @@ export function holdTransaction<A>(
 	return {
 		held,
 		release,
-		waitForWaiters: async (count, signal) => {
-			const { pid } = await acquired.promise;
-			return observeLockWait(count, signal, pid);
-		},
+		waitForWaiters: (count, signal) => observeLockWait(count, signal, acquired.promise),
 	};
 }
 

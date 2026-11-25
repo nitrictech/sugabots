@@ -21,7 +21,7 @@ import {
 	MAX_CRON_EXPRESSION_CHARACTERS,
 	manualAutomationRunSchema,
 	newAutomationSchema,
-	routineScheduleSchema,
+	routineSchema,
 	runPageQuerySchema,
 	runPageSchema,
 } from "../automations.ts";
@@ -93,7 +93,7 @@ const automationInChatSchema = Schema.Struct({
 		Schema.Union([
 			Schema.Struct({
 				kind: Schema.Literal("routine"),
-				schedule: routineScheduleSchema,
+				schedule: routineSchema,
 				timezone: Schema.String,
 				nextRunAt: Schema.NullOr(Schema.String),
 			}),

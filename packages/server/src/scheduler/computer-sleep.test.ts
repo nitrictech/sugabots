@@ -135,6 +135,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					}),
 				),
 			destroy: (id) => Effect.sync(() => void atProvider.delete(id)),
+			labelled: () => Effect.die(new Error("No computer is looked for by label here")),
 		};
 
 		let projectComputers: ProjectComputers.Interface;

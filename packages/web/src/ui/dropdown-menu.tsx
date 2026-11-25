@@ -45,7 +45,11 @@ function DropdownMenuContent({
 			>
 				<MenuPrimitive.Popup
 					data-slot="dropdown-menu-content"
-					className={cn(MENU_POPUP, className)}
+					className={
+						typeof className === "function"
+							? (state) => cn(MENU_POPUP, className(state))
+							: cn(MENU_POPUP, className)
+					}
 					{...props}
 				/>
 			</MenuPrimitive.Positioner>
@@ -187,7 +191,11 @@ function ContextMenuContent({ className, ...props }: ContextMenuPrimitive.Popup.
 			<ContextMenuPrimitive.Positioner className="isolate z-50 outline-none">
 				<ContextMenuPrimitive.Popup
 					data-slot="context-menu-content"
-					className={cn(MENU_POPUP, className)}
+					className={
+						typeof className === "function"
+							? (state) => cn(MENU_POPUP, className(state))
+							: cn(MENU_POPUP, className)
+					}
 					{...props}
 				/>
 			</ContextMenuPrimitive.Positioner>

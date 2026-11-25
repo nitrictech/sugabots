@@ -112,7 +112,8 @@ webhook's **Source** and **Auth** say:
 
 - **GitHub**, **Stripe**, **Slack** or **Linear**: paste the signing secret the
   source made, and add the address in the source, which signs each call itself.
-  Slack's address check is answered for you.
+  Slack's address check is answered for you. Linear's signed timestamp must be
+  within one minute of the server clock. Slack and Stripe allow five minutes.
 - **Generic**, for any other caller, with one **Auth**:
   - **HMAC**: the caller signs the raw body with the secret and sends the digest in
     the **Header** you name. Pick SHA-1, SHA-256 or SHA-512, and hex or base64. A
@@ -194,6 +195,10 @@ with `409`. Where the id comes from depends on the **Source**:
   event, in the body.
 - **Generic**: the header you name in **Delivery ID header**, `Idempotency-Key`
   until you change it. Clear it, and every call starts a run.
+
+GitHub and generic HMAC sign the body without a timestamp. Their delivery ID
+headers help deduplicate retries. A captured signed request can still be
+replayed, so keep signed requests and signatures out of shared logs.
 
 With no id, or when the header is missing, every call starts a run. A generic
 webhook with an explicit header reads nothing else, so a caller that names its

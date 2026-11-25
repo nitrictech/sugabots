@@ -6,6 +6,7 @@ import {
 	WebhookDeliveryIdHeaderRejected,
 	WebhookRefused,
 } from "@sugabots/contracts/errors/automations";
+import { AUTOMATION_WEBHOOK_MAX_BODY_BYTES } from "@sugabots/contracts/http";
 import {
 	seedAutomation,
 	seedBot,
@@ -27,7 +28,6 @@ import {
 	signedInWith,
 	type TestApp,
 } from "../../http/app.test-support.ts";
-import { MAX_JSON_BODY_BYTES } from "../../http/validation.ts";
 
 const AUTOMATION_ID = "0199a3a0-0000-7000-8000-000000000001";
 const TRIGGER_ID = "0199a3a0-0000-7000-8000-000000000003";
@@ -189,15 +189,35 @@ describe("Automation webhooks", () => {
 		expect(webhook).not.toHaveBeenCalled();
 	});
 
-	it("rejects oversized JSON before authenticating", async () => {
-		const { app, authenticated } = webhookApp();
+	it("starts a run for a call up to its limit, which its run's first message holds", async () => {
+		const { app, webhook } = webhookApp();
+		const shell = JSON.stringify({ report: "" });
+		const payload = { report: "x".repeat(AUTOMATION_WEBHOOK_MAX_BODY_BYTES - shell.length) };
 
 		const response = await deliver(app, {
 			authorization: GOOD_AUTHORIZATION,
-			body: JSON.stringify({ payload: "x".repeat(MAX_JSON_BODY_BYTES) }),
+			body: JSON.stringify(payload),
+		});
+
+		expect(response.status).toBe(202);
+		expect(webhook.mock.calls[0]?.[1]).toMatchObject({ payload });
+	});
+
+	it("refuses a call over its limit while reading it, before authenticating", async () => {
+		const { app, authenticated } = webhookApp();
+		const shell = JSON.stringify({ report: "" });
+
+		const response = await deliver(app, {
+			authorization: GOOD_AUTHORIZATION,
+			body: JSON.stringify({
+				report: "x".repeat(AUTOMATION_WEBHOOK_MAX_BODY_BYTES - shell.length + 1),
+			}),
 		});
 
 		expect(response.status).toBe(413);
+		expect(await response.json()).toMatchObject({
+			message: "The request body is over the 64 KiB limit",
+		});
 		expect(authenticated).not.toHaveBeenCalled();
 	});
 

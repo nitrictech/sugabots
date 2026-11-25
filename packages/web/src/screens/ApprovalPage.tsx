@@ -57,7 +57,7 @@ function findRequest(
 function ApprovalDetail({ found }: { found: ListedRequest }) {
 	const { request } = found;
 	const { call, bot } = request;
-	const { connector, toolSourceName, action } = useApprovalToolSource(request);
+	const { connector, toolSourceName, action, hostRequest } = useApprovalToolSource(request);
 	const review = useReviewToolCall(request.chatId);
 	const { project, askedIn } = useAskedIn(request);
 	const fields = fieldsOf(call.input) ?? [];
@@ -82,12 +82,17 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 				<header className="flex flex-col gap-3">
 					<div className="flex items-center gap-3">
 						<span aria-hidden className="flex shrink-0">
-							<ConnectorMark markId={connector?.markId} name={toolSourceName} size="sm" />
+							<ConnectorMark
+								markId={connector?.markId}
+								name={toolSourceName}
+								icon={hostRequest?.icon}
+								size="sm"
+							/>
 						</span>
 						{/* On a phone, the title first, then one line of who asked, for what, where and when. */}
 						<div className="flex min-w-0 flex-col max-md:flex-col-reverse max-md:gap-1">
 							<span className="truncate text-muted-foreground text-xs max-md:whitespace-normal max-md:text-sm">
-								{bot.name} wants to use {toolSourceName}
+								{hostRequest?.description ?? `${bot.name} wants to use ${toolSourceName}`}
 								<span className="md:hidden"> · {askedIn}</span>
 							</span>
 							<h1 className="m-0 truncate font-bold text-xl text-foreground leading-tight tracking-normal max-md:whitespace-normal max-md:font-semibold">
@@ -97,13 +102,15 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 					</div>
 					<p className="m-0 text-subtle-foreground text-xs max-md:hidden">Asked {askedIn}</p>
 				</header>
-				<dl className="m-0 overflow-hidden rounded-xl border border-border">
-					{fields.map(([key, value]) => (
-						<Row key={key} label={wordsFromKey(key)}>
-							<RequestValue value={value} depth={1} />
-						</Row>
-					))}
-				</dl>
+				{fields.length > 0 && (
+					<dl className="m-0 overflow-hidden rounded-xl border border-border">
+						{fields.map(([key, value]) => (
+							<Row key={key} label={wordsFromKey(key)}>
+								<RequestValue value={value} depth={1} />
+							</Row>
+						))}
+					</dl>
+				)}
 				<div className="flex flex-wrap items-center gap-3 pt-1 max-md:flex-col max-md:items-stretch max-md:gap-4">
 					{found.kind === "answered" ? (
 						// Announced when the member has just answered it here.

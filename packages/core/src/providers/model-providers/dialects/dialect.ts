@@ -5,8 +5,9 @@ import {
 	type ProviderModelCapability,
 	providerModelCapabilitySchema,
 } from "@sugabots/contracts";
+import { type DomainError, userText } from "@sugabots/errors";
 import type { LanguageModel, ModelMessage } from "ai";
-import { Data, Effect, Schema, SchemaGetter } from "effect";
+import { Effect, ErrorReporter, Schema, SchemaGetter } from "effect";
 import type { RecognizeFailure } from "../../models/request-failures.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
 
@@ -116,10 +117,19 @@ export interface ProviderDialect {
 	recognizeFailure?: RecognizeFailure;
 }
 
-export class ModelInspectionFailed extends Data.TaggedError("ModelInspectionFailed")<{
-	readonly message: string;
-	readonly cause?: unknown;
-}> {}
+export class ModelInspectionFailed
+	extends Schema.TaggedError<ModelInspectionFailed>()("ModelInspectionFailed", {
+		message: Schema.String,
+		cause: Schema.optional(Schema.Defect()),
+	})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	get userMessage() {
+		return userText`Sugabots couldn't read the model's details from its provider. Check the provider's settings and try again.`;
+	}
+}
 
 /** A listing whose entries sit under `data`: OpenAI's shape, and the one most providers copy. */
 export const dataListing = Schema.Struct({

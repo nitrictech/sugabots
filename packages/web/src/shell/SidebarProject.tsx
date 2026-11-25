@@ -13,8 +13,8 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { initialOf } from "@/ui/letter-tile.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 
-/** A project the viewer is in, with how its chats stand for them. */
-export type ProjectStanding = AttentionMark & { project: Project };
+/** A project the viewer is in, with its unread messages, approvals and automation errors. */
+export type ProjectWithAttention = AttentionMark & { project: Project };
 
 /**
  * A project in the sidebar: one row, as a bot is, whose name opens the
@@ -26,18 +26,18 @@ export type ProjectStanding = AttentionMark & { project: Project };
  * offers its notifications. A private project's name carries a lock.
  */
 export function SidebarProject({
-	standing,
+	projectWithAttention,
 	selected,
 	notificationSettings,
 }: {
-	standing: ProjectStanding;
+	projectWithAttention: ProjectWithAttention;
 	/** Whether the page open is in this project. */
 	selected: boolean;
 	/** What the viewer is notified about, once loaded. */
 	notificationSettings?: NotificationSettings;
 }) {
-	const { project } = standing;
-	const problem = useProjectProblem(standing);
+	const { project } = projectWithAttention;
+	const problem = useProjectProblem(projectWithAttention);
 	const notificationPlace = { kind: "project", id: project.id } as const;
 	const isPrivate = project.visibility === "private";
 	return (
@@ -59,7 +59,7 @@ export function SidebarProject({
 					<span
 						className={cn(
 							"min-w-0 truncate text-sm",
-							hasNews(standing)
+							hasNews(projectWithAttention)
 								? "font-semibold text-foreground"
 								: "font-medium text-muted-foreground group-hover/project:text-foreground",
 						)}
@@ -70,8 +70,8 @@ export function SidebarProject({
 					<MutedMark settings={notificationSettings} place={notificationPlace} />
 				</Link>
 				<RowAttention
-					unreadMessages={standing.unreadMessages}
-					needsApproval={standing.needsApproval}
+					unreadMessages={projectWithAttention.unreadMessages}
+					needsApproval={projectWithAttention.needsApproval}
 					className="mr-2"
 				/>
 				{problem && (
@@ -104,7 +104,10 @@ export function SidebarProject({
  * What is wrong with a project that its settings or automations set right,
  * settings first.
  */
-function useProjectProblem({ project, failedAutomations }: ProjectStanding): string | undefined {
+function useProjectProblem({
+	project,
+	failedAutomations,
+}: ProjectWithAttention): string | undefined {
 	const problems = useOwnerProblems({ project }, failedAutomations > 0);
 	return problems.settings ?? problems.automations;
 }

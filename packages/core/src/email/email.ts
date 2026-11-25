@@ -1,6 +1,7 @@
 export * as Email from "./email.ts";
 
-import { Config, Context, Data, Effect, Layer, Option } from "effect";
+import { type DomainError, userText } from "@sugabots/errors";
+import { Config, Context, Effect, ErrorReporter, Layer, Option, Schema } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { ServerSettings } from "../server-settings/server-settings.ts";
 import { processLayer, Tier } from "../tiers.ts";
@@ -49,14 +50,33 @@ export type Message = Body & {
 	subject: string;
 };
 
-export class DeliveryFailed extends Data.TaggedError("EmailDeliveryFailed")<{
-	provider: string;
-	cause: unknown;
-}> {}
+export class DeliveryFailed
+	extends Schema.TaggedError<DeliveryFailed>()("EmailDeliveryFailed", {
+		provider: Schema.String,
+		cause: Schema.Defect(),
+	})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The ${this.provider} email provider failed`;
+	}
+	get userMessage() {
+		return userText`Sugabots couldn't send the email. Try again shortly.`;
+	}
+}
 
-export class InvalidConfig extends Data.TaggedError("InvalidEmailConfig")<{
-	message: string;
-}> {}
+export class InvalidConfig
+	extends Schema.TaggedError<InvalidConfig>()("InvalidEmailConfig", { message: Schema.String })
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	get userMessage() {
+		return userText`Email is unavailable. Ask whoever runs this server to check its email settings.`;
+	}
+}
 
 /**
  * Parses `Name <address>` or a bare `address`, the forms mail clients show, or

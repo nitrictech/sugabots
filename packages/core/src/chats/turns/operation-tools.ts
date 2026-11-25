@@ -191,7 +191,7 @@ function operationTool(
 										}),
 									);
 							}
-							return yield* Effect.fail(new ToolCallError(error.userMessage));
+							return yield* Effect.fail(new ToolCallError({ userMessage: error.userMessage }));
 						}),
 					),
 					Effect.catchDefect((defect) =>
@@ -202,9 +202,11 @@ function operationTool(
 								defect,
 							});
 							return yield* Effect.fail(
-								new ToolCallError(
-									UserText.unchecked(`The tool failed before it finished. Reference: ${callId}.`),
-								),
+								new ToolCallError({
+									userMessage: UserText.unchecked(
+										`The tool failed before it finished. Reference: ${callId}.`,
+									),
+								}),
 							);
 						}),
 					),

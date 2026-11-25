@@ -8,6 +8,7 @@ import {
 	NotFound,
 	PayloadTooLarge,
 	Unauthorized,
+	UnsupportedMediaType,
 } from "@sugabots/contracts/http";
 import { type UserText, userText } from "@sugabots/errors";
 import { Schema } from "effect";
@@ -34,6 +35,8 @@ export function failureForStatus(status: number, message: UserText, details?: un
 			return new Conflict(fields);
 		case 413:
 			return new PayloadTooLarge(fields);
+		case 415:
+			return new UnsupportedMediaType(fields);
 		default:
 			return status >= 500 ? new InternalServerError(fields) : new BadRequest(fields);
 	}

@@ -48,6 +48,7 @@ async function recordedResult(
 	return run(forModel(call.outcome.output, { files, chatId, toolCallId: call.id }));
 }
 
+// biome-ignore lint/plugin/errors-implement-domain-error: The loop catches this signal to ask for approval again.
 export class ToolApprovalRequired extends Error {
 	readonly asked: ApprovalAsked & { readonly reopenCallId: string };
 

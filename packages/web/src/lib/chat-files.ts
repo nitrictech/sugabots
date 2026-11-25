@@ -6,6 +6,7 @@ import { client } from "@/api.ts";
 const decodeUploadedAttachment = Schema.decodeUnknownSync(uploadedAttachmentSchema);
 
 /** An upload that never got an answer from the API: the connection dropped, or it was stopped. */
+// biome-ignore lint/plugin/errors-implement-domain-error: Browser transport signal from XMLHttpRequest.
 export class UploadInterrupted extends Error {
 	constructor() {
 		super("The upload did not finish");

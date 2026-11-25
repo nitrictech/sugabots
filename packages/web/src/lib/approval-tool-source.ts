@@ -1,8 +1,17 @@
 import type { ApprovalRequest } from "@sugabots/contracts";
+import { Globe } from "lucide-react";
 import { useMarkedConnectors } from "@/lib/connectors.ts";
 import { formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { useProjects } from "@/lib/projects.ts";
-import { connectorLabel, splitToolKey, stepLabel } from "@/lib/tool-names.ts";
+import { connectorLabel, HOST_REQUEST_TOOL, splitToolKey, stepLabel } from "@/lib/tool-names.ts";
+
+export function hostRequestPresentation(tool: string, botName: string) {
+	if (tool !== HOST_REQUEST_TOOL) return undefined;
+	return {
+		description: `${botName} wants the project's computer to reach a new host`,
+		icon: Globe,
+	};
+}
 
 /**
  * What an approval request would use and do, as its row and its page show
@@ -16,6 +25,7 @@ export function useApprovalToolSource(request: ApprovalRequest) {
 	const action = stepLabel(request.call.tool, name);
 	return {
 		connector,
+		hostRequest: hostRequestPresentation(request.call.tool, request.bot.name),
 		toolSourceName: handle ? connectorLabel(handle, connector?.name) : action,
 		action,
 	};

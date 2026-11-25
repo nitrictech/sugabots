@@ -8,6 +8,7 @@ import { EventBus } from "../../database/events/bus.ts";
 import { bot, connector, member, membership, workspace } from "../../database/schema.ts";
 import { onDatabase, runOnPostgres, type TestInfrastructure } from "../../database/testing.ts";
 import type { AsMember } from "../../operations/chats/testing.ts";
+import { askForApprovals } from "../../operations/turns/ask-for-approvals.ts";
 import { asRunningTurn } from "../../operations/turns/running-turn.ts";
 import type { BotPrincipal } from "../../principal.ts";
 import type { RunsTurn } from "../../proofs/runs-turn.ts";
@@ -257,11 +258,13 @@ export const parkTurn = (
 	approvals: Parameters<TurnRecords.Interface["askForApprovals"]>[2],
 	step = 0,
 ) =>
-	asTheLoop(turn, (runsTurn) =>
-		Effect.flatMap(TurnRecords.Service, (records) =>
-			records.askForApprovals(runsTurn, step, approvals),
-		),
-	);
+	askForApprovals
+		.run(
+			turn.principal,
+			{ chatId: turn.run.request.chatId, turnId: turn.turnId, step, approvals },
+			{ kind: "request", request: crypto.randomUUID() },
+		)
+		.pipe(Effect.orDie);
 
 /**
  * Records that `turn`'s step `step` is sending a call to `tool`, as the loop

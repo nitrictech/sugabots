@@ -1,1 +1,0 @@
-ALTER TABLE "message" ADD COLUMN "brief_turn_rule" text;

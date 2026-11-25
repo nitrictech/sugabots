@@ -45,7 +45,7 @@ if [ -f .env ]; then
 else
 	(
 		umask 077
-		printf 'BETTER_AUTH_SECRET=%s\nCREDENTIALS_ENCRYPTION_KEY=%s\n' "$(random_key)" "$(random_key)" >.env
+		printf 'BETTER_AUTH_SECRET=%s\nSECRETS_ENCRYPTION_KEY=%s\n' "$(random_key)" "$(random_key)" >.env
 	)
 	echo "Wrote new keys to $INSTALL_DIR/.env. Back it up and keep it private."
 fi

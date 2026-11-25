@@ -18,7 +18,12 @@ import {
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { and, eq, sql } from "drizzle-orm";
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
-import { type Database, query, serviceOperations } from "../../../database/database.ts";
+import {
+	type Database,
+	query,
+	serviceOperations,
+	transaction,
+} from "../../../database/database.ts";
 import { bot, project } from "../../../database/schema.ts";
 import { Ids } from "../../../ids/ids.ts";
 import type { CanManageProject } from "../../../proofs/project-permissions.ts";
@@ -33,6 +38,7 @@ import { ConnectorStore } from "../connector-store.ts";
 import { encryptAppCredential, openAppCredential } from "./credential.ts";
 import * as GitHub from "./github.ts";
 import { gitHubConnectorForProject } from "./github-connectors.ts";
+import { GitHubUninstalls } from "./uninstalls.ts";
 
 /**
  * Connecting a project to GitHub, for operations that have proved what each
@@ -102,6 +108,7 @@ export const make = Effect.gen(function* () {
 	const secrets = yield* Secrets.Service;
 	const serverSettings = yield* ServerSettings.Service;
 	const connectors = yield* ConnectorStore.Service;
+	const uninstalls = yield* GitHubUninstalls.Service;
 	const ids = yield* Ids.Service;
 	const egress = yield* Egress.Service;
 	// Asked for when used, so building this asks nothing of egress.
@@ -255,8 +262,21 @@ export const make = Effect.gen(function* () {
 						// Only a member's own account is theirs alone, so only then is the installation theirs.
 						installedById: onUserAccount ? member.actor.memberId : null,
 					});
-					// The connector went meanwhile, or its member left the workspace or was removed.
-					if (!recorded) return failed(undefined, "expired");
+					// The connector went meanwhile, or its member left the workspace or was
+					// removed: nothing records the installation now, so it is uninstalled.
+					if (!recorded) {
+						yield* transaction(
+							uninstalls.enqueue(reach.workspace, [
+								{
+									connectorId: row.id,
+									appId: row.settings.appId,
+									appCredentialEncrypted: row.appCredentialEncrypted,
+									installationId: id,
+								},
+							]),
+						);
+						return failed(undefined, "expired");
+					}
 					return { kind: "done", at: projectIn(reach), connectorId: row.id };
 				}),
 			),
@@ -284,7 +304,9 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(Layer.provide(ConnectorStore.layer));
+export const layer = layerNoDeps.pipe(
+	Layer.provide([ConnectorStore.layer, GitHubUninstalls.layer]),
+);
 
 /** The project being connected. */
 interface SetupProject {

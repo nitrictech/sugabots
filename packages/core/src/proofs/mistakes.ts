@@ -1,8 +1,8 @@
 /**
  * Near-misses with proofs, principals and tiers, one per line under
- * `@ts-expect-error`. Type-checked and never run or imported: if a change makes
- * one of these lines compile, the unused `@ts-expect-error` fails the
- * typecheck. Add a line for every near-miss found in review.
+ * `@ts-expect-error`. Type-checked and never run or imported. The lint check
+ * reads each directive's TS code and bracketed message fragment to verify
+ * that the line fails for the intended reason.
  *
  * The proofs and services here are stand-ins with the shapes the real ones
  * take, declared so the checks don't depend on any one prover.
@@ -217,9 +217,9 @@ declare const otherChatId: string;
 const ReachesChatProof = defineProof("ReachesChat");
 export const proveHere = <P, C>(principal: Named<P, Principal>, chat: Named<C, string>) => {
 	const proof: ReachesChat<P, C> = ReachesChatProof.prove([principal, chat], { chat });
-	// @ts-expect-error TS2322 Swapping the names changes which principal reaches which chat.
+	// @ts-expect-error TS2322 [Type 'Proof<"ReachesChat", [P, C]> & Readonly<{ chat: Named<C, string>; }>' is not assignable to type 'Reaches] Swapping the names changes which principal reaches which chat.
 	const swapped: ReachesChat<C, P> = ReachesChatProof.prove([principal, chat], { chat });
-	// @ts-expect-error TS2322 Reach cannot stand in for permission to take part.
+	// @ts-expect-error TS2322 [Type 'Proof<"ReachesChat", [P, C]> & Readonly<{ reach: ReachesChat<P, C>; }>' is not assignable to type 'CanTa] Reach cannot stand in for permission to take part.
 	const otherKind: CanTakePart<P, C> = ReachesChatProof.prove([principal, chat], { reach: proof });
 	return [proof, swapped, otherKind];
 };
@@ -231,19 +231,19 @@ export const mistakes = named(principal, chatId, otherChatId, (principal, chatA,
 		const canTakePartA = proveCanTakePart(reachA);
 
 		// A raw chat id handed to a service that wants a named one.
-		// @ts-expect-error TS2345
+		// @ts-expect-error TS2345 [Argument of type 'string' is not assignable to parameter of type 'Named<NameB, string>']
 		yield* chats.rename(chatId, canTakePartA);
 
 		// A proof about chat A used for chat B.
-		// @ts-expect-error TS2345
+		// @ts-expect-error TS2345 [Argument of type 'CanTakePart<NameA, NameB>' is not assignable to parameter of type 'CanTakePart<NameA, NameC>']
 		yield* chats.setResolved(reachB, true, canTakePartA);
 
 		// `CanTakePart` where `CanChangeChat` is needed.
-		// @ts-expect-error TS2345
+		// @ts-expect-error TS2345 [Argument of type 'CanTakePart<NameA, NameB>' is not assignable to parameter of type 'CanChangeChat<NameA, NameB>']
 		yield* chats.rename(chatA, canTakePartA);
 
 		// A spread copy of a named value, with another value.
-		// @ts-expect-error TS2739
+		// @ts-expect-error TS2739 [from type 'Named<NameB, string>']
 		yield* chats.post({ ...chatA, value: otherChatId }, canTakePartA);
 
 		yield* chats.post(chatA, canTakePartA);
@@ -257,7 +257,7 @@ export const membershipMistakes = named(principal, "workspace", (principal, work
 		const membership = yield* proveInWorkspace(principal, workspace);
 
 		// A spread copy of `InWorkspace` with another role.
-		// @ts-expect-error TS2739
+		// @ts-expect-error TS2739 [from type 'InWorkspace<NameA, NameB>']
 		yield* memberships.promote({ ...membership, role: "owner" });
 
 		yield* memberships.promote(membership);
@@ -265,31 +265,31 @@ export const membershipMistakes = named(principal, "workspace", (principal, work
 );
 
 // A named value returned out of `named`.
-// @ts-expect-error TS2322
+// @ts-expect-error TS2322 [Type 'Effect<Named<NameA, string>, never, never>' is not assignable to type 'Effect<Named<unknown, string>, ne]
 export const escaped = named(chatId, (chat) => Effect.succeed(chat));
 
 declare const memberOnly: (principal: MemberSession) => Effect.Effect<void>;
 declare const botForAsker: BotForAsker;
 
 // A `MemberSession`-only operation called with a `BotForAsker`.
-// @ts-expect-error TS2739
+// @ts-expect-error TS2739 [from type 'MemberSession']
 export const botAsMember = memberOnly(botForAsker);
 
 // Building a `Principal` literal.
-// @ts-expect-error TS2739
+// @ts-expect-error TS2739 [from type 'MemberSession']
 export const forged: MemberSession = { _tag: "MemberSession", member: "someone" };
 
 declare const session: MemberSession;
 // A spread copy of a principal, with another member.
-// @ts-expect-error TS2739
+// @ts-expect-error TS2739 [from type 'MemberSession']
 export const copied: MemberSession = { ...session, member: "someone else" };
 
 // A spread copy of a bot's principal, with wider bounds.
-// @ts-expect-error TS2739
+// @ts-expect-error TS2739 [from type 'BotForAsker']
 export const widened: BotForAsker = { ...botForAsker, bounds: { kind: "member" } };
 
 // Building system work naming another chat.
-// @ts-expect-error TS2741
+// @ts-expect-error TS2741 [required in type 'SystemWork']
 export const forgedWork: SystemWork = {
 	_tag: "SystemWork",
 	workspace: "workspace",
@@ -298,7 +298,7 @@ export const forgedWork: SystemWork = {
 
 declare const page: PageAddress;
 // A spread copy of a page address, opening another page.
-// @ts-expect-error TS2739
+// @ts-expect-error TS2739 [from type 'PageAddress']
 export const otherPage: PageAddress = { ...page, file: "another file" };
 
 class CurrentRequest extends Context.Service<CurrentRequest, { readonly id: string }>()(
@@ -319,7 +319,7 @@ class Lookup extends Context.Service<Lookup, { readonly describe: Effect.Effect<
 
 // `processLayer` over a layer that needs a request-tier service.
 export const capturesRequest = processLayer(
-	// @ts-expect-error TS2345 The layer that builds Lookup reads a request-tier service.
+	// @ts-expect-error TS2345 [parameter of type 'Layer<Lookup, never, CurrentRequest> & { readonly "built per worksp] The layer that builds Lookup reads a request-tier service.
 	Layer.effect(
 		Lookup,
 		Effect.gen(function* () {
@@ -337,7 +337,7 @@ export const capturesRequestPiped = Layer.effect(
 		return { describe: Effect.log(request.id) };
 	}),
 ).pipe(
-	// @ts-expect-error TS2345 Piping through processLayer still rejects the request dependency.
+	// @ts-expect-error TS2345 [parameter of type '(_: Layer<Lookup, never, CurrentRequest>) => Layer<Lookup, never, C] Piping through processLayer still rejects the request dependency.
 	processLayer,
 );
 
@@ -353,13 +353,13 @@ export const processOnly = processLayer(
 
 // A layer that provides a request-tier service, built from a whole context.
 export const providesRequest = processLayer(
-	// @ts-expect-error TS2345 A whole context cannot hide a request-tier service.
+	// @ts-expect-error TS2345 [parameter of type 'Layer<CurrentRequest, never, never> & { readonly "built per workspa] A whole context cannot hide a request-tier service.
 	Layer.succeedContext(Context.make(CurrentRequest, { id: "one request's" })),
 );
 
 // The database's open transaction is request tier too, however it is imported.
 export const providesTransaction = processLayer(
-	// @ts-expect-error TS2345 The context contains the request's open transaction.
+	// @ts-expect-error TS2345 [parameter of type 'Layer<Transaction, never, never> & { readonly "built per workspace ] The context contains the request's open transaction.
 	Layer.succeedContext(
 		Context.make(Transaction, { beforeCommit: [], batches: new Map(), afterCommit: [] }),
 	),
@@ -368,7 +368,7 @@ export const providesTransaction = processLayer(
 // An outer `Layer.unwrap` that reads a request-tier service while choosing a layer
 // that is fine itself.
 export const choosesWhileReadingRequest = processLayer(
-	// @ts-expect-error TS2345 The outer layer reads the request while choosing a process layer.
+	// @ts-expect-error TS2345 [parameter of type 'Layer<Lookup, never, CurrentRequest> & { readonly "built per worksp] The outer layer reads the request while choosing a process layer.
 	Layer.unwrap(
 		Effect.gen(function* () {
 			const request = yield* CurrentRequest;
@@ -392,7 +392,7 @@ export const choosesWhileReadingProcess = processLayer(
 
 // `Layer.fromBuild` and `Layer.effectDiscard`, which take no service to build.
 export const buildsFromRequest = processLayer(
-	// @ts-expect-error TS2345 The build needs a request even though its output is process-tier.
+	// @ts-expect-error TS2345 [parameter of type 'Layer<Lookup, never, CurrentRequest> & { readonly "built per worksp] The build needs a request even though its output is process-tier.
 	Layer.fromBuild(() =>
 		Effect.map(CurrentRequest, (request) =>
 			Context.make(Lookup, { describe: Effect.log(request.id) }),
@@ -401,7 +401,7 @@ export const buildsFromRequest = processLayer(
 );
 
 export const discardsAfterRequest = processLayer(
-	// @ts-expect-error TS2345 Discarding the result does not remove the request dependency.
+	// @ts-expect-error TS2345 [parameter of type 'Layer<never, never, CurrentRequest> & { readonly "built per workspa] Discarding the result does not remove the request dependency.
 	Layer.effectDiscard(Effect.flatMap(CurrentRequest, (request) => Effect.log(request.id))),
 );
 
@@ -414,18 +414,18 @@ const setResolved = OperationContract.make("chats.setResolved", {
 });
 
 // An operation's body failing with an error its contract doesn't list.
-// @ts-expect-error TS2322
+// @ts-expect-error TS2322 [Type 'Effect<never, string, never>' is not assignable to type 'Effect<void, never, never>']
 export const undeclaredError = defineOperation(setResolved, () => Effect.fail("refused"));
 
 // An operation's body reading an input field its contract doesn't have.
-// @ts-expect-error TS2339
+// @ts-expect-error TS2339 [Property 'chatName' does not exist on type '{ readonly chatId: string; readonly resolved: boolean; }']
 export const unknownInput = defineOperation(setResolved, (_, input) => Effect.log(input.chatName));
 
 export const declared = defineOperation(setResolved, (_, input) => Effect.log(input.chatId));
 
 export const assumesToolCall = defineOperation(setResolved, (_, __, call) =>
 	// An operation's body reading a tool call's id from a call that may be an HTTP request.
-	// @ts-expect-error TS2339
+	// @ts-expect-error TS2339 [Property 'toolCall' does not exist on type 'Call']
 	Effect.log(call.toolCall),
 );
 
@@ -459,28 +459,28 @@ export const projectsServiceMistakes = underWorkspaceLock(principal, "workspace"
 				);
 
 				// A project's members changed with a reach proved for a principal named outside the lock.
-				// @ts-expect-error TS2345
+				// @ts-expect-error TS2345 [Argument of type 'ReachesProject<NameA, NameB>' is not assignable to parameter of type 'ReachesProject<P, NameB>']
 				yield* proveCanChangeProjectMembers(lock, yield* proveRealReachesProject(other, project));
 
 				// A bot proven reached by another principal, added to a project this one may change.
-				// @ts-expect-error TS2345
+				// @ts-expect-error TS2345 [Argument of type 'ReachesBot<NameA, NameC>' is not assignable to parameter of type 'ReachesBot<P, NameC>']
 				yield* projectsService.addBot(canChange, yield* proveReachesBot(other, bot), approved);
 
 				// A bot added for a bot's call another principal's approval allowed.
 				const reachesBot = yield* proveReachesBot(lock.principal, bot);
-				// @ts-expect-error TS2345 The approval belongs to a different principal.
+				// @ts-expect-error TS2345 [Argument of type 'CanChangeProjectMembers<P, NameB>' is not assignable to parameter of type 'CanChangeProjectMembers<NameA, NameB>'] The approval belongs to a different principal.
 				yield* projectsService.addBot(canChange, reachesBot, approvedForOther);
 
 				// A project deleted with the proof that its members may be changed, not that it may be deleted.
-				// @ts-expect-error TS2739
+				// @ts-expect-error TS2739 [from type 'ProjectDeletionStarted<unknown, unknown, "project">']
 				yield* projectsService.remove(canChange);
 
 				// A project's members listed with no proof that it is reached, only its id.
-				// @ts-expect-error TS2740
+				// @ts-expect-error TS2740 [from type 'ReachesProject<unknown, unknown>']
 				yield* projectsService.members(project);
 
 				// A member added by a write taken out of the transaction that holds the lock.
-				// @ts-expect-error TS2322
+				// @ts-expect-error TS2322 [Type 'Effect<void, NotInWorkspace, Transaction>' is not assignable to type 'Effect<void, NotInWorkspace, never]
 				const outsideTheLock: Effect.Effect<void, NotInWorkspace> = projectsService.addMember(
 					canChange,
 					member,
@@ -516,15 +516,15 @@ export const computersServiceMistakes = named(
 			const canManage = yield* proveRealCanManageProject(reach);
 
 			// A workspace's computer providers listed by whoever may read the workspace, not manage it.
-			// @ts-expect-error TS2345
+			// @ts-expect-error TS2345 [Argument of type 'CanReadWorkspace<NameA, NameB>' is not assignable to parameter of type 'CanManageWorkspace<NameA, NameB>']
 			yield* computerProviderSetup.list(canRead);
 
 			// A project's allowed hosts changed by its managers outside member bounds, with `CanManageProject`.
-			// @ts-expect-error TS2345
+			// @ts-expect-error TS2345 [Argument of type 'CanManageProject<NameA, NameC>' is not assignable to parameter of type 'CanChangeAllowedHosts<NameA, NameC>']
 			yield* computerNetwork.addProjectHost(canManage, "example.com");
 
 			// A project's computer reset by whoever reaches the project, not whoever manages it.
-			// @ts-expect-error TS2739
+			// @ts-expect-error TS2739 [from type 'CanManageProject<unknown, unknown>']
 			yield* projectComputerSetup.reset(reach);
 
 			yield* computerProviderSetup.list(canManageWorkspace);
@@ -553,15 +553,15 @@ export const providersServiceMistakes = named(
 			const canManage = yield* proveCanManageWorkspace(inWorkspace);
 			const reach = proveReachSet(inWorkspace);
 
-			// @ts-expect-error TS2554 The workspace guide needs the approval proof for the call.
+			// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] The workspace guide needs the approval proof for the call.
 			yield* guides.guide(canRead, reach);
 
 			// A provider's key changed with the proof that the workspace may be read, not that its providers may be managed.
-			// @ts-expect-error TS2739
+			// @ts-expect-error TS2739 [from type 'ReachesModelProvider<unknown, unknown, unknown>']
 			yield* modelProvidersService.update(canRead, { apiKey: "key" });
 
 			// A search provider removed with no proof, only the workspace's id.
-			// @ts-expect-error TS2740
+			// @ts-expect-error TS2740 [from type 'ReachesSearchProvider<unknown, unknown>']
 			yield* searchProvidersService.remove(workspace);
 
 			yield* modelProvidersService.update(yield* proveReachesModelProvider(canManage, provider), {
@@ -596,23 +596,23 @@ export const botsServiceMistakes = named(
 				);
 
 				// A bot deleted with the proof that it may be managed, not that it may be deleted.
-				// @ts-expect-error TS2345
+				// @ts-expect-error TS2345 [Argument of type 'CanManageBot<NameA, NameC>' is not assignable to parameter of type 'CanDeleteBot<unknown, unknown>']
 				yield* botsService.beginRemoval(canManage);
 
 				// A bot deleted with the proof that it may be restricted, not that it may be deleted.
-				// @ts-expect-error TS2345
+				// @ts-expect-error TS2345 [Argument of type 'CanRestrictBot<NameA, NameC>' is not assignable to parameter of type 'CanDeleteBot<unknown, unknown>']
 				yield* botsService.beginRemoval(canRestrict);
 
 				// A bot changed with the proof that an admin may restrict it, which changes nothing of it.
-				// @ts-expect-error TS2741
+				// @ts-expect-error TS2741 [required in type 'CanManageBot<NameA, NameC>']
 				yield* botsService.update(canRestrict, {});
 
 				// A bot pinned for one principal with another's proof that it reaches it.
-				// @ts-expect-error TS2345
+				// @ts-expect-error TS2345 [Argument of type 'ActsForMember<NameB>' is not assignable to parameter of type 'ActsForMember<NameA>']
 				yield* botsService.setPinned(otherActsForMember, reach, true, approved);
 
 				// A bot pinned with no proof the call was approved.
-				// @ts-expect-error TS2554
+				// @ts-expect-error TS2554 [Expected 4 arguments, but got 3.]
 				yield* botsService.setPinned(yield* proveActsForMember(principal), reach, true);
 
 				yield* botsService.setPinned(yield* proveActsForMember(principal), reach, true, approved);
@@ -628,11 +628,11 @@ export const botDeletionMistakes = underWorkspaceLock(principal, "workspace", (l
 			const managedOutside = yield* proveCanManageBot(other, bot);
 
 			// A bot deleted with an authority proved for a principal named outside the lock.
-			// @ts-expect-error TS2345
+			// @ts-expect-error TS2345 [Argument of type 'CanManageBot<NameA, NameB>' is not assignable to parameter of type 'CanManageBot<P, NameB> | CanRestrictBot<P, NameB>']
 			yield* proveCanDeleteBot(lock, managedOutside);
 
 			// A bot made personal with no proof made under its workspace's lock.
-			// @ts-expect-error TS2741
+			// @ts-expect-error TS2741 [required in type 'CanChangeBotReach<P, NameB>']
 			yield* botsService.update(canManage, { visibility: "personal" }, canManage);
 
 			yield* botsService.beginRemoval(yield* proveCanDeleteBot(lock, canManage));
@@ -671,26 +671,26 @@ export const projectAutomationsServiceMistakes = named(
 				timezone: "UTC",
 			} as const;
 
-			// @ts-expect-error TS2739 Reaching the project does not authorize creating an automation.
+			// @ts-expect-error TS2739 [from type 'CanManageProject<NameA, unknown>'] Reaching the project does not authorize creating an automation.
 			yield* automationsService.create(reach, member, settings);
 
-			// @ts-expect-error TS2739 Creating an automation with a routine requires approval for that call.
+			// @ts-expect-error TS2739 [from type 'Approved<NameA, unknown, [NameB], "automations.createWithRoutine">'] Creating an automation with a routine requires approval for that call.
 			yield* automationsService.createWithRoutine(canManage, member, settings, routine);
 
-			// @ts-expect-error TS2739 Changing an automation from a chat requires approval for that call.
+			// @ts-expect-error TS2739 [from type 'Approved<NameA, unknown, [NameB, NameC], "automations.updateInChat">'] Changing an automation from a chat requires approval for that call.
 			yield* automationsService.updateInChat(canManage, automation, target, member, {}, routine);
 
 			yield* automationsService.create(canManage, member, settings);
 
 			// An automation run with the proof that its project may be managed, not that a run may be started there.
-			// @ts-expect-error TS2345
+			// @ts-expect-error TS2345 [Argument of type 'CanManageProject<NameA, NameB>' is not assignable to parameter of type 'CanRunAutomations<NameA, NameB>']
 			yield* automationsService.run(canManage, automation, target, "request");
 
 			// An automation changed at will by an admin who may only switch it off.
-			// @ts-expect-error TS2739
+			// @ts-expect-error TS2739 [from type 'CanManageProject<NameA, NameB>']
 			yield* automationsService.update(canRestrict, automation, target, member, { name: "Mine" });
 
-			// @ts-expect-error TS2345 The target proves reach to a different automation.
+			// @ts-expect-error TS2345 [parameter of type 'ReachesProjectAutomation<NameA, NameB, NameD>] The target proves reach to a different automation.
 			yield* automationsService.remove(canManage, otherAutomation, target);
 
 			yield* automationsService.run(
@@ -709,11 +709,11 @@ export const projectAutomationsServiceMistakes = named(
 						automation,
 						trigger,
 					);
-					// @ts-expect-error TS2345 The target proves reach to a different trigger.
+					// @ts-expect-error TS2345 [parameter of type 'ReachesAutomationTrigger<NameA, NameB, NameC, NameB>] The target proves reach to a different trigger.
 					yield* automationsService.removeTrigger(canManage, otherTrigger, reached.target);
 					yield* automationsService.removeTrigger(canManage, trigger, reached.target);
 
-					// @ts-expect-error TS2740 A named trigger does not prove the webhook call reached it.
+					// @ts-expect-error TS2740 [from type 'CallsWebhook<unknown, unknown>'] A named trigger does not prove the webhook call reached it.
 					yield* automationsService.acceptWebhook(trigger, { headers: {}, payload: {} });
 
 					yield* automationsService.acceptWebhook(yield* proveCallsWebhook(principal, trigger), {
@@ -737,20 +737,20 @@ export const membershipServiceMistakes = underWorkspaceLock(principal, "workspac
 			const otherInWorkspace = yield* proveRealInWorkspace(other, lock.workspace);
 
 			// A workspace deleted with the proof that it may be read, not that its owner deletes it.
-			// @ts-expect-error TS2741
+			// @ts-expect-error TS2741 [required in type 'DeletionStarted<unknown>']
 			yield* membershipService.delete(canRead);
 
 			// A member taken out by a write taken out of the transaction that holds the lock.
-			// @ts-expect-error TS2322
+			// @ts-expect-error TS2322 [Type 'Effect<{ readonly cleanupPending: boolean; }, SubscriptionInUse, Transaction>' is not assignable to type]
 			const outsideTheLock: Effect.Effect<{ cleanupPending: boolean }, SubscriptionInUse> =
 				membershipService.beginRemoval(canRemove);
 
 			// A membership changed by a principal proved in the workspace outside the lock, with no lock of its own.
-			// @ts-expect-error TS2345
+			// @ts-expect-error TS2345 [Argument of type 'InWorkspace<NameA, W>' is not assignable to parameter of type 'HoldsWorkspaceLock<unknown, unknown>']
 			yield* proveCanChangeMembership(otherInWorkspace, member, { kind: "removal" });
 
 			// A member's own workspaces listed with only the principal, not the proof a member is signed in.
-			// @ts-expect-error TS2740
+			// @ts-expect-error TS2740 [from type 'IsMember<unknown>']
 			yield* membershipService.workspaces(lock.principal);
 
 			yield* outsideTheLock;
@@ -773,11 +773,11 @@ export const notificationsServiceMistakes = named(
 			const reachedByOther = yield* proveRealReachesProject(other, project);
 
 			// A member's level set in a project another principal was proved to reach.
-			// @ts-expect-error TS2345
+			// @ts-expect-error TS2345 [Argument of type 'ReachesProject<NameB, NameC>' is not assignable to parameter of type 'PlaceReached<NameA, NameC>']
 			yield* notificationsService.setLevel(isMember, reachedByOther, "all");
 
 			// A member's settings read with only the principal, not the proof a member is signed in.
-			// @ts-expect-error TS2740
+			// @ts-expect-error TS2740 [from type 'IsMember<unknown>']
 			yield* notificationsService.settings(principal);
 
 			const reached = yield* proveRealReachesProject(principal, project);
@@ -791,7 +791,7 @@ export const workspaceDeletionMistakes = underWorkspaceLock(principal, "workspac
 			const canDelete = yield* proveCanDeleteWorkspace(lock);
 
 			// A workspace's deletion proved with no lock, from its owner's place in it.
-			// @ts-expect-error TS2345
+			// @ts-expect-error TS2345 [Argument of type 'InWorkspace<NameA, W>' is not assignable to parameter of type 'HoldsWorkspaceLock<unknown, unknown>']
 			yield* proveCanDeleteWorkspace(yield* proveRealInWorkspace(other, lock.workspace));
 
 			yield* membershipService.beginDeletion(canDelete);
@@ -799,7 +799,7 @@ export const workspaceDeletionMistakes = underWorkspaceLock(principal, "workspac
 			if (!started) return;
 
 			// A recorded deletion still needs its workspace's lock to finish.
-			// @ts-expect-error TS2322
+			// @ts-expect-error TS2322 [Type 'Effect<void, ComputerMadeMeanwhile, Transaction>' is not assignable to type 'Effect<void, ComputerMadeMe]
 			const outsideTheLock: Effect.Effect<void, ComputerMadeMeanwhile> =
 				membershipService.delete(started);
 
@@ -825,20 +825,20 @@ export const connectorsServiceMistakes = named(
 			const canManage = yield* proveRealCanManageProject(reach);
 
 			// A connector removed with the proof that its project's connectors may be read, not managed.
-			// @ts-expect-error TS2741
+			// @ts-expect-error TS2741 [required in type 'CanManageProject<NameA, NameB>']
 			yield* connectorsService.remove(canRead, connector, target);
 
 			// A project's connectors listed with no proof that they may be read, only that it is reached.
-			// @ts-expect-error TS2741
+			// @ts-expect-error TS2741 [required in type 'CanReadConnectors<unknown, unknown>']
 			yield* connectorsService.list(reach);
 
 			// A delivery read with the proof that its project is reached, not that its GitHub app signed it.
-			// @ts-expect-error TS2741
+			// @ts-expect-error TS2741 [required in type 'SignedByGitHubApp<unknown, unknown>']
 			yield* gitHubConnectorsService.readDelivery(reach, delivery);
 
-			// @ts-expect-error TS2345 The target proves reach to a different connector.
+			// @ts-expect-error TS2345 [Argument of type 'ReachesConnector<NameA, NameB, NameC>' is not assignable to parameter of type 'ReachesConnector<NameA, NameB, NameD>'] The target proves reach to a different connector.
 			yield* connectorsService.remove(canManage, otherConnector, target);
-			// @ts-expect-error TS2345 The raw connector id cannot be bound to the proved target.
+			// @ts-expect-error TS2345 [Argument of type 'string' is not assignable to parameter of type 'Named<NameC, string>'] The raw connector id cannot be bound to the proved target.
 			yield* connectorsService.remove(canManage, "connector", target);
 
 			yield* connectorsService.remove(canManage, connector, target);
@@ -894,29 +894,29 @@ export const chatServicesMistakes = named(
 				);
 				const canChange = yield* proveRealCanChangeChat(reach);
 				const newFile = { kind: "markdown", title: "Notes", content: "# Notes" } as const;
-				// @ts-expect-error TS2554 Writing a file requires approval.
+				// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] Writing a file requires approval.
 				yield* filesService.create(canChange, newFile);
-				// @ts-expect-error TS2345 Taking part does not authorize writing a file.
+				// @ts-expect-error TS2345 [Argument of type 'CanTakePart<NameA, NameC>' is not assignable to parameter of type 'CanChangeChat<NameA, NameC>'] Taking part does not authorize writing a file.
 				yield* filesService.create(canTakePart, approved, newFile);
-				// @ts-expect-error TS2554 Listing written files requires approval.
+				// @ts-expect-error TS2554 [Expected 2 arguments, but got 1.] Listing written files requires approval.
 				yield* filesService.listWritten(reach);
-				// @ts-expect-error TS2554 Resolving a chat requires approval.
+				// @ts-expect-error TS2554 [Expected 4 arguments, but got 3.] Resolving a chat requires approval.
 				yield* chatsService.setResolved(reach, true, canChange);
 
 				// `CanChangeChat` proven for another chat, handed over with the reach of this one.
-				// @ts-expect-error TS2345
+				// @ts-expect-error TS2345 [Argument of type 'CanChangeChat<NameA, NameD>' is not assignable to parameter of type 'CanChangeChat<NameA, NameC>']
 				yield* chatsService.setResolved(reach, true, changesOther, approved);
 
 				// A message posted as another principal's member, in a chat this one takes part in.
-				// @ts-expect-error TS2345
+				// @ts-expect-error TS2345 [Argument of type 'CanTakePart<NameA, NameC>' is not assignable to parameter of type 'CanTakePart<NameB, NameC>']
 				yield* chatsService.post(yield* proveIsMember(other), canTakePart, posted);
 
 				// A chat renamed with the proof that it may be changed, not that its project's chats may be managed.
-				// @ts-expect-error TS2741
+				// @ts-expect-error TS2741 [required in type 'CanManageChats<NameA, NameC>']
 				yield* chatsService.renameChat(reach, "Renamed", yield* proveRealCanChangeChat(reach));
 
 				// A page of a chat read with the reach of its project, not of the chat.
-				// @ts-expect-error TS2741
+				// @ts-expect-error TS2741 [required in type 'ReachesChat<unknown, unknown>']
 				yield* chatViewService.messages(yield* proveRealReachesProject(principal, chat), firstPage);
 
 				const approvedElsewhere = yield* proveRealApproved(
@@ -929,10 +929,10 @@ export const chatServicesMistakes = named(
 					},
 					otherChat,
 				);
-				// @ts-expect-error TS2345 The approval targets a different chat.
+				// @ts-expect-error TS2345 [Argument of type 'ReachesChat<NameA, NameC>' is not assignable to parameter of type 'ReachesChat<NameA, NameD>'] The approval targets a different chat.
 				yield* chatsService.setResolved(reach, true, canChange, approvedElsewhere);
 				yield* named({}, (unrelated) => {
-					// @ts-expect-error TS2345 The named input must match the operation's input.
+					// @ts-expect-error TS2345 [parameter of type 'Named<NameA, { readonly chatId: string; readonly resolved: boolean;] The named input must match the operation's input.
 					return proveNamedApproval(principal, call, resolveApproval, unrelated, chat);
 				});
 				const approvedList = yield* proveRealApproved(
@@ -942,7 +942,7 @@ export const chatServicesMistakes = named(
 					{},
 					chat,
 				);
-				// @ts-expect-error TS2345 Approval to list files cannot authorize resolving a chat.
+				// @ts-expect-error TS2345 [parameter of type 'Approved<NameA, NameA, [NameC], "chats.setResolved">] Approval to list files cannot authorize resolving a chat.
 				yield* chatsService.setResolved(reach, true, canChange, approvedList);
 				yield* chatsService.setResolved(reach, true, canChange, approved);
 				yield* chatsService.post(yield* proveIsMember(principal), canTakePart, posted);
@@ -965,15 +965,15 @@ export const chatFileMistakes = named(
 			);
 			const isMember = yield* proveIsMember(principal);
 
-			// @ts-expect-error TS2554 Reading a written file requires approval.
+			// @ts-expect-error TS2554 [Expected 2 arguments, but got 1.] Reading a written file requires approval.
 			yield* filesService.readWritten(reach);
 
 			// A file deleted with the proof that another file's chats may be managed.
-			// @ts-expect-error TS2345
+			// @ts-expect-error TS2345 [Argument of type 'CanManageChats<NameA, NameC>' is not assignable to parameter of type 'CanManageChats<NameA, NameB>']
 			yield* filesService.remove(reach, managesOther);
 
 			// A reaction added with the reach of a chat, not of the message.
-			// @ts-expect-error TS2741
+			// @ts-expect-error TS2741 [required in type 'ReachesMessage<NameA, NameD>']
 			yield* reactionsService.add(isMember, yield* proveRealReachesChat(principal, message), "👍");
 
 			yield* filesService.remove(reach, yield* proveCanManageChats(reach));
@@ -990,15 +990,15 @@ export const decisionMistakes = named(principal, otherPrincipal, "call", (princi
 		const changesNothing = () => Effect.void;
 
 		// A call decided as another principal's member than the approver `CanDecide` found.
-		// @ts-expect-error TS2345
+		// @ts-expect-error TS2345 [Argument of type 'CanDecide<NameA, NameC>' is not assignable to parameter of type 'CanDecide<NameB, NameC>']
 		yield* turnControls.decide(otherMember, canDecide, "deny", changesNothing);
 
 		// A call decided with no proof that the member is its approver, only its id.
-		// @ts-expect-error TS2740
+		// @ts-expect-error TS2740 [from type 'CanDecide<NameA, unknown>']
 		yield* turnControls.decide(isMember, call, "deny", changesNothing);
 
 		// A host request granted as another member than the approver `CanDecide` found.
-		// @ts-expect-error TS2345
+		// @ts-expect-error TS2345 [Argument of type 'CanDecide<NameA, NameC>' is not assignable to parameter of type 'CanDecide<NameB, NameC>']
 		yield* computerNetwork.grantHostRequest(otherMember, canDecide);
 
 		yield* turnControls.decide(isMember, canDecide, "deny", changesNothing);
@@ -1020,19 +1020,19 @@ export const turnControlMistakes = named(
 			const canInterrupt = yield* proveCanInterrupt(isMember, reach, turn);
 
 			// A turn interrupted with the proof that its asker may steer it, which a manager lacks.
-			// @ts-expect-error TS2345
+			// @ts-expect-error TS2345 [Argument of type 'CanSteer<NameA, NameD>' is not assignable to parameter of type 'CanInterrupt<NameA, NameD>']
 			yield* turnControls.interrupt(canSteer);
 
 			// A turn interrupted with no proof at all, only its id.
-			// @ts-expect-error TS2740
+			// @ts-expect-error TS2740 [from type 'CanInterrupt<unknown, unknown>']
 			yield* turnControls.interrupt(turn);
 
 			// A message made a steer with the proof that its author may interrupt, not steer.
-			// @ts-expect-error TS2345
+			// @ts-expect-error TS2345 [Argument of type 'CanInterrupt<NameA, NameD>' is not assignable to parameter of type 'CanSteer<NameA, NameD>']
 			yield* turnControls.steer(canInterrupt, { messageId: "message", reason: "mention" });
 
 			// Interrupting proved for one principal's member and another's reach of the chat.
-			// @ts-expect-error TS2345
+			// @ts-expect-error TS2345 [Argument of type 'ReachesChat<NameA, NameC>' is not assignable to parameter of type 'ReachesChat<NameB, NameC>']
 			yield* proveCanInterrupt(otherMember, reach, turn);
 
 			yield* turnControls.steer(canSteer, { messageId: "message", reason: "mention" });
@@ -1063,30 +1063,30 @@ export const computerUseMistakes = named(
 						chat,
 					);
 
-					// @ts-expect-error TS2345 Only the principal that can use the computer may request this host.
+					// @ts-expect-error TS2345 [Argument of type 'CanUseChatComputer<NameB, NameC>' is not assignable to parameter of type 'CanUseChatComputer<NoInfer<NameA>, NameC>'] Only the principal that can use the computer may request this host.
 					yield* proveComputerRequestApproved(principal, call, host, otherUses);
-					// @ts-expect-error TS2554 Requesting a host requires authority to use the computer.
+					// @ts-expect-error TS2554 [Expected 4 arguments, but got 3.] Requesting a host requires authority to use the computer.
 					yield* proveComputerRequestApproved(principal, call, host);
 					yield* proveNamedApproval(
 						principal,
 						call,
-						// @ts-expect-error TS2345 A computer request uses its dedicated approval prover.
+						// @ts-expect-error TS2345 [parameter of type 'ApprovalRule<OrdinaryApproval, "computers.requestHost">] A computer request uses its dedicated approval prover.
 						approvalRule("computers.requestHost"),
 						host,
 						chat,
 					);
 
 					// A command run on the computer another principal may use, with this one's approval.
-					// @ts-expect-error TS2345
+					// @ts-expect-error TS2345 [Argument of type 'CanUseChatComputer<NameB, NameC>' is not assignable to parameter of type 'CanUseChatComputer<NameA, NameC>']
 					yield* turnComputers.runCommand(otherUses, approved, command);
 
 					// A command run with no proof that the call may run.
-					// @ts-expect-error TS2739
+					// @ts-expect-error TS2739 [from type 'Approved<NameA, unknown, [NameC], "computers.runCommand">']
 					yield* turnComputers.runCommand(canUse, canUse, command);
 
 					// A host request read back with the reach of the chat, not the proof the bot may use its computer.
 					const reach = yield* proveRealReachesChat(principal, chat);
-					// @ts-expect-error TS2739 Chat reach does not prove permission to read a computer request.
+					// @ts-expect-error TS2739 [from type 'CanUseChatComputer<NameA, NameC>'] Chat reach does not prove permission to read a computer request.
 					yield* computerNetwork.requestedHost(reach, approved, "example.com");
 
 					yield* turnComputers.runCommand(canUse, approved, command);
@@ -1107,7 +1107,7 @@ export const automationFeedProofMistakes = named(
 	(principal, workspace, automation, otherAutomation) =>
 		Effect.gen(function* () {
 			const reach = yield* proveReachesAutomation(principal, workspace, automation);
-			// @ts-expect-error TS2345 The reach proof targets a different automation feed.
+			// @ts-expect-error TS2345 [Argument of type 'ReachesAutomation<NameA, NameC>' is not assignable to parameter of type 'ReachesAutomation<NameA, NameD>'] The reach proof targets a different automation feed.
 			yield* chatsService.openAutomationFeed(otherAutomation, reach);
 			yield* chatsService.openAutomationFeed(automation, reach);
 		}),
@@ -1127,9 +1127,9 @@ export const chatFileReadProofMistakes = named(
 			const input = { file: file.value };
 			const rule = approvalRule("chats.readChatFile");
 			const approvedForOther = yield* proveRealApproved(other, call, rule, input, file);
-			// @ts-expect-error TS2554 Reading a chat file in a turn requires approval.
+			// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] Reading a chat file in a turn requires approval.
 			yield* chatFilesService.readForTurn(reach, {});
-			// @ts-expect-error TS2345 The approval belongs to another principal.
+			// @ts-expect-error TS2345 [Argument of type 'ReachesFile<NameA, NameC>' is not assignable to parameter of type 'ReachesFile<NameB, NameC>'] The approval belongs to another principal.
 			yield* chatFilesService.readForTurn(reach, {}, approvedForOther);
 			yield* chatFilesService.readForTurn(
 				reach,
@@ -1147,14 +1147,14 @@ export const chatAttachmentProofMistakes = named(
 	(principal, chat, file, otherFile) =>
 		Effect.gen(function* () {
 			const reach = yield* proveReachesMessageFile(principal, chat, file);
-			// @ts-expect-error TS2345 The named file must agree with the attachment reach proof.
+			// @ts-expect-error TS2345 [Argument of type 'ReachesMessageFile<NameA, NameC>' is not assignable to parameter of type 'ReachesMessageFile<NameA, NameD>'] The named file must agree with the attachment reach proof.
 			yield* chatFilesService.read(otherFile, reach);
 			yield* chatFilesService.read(file, reach);
 
 			const owns = yield* proveOwnsUnsentAttachment(yield* proveIsMember(principal), chat, file);
-			// @ts-expect-error TS2741 Reaching an attachment does not prove ownership of an unsent upload.
+			// @ts-expect-error TS2741 [required in type 'OwnsUnsentAttachment<NameA, NameC>'] Reaching an attachment does not prove ownership of an unsent upload.
 			yield* chatFilesService.removeUnsentAttachment(file, reach);
-			// @ts-expect-error TS2345 The ownership proof targets another upload.
+			// @ts-expect-error TS2345 [Argument of type 'OwnsUnsentAttachment<NameA, NameC>' is not assignable to parameter of type 'OwnsUnsentAttachment<NameA, NameD>'] The ownership proof targets another upload.
 			yield* chatFilesService.removeUnsentAttachment(otherFile, owns);
 			yield* chatFilesService.removeUnsentAttachment(file, owns);
 		}),
@@ -1168,11 +1168,11 @@ export const computerProviderTargetMistakes = named(
 	(principal, workspace, provider, otherProvider) =>
 		Effect.gen(function* () {
 			const inWorkspace = yield* proveRealInWorkspace(principal, workspace);
-			// @ts-expect-error TS2739 Workspace membership does not authorize reaching provider settings.
+			// @ts-expect-error TS2739 [from type 'CanManageWorkspace<unknown, unknown>'] Workspace membership does not authorize reaching provider settings.
 			yield* proveReachesComputerProvider(inWorkspace, provider);
 			const canManage = yield* proveCanManageWorkspace(inWorkspace);
 			const target = yield* proveReachesComputerProvider(canManage, provider);
-			// @ts-expect-error TS2345 The reach proof targets a different provider.
+			// @ts-expect-error TS2345 [parameter of type 'ReachesComputerProvider<NameA, NameB, NameD>] The reach proof targets a different provider.
 			yield* computerProviderSetup.test(canManage, otherProvider, target);
 			yield* computerProviderSetup.test(canManage, provider, target);
 		}),
@@ -1186,11 +1186,11 @@ export const workspaceSetupBotMistakes = named(
 	(principal, workspace, bot, otherBot) =>
 		Effect.gen(function* () {
 			const inWorkspace = yield* proveRealInWorkspace(principal, workspace);
-			// @ts-expect-error TS2739 Workspace membership does not authorize reaching the setup bot.
+			// @ts-expect-error TS2739 [from type 'CanManageWorkspace<unknown, unknown>'] Workspace membership does not authorize reaching the setup bot.
 			yield* proveReachesSetupBot(inWorkspace, bot);
 			const canManage = yield* proveCanManageWorkspace(inWorkspace);
 			const target = yield* proveReachesSetupBot(canManage, bot);
-			// @ts-expect-error TS2345 The reach proof targets a different setup bot.
+			// @ts-expect-error TS2345 [Argument of type 'ReachesSetupBot<NameA, NameB, NameC>' is not assignable to parameter of type 'ReachesSetupBot<NameA, NameB, NameD>'] The reach proof targets a different setup bot.
 			yield* workspaceSetup.complete(canManage, otherBot, target);
 			yield* workspaceSetup.complete(canManage, bot, target);
 		}),
@@ -1200,7 +1200,7 @@ export const invitationTargetMistakes = underWorkspaceLock(principal, "workspace
 	named("invitation", "other invitation", (invitation, otherInvitation) =>
 		Effect.gen(function* () {
 			const canCancel = yield* proveCanCancelInvitation(lock, invitation);
-			// @ts-expect-error TS2345 The cancellation proof targets a different invitation.
+			// @ts-expect-error TS2345 [Argument of type 'CanCancelInvitation<P, W, NameA>' is not assignable to parameter of type 'CanCancelInvitation<P, W, NameB>'] The cancellation proof targets a different invitation.
 			yield* membershipService.cancelInvitation(otherInvitation, canCancel);
 			yield* membershipService.cancelInvitation(invitation, canCancel);
 		}),
@@ -1235,11 +1235,11 @@ export const webProofMistakes = named(
 				workspace,
 			);
 
-			// @ts-expect-error TS2554 Fetching a page requires approval.
+			// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] Fetching a page requires approval.
 			yield* webService.fetch(canFetch, input);
-			// @ts-expect-error TS2345 Search permission does not grant fetch permission.
+			// @ts-expect-error TS2345 [Argument of type 'CanUseWeb<NameA, NameC, "web_search">' is not assignable to parameter of type 'CanUseWeb<NameA, NameC, "web_fetch">'] Search permission does not grant fetch permission.
 			yield* webService.fetch(canSearch, input, approved);
-			// @ts-expect-error TS2345 Approval from a different principal cannot authorize the fetch.
+			// @ts-expect-error TS2345 [Argument of type 'CanUseWeb<NameA, NameC, "web_fetch">' is not assignable to parameter of type 'CanUseWeb<NameB, NameC, "web_fetch">'] Approval from a different principal cannot authorize the fetch.
 			yield* webService.fetch(canFetch, input, otherApproved);
 
 			yield* webService.fetch(canFetch, input, approved);
@@ -1263,9 +1263,9 @@ declare const anotherTurnApproval: RecordedApproval<
 >;
 
 export const connectorCallMistakes = Effect.gen(function* () {
-	// @ts-expect-error TS2554 A connector call requires the approval recorded for that call.
+	// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] A connector call requires the approval recorded for that call.
 	yield* connectorCalls.callTool(connectorTurn, connectorUse);
-	// @ts-expect-error TS2345 The recorded approval belongs to a different turn principal.
+	// @ts-expect-error TS2345 [parameter of type 'Approved<"principal", "other call", ["turn", "connector"], "connect] The recorded approval belongs to a different turn principal.
 	yield* connectorCalls.callTool(connectorTurn, connectorUse, anotherTurnApproval);
 	yield* connectorCalls.callTool(connectorTurn, connectorUse, connectorApproval);
 });
@@ -1276,9 +1276,9 @@ declare const approvalExpiryWork: DoesStoredWork<"principal", "approval", "appro
 
 export const approvalWithdrawalMistakes = underWorkspaceLock(principal, "workspace", (lock) =>
 	Effect.gen(function* () {
-		// @ts-expect-error TS2740 Withdrawing approvals after reach changes requires the workspace lock.
+		// @ts-expect-error TS2740 [from type 'HoldsWorkspaceLock<unknown, unknown>'] Withdrawing approvals after reach changes requires the workspace lock.
 		yield* approvalWithdrawals.afterReachChange(lock.workspace);
-		// @ts-expect-error TS2345 Approval expiry requires approval-expiry work.
+		// @ts-expect-error TS2345 [parameter of type 'DoesStoredWork<"principal", "routine", "approvalExpiry">] Approval expiry requires approval-expiry work.
 		yield* approvalWithdrawals.expire(routineWork);
 		yield* approvalWithdrawals.afterReachChange(lock);
 		yield* approvalWithdrawals.expire(approvalExpiryWork);
@@ -1299,15 +1299,15 @@ declare const otherSearchApproval: RecordedApproval<
 >;
 
 export const connectorSearchMistakes = Effect.gen(function* () {
-	// @ts-expect-error TS2554 Connector tool search requires approval.
+	// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] Connector tool search requires approval.
 	yield* connectorCalls.searchTools(connectorTurn, "issues");
-	// @ts-expect-error TS2345 The recorded approval belongs to a different turn principal.
+	// @ts-expect-error TS2345 [parameter of type 'Approved<"principal", "other call", ["turn"], "connectors.searchToo] The recorded approval belongs to a different turn principal.
 	yield* connectorCalls.searchTools(connectorTurn, otherSearchApproval, "issues");
 	yield* connectorCalls.searchTools(connectorTurn, searchApproval, "issues");
 });
 
 export const computerAvailabilityMistake = Effect.gen(function* () {
-	// @ts-expect-error TS2345 A computer id does not prove permission to use the chat's computer.
+	// @ts-expect-error TS2345 [Argument of type 'string' is not assignable to parameter of type 'CanUseChatComputer<unknown, unknown>'] A computer id does not prove permission to use the chat's computer.
 	yield* turnComputers.requireComputer("computer-id");
 });
 
@@ -1325,15 +1325,15 @@ export const turnRecordMistakes = named(principal, "chat", "turn", (principal, c
 		const running = yield* proveRunsTurn(yield* proveRealReachesChat(principal, chat), turn);
 		const ending = yield* proveEndsTurn(principal, turn);
 
-		// @ts-expect-error TS2739 Loading step data requires a running turn.
+		// @ts-expect-error TS2739 [from type 'RunsTurn<NameA, NameC>'] Loading step data requires a running turn.
 		yield* turnRecords.load(ending, 0);
-		// @ts-expect-error TS2345 Ending lost work requires authority to end the turn.
+		// @ts-expect-error TS2345 [Argument of type 'RunsTurn<NameA, NameC>' is not assignable to parameter of type 'EndsTurn<unknown, unknown>'] Ending lost work requires authority to end the turn.
 		yield* turnRecords.endLost(running, lostEnding);
-		// @ts-expect-error TS2739 Checking the current execution requires a running turn.
+		// @ts-expect-error TS2739 [from type 'RunsTurn<NameA, NameC>'] Checking the current execution requires a running turn.
 		yield* turnStore.current(ending);
-		// @ts-expect-error TS2739 Claiming a tool call requires a running turn.
+		// @ts-expect-error TS2739 [from type 'RunsTurn<NameA, NameC>'] Claiming a tool call requires a running turn.
 		yield* toolCallStore.claim(ending, "call");
-		// @ts-expect-error TS2739 Offering tools for a step requires a running turn.
+		// @ts-expect-error TS2739 [from type 'RunsTurn<NameA, NameC>'] Offering tools for a step requires a running turn.
 		yield* stepTools.forStep(ending, stepOperations, loadedStep, recorder);
 
 		yield* turnRecords.load(running, 0);
@@ -1368,21 +1368,21 @@ export const reachServiceMistakes = named(
 			const otherMember = yield* proveIsMember(other);
 			const canTakePart = yield* proveRealCanTakePart(reachedChat);
 
-			// @ts-expect-error TS2740 Listening to a chat requires proven reach to that chat.
+			// @ts-expect-error TS2740 [from type 'ReachesChat<unknown, unknown>'] Listening to a chat requires proven reach to that chat.
 			streams.hearingChat(chat);
-			// @ts-expect-error TS2740 Listening to a member's stream requires a signed-in member.
+			// @ts-expect-error TS2740 [from type 'IsMember<unknown>'] Listening to a member's stream requires a signed-in member.
 			streams.hearingOwn(other);
-			// @ts-expect-error TS2345 The member reporting typing must be the one taking part.
+			// @ts-expect-error TS2345 [Argument of type 'IsMember<NameB>' is not assignable to parameter of type 'IsMember<NameA>'] The member reporting typing must be the one taking part.
 			yield* streams.reportTyping(canTakePart, otherMember);
-			// @ts-expect-error TS2740 Reading chat details requires proven reach to the chat.
+			// @ts-expect-error TS2740 [from type 'ReachesChat<unknown, unknown>'] Reading chat details requires proven reach to the chat.
 			yield* details.get(chat);
-			// @ts-expect-error TS2345 The computer's bot and chat must be reached by the same principal.
+			// @ts-expect-error TS2345 [Argument of type 'ReachesBot<NameB, NameD>' is not assignable to parameter of type 'ReachesBot<NameA, NameD>'] The computer's bot and chat must be reached by the same principal.
 			yield* desktop.openComputer(reachedChat, reachedBot);
-			// @ts-expect-error TS2740 Reading a referral link requires a signed-in member.
+			// @ts-expect-error TS2740 [from type 'IsMember<unknown>'] Reading a referral link requires a signed-in member.
 			yield* accounts.referralLink(other);
-			// @ts-expect-error TS2740 Resetting a referral link requires a signed-in member.
+			// @ts-expect-error TS2740 [from type 'IsMember<unknown>'] Resetting a referral link requires a signed-in member.
 			yield* accounts.resetReferralLink(other);
-			// @ts-expect-error TS2740 Giving up the floor requires proven reach to the chat.
+			// @ts-expect-error TS2740 [from type 'ReachesChat<unknown, unknown>'] Giving up the floor requires proven reach to the chat.
 			yield* floor.giveFloor(committed, chat);
 
 			streams.hearingChat(reachedChat);
@@ -1408,15 +1408,15 @@ export const workspaceServiceMistakes = named(
 			const canManage = yield* proveCanManageWorkspace(inWorkspace);
 			const reachedProject = yield* proveRealReachesProject(principal, project);
 
-			// @ts-expect-error TS2739 Listening to a workspace requires knowing which resources it offers this principal.
+			// @ts-expect-error TS2739 [from type 'ReachSet<unknown, unknown>'] Listening to a workspace requires knowing which resources it offers this principal.
 			yield* streams.hearingIn(inWorkspace);
-			// @ts-expect-error TS2345 Reading usage requires workspace management permission.
+			// @ts-expect-error TS2345 [Argument of type 'CanReadWorkspace<NameA, NameB>' is not assignable to parameter of type 'CanManageWorkspace<NameA, NameB>'] Reading usage requires workspace management permission.
 			yield* usage.month(canRead, month);
-			// @ts-expect-error TS2345 Reading the time zone setting requires workspace management permission.
+			// @ts-expect-error TS2345 [Argument of type 'CanReadWorkspace<NameA, NameB>' is not assignable to parameter of type 'CanManageWorkspace<NameA, NameB>'] Reading the time zone setting requires workspace management permission.
 			yield* timeZone.get(canRead);
-			// @ts-expect-error TS2739 Starting a GitHub app requires project management permission.
+			// @ts-expect-error TS2739 [from type 'CanManageProject<unknown, unknown>'] Starting a GitHub app requires project management permission.
 			yield* apps.start(reachedProject, undefined);
-			// @ts-expect-error TS2740 Making a page address requires proven reach to its file.
+			// @ts-expect-error TS2740 [from type 'ReachesFile<unknown, unknown>'] Making a page address requires proven reach to its file.
 			yield* filePages.address(file, 1);
 
 			yield* streams.hearingIn(proveReachSet(inWorkspace));
@@ -1436,13 +1436,13 @@ declare const sleepWork: DoesStoredWork<"principal", "computer", "computerSleep"
 declare const uninstallWork: DoesStoredWork<"principal", "uninstall", "gitHubUninstall">;
 
 export const storedWorkMistakes = Effect.gen(function* () {
-	// @ts-expect-error TS2345 Pause work cannot authorize running a due routine.
+	// @ts-expect-error TS2345 [parameter of type 'DoesStoredWork<"principal", "automation", "dueRoutine">] Pause work cannot authorize running a due routine.
 	yield* runner.runDueRoutine(pauseWork);
-	// @ts-expect-error TS2345 Due-routine work cannot authorize pausing an automation.
+	// @ts-expect-error TS2345 [parameter of type 'DoesStoredWork<"principal", "routine", "pauseAfterFailures">] Due-routine work cannot authorize pausing an automation.
 	yield* automationStore.pauseAfterFailures(routineWork);
-	// @ts-expect-error TS2345 Due-routine work cannot authorize sleeping a computer.
+	// @ts-expect-error TS2345 [parameter of type 'DoesStoredWork<"principal", "routine", "computerSleep">] Due-routine work cannot authorize sleeping a computer.
 	yield* projectComputers.sleepIfIdle(routineWork);
-	// @ts-expect-error TS2345 Due-routine work cannot authorize uninstalling a GitHub app.
+	// @ts-expect-error TS2345 [parameter of type 'DoesStoredWork<"principal", "routine", "gitHubUninstall">] Due-routine work cannot authorize uninstalling a GitHub app.
 	yield* uninstalls.uninstall(routineWork);
 
 	yield* runner.runDueRoutine(routineWork);
@@ -1454,7 +1454,7 @@ export const storedWorkMistakes = Effect.gen(function* () {
 export const pageServingMistakes = named(page, "file", (principal, file) =>
 	Effect.gen(function* () {
 		const reach = yield* proveReachesFile(principal, file);
-		// @ts-expect-error TS2741 File reach does not authorize serving a page version.
+		// @ts-expect-error TS2741 [required in type 'ReachesPage<unknown, unknown>'] File reach does not authorize serving a page version.
 		yield* filesService.servePage(reach);
 		yield* filesService.servePage(yield* proveReachesPage(principal, file));
 	}),
@@ -1465,7 +1465,7 @@ declare const activity: Parameters<Automations.ConnectorEventsInterface["accept"
 
 export const connectorEventMistakes = named(principal, "connector", (principal, connector) =>
 	Effect.gen(function* () {
-		// @ts-expect-error TS2740 A named connector does not prove which GitHub app signed the delivery.
+		// @ts-expect-error TS2740 [from type 'SignedByGitHubApp<unknown, unknown>'] A named connector does not prove which GitHub app signed the delivery.
 		yield* connectorEvents.accept(connector, activity);
 		yield* connectorEvents.accept(yield* proveSignedByGitHubApp(principal, connector), activity);
 	}),
@@ -1476,9 +1476,9 @@ export const computerDeletionMistakes = named("workspace", "project", (workspace
 		const workspaceDeletion = yield* proveDeletionRecorded(workspace);
 		const projectDeletion = yield* proveProjectDeletionRecorded(workspace, project);
 		if (!workspaceDeletion || !projectDeletion) return;
-		// @ts-expect-error TS2741 Destroying one project's computer requires a recorded project deletion.
+		// @ts-expect-error TS2741 [required in type 'ProjectDeletionRecorded<NameA, unknown>'] Destroying one project's computer requires a recorded project deletion.
 		yield* projectComputers.destroy(workspaceDeletion);
-		// @ts-expect-error TS2345 Destroying all computers requires a recorded workspace deletion.
+		// @ts-expect-error TS2345 [Argument of type 'ProjectDeletionRecorded<NameA, NameB>' is not assignable to parameter of type 'DeletionRecorded<unknown>'] Destroying all computers requires a recorded workspace deletion.
 		yield* projectComputers.destroyAllIn(projectDeletion);
 		yield* projectComputers.destroy(projectDeletion);
 		yield* projectComputers.destroyAllIn(workspaceDeletion);
@@ -1488,7 +1488,7 @@ export const computerDeletionMistakes = named("workspace", "project", (workspace
 export const approvalInputMistake = named(principal, projectCall, "bot", (principal, call, bot) =>
 	Effect.gen(function* () {
 		const input = { botId: "bot" };
-		// @ts-expect-error TS2739 The approval input must be named so the proof is bound to it.
+		// @ts-expect-error TS2739 [from type 'Named<unknown, { readonly botId: string; }>'] The approval input must be named so the proof is bound to it.
 		yield* proveNamedApproval(principal, call, approvalRule("bots.pin"), input, bot);
 		yield* named(input, (input) =>
 			proveNamedApproval(principal, call, approvalRule("bots.pin"), input, bot),

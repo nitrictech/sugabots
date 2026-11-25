@@ -7,6 +7,7 @@ import type { ComputerUnavailable as Unavailable } from "@sugabots/contracts/err
 import { type UserText, userText } from "@sugabots/errors";
 import { type Brand, Context, Data, type Duration, Effect, Layer, type Redacted } from "effect";
 import { Ids } from "../ids/ids.ts";
+import { Egress, type EgressHttpClient } from "../providers/network/egress.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { fromE2b } from "./implementations/e2b.ts";
 import { fromOpenSandbox } from "./implementations/opensandbox.ts";
@@ -22,13 +23,14 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 export const make = Effect.gen(function* () {
 	const ids = yield* Ids.Service;
+	const egress = yield* Egress.Service;
 	return Service.of({
 		forAccess: (access) => {
 			switch (access.provider) {
 				case "e2b":
-					return fromE2b(access, ids);
+					return fromE2b(access, ids, egress);
 				case "opensandbox":
-					return fromOpenSandbox(access, ids);
+					return fromOpenSandbox(access, ids, egress);
 			}
 		},
 	});
@@ -77,6 +79,15 @@ export interface Provider {
 	 * from it. One that is already gone counts as destroyed.
 	 */
 	readonly destroy: (id: ComputerId) => Effect.Effect<void, Unavailable>;
+	/**
+	 * The ids of its computers, running or asleep, made with `key` set to
+	 * `value` among their {@link Spec.labels}, so one whose id was never
+	 * recorded can be found to destroy.
+	 */
+	readonly labelled: (
+		key: string,
+		value: string,
+	) => Effect.Effect<readonly ComputerId[], Unavailable>;
 }
 
 interface TemplateBuilds {
@@ -281,6 +292,26 @@ export interface Endpoint {
 	readonly url: string;
 	/** Headers every request to it must carry. */
 	readonly headers: Readonly<Record<string, string>>;
+	readonly fetch: EgressHttpClient;
+}
+
+export function checkedEndpoint(
+	egress: Pick<Egress.Interface, "providers" | "validateProviderUrl">,
+	endpoint: Pick<Endpoint, "url" | "headers">,
+) {
+	return Effect.map(egress.validateProviderUrl(endpoint.url), () => ({
+		...endpoint,
+		fetch: egress.providers.for({ baseUrl: endpoint.url }),
+	}));
+}
+
+export function fetchComputerEndpoint(
+	egress: Pick<Egress.Interface, "providers">,
+): EgressHttpClient {
+	return (input, init) => {
+		const address = new URL(input instanceof Request ? input.url : input.toString());
+		return egress.providers.for({ baseUrl: address.origin })(input, init);
+	};
 }
 
 export interface ExecOptions {

@@ -505,7 +505,11 @@ export const make = Effect.gen(function* () {
 					yield* life.end;
 					return { stream: Stream.empty, ended: Deferred.await(life.ended) };
 				}
-				if (since !== undefined && !resumes) {
+				if (since === undefined) {
+					// Where the stream starts is known: whatever the client fetched before
+					// this, it fetches again, and what changes after arrives here.
+					yield* Queue.offer(outbox, { event: streamEvent("ready") });
+				} else if (!resumes) {
 					// The resume point is gone, or was never this stream's: start again.
 					yield* Queue.offer(outbox, { event: streamEvent("reset") });
 				}

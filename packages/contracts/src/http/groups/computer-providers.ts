@@ -45,7 +45,7 @@ export class ComputerProvidersApi extends HttpApiGroup.make("computerProviders")
 			params: provider,
 			payload: computerProviderUpdateSchema,
 			success: computerProviderSchema,
-			error: [BadRequest, ...refused],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.delete("remove", `${root}/:providerId`, {
 			params: provider,

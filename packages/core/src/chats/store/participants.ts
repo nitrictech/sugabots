@@ -261,8 +261,17 @@ interface MessageWithRelations extends schema.MessageRow {
 /** A message read with `messageRelations`, as the API shows it. */
 export function messageFromRelations(
 	stored: MessageWithRelations,
-	/** The turn that wrote the reply: why it failed, if it did, and when it ended. */
-	turn?: { error: UserText | null; finishedAt: Date | null } | null,
+	/**
+	 * The turn that wrote the reply: why it failed, if it did, when it ended,
+	 * which of its executions wrote the reply so far while it writes, and the
+	 * execution it is on, which once it has ended is the one that ended it.
+	 */
+	turn?: {
+		error: UserText | null;
+		finishedAt: Date | null;
+		execution?: number | null;
+		executionNumber?: number;
+	} | null,
 ): Message {
 	const shown = toMessage(
 		stored,
@@ -277,10 +286,25 @@ export function messageFromRelations(
 	return {
 		...shown,
 		...(turn?.finishedAt ? { finishedAt: turn.finishedAt.toISOString() } : {}),
+		...executionOf(shown.status, turn),
 		...(run ? { automationResultOf: automationResultOf(run) } : {}),
 		...(stored.replyTo ? { replyTo: toReplyTo(stored.replyTo) } : {}),
 		...(stored.reactions.length > 0 ? { reactions: toReactions(stored.reactions) } : {}),
 	};
+}
+
+/**
+ * Which execution of its turn a reply is as of: for one being written, the
+ * execution its checkpoint says wrote it, none before its first step; for
+ * one that ended, the execution that ended it, which is the turn's last,
+ * since only running again, which reopens the reply, starts another.
+ */
+function executionOf(
+	status: Message["status"],
+	turn: { execution?: number | null; executionNumber?: number } | null | undefined,
+): { execution?: number } {
+	const execution = status === "writing" ? turn?.execution : turn?.executionNumber;
+	return typeof execution === "number" ? { execution } : {};
 }
 
 /** The run `run` as the result posted from it links to it. */

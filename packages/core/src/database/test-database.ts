@@ -12,6 +12,7 @@
  * development database itself is refused rather than done quietly.
  */
 
+// biome-ignore lint/plugin/errors-implement-domain-error: Test database setup aborts on unsafe configuration.
 export class DevelopmentDatabaseRefused extends Error {
 	constructor(url: string) {
 		super(

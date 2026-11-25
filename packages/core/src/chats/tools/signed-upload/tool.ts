@@ -6,9 +6,9 @@ import {
 	MAX_URL_CHARACTERS,
 } from "@sugabots/contracts";
 import { uuidSchema } from "@sugabots/contracts/uuid";
-import { UserText, userText } from "@sugabots/errors";
+import { type DomainError, userText } from "@sugabots/errors";
 import { type Tool, tool } from "ai";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, ErrorReporter, Schema, Stream } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import type { ChatFileStore } from "../../../files/chat-file-store.ts";
 import { type EgressHttpClients, EgressRefused } from "../../../providers/network/egress.ts";
@@ -111,6 +111,7 @@ export function signedUploadTool(
 				headers,
 				content,
 				abortSignal,
+				run,
 			);
 		},
 	});
@@ -176,6 +177,7 @@ async function put(
 	headers: Record<string, string>,
 	content: Uint8Array,
 	abortSignal: AbortSignal | undefined,
+	run: RunEffect<never>,
 ): Promise<UploadResult> {
 	const timeout = AbortSignal.timeout(TIMEOUT_MS);
 	let response: Response;
@@ -199,9 +201,27 @@ async function put(
 		await response.body?.cancel();
 		return { status: "uploaded", bytes: content.byteLength };
 	}
-	// The service's own words, such as an expired or mismatched signature.
-	const said = (await response.text()).slice(0, MAX_REFUSAL_CHARACTERS);
-	return failed(
-		userText`The upload was refused with HTTP ${response.status}: ${UserText.unchecked(said)}`,
-	);
+	const refusal = new SignedUploadRefused({
+		httpStatus: response.status,
+		upstreamMessage: (await response.text()).slice(0, MAX_REFUSAL_CHARACTERS),
+	});
+	await run(Effect.logWarning(refusal.message));
+	return failed(refusal.userMessage);
+}
+
+export class SignedUploadRefused
+	extends Schema.TaggedError<SignedUploadRefused>()("SignedUploadRefused", {
+		httpStatus: Schema.Int,
+		upstreamMessage: Schema.String,
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The signed upload was refused with HTTP ${this.httpStatus}: ${this.upstreamMessage}`;
+	}
+	get userMessage() {
+		return userText`The upload service refused the file with HTTP ${this.httpStatus}. Request a new signed upload address and try again.`;
+	}
 }

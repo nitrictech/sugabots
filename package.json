@@ -23,7 +23,7 @@
 	"scripts": {
 		"prepare": "effect-tsgo patch --typescript --no-oxlint",
 		"check": "bun run lint && bun run typecheck && bun run test",
-		"lint": "biome ci . && node lint/check-glossary.ts && node lint/check-package-boundaries.ts && node lint/check-proof-boundaries.ts && node lint/check-service-tiers.ts && node lint/check-type-mistakes.ts",
+		"lint": "biome ci . && node lint/check-glossary.ts && node lint/check-package-boundaries.ts && node lint/check-proof-boundaries.ts && node lint/check-service-tiers.ts && node lint/check-type-mistakes.ts && node lint/check-tailwind-values.ts",
 		"glossary:report": "node lint/check-glossary.ts --report",
 		"format": "biome check --write .",
 		"typecheck": "tsc --noEmit && bun run --filter '*' typecheck",
@@ -36,6 +36,7 @@
 		"test:storybook": "bun run --cwd packages/web test:storybook",
 		"db:generate": "bun run --cwd packages/core db:generate",
 		"db:migrate": "bun run --cwd packages/core db:migrate",
+		"db:compare-migrations": "bun run --cwd packages/core db:compare-migrations",
 		"db:studio": "bun run --cwd packages/core db:studio",
 		"db:seed": "node --env-file-if-exists=.env packages/demo/src/development.ts",
 		"db:seed:showcase": "node --env-file-if-exists=.env packages/demo/src/showcase/seed.ts",
@@ -52,5 +53,8 @@
 		"typescript": "^7.0.2",
 		"vite": "catalog:",
 		"vitest": "^5.0.5"
+	},
+	"patchedDependencies": {
+		"e2b@2.64.0": "patches/e2b@2.64.0.patch"
 	}
 }

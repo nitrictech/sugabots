@@ -26,6 +26,7 @@ import {
 	ComputerInUse,
 	ComputerMadeMeanwhile,
 	ComputerProviderBuiltInFixed,
+	ComputerProviderHasComputers,
 	ComputerProviderIncomplete,
 	ComputerProviderNotFound,
 	ComputersNotDestroyed,
@@ -196,6 +197,7 @@ export const computersContracts = {
 			UrlNotAllowed,
 			ComputerProviderIncomplete,
 			ComputerProviderBuiltInFixed,
+			ComputerProviderHasComputers,
 		],
 		changes: true,
 	}),
@@ -505,15 +507,17 @@ const heldForBots = <const What extends string>(what: What) =>
 
 /**
  * Offered as `tool` in every turn, which works on its chat's project's
- * computer when it may: it manages nothing. It waits for approval only where
- * a Personal Assistant's rule or an inherited one says so.
+ * computer when it may. Each tool declares when it needs the turn’s approvers.
  */
-const worksOnComputer = <const Tool extends string>(tool: Tool) =>
+const worksOnComputer = <const Tool extends string, const Policy extends "never" | "outsideRuns">(
+	tool: Tool,
+	policy: Policy,
+) =>
 	({
 		kind: "offered",
 		tool,
 		offeredIn: "everywhere",
-		approval: { kind: "never" },
+		approval: { kind: policy },
 	}) as const;
 
 export const computersExposure = {
@@ -621,32 +625,32 @@ export const computersExposure = {
 	},
 	"computers.runCommand": {
 		http: heldForBots("its terminal"),
-		botLoop: worksOnComputer("run_command"),
+		botLoop: worksOnComputer("run_command", "outsideRuns"),
 	},
 	"computers.readFile": {
 		http: heldForBots("its files"),
-		botLoop: worksOnComputer("read_file"),
+		botLoop: worksOnComputer("read_file", "never"),
 	},
 	"computers.writeFile": {
 		http: heldForBots("its files"),
-		botLoop: worksOnComputer("write_file"),
+		botLoop: worksOnComputer("write_file", "outsideRuns"),
 	},
 	"computers.copyChatFile": {
 		http: heldForBots("its files"),
-		botLoop: worksOnComputer("copy_file_to_computer"),
+		botLoop: worksOnComputer("copy_file_to_computer", "outsideRuns"),
 	},
 	"computers.shareFile": {
 		http: {
 			kind: "heldBack",
 			reason: "A member attaches a file to their own message instead.",
 		},
-		botLoop: worksOnComputer("share_file"),
+		botLoop: worksOnComputer("share_file", "never"),
 	},
 	"computers.useBrowser": {
 		http: heldForBots("its browser"),
 		// One tool per browser action, each named browser_ and the action, as the
 		// browser's own server lists them.
-		botLoop: worksOnComputer("browser_*"),
+		botLoop: worksOnComputer("browser_*", "outsideRuns"),
 	},
 	"computers.requestHost": {
 		http: {

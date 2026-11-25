@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { Authentication } from "../../auth/authentication.ts";
-import { operationCaller } from "../../auth/middleware.ts";
+import { operationCaller, sessionRowCheck } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, memberOnly, refusals } from "../../http/errors.ts";
 
@@ -15,36 +15,45 @@ import { asHttpError, memberOnly, refusals } from "../../http/errors.ts";
 export const systemRoutes = HttpApiBuilder.group(ServerApi, "system", (handlers) =>
 	Effect.gen(function* () {
 		const callOperation = yield* operationCaller;
+		const confirmSessionRow = yield* sessionRowCheck;
 		const authentication = yield* Authentication.Service;
-		return handlers
-			.handle("health", () =>
-				Effect.succeed({ status: "ok" as const, version: VERSION, commit: COMMIT }),
-			)
-			.handle("me", () =>
-				Effect.all(
-					{
-						member: Effect.service(CurrentUserOfRequest),
-						workspaces: callOperation("workspaces.list", {}).pipe(memberOnly),
-					},
-					{ concurrency: "unbounded" },
-				),
-			)
-			.handle("rename", ({ payload }) =>
-				Effect.gen(function* () {
-					const renamed = yield* callOperation("system.rename", payload).pipe(memberOnly);
-					// The session's cookie cache holds the old name; renewed, `/me` answers with the new one.
-					const request = yield* HttpServerRequest.HttpServerRequest;
-					const refreshed = yield* authentication.refreshedCookies(new Headers(request.headers));
-					yield* HttpEffect.appendPreResponseHandler((_request, response) =>
-						Effect.succeed(HttpServerResponse.mergeCookies(response, refreshed)),
-					);
-					return renamed;
-				}),
-			)
-			.handle("workspaceAccess", ({ params }) =>
-				callOperation("system.workspaceAccess", { workspace: params.workspace }).pipe(
-					asHttpError(refusals),
-				),
-			);
+		return (
+			handlers
+				.handle("health", () =>
+					Effect.succeed({ status: "ok" as const, version: VERSION, commit: COMMIT }),
+				)
+				// Who is signed in, as the session's row has it: the web app asks this
+				// after a stream refuses its session, which better-auth's cookie cache
+				// would go on accepting for minutes after the session was revoked.
+				.handle("me", () =>
+					Effect.andThen(
+						confirmSessionRow,
+						Effect.all(
+							{
+								member: Effect.service(CurrentUserOfRequest),
+								workspaces: callOperation("workspaces.list", {}).pipe(memberOnly),
+							},
+							{ concurrency: "unbounded" },
+						),
+					),
+				)
+				.handle("rename", ({ payload }) =>
+					Effect.gen(function* () {
+						const renamed = yield* callOperation("system.rename", payload).pipe(memberOnly);
+						// The session's cookie cache holds the old name; renewed, `/me` answers with the new one.
+						const request = yield* HttpServerRequest.HttpServerRequest;
+						const refreshed = yield* authentication.refreshedCookies(new Headers(request.headers));
+						yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+							Effect.succeed(HttpServerResponse.mergeCookies(response, refreshed)),
+						);
+						return renamed;
+					}),
+				)
+				.handle("workspaceAccess", ({ params }) =>
+					callOperation("system.workspaceAccess", { workspace: params.workspace }).pipe(
+						asHttpError(refusals),
+					),
+				)
+		);
 	}),
 );

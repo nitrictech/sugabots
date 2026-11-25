@@ -1,5 +1,5 @@
 import { Download, Trash2 } from "lucide-react";
-import { expect, screen } from "storybook/test";
+import { expect, screen, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import { DropdownMenuItem } from "./dropdown-menu.tsx";
 import { MoreMenu } from "./more-menu.tsx";
@@ -35,7 +35,7 @@ export const Closed = meta.story({
 export const Open = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "More" }));
-		await expect(await screen.findByRole("menuitem", { name: "Download" })).toBeVisible();
+		await waitFor(() => expect(screen.getByRole("menuitem", { name: "Download" })).toBeVisible());
 		await expect(screen.getByRole("menuitem", { name: "Delete" })).toBeVisible();
 	},
 });

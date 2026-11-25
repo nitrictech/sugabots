@@ -12,7 +12,7 @@ import {
 	type TurnBounds,
 } from "../principal.ts";
 import { processLayer, Tier } from "../tiers.ts";
-import { askerOf, type TurnFacts, turnFacts } from "./turn-facts.ts";
+import { askerOf, hasMemberBounds, type TurnFacts, turnFacts } from "./turn-facts.ts";
 
 /**
  * The authenticator for a turn, which the bot loop calls each time a turn
@@ -116,14 +116,7 @@ export const layer = layerNoDeps;
  * if the turn writing it had them.
  */
 function boundsOf(facts: TurnFacts, asker: string, project: string): TurnBounds {
-	const assistantsOwn = facts.assistantOf === asker && facts.inOwnChats;
-	const startedFromOutside =
-		facts.run?.startedBy === "webhook" || facts.run?.startedBy === "github";
-	return assistantsOwn &&
-		(facts.reason !== "brief" || facts.briefTurnRule === "memberBounds") &&
-		!startedFromOutside
-		? { kind: "member" }
-		: { kind: "chat", project };
+	return hasMemberBounds(facts, asker) ? { kind: "member" } : { kind: "chat", project };
 }
 
 /**

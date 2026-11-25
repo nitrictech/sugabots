@@ -106,6 +106,7 @@ const computerProviderErrors = {
 	UrlNotAllowed: BadRequest,
 	ComputerProviderIncomplete: BadRequest,
 	ComputerProviderBuiltInFixed: BadRequest,
+	ComputerProviderHasComputers: Conflict,
 	ComputersNotDestroyed: Conflict,
 	ComputerMadeMeanwhile: Conflict,
 	NoTemplates: BadRequest,

@@ -100,6 +100,11 @@ export const TrustedOnly = meta.story({
 		},
 	},
 	play: async ({ canvas, userEvent }) => {
+		await expect(
+			canvas.getByText(
+				/Runs started by a webhook or GitHub event ask for approval before each computer command/,
+			),
+		).toBeVisible();
 		await userEvent.click(canvas.getByText("Trusted hosts"));
 		await expect(canvas.getByText(/registry\.npmjs\.org/)).toBeVisible();
 	},
@@ -117,6 +122,11 @@ export const Open = meta.story({
 		settings: { ...settings, mode: "open" },
 	},
 	play: async ({ canvas, args, userEvent }) => {
+		await expect(
+			canvas.getByText(
+				/Runs started by a webhook or GitHub event ask for approval before each computer command/,
+			),
+		).toBeVisible();
 		await expect(canvas.getByText(/Any host but the blocked ones below/)).toBeVisible();
 		await expect(canvas.queryByLabelText("Allow host")).toBeNull();
 		await expect(canvas.queryByText("api.stripe.com")).toBeNull();

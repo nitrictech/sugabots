@@ -8,9 +8,11 @@ import {
 import type { Computers } from "@sugabots/core/computers/computers";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Operations } from "@sugabots/core/operations/registry";
+import { Egress } from "@sugabots/core/providers/network/egress";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { processLayer } from "@sugabots/core/tiers";
-import { Context, Data, Duration, Effect, Layer, Schema, Stream } from "effect";
+import { type DomainError, userText } from "@sugabots/errors";
+import { Context, Duration, Effect, ErrorReporter, Layer, Schema, Stream } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Socket } from "effect/unstable/socket";
 import { Authentication } from "../auth/authentication.ts";
@@ -38,6 +40,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 		const sessions = yield* SessionAuthentication.Service;
 		const operations = yield* Operations.LongRunning;
 		const ids = yield* Ids.Service;
+		const egress = yield* Egress.Service;
 		const trusted = new Set((yield* ServerSettings.Service).trustedOrigins);
 		const decodeAddress = Schema.decodeSync(computersContracts["computers.viewDesktop"].input);
 
@@ -80,7 +83,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 						// Ending the relay closes the member's socket; the operation ending, or its
 						// time running out, ends the relay.
 						yield* Effect.raceAll([
-							relay(browserSide, upstream(desktop.endpoint), desktop.password),
+							relay(browserSide, upstream(desktop.endpoint, egress), desktop.password),
 							viewing.ended,
 							Effect.sleep(maxAge),
 						]);
@@ -124,20 +127,15 @@ export const DesktopViewerTiming = Context.Reference<DesktopViewerTimingInterfac
  * The desktop's VNC server as a WebSocket, reached through the computer
  * provider: websockify in front of Xvnc.
  */
-function upstream(desktop: Computers.Endpoint) {
-	const url = desktop.url.replace(/^http/, "ws");
+function upstream(desktop: Pick<Computers.Endpoint, "url" | "headers">, egress: Egress.Interface) {
 	return Socket.fromWebSocket(
-		Effect.acquireRelease(
-			Effect.sync(
-				// Node's WebSocket takes headers as well as protocols: a provider
-				// may need them to route the request.
-				() =>
-					new WebSocket(url, {
-						protocols: [VNC_SUBPROTOCOL],
-						headers: desktop.headers,
-					} as unknown as string[]),
+		egress.providerWebSocket(desktop.url, [VNC_SUBPROTOCOL], desktop.headers).pipe(
+			Effect.mapError(
+				(cause) =>
+					new Socket.SocketError({
+						reason: new Socket.SocketOpenError({ kind: "Unknown", cause }),
+					}),
 			),
-			(socket) => Effect.sync(() => socket.close()),
 		),
 		{ openTimeout: "10 seconds" },
 	);
@@ -273,7 +271,21 @@ function concatenated(parts: readonly Uint8Array[]) {
 }
 
 /** The desktop and its viewer couldn't be joined, for `reason`. */
-class DesktopSignInFailed extends Data.TaggedError("DesktopSignInFailed")<{ reason: string }> {}
+class DesktopSignInFailed
+	extends Schema.TaggedError<DesktopSignInFailed>()("DesktopSignInFailed", {
+		reason: Schema.String,
+	})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return this.reason;
+	}
+	get userMessage() {
+		return userText`Sugabots couldn't connect to the desktop. Close the viewer and open it again.`;
+	}
+}
 
 const RFB_3_8 = "RFB 003.008\n";
 const VERSION_BYTES = RFB_3_8.length;

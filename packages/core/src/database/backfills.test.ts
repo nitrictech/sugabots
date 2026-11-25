@@ -17,15 +17,34 @@ import {
 import { turn } from "./schema.ts";
 import { closeDatabase, onDatabase } from "./testing.ts";
 
-const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), "../../drizzle");
+/** The migration that moved `main`'s installations to bots and projects, whose steps these are. */
+const UPGRADE = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"../../drizzle/20261125093952_bots_projects_and_chats/migration.sql",
+);
 
-/** The statements of the migration `name` that fill in rows it found, as it runs them. */
-function backfillsOf(name: string): string[] {
-	return readFileSync(join(MIGRATIONS, name, "migration.sql"), "utf8")
+/** A step's heading in the migration: a comment line of its own, starting the step. */
+const STEP_HEADING = "-- ## ";
+
+/**
+ * The statements of the migration's step headed `step` that fill in rows it
+ * found, as it runs them.
+ */
+function backfillsOf(step: string): string[] {
+	const statements = readFileSync(UPGRADE, "utf8")
 		.split("--> statement-breakpoint")
-		.map((statement) =>
-			statement
-				.split("\n")
+		.map((statement) => statement.split("\n"));
+	const inStep: string[][] = [];
+	let current = "";
+	for (const lines of statements) {
+		const heading = lines.find((line) => line.startsWith(STEP_HEADING));
+		if (heading) current = heading.slice(STEP_HEADING.length);
+		if (current === step) inStep.push(lines);
+	}
+	expect(inStep, `a step headed "${step}"`).not.toHaveLength(0);
+	return inStep
+		.map((lines) =>
+			lines
 				.filter((line) => !line.trimStart().startsWith("--"))
 				.join("\n")
 				.trim(),
@@ -97,8 +116,8 @@ describe.skipIf(!process.env.DATABASE_URL)("the asker backfills", () => {
 				.where(inArray(turn.id, Object.values(turns))),
 		);
 		for (const statement of [
-			...backfillsOf("20261125032116_turn_askers_and_joins"),
-			...backfillsOf("20261125043508_turn_askers_in_code"),
+			...backfillsOf("Turn askers and joins"),
+			...backfillsOf("Turn askers in code"),
 		]) {
 			await onDatabase((db) => db.execute(sql.raw(statement)));
 		}

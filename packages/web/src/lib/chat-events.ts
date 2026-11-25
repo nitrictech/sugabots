@@ -2,6 +2,7 @@ import {
 	type ChatDetails,
 	type ChatRead,
 	chatUpdateEventSchema,
+	DEFAULT_CHAT_HISTORY_LIMIT,
 	isAttached,
 	type MemberParticipant,
 	type Message,
@@ -12,28 +13,68 @@ import {
 	type StreamEvent,
 	workspaceUpdateEventSchema,
 } from "@sugabots/contracts";
+import { isApiFailure } from "@sugabots/sdk";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { refreshAutomations } from "@/lib/automations.ts";
-import { refreshAfterChatChange, refreshListsAndAttention } from "@/lib/chats.ts";
+import { refreshAfterChatChange, removeRepliesGoneFromTimeline } from "@/lib/chats.ts";
 import { refreshFilesAfter } from "@/lib/files.ts";
 import { changeReactions } from "@/lib/reactions.ts";
+import { useSession } from "@/lib/session.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
+/**
+ * Keeps the chat `chatId` current from its stream while it is on screen.
+ *
+ * Events are applied one at a time, in order: while one waits, such as for
+ * the chat fetched afresh on `ready` or `reset`, the ones after it wait too.
+ * A stream the server ends for good says why: a signed-out member's session
+ * is asked about again, and a chat the member no longer reaches is dropped
+ * from screen while what decides where they reach is fetched again.
+ */
 export function useChatEvents(chatId: string | undefined): void {
 	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	const { refresh: refreshSession } = useSession();
 
 	useEffect(() => {
 		if (!chatId) return;
 		const stream = client.events.chat(chatId);
-		void consume(stream, (event) => applyChatEvent(queries, chatId, event)).catch(() => {
-			void queries.invalidateQueries({ queryKey: ["chat", chatId] });
-		});
+		const waiting: WaitingDeltas = new Map();
+		void consume(stream, (event) => applyChatEvent(queries, chatId, event, waiting)).catch(
+			(refusal) => {
+				if (isSignedOut(refusal)) return void refreshSession().catch(() => {});
+				if (isUnreached(refusal)) return void dropUnreachedChat(queries, chatId, workspaceId);
+				void queries.invalidateQueries({ queryKey: ["chat", chatId] });
+			},
+		);
 		return () => stream.close();
-	}, [queries, chatId]);
+	}, [queries, chatId, workspaceId, refreshSession]);
+}
+
+/** Whether a stream ended because its session did. */
+function isSignedOut(refusal: unknown): boolean {
+	return isApiFailure(refusal) && refusal._tag === "Unauthorized";
+}
+
+/** Whether a stream ended because its member no longer reaches what it follows. */
+function isUnreached(refusal: unknown): boolean {
+	return isApiFailure(refusal) && (refusal._tag === "NotFound" || refusal._tag === "Forbidden");
+}
+
+/**
+ * Drops what is shown of a chat the member no longer reaches, so it is not
+ * left on screen as it was, and fetches again what decides where they reach.
+ */
+function dropUnreachedChat(queries: QueryClient, chatId: string, workspaceId: string | undefined) {
+	return Promise.all([
+		queries.resetQueries({ queryKey: ["chat", chatId], exact: true }),
+		queries.resetQueries({ queryKey: ["chat-messages", chatId] }),
+		...(workspaceId ? [refreshAfterReachChange(queries, workspaceId)] : []),
+	]);
 }
 
 /** Something the chat's events told its watchers that no message records. */
@@ -148,18 +189,24 @@ function withMemberTyping(typing: TypingMember[], member: MemberParticipant): Ty
 export function useWorkspaceEvents(): void {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
+	const { refresh: refreshSession } = useSession();
 
 	useEffect(() => {
 		if (!workspaceId) {
 			return;
 		}
 		const stream = client.events.workspace(workspaceId);
-		// A stream that drops may have missed a new message, so the lists are fetched afresh.
-		void consume(stream, (event) => applyWorkspaceEvent(queries, workspaceId, event)).catch(() => {
-			void refreshListsAndAttention(queries, workspaceId);
-		});
+		// A stream the server ended for good may have missed anything, and may
+		// mean the member left the workspace, so all it keeps fresh is fetched
+		// again; a signed-out member's session is asked about again.
+		void consume(stream, (event) => applyWorkspaceEvent(queries, workspaceId, event)).catch(
+			(refusal) => {
+				if (isSignedOut(refusal)) return void refreshSession().catch(() => {});
+				void refreshAfterReachChange(queries, workspaceId);
+			},
+		);
 		return () => stream.close();
-	}, [queries, workspaceId]);
+	}, [queries, workspaceId, refreshSession]);
 }
 
 function upsertChatMessage(details: ChatDetails, incoming: Message): ChatDetails {
@@ -182,11 +229,6 @@ export function mergeChatMessages(current: Message[], incoming: Message[]): Mess
 	});
 }
 
-/**
- * The newest execution heard for each message being written, by message id.
- */
-const streamingExecutions = new Map<string, number>();
-
 async function consume(
 	stream: AsyncIterable<StreamEvent>,
 	apply: (event: StreamEvent) => void | Promise<void>,
@@ -200,6 +242,7 @@ async function applyChatEvent(
 	queries: QueryClient,
 	chatId: string,
 	event: StreamEvent,
+	waiting: WaitingDeltas,
 ): Promise<void> {
 	const parsed = Schema.decodeUnknownResult(chatUpdateEventSchema)(event);
 	if (parsed._tag === "Failure") {
@@ -208,16 +251,6 @@ async function applyChatEvent(
 	const update = parsed.success;
 	if ("chatId" in update && update.chatId !== chatId) {
 		return;
-	}
-	let previousExecution: number | undefined;
-	if (
-		update.type === "message.delta" ||
-		update.type === "message.thinking_delta" ||
-		update.type === "message.execution_started"
-	) {
-		previousExecution = streamingExecutions.get(update.messageId);
-		if (previousExecution !== undefined && update.execution < previousExecution) return;
-		streamingExecutions.set(update.messageId, update.execution);
 	}
 	if (update.type === "chat.notice") {
 		const notice = { id: uuidv4(), text: update.notice };
@@ -246,34 +279,69 @@ async function applyChatEvent(
 		changeReactions(queries, { id: update.messageId, chatId }, update.reactions);
 		return;
 	}
+	if (update.type === "ready" || update.type === "reset") {
+		// What was fetched before may be behind the stream, or the stream missed
+		// events: the chat as fetched now replaces it, its pages and runs are
+		// fetched again, and the events after this one wait until they have.
+		await Promise.all([
+			replaceChat(queries, chatId),
+			queries.invalidateQueries({ queryKey: ["chat-context", chatId] }),
+			queries.invalidateQueries({ queryKey: ["chat-messages", chatId] }),
+			queries.invalidateQueries({ queryKey: ["chat-history", chatId] }),
+		]);
+		addWaitingDeltas(queries, chatId, waiting);
+		return;
+	}
 	await queries.cancelQueries({ queryKey: ["chat", chatId] });
 	if (!queries.getQueryData(["chat", chatId])) {
 		await queries.invalidateQueries({ queryKey: ["chat", chatId] });
 		return;
 	}
 	if (
-		update.type === "reset" ||
 		// A turn starting takes up the messages that waited for it.
 		update.type === "turn.started" ||
 		update.type === "turn.completed" ||
 		update.type === "chat.changed"
 	) {
+		const fetchedBefore = queries.getQueryState(["chat", chatId])?.dataUpdatedAt ?? 0;
 		await Promise.all([
 			queries.invalidateQueries({ queryKey: ["chat", chatId] }),
 			queries.invalidateQueries({ queryKey: ["chat-context", chatId] }),
 		]);
+		const fetched = queries.getQueryState<ChatDetails>(["chat", chatId]);
+		// Only a chat fetched just now says which replies are gone: what was
+		// cached before may not yet hold a reply another turn has started.
+		const fetchedNow = fetched?.data !== undefined && fetched.dataUpdatedAt > fetchedBefore;
+		if (update.type === "turn.completed" && fetched?.data && fetchedNow) {
+			const latest = fetched.data;
+			// A turn that stayed silent removed its reply, which the timeline's
+			// pages may still show being written.
+			removeRepliesGoneFromTimeline(queries, chatId, latest.messages);
+			// A reply absent from the chat as fetched once a turn ended was
+			// removed, as a silent turn removes its own; nothing more will add to it.
+			for (const messageId of waiting.keys()) {
+				if (!latest.messages.some(({ id }) => id === messageId)) waiting.delete(messageId);
+			}
+		}
+		addWaitingDeltas(queries, chatId, waiting);
 		return;
 	}
 	if (update.type === "message.created") {
+		// The chat may have been fetched since the message was made, as
+		// `turn.started` before its reply's creation has it fetched; what was
+		// fetched is newer than what was created.
 		queries.setQueryData<ChatDetails>(["chat", chatId], (details) =>
-			details ? upsertChatMessage(details, update.message) : details,
+			details && !details.messages.some(({ id }) => id === update.message.id)
+				? upsertChatMessage(details, update.message)
+				: details,
 		);
+		addWaitingDeltas(queries, chatId, waiting);
 		return;
 	}
 	if (update.type === "chat.read") {
 		const { member, readThrough, readAt } = update;
 		queries.setQueryData<ChatDetails>(["chat", chatId], (details) =>
-			details ? wichat(details, { member, readThrough, readAt }) : details,
+			details ? advanceMemberReadCursor(details, { member, readThrough, readAt }) : details,
 		);
 		return;
 	}
@@ -281,55 +349,50 @@ async function applyChatEvent(
 	let messageId: string;
 	let applyMessage: (message: Message) => Message;
 	if (update.type === "message.delta" || update.type === "message.thinking_delta") {
-		messageId = update.messageId;
-		const current = queries
-			.getQueryData<ChatDetails>(["chat", chatId])
-			?.messages.find((message) => message.id === messageId);
-		if (current?.status !== "writing") {
-			if (current) streamingExecutions.delete(messageId);
+		const current = cachedMessage(queries, chatId, update.messageId);
+		if (!current) {
+			// Its reply's creation is still on its way, as a step's first thinking
+			// can overtake it: kept until the reply arrives.
+			keepWaiting(waiting, update);
 			return;
 		}
-		const step = update.type === "message.thinking_delta" ? update.step : undefined;
-		const currentText =
-			step === undefined
-				? current.content
-				: (current.thinking?.find((part) => part.step === step)?.text ?? "");
-		const { offset, text } = update;
-		const restarted = previousExecution !== undefined && update.execution > previousExecution;
-		const overlap = currentText.slice(offset);
-		if (!restarted && overlap.startsWith(text)) return;
-		if (offset > currentText.length || (!restarted && !text.startsWith(overlap))) {
+		const added = withDelta(current, update);
+		if (added === "stale") return;
+		if (added === "unplaced") {
+			// Kept until the text it adds to is here, which is fetched now: its
+			// execution's start, or the text before it, has not arrived yet.
+			keepWaiting(waiting, update);
 			await queries.invalidateQueries({ queryKey: ["chat", chatId] });
+			addWaitingDeltas(queries, chatId, waiting);
 			return;
 		}
-		const combined = currentText.slice(0, offset) + text;
-		applyMessage = (message) =>
-			step === undefined
-				? withContent(message, combined)
-				: {
-						...message,
-						thinking: [
-							...(message.thinking ?? []).filter((part) => part.step !== step),
-							{ step, text: combined },
-						].sort((left, right) => left.step - right.step),
-					};
-	} else if (update.type === "message.execution_started") {
-		if (previousExecution === update.execution) return;
+		setMessage(queries, chatId, added);
+		addWaitingDeltas(queries, chatId, waiting);
+		return;
+	}
+	if (update.type === "message.execution_started") {
 		messageId = update.messageId;
-		const { content, thinking } = update;
+		const { execution, content, thinking } = update;
+		// What a newer execution restarts from replaces what an older one wrote,
+		// or how it ended, as a turn that runs again reopens its reply; the reply
+		// as fetched since it started already begins there.
 		applyMessage = (message) => {
-			if (message.status !== "writing") return message;
-			const fetchedAhead =
-				previousExecution === undefined &&
-				message.content.length > content.length &&
-				message.content.startsWith(content);
-			return fetchedAhead ? message : { ...withContent(message, content), thinking };
+			if (message.execution !== undefined && execution <= message.execution) return message;
+			const { error: _error, finishedAt: _finishedAt, ...reopened } = message;
+			return { ...withContent(reopened, content), status: "writing", thinking, execution };
 		};
 	} else if (update.type === "message.completed") {
 		messageId = update.messageId;
-		streamingExecutions.delete(messageId);
-		const { content, status, finishedAt } = update;
-		applyMessage = (message) => ({ ...withContent(message, content), status, finishedAt });
+		const { content, status, finishedAt, execution } = update;
+		applyMessage = (message) =>
+			endedBefore(message, execution)
+				? message
+				: {
+						...withContent(message, content),
+						status,
+						finishedAt,
+						...(execution === undefined ? {} : { execution }),
+					};
 	} else if (
 		update.type === "tool_call.started" ||
 		update.type === "tool_call.completed" ||
@@ -345,14 +408,129 @@ async function applyChatEvent(
 		applyMessage = (message) => ({ ...message, parts: [...partsWithoutFiles(message), ...files] });
 	} else if (update.type === "message.failed") {
 		messageId = update.messageId;
-		const { error } = update;
-		applyMessage = (message) => ({ ...message, status: "failed", error });
+		const { error, execution } = update;
+		applyMessage = (message) =>
+			endedBefore(message, execution)
+				? message
+				: {
+						...message,
+						status: "failed",
+						error,
+						...(execution === undefined ? {} : { execution }),
+					};
 	} else {
 		return;
 	}
 
 	queries.setQueryData<ChatDetails>(["chat", chatId], (details) =>
 		details ? updateChatMessage(details, messageId, applyMessage) : details,
+	);
+	if (update.type === "message.execution_started") addWaitingDeltas(queries, chatId, waiting);
+}
+
+/**
+ * Whether an end by `execution` is an older execution's than the one the
+ * reply is as of, such as a failure that arrived after the turn ran again,
+ * which says nothing of the reply now.
+ */
+function endedBefore(message: Message, execution: number | undefined): boolean {
+	return (
+		execution !== undefined && message.execution !== undefined && execution < message.execution
+	);
+}
+
+type ChatUpdate = typeof chatUpdateEventSchema.Type;
+
+/** Text or thinking a reply's turn wrote, as the chat's stream sends it while it writes. */
+type ReplyDelta = Extract<ChatUpdate, { type: "message.delta" | "message.thinking_delta" }>;
+
+/**
+ * The deltas a chat's stream sent before the text they add to was there, by
+ * reply, until it is: a delta of a newer execution can overtake its start,
+ * and one can arrive before the text it follows has been fetched.
+ */
+type WaitingDeltas = Map<string, ReplyDelta[]>;
+
+/** The most deltas kept waiting for one reply; past it, the oldest go. */
+const MAX_WAITING_DELTAS = 500;
+
+function keepWaiting(waiting: WaitingDeltas, delta: ReplyDelta): void {
+	const kept = [...(waiting.get(delta.messageId) ?? []), delta];
+	waiting.set(delta.messageId, kept.slice(-MAX_WAITING_DELTAS));
+}
+
+/**
+ * Adds each waiting delta whose text is now there, by execution and offset,
+ * for as long as one more can be added, and drops each one that never will.
+ */
+function addWaitingDeltas(queries: QueryClient, chatId: string, waiting: WaitingDeltas): void {
+	for (const [messageId, deltas] of waiting) {
+		const ordered = [...deltas].sort(
+			(left, right) => left.execution - right.execution || left.offset - right.offset,
+		);
+		let still = ordered;
+		let added = true;
+		while (added && still.length > 0) {
+			added = false;
+			const next: ReplyDelta[] = [];
+			for (const delta of still) {
+				const current = cachedMessage(queries, chatId, messageId);
+				const result = current && withDelta(current, delta);
+				if (result === undefined || result === "unplaced") {
+					next.push(delta);
+				} else if (result !== "stale") {
+					setMessage(queries, chatId, result);
+					added = true;
+				}
+			}
+			still = next;
+		}
+		if (still.length === 0) waiting.delete(messageId);
+		else waiting.set(messageId, still);
+	}
+}
+
+/**
+ * The reply with `delta` added to the text its own execution wrote; `stale`
+ * for one it never will be, from an older execution, into a reply its own
+ * execution ended, or already there; `unplaced` while the text it adds to is
+ * not there: its newer execution's start, or the text before its offset.
+ */
+function withDelta(current: Message, delta: ReplyDelta): Message | "stale" | "unplaced" {
+	const { execution, offset, text } = delta;
+	const baseline = current.execution;
+	if (baseline !== undefined && execution < baseline) return "stale";
+	if (baseline === execution && current.status !== "writing") return "stale";
+	if (current.status !== "writing" || (baseline ?? execution) !== execution) return "unplaced";
+	const step = delta.type === "message.thinking_delta" ? delta.step : undefined;
+	const currentText =
+		step === undefined
+			? current.content
+			: (current.thinking?.find((part) => part.step === step)?.text ?? "");
+	const overlap = currentText.slice(offset);
+	if (overlap.startsWith(text)) return "stale";
+	if (offset > currentText.length || !text.startsWith(overlap)) return "unplaced";
+	const combined = currentText.slice(0, offset) + text;
+	if (step === undefined) return { ...withContent(current, combined), execution };
+	return {
+		...current,
+		execution,
+		thinking: [
+			...(current.thinking ?? []).filter((part) => part.step !== step),
+			{ step, text: combined },
+		].sort((left, right) => left.step - right.step),
+	};
+}
+
+function cachedMessage(queries: QueryClient, chatId: string, messageId: string) {
+	return queries
+		.getQueryData<ChatDetails>(["chat", chatId])
+		?.messages.find((message) => message.id === messageId);
+}
+
+function setMessage(queries: QueryClient, chatId: string, message: Message): void {
+	queries.setQueryData<ChatDetails>(["chat", chatId], (details) =>
+		details ? updateChatMessage(details, message.id, () => message) : details,
 	);
 }
 
@@ -389,35 +567,94 @@ async function applyWorkspaceEvent(
 			]);
 			return;
 		case "reach.changed":
-			// Who reaches a project, bot or the workspace changed, so what the lists
-			// show of them may have too, and whose turns each member may interrupt in
-			// a chat; a stream that lost what it follows ends on its own.
-			await Promise.all([
-				queries.invalidateQueries({ queryKey: ["chat"] }),
-				queries.invalidateQueries({ queryKey: ["projects"] }),
-				queries.invalidateQueries({ queryKey: ["project-members"] }),
-				queries.invalidateQueries({ queryKey: ["project-bots"] }),
-				queries.invalidateQueries({ queryKey: ["bots"] }),
-				queries.invalidateQueries({ queryKey: ["workspaces"] }),
-				refreshAfterChatChange(queries, workspaceId),
-			]);
+			await refreshAfterReachChange(queries, workspaceId);
 			return;
 		case "member.changed":
 			// A member's name, and so their handle, shows wherever they do.
 			await queries.invalidateQueries();
 			return;
+		case "ready":
 		case "reset":
-			// Any number of the events above may have been missed, so everything they keep fresh is fetched again.
+			// What the lists were fetched before may be behind the stream, or any
+			// number of the events above were missed, so everything they keep fresh
+			// is fetched again.
 			await Promise.all([
 				queries.invalidateQueries({ queryKey: ["chat-messages"] }),
 				queries.invalidateQueries({ queryKey: ["chat-history"] }),
 				refreshAutomations(queries),
-				refreshAfterChatChange(queries, workspaceId),
+				refreshAfterReachChange(queries, workspaceId),
 			]);
 			return;
 		default:
 			update satisfies never;
 	}
+}
+
+/**
+ * Fetches again what a change of who reaches what may have changed: who
+ * reaches a project, bot or the workspace, or what someone's role lets them
+ * do there, changes what the lists show, what the member may do in the
+ * workspace, and whose turns each member may interrupt in a chat. A stream
+ * that lost what it follows ends on its own.
+ */
+function refreshAfterReachChange(queries: QueryClient, workspaceId: string) {
+	return Promise.all([
+		queries.invalidateQueries({ queryKey: ["chat"] }),
+		queries.invalidateQueries({ queryKey: ["projects"] }),
+		queries.invalidateQueries({ queryKey: ["project-members"] }),
+		queries.invalidateQueries({ queryKey: ["project-bots"] }),
+		queries.invalidateQueries({ queryKey: ["bots"] }),
+		queries.invalidateQueries({ queryKey: ["workspaces"] }),
+		queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
+		refreshAfterChatChange(queries, workspaceId),
+	]);
+}
+
+/**
+ * Replaces what the cache holds of the chat with the chat as fetched now,
+ * merging nothing kept from before, which may be text an execution since
+ * superseded. A refusal to show the chat ends its stream as the server's own
+ * would; any other failure leaves the chat to be fetched as usual.
+ */
+async function replaceChat(queries: QueryClient, chatId: string): Promise<void> {
+	await queries.cancelQueries({ queryKey: ["chat", chatId], exact: true });
+	try {
+		const latest = await Effect.runPromise(
+			client.api.chats.get({ params: { chatId }, query: { limit: DEFAULT_CHAT_HISTORY_LIMIT } }),
+		);
+		queries.setQueryData<ChatDetails>(["chat", chatId], (current) =>
+			withEarlierPagesKept(current, latest),
+		);
+	} catch (failure) {
+		if (isSignedOut(failure) || isUnreached(failure)) throw failure;
+		await queries.invalidateQueries({ queryKey: ["chat", chatId] });
+	}
+}
+
+/**
+ * `latest`, the chat's newest page as fetched now, after the earlier messages
+ * `current` had loaded before it, such as a run's older pages, with the cursor
+ * to what comes before them. Only where the two meet: with messages between
+ * them unloaded, `latest` alone, which the member loads back from.
+ */
+function withEarlierPagesKept(current: ChatDetails | undefined, latest: ChatDetails): ChatDetails {
+	const [oldestLatest] = latest.messages;
+	if (!current || !oldestLatest || latest.olderMessagesCursor === null) return latest;
+	if (!current.messages.some(({ id }) => id === oldestLatest.id)) return latest;
+	const earlier = current.messages.filter((message) => comesBefore(message, oldestLatest));
+	if (earlier.length === 0) return latest;
+	return {
+		...latest,
+		messages: [...earlier, ...latest.messages],
+		olderMessagesCursor: current.olderMessagesCursor,
+	};
+}
+
+/** Whether `message` comes before `other` in the chat, as `mergeChatMessages` orders them. */
+function comesBefore(message: Message, other: Message): boolean {
+	return message.createdAt === other.createdAt
+		? message.id < other.id
+		: message.createdAt < other.createdAt;
 }
 
 function updateChatMessage(
@@ -464,7 +701,7 @@ function partsWithoutFiles(message: Message): MessagePart[] {
 }
 
 /** `details` with `read` in place of what it had of the same member, unless it had them further on. */
-function wichat(details: ChatDetails, read: ChatRead): ChatDetails {
+function advanceMemberReadCursor(details: ChatDetails, read: ChatRead): ChatDetails {
 	const previous = details.reads.find(({ member }) => member.id === read.member.id);
 	if (previous && Date.parse(previous.readThrough) >= Date.parse(read.readThrough)) return details;
 	return {

@@ -48,7 +48,7 @@
 		if (Test-Path .env) {
 			Write-Host "Keeping the existing keys in $installDir\.env"
 		} else {
-			$envFile = "BETTER_AUTH_SECRET=$(New-RandomKey)`nCREDENTIALS_ENCRYPTION_KEY=$(New-RandomKey)`n"
+			$envFile = "BETTER_AUTH_SECRET=$(New-RandomKey)`nSECRETS_ENCRYPTION_KEY=$(New-RandomKey)`n"
 			# Without a byte-order mark, which Windows PowerShell's own encoders add and Compose reads as part of the first name.
 			[System.IO.File]::WriteAllText((Join-Path (Get-Location) ".env"), $envFile, (New-Object System.Text.UTF8Encoding $false))
 			Write-Host "Wrote new keys to $installDir\.env. Back it up and keep it private."

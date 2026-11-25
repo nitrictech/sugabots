@@ -1,5 +1,6 @@
 export {
 	ComputerProviderBuiltInFixed,
+	ComputerProviderHasComputers,
 	ComputerProviderIncomplete,
 } from "@sugabots/contracts/errors/computers";
 export * as ComputerProviderStore from "./computer-provider-store.ts";
@@ -13,13 +14,19 @@ import type {
 import { COMPUTER_NETWORK_MODE_DEFAULT, computerBuiltInProvider } from "@sugabots/contracts";
 import {
 	ComputerProviderBuiltInFixed,
+	ComputerProviderHasComputers,
 	ComputerProviderIncomplete,
 } from "@sugabots/contracts/errors/computers";
 import type { UserText } from "@sugabots/errors";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Redacted } from "effect";
 import { query, serviceOperations, transaction, writtenRow } from "../database/database.ts";
-import { type ComputerProviderRow, computerProvider } from "../database/schema.ts";
+import {
+	type ComputerProviderRow,
+	computer,
+	computerDestruction,
+	computerProvider,
+} from "../database/schema.ts";
 import { stillConfiguredAs } from "../providers/tested-configuration.ts";
 import { Secrets } from "../secrets/secrets.ts";
 import { processLayer, Tier } from "../tiers.ts";
@@ -43,7 +50,7 @@ export interface Interface {
 		changes: ComputerProviderUpdate,
 	) => Effect.Effect<
 		ComputerProviderRow | undefined,
-		ComputerProviderIncomplete | ComputerProviderBuiltInFixed
+		ComputerProviderIncomplete | ComputerProviderBuiltInFixed | ComputerProviderHasComputers
 	>;
 	/** Deletes the row. Its computers must have been destroyed first. */
 	readonly remove: (workspaceId: string, providerId: string) => Effect.Effect<boolean>;
@@ -112,6 +119,40 @@ export const make = Effect.gen(function* () {
 				.limit(1),
 		).pipe(Effect.map(([row]) => row));
 
+	/** Whether the provider has made a computer, or left a machine behind, that still needs it to be destroyed. */
+	const hasComputers = (providerId: string) =>
+		Effect.map(
+			Effect.all([
+				query((db) =>
+					db
+						.select({ id: computer.id })
+						.from(computer)
+						.where(eq(computer.computerProviderId, providerId))
+						.limit(1),
+				),
+				query((db) =>
+					db
+						.select({ id: computerDestruction.id })
+						.from(computerDestruction)
+						.where(eq(computerDestruction.computerProviderId, providerId))
+						.limit(1),
+				),
+			]),
+			([made, left]) => made.length + left.length > 0,
+		);
+
+	/** The provider's row, locked until the transaction ends, so its computers are counted against what is changed. */
+	const lockForUpdate = (workspaceId: string, providerId: string) =>
+		query((db) =>
+			db
+				.select()
+				.from(computerProvider)
+				.where(
+					and(eq(computerProvider.workspaceId, workspaceId), eq(computerProvider.id, providerId)),
+				)
+				.for("update"),
+		).pipe(Effect.map(([row]) => row));
+
 	/** Disables the workspace's other providers, so this one can be the enabled one. */
 	const disableOthers = (workspaceId: string, providerId?: string) =>
 		query((db) =>
@@ -166,7 +207,7 @@ export const make = Effect.gen(function* () {
 				"update",
 				transaction(
 					Effect.gen(function* () {
-						const current = yield* load(workspaceId, providerId);
+						const current = yield* lockForUpdate(workspaceId, providerId);
 						if (!current) return undefined;
 						if (changes.settings && changes.settings.builtIn !== current.builtIn) {
 							return yield* new ComputerProviderBuiltInFixed();
@@ -187,6 +228,12 @@ export const make = Effect.gen(function* () {
 									: {}),
 						};
 						const next = { ...current, ...values };
+						// Its computers are destroyed with its key at its address, so
+						// neither goes while it has any.
+						const losesReach = current.apiKeyEncrypted !== null && next.apiKeyEncrypted === null;
+						if ((losesReach || addressMoved) && (yield* hasComputers(providerId))) {
+							return yield* new ComputerProviderHasComputers();
+						}
 						// Taking away what it needs disables it, rather than refusing the change.
 						const complete = isComplete(next);
 						if (next.enabled && !complete) {

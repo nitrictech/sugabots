@@ -248,7 +248,7 @@ function lineFor(connector: Connector): string {
 		return "Sign-in expired. Bots can't use it until someone signs in again";
 	if (!connector.signedIn) return "Not signed in yet";
 	if (connector.status === "error") return connector.lastTestError ?? "The last check failed";
-	const access = accessSummaryText(connector.toolCounts) ?? "No actions found yet";
+	const access = accessSummaryText(connector.toolCounts) ?? "No tools found yet";
 	return connector.signedInAs ? `${access} · Signed in as ${connector.signedInAs.name}` : access;
 }
 

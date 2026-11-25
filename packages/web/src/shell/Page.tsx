@@ -46,6 +46,12 @@ export function Page({
 	);
 }
 
+export function DirectoryBody({ children }: { children: ReactNode }) {
+	return (
+		<div className="mx-auto flex w-full max-w-180 flex-col gap-6 px-4 pt-6 pb-12">{children}</div>
+	);
+}
+
 /**
  * The title across the top of a page or of a list beside the sidebar, with
  * `actions` at the right: the same in each, so the titles line up. On a

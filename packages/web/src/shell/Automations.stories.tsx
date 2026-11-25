@@ -342,7 +342,9 @@ export const AddingTrigger = meta.story({
 		const triggers = canvas.getByRole("region", { name: "Triggers" });
 		await userEvent.click(within(triggers).getByRole("button", { name: "Add trigger" }));
 		const dialog = await within(document.body).findByRole("dialog", { name: "Add a trigger" });
-		await expect(within(dialog).getByRole("button", { name: /^Webhook/ })).toBeVisible();
+		await waitFor(() =>
+			expect(within(dialog).getByRole("button", { name: /^Webhook/ })).toBeVisible(),
+		);
 	},
 });
 

@@ -10,6 +10,7 @@ import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
 import { noDatabase } from "@sugabots/core/database/testing";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Operations } from "@sugabots/core/operations/registry";
+import { Egress } from "@sugabots/core/providers/network/egress";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
@@ -61,7 +62,8 @@ type TestServices =
 	| PageAuthentication.Service
 	| Ids.Service
 	| ServerSettings.Service
-	| EventBus.Service;
+	| EventBus.Service
+	| Egress.Service;
 
 /**
  * The complete route table, built by `apiLayer` as the server builds it, over
@@ -130,6 +132,7 @@ const fakes: Layer.Layer<TestServices, never, Database> = Layer.mergeAll(
 	unimplemented(WebhookAuthentication.Service),
 	Ids.layer,
 	serverSettingsWithWebAppAt(WEB_ORIGIN),
+	Egress.layer.pipe(Layer.provide(serverSettingsWithWebAppAt(WEB_ORIGIN)), Layer.orDie),
 	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: inMemoryEventStore() })),
 );
 

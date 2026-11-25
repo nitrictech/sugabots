@@ -8,7 +8,7 @@ import { MAX_SHARED_FILE_MEGABYTES } from "@sugabots/contracts/operations/comput
 import { UserText, userText } from "@sugabots/errors";
 import { Context, Effect, Layer, type Scope, Semaphore, Stream } from "effect";
 import { contentType as mediaTypeForName } from "mime-types";
-import type { BlobStore } from "../../../blob-store/blob-store.ts";
+import { BlobStore } from "../../../blob-store/blob-store.ts";
 import { reachOf } from "../../../computers/allowed-hosts.ts";
 import { BOT_CACHES } from "../../../computers/computer-disk-clearing.ts";
 import { ComputerProviderStore } from "../../../computers/computer-provider-store.ts";
@@ -529,13 +529,16 @@ function shareFrom(
 				file: file.id,
 				note: userText`Members see it under your reply now; it needn't be described again.`,
 			})),
-			Effect.catchTags({
-				BlobStoreUnavailable: (failure) =>
-					notKept(failure, userText`The file couldn't be kept right now. Try again shortly.`),
-				BlobStoreRejected: (failure) =>
-					notKept(failure, userText`The workspace's file storage refused the file.`),
+			Effect.catch((failure) => {
+				if (failure instanceof BlobStore.Unavailable)
+					return notKept(
+						failure,
+						userText`The file couldn't be kept right now. Try again shortly.`,
+					);
+				if (failure instanceof BlobStore.Rejected)
+					return notKept(failure, userText`The workspace's file storage refused the file.`);
+				return Effect.succeed(failed(failure.userMessage));
 			}),
-			Effect.catch((failure) => Effect.succeed(failed(failure.userMessage))),
 		);
 	});
 }

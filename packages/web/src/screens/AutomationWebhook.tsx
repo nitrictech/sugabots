@@ -128,7 +128,7 @@ export function authNote(auth: WebhookAuth): string {
 		case "linear":
 			return WEBHOOK_SOURCE_NOTES[auth.kind];
 		case "hmac":
-			return `Sign the raw request body with the secret using HMAC ${labelOf(WEBHOOK_ALGORITHM_OPTIONS, auth.algorithm)}, and send the digest in ${auth.header}, written in ${labelOf(WEBHOOK_ENCODING_OPTIONS, auth.encoding).toLowerCase()}.`;
+			return `Sign the raw request body with the secret using HMAC ${labelOf(WEBHOOK_ALGORITHM_OPTIONS, auth.algorithm)}, and send the digest in ${auth.header}, written in ${labelOf(WEBHOOK_ENCODING_OPTIONS, auth.encoding).toLowerCase()}. Keep signed requests private. A captured request can be sent again.`;
 		case "api_key":
 			return `Send the key in the ${auth.header} header.`;
 		case "bearer":

@@ -13,6 +13,7 @@ import { COMPUTER_IMAGE } from "@sugabots/contracts";
 import {
 	type ComputerMadeMeanwhile,
 	type ComputerProviderBuiltInFixed,
+	type ComputerProviderHasComputers,
 	type ComputerProviderIncomplete,
 	ComputerProviderNotFound,
 	ComputersNotDestroyed,
@@ -67,6 +68,7 @@ export interface Interface {
 		| UrlNotAllowed
 		| ComputerProviderIncomplete
 		| ComputerProviderBuiltInFixed
+		| ComputerProviderHasComputers
 	>;
 	/**
 	 * Destroys the provider's computers, then removes it. When one is made

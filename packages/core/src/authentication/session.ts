@@ -2,7 +2,7 @@ export * as SessionAuthentication from "./session.ts";
 
 import { memberStream, streamEvent } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
-import { and, eq, gt, type SQL, sql } from "drizzle-orm";
+import { and, eq, gt, type SQL } from "drizzle-orm";
 import { Context, DateTime, Effect, ErrorReporter, Layer, Schema } from "effect";
 import { query, serviceOperations, transaction } from "../database/database.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
@@ -70,12 +70,14 @@ export const make = Effect.gen(function* () {
 
 	/** The unexpired session row `where` picks, as its member's principal. */
 	const sessionWhere = (where: SQL | undefined) =>
-		query((db) =>
-			db
-				.select({ session: session.id, member: session.memberId })
-				.from(session)
-				.where(and(where, gt(session.expiresAt, sql`now()`)))
-				.limit(1),
+		Effect.flatMap(activeSession, (unexpired) =>
+			query((db) =>
+				db
+					.select({ session: session.id, member: session.memberId })
+					.from(session)
+					.where(and(where, unexpired))
+					.limit(1),
+			),
 		).pipe(
 			Effect.flatMap(([row]) =>
 				row ? Effect.succeed(authenticated.memberSession(row)) : Effect.fail(new SessionInvalid()),
@@ -122,23 +124,21 @@ export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 export const layer = layerNoDeps;
 
+const activeSession = Effect.map(DateTime.nowAsDate, (now) => gt(session.expiresAt, now));
+
 /**
  * When `principal`'s session expires, read again from its row, for a
  * long-running operation proving again; `undefined` once it has ended or
  * expired, which ends the operation.
  */
 export const expiryOf = (principal: MemberSession) =>
-	Effect.flatMap(DateTime.nowAsDate, (now) =>
+	Effect.flatMap(activeSession, (unexpired) =>
 		query((db) =>
 			db
 				.select({ expiresAt: session.expiresAt })
 				.from(session)
 				.where(
-					and(
-						eq(session.id, principal.session),
-						eq(session.memberId, principal.member),
-						gt(session.expiresAt, now),
-					),
+					and(eq(session.id, principal.session), eq(session.memberId, principal.member), unexpired),
 				)
 				.limit(1),
 		).pipe(Effect.map(([row]) => row?.expiresAt)),

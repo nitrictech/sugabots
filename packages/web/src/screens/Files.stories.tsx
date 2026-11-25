@@ -198,7 +198,7 @@ export const Document = meta.story({
 		).toBeVisible();
 		await expect(canvas.getByRole("button", { name: /Version 3/ })).toBeVisible();
 		await userEvent.click(canvas.getByRole("button", { name: "More" }));
-		await expect(await screen.findByRole("menuitem", { name: "Download" })).toBeVisible();
+		await waitFor(() => expect(screen.getByRole("menuitem", { name: "Download" })).toBeVisible());
 		await expect(screen.getByRole("menuitem", { name: "Copy link" })).toBeVisible();
 		await expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
 		await userEvent.keyboard("{Escape}");
@@ -474,6 +474,25 @@ export const InlinePage = meta.story({
 		);
 		await expect(canvas.getByRole("button", { name: "Open Pipeline by stage" })).toBeVisible();
 		await expect(canvas.getByTitle("Pipeline by stage")).toBeVisible();
+	},
+});
+
+/** A page from a GitHub run stays off until the member loads it. */
+export const PageFromGitHubRun = meta.story({
+	render: () => (
+		<FileCardView
+			file={asWritten(dashboard)}
+			botName={writer.name}
+			content={chartPage}
+			outsideRun="github"
+			onOpen={fn()}
+		/>
+	),
+	play: async ({ canvas, userEvent }) => {
+		await expect(canvas.getByText("Written by a run started by a GitHub event.")).toBeVisible();
+		await expect(canvas.queryByTitle(dashboard.title)).not.toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: `Load page ${dashboard.title}` }));
+		await expect(canvas.getByTitle(dashboard.title)).toBeVisible();
 	},
 });
 

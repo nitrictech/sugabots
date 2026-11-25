@@ -1,3 +1,4 @@
+import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { WebToolOff } from "@sugabots/contracts/errors/web";
 import { WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "@sugabots/contracts/operations/web";
 import {
@@ -6,10 +7,11 @@ import {
 	seedMember,
 	seedRun,
 } from "@sugabots/core/authentication/seed.test-support";
+import { seedChat } from "@sugabots/core/chats/seed.test-support";
 import { aChatAwaitingReply } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
-import { bot, workspace } from "@sugabots/core/database/schema";
+import { bot, turn, workspace } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
 import { Egress } from "@sugabots/core/providers/network/egress";
@@ -19,9 +21,11 @@ import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	botLoopOnPostgres,
+	calling,
 	callsOf,
 	enableWebSearch,
 	examplePage,
+	parkedCallOf,
 	scriptedSteps,
 	searchBaseUrl,
 	storedReply,
@@ -74,10 +78,21 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's web tools, against Postgres
 			{ text: ["Found it."] },
 		);
 
-		const ran = await loop.runTurn(chatId, {
+		const workflow = await loop.runWorkflow(chatId, {
 			model,
 			egress: unimplemented(Egress.Service, { webFetch }),
 		});
+
+		await Promise.race([
+			workflow.completed(),
+			workflow.suspended().then(() => {
+				throw new Error("Ordinary chat asked for approval");
+			}),
+		]);
+		const [opened] = await onDatabase((db) =>
+			db.select({ id: turn.id }).from(turn).where(eq(turn.executionId, workflow.executionId)),
+		);
+		if (!opened) throw new Error("No turn opened");
 
 		expect(webFetch).toHaveBeenCalledExactlyOnceWith(
 			new URL(examplePage.url),
@@ -86,7 +101,6 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's web tools, against Postgres
 			}),
 		);
 
-		expect(ran.outcomes).toEqual([{ _tag: "Continue" }, { _tag: "Finished" }]);
 		expect(requests).toHaveLength(2);
 		expect(requests.map(({ step }) => step)).toEqual([0, 1]);
 		// The first request offers the tool without running it; the second carries its result.
@@ -105,8 +119,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's web tools, against Postgres
 				],
 			},
 		]);
-		const reply = await storedReply(ran.turnId);
-		expect(await callsOf(ran.turnId)).toMatchObject([
+		const reply = await storedReply(opened.id);
+		expect(await callsOf(opened.id)).toMatchObject([
 			{
 				tool: WEB_FETCH_TOOL,
 				step: 0,
@@ -122,6 +136,82 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's web tools, against Postgres
 		]);
 		expect(reply).toMatchObject({ status: "complete", content: "Looking. Found it." });
 	});
+
+	it.each(["webhook", "github", "member bounds"] as const)(
+		"shows the full fetch URL and waits for its approver in %s",
+		async (source) => {
+			await enableWebSearch(workspaceId, adminId);
+			const memberBounds = source === "member bounds";
+			const member = await seedMember(workspaceId, "editor");
+			const selected = await seedBot(
+				workspaceId,
+				memberBounds ? { assistantOf: member, visibility: "personal" } : { createdById: member },
+			);
+			await onDatabase((db) => db.update(bot).set({ model: "m" }).where(eq(bot.id, selected.id)));
+			let sourceChat: string;
+			if (memberBounds) {
+				const { chat } = await chatsAs(member).startProjectChat({
+					projectId: selected.defaultProject,
+					retryKey: crypto.randomUUID(),
+					message: "Read the example page.",
+				});
+				sourceChat = chat.id;
+			} else {
+				const automationId = await seedAutomation(workspaceId, selected.defaultProject);
+				await onDatabase((db) =>
+					seedChat(db, {
+						workspaceId,
+						kind: "automation_feed",
+						automationId,
+						title: "Page review",
+					}),
+				);
+				const started = await seedRun(workspaceId, automationId, selected.id, source);
+				await runOnPostgres(
+					Context.get(loop.services, Turns.Service).ask({
+						chatId: started.chat,
+						botId: selected.id,
+						triggerMessageId: started.triggerMessage,
+						reason: "automation",
+					}),
+				);
+				sourceChat = started.chat;
+			}
+			const approver = memberBounds || source === "github" ? member : adminId;
+			const other = memberBounds ? adminId : await seedMember(workspaceId, "editor");
+			const url = `${examplePage.url}?edition=full&language=en`;
+			const webFetch = vi.fn(async () => examplePage.response());
+			const workflow = await loop.runWorkflow(sourceChat, {
+				model: calling(WEB_FETCH_TOOL, { url }).model,
+				egress: unimplemented(Egress.Service, { webFetch }),
+			});
+
+			await workflow.suspended();
+			const { turnId, parked } = await parkedCallOf(workflow.executionId);
+			expect(webFetch).not.toHaveBeenCalled();
+			expect((await chatsAs(approver).approvals(workspaceId)).waiting).toMatchObject([
+				{ call: { id: parked.id, tool: WEB_FETCH_TOOL, input: { url } } },
+			]);
+			await expect(
+				chatsAs(other).decide({ toolCallId: parked.id, decision: "allow_once" }),
+			).rejects.toMatchObject({
+				userMessage: (memberBounds
+					? new ResourceHidden({ resource: "approval" })
+					: new ActionForbidden({ proof: "CanDecide" })
+				).userMessage,
+			});
+
+			await chatsAs(approver).decide({ toolCallId: parked.id, decision: "allow_once" });
+			await workflow.completed();
+			expect(webFetch).toHaveBeenCalledExactlyOnceWith(
+				new URL(url),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			);
+			expect(await callsOf(turnId)).toMatchObject([
+				{ id: parked.id, status: "completed", approvalStatus: "allowed", decidedById: approver },
+			]);
+		},
+	);
 
 	it("tells the model what was wrong with a call's input, without making the call", async () => {
 		const { model, requests } = scriptedSteps(

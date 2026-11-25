@@ -3,7 +3,7 @@ import {
 	type AutomationTriggerInput,
 	type CalendarSchedule,
 	MAX_ROUTINE_TIMES,
-	type RoutineSchedule,
+	type Routine,
 	type Weekday,
 } from "@sugabots/contracts";
 import {
@@ -68,13 +68,13 @@ export function defaultSchedule(): CalendarSchedule {
 }
 
 /** A stored schedule, read into its parts where they can say it. */
-export function readSchedule(schedule: RoutineSchedule): RoutineReading {
+export function readSchedule(schedule: Routine): RoutineReading {
 	if (schedule.repeat !== "cron") return { kind: "picked", schedule };
 	return readCron(schedule.expression.trim());
 }
 
 /** The schedule an automation saves: the one picked, or the written one kept as it was. */
-export function scheduleOfReading(reading: RoutineReading): RoutineSchedule {
+export function scheduleOfReading(reading: RoutineReading): Routine {
 	return reading.kind === "picked"
 		? reading.schedule
 		: { repeat: "cron", expression: reading.expression };

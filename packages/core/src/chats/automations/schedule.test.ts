@@ -1,4 +1,4 @@
-import type { CalendarSchedule, RoutineSchedule } from "@sugabots/contracts";
+import type { CalendarSchedule, Routine } from "@sugabots/contracts";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -9,7 +9,7 @@ import {
 
 /** The schedule's next `count` runs after `from`, each found after the one before. */
 const upcomingOccurrences = (
-	schedule: RoutineSchedule,
+	schedule: Routine,
 	timezone: string,
 	from: Date,
 	count = 1,

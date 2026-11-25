@@ -1,7 +1,8 @@
 import type { WrittenFilePart } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Cause, Context, Effect, Layer, Logger } from "effect";
+import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedMessage } from "../../authentication/seed.test-support.ts";
 import { SystemWorkAuthentication } from "../../authentication/system-work.ts";
@@ -28,6 +29,8 @@ import {
 } from "../../database/testing.ts";
 import { asMember } from "../../operations/chats/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
+import { unimplemented } from "../../testing.ts";
+import { Lanes } from "../../workflows/lanes.ts";
 import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
 import { seedChat } from "../seed.test-support.ts";
@@ -54,9 +57,10 @@ import {
 	writeReply,
 } from "../turns/testing.ts";
 import type { Turns } from "../turns/turns.ts";
+import { Automation, automationWorkflow } from "./automation.workflow.ts";
 import { AutomationRunner } from "./automation-runner.ts";
 import { AutomationSettlement } from "./settlement.ts";
-import { RUN_STOPPED_UNEXPECTEDLY } from "./store.ts";
+import { automationStepsLayer } from "./steps.ts";
 import {
 	anAutomationAdmin,
 	automationsAs,
@@ -345,7 +349,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 		expect(await executionOf(first.execution.id)).toMatchObject({
 			state: "failed",
-			error: RUN_STOPPED_UNEXPECTEDLY,
+			error: expect.stringContaining("The automation run stopped unexpectedly. Reference: "),
 			finishedAt: expect.any(Date),
 		});
 		const next = await startRunning(runner, created.automation.id);
@@ -372,8 +376,48 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 		expect(await executionOf(accepted.runId)).toMatchObject({
 			state: "failed",
-			error: RUN_STOPPED_UNEXPECTEDLY,
+			error: expect.stringContaining("The automation run stopped unexpectedly. Reference: "),
 		});
+	});
+
+	it("shows members the logged reference when the automation workflow dies", async () => {
+		const { automation } = await automations.create(
+			{ projectId: ownProjectId },
+			{ name: "Stopped run", instructions: "Do the work.", triggers: [] },
+		);
+		const { runId, chatId } = await runByHand({
+			projectId: ownProjectId,
+			automationId: automation.id,
+			requestId: crypto.randomUUID(),
+		});
+		const defect = new Error("Automation could not start");
+		const logged: unknown[] = [];
+		const logger = Logger.make(({ message, cause }) => {
+			if (Cause.squash(cause) === defect) logged.push(message);
+		});
+		const workflow = automationWorkflow.layer.pipe(
+			Layer.provide(automationStepsLayer),
+			Layer.provide(
+				unimplemented(AutomationRunner.Service, { startRun: () => Effect.die(defect) }),
+			),
+			Layer.provide(Layer.succeedContext(services)),
+			Layer.provide(Lanes.layerFor([Automation])),
+			Layer.provideMerge(WorkflowEngine.layerMemory),
+			Layer.provideMerge(Logger.layer([logger])),
+		);
+		await runOnPostgres(
+			Automation.execute({ automationId: automation.id, runId }).pipe(Effect.provide(workflow)),
+		);
+
+		const { automationRun } = await asMember(call, memberId).get(chatId);
+		expect(automationRun).toMatchObject({
+			state: "failed",
+			error: expect.stringMatching(
+				/^The automation run stopped unexpectedly\. Reference: [0-9a-f]+\.$/,
+			),
+		});
+		const referenceId = automationRun?.error?.match(/Reference: ([0-9a-f]+)\.$/)?.[1];
+		expect(logged).toEqual([expect.arrayContaining([expect.objectContaining({ referenceId })])]);
 	});
 
 	it.each([

@@ -42,7 +42,7 @@ import { IconTile } from "@/ui/icon-tile.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { useCopy } from "@/ui/use-copy.ts";
-import { FILE_KINDS } from "./file-kinds.tsx";
+import { FILE_KINDS, LoadOutsideRunPage } from "./file-kinds.tsx";
 
 type Loading = "loading" | "failed";
 
@@ -377,6 +377,13 @@ export function FileStageView({
 	}
 	const kind = FILE_KINDS[file.kind];
 	const shown = file.shownVersion;
+	const page = (
+		<kind.Full
+			title={file.title}
+			content={file.content}
+			at={{ fileId: file.id, version: shown.number }}
+		/>
+	);
 	function copyLink() {
 		if (typeof file !== "object") return;
 		const href = hrefOf(owner, file.id);
@@ -428,11 +435,13 @@ export function FileStageView({
 			}
 			onClose={onClose}
 		>
-			<kind.Full
-				title={file.title}
-				content={file.content}
-				at={{ fileId: file.id, version: shown.number }}
-			/>
+			{file.kind === "html" && file.outsideRun ? (
+				<LoadOutsideRunPage key={`${file.id}:${shown.number}`} source={file.outsideRun}>
+					{page}
+				</LoadOutsideRunPage>
+			) : (
+				page
+			)}
 			{deletion && (
 				<DeleteDialog
 					open={confirmingDelete}

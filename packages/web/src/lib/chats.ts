@@ -5,18 +5,21 @@ import {
 	type Bot,
 	type ChatDetails,
 	type ChatMessageItem,
+	type ChatMessagesPage,
 	type CurrentUser,
 	type FilePart,
 	type FirstChatMessage,
 	handleFromName,
 	type ListedChat,
 	type MemberParticipant,
+	type Message,
 	type MessageReplyTo,
 	type NewMessage,
 	type Project,
 	type StartedChat,
 } from "@sugabots/contracts";
 import {
+	type InfiniteData,
 	infiniteQueryOptions,
 	type QueryClient,
 	queryOptions,
@@ -480,6 +483,35 @@ function chatHistoryQuery(chatId: string | undefined) {
 		initialPageParam: undefined as string | undefined,
 		getNextPageParam: (page) => page?.nextCursor ?? undefined,
 	});
+}
+
+/**
+ * Takes out of the chat's loaded pages each reply its turn removed, as a turn
+ * that stays silent removes its empty reply: one still being written there
+ * that `latest`, the chat's newest messages as fetched since, no longer holds.
+ */
+export function removeRepliesGoneFromTimeline(
+	queries: QueryClient,
+	chatId: string,
+	latest: readonly Message[],
+): void {
+	const oldestLatest = latest[0]?.createdAt;
+	const stillThere = new Set(latest.map((message) => message.id));
+	const gone = (item: ChatMessageItem) =>
+		item.kind === "message" &&
+		item.message.status === "writing" &&
+		!stillThere.has(item.message.id) &&
+		(oldestLatest === undefined || item.message.createdAt >= oldestLatest);
+	queries.setQueryData<InfiniteData<ChatMessagesPage | undefined>>(
+		chatMessagesKey(chatId),
+		(timeline) =>
+			timeline && {
+				...timeline,
+				pages: timeline.pages.map(
+					(page) => page && { ...page, items: page.items.filter((item) => !gone(item)) },
+				),
+			},
+	);
 }
 
 export function useChatMessages(chatId: string | undefined) {

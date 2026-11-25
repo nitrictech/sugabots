@@ -5,7 +5,7 @@ import { chatServicesForTests, standInTurnSignals } from "@sugabots/core/chats/t
 import { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
 import { runningTurns } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
-import { noComputers } from "@sugabots/core/computers/testing";
+import { ComputerSignIn } from "@sugabots/core/computers/computer-sign-in";
 import { afterCommit as afterTransaction, Database } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
@@ -40,6 +40,7 @@ import {
 	Effect,
 	Exit,
 	Layer,
+	Logger,
 	ManagedRuntime,
 	Schema,
 	Scope,
@@ -49,7 +50,13 @@ import { WorkflowEngine } from "effect/unstable/workflow";
 import { onTestFinished } from "vitest";
 import * as Signals from "./signals.ts";
 import * as Steps from "./steps.ts";
-import { type StepPlace, type StepResult, Turn, TurnSteps, turnWorkflow } from "./turn.workflow.ts";
+import {
+	type StepPlace,
+	type StepResult,
+	Turn,
+	TurnActivities,
+	turnWorkflow,
+} from "./turn.workflow.ts";
 
 /** How long an approval waits for a decision before the scheduler expires it. */
 const APPROVAL_LIFETIME = Duration.days(7);
@@ -280,15 +287,18 @@ export async function controlledClock() {
 	return {
 		clock,
 		/**
-		 * Resolves, once at least `count` sleeps wait on the clock, with how long
-		 * each that waits was asked for, in milliseconds, shortest first.
+		 * Resolves once at least `count` sleeps wait on the clock, optionally
+		 * counting only sleeps of `duration`. Returns the matching durations in milliseconds.
 		 */
-		waiting: (count: number) =>
+		waiting: (count: number, duration?: Duration.Duration) =>
 			new Promise<readonly number[]>((resolve) => {
 				const check = () => {
-					if (waiting.length < count) return;
+					const matching = duration
+						? waiting.filter((sleep) => Duration.equals(sleep, duration))
+						: waiting;
+					if (matching.length < count) return;
 					checks.delete(check);
-					resolve(waiting.map(Duration.toMillis).toSorted((left, right) => left - right));
+					resolve(matching.map(Duration.toMillis).toSorted((left, right) => left - right));
 				};
 				checks.add(check);
 				check();
@@ -439,8 +449,9 @@ export function observedExecution(executionId: string) {
 
 /** How a case runs a turn's steps. */
 export interface LoopOptions {
-	/** The clock the steps time themselves by, instead of the real one. */
+	/** The clock the workflow and its steps time themselves by. */
 	readonly clock?: Clock.Clock;
+	readonly logger?: Logger.Logger<unknown, unknown>;
 	/**
 	 * Waited for before each operation the steps call, by its name, so a case
 	 * can hold a step between two of its writes.
@@ -473,6 +484,7 @@ export interface Outside {
 	readonly model: Models.Interface;
 	readonly events?: EventBus.Interface;
 	readonly egress?: Layer.Layer<Egress.Service>;
+	readonly computerSignIn?: Layer.Layer<ComputerSignIn.Service>;
 	readonly connectorTools?: ConnectorCatalog.Interface;
 }
 
@@ -520,6 +532,7 @@ export async function botLoopOnPostgres(
 				saved.model === outside.model &&
 				saved.events === outside.events &&
 				saved.egress === outside.egress &&
+				saved.computerSignIn === outside.computerSignIn &&
 				saved.connectorTools === outside.connectorTools,
 		);
 		if (existing) return existing.built;
@@ -536,8 +549,9 @@ export async function botLoopOnPostgres(
 
 	const buildEnvironment = (outside: Outside, scope: Scope.Closeable) => {
 		const surroundings = Layer.mergeAll(
-			noComputers,
 			Layer.succeedContext(services),
+			outside.computerSignIn ?? unimplemented(ComputerSignIn.Service),
+			outside.egress ?? unimplemented(Egress.Service),
 			Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
 			unimplemented(Accounts.Service, { requireEmailVerification: false }),
 			Layer.succeed(
@@ -555,7 +569,7 @@ export async function botLoopOnPostgres(
 			Layer.provideMerge(
 				layerWithConnectorCalls(
 					ConnectorCalls.from(outside.connectorTools ?? ConnectorCatalog.none),
-				).pipe(Layer.provide(outside.egress ?? unimplemented(Egress.Service))),
+				),
 			),
 			Layer.provideMerge(surroundings),
 		);
@@ -584,7 +598,7 @@ export async function botLoopOnPostgres(
 			: onPostgres;
 		return {
 			built,
-			steps: onClock(Context.get(built, TurnSteps)),
+			steps: onClock(Context.get(built, TurnActivities)),
 			authentication: onPostgres(Context.get(built, TurnAuthentication.Service)),
 		};
 	};
@@ -628,10 +642,10 @@ export async function botLoopOnPostgres(
 	 * it, and `completed` once it completes. Each rejects if a run of it dies, or
 	 * once it can no longer get there.
 	 */
-	const runWorkflow = async (chatId: string, outside: Outside) => {
+	const runWorkflow = async (chatId: string, outside: Outside, options: LoopOptions = {}) => {
 		const [run] = await runOnPostgres(runningTurns(chatId));
 		if (!run) throw new Error("no turn running");
-		const { built } = await loopOver(outside);
+		const { built } = await loopOver(outside, options);
 		const database = await runOnPostgres(Effect.service(Database));
 		const execution = observedExecution(run.executionId);
 		const runtime = ManagedRuntime.make(
@@ -641,6 +655,8 @@ export async function botLoopOnPostgres(
 				Layer.provideMerge(execution.engine),
 				Layer.provide(Layer.succeed(Database, database)),
 				Layer.provide(Layer.succeedContext(built)),
+				Layer.provideMerge(options.clock ? Layer.succeed(Clock.Clock, options.clock) : Layer.empty),
+				Layer.provideMerge(options.logger ? Logger.layer([options.logger]) : Layer.empty),
 			),
 		);
 		onTestFinished(async () => {
@@ -705,7 +721,9 @@ export async function resumeAt(
 		readonly run: Turns.TurnRun;
 		readonly turnId: string;
 		readonly steps: {
-			readonly step: (...args: Parameters<TurnSteps["Service"]["step"]>) => Promise<StepResult>;
+			readonly step: (
+				...args: Parameters<TurnActivities["Service"]["step"]>
+			) => Promise<StepResult>;
 		};
 		readonly authentication: { readonly authenticate: (turnId: string) => Promise<BotPrincipal> };
 	},

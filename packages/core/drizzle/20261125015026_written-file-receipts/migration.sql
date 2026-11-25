@@ -1,1 +1,0 @@
-ALTER TABLE "tool_call" ADD COLUMN "written_file_receipt" jsonb;

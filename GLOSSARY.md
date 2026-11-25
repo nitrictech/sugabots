@@ -37,9 +37,9 @@ A comment explains with these definitions. "Whoever can talk to the bot can read
 | **Handle** | A bot's or member's `@name`. A bot members made has one no other such bot in the workspace has. A member's is made from their name, so two members can share one, as "Sam Rose" and "Sam-Rose" both have `@sam-rose`, and a mention of it mentions both. | username, tag |
 | **Creator** | The member who made a bot. The creator may change it, and so may admins, except a personal bot, which they may only delete or switch parts of off. | owner (a role), maker |
 | **Public bot** | A bot everyone in the workspace can see and talk to, along with its chats and files. Only public bots can be added to projects. | shared bot, workspace bot |
-| **Private bot** | A bot not open to the whole workspace: only its creator and the members they invite can see and talk to it, and read its chats and files. Admins manage it as they do a public bot. It can't be added to projects, and another bot may ask it for help only from a chat where everyone can talk to it. | unlisted bot, invite-only bot |
-| **Personal bot** | A bot only its creator can see and talk to. Admins see that it exists, not its chats. Another bot may ask it for help only from a chat its creator alone reaches. | hidden bot, secret bot |
-| **Personal Assistant** | Each member's own bot that nobody else can talk to: a guide that knows the workspace, points them to the right bot, tells them what needs their attention, and does things for them with their approval. Neither public, private nor personal: only its member ever sees it. We manage its instructions; its member may change its name and avatar, add connectors, and manage, run and answer the approvals of its **automations**. Only its member manages it, and other bots may not ask it for help. | PA (in the product), concierge |
+| **Private bot** | A bot not open to the whole workspace: only its creator and the members they invite can see and talk to it, and read its chats and files. Admins manage it as they do a public bot. It can't be added to projects, so no other bot can ask it for help. | unlisted bot, invite-only bot |
+| **Personal bot** | A bot only its creator can see and talk to. Admins see that it exists, not its chats. It can't be added to projects, so no other bot can ask it for help. | hidden bot, secret bot |
+| **Personal Assistant** | Each member's own bot that nobody else can talk to: a guide that knows the workspace, points them to the right bot, tells them what needs their attention, and does things for them with their approval. Neither public, private nor personal: only its member ever sees it. We manage its instructions; its member may change its name and avatar, add connectors, and manage, run and answer the approvals of its **automations**. Only its member manages it. It leads only its own default project, so no other bot can ask it for help. | PA (in the product), concierge |
 | **System bot** | A bot that does background work and nobody talks to: **Compaction**, which shortens long chats. | internal bot, service bot, background bot |
 | **Instructions** | A bot's prompt: who it is and how it works. A new bot starts by interviewing its creator to write them. | system prompt, persona, profile |
 | **Model** | The language model a bot runs on, from one of the workspace's model providers. | LLM (in the product), engine, brain |
@@ -157,13 +157,14 @@ Words for how Sugabots is built, which [the architecture docs](https://github.co
 | **Turn input** | A steer or an interrupt recorded for a running turn. A steer is read at its next step; an interrupt is also signalled to the process running the step, which stops it at once. | — |
 | **Turn bounds** | What a bot acting for its asker, or an automation's run, may reach in a turn: **chat bounds** (for most turns, a helper's included: the chat's project and the bot's own connectors) or **member bounds** (a Personal Assistant's own turns and its routine and manual runs: everything its member reaches). A brief's first turn gets chat bounds in its new chat, and wider ones only if the asking turn had them. | scope, sandbox, context |
 | **Steer** | A message from the asker that reaches a running turn and is read before its next step, or in one more step if it arrives after the last. One that arrives while the turn waits for approval withdraws the approval. Anyone else's message waits for a turn of its own. | nudge, inject, follow-up |
-| **Interrupt** | Ending a running turn partway through: the step under way stops, any approval it waits for is withdrawn, and the turn ends. Its asker may interrupt it, and so may anyone who may manage its project and reaches its chat. An interrupted turn gets no hand-back, and its helpers' turns go on. | stop, cancel, abort, halt, kill |
+| **Interrupt** | Ending a running turn partway through: the step under way stops, any approval it waits for is withdrawn, and the turn ends. Its asker may interrupt it, and so may anyone who may manage its project and reaches its chat, and for a run's turn, those who may approve its calls. An interrupted turn gets no hand-back. | stop, cancel, abort, halt, kill |
 | **Step text** | The words one step wrote; a message's text is its steps' text joined. | — |
 | **Thinking** | What a model works through before it replies, kept with its step and in the checkpoint. A model thinks when its provider offers adaptive or default thinking. Anyone who can read the chat can see the thinking the provider returns as text. | reasoning (except in a model provider's API), chain of thought, thoughts |
 | **Event** | A recorded change, written to the **event outbox** in the same transaction as the change, then sent to the event stream. Token-stream pieces are ephemeral events that skip the outbox. | update, change, signal, broadcast |
 | **Ledger** | The record of every model request and its cost, which usage is read from. | log, meter |
 | **Token stream** | A reply reaching clients as it is written, in batches of ephemeral events. Each step's full text is stored. | streaming, live typing |
 | **Checkpoint** | What a turn keeps so it can resume after waiting or a restart, its thinking included. | snapshot, save state |
+| **Execution fence** | A check in a turn's write transaction that its execution is still current and its turn is still running. A superseded execution can't write. | guard (for a turn's writes) |
 | **Event stream** | The entrypoint that pushes events to clients as they happen, over server-sent events. | event bus (in the product), realtime, websocket |
 | **Store** | The service that owns one aggregate's rows: the only one that reads and writes them. | DAO, table |
 | **Aggregate** | Rows a store owns and changes together. | entity, table |
@@ -223,11 +224,15 @@ Words for things that no longer exist. Don't use them, even in comments explaini
 
 ## Kept names
 
-Every older name was renamed when its word was. Only migrations keep them.
+These identifiers keep their spelling for compatibility. Migrations, and the test that runs them over old rows, keep older names too.
 
 | Name | Where | Why it is kept |
 |---|---|---|
 | Migration names and SQL | `packages/core/drizzle/` | Migrations are history: each names the tables as they were when it ran. |
+| `sugabots-sandbox` | `packages/contracts/src/computer-providers.ts`, `docker/computer/Dockerfile`, the computer publishing workflows in `.github/workflows/`, and `build:computer` in `package.json`. | The published computer image and E2B template keep the names that registries, workspace settings and E2B accounts already reference. |
+| `PROVIDER_AUTHORITY=sandbox-provider` | `docker/computer/sugabots-desktop` | Persisted browser profiles use this certificate name. The desktop script uses the same name to remove the previous certificate before trusting its replacement. |
+| `resume` | `packages/core/src/chats/turns/requests.ts` | Stored turn workflow payloads use this name for a hand-back, so a workflow can resume after an upgrade. |
+| The upgrade test's rows | `packages/core/src/database/upgrade.test*.ts` | It writes an installation as `main` left it, by `main`'s names, and checks what the migrations make of it. |
 
 ### The `chat` table
 

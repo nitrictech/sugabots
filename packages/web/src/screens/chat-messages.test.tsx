@@ -330,11 +330,11 @@ describe("a reply still being written", () => {
 		client.api.chats.interruptTurn.mockReturnValue(Effect.undefined);
 
 		show([writing]);
-		expect(screen.queryByRole("button", { name: "Interrupt" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Interrupt Linear Handler’s reply" })).toBeNull();
 		cleanup();
 
 		show([writing], { interruptTurns: [{ replyId: writing.id, turnId: TURN }] });
-		fireEvent.click(screen.getByRole("button", { name: "Interrupt" }));
+		fireEvent.click(screen.getByRole("button", { name: "Interrupt Linear Handler’s reply" }));
 		await waitFor(() =>
 			expect(client.api.chats.interruptTurn).toHaveBeenCalledWith({
 				params: { chatId: CHAT, turnId: TURN },

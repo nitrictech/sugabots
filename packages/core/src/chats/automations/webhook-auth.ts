@@ -24,6 +24,7 @@ type SentSecretAuth = Extract<WebhookAuth, { kind: "api_key" | "bearer" | "basic
  * is refused as a replay: the five minutes Slack and Stripe recommend.
  */
 const SIGNED_TIMESTAMP_TOLERANCE_SECONDS = 5 * 60;
+const LINEAR_TIMESTAMP_TOLERANCE_MILLISECONDS = 60_000;
 
 export function generateSecret(kind: WebhookAuthKind): string {
 	return `${WEBHOOK_SECRET_PREFIXES[kind]}${randomBytes(32).toString("base64url")}`;
@@ -60,10 +61,17 @@ export function deliveryAuthentic(
 			const sent = /^sha256=(.+)$/.exec(headers["x-hub-signature-256"]?.trim() ?? "")?.[1];
 			return sent !== undefined && signatureMatches(sent, "hex", hmac("sha256", secret, body));
 		}
-		// Linear signs the body and sends the hex digest alone.
 		case "linear": {
 			const sent = headers["linear-signature"]?.trim();
-			return sent !== undefined && signatureMatches(sent, "hex", hmac("sha256", secret, body));
+			if (!sent || !signatureMatches(sent, "hex", hmac("sha256", secret, body))) return false;
+			const { payload } = delivery;
+			if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return false;
+			const timestamp: unknown = Reflect.get(payload, "webhookTimestamp");
+			return (
+				typeof timestamp === "number" &&
+				Number.isSafeInteger(timestamp) &&
+				Math.abs(now.getTime() - timestamp) <= LINEAR_TIMESTAMP_TOLERANCE_MILLISECONDS
+			);
 		}
 		// Slack signs `v0:{timestamp}:{body}` and sends `v0={hex}`.
 		case "slack": {

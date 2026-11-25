@@ -1,12 +1,12 @@
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { SearchProviderNotFound } from "@sugabots/contracts/errors/providers";
 import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
-import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { member, membership, workspace } from "../../database/schema.ts";
 import { closeDatabase, onDatabase } from "../../database/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
+import { unimplemented } from "../../testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
 
 /**
@@ -35,7 +35,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 		{ allowPrivateNetwork = true, as = adminId } = {},
 	) => {
 		const call = await servedOperations({
-			egress: Layer.succeed(Egress.Service, {
+			egress: unimplemented(Egress.Service, {
 				providers: { for: () => (url) => search(String(url)) },
 				validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork })),
 				oauth: fetch,

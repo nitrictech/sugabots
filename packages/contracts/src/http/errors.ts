@@ -1,3 +1,4 @@
+// biome-ignore-all lint/plugin/errors-implement-domain-error: The HTTP statuses wrap public errors for transport.
 import { PublicError, UserText } from "@sugabots/errors";
 import { Schema } from "effect";
 
@@ -70,10 +71,21 @@ export class PayloadTooLarge extends Schema.TaggedError<PayloadTooLarge>()(
 	{ httpApiStatus: 413 },
 ) {}
 
-/** Something went wrong on the server. The message says nothing about what. */
+/** The body is of a media type the endpoint does not take. */
+export class UnsupportedMediaType extends Schema.TaggedError<UnsupportedMediaType>()(
+	"UnsupportedMediaType",
+	{ message, details, error },
+	{ httpApiStatus: 415 },
+) {}
+
+/**
+ * Something went wrong on the server. The message says nothing about what; a
+ * defect's message names its `reference`, which finds its full entry in the
+ * server's log.
+ */
 export class InternalServerError extends Schema.TaggedError<InternalServerError>()(
 	"InternalServerError",
-	{ message, details, error },
+	{ message, details, error, reference: Schema.optional(Schema.String) },
 	{ httpApiStatus: 500 },
 ) {}
 
@@ -85,6 +97,7 @@ export const apiFailureSchema = Schema.Union([
 	NotFound,
 	Conflict,
 	PayloadTooLarge,
+	UnsupportedMediaType,
 	InternalServerError,
 ]);
 

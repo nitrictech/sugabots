@@ -17,10 +17,14 @@ const registry = {
 	cost: (model: string) => (model === "priced" ? { input: 3, output: 15 } : undefined),
 };
 
-const provider = (builtIn: ProviderIdentity["builtIn"]): ProviderIdentity => ({
+const provider = (
+	builtIn: ProviderIdentity["builtIn"],
+	signedIn = false,
+): ProviderIdentity & { signedIn: boolean } => ({
 	builtIn,
 	baseUrl: "https://models.example/v1",
 	apiFormat: "openai",
+	signedIn,
 });
 
 describe("requestCost", () => {
@@ -43,10 +47,16 @@ describe("requestCost", () => {
 	});
 
 	it("charges nothing per request for a ChatGPT subscription", () => {
-		expect(requestCost(provider("chatgpt"), "priced", usage(), registry)).toEqual({
+		expect(requestCost(provider("chatgpt", true), "priced", usage(), registry)).toEqual({
 			usd: 0,
 			source: "subscription",
 		});
+	});
+
+	it("prices a request a provider that signs in made with a key", () => {
+		const cost = requestCost(provider("supergrok"), "priced", usage(), registry);
+		expect(cost?.source).toBe("models.dev@test");
+		expect(cost?.usd).toBeCloseTo(3 + 1.5);
 	});
 
 	it("believes OpenRouter's own figure over the published rates", () => {

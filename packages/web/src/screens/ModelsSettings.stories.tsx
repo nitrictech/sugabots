@@ -11,7 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
 // The dialog is portalled to the body, so reaching it means `screen`.
-import { expect, fn, screen, within } from "storybook/test";
+import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import {
 	accountManager,
@@ -644,7 +644,9 @@ export const SupergrokSignIn = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "Sign in with xAI" }));
 		const warning = await screen.findByRole("dialog", { name: "Single-member servers only" });
-		await expect(within(warning).getByText(/A SuperGrok plan is for one member/)).toBeVisible();
+		await waitFor(() =>
+			expect(within(warning).getByText(/A SuperGrok plan is for one member/)).toBeVisible(),
+		);
 		await expect(within(warning).getByRole("link", { name: "xAI's terms" })).toHaveAttribute(
 			"href",
 			"https://x.ai/legal/terms-of-service",

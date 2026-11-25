@@ -2,6 +2,7 @@ import {
 	filesWrittenBy,
 	type MessagePart,
 	type ToolCallPart,
+	type WrittenFile,
 	type WrittenFilePart,
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
@@ -11,7 +12,7 @@ import { useState } from "react";
 import { useFile } from "@/lib/files.ts";
 import { Button } from "@/ui/button.tsx";
 import { IconTile } from "@/ui/icon-tile.tsx";
-import { FILE_KINDS } from "./file-kinds.tsx";
+import { FILE_KINDS, OutsideRunPageNote } from "./file-kinds.tsx";
 
 /** A file as a message shows it: at the version written. */
 export type FileAsWritten = Omit<WrittenFilePart, "type">;
@@ -63,7 +64,16 @@ function FileCard({
 		: isApiFailure(query.error) && query.error._tag === "NotFound"
 			? "deleted"
 			: "failed";
-	return <FileCardView file={file} botName={botName} content={content} onOpen={onOpen} />;
+	return (
+		<FileCardView
+			key={`${file.fileId}:${file.version}:${query.data?.outsideRun ?? ""}`}
+			file={file}
+			botName={botName}
+			content={content}
+			outsideRun={query.data?.outsideRun}
+			onOpen={onOpen}
+		/>
+	);
 }
 
 /** A card showing only its header. */
@@ -79,6 +89,7 @@ export function FileCardView({
 	file,
 	botName,
 	content,
+	outsideRun,
 	onOpen,
 }: {
 	file: FileAsWritten;
@@ -88,11 +99,14 @@ export function FileCardView({
 	 * loaded, and only its name, not to be opened, once it has been deleted.
 	 */
 	content: string | "failed" | "deleted" | undefined;
+	outsideRun?: WrittenFile["outsideRun"];
 	onOpen: () => void;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const kind = FILE_KINDS[file.kind];
+	const outsidePage = file.kind === "html" ? outsideRun : undefined;
 	const expandable = content !== "failed";
+	const previewLabel = outsidePage ? "Load page" : "Preview";
 	const showsContent = expandable && expanded;
 	if (content === "deleted") {
 		return (
@@ -139,6 +153,7 @@ export function FileCardView({
 					<span className="truncate text-xs text-muted-foreground">
 						{kind.label} by {botName}
 					</span>
+					{outsidePage && <OutsideRunPageNote source={outsidePage} />}
 				</span>
 				<div className="ml-auto flex gap-2.5">
 					{expandable && (
@@ -146,12 +161,12 @@ export function FileCardView({
 							variant="ghost"
 							size="sm"
 							aria-expanded={expanded}
-							aria-label={`${expanded ? "Hide" : "Preview"} ${file.title}`}
+							aria-label={`${expanded ? "Hide" : previewLabel} ${file.title}`}
 							onClick={() => setExpanded(!expanded)}
 							className="border border-border-strong text-foreground"
 						>
 							{expanded ? <ChevronUp aria-hidden /> : <ChevronDown aria-hidden />}
-							{expanded ? "Hide" : "Preview"}
+							{expanded ? "Hide" : previewLabel}
 						</Button>
 					)}
 					<Button variant="secondary" size="sm" aria-label={`Open ${file.title}`} onClick={onOpen}>

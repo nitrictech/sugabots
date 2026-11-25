@@ -41,6 +41,7 @@ declare const aboutKey: unique symbol;
  * ended. A defect: proofs and named values belong to one operation, so work
  * that outlives it keeps ids and proves again.
  */
+// biome-ignore lint/plugin/errors-implement-domain-error: Reading an expired proof is a defect in the caller.
 export class NamedValueReadAfterOperation extends Error {
 	override readonly name = "NamedValueReadAfterOperation";
 	constructor() {

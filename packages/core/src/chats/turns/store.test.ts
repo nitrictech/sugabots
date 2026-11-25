@@ -45,6 +45,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	const chatsAs = (memberId: string) => asMember(call, memberId);
 	const providerDown = userText`The model provider could not answer.`;
 	let chatId: string;
+	let adminId: string;
 	let opened: OpenedTurnForTests;
 
 	afterAll(async () => {
@@ -52,7 +53,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	});
 
 	beforeEach(async () => {
-		({ chatId } = await aChatAwaitingReply(chatsAs));
+		({ chatId, adminId } = await aChatAwaitingReply(chatsAs));
 		const [running] = await runOnPostgres(runningTurns(chatId));
 		if (!running) throw new Error("no turn running");
 		opened = await run(openTurn(running));
@@ -182,6 +183,59 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		expect(await run(parkTurn(opened, []))).toEqual({ _tag: "Waiting", approvals: [] });
 
 		expect(await storedTurn()).toMatchObject({ status: "waiting", runs: 0 });
+	});
+
+	it("shows a reply being written with the execution that wrote it, and the next one's once it begins", async () => {
+		const replyAsShown = async () =>
+			(await chatsAs(adminId).get(chatId)).messages.find(
+				(shown) => shown.id === opened.replyMessageId,
+			);
+		await load(opened, 0);
+		await run(writeReply(opened, "Halfway through the first."));
+
+		expect(await replyAsShown()).toMatchObject({
+			content: "Halfway through the first.",
+			execution: opened.principal.executionNumber,
+		});
+
+		const resumed = await run(openTurn(opened.run));
+		expect(resumed.principal.executionNumber).toBeGreaterThan(opened.principal.executionNumber);
+		await load(resumed, 1);
+
+		expect(await replyAsShown()).toMatchObject({
+			status: "writing",
+			execution: resumed.principal.executionNumber,
+		});
+	});
+
+	it("shows a failed reply with the execution that ended it, and its retry under a newer one", async () => {
+		const replyAsShown = async () =>
+			(await chatsAs(adminId).get(chatId)).messages.find(
+				(shown) => shown.id === opened.replyMessageId,
+			);
+		await load(opened, 0);
+		await run(writeReply(opened, "Halfway."));
+		await run(endTurn(opened, { kind: "failed", userMessage: providerDown, mayRunAgain: true }));
+
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({
+				type: "message.failed",
+				execution: opened.principal.executionNumber,
+			}),
+		);
+		expect(await replyAsShown()).toMatchObject({
+			status: "failed",
+			execution: opened.principal.executionNumber,
+		});
+
+		const retried = await run(openTurn(opened.run));
+		await load(retried, 0);
+
+		expect(retried.principal.executionNumber).toBeGreaterThan(opened.principal.executionNumber);
+		expect(await replyAsShown()).toMatchObject({
+			status: "writing",
+			execution: retried.principal.executionNumber,
+		});
 	});
 
 	it("finds a turn its run opened before a crash again, with what its steps wrote", async () => {

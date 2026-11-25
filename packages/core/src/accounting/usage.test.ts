@@ -1,6 +1,8 @@
+import { Usd } from "@sugabots/accounting";
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
+import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	bot,
@@ -10,10 +12,11 @@ import {
 	modelRequest,
 	workspace,
 } from "../database/schema.ts";
-import { closeDatabase, onDatabase } from "../database/testing.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { type CallOperation, servedOperations } from "../operations/testing.ts";
 import type { MemberSession } from "../principal.ts";
 import { authenticators, principals } from "../proofs/world.test-support.ts";
+import { ModelRequests } from "./model-requests.ts";
 
 /**
  * A month's usage, read from the request ledger in Postgres: how requests are
@@ -193,32 +196,65 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 		]);
 	});
 
-	it("counts members' Personal Assistants together, naming none", async () => {
-		const [assistant] = await onDatabase((db) =>
-			db
-				.insert(bot)
-				.values({
-					workspaceId,
-					name: "Personal Assistant",
-					handle: "personal-assistant",
-					color: "sky",
-					eyes: "pill",
-					visibility: "personal",
-					assistantOf: editorId,
-				})
-				.returning(),
-		);
-		if (!assistant) throw new Error("fixture");
-		await recorded(
-			{ startedAt: new Date("2026-09-03T01:00:00Z"), ...priced(1.5) },
-			{ startedAt: new Date("2026-09-04T01:00:00Z"), botId: assistant.id, ...priced(0.5) },
-		);
+	it("counts members' Personal Assistants together, naming none, a departed member's too", async () => {
+		const assistantOf = async (memberId: string) => {
+			const [assistant] = await onDatabase((db) =>
+				db
+					.insert(bot)
+					.values({
+						workspaceId,
+						name: "Personal Assistant",
+						handle: "personal-assistant",
+						color: "sky",
+						eyes: "pill",
+						visibility: "personal",
+						assistantOf: memberId,
+					})
+					.returning(),
+			);
+			if (!assistant) throw new Error("fixture");
+			return assistant.id;
+		};
+		const editors = await assistantOf(editorId);
+		const admins = await assistantOf(adminId);
+		/** A request of `botId`'s, through the ledger as a turn makes one. */
+		const throughTheLedger = (botId: string, startedAt: Date, usd: number) =>
+			runOnPostgres(
+				Effect.gen(function* () {
+					const requests = yield* ModelRequests.make;
+					const id = yield* requests.start({
+						workspaceId,
+						purpose: {
+							name: "bot-turn",
+							botId,
+							chatId: crypto.randomUUID(),
+							turnId: crypto.randomUUID(),
+						},
+						step: 0,
+						providerId,
+						builtIn: "anthropic",
+						model: "claude-sonnet",
+						startedAt,
+					});
+					yield* requests.finish(id, {
+						outcome: "completed",
+						usage: undefined,
+						cost: { usd: Usd.make(usd), source: "models.dev@test" },
+						endedAt: startedAt,
+					});
+				}),
+			);
+		await recorded({ startedAt: new Date("2026-09-03T01:00:00Z"), ...priced(1.5) });
+		await throughTheLedger(editors, new Date("2026-09-04T01:00:00Z"), 0.5);
+		await throughTheLedger(admins, new Date("2026-09-05T01:00:00Z"), 0.25);
+		// The editor leaves, and their Personal Assistant goes with their membership.
+		await onDatabase((db) => db.delete(bot).where(eq(bot.id, editors)));
 
 		const usage = await usageAs(adminId).month({ workspace: workspaceId, month: "2026-09" });
 
-		expect(usage).toMatchObject({ usd: 2, unknownCostRequests: 0 });
+		expect(usage).toMatchObject({ usd: 2.25, unknownCostRequests: 0 });
 		expect(usage.bots.map((bot) => bot.botId)).toEqual([growthDeskId]);
-		expect(usage.personalAssistants).toEqual({ usd: 0.5, unknownCostRequests: 0 });
+		expect(usage.personalAssistants).toEqual({ usd: 0.75, unknownCostRequests: 0 });
 	});
 
 	it("puts a request in the month and on the day of the workspace's time zone", async () => {

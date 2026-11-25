@@ -56,7 +56,6 @@ export function requireCookieOrigin(trustedOrigins: readonly string[]) {
 				return failureResponse(
 					Forbidden,
 					new Forbidden({ message: userText`Untrusted request origin` }),
-					403,
 				);
 			}
 			return yield* effect;
@@ -190,13 +189,30 @@ export const longRunningCaller = Effect.gen(function* () {
 		input: InputOf<Name>,
 	): Effect.Effect<Running<OutputOf<Name>>, FailureOf<Name> | Unauthorized, Scope.Scope> =>
 		Effect.gen(function* () {
-			const { headers, cookie, call } = yield* authenticatedRequest;
-			const principal = yield* sessions.authenticateLongRunning(headers).pipe(
-				Effect.provideService(SessionAuthentication.Cookies, {
-					read: () => Effect.succeed(cookie),
-				}),
-				Effect.catchTag("SessionInvalid", () => Effect.fail(signedOut())),
-			);
+			const principal = yield* principalFromSessionRow(sessions);
+			const { call } = yield* authenticatedRequest;
 			return yield* operations[name](principal, input, call);
 		});
 });
+
+/**
+ * An effect that refuses the request as `Unauthorized` unless its session's
+ * row still holds, whatever better-auth's cookie cache says, for an endpoint
+ * that answers who is signed in. Yield it where a group's handlers are built.
+ */
+export const sessionRowCheck = Effect.map(SessionAuthentication.Service, (sessions) =>
+	Effect.asVoid(principalFromSessionRow(sessions)),
+);
+
+/** The member whose session the request carries, read again from the session's row. */
+function principalFromSessionRow(sessions: SessionAuthentication.Interface) {
+	return Effect.gen(function* () {
+		const { headers, cookie } = yield* authenticatedRequest;
+		return yield* sessions.authenticateLongRunning(headers).pipe(
+			Effect.provideService(SessionAuthentication.Cookies, {
+				read: () => Effect.succeed(cookie),
+			}),
+			Effect.catchTag("SessionInvalid", () => Effect.fail(signedOut())),
+		);
+	});
+}

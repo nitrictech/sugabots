@@ -602,11 +602,12 @@ const finishReply = (reply: Reply, text: string) =>
 					db.update(message).set({ status: "complete" }).where(eq(message.id, reply.messageId)),
 				);
 				const finishedAt = new Date();
-				yield* query((db) =>
+				const [ended] = yield* query((db) =>
 					db
 						.update(turn)
 						.set({ status: "done", finishedAt, contextCapacity: CONTEXT_CAPACITY })
-						.where(eq(turn.id, reply.turnId)),
+						.where(eq(turn.id, reply.turnId))
+						.returning({ execution: turn.executionNumber }),
 				);
 				yield* emit([
 					ChatEvent.TurnCompleted({
@@ -615,6 +616,7 @@ const finishReply = (reply: Reply, text: string) =>
 						turnId: reply.turnId,
 						botId: reply.bot.id,
 						messageId: reply.messageId,
+						execution: ended?.execution ?? 0,
 						content,
 						finishedAt,
 						contextTokens: undefined,

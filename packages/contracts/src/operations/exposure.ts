@@ -41,12 +41,17 @@ type HttpDecision =
  *   admins and the managers of its bot. `computerManagers`: a request to
  *   change a computer, such as a host request, which those who may manage its
  *   project decide.
+ * - `outsideRunsOrMemberBounds`: the turn's approvers decide in runs started by
+ *   webhooks or GitHub and in turns with member bounds.
+ * - `outsideRuns`: the run's approvers decide in runs started by webhooks or GitHub.
  * - `byToolAccess`: a connector's tool, which runs, waits or is refused by its
  *   tool access, set as data.
  */
 export type Approval =
 	| { readonly kind: "never" }
 	| { readonly kind: "always"; readonly approvers: "turn" | "computerManagers" }
+	| { readonly kind: "outsideRunsOrMemberBounds" }
+	| { readonly kind: "outsideRuns" }
 	| { readonly kind: "byToolAccess" };
 
 /** Waiting for the turn's approver: for a turn with an asker, the asker's own say. */

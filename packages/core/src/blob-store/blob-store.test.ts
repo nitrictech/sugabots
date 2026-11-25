@@ -131,7 +131,7 @@ describe.for(implementations.filter(({ skip }) => !skip))("blob store, on $name"
 		expect([...(await bytesOf(key))]).toEqual([1, 2]);
 	});
 
-	it("ends a read whose blob is replaced by a shorter one before it is read", async () => {
+	it("streams only the shorter replacement to a read opened before its blob was replaced", async () => {
 		const key = BlobStore.key("tests", aFolder(), "notes.md");
 		await blobs.put(key, {
 			stream: Stream.succeed(Buffer.alloc(9 * 1024 * 1024)),

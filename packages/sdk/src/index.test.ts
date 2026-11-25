@@ -1,4 +1,4 @@
-import { Unauthorized } from "@sugabots/contracts/http";
+import { Forbidden, Unauthorized, UnsupportedMediaType } from "@sugabots/contracts/http";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createClient, isApiFailure } from "./index.ts";
@@ -87,6 +87,29 @@ describe("api", () => {
 		expect(failure).toMatchObject({ message: "Sign in first" });
 		expect(isApiFailure(failure)).toBe(true);
 	});
+
+	it.each([
+		[403, "Forbidden", Forbidden, "Untrusted request origin"],
+		[
+			415,
+			"UnsupportedMediaType",
+			UnsupportedMediaType,
+			"This request's body is not of a type it takes. Send it as JSON",
+		],
+	])(
+		"decodes a %s the server's middleware answers, on an endpoint that declares neither",
+		async (status, _tag, Failure, message) => {
+			const client = createClient({
+				baseUrl: "http://api.test",
+				fetch: respondWith({ _tag, message }, status),
+			});
+
+			const failure = await Effect.runPromise(Effect.flip(client.api.notifications.sendTest()));
+
+			expect(failure).toBeInstanceOf(Failure);
+			expect(failure).toMatchObject({ message });
+		},
+	);
 
 	it("does not mistake a proxy's error page for the API answering", async () => {
 		const client = createClient({

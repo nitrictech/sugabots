@@ -30,7 +30,7 @@
 				"overrides": [
 					{
 						// Code that uses DomainError: a caught error must become a typed class.
-						// Keep this list the same as the DomainError override in biome.json.
+						// Keep this list in sync with the typed Effect and user-text override in biome.json.
 						"include": [
 							"packages/core/src/providers/connectors/github/**/*.ts",
 							"packages/core/src/providers/models/**/*.ts",

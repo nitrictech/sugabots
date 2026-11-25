@@ -4,7 +4,7 @@ import { Turns } from "@sugabots/core/chats/turns/turns";
 import { promising } from "@sugabots/core/database/testing";
 import type { BotPrincipal } from "@sugabots/core/principal";
 import { Lanes } from "@sugabots/core/workflows/lanes";
-import { Clock, Duration, Effect, Layer, ManagedRuntime, Schema } from "effect";
+import { Cause, Clock, Duration, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { DurableDeferred, type WorkflowEngine } from "effect/unstable/workflow";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import * as Signals from "./signals.ts";
@@ -15,7 +15,7 @@ import {
 	type StepPlace,
 	type StepResult,
 	Turn,
-	TurnSteps,
+	TurnActivities,
 	turnWorkflow,
 } from "./turn.workflow.ts";
 
@@ -37,8 +37,11 @@ const step = vi.fn(
 );
 const cancelled = vi.fn((_principal: BotPrincipal, _turnId: string) => Effect.void);
 const died = vi.fn(
-	(_principal: BotPrincipal, _turnId: string): Effect.Effect<StepResult> =>
-		Effect.succeed(finished),
+	(
+		_principal: BotPrincipal,
+		_turnId: string,
+		_cause: Cause.Cause<unknown>,
+	): Effect.Effect<StepResult> => Effect.succeed(finished),
 );
 const unauthenticated = vi.fn((_turn: TurnRequest, _attempt: number) => Effect.void);
 const abandon = vi.fn((_turn: TurnRequest) => Effect.void);
@@ -73,8 +76,8 @@ async function started(asked: TurnRequest) {
 		turnWorkflow.layer.pipe(
 			Layer.provideMerge(
 				Layer.succeed(
-					TurnSteps,
-					TurnSteps.of({
+					TurnActivities,
+					TurnActivities.of({
 						open,
 						step,
 						release: () => Effect.void,
@@ -409,7 +412,8 @@ describe("the turn workflow", () => {
 
 	it("ends the turn as the execution whose step died, before freeing its lane", async () => {
 		const order: string[] = [];
-		step.mockReturnValueOnce(Effect.die(new Error("database unavailable")));
+		const defect = new Error("database unavailable");
+		step.mockReturnValueOnce(Effect.die(defect));
 		died.mockImplementationOnce(() =>
 			Effect.sync(() => {
 				order.push("died");
@@ -423,7 +427,13 @@ describe("the turn workflow", () => {
 
 		await turn.completed();
 		expect(announceReleased).toHaveBeenCalledWith(asked);
-		expect(died).toHaveBeenCalledWith(expect.objectContaining({ turn: "turn-1" }), "turn-1");
+		expect(died).toHaveBeenCalledWith(
+			expect.objectContaining({ turn: "turn-1" }),
+			"turn-1",
+			expect.anything(),
+		);
+		const cause = died.mock.calls[0]?.[2];
+		expect(cause && Cause.squash(cause)).toBe(defect);
 		// Not by the workflow's id, which every execution of the turn shares.
 		expect(abandon).not.toHaveBeenCalled();
 		expect(order).toEqual(["died", "release"]);

@@ -116,6 +116,25 @@ export class ComputerProviderBuiltInFixed
 }
 
 /**
+ * A change would take away the key or address that reaches the provider's
+ * computers while it still has some, which would leave them running there
+ * with nothing to destroy them.
+ */
+export class ComputerProviderHasComputers
+	extends Schema.TaggedError<ComputerProviderHasComputers>()("ComputerProviderHasComputers", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The computer provider's key or address can't be taken away while it has computers";
+	}
+	get userMessage() {
+		return userText`This provider still has computers, which need its key and address to be removed. Reset its projects' computers, or remove the provider, before taking either away.`;
+	}
+}
+
+/**
  * The provider's computers couldn't be destroyed, so it was kept: removing it
  * would leave them running at the provider with nothing to remove them.
  * `reason` says whether it lacks the settings to reach them, or didn't answer.

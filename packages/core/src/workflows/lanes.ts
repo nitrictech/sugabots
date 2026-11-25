@@ -183,6 +183,24 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 			return workflow;
 		};
 
+		/**
+		 * The workflow a lane a crash left behind holds, for `reconcile`; none for
+		 * one no process runs, such as a workflow since removed, which is logged
+		 * and left as it is, so one such lane never stops the others' repair.
+		 */
+		const repairableWorkflow = (row: { key: string; workflow: string }) => {
+			const workflow = byName.get(row.workflow);
+			return workflow
+				? Effect.succeed(workflow)
+				: Effect.as(
+						Effect.logWarning("A lane holds a workflow no process runs, so it is left as it is", {
+							key: row.key,
+							workflow: row.workflow,
+						}),
+						undefined,
+					);
+		};
+
 		// A queued execution may have been interrupted before it got the lane.
 		const releaseIfFinished = (key: string, workflow: Workflow.Any, executionId: string) =>
 			Effect.flatMap(
@@ -450,7 +468,9 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 			);
 			for (const row of stale) {
 				if (!row.workflow || !row.executionId) continue;
-				yield* startAfterCommit(row.key, workflowNamed(row.workflow), row.executionId, row.payload);
+				const workflow = yield* repairableWorkflow({ key: row.key, workflow: row.workflow });
+				if (!workflow) continue;
+				yield* startAfterCommit(row.key, workflow, row.executionId, row.payload);
 			}
 			const long = yield* query((db) =>
 				db
@@ -468,10 +488,11 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 			);
 			for (const row of long) {
 				if (!row.workflow || !row.executionId) continue;
-				const result = yield* engine.poll(
-					general(workflowNamed(row.workflow)),
-					row.executionId,
-				) as Effect.Effect<Option.Option<Workflow.Result<unknown, unknown>>>;
+				const workflow = yield* repairableWorkflow({ key: row.key, workflow: row.workflow });
+				if (!workflow) continue;
+				const result = yield* engine.poll(general(workflow), row.executionId) as Effect.Effect<
+					Option.Option<Workflow.Result<unknown, unknown>>
+				>;
 				// Only a finished execution is released. One the engine cannot see yet
 				// may still be starting, and is left to a later pass.
 				if (Option.isSome(result) && result.value._tag === "Complete") {
@@ -561,7 +582,11 @@ export const workflow = <
 				const instance = yield* WorkflowEngine.WorkflowInstance;
 				if (instance.suspended) return yield* Effect.interrupt;
 				if (Exit.isFailure(ended)) {
-					yield* Effect.logError(`The ${definition._tag} workflow failed`, ended.cause);
+					yield* Effect.logError(
+						`The ${definition._tag} workflow failed`,
+						{ referenceId: instance.executionId },
+						ended.cause,
+					);
 					if (options.onFailure) yield* ending(options.onFailure, payload);
 				}
 				yield* releaseLane(payload);

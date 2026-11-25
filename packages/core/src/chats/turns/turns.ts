@@ -27,6 +27,7 @@ import type {
 	ToolApprovalNotFound,
 } from "@sugabots/contracts/errors/approvals";
 import type { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import type { DomainError } from "@sugabots/errors";
 import { inArray, type SQLWrapper } from "drizzle-orm";
 import { Context, type Effect, Layer } from "effect";
 import { ACTIVE_TURN_STATUSES, type TurnSteer, turn } from "../../database/schema.ts";
@@ -34,7 +35,6 @@ import type { CanDecide } from "../../proofs/can-decide.ts";
 import type { IsMember } from "../../proofs/is-member.ts";
 import type { CanInterrupt, CanSteer } from "../../proofs/turn-control.ts";
 import { processLayer, Tier } from "../../tiers.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { laneBusy, waitingSince } from "../../workflows/lanes.ts";
 import { makeControls } from "./controls.ts";
 import { TURN_WORKFLOW, type TurnRequest } from "./requests.ts";
@@ -63,7 +63,13 @@ export {
 	holdTurnForToolWrite,
 	holdTurnOf,
 } from "./fence.ts";
-export { type Ended, MAX_TURN_RUNS, TURN_CANCELLED } from "./lifecycle.ts";
+export {
+	type Ended,
+	logTurnDefect,
+	MAX_TURN_RUNS,
+	TURN_CANCELLED,
+	turnStoppedUnexpectedly,
+} from "./lifecycle.ts";
 export { TurnRecords as Records } from "./records.ts";
 export { TurnRequests } from "./requests.ts";
 export { TurnRuns as Runs } from "./runs.ts";
@@ -120,7 +126,7 @@ export interface Interface {
 	 * it with what went wrong. Only `work` may be interrupted; how it ended is
 	 * always written.
 	 */
-	readonly recordSystemTurn: <A, E extends UserFacing, R>(
+	readonly recordSystemTurn: <A, E extends DomainError, R>(
 		turn: SystemTurn,
 		work: (turnId: string) => Effect.Effect<{ value: A; contextTokens?: number }, E, R>,
 	) => Effect.Effect<SystemTurnOutcome<A>, never, R>;

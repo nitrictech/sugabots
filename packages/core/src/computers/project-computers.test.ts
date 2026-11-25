@@ -1,8 +1,17 @@
 import { eq, inArray } from "drizzle-orm";
-import { DateTime, type Duration, Effect, Fiber, Layer, Redacted } from "effect";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { DateTime, type Duration, Effect, Exit, Fiber, Layer, Redacted, Scope } from "effect";
+import { afterAll, afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { SystemWorkAuthentication } from "../authentication/system-work.ts";
-import { computer, computerLease, member, membership, workspace } from "../database/schema.ts";
+import {
+	computer,
+	computerDestruction,
+	computerLease,
+	computerProvider,
+	member,
+	membership,
+	project as projectTable,
+	workspace,
+} from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { scheduledWorkOperations } from "../operations/scheduled-work.ts";
 import { Egress } from "../providers/network/egress.ts";
@@ -12,7 +21,7 @@ import { ComputerProviderStore } from "./computer-provider-store.ts";
 import { ComputerSignIn } from "./computer-sign-in.ts";
 import type { Computers } from "./computers.ts";
 import { ProjectComputers } from "./project-computers.ts";
-import { inMemoryComputers } from "./testing.ts";
+import { inMemoryComputers, type ProviderHold } from "./testing.ts";
 
 /**
  * A project's one computer, against Postgres and a provider that keeps its
@@ -24,6 +33,10 @@ const DEBIAN = "debian:bookworm-slim";
 const PYTHON = "python:3.13-slim";
 const DEBIAN_DIGEST = `sha256:${"a".repeat(64)}`;
 const PYTHON_DIGEST = `sha256:${"b".repeat(64)}`;
+/** The OpenSandbox server the workspace's first provider reaches. */
+const FIRST_SERVER = "http://computers.test";
+/** Another OpenSandbox server, for a provider that replaces the first. */
+const SECOND_SERVER = "http://other-computers.test";
 const TURN: ProjectComputers.Holder = { kind: "turn", id: "turn-under-test" };
 const OTHER_TURN: ProjectComputers.Holder = { kind: "turn", id: "another-turn" };
 
@@ -35,7 +48,10 @@ afterAll(closeDatabase);
  * acted on, through the next case's provider, by that case's sweep.
  */
 const workspacesMade: string[] = [];
+/** The provider calls cases held, released after each so nothing is left waiting on one. */
+const holdsMade: ProviderHold[] = [];
 afterEach(async () => {
+	for (const hold of holdsMade.splice(0)) hold.release();
 	const made = workspacesMade.splice(0);
 	if (made.length === 0) return;
 	await onDatabase((db) => db.delete(workspace).where(inArray(workspace.id, made)));
@@ -111,13 +127,13 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 	);
 	const project: ProjectComputers.Project = { workspaceId: space.id, projectId: made.id };
 
-	/** A provider for the workspace, enabled, which disables any other. */
-	const addProvider = (image = DEBIAN) =>
+	/** A provider for the workspace at `serverUrl`, enabled, which disables any other. */
+	const addProvider = (serverUrl = FIRST_SERVER) =>
 		runOnPostgres(
 			providers.create(project.workspaceId, {
 				createdById: owner.id,
 				provider: {
-					settings: { builtIn: "opensandbox", serverUrl: "http://computers.test", image },
+					settings: { builtIn: "opensandbox", serverUrl, image: DEBIAN },
 					enabled: true,
 					apiKey: "a-key",
 				},
@@ -130,9 +146,18 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 		if (!enabled) throw new Error("no enabled provider");
 		return enabled;
 	};
+	/** Registers `hold` to be released after the case, and returns it. */
+	const released = (hold: ProviderHold) => {
+		holdsMade.push(hold);
+		return hold;
+	};
 	const world = {
 		provider,
 		registry,
+		/** Holds every creation from now on until released. */
+		holdCreations: () => released(provider.holdCreations()),
+		/** Holds every opening of the computer `id` at its provider from now on until released. */
+		holdOpening: (id: Computers.ComputerId) => released(provider.holdOpening(id)),
 		/** What the project's computer is signed in with from now on. */
 		signInAs: (signedIn: ComputerSignIn.SignedIn, inProject = project) =>
 			void signedInAs.set(inProject.projectId, signedIn),
@@ -155,7 +180,7 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 		changeImage: async (image: string) =>
 			runOnPostgres(
 				providers.update(project.workspaceId, (await enabledProvider()).id, {
-					settings: { builtIn: "opensandbox", serverUrl: "http://computers.test", image },
+					settings: { builtIn: "opensandbox", serverUrl: FIRST_SERVER, image },
 				}),
 			),
 		/** Makes the project's computer look unused for longer than the idle window. */
@@ -181,6 +206,24 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 			),
 	};
 	return world;
+}
+
+type World = Awaited<ReturnType<typeof startWorld>>;
+
+/** What a member is told about `error`. */
+function userMessageOf(error: unknown): string {
+	return String((error as { userMessage?: unknown }).userMessage);
+}
+
+/**
+ * How many fibers forked into `scope` are still running. Effect keeps a
+ * finalizer in the scope for each, to interrupt it when the scope closes,
+ * from when it is forked until it ends.
+ */
+function fibersRunningIn(scope: Scope.Scope) {
+	const { state } = scope;
+	if (state._tag !== "Open") return 0;
+	return (state.finalizer ? 1 : 0) + (state.finalizers?.size ?? 0);
 }
 
 /** The only computer the provider has, which a case that expects one asks for. */
@@ -212,18 +255,31 @@ describe("a project's computer, over an in-memory provider", () => {
 		expect(made.spec.labels).toEqual({
 			"sugabots.workspace": world.project.workspaceId,
 			"sugabots.project": world.project.projectId,
+			// Finds it at the provider if its creation never recorded it.
+			"sugabots.creation": expect.any(String),
 		});
 		expect(await world.status()).toMatchObject({ image: `debian@${DEBIAN_DIGEST}` });
 	});
 
 	it("makes one computer when two turns open it at once, and both hold it", async () => {
 		const world = await startWorld();
-		const creating = world.provider.holdCreations();
+		const provider = await world.enabledProvider();
+		const creating = world.holdCreations();
 
-		const opening = Promise.all([world.open(TURN), world.open(OTHER_TURN)]);
-		await creating.started(2);
-		creating.release();
-		const [one, other] = await opening;
+		const [one, other] = await runOnPostgres(
+			Effect.gen(function* () {
+				// Each runs at once until it first waits, so both are opening before either can finish.
+				const opening = (holder: ProjectComputers.Holder) =>
+					Effect.forkChild(world.projectComputers.open(world.project, provider, holder), {
+						startImmediately: true,
+					});
+				const first = yield* opening(TURN);
+				const second = yield* opening(OTHER_TURN);
+				yield* Effect.promise(() => creating.started(1));
+				creating.release();
+				return yield* Effect.all([Fiber.join(first), Fiber.join(second)]);
+			}),
+		);
 
 		expect(one.computer.id).toBe(other.computer.id);
 		expect(theOnly(world.provider.computers()).id).toBe(one.computer.id);
@@ -279,14 +335,14 @@ describe("a project's computer, over an in-memory provider", () => {
 
 	it("moves the project to a newly enabled provider, destroying its computer at the old one", async () => {
 		const world = await startWorld();
-		const first = await world.open();
-		await world.addProvider();
+		await world.open();
+		await world.addProvider(SECOND_SERVER);
 
 		const moved = await world.open();
 
 		expect(moved.arrival).toBe("replaced");
-		expect(moved.computer.id).not.toBe(first.computer.id);
-		expect(theOnly(world.provider.computers()).id).toBe(moved.computer.id);
+		expect(world.provider.computersAt(FIRST_SERVER)).toEqual([]);
+		expect(theOnly(world.provider.computersAt(SECOND_SERVER)).id).toBe(moved.computer.id);
 	});
 
 	it("destroys and forgets every computer a provider made", async () => {
@@ -449,21 +505,19 @@ describe("a project's computer, over an in-memory provider", () => {
 
 		it("copies the work to a new computer when upgrading to another provider, then destroys the old one", async () => {
 			const world = await startWorld();
-			const first = await world.open();
+			await world.open();
 			await world.release();
-			await world.addProvider();
+			const packedWork = new TextEncoder().encode("the old computer's packed-up work");
+			world.provider.serveDownloadsAt(FIRST_SERVER, packedWork);
+			await world.addProvider(SECOND_SERVER);
 
 			await runOnPostgres(
 				world.projectComputers.upgrade(world.project, await world.enabledProvider()),
 			);
 
-			const upgraded = theOnly(world.provider.computers());
-			expect(upgraded.id).not.toBe(first.computer.id);
-			expect(world.provider.made()).toBe(2);
-			// The in-memory provider hands out a file's own path as its content, so
-			// the new computer holds exactly what the old one's download gave.
-			const given = theOnly([...upgraded.uploads]);
-			expect(new TextDecoder().decode(given[1])).toBe(given[0]);
+			expect(world.provider.computersAt(FIRST_SERVER)).toEqual([]);
+			const upgraded = theOnly(world.provider.computersAt(SECOND_SERVER));
+			expect([...upgraded.uploads.values()]).toEqual([packedWork]);
 			expect((await world.open()).computer.id).toBe(upgraded.id);
 		});
 
@@ -476,7 +530,8 @@ describe("a project's computer, over an in-memory provider", () => {
 				const world = await startWorld();
 				const first = await world.open();
 				await world.release();
-				await world.addProvider();
+				world.provider.serveDownloadsAt(FIRST_SERVER, new TextEncoder().encode("packed-up work"));
+				await world.addProvider(SECOND_SERVER);
 				world.provider.answerCommandsWith((computerId) =>
 					(computerId === first.computer.id) === (failsIn === "old") ? 1 : 0,
 				);
@@ -487,7 +542,8 @@ describe("a project's computer, over an in-memory provider", () => {
 
 				expect(refused).toBeInstanceOf(ProjectComputers.UpgradeFailed);
 				expect(world.provider.made()).toBe(made);
-				expect(theOnly(world.provider.computers()).id).toBe(first.computer.id);
+				expect(theOnly(world.provider.computersAt(FIRST_SERVER)).id).toBe(first.computer.id);
+				expect(world.provider.computersAt(SECOND_SERVER)).toEqual([]);
 			},
 		);
 
@@ -496,20 +552,22 @@ describe("a project's computer, over an in-memory provider", () => {
 			const first = await world.open();
 			await world.release();
 			const provider = await world.enabledProvider();
-			const creating = world.provider.holdCreations();
+			const creating = world.holdCreations();
 
-			await runOnPostgres(
+			const upgraded = await runOnPostgres(
 				Effect.gen(function* () {
 					const upgrading = yield* Effect.forkChild(
 						world.projectComputers.upgrade(world.project, provider),
 					);
 					yield* Effect.promise(() => creating.started(1));
-					const interrupting = yield* Effect.forkChild(Fiber.interrupt(upgrading));
+					// Asked to stop, as when its caller goes away, before the new computer is made.
+					upgrading.interruptUnsafe();
 					creating.release();
-					yield* Fiber.join(interrupting);
+					return yield* Fiber.await(upgrading);
 				}),
 			);
 
+			expect(Exit.hasInterrupts(upgraded)).toBe(true);
 			const left = theOnly(world.provider.computers());
 			expect(left.id).not.toBe(first.computer.id);
 			const reopened = await world.open();
@@ -535,6 +593,110 @@ describe("a project's computer, over an in-memory provider", () => {
 		});
 	});
 
+	describe("machines left behind", () => {
+		/** The sweep for machines left behind, run once the time of every one in the workspace has come. */
+		const sweepLeftBehind = async (world: World) => {
+			await onDatabase((db) =>
+				db
+					.update(computerDestruction)
+					.set({ dueAt: new Date(0) })
+					.where(eq(computerDestruction.workspaceId, world.project.workspaceId)),
+			);
+			await runOnPostgres(world.projectComputers.destroyLeftBehind);
+		};
+
+		it("destroys a computer made while its project was being deleted, which couldn't be destroyed at once", async () => {
+			const world = await startWorld();
+			const creating = world.holdCreations();
+			const opening = world.open().then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+			await creating.started(1);
+			await onDatabase((db) =>
+				db
+					.update(projectTable)
+					.set({ deleting: true })
+					.where(eq(projectTable.id, world.project.projectId)),
+			);
+			world.provider.failDestroys(1);
+			creating.release();
+
+			const refused = await opening;
+			const leftRunning = world.provider.computers();
+			await sweepLeftBehind(world);
+
+			expect(userMessageOf(refused)).toBe("This project is being deleted.");
+			expect(leftRunning).toHaveLength(1);
+			expect(world.provider.computers()).toEqual([]);
+			expect(
+				await onDatabase((db) =>
+					db
+						.select()
+						.from(computerDestruction)
+						.where(eq(computerDestruction.workspaceId, world.project.workspaceId)),
+				),
+			).toEqual([]);
+		});
+
+		it("destroys an upgraded computer's old machine later, when its provider didn't answer at once", async () => {
+			const world = await startWorld({ workKeptApart: true });
+			const first = await world.open();
+			await world.release();
+			await world.changeImage(PYTHON);
+			await world.idleForAnHour();
+			world.provider.failDestroys(1);
+
+			await runOnPostgres(world.projectComputers.upgradeIdle);
+			const afterUpgrade = world.provider.computers().map(({ id }) => id);
+			await sweepLeftBehind(world);
+
+			expect(afterUpgrade).toContain(first.computer.id);
+			expect(afterUpgrade).toHaveLength(2);
+			expect(theOnly(world.provider.computers()).madeFrom).toBe(`python@${PYTHON_DIGEST}`);
+		});
+
+		it("destroys a computer at a provider no longer in use later, when it didn't answer at once", async () => {
+			const world = await startWorld();
+			const first = await world.open();
+			await world.addProvider(SECOND_SERVER);
+			world.provider.failDestroys(1);
+
+			const moved = await world.open();
+			const leftAtFirst = world.provider.computersAt(FIRST_SERVER).map(({ id }) => id);
+			await sweepLeftBehind(world);
+
+			expect(leftAtFirst).toEqual([first.computer.id]);
+			expect(world.provider.computersAt(FIRST_SERVER)).toEqual([]);
+			expect(theOnly(world.provider.computersAt(SECOND_SERVER)).id).toBe(moved.computer.id);
+		});
+
+		it("keeps the record of a computer its provider lacks the settings to destroy", async () => {
+			const world = await startWorld();
+			await world.open();
+			await world.release();
+			// As when the key no longer decrypts: the store refuses to take it away.
+			await onDatabase((db) =>
+				db
+					.update(computerProvider)
+					.set({ apiKeyEncrypted: null })
+					.where(eq(computerProvider.workspaceId, world.project.workspaceId)),
+			);
+
+			const refused = await runOnPostgres(Effect.flip(world.projectComputers.reset(world.project)));
+
+			expect(userMessageOf(refused)).toBe(
+				"The computer provider lacks the settings to reach its computers. Restore its key or address, then try again.",
+			);
+			expect(world.provider.computers()).toHaveLength(1);
+			expect(
+				await onDatabase((db) =>
+					db.select().from(computer).where(eq(computer.projectId, world.project.projectId)),
+				),
+			).toHaveLength(1);
+		});
+	});
+
 	describe("signing in", () => {
 		const signedInUntil = (token: string, expiresIn: Duration.Input) => ({
 			credentials: [
@@ -554,20 +716,24 @@ describe("a project's computer, over an in-memory provider", () => {
 			const expiring = await world.addProject("expiring");
 			world.signInAs(signedInUntil("Bearer durable at opening", "2 hours"), durable);
 			world.signInAs(signedInUntil("Bearer expiring at opening", "5 minutes"), expiring);
-			// The first opened is the first renewed, so a renewal that wrongly
-			// signed in the durable one again would do it before the expiring one.
 			const durableComputer = await world.open(TURN, durable);
 			const expiringComputer = await world.open(TURN, expiring);
-			const refreshed = world.provider.nextNetwork(expiringComputer.computer.id);
 			world.signInAs(signedInUntil("Bearer durable renewed", "2 hours"), durable);
 			world.signInAs(signedInUntil("Bearer expiring renewed", "2 hours"), expiring);
+			const refreshing = world.holdOpening(expiringComputer.computer.id);
+			const refreshed = world.provider.nextNetwork(expiringComputer.computer.id);
+			// The turn's scope, open until the case ends, so nothing the renewal started is cut short.
+			const turnScope = Scope.makeUnsafe();
+			onTestFinished(() => Effect.runPromise(Scope.close(turnScope, Exit.void)));
 
-			await runOnPostgres(
-				Effect.scoped(
-					world.projectComputers.renew(TURN).pipe(Effect.andThen(Effect.promise(() => refreshed))),
-				),
-			);
+			await runOnPostgres(world.projectComputers.renew(TURN).pipe(Scope.provide(turnScope)));
+			await refreshing.started(1);
+			const runningWhileHeld = fibersRunningIn(turnScope);
+			refreshing.release();
+			await refreshed;
 
+			// The expiring computer's refresh, held at its provider, and nothing for the durable one, now or later.
+			expect(runningWhileHeld).toBe(1);
 			const tokensGiven = (id: Computers.ComputerId) =>
 				world.provider
 					.computers()

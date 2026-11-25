@@ -91,7 +91,7 @@ export function testProvider(
 export function fetchProviderModels(
 	providers: Pick<
 		ModelProviderStore.Interface,
-		"access" | "recordTest" | "syncDiscovered" | "renewOAuthTokens"
+		"access" | "recordTest" | "recordDiscovery" | "renewOAuthTokens"
 	>,
 	workspaceId: string,
 	providerId: string,
@@ -116,16 +116,44 @@ export function fetchProviderModels(
 			return yield* outcome.failure;
 		}
 
-		const { added, updated } = yield* providers.syncDiscovered(
+		// Nothing is recorded once the provider has been reconfigured meanwhile:
+		// what it listed was another configuration's.
+		const recorded = yield* providers.recordDiscovery(
 			workspaceId,
 			providerId,
+			access.configurationUpdatedAt,
 			outcome.success,
-		);
-		yield* providers.recordTest(workspaceId, providerId, access.configurationUpdatedAt, {
 			activateOnSuccess,
-		});
+		);
+		const { added, updated } = recorded ?? { added: 0, updated: 0 };
 		return { added, updated, unchanged: outcome.success.length - added - updated };
 	});
+}
+
+/**
+ * Asks the provider `candidate` describes for its models, as discovery does,
+ * storing nothing: for a key or sign-in that replaces the provider's only
+ * once it has answered. A candidate sign-in's tokens are refreshed, if they
+ * need it, in memory.
+ */
+export function discoverWithCandidate(
+	candidate: ModelProviderStore.ProviderAccess,
+	httpClients: EgressHttpClients,
+	registry: ModelRegistry = modelsDev,
+): Effect.Effect<DiscoveredModel[], DiscoveryFailure> {
+	const inMemory: Pick<ModelProviderStore.Interface, "renewOAuthTokens"> = {
+		renewOAuthTokens: (_workspaceId, _providerId, { isStale, refresh }) => {
+			const tokens = candidate.oauthTokens;
+			if (!tokens) return Effect.succeed(undefined);
+			return Effect.flatMap(isStale(tokens), (stale) =>
+				stale ? refresh(tokens) : Effect.succeed(tokens),
+			);
+		},
+	};
+	return requestModels(inMemory, "", candidate, httpClients).pipe(
+		Effect.tapError(logFailure),
+		Effect.map((models) => models.map((model) => registry.complete(model, candidate))),
+	);
 }
 
 function requireAccess(

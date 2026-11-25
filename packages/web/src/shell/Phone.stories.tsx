@@ -1,6 +1,6 @@
 import type { ListedWrittenFile } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
-import { expect, screen, within } from "storybook/test";
+import { expect, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { engineering, growthDesk, revenue } from "@/shell/story-fixtures.test-support.ts";
 import {
@@ -239,13 +239,14 @@ export const BotChat = meta.story({
 		// The chat's name heads its messages, and the pill over them, shortened to fit.
 		await expect(await canvas.findByRole("heading", { level: 2, name: LONG_TITLE })).toBeVisible();
 		const pill = canvas
-			.getByText(LONG_TITLE, { selector: "button[aria-hidden] span" })
-			.closest("button")
-			?.getBoundingClientRect();
+			.getByRole("button", { name: `Details for ${LONG_TITLE}` })
+			.getBoundingClientRect();
 		await expect(pill?.right).toBeLessThanOrEqual(more.getBoundingClientRect().left);
 		await userEvent.click(more);
 		const menu = await screen.findByRole("menu");
-		await expect(within(menu).getByRole("menuitem", { name: "Resolve" })).toBeVisible();
+		await waitFor(() =>
+			expect(within(menu).getByRole("menuitem", { name: "Resolve" })).toBeVisible(),
+		);
 		await expect(within(menu).getByRole("menuitem", { name: "Computer" })).toBeVisible();
 	},
 });
@@ -296,8 +297,8 @@ export const Computer = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "More for this chat" }));
 		await userEvent.click(await screen.findByRole("menuitem", { name: "Computer" }));
-		await expect(
-			await screen.findByRole("dialog", { name: `${growthDesk.name}'s computer` }),
-		).toBeVisible();
+		await waitFor(() =>
+			expect(screen.getByRole("dialog", { name: `${growthDesk.name}'s computer` })).toBeVisible(),
+		);
 	},
 });

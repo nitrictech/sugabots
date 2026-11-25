@@ -336,6 +336,59 @@ describe.skipIf(!process.env.DATABASE_URL)("lanes", () => {
 		expect(Option.isSome(polled)).toBe(true);
 	});
 
+	it("repairs the other lanes when one holds a workflow no process runs", async () => {
+		const gone = crypto.randomUUID();
+		const crashed = crypto.randomUUID();
+		const executionId = await executionIdOf(crashed, "a");
+		const longAgo = sql`now() - interval '1 day'`;
+		await runtime.runPromise(
+			query((db) =>
+				db.insert(lane).values([
+					// Left by a workflow since removed, starting and running.
+					{
+						key: `${gone}:starting`,
+						state: "starting",
+						workflow: "routine",
+						executionId: "removed-1",
+						payload: { routineId: gone },
+						updatedAt: longAgo,
+					},
+					{
+						key: `${gone}:running`,
+						state: "running",
+						workflow: "summary",
+						executionId: "removed-2",
+						payload: { sourceMessageId: gone },
+						updatedAt: longAgo,
+					},
+					{
+						key: crashed,
+						state: "starting",
+						workflow: Held._tag,
+						executionId,
+						payload: { key: crashed, request: "a" },
+						updatedAt: longAgo,
+					},
+				]),
+			),
+		);
+
+		await run((await lanes()).reconcile);
+
+		expect(await laneOf(crashed)).toMatchObject({ state: "running", executionId });
+		expect(await laneOf(`${gone}:starting`)).toMatchObject({
+			state: "starting",
+			workflow: "routine",
+		});
+		expect(await laneOf(`${gone}:running`)).toMatchObject({
+			state: "running",
+			workflow: "summary",
+		});
+		await runtime.runPromise(
+			query((db) => db.delete(lane).where(sql`${lane.key} like ${`${gone}:%`}`)),
+		);
+	});
+
 	describe("a lane workflow", () => {
 		/** Starts an `Ending` execution in its lane, waiting until it suspends to wait for `Go`. */
 		const startEnding = async (payload: typeof Ending.payloadSchema.Type) => {

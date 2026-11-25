@@ -10,6 +10,7 @@
 	"scripts": {
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "node --env-file-if-exists=../../.env src/database/migrate.ts",
+		"db:compare-migrations": "node --env-file-if-exists=../../.env src/database/compare-migrations.ts",
 		"db:studio": "drizzle-kit studio",
 		"typecheck": "tsc --noEmit"
 	},

@@ -69,7 +69,7 @@ export function MobileTabBar() {
 							<MemberAvatar
 								member={signedIn}
 								size={24}
-								className={cn(tab === "you" && "ring-2 ring-foreground")}
+								className={tab === "you" ? "ring-2 ring-foreground" : undefined}
 							/>
 						) : (
 							<span className="size-6 rounded-full bg-member-avatar" />

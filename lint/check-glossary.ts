@@ -56,9 +56,10 @@ const RETIRED_WORDS: readonly CheckedWord[] = [
 		plural: "channels",
 		replacement: "project",
 		// Others' channels: Slack's `@channel`, which a member writes to mention
-		// everyone in a chat, and the Postgres notification channel.
+		// everyone in a chat, the Postgres notification channel, and Node's
+		// diagnostics channels.
 		otherMeanings:
-			/@channel|"here", "channel"|handle: "channel"|name: "Channel"|\[\["channel", "reviewer"\]\]|`here` or `channel`|"here and channel"|NOTIFY_CHANNEL|notification channel/g,
+			/@channel|"here", "channel"|handle: "channel"|name: "Channel"|\[\["channel", "reviewer"\]\]|`here` or `channel`|"here and channel"|NOTIFY_CHANNEL|notification channel|diagnostics_channel|diagnosticsChannel|diagnostics channel/g,
 		keptIn: [
 			// A colour's red, green and blue channels.
 			/^docker\/computer\/sugabots-desktop-look$/,
@@ -79,10 +80,10 @@ const RETIRED_WORDS: readonly CheckedWord[] = [
 		// container names; E2B's `sandboxUrl`; Chromium's and an iframe's
 		// sandbox. And names kept because something outside the code holds
 		// them: the published image and E2B template `sugabots-sandbox`, the
-		// certificate name in computers' homes, the tool name earlier calls
-		// record, and the tables as a database not yet migrated has them.
+		// certificate name in computers' homes, and the tables as a database
+		// not yet migrated has them.
 		otherMeanings:
-			/OpenSandbox|SANDBOX_CONFIG_PATH|SandboxManager|listSandboxInfos|`sandbox-\$\{|sandboxUrl|E2B_SANDBOX_URL|--no-sandbox|chromium_sandbox_flags|Chromium's flags for its own sandbox|sugabots-sandbox|PROVIDER_AUTHORITY=sandbox-provider|copy_file_to_sandbox|toHaveAttribute\("sandbox"/g,
+			/OpenSandbox|SANDBOX_CONFIG_PATH|SandboxManager|listSandboxInfos|`sandbox-\$\{|sandboxUrl|E2B_SANDBOX_URL|--no-sandbox|chromium_sandbox_flags|Chromium's flags for its own sandbox|sugabots-sandbox|PROVIDER_AUTHORITY=sandbox-provider|toHaveAttribute\("sandbox"/g,
 		keptIn: [
 			// Talking to each provider in its own words.
 			/^packages\/core\/src\/computers\/implementations\//,
@@ -105,6 +106,7 @@ const RETIRED_WORDS: readonly CheckedWord[] = [
 		keptIn: [
 			// undici's Agent, the connection pool requests are sent through.
 			/^packages\/core\/src\/providers\/network\/egress(\.test)?\.ts$/,
+			/^packages\/core\/src\/computers\/implementations\/computer-egress\.test\.ts$/,
 		],
 	},
 	{ word: "bot summary", plural: "bot summaries", replacement: "nothing: summaries are gone" },
@@ -529,6 +531,8 @@ const SKIPPED_PATHS: readonly RegExp[] = [
 	/^GLOSSARY\.md$/,
 	/^lint\/check-glossary\.ts$/,
 	/^packages\/core\/drizzle\//,
+	/^patches\/e2b@[^/]+\.patch$/,
+	/^packages\/core\/src\/database\/upgrade\.test(-support)?\.ts$/,
 	/^packages\/emoji\/src\/emoji\.json$/,
 	/(^|\/)bun\.lock$/,
 	/\.(svg|png|jpe?g|gif|webp|ico|woff2?|ttf|otf|pdf|mp4|webm)$/,

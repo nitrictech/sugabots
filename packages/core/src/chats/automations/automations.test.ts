@@ -453,7 +453,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		}
 	});
 
-	it("checks a signing automation's callers by signature, with the secret its webhook source made", async () => {
+	it("requires a valid Linear signature and a recent timestamp in the signed body", async () => {
 		const linearSecret = "lin_wh_9f2c1e5a7b3d4f60";
 		const created = await automations.create(
 			{ projectId: ownProjectId },
@@ -464,15 +464,26 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			},
 		);
 		const { triggerId } = firstTriggerOf(created).addressed;
-		const body = '{"action":"create","data":{"id":"ISS-1"}}';
-		const signed: Delivery = {
-			headers: {
-				"linear-signature": createHmac("sha256", linearSecret).update(body).digest("hex"),
-				"linear-delivery": "234d1a4e-b617-4388-90fe-adc3633d6b72",
-			},
-			body: new TextEncoder().encode(body),
-			payload: JSON.parse(body),
+		const now = Date.now();
+		const signedDelivery = (webhookTimestamp?: number): Delivery => {
+			const payload = { action: "create", data: { id: "ISS-1" }, webhookTimestamp };
+			const body = JSON.stringify(payload);
+			return {
+				headers: {
+					"linear-signature": createHmac("sha256", linearSecret).update(body).digest("hex"),
+					"linear-delivery": "234d1a4e-b617-4388-90fe-adc3633d6b72",
+					"linear-timestamp": String(now),
+				},
+				body: new TextEncoder().encode(body),
+				payload: JSON.parse(body),
+			};
 		};
+		for (const timestamp of [undefined, now - 120_000, now + 120_000]) {
+			expect(
+				await webhooks.accept({ triggerId, delivery: signedDelivery(timestamp) }),
+			).toBeUndefined();
+		}
+		const signed = signedDelivery(now);
 
 		expect(await webhooks.accept({ triggerId, delivery: signed })).toMatchObject({
 			kind: "run",

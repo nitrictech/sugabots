@@ -362,6 +362,45 @@ describe.skipIf(!process.env.DATABASE_URL)("chat files, against Postgres", () =>
 		expect((await rows()).map(({ id }) => id).sort()).toEqual([kept.id, sent.id].sort());
 	});
 
+	it("deletes a removed upload's blob later when the store can't delete it at once", async () => {
+		const { chatId, memberId } = await aChat();
+		const deletesFailing = Layer.effect(
+			BlobStore.Service,
+			Effect.map(BlobStore.Service, (store) =>
+				BlobStore.Service.of({
+					...store,
+					delete: () =>
+						Effect.fail(
+							new BlobStore.Unavailable({
+								operation: "delete",
+								provider: "postgres",
+								cause: "down",
+							}),
+						),
+				}),
+			),
+		);
+		const flaky = await servedOnPostgres(
+			ChatFileStore.Service,
+			ChatFileStore.layer.pipe(Layer.provide(deletesFailing), Layer.orDie),
+		);
+		const upload = await flaky.upload({
+			chatId,
+			uploaderId: memberId,
+			name: "draft.txt",
+			maxSize: 1024,
+			maxUnsent: 20,
+			content: text("draft"),
+		});
+
+		await flaky.removeUnsentAttachment({ chatId, uploaderId: memberId, fileId: upload.id });
+		const leftAtOnce = await blobKeysUnder(BlobStore.key("chats", chatId));
+		await runOnPostgres(BlobDeletions.deleteQueued);
+
+		expect(leftAtOnce).toEqual([BlobStore.key("chats", chatId, "files", upload.id)]);
+		expect(await blobKeysUnder(BlobStore.key("chats", chatId))).toEqual([]);
+	});
+
 	it("removes uploads left unsent, with their blobs, and nothing else", async () => {
 		const { chatId, memberId, botId } = await aChat();
 		const upload = (name: string) =>

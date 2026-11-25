@@ -8,7 +8,7 @@
 
 ## Naming
 
-[`GLOSSARY.md`](GLOSSARY.md) defines the product's words, and the words for how it is built: bots, projects and their chats, computers, automations, operations, errors and the rest. Use its words and definitions in identifiers, comments, docs, UI text and bot prompts. Each table's "Banned synonyms" are words not to use for that thing; its "Retired terms" table gives the word that replaced each old one; its "Kept names" table says where old names are kept on purpose (only in migrations), and why. A library's or provider's own word, such as E2B's template, means only what it means there. `bun run glossary:report` counts the retired words, and the banned synonyms it can check, left in the code.
+[`GLOSSARY.md`](GLOSSARY.md) defines the product's words, and the words for how it is built: bots, projects and their chats, computers, automations, operations, errors and the rest. Use its words and definitions in identifiers, comments, docs, UI text and bot prompts. Each table's "Banned synonyms" are words not to use for that thing; its "Retired terms" table gives the word that replaced each old one; its "Kept names" table says where old names are kept on purpose and why. A library's or provider's own word, such as E2B's template, means only what it means there. `bun run glossary:report` counts the retired words, and the banned synonyms it can check, left in the code.
 
 ## Working from an issue
 

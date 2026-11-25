@@ -13,7 +13,7 @@ import {
 } from "../../github.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { BadRequest, Conflict, NotFound, refused, Unauthorized } from "../errors.ts";
-import { Session } from "../middleware.ts";
+import { GITHUB_DELIVERY_MAX_BODY_BYTES, MaxBodyBytes, Session } from "../middleware.ts";
 
 const project = { projectId: uuidSchema };
 const connected = { projectId: uuidSchema, connectorId: uuidSchema };
@@ -106,5 +106,5 @@ export class GitHubWebhooksApi extends HttpApiGroup.make("gitHubWebhooks").add(
 		payload: Schema.Json,
 		success: HttpApiSchema.Empty(204),
 		error: [BadRequest, Unauthorized],
-	}),
+	}).annotate(MaxBodyBytes, GITHUB_DELIVERY_MAX_BODY_BYTES),
 ) {}

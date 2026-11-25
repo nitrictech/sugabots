@@ -1,5 +1,6 @@
 import type { GitHubSetupOutcome, RepositoryActivity } from "@sugabots/contracts";
 import { GitHubDeliveryIdInvalid } from "@sugabots/contracts/errors/connectors";
+import { GITHUB_DELIVERY_MAX_BODY_BYTES } from "@sugabots/contracts/http";
 import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import { Operations } from "@sugabots/core/operations/registry";
 import type { WebhookCall } from "@sugabots/core/principal";
@@ -68,12 +69,25 @@ const deliver = (
 	app: ReturnType<typeof hookApp>["app"],
 	headers: Record<string, string>,
 	connectorId = CONNECTOR_ID,
+	body = '{ "action":  "opened" }',
 ) =>
 	app.request(`/webhooks/connectors/${connectorId}`, {
 		method: "POST",
 		headers: { "content-type": "application/json", ...headers },
-		body: '{ "action":  "opened" }',
+		body,
 	});
+
+/** A delivery of `bytes` bytes, as GitHub sends a push with a long list of commits. */
+const deliveryOf = (bytes: number) => {
+	const shell = '{ "action": "opened", "commits": "" }';
+	return shell.replace('""', `"${"x".repeat(bytes - shell.length)}"`);
+};
+
+const signedHeaders = {
+	"x-github-event": "pull_request",
+	"x-github-delivery": "delivery-1",
+	"x-hub-signature-256": GOOD_SIGNATURE,
+};
 
 describe("A GitHub connector's deliveries", () => {
 	it("admits the exact body by its signature, and hands it to the delivery operation", async () => {
@@ -108,6 +122,41 @@ describe("A GitHub connector's deliveries", () => {
 			deliveryId,
 			body: '{ "action":  "opened" }',
 		});
+	});
+
+	it("admits a delivery far over the API's usual body limit, as GitHub sends up to 25 MiB", async () => {
+		const { app, authenticate, read } = hookApp({
+			delivery: Effect.succeed({
+				workspaceId: WORKSPACE_ID,
+				deliveryId: "delivery-1",
+				activity: opened,
+			}),
+		});
+		const body = deliveryOf(5 * 1024 * 1024);
+
+		const response = await deliver(app, signedHeaders, CONNECTOR_ID, body);
+
+		expect(response.status).toBe(204);
+		expect(authenticate.mock.calls[0]?.[1].body).toBe(body);
+		expect(read.mock.calls[0]?.[1]).toMatchObject({ body });
+	});
+
+	it("refuses a delivery over 25 MiB while reading it, before its signature is checked", async () => {
+		const { app, authenticate } = hookApp();
+
+		const response = await deliver(
+			app,
+			signedHeaders,
+			CONNECTOR_ID,
+			deliveryOf(GITHUB_DELIVERY_MAX_BODY_BYTES + 1),
+		);
+
+		expect(response.status).toBe(413);
+		expect(await response.json()).toMatchObject({
+			_tag: "PayloadTooLarge",
+			message: "The request body is over the 25 MiB limit",
+		});
+		expect(authenticate).not.toHaveBeenCalled();
 	});
 
 	it("refuses a delivery its app didn't sign, and reads nothing", async () => {

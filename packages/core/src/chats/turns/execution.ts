@@ -96,7 +96,7 @@ export const make = Effect.gen(function* () {
 		ending: { status: "failed" | "cancelled"; userMessage: UserText },
 	) =>
 		Effect.gen(function* () {
-			const ended = yield* turns.abandon(run.executionId, ending);
+			const ended = yield* turns.abandon(run.executionId, { ...ending, handOnSteers: false });
 			if (!ended) {
 				yield* emit([
 					ChatEvent.TurnAbandoned({

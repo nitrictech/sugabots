@@ -216,8 +216,15 @@ const loadChat = Effect.fn("ChatDetailsView.loadChat")(function* (
 				}),
 				with: {
 					...messageRelations,
-					// A failed reply's reason, and when it ended, live on its turn.
-					turn: { columns: { error: true, finishedAt: true } },
+					// A failed reply's reason, and when it ended, live on its turn; so
+					// does which execution wrote it: a reply being written by its
+					// checkpoint's, an ended one by the turn's last.
+					turn: {
+						columns: { error: true, finishedAt: true, executionNumber: true },
+						extras: {
+							execution: (row) => sql<number | null>`(${row.checkpoint} ->> 'execution')::int`,
+						},
+					},
 				},
 			},
 		},

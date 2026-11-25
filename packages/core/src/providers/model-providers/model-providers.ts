@@ -32,7 +32,7 @@ import {
 	ProviderModelNotFound,
 	ProviderModelsRequireCredential,
 	ProviderSignInAttemptInvalid,
-	type ProviderSignInFailed,
+	ProviderSignInFailed,
 	ProviderSignInNotOffered,
 	type UrlNotAllowed,
 } from "@sugabots/contracts/errors/providers";
@@ -55,6 +55,7 @@ import { offeredModels, providerIn, providersIn } from "./model-provider-reads.t
 import { ModelProviderStore } from "./model-provider-store.ts";
 import {
 	type DiscoveryFailure,
+	discoverWithCandidate,
 	fetchProviderModels,
 	isDiscoveryFailure,
 	testProvider,
@@ -92,19 +93,26 @@ export interface Interface {
 		UrlNotAllowed | ModelProviderNameConflict | ModelProviderNotFound
 	>;
 	/**
-	 * A new key sends the provider back through discovery, and switching it on
-	 * tests it first; either way it is on only once it has answered. A new
-	 * address does the same, and without a new key also takes away the key,
-	 * headers and sign-in it held. A new key takes the place of a subscription
-	 * sign-in. Switching it off, removing its key or moving it fails with
-	 * `ModelInUse` rather than stop offering a model the workspace depends on.
+	 * A new key is tried before it is stored: once the provider answers, it
+	 * takes the place of the key or subscription sign-in, and the provider is
+	 * on unless switched off with it. One the provider doesn't answer is
+	 * refused with why while the provider is on, so a working provider never
+	 * stops over a bad key; while it is off, the key is stored with its test's
+	 * error. A new address sends the provider back through discovery, and
+	 * without a new key takes away the key, headers and sign-in it held.
+	 * Switching it off, removing its key or moving it fails with `ModelInUse`
+	 * rather than stop offering a model the workspace depends on.
 	 */
 	readonly update: <P, W, V>(
 		reach: ReachesModelProvider<P, W, V>,
 		changes: ModelProviderUpdate,
 	) => Effect.Effect<
 		ModelProvider,
-		ModelProviderNotFound | UrlNotAllowed | ProviderActivationRequiresCredential | ModelInUse
+		| ModelProviderNotFound
+		| UrlNotAllowed
+		| ProviderActivationRequiresCredential
+		| ModelInUse
+		| DiscoveryFailure
 	>;
 	readonly remove: <P, W, V>(
 		reach: ReachesModelProvider<P, W, V>,
@@ -332,6 +340,60 @@ export const make = Effect.gen(function* () {
 			activateOnSuccess,
 		}).pipe(Effect.catchIf(isDiscoveryFailure, () => Effect.void));
 
+	/**
+	 * Puts `candidate` in place of the provider's key or sign-in once the
+	 * provider has answered it, with the models it listed, and switches it on:
+	 * a provider that works keeps working until its replacement does. When the
+	 * provider doesn't answer the candidate, one that is on keeps what it has
+	 * and this fails with why; one that is off is given the candidate by
+	 * `storeUntried`, and keeps the test's error. Tried again from the start
+	 * when the provider was reconfigured meanwhile. `signerGone` when the
+	 * member signing in has left the workspace.
+	 */
+	const replacingCredential = <E, R>(
+		workspaceId: string,
+		providerId: string,
+		candidate: ModelProviderStore.CandidateCredential,
+		options: { changedById: string; storeUntried: Effect.Effect<Date | undefined, E, R> },
+	) =>
+		Effect.gen(function* () {
+			for (let attempt = 1; ; attempt++) {
+				const current = yield* requireProvider(workspaceId, providerId);
+				const access = yield* providers.candidateAccess(workspaceId, providerId, candidate);
+				if (!access) return yield* new ModelProviderNotFound();
+				const listed = yield* Effect.result(discoverWithCandidate(access, egress.providers));
+				if (listed._tag === "Failure") {
+					if (current.active) return yield* listed.failure;
+					const storedAt = yield* options.storeUntried;
+					if (storedAt) {
+						yield* providers.recordTest(workspaceId, providerId, storedAt, {
+							error: listed.failure.userMessage,
+						});
+					}
+					return "stored" as const;
+				}
+				// Switching it on with what it listed only adds to what the
+				// workspace offers, so nothing it holds can go.
+				const replaced = yield* withHeldModelsLocked(
+					workspaceId,
+					providers.replaceCredential(workspaceId, providerId, {
+						candidate,
+						builtOn: access.configurationUpdatedAt,
+						changedById: options.changedById,
+						active: true,
+						models: listed.success,
+					}),
+				);
+				if (replaced === "signerGone") return replaced;
+				if (replaced !== "reconfigured") return "replaced" as const;
+				if (attempt === RECONFIGURED_ATTEMPTS) {
+					return yield* Effect.die(
+						new Error("The provider kept being reconfigured while its new credential was tried"),
+					);
+				}
+			}
+		});
+
 	const saveSignIn = (
 		workspaceId: string,
 		providerId: string,
@@ -339,13 +401,30 @@ export const make = Effect.gen(function* () {
 		signedInById: string,
 	) =>
 		Effect.gen(function* () {
-			const saved = yield* providers.saveOAuthTokens(workspaceId, providerId, {
-				tokens,
-				signedInById,
-			});
+			const outcome = yield* replacingCredential(
+				workspaceId,
+				providerId,
+				{ tokens, signedInById },
+				{
+					changedById: signedInById,
+					storeUntried: Effect.gen(function* () {
+						const saved = yield* providers.saveOAuthTokens(workspaceId, providerId, {
+							tokens,
+							signedInById,
+						});
+						if (!saved) return yield* new ResourceHidden({ resource: "workspace" });
+						return (yield* providers.access(workspaceId, providerId))?.configurationUpdatedAt;
+					}),
+				},
+			).pipe(
+				Effect.catchIf(isDiscoveryFailure, (failure) =>
+					Effect.fail(
+						new ProviderSignInFailed({ userMessage: failure.userMessage, cause: failure }),
+					),
+				),
+			);
 			// They left the workspace, or were removed from it, while signing in.
-			if (!saved) return yield* new ResourceHidden({ resource: "workspace" });
-			yield* discoverModelsQuietly(workspaceId, providerId, true);
+			if (outcome === "signerGone") return yield* new ResourceHidden({ resource: "workspace" });
 			yield* adoptFirstModel(workspaceId);
 			return yield* requireProvider(workspaceId, providerId);
 		});
@@ -403,6 +482,28 @@ export const make = Effect.gen(function* () {
 						return yield* new ProviderActivationRequiresCredential({
 							missing: missingCredential(current.builtIn),
 						});
+					}
+					// A new key the provider is to be on with is tried first; one it is
+					// switched off with is stored as it is, below.
+					if (changes.apiKey && !moved && changes.active !== false) {
+						yield* replacingCredential(
+							workspaceId,
+							providerId,
+							{
+								apiKey: changes.apiKey,
+								apiFormat: changes.apiFormat,
+								customHeaders: changes.customHeaders,
+							},
+							{
+								changedById: canManage.actor.memberId,
+								storeUntried: Effect.map(
+									providers.update(workspaceId, providerId, changes, canManage.actor.memberId),
+									(updated) => updated?.updatedAt,
+								),
+							},
+						);
+						yield* adoptFirstModel(workspaceId);
+						return yield* requireProvider(workspaceId, providerId);
 					}
 					const write = providers.update(
 						workspaceId,
@@ -634,6 +735,9 @@ export const make = Effect.gen(function* () {
 });
 
 export const layerNoDeps = processLayer(Layer.effect(Service, make));
+
+/** How many times a new key or sign-in is tried while the provider keeps being reconfigured. */
+const RECONFIGURED_ATTEMPTS = 3;
 
 export const layer = layerNoDeps.pipe(Layer.provide([ModelProviderStore.layer, BotStore.layer]));
 

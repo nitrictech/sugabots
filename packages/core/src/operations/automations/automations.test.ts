@@ -81,7 +81,7 @@ describe("the automations operations, for each kind of principal", () => {
 			});
 		});
 
-		it("lists a project's runs only to members, askers and runs that reach it", async () => {
+		it("lists project runs for a viewer and hides them from a non-member and computer sleep", async () => {
 			const projectId = await seedProject(a.workspace, {
 				leadBotId: a.pub.id,
 				members: [a.ed, a.vi],

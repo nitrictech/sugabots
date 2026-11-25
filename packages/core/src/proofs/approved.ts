@@ -9,7 +9,13 @@ import {
 } from "@sugabots/contracts/operations";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { asksBeforeAllTools, type TurnFacts, turnFacts } from "../authentication/turn-facts.ts";
+import {
+	asksBeforeAllTools,
+	hasMemberBounds,
+	startedFromOutside,
+	type TurnFacts,
+	turnFacts,
+} from "../authentication/turn-facts.ts";
 import { decodeRecordedBuiltInInput } from "../chats/tools/recorded-input.ts";
 import { query } from "../database/database.ts";
 import { toolCall } from "../database/schema.ts";
@@ -347,8 +353,8 @@ function sameInputAsRecorded(tool: string, recorded: unknown, input: unknown): b
 /**
  * What a call needs, by its rule and the turn's: a Personal Assistant's calls
  * that change anything, and every call in its runs that came from outside,
- * wait for its member; a connector's tool switched off is refused, one set to
- * Allow runs, and one set to Ask waits.
+ * wait for its member. An exposed tool may add its own approval rule, and a
+ * connector's tool follows how that tool is configured.
  */
 export function approvalNeed(
 	facts: TurnFacts,
@@ -361,6 +367,12 @@ export function approvalNeed(
 	if (
 		asksBeforeAllTools(facts) ||
 		((facts.assistantOf !== null || facts.briefedByAssistant) && changes)
+	)
+		return "approver";
+	if (rule.approval.kind === "outsideRuns" && startedFromOutside(facts)) return "approver";
+	if (
+		rule.approval.kind === "outsideRunsOrMemberBounds" &&
+		(startedFromOutside(facts) || hasMemberBounds(facts))
 	)
 		return "approver";
 	return rule.approval.kind === "always" || connectorUse?.access === "ask" ? "approver" : "nothing";

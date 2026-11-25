@@ -142,6 +142,10 @@ bun run dev
 Back up your PostgreSQL volume and `.env` before updating an installation that
 contains data you care about.
 
+If your `.env` uses `CREDENTIALS_ENCRYPTION_KEY`, rename it to
+`SECRETS_ENCRYPTION_KEY` and keep its value so the server can still read saved
+secrets. The old name still works during the upgrade.
+
 ### Reset everything
 
 The following removes the database volume and all Sugabots data:
@@ -176,6 +180,13 @@ bun run format          # apply Biome formatting fixes
 bun run db:studio       # inspect the database with Drizzle Studio
 bun run build:computer  # build the computer image, as sugabots-computer:dev
 ```
+
+`bun run db:compare-migrations <revision>` checks that the migrations after
+`main`'s newest upgrade a database the same way as the ones at a git revision.
+It runs both sets on copies of a database at `main`'s schema, one holding an
+installation's rows and one empty, then compares the copies' schemas and rows.
+Run it after changing a migration that's already been reviewed, such as when
+squashing migrations.
 
 Computers are made from the published image their tag names on its registry,
 so a local build under the published name is never used. To try one, set the

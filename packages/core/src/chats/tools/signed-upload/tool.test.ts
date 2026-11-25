@@ -1,8 +1,8 @@
-import { Effect, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { Effect, Logger, Stream } from "effect";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { ChatFileStore } from "../../../files/chat-file-store.ts";
 import { createEgressHttpClients } from "../../../providers/network/egress.ts";
-import { signedUploadTool } from "./tool.ts";
+import { SignedUploadRefused, signedUploadTool } from "./tool.ts";
 
 const CHAT = "0199a3a0-0000-7000-8000-000000000001";
 const FILE = "0199a3a0-0000-7000-8000-0000000000f1";
@@ -54,12 +54,15 @@ function uploadWith(status = 200, answer = "") {
 			return new Response(answer, { status });
 		},
 	});
+	onTestFinished(() => upload.close());
+	const logged: unknown[] = [];
+	const logger = Logger.layer([Logger.make(({ message }) => logged.push(message))]);
 	const tool = signedUploadTool(SERVICE, {
 		chatId: CHAT,
 		files,
 		computer: undefined,
 		upload,
-		run: Effect.runPromise,
+		run: (effect) => Effect.runPromise(effect.pipe(Effect.provide(logger))),
 	});
 	const call = (input: {
 		file?: string;
@@ -67,7 +70,7 @@ function uploadWith(status = 200, answer = "") {
 		uploadUrl: string;
 		headers: Record<string, string>;
 	}) => tool.execute?.(input, { toolCallId: "call", messages: [] } as never);
-	return { call, sent };
+	return { call, sent, logged };
 }
 
 describe("a signed upload tool", () => {
@@ -111,15 +114,19 @@ describe("a signed upload tool", () => {
 		expect(sent).toEqual([]);
 	});
 
-	it("says what the service answered when it refuses the upload", async () => {
-		const { call } = uploadWith(400, "<Error><Code>ExpiredToken</Code></Error>");
+	it("gives the bot the HTTP status and keeps the upload service's body in the log", async () => {
+		const httpStatus = 400;
+		const upstreamMessage = "<Error><Code>ExpiredToken</Code></Error>";
+		const { call, logged } = uploadWith(httpStatus, upstreamMessage);
 
 		const result = await call({ file: FILE, uploadUrl: SIGNED_URL, headers: SIGNED_HEADERS });
 
 		expect(result).toEqual({
 			status: "failed",
-			error: "The upload was refused with HTTP 400: <Error><Code>ExpiredToken</Code></Error>",
+			error: new SignedUploadRefused({ httpStatus, upstreamMessage: "" }).userMessage,
 		});
+		expect(result).toMatchObject({ error: expect.stringContaining(String(httpStatus)) });
+		expect(logged).toContainEqual([expect.stringContaining(upstreamMessage)]);
 	});
 
 	it("says when the chat has no such file", async () => {

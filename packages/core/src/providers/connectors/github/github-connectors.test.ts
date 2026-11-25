@@ -288,6 +288,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 			info: unused,
 			sleep: unused,
 			destroy: unused,
+			labelled: unused,
 		};
 		const projectComputers = ProjectComputers.layerNoDeps.pipe(
 			Layer.provide([

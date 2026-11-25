@@ -236,11 +236,11 @@ export const makeAutomationWrites = Effect.gen(function* () {
 			project: { id: string; workspaceId: string },
 			maker: Maker,
 			input: NewAutomation,
-			guard: Effect.Effect<void, E, Database>,
+			fence: Effect.Effect<void, E, Database>,
 		) =>
 			transaction(
 				Effect.gen(function* () {
-					yield* guard;
+					yield* fence;
 					const state = input.state ?? "enabled";
 					const written = yield* Effect.forEach(input.triggers, (trigger) =>
 						triggerValues(project, trigger, undefined, state),
@@ -254,11 +254,11 @@ export const makeAutomationWrites = Effect.gen(function* () {
 			maker: Maker,
 			input: Pick<NewAutomation, "name" | "instructions">,
 			routine: RoutineInput,
-			guard: Effect.Effect<void, E, Database>,
+			fence: Effect.Effect<void, E, Database>,
 		) =>
 			transaction(
 				Effect.gen(function* () {
-					yield* guard;
+					yield* fence;
 					const written = yield* routineValues(routine, "enabled");
 					const { automation } = yield* insertAutomation(project, maker, input, "enabled", [
 						written,
@@ -271,10 +271,10 @@ export const makeAutomationWrites = Effect.gen(function* () {
 		 * Changes an automation's own settings. Pausing it stops its routines;
 		 * enabling it again sets when each runs next from now.
 		 */
-		update: <E>(scope: Scope, input: AutomationUpdate, guard: Effect.Effect<void, E, Database>) =>
+		update: <E>(scope: Scope, input: AutomationUpdate, fence: Effect.Effect<void, E, Database>) =>
 			transaction(
 				Effect.gen(function* () {
-					yield* guard;
+					yield* fence;
 					yield* lockTriggers(scope.automationId);
 					const current = yield* automationIn(scope);
 					const row = yield* changeSettings(scope, current, input);
@@ -292,11 +292,11 @@ export const makeAutomationWrites = Effect.gen(function* () {
 			scope: Scope,
 			input: AutomationUpdate,
 			routine: RoutineInput,
-			guard: Effect.Effect<void, E, Database>,
+			fence: Effect.Effect<void, E, Database>,
 		) =>
 			transaction(
 				Effect.gen(function* () {
-					yield* guard;
+					yield* fence;
 					// Held across the check and both writes, so a trigger added meanwhile
 					// waits, and a refused routine leaves the settings as they were.
 					yield* lockTriggers(scope.automationId);

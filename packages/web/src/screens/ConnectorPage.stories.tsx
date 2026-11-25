@@ -205,8 +205,8 @@ const appRepositories = (account: string | null) =>
 			repositories:
 				account === null
 					? []
-					: ["acme/web", "acme/infra"].map((repository) => ({
-							repository,
+					: ["web", "infra"].map((repository) => ({
+							repository: `${account}/${repository}`,
 							addedByName: "Rowan Ellis",
 						})),
 		}),
@@ -341,7 +341,7 @@ export const NotSignedIn = meta.story({
 	render: () => <StoryApp path={pagePath(notion)} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
-		await expect(await canvas.findByText("No actions found yet")).toBeInTheDocument();
+		await expect(await canvas.findByText("No tools found yet")).toBeInTheDocument();
 	},
 });
 
@@ -360,8 +360,40 @@ export const GitHubApp = meta.story({
 			"href",
 			"https://github.com/organizations/acme/settings/apps/sugabots-revenue-09a7",
 		);
+		const account = canvas.getByRole("region", { name: "Account" });
+		await expect(within(account).getByText("Installed by")).toBeVisible();
+		await expect(within(account).getByText("Rowan Ellis")).toBeVisible();
 		await expect(canvas.queryByRole("button", { name: "Install on GitHub" })).toBeNull();
 		await expect(canvas.getByRole("button", { name: "Manage access" })).toBeInTheDocument();
+	},
+});
+
+/** GitHubAppInstalledByAnotherMember shows who installed the app on their own GitHub account. */
+export const GitHubAppInstalledByAnotherMember = meta.story({
+	name: "GitHub app installed by another member",
+	beforeEach({ msw }) {
+		msw.use(
+			appRepositories("jaypark"),
+			...connectorHandlers([
+				{
+					...gitHubApp,
+					url: "https://github.com/jaypark",
+					signedInAs: {
+						id: "0199a3a0-0000-7000-8000-00000000000a",
+						name: "Jay Park",
+						email: "jay@example.com",
+						image: null,
+					},
+				},
+			]),
+		);
+	},
+	render: () => <StoryApp path={pagePath(gitHubApp)} />,
+	play: async ({ canvas }) => {
+		const account = within(await canvas.findByRole("region", { name: "Account" }));
+		await expect(account.getByText("Installed by")).toBeVisible();
+		await expect(account.getByText("Jay Park")).toBeVisible();
+		await expect(account.queryByText("Rowan Ellis")).toBeNull();
 	},
 });
 

@@ -132,7 +132,7 @@ export type FollowOperation = <Name extends LongRunningOperationName>(
 export interface Following<Output> {
 	/**
 	 * What it yields next, or `ended` once it has ended. Rejects when nothing
-	 * comes within `within`.
+	 * comes within `within` (at most four seconds of wall time).
 	 */
 	readonly next: (within?: Duration.Input) => Promise<Output | "ended">;
 	/**
@@ -144,8 +144,7 @@ export interface Following<Output> {
 	readonly close: () => Promise<void>;
 }
 
-/** How long a case waits for a long-running operation to yield, by default. */
-const FOLLOW_WAIT = Duration.seconds(5);
+const FOLLOW_WAIT = Duration.seconds(4);
 
 /** How long a case watches a long-running operation yield nothing, by default. */
 const QUIET_WAIT = Duration.millis(300);
@@ -200,8 +199,12 @@ export async function servedRegistry(over: ServedOver = {}): Promise<{
 						);
 					const following: Following<OutputOf<typeof name>> = {
 						next: async (within = FOLLOW_WAIT) => {
-							const taken = await Effect.runPromise(withClock(take(within)));
-							if (taken === "quiet") throw new Error(`${name} yielded nothing in time`);
+							const taken = await Effect.runPromise(
+								take(Duration.min(Duration.fromInputUnsafe(within), FOLLOW_WAIT)),
+							);
+							if (taken === "quiet") {
+								throw new Error(`Timed out waiting for ${name} to yield or end`);
+							}
 							return taken;
 						},
 						quiet: (within = QUIET_WAIT) => Effect.runPromise(withClock(take(within))),

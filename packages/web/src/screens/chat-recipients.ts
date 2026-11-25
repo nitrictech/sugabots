@@ -13,6 +13,7 @@ import {
 } from "@sugabots/contracts";
 import type { Dispatch, SetStateAction } from "react";
 import { useTakenOffRecipients } from "@/lib/chat-draft.ts";
+import { chooseRestoredBots, useUnsentMessages } from "@/lib/unsent-messages.ts";
 import { botsNamed } from "./mentions.tsx";
 
 /** The bots the message being written goes to, and the ways to take them off; see `useChatRecipients`. */
@@ -64,16 +65,29 @@ export function useChatRecipients({
 			)
 		: undefined;
 	const [takenOff, setTakenOff] = useTakenOffRecipients(memberId, chatId);
+	// A message not sent and put back goes to the bots it went to, or those the
+	// member chose since, not those their latest message went to.
+	const { restoredBots } = useUnsentMessages(memberId, chatId);
 	const takenOffIds = takenOff.after === lastOwnMessage?.id ? takenOff.botIds : [];
 	const named = botsNamed(draft, projectBots);
 	const repliedToBot = botRepliedTo(replyingTo, projectBots);
-	const addressed = (lastOwnMessage ? botsAddressedBy(lastOwnMessage, projectBots) : []).filter(
-		(bot) =>
-			!takenOffIds.includes(bot.id) &&
-			bot.id !== repliedToBot?.id &&
-			!named.some((one) => one.id === bot.id),
+	const inherited =
+		restoredBots ??
+		(lastOwnMessage ? botsAddressedBy(lastOwnMessage, projectBots) : []).filter(
+			(bot) => !takenOffIds.includes(bot.id),
+		);
+	const addressed = inherited.filter(
+		(bot) => bot.id !== repliedToBot?.id && !named.some((one) => one.id === bot.id),
 	);
 	function takeOff(botIds: readonly string[]) {
+		if (restoredBots) {
+			chooseRestoredBots(
+				memberId,
+				chatId,
+				restoredBots.filter((bot) => !botIds.includes(bot.id)),
+			);
+			return;
+		}
 		setTakenOff({ after: lastOwnMessage?.id, botIds: [...takenOffIds, ...botIds] });
 	}
 	return {

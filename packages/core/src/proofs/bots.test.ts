@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedBot } from "../authentication/seed.test-support.ts";
 import { closeDatabase, runOnPostgres } from "../database/testing.ts";
 import type { Principal } from "../principal.ts";
+import { proveActsForMember } from "./acts-for-member.ts";
 import { proveCanDeleteBot } from "./bot-permissions.ts";
 import { proveCanManageBot } from "./can-manage-bot.ts";
 import { proveCanRestrictBot } from "./can-restrict-bot.ts";
@@ -15,6 +16,7 @@ import {
 	buildWorld,
 	everyKindOfPrincipal,
 	outcome,
+	outcomesFor,
 	principals,
 	type World,
 } from "./world.test-support.ts";
@@ -40,6 +42,25 @@ describe("managing, restricting and briefing bots", () => {
 		outcome(named(principal, botId, (p, b) => proveCanRestrictBot(p, b).pipe(Effect.asVoid)));
 	const briefs = (principal: Principal, botId: string) =>
 		outcome(named(principal, botId, (p, b) => proveMayBrief(p, b).pipe(Effect.asVoid)));
+
+	it("lets a member or their Personal Assistant act for them within member bounds", async () => {
+		const { a } = world;
+		const member = await as.member(a.ed);
+		const assistant = await as.botFor(a.ed, a.assistant.id, a.assistantChat);
+		const projectBot = await as.botFor(a.ed, a.pub.id, a.chat);
+		const { principal: run } = await as.run(a.workspace, a.project, a.pub.id);
+
+		expect(
+			await outcomesFor({ member, assistant, projectBot, run }, (principal) =>
+				outcome(named(principal, (principal) => proveActsForMember(principal).pipe(Effect.asVoid))),
+			),
+		).toEqual({
+			member: "ok",
+			assistant: "ok",
+			projectBot: "ActionForbidden",
+			run: "ActionForbidden",
+		});
+	});
 
 	describe("CanManageBot", () => {
 		it("lets a public bot's creator and admins manage it, and refuses those who only reach it", async () => {

@@ -1,14 +1,18 @@
 import { MAX_FILE_CONTENT_CHARACTERS } from "@sugabots/contracts";
 import type { InputOf } from "@sugabots/contracts/operations";
-import { eq } from "drizzle-orm";
-import { Effect, Stream } from "effect";
+import { eq, inArray, like } from "drizzle-orm";
+import { Effect, Layer, Stream } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PageAuthentication } from "../authentication/page.ts";
 import { seedMessage, seedTurnAnswering } from "../authentication/seed.test-support.ts";
 import { TurnAuthentication } from "../authentication/turn.ts";
 import { askerColumns } from "../authentication/turn-facts.ts";
+import { BlobStore } from "../blob-store/blob-store.ts";
+import { BlobDeletions } from "../blob-store/deletions.ts";
 import { seedChat } from "../chats/seed.test-support.ts";
 import {
+	blob,
+	blobDeletion,
 	bot,
 	fileVersion,
 	member,
@@ -634,5 +638,53 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		await expect(filesAs(editorId).get(sent.id)).rejects.toMatchObject({
 			_tag: "ResourceHidden",
 		});
+	});
+
+	it("deletes what a write stored when it never recorded it and the store couldn't take it back", async () => {
+		const deletesFailing = Layer.effect(
+			BlobStore.Service,
+			Effect.map(BlobStore.Service, (store) =>
+				BlobStore.Service.of({
+					...store,
+					delete: () =>
+						Effect.fail(
+							new BlobStore.Unavailable({
+								operation: "delete",
+								provider: "postgres",
+								cause: "down",
+							}),
+						),
+				}),
+			),
+		);
+		const writtenKeys = async () =>
+			(
+				await onDatabase((db) =>
+					db.select({ key: blob.key }).from(blob).where(like(blob.key, "files/%")),
+				)
+			).map(({ key }) => key);
+		const before = new Set(await writtenKeys());
+
+		// Its chat is gone, so the version can't be recorded.
+		const refused = await runOnPostgres(
+			Effect.exit(
+				Files.seedWrittenFile(
+					{ ...by, chatId: crypto.randomUUID() },
+					{ kind: "markdown", title: "Lost", content: "# Lost" },
+				).pipe(Effect.provide(deletesFailing)),
+			),
+		);
+		const orphaned = (await writtenKeys()).filter((key) => !before.has(key));
+		await onDatabase((db) =>
+			db
+				.update(blobDeletion)
+				.set({ dueAt: new Date(0) })
+				.where(inArray(blobDeletion.prefix, orphaned as BlobStore.Key[])),
+		);
+		await runOnPostgres(BlobDeletions.deleteQueued);
+
+		expect(refused._tag).toBe("Failure");
+		expect(orphaned).toHaveLength(1);
+		expect((await writtenKeys()).filter((key) => !before.has(key))).toEqual([]);
 	});
 });

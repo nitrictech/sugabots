@@ -88,11 +88,23 @@ const eventPayloadSchemas = {
 	"message.completed": Schema.Struct({
 		chatId,
 		messageId,
+		/**
+		 * Which execution of its turn ended the reply: a client ignores an
+		 * older one's end arriving after a newer one began writing it again.
+		 * Absent from events stored before it was sent.
+		 */
+		execution: Schema.optional(execution),
 		content: Schema.String,
 		status: messageStatusSchema,
 		finishedAt: isoTimestampSchema,
 	}),
-	"message.failed": Schema.Struct({ chatId, messageId, error: Schema.String }),
+	/** `execution` is as on `message.completed`. */
+	"message.failed": Schema.Struct({
+		chatId,
+		messageId,
+		execution: Schema.optional(execution),
+		error: Schema.String,
+	}),
 	/** Somebody reacted to the message or took a reaction back; `reactions` is all it has now. */
 	"message.reactions_changed": Schema.Struct({
 		chatId,
@@ -163,7 +175,15 @@ const eventPayloadSchemas = {
 	/** One of the member's tabs says what it is looking at, so their other tabs hold back notifications about it. */
 	presence: presenceSchema,
 	/**
-	 * The one control event. Sent when the server cannot give the client a
+	 * The first event on a stream that resumes from nowhere, sent once
+	 * the server knows where in the stream it starts: everything after it
+	 * follows. A client fetches its view over REST on hearing it, holding the
+	 * events after it until that view arrives, so a change between its first
+	 * fetch and the stream starting is not lost.
+	 */
+	ready: nothing,
+	/**
+	 * The control event that restarts a view. Sent when the server cannot give the client a
 	 * continuous history: the resume point was pruned, the replay is too long
 	 * to be worth sending, or the subscriber fell too far behind. It means
 	 * "refetch this view over REST, then keep listening".
@@ -311,6 +331,7 @@ export const chatUpdateEventSchema = Schema.Union([
 	withEnvelope("chat.read", P["chat.read"]),
 	withEnvelope("member.typing", P["member.typing"]),
 	withEnvelope("chat.nested_chat_changed", P["chat.nested_chat_changed"]),
+	withEnvelope("ready", P.ready.schema),
 	withEnvelope("reset", P.reset.schema),
 ]);
 
@@ -320,6 +341,7 @@ export const workspaceUpdateEventSchema = Schema.Union([
 	withEnvelope("chat.nested_chat_changed", P["chat.nested_chat_changed"]),
 	withEnvelope("reach.changed", P["reach.changed"]),
 	withEnvelope("member.changed", P["member.changed"]),
+	withEnvelope("ready", P.ready.schema),
 	withEnvelope("reset", P.reset.schema),
 ]);
 
@@ -328,6 +350,7 @@ export const memberUpdateEventSchema = Schema.Union([
 	withEnvelope("notification", P.notification),
 	withEnvelope("approvals.changed", P["approvals.changed"]),
 	withEnvelope("presence", P.presence),
+	withEnvelope("ready", P.ready.schema),
 	withEnvelope("reset", P.reset.schema),
 ]);
 

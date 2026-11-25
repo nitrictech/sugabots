@@ -61,10 +61,11 @@ export const WEBHOOK_SOURCE_SECRET_PLACEHOLDERS: Record<WebhookSource, string> =
 /** What a caller must do to be let in, for each source, in the note under the webhook's rows. */
 export const WEBHOOK_SOURCE_NOTES: Record<WebhookSource, string> = {
 	github:
-		"Add the address as a webhook in GitHub, with the content type application/json, and give it the same secret.",
+		"Add the address as a webhook in GitHub, with the content type application/json, and give it the same secret. Keep signed requests private. A captured request can be sent again.",
 	stripe: "Add the address as an endpoint in Stripe, and paste its signing secret.",
 	slack: "Set the address as your Slack app's Request URL, and paste its Signing Secret.",
-	linear: "Add the address as a webhook in Linear, and paste its signing secret.",
+	linear:
+		"Add the address as a webhook in Linear, and paste its signing secret. The signed time must be within one minute of the server clock.",
 };
 
 export const WEBHOOK_AUTH_OPTIONS = [

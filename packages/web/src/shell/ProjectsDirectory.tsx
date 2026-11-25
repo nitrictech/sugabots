@@ -7,7 +7,7 @@ import { projectLink } from "@/lib/links.ts";
 import { useJoinProject, useProjects } from "@/lib/projects.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { NewProjectDialog } from "@/shell/NewProject.tsx";
-import { Page } from "@/shell/Page.tsx";
+import { DirectoryBody, Page } from "@/shell/Page.tsx";
 import { PrivateMark, ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -41,7 +41,7 @@ export function ProjectsDirectory() {
 				)
 			}
 		>
-			<div className="mx-auto flex w-full max-w-180 flex-col gap-6 px-4 pt-6 pb-12">
+			<DirectoryBody>
 				{error && <Alert>{failureMessage(error)}</Alert>}
 				{join.error && <Alert>{failureMessage(join.error)}</Alert>}
 				{!isPending && projects?.length === 0 && (
@@ -78,7 +78,7 @@ export function ProjectsDirectory() {
 						))}
 					</SettingsGroup>
 				)}
-			</div>
+			</DirectoryBody>
 			<Dialog open={creating} onOpenChange={setCreating}>
 				<NewProjectDialog
 					onCreated={async (project) => {

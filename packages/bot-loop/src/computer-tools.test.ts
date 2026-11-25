@@ -1,19 +1,29 @@
 import { HOST_REQUEST_TOOL, memberStream } from "@sugabots/contracts";
 import { ComputerHostBlocked, NoComputerProvider } from "@sugabots/contracts/errors/computers";
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
-import { seedMember, seedProject } from "@sugabots/core/authentication/seed.test-support";
+import {
+	seedAutomation,
+	seedMember,
+	seedProject,
+	seedRun,
+} from "@sugabots/core/authentication/seed.test-support";
+import { seedChat } from "@sugabots/core/chats/seed.test-support";
 import { aChatAwaitingReply } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
 import { ComputerProviderStore } from "@sugabots/core/computers/computer-provider-store";
+import { ComputerSignIn } from "@sugabots/core/computers/computer-sign-in";
+import { Computers } from "@sugabots/core/computers/computers";
 import { noComputers } from "@sugabots/core/computers/testing";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
 import {
 	blockedHost,
 	bot,
+	computer,
 	membership,
 	projectAllowedHost,
 	toolCall,
+	turn,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
@@ -21,16 +31,18 @@ import { proveCanDecide } from "@sugabots/core/proofs/can-decide";
 import { proveIsMember } from "@sugabots/core/proofs/is-member";
 import { named } from "@sugabots/core/proofs/proof";
 import { authenticators, principals } from "@sugabots/core/proofs/world.test-support";
+import { Egress } from "@sugabots/core/providers/network/egress";
+import { unimplemented } from "@sugabots/core/testing";
+import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
 import { and, eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { botLoopOnPostgres, scriptedSteps } from "./testing.ts";
+import { Context, Effect, Layer } from "effect";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { botLoopOnPostgres, parkedCallOf, scriptedSteps } from "./testing.ts";
 
 /**
  * A bot's computer tools, and its host requests, through the bot loop over
  * the real operations on Postgres: who may use the computer, and who decides
- * a request to reach another host. No computer is ever made: each case is
- * refused, or asks for a host, before one would be.
+ * a request to reach another host.
  */
 // Each case runs a turn or two, each building the bot loop afresh, which takes seconds under load.
 const CASE_TIMEOUT = 30_000;
@@ -73,17 +85,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				db.select().from(projectAllowedHost).where(eq(projectAllowedHost.workspaceId, workspaceId)),
 			);
 
-		/**
-		 * An OpenSandbox provider for the workspace, never reached, letting
-		 * computers reach only allowed hosts, or every host where `networkMode` says.
-		 */
+		/** Configures the workspace's provider. Tests that use it supply its responses. */
 		const enableComputers = async (
 			networkMode: "allowed-hosts-only" | "open" = "allowed-hosts-only",
 		) => {
 			const providers = await runOnPostgres(
 				Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer),
 			);
-			await runOnPostgres(
+			return runOnPostgres(
 				providers.create(workspaceId, {
 					createdById: adminId,
 					provider: {
@@ -155,6 +164,109 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(requests[0]?.tools).toHaveProperty("browser_navigate");
 				expect(requests[0]?.tools).not.toHaveProperty("browser_take_screenshot");
 				expect(Object.hasOwn(requests[0]?.tools ?? {}, HOST_REQUEST_TOOL)).toBe(asksForHosts);
+			},
+		);
+
+		const queueOutsideRun = async (projectId: string, source: "github" | "webhook") => {
+			const automationId = await seedAutomation(workspaceId, projectId);
+			await onDatabase((db) =>
+				seedChat(db, { workspaceId, kind: "automation_feed", automationId, title: "Checks" }),
+			);
+			const started = await seedRun(workspaceId, automationId, botId, source);
+			await runOnPostgres(
+				Context.get(loop.services, Turns.Service).ask({
+					chatId: started.chat,
+					botId,
+					triggerMessageId: started.triggerMessage,
+					reason: "automation",
+				}),
+			);
+			return started.chat;
+		};
+
+		it.each([
+			["github", "open", true],
+			["github", "allowed-hosts-only", true],
+			["webhook", "allowed-hosts-only", true],
+			["chat", "open", false],
+		] as const)(
+			"uses the computer from %s with %s reach (approval required: %s)",
+			async (source, networkMode, asks) => {
+				const projectId = await runOnPostgres(defaultProjectOf(botId));
+				const provider = await enableComputers(networkMode);
+				const providerComputerId = Computers.ComputerId("desktop");
+				await onDatabase((db) =>
+					db.insert(computer).values({
+						workspaceId,
+						projectId,
+						computerProviderId: provider.id,
+						providerComputerId,
+						image: "sugabots-computer:dev",
+					}),
+				);
+
+				const sourceChat = source === "chat" ? chatId : await queueOutsideRun(projectId, source);
+
+				const providerFetch = computerService(providerComputerId, networkMode);
+				const input = { command: "pwd", timeout_seconds: 30 };
+				const workflow = await loop.runWorkflow(sourceChat, {
+					model: calling("run_command", input).model,
+					egress: unimplemented(Egress.Service, { providers: { for: () => providerFetch } }),
+					computerSignIn: ComputerSignIn.none,
+				});
+
+				if (asks) {
+					await workflow.suspended();
+					const { parked } = await parkedCallOf(workflow.executionId);
+					expect(providerFetch).not.toHaveBeenCalled();
+					expect((await chatsAs(adminId).approvals(workspaceId)).waiting).toMatchObject([
+						{ call: { id: parked.id, tool: "run_command", input } },
+					]);
+					await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
+					await workflow.completed();
+				} else {
+					await Promise.race([
+						workflow.completed(),
+						workflow.suspended().then(() => {
+							throw new Error("Computer command asked for approval");
+						}),
+					]);
+				}
+
+				const [opened] = await onDatabase((db) =>
+					db.select({ id: turn.id }).from(turn).where(eq(turn.executionId, workflow.executionId)),
+				);
+				if (!opened) throw new Error("No turn opened");
+				expect(await callsOf(opened.id)).toMatchObject([
+					{
+						status: "completed",
+						approvalStatus: asks ? "allowed" : null,
+						output: { stdout: "/workspace\n" },
+					},
+				]);
+			},
+		);
+
+		it.each([
+			["write_file", { path: "notes.txt", content: "Notes" }],
+			["copy_file_to_computer", { file: "example-file" }],
+			["browser_navigate", { url: "https://example.com/" }],
+		] as const)(
+			"asks before %s in a GitHub run with allowed hosts only",
+			async (toolName, input) => {
+				await enableComputers("allowed-hosts-only");
+				const runChat = await queueOutsideRun(
+					await runOnPostgres(defaultProjectOf(botId)),
+					"github",
+				);
+				const workflow = await loop.runWorkflow(runChat, { model: calling(toolName, input).model });
+
+				await workflow.suspended();
+				const { turnId, parked } = await parkedCallOf(workflow.executionId);
+				expect(parked).toMatchObject({ tool: toolName, input, approvalStatus: "pending" });
+				await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "deny" });
+				await workflow.completed();
+				expect(await callsOf(turnId)).toMatchObject([{ approvalStatus: "denied" }]);
 			},
 		);
 
@@ -394,3 +506,44 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		});
 	},
 );
+
+function computerService(id: Computers.ComputerId, mode: "open" | "allowed-hosts-only") {
+	return vi.fn(async (request: Parameters<typeof fetch>[0]) => {
+		const url = new URL(request instanceof Request ? request.url : request.toString());
+		if (url.origin === "https://computers.example.com") {
+			if (url.pathname.includes(`/${id}/endpoints/`)) {
+				return Response.json({ endpoint: "computer.example.com", headers: {} });
+			}
+			if (url.pathname.endsWith(`/${id}`)) {
+				return Response.json({
+					id,
+					status: { state: "Running" },
+					createdAt: "2026-01-01T00:00:00Z",
+				});
+			}
+			if (url.pathname.endsWith(`/${id}/networkpolicy`)) return new Response(null, { status: 204 });
+		}
+		if (url.origin === "https://computer.example.com") {
+			switch (url.pathname) {
+				case "/ping":
+					return new Response("ok");
+				case "/policy":
+					return Response.json({
+						policy: { defaultAction: mode === "open" ? "allow" : "deny", egress: [] },
+					});
+				case "/credential-vault":
+					return Response.json({ code: "NOT_FOUND", message: "Missing" }, { status: 404 });
+				case "/command":
+					return new Response(
+						[
+							'data: {"type":"stdout","text":"/workspace"}',
+							'data: {"type":"execution_complete","execution_time":1}',
+							"",
+						].join("\n\n"),
+						{ headers: { "content-type": "text/event-stream" } },
+					);
+			}
+		}
+		throw new Error(`Unexpected computer service request to ${url}`);
+	});
+}

@@ -68,10 +68,6 @@
 			}
 		},
 		{
-			"includes": ["packages/web/src/**/*.{ts,tsx}", "packages/website/src/**/*.{ts,tsx}"],
-			"plugins": ["./lint/no-fixed-tailwind-values.grit"]
-		},
-		{
 			"includes": [
 				"packages/core/src/providers/connectors/github/**/*.ts",
 				"packages/core/src/providers/models/**/*.ts",
@@ -120,11 +116,7 @@
 				"packages/contracts/src/errors/**/*.ts",
 				"packages/server/src/http/errors.ts"
 			],
-			"plugins": [
-				"./lint/errors-implement-domain-error.grit",
-				"./lint/no-effect-promise.grit",
-				"./lint/no-unchecked-user-text.grit"
-			]
+			"plugins": ["./lint/no-effect-promise.grit", "./lint/no-unchecked-user-text.grit"]
 		},
 		{
 			"includes": [
@@ -588,6 +580,19 @@
 			"linter": {
 				"enabled": false
 			}
+		},
+		{
+			"includes": [
+				"packages/**/src/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx",
+				"!**/testing.ts",
+				"!packages/core/src/computers/computers.ts",
+				"!packages/core/src/computers/computer-disk.ts"
+			],
+			"plugins": ["./lint/errors-implement-domain-error.grit"]
 		}
 	]
 }

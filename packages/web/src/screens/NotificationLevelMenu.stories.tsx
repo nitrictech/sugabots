@@ -18,7 +18,7 @@ if (!bot || !project) throw new Error("The story app has no bot or project");
 async function openMenuOf(row: Element) {
 	await waitFor(async () => {
 		await userEvent.pointer({ keys: "[MouseRight]", target: row });
-		await expect(screen.getByRole("menu")).toBeVisible();
+		await waitFor(() => expect(screen.getByRole("menu")).toBeVisible());
 	});
 }
 
@@ -100,7 +100,9 @@ export const MutingABot = meta.story({
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
 		const row = await sidebar.findByText(bot.name);
 		await openMenuOf(row);
-		await expect(await screen.findByRole("group", { name: "Notify you about…" })).toBeVisible();
+		await waitFor(() =>
+			expect(screen.getByRole("group", { name: "Notify you about…" })).toBeVisible(),
+		);
 		await chooseAndClose(await screen.findByRole("menuitemradio", { name: "Nothing" }));
 		await expect(await sidebar.findByRole("img", { name: "Muted" })).toBeVisible();
 

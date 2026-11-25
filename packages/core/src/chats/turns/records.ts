@@ -24,11 +24,13 @@ import {
 	DateTime,
 	Duration,
 	Effect,
+	ErrorReporter,
 	Exit,
 	Layer,
 	Option,
 	Ref,
 	Schedule,
+	Schema,
 	Semaphore,
 } from "effect";
 import { type Database, transaction } from "../../database/database.ts";
@@ -40,13 +42,14 @@ import type { EndsTurn } from "../../proofs/ends-turn.ts";
 import type { RunsTurn } from "../../proofs/runs-turn.ts";
 import { Models } from "../../providers/models/models.ts";
 import { processLayer, Tier } from "../../tiers.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { modelPrompt, steerPromptMessages } from "./context.ts";
 import { TurnExecution } from "./execution.ts";
 import { type FenceRefusal, holdRunningTurn } from "./fence.ts";
+import { logTurnDefect } from "./lifecycle.ts";
 import { type LostEnding, type ReplyDraft, type TurnCheckpoint, TurnStore } from "./store.ts";
 import { INTERRUPTED_CALL } from "./tool-calls/lifecycle.ts";
 import { sameCallAsSent, ToolCallStore } from "./tool-calls/store.ts";
+import type { WorkAdmission } from "./work-admission.ts";
 
 /**
  * What the bot loop records of a turn while it runs, each part demanding
@@ -138,9 +141,8 @@ export interface Interface {
 		FenceRefusal
 	>;
 	/**
-	 * Parks the turn until its approvers decide the step's calls that wait for
-	 * approval. Says which approvals it waits for, or that it may not wait: it
-	 * was asked to stop, or its automation run takes no more turns.
+	 * Parks an admitted turn until its approvers decide the step's calls. Returns
+	 * the approvals, or `NotWaiting` when the turn was asked to stop.
 	 */
 	readonly askForApprovals: <P, T>(
 		runsTurn: RunsTurn<P, T>,
@@ -151,6 +153,7 @@ export interface Interface {
 				readonly reopenCallId?: string | undefined;
 			}
 		>,
+		admitted: WorkAdmission.ApprovalAdmission,
 	) => Effect.Effect<
 		| { readonly _tag: "Waiting"; readonly approvals: readonly string[] }
 		| { readonly _tag: "NotWaiting" },
@@ -163,8 +166,9 @@ export interface Interface {
 	) => Effect.Effect<void, FenceRefusal>;
 	/**
 	 * Ends the turn's run as `ending` says. An answer completes the reply; one
-	 * that says nothing and carries no file lets an optional turn stay silent,
-	 * and fails any other. Says whether a failed turn runs again, and whether an
+	 * that says nothing and carries no file fails a required turn. An optional
+	 * turn with no text or files completes with its tool calls, or stays
+	 * silent if it made none. Says whether a failed turn runs again, and whether an
 	 * answer came too soon: a steer reached the turn that no step has read, so
 	 * the turn takes another step to read it rather than end.
 	 */
@@ -380,7 +384,7 @@ export const make = Effect.gen(function* () {
 					);
 					if (Option.isSome(ended)) return yield* Effect.fail(ended.value);
 					if (Cause.hasInterruptsOnly(cause)) return yield* Effect.interrupt;
-					return yield* requestFailed(runsTurn, cause);
+					return yield* requestFailed(runsTurn, cause, ids.random);
 				}
 				const finished = streamed.value;
 				yield* turns.recordModelRequest(runsTurn, {
@@ -474,12 +478,13 @@ export const make = Effect.gen(function* () {
 				handsOnUnreadSteers: steered,
 			};
 			const answered = (checkpoint?.reply.content ?? "").trim() !== "";
+			const optionalWithCalls =
+				context.reason === "optional" && !!checkpoint?.reply.toolCalls.length;
 			// Files the bot shared answer as words do. Looked up only when nothing else answered.
-			if (answered || (yield* turns.replyFiles(reply)).length > 0) {
+			if (answered || optionalWithCalls || (yield* turns.replyFiles(reply)).length > 0) {
 				yield* turns.complete(runsTurn, completion);
 				return ended;
 			}
-			// Writing nothing is how a bot declines an optional turn.
 			if (context.reason === "optional") {
 				yield* turns.staySilent(runsTurn, completion);
 				return ended;
@@ -550,7 +555,7 @@ export const make = Effect.gen(function* () {
 						: ({ _tag: "Refused", reason: MISSING_APPROVAL_RECORD } as const);
 				}),
 			).pipe(Effect.provideContext(database)),
-		askForApprovals: (runsTurn, step, approvals) =>
+		askForApprovals: (runsTurn, step, approvals, admitted) =>
 			Effect.gen(function* () {
 				const pending = yield* Effect.forEach(approvals, (approval) =>
 					Effect.gen(function* () {
@@ -574,6 +579,7 @@ export const make = Effect.gen(function* () {
 				);
 				const suspended = yield* turns.suspend(
 					runsTurn,
+					admitted,
 					pending,
 					pending.map(({ approvalId, sdkToolCallId, tool, binding }) => ({
 						approvalId,
@@ -638,17 +644,25 @@ function offered(tools: readonly OfferedTool[]): ToolSet {
  * Logs why a model request failed and says what the loop records of it: the
  * turn runs again only while that is safe and could help. A request that
  * would fail the same way again does not, nor one that asks to be left
- * longer than a turn should wait. A defect is logged in full and told as
- * the reply stopping unexpectedly.
+ * longer than a turn should wait. A defect gives members a reference id for
+ * the full cause in the log.
  */
-const requestFailed = <P, T>(runsTurn: RunsTurn<P, T>, cause: Cause.Cause<unknown>) =>
+const requestFailed = <P, T>(
+	runsTurn: RunsTurn<P, T>,
+	cause: Cause.Cause<unknown>,
+	newReferenceId: Effect.Effect<string>,
+) =>
 	Effect.gen(function* () {
 		const expected = Cause.findErrorOption(cause).pipe(Option.filter(Models.isRequestFailure));
-		if (Option.isNone(expected)) {
-			yield* Effect.logError("A turn's model request died", cause);
+		if (Option.isNone(expected) || Cause.hasDies(cause)) {
+			const userMessage = yield* logTurnDefect(
+				yield* newReferenceId,
+				`The model request of turn ${runsTurn.turn.value} died`,
+				cause,
+			);
 			return {
 				_tag: "Failed",
-				userMessage: TURN_STOPPED_UNEXPECTEDLY,
+				userMessage,
 				mayRunAgain: true,
 			} satisfies ModelRequestOutcome;
 		}
@@ -672,12 +686,6 @@ const requestFailed = <P, T>(runsTurn: RunsTurn<P, T>, cause: Cause.Cause<unknow
 const logTurnFailure = <P, T>(runsTurn: RunsTurn<P, T>, why: string) =>
 	Effect.logError(`Turn ${runsTurn.turn.value} failed: ${why}`, `(chat ${runsTurn.chat})`);
 
-/**
- * What members, and the model, are told of a call that may change things,
- * which an execution of the turn sent and never saw finish, as when its
- * process stopped: it is not sent again.
- */
-
 export const MISSING_APPROVAL_RECORD = "The call has no approval record";
 
 /** What a call is told when its tool changed since an execution sent it, so it isn't sent again. */
@@ -692,12 +700,16 @@ const AWAITS_APPROVAL = userText`This call waits for approval, so it wasn't sent
 /** What a failed call is told as when it was recorded without saying why. */
 const TOOL_CALL_FAILED = userText`The tool failed before it finished.`;
 
-/** What members are told of a turn a defect ended, rather than a failure it expects. */
-const TURN_STOPPED_UNEXPECTEDLY = userText`The reply stopped unexpectedly.`;
-
 /** The model finished without writing anything or asking anyone. */
-class ReplyWithoutAnswer extends Error implements UserFacing {
-	override readonly message = "Model finished without an answer";
+class ReplyWithoutAnswer
+	extends Schema.TaggedError<ReplyWithoutAnswer>()("ReplyWithoutAnswer", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return "Model finished without an answer";
+	}
 	get userMessage() {
 		return userText`The reply stopped before answering.`;
 	}

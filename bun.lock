@@ -318,6 +318,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "e2b@2.64.0": "patches/e2b@2.64.0.patch",
+  },
   "catalog": {
     "@effect/platform-node": "4.0.0-rc.117",
     "@effect/sql-pg": "4.0.0-rc.117",

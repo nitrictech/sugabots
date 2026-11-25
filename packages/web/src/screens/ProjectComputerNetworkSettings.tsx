@@ -28,6 +28,7 @@ export function ProjectComputerNetworkSettings({ owner }: { owner: ResourceOwner
 		return (
 			<SettingsGroup
 				label="Network"
+				headingLevel={2}
 				note="The workspace's computers are open. Its admins choose this, and any hosts it blocks, in its computer settings."
 			>
 				<SettingsRow
@@ -46,6 +47,7 @@ export function ProjectComputerNetworkSettings({ owner }: { owner: ResourceOwner
 		<>
 			<SettingsGroup
 				label="Network"
+				headingLevel={2}
 				note={`This ${ownerWord}'s computer connects to the workspace's hosts and these. When it needs another, a bot asks in a chat, and ${canManage ? "you can allow it there" : `someone who manages the ${ownerWord} decides`}.`}
 			>
 				{addedHosts.map((added) => (

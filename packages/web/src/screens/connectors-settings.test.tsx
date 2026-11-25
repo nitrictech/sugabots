@@ -512,7 +512,7 @@ describe("a bot's Connectors page", () => {
 		await showConnectors();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
-		within(row).getByText("No actions found yet");
+		within(row).getByText("No tools found yet");
 		expect(within(row).queryByRole("button", { name: /all tools/ })).toBeNull();
 	});
 

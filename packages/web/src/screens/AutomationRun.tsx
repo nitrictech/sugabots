@@ -173,7 +173,7 @@ export function RunMessage({
 				) : (
 					<p className="m-0 text-sm text-body-foreground leading-normal">
 						{item.error ??
-							(outcome === "cancelled" ? "The run was stopped." : "It posted nothing.")}
+							(outcome === "cancelled" ? "The run ended early." : "It posted nothing.")}
 					</p>
 				)}
 				{latest && outcome === "failed" && retryFailure !== undefined && (

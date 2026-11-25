@@ -6,13 +6,11 @@ import {
 	HOST_REQUEST_TOOL,
 } from "@sugabots/contracts";
 import { MAX_SHARED_FILE_BYTES } from "@sugabots/contracts/operations/computers";
-import { UserText, userText } from "@sugabots/errors";
+import { type DomainError, UserText, userText } from "@sugabots/errors";
 import { Effect } from "effect";
-import type { BlobStore } from "../../../blob-store/blob-store.ts";
 import { Computers } from "../../../computers/computers.ts";
 import type { ProjectComputers } from "../../../computers/project-computers.ts";
 import type { RunEffect } from "../../../database/database.ts";
-import type { UserFacing } from "../../../user-message.ts";
 import { type Failed, failed } from "../failed.ts";
 
 /*
@@ -35,7 +33,7 @@ export type AttachToReply = (file: {
 	name: string;
 	contentType: string;
 	content: Uint8Array;
-}) => Effect.Effect<FilePart, UserFacing | BlobStore.Failure>;
+}) => Effect.Effect<FilePart, DomainError>;
 
 /**
  * Where a turn works in the computer of the project it works in. Both are under `/workspace`, so

@@ -5,6 +5,8 @@ import {
 	check,
 	primaryKey as compositePrimaryKey,
 	foreignKey,
+	index,
+	integer,
 	jsonb,
 	pgTable,
 	text,
@@ -152,6 +154,55 @@ export const computerLease = pgTable(
 );
 
 export type ComputerLeaseHolderKind = "turn" | "viewer";
+
+/**
+ * A machine at a provider that no `computer` row records, which is destroyed
+ * there and then forgotten: no transaction is held across a provider's call,
+ * so what a call will leave behind is written down before it is made, and
+ * survives the process stopping part-way.
+ *
+ * A row is written in the same transaction that last records the machine or
+ * gives it up: before a computer is made, naming the label it will carry, and
+ * deleted with the transaction that records it; when a project moves to
+ * another computer, or its record is deleted without its machine, naming the
+ * machine left. A migration writes one for a computer it found nothing to
+ * keep for.
+ */
+export const computerDestruction = pgTable(
+	"computer_destruction",
+	{
+		id: primaryKey(),
+		workspaceId: uuid("workspace_id").notNull(),
+		/** The provider the machine is at; removing it destroys these first. */
+		computerProviderId: uuid("computer_provider_id").notNull(),
+		/** The provider's own id for the machine; null until a creation returns it. */
+		providerComputerId: text("provider_computer_id").$type<Computers.ComputerId>(),
+		/**
+		 * The value of the machine's {@link CREATION_LABEL}, which finds it at the
+		 * provider when its id was never recorded; null for one made without it.
+		 */
+		creationId: uuid("creation_id"),
+		/** When it is next tried: a creation's grace runs out, or a retry's backoff. */
+		dueAt: stamp("due_at"),
+		/** Each claim adds one, so whoever claimed it last deletes it. */
+		attempts: integer("attempts").notNull().default(0),
+	},
+	(table) => [
+		foreignKey({
+			columns: [table.computerProviderId, table.workspaceId],
+			foreignColumns: [computerProvider.id, computerProvider.workspaceId],
+			name: "computer_destruction_provider_workspace_fkey",
+		}).onDelete("cascade"),
+		index("computer_destruction_due_idx").on(table.dueAt, table.id),
+		check(
+			"computer_destruction_found_check",
+			sql`${table.providerComputerId} is not null or ${table.creationId} is not null`,
+		),
+	],
+);
+
+/** The label a computer is made with, whose value is its creation's id. */
+export const CREATION_LABEL = "sugabots.creation";
 
 /**
  * A host every computer in a workspace may reach, beyond the trusted ones

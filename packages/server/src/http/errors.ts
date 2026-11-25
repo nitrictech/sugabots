@@ -1,8 +1,7 @@
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { type ApiFailure, Forbidden, NotFound } from "@sugabots/contracts/http";
-import type { UserFacing } from "@sugabots/core/user-message";
 import { type DomainError, type PublicError, toPublicError, type UserText } from "@sugabots/errors";
-import { Effect, Schema } from "effect";
+import { Effect, Schema, SchemaAST } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 
 /** One of the API's failure classes, such as `NotFound`. */
@@ -27,13 +26,7 @@ type ApiFailureClass = new (fields: {
  */
 export const asHttpError =
 	<const Statuses extends Record<string, ApiFailureClass>>(statuses: Statuses) =>
-	<
-		A,
-		E extends
-			| ((DomainError | UserFacing) & { readonly _tag: keyof Statuses & string })
-			| ApiFailure,
-		R,
-	>(
+	<A, E extends (DomainError & { readonly _tag: keyof Statuses & string }) | ApiFailure, R>(
 		effect: Effect.Effect<A, E, R>,
 	): Effect.Effect<
 		A,
@@ -45,7 +38,7 @@ export const asHttpError =
 			const Failure = statuses[failure._tag] as Statuses[Exclude<E, ApiFailure>["_tag"]];
 			return new Failure({
 				message: failure.userMessage,
-				...(isDomainError(failure) ? { error: toPublicError(failure) } : {}),
+				error: toPublicError(failure),
 			}) as InstanceType<typeof Failure>;
 		});
 
@@ -76,19 +69,20 @@ export const memberOnly = <A, E, R>(
 		(refusal) => Effect.die(refusal),
 	);
 
-/** Whether `failure` is a `DomainError` rather than an older `UserFacing` error. */
-function isDomainError(failure: DomainError | UserFacing): failure is DomainError {
-	return "isRetryable" in failure;
-}
-
 /**
  * A failure as a response, for the router-level middleware that answers
- * before any endpoint does and so has no endpoint to encode it.
+ * before any endpoint does and so has no endpoint to encode it. Its status is
+ * the one `schema` declares, as an endpoint's would be.
  */
 export function failureResponse<F extends ApiFailure>(
 	schema: Schema.Codec<F, unknown>,
 	failure: F,
-	status: number,
 ): HttpServerResponse.HttpServerResponse {
+	const status = httpApiStatus(schema.ast) ?? INTERNAL_SERVER_ERROR;
 	return HttpServerResponse.jsonUnsafe(Schema.encodeSync(schema)(failure), { status });
 }
+
+const httpApiStatus = SchemaAST.resolveAt<number>("httpApiStatus");
+
+/** The status the HttpApi gives a failure whose schema declares none. */
+const INTERNAL_SERVER_ERROR = 500;

@@ -31,7 +31,7 @@ interface StreamLedgerOptions {
 	model: string;
 	access: Pick<
 		ModelProviderStore.ProviderAccess,
-		"providerId" | "builtIn" | "baseUrl" | "apiFormat"
+		"providerId" | "builtIn" | "baseUrl" | "apiFormat" | "oauthTokens"
 	>;
 	/** The step the stream's first request is, counting on from there. */
 	step: number;
@@ -91,7 +91,14 @@ export const streamLedger = (options: StreamLedgerOptions): Effect.Effect<Stream
 				open = undefined;
 				const usage = sdkUsage && usageFromAiSdk(sdkUsage);
 				const cost =
-					sdkUsage && requestCost(options.access, options.model, sdkUsage, options.registry);
+					sdkUsage &&
+					requestCost(
+						// Made with its subscription sign-in's tokens, not a key.
+						{ ...options.access, signedIn: options.access.oauthTokens !== undefined },
+						options.model,
+						sdkUsage,
+						options.registry,
+					);
 				annotate(request.span, outcome, usage, cost);
 				if (request.id !== undefined) {
 					yield* options.requests

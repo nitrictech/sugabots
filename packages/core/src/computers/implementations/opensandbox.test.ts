@@ -18,6 +18,7 @@ const createComputer = async () => {
 			networkMode: "allowed-hosts-only",
 		},
 		await Effect.runPromise(Ids.make),
+		{ providers: { for: () => fetch }, validateProviderUrl: () => Effect.void },
 	);
 	return Effect.runPromise(
 		Effect.result(

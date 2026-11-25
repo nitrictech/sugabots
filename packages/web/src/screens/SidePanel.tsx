@@ -86,7 +86,7 @@ export function SidePanel({
 						{label}
 					</h2>
 					{actions}
-					<CloseButton onClick={onClose} className={cn(headerless && "max-md:hidden")} />
+					<CloseButton onClick={onClose} className={headerless ? "max-md:hidden" : undefined} />
 				</header>
 				<FloatingCards value={floating}>{children}</FloatingCards>
 			</aside>

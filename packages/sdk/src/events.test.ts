@@ -254,12 +254,16 @@ describe("resume", () => {
 		expect(calls[1]?.headers.get("last-event-id")).toBe("7");
 	});
 
-	it("asks the caller to refetch when the first connection ends before an event id", async () => {
-		const { fetch, calls } = scripted(": ping\n\n", frame({ event: "message.completed", id: 8 }));
+	it("leaves the refetch after a reconnect with nothing to resume from to the server's ready", async () => {
+		const ready = frame({ event: "ready", data: { v: 1, type: "ready" } });
+		const { fetch, calls } = scripted(
+			`${ready}: ping\n\n`,
+			ready + frame({ event: "message.completed", id: 8 }),
+		);
 
-		const seen = await take(events(fetch).chat("c1"), 2);
+		const seen = await take(events(fetch).chat("c1"), 3);
 
-		expect(seen.map((event) => event.type)).toEqual(["reset", "message.completed"]);
+		expect(seen.map((event) => event.type)).toEqual(["ready", "ready", "message.completed"]);
 		expect(calls[1]?.headers.get("last-event-id")).toBeNull();
 	});
 
@@ -295,9 +299,9 @@ describe("resume", () => {
 			frame({ event: "message.completed", id: 9 }),
 		);
 
-		const seen = await take(events(fetch).chat("c1"), 3);
+		const seen = await take(events(fetch).chat("c1"), 2);
 
-		expect(seen.map((event) => event.type)).toEqual(["reset", "reset", "message.completed"]);
+		expect(seen.map((event) => event.type)).toEqual(["reset", "message.completed"]);
 		expect(calls[1]?.headers.get("last-event-id")).toBeNull();
 	});
 
@@ -326,6 +330,38 @@ describe("failure", () => {
 			"message.created",
 		]);
 		expect(calls).toHaveLength(2);
+	});
+
+	it.each([
+		["a number of seconds", "120"],
+		["an HTTP date", new Date(Date.UTC(2026, 10, 25, 12, 2)).toUTCString()],
+	])("waits at least as long as Retry-After asks, given as %s", async (_form, retryAfter) => {
+		vi.useFakeTimers({ now: Date.UTC(2026, 10, 25, 12, 0) });
+		let calls = 0;
+		const fetch = (async () => {
+			calls++;
+			return calls === 1
+				? new Response(JSON.stringify({ message: "restarting" }), {
+						status: 503,
+						headers: { "retry-after": retryAfter },
+					})
+				: new Response(new TextEncoder().encode(frame({ event: "message.created", id: 1 })), {
+						headers: { "content-type": "text/event-stream" },
+					});
+		}) as typeof globalThis.fetch;
+		const stream = events(fetch).chat("c1");
+
+		try {
+			const first = take(stream, 1);
+			await vi.advanceTimersByTimeAsync(119_999);
+			expect(calls).toBe(1);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(calls).toBe(2);
+			expect((await first).map((event) => event.type)).toEqual(["message.created"]);
+		} finally {
+			stream.close();
+			vi.useRealTimers();
+		}
 	});
 
 	it.each([

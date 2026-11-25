@@ -1,5 +1,5 @@
-import { type UserText, userText } from "@sugabots/errors";
-import { Data } from "effect";
+import { UserText, userText } from "@sugabots/errors";
+import { type Cause, Data, Effect } from "effect";
 import type { TurnEndRequest, TurnStatus } from "../../database/schema.ts";
 
 /**
@@ -56,8 +56,13 @@ export function unfinishedCallsMessage(request: TurnEndRequest | null): UserText
 	}
 }
 
-/** What members are told of a turn a defect ended, rather than a failure it expects. */
-export const TURN_STOPPED_UNEXPECTEDLY = userText`The reply stopped unexpectedly.`;
+/** turnStoppedUnexpectedly tells members how to find a turn's defect in the log. */
+export const turnStoppedUnexpectedly = (referenceId: string): UserText =>
+	UserText.unchecked(`The reply stopped unexpectedly. Reference: ${referenceId}.`);
+
+/** logTurnDefect logs the full cause and returns the user message with the same reference id. */
+export const logTurnDefect = (referenceId: string, message: string, cause: Cause.Cause<unknown>) =>
+	Effect.as(Effect.logError(message, { referenceId }, cause), turnStoppedUnexpectedly(referenceId));
 
 /** What members are told of a system bot's turn cut short by its process stopping. */
 export const SYSTEM_TURN_INTERRUPTED = userText`It was interrupted before it finished.`;
@@ -167,13 +172,18 @@ export function transition(state: TurnState, event: TurnEvent): Transition {
 		Complete: () => (isActive(state) ? next({ ...factsOf(state), status: "done" }) : ended),
 		Fail: ({ userMessage }) => (isActive(state) ? next(failed(state, userMessage)) : ended),
 		Cancel: () => (isActive(state) ? next(cancelled(state)) : ended),
-		Abandon: ({ status, userMessage }) =>
-			isActive(state)
-				? next(
-						status === "failed" ? failed(state, userMessage) : cancelled(state),
-						FollowUp.End({ userMessage }),
-					)
-				: ended,
+		Abandon: ({ status, userMessage }) => {
+			if (state.status === "failed" && state.retrying) {
+				const error = status === "failed" ? userMessage : state.userMessage;
+				return next(failed(state, error), FollowUp.End({ userMessage: error }));
+			}
+			if (!isActive(state)) return ended;
+			if (state.endRequested) return endAsRequested(state);
+			return next(
+				status === "failed" ? failed(state, userMessage) : cancelled(state),
+				FollowUp.End({ userMessage }),
+			);
+		},
 		AutomationEnded: () => requestEnd(state, "run_ended"),
 		Interrupt: () => requestEnd(state, "interrupted"),
 		EndAsRequested: () => (isActive(state) ? endAsRequested(state) : ended),

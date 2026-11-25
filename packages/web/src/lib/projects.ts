@@ -99,7 +99,7 @@ export function useDeleteProject() {
 /** Who is in the project; nothing is asked while `projectId` is undefined. */
 export function useProjectMembers(projectId: string | undefined) {
 	return useQuery({
-		queryKey: ["project-members", projectId],
+		queryKey: ["project-members", projectId, "members"],
 		queryFn: projectId
 			? ({ signal }) =>
 					Effect.runPromise(client.api.projects.listMembers({ params: { projectId } }), { signal })
@@ -113,7 +113,7 @@ export function useProjectMembers(projectId: string | undefined) {
  */
 export function useMembersReachingProject(projectId: string) {
 	return useQuery({
-		queryKey: ["project-members", projectId],
+		queryKey: ["project-members", projectId, "reaching"],
 		queryFn: ({ signal }) =>
 			Effect.runPromise(client.api.projects.listMembersReaching({ params: { projectId } }), {
 				signal,
@@ -165,7 +165,8 @@ export function useJoinProject() {
 
 /**
  * Fetches again what shows who is in the project `projectId`: the projects,
- * which count its members, its members, and who reaches it.
+ * which count its members, and both its members and who reaches it, which
+ * share the key `["project-members", projectId]` before their own shape's.
  */
 function refreshMembership(
 	queries: QueryClient,
@@ -174,7 +175,6 @@ function refreshMembership(
 ) {
 	return Promise.all([
 		queries.invalidateQueries({ queryKey: ["projects", workspaceId] }),
-		queries.invalidateQueries({ queryKey: ["project-members", projectId] }),
 		queries.invalidateQueries({ queryKey: ["project-members", projectId] }),
 	]);
 }

@@ -503,7 +503,7 @@ function whyYou(context: TurnContext): string {
 		case "reply":
 			return "It is your turn because a member replied to your message.";
 		case "optional":
-			return "It is your turn because you lead this project, and its latest message mentions only members, not any bot. It may well be meant for them alone. Reply only if you can clearly help or were asked something; otherwise stay silent by writing nothing at all, and members will see you read it.";
+			return "It is your turn because you lead this project, and its latest message mentions only members, not any bot. It may well be meant for them alone. Reply only if you can clearly help or were asked something. To stay silent, make no tool calls and write nothing. Members will see you read it.";
 		case "collaboration":
 			return "It is your turn because another bot's latest message mentioned you, asking for your help. Answer what it asked, here in the chat. Bots you mention now aren't asked, so answer with what you know and find yourself.";
 		case "hand_back":

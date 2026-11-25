@@ -7,7 +7,7 @@ import { botLink, projectLink } from "@/lib/links.ts";
 import { OWNER_MARK_SIZE_PX, ownerMarkTransition } from "@/lib/owner-mark.ts";
 import { TurnTakingAvatar } from "@/shell/Bot.tsx";
 import { attentionOf, type BotStanding } from "@/shell/SidebarBot.tsx";
-import { ProjectInitial, type ProjectStanding } from "@/shell/SidebarProject.tsx";
+import { ProjectInitial, type ProjectWithAttention } from "@/shell/SidebarProject.tsx";
 import { AttentionDot } from "@/ui/attention-dot.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
@@ -30,7 +30,7 @@ export function IconRail({
 	/** The viewer's Personal Assistant, with how it stands, once it is made. */
 	assistant: BotStanding | undefined;
 	/** The projects the viewer is in, with how each stands. */
-	projects: readonly ProjectStanding[];
+	projects: readonly ProjectWithAttention[];
 	/** The bots the viewer pinned, with how each stands. */
 	bots: readonly BotStanding[];
 	currentProjectSlug: string | undefined;
@@ -57,16 +57,19 @@ export function IconRail({
 				{assistant ? <RailDivider /> : <div aria-hidden className="h-8.25 shrink-0" />}
 				<section aria-label="Projects">
 					<ul className={RAIL_LIST}>
-						{projects.map((standing) => (
-							<li key={standing.project.id}>
+						{projects.map((projectWithAttention) => (
+							<li key={projectWithAttention.project.id}>
 								<RailItem
-									label={standing.project.name}
-									render={<Link {...projectLink(standing.project)} />}
-									current={standing.project.slug === currentProjectSlug}
-									attentionMark={attentionOf(standing)}
+									label={projectWithAttention.project.name}
+									render={<Link {...projectLink(projectWithAttention.project)} />}
+									current={projectWithAttention.project.slug === currentProjectSlug}
+									attentionMark={attentionOf(projectWithAttention)}
 								>
-									<span style={ownerMarkTransition(standing.project.id)} className="flex">
-										<ProjectInitial project={standing.project} size="nav" />
+									<span
+										style={ownerMarkTransition(projectWithAttention.project.id)}
+										className="flex"
+									>
+										<ProjectInitial project={projectWithAttention.project} size="nav" />
 									</span>
 								</RailItem>
 							</li>

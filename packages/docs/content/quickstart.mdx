@@ -68,6 +68,9 @@ docker compose version
 Back it up, and keep it private. Losing `SECRETS_ENCRYPTION_KEY` makes every
 saved API key unreadable. Changing `BETTER_AUTH_SECRET` signs everybody out.
 
+If your `.env` still uses `CREDENTIALS_ENCRYPTION_KEY`, see how to
+[rename it while keeping the same key](/docs/deploy-with-docker#updating).
+
 </Careful>
 
 ## What's running

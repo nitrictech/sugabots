@@ -20,6 +20,13 @@ import { type MarkedConnector, useMarkedConnectors } from "@/lib/connectors.ts";
 import { formatClockTime, formatDay, formatFullTimestamp } from "@/lib/list-time.ts";
 import { BROWSER_TOOL_PREFIX, splitToolKey } from "@/lib/tool-names.ts";
 import { BotAvatar, WatchingAvatar } from "@/shell/Bot.tsx";
+import {
+	ActivityCollapsible,
+	ActivityCollapsibleContent,
+	ActivityCollapsibleTrigger,
+	ActivityLine,
+	ActivityTitle,
+} from "@/ui/activity.tsx";
 import { MemberAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -248,10 +255,11 @@ export function ChatMessages({
 						{typing && message.author.kind === "bot" && isTyping(message) && (
 							<TypingIndicator key={`${message.id}-typing`} typers={[message.author]} />
 						)}
-						{message.status === "writing" && (
+						{message.status === "writing" && message.author.kind === "bot" && (
 							<InterruptTurnFor
 								chatId={message.chatId}
 								replyId={message.id}
+								botName={message.author.name}
 								permissions={approvalPermissions}
 							/>
 						)}
@@ -504,7 +512,7 @@ function ChatMessage({
 				</RowNote>
 			)}
 			{message.status === "cancelled" && (
-				<RowNote className="font-semibold text-subtle-foreground">Reply stopped</RowNote>
+				<RowNote className="font-semibold text-subtle-foreground">Reply interrupted</RowNote>
 			)}
 			{queuedNote && <RowNote className="text-subtle-foreground">Queued</RowNote>}
 		</>
@@ -524,6 +532,7 @@ function ChatMessage({
 	return (
 		<article
 			aria-label={`${author.name}, ${messageStatus(message, { queued })}`}
+			aria-busy={message.status === "writing"}
 			data-message-id={message.id}
 			className={cn(
 				"group/message relative flex flex-col px-5 pb-0.5 transition-colors duration-700 motion-reduce:animate-none",
@@ -570,16 +579,20 @@ function ChatMessage({
 						/>
 						{parts}
 						{message.thinking && message.thinking.length > 0 && (
-							<details className="max-w-full text-sm text-subtle-foreground">
-								<summary className="cursor-pointer">Thinking</summary>
-								<div className="space-y-2 pt-1">
+							<ActivityCollapsible>
+								<ActivityCollapsibleTrigger>
+									<ActivityLine>
+										<ActivityTitle>Thinking</ActivityTitle>
+									</ActivityLine>
+								</ActivityCollapsibleTrigger>
+								<ActivityCollapsibleContent className="space-y-2 text-sm">
 									{message.thinking.map(({ step, text }) => (
-										<p key={step} className="whitespace-pre-wrap break-words">
+										<p key={step} className="whitespace-pre-wrap">
 											{text}
 										</p>
 									))}
-								</div>
-							</details>
+								</ActivityCollapsibleContent>
+							</ActivityCollapsible>
 						)}
 						{fileList}
 						{previews &&
@@ -923,7 +936,7 @@ function messageStatus(message: Message, { queued }: { queued: boolean }): strin
 		return "failed";
 	}
 	if (message.status === "cancelled") {
-		return "stopped";
+		return "interrupted";
 	}
 	return formatClockTime(new Date(message.createdAt));
 }
@@ -944,13 +957,15 @@ function speakersIn(messages: readonly Message[]): string[] {
 function InterruptTurnFor({
 	chatId,
 	replyId,
+	botName,
 	permissions,
 }: {
 	chatId: string;
 	replyId: string;
+	botName: string;
 	permissions: ApprovalPermissions | undefined;
 }) {
 	const interruptible = permissions?.interruptTurns.find((turn) => turn.replyId === replyId);
 	if (!interruptible) return null;
-	return <InterruptTurnButton chatId={chatId} turnId={interruptible.turnId} />;
+	return <InterruptTurnButton chatId={chatId} turnId={interruptible.turnId} botName={botName} />;
 }

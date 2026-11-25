@@ -17,8 +17,9 @@
  * TypeScript checker, so an aliased import, a service bound to another name, or
  * a local `Tier` is judged by what it is, not by how it is spelled.
  *
- * Test files and test doubles are not checked. `packages/workflow` is below
- * `packages/contracts` and cannot import the markers, so it is not checked either.
+ * Test files and test doubles are outside the check. `packages/workflow` is
+ * also outside it. The workflow engine depends only on Effect packages, and
+ * the tier marker and layer wrapper belong to contracts and core.
  *
  * `node lint/check-service-tiers.ts` fails if anything is unmarked or unwrapped,
  * listing where.

@@ -26,8 +26,8 @@ type ComputerOperation =
 /**
  * A bot's work on its computer: the computer of the project its turn's chat
  * is in. Each call proves the bot may use it, as `CanUseChatComputer`
- * decides, and that the call may run, which needs approval only where a
- * Personal Assistant's rule or an inherited one says so, then does `work`.
+ * decides, and that the call may run under the tool and turn's approval rules
+ * before it does `work`.
  * Any principal but a bot in a turn reaches no computer this way.
  */
 const usingComputer = <N extends ComputerOperation, A, E, R>(

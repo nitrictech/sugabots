@@ -12,7 +12,7 @@ import {
 	type StreamEvent,
 } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { Cause, Effect, Exit, Layer, Metric, Scope } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { askerColumns } from "../authentication/turn-facts.ts";
@@ -28,6 +28,8 @@ import {
 	member,
 	membership,
 	message,
+	notificationDelivery,
+	pendingNotification,
 	project,
 	projectBot,
 	projectMember,
@@ -359,6 +361,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			turnId,
 			botId: botId,
 			messageId: crypto.randomUUID(),
+			execution: 1,
 			content,
 			finishedAt: new Date(),
 			contextTokens: undefined,
@@ -542,6 +545,80 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			unblock.resolve();
 			await service.close();
 		}
+	});
+
+	describe("after the process sending them stops", () => {
+		/** Makes everything left unsent look old enough for the sweep, as if its process stopped a while ago. */
+		const aWhileLater = async () => {
+			const before = new Date(Date.now() - 60_000);
+			await onDatabase((db) => db.update(pendingNotification).set({ dueAt: before }));
+			await onDatabase((db) =>
+				db
+					.update(notificationDelivery)
+					.set({ createdAt: before })
+					.where(isNull(notificationDelivery.sentAt)),
+			);
+		};
+
+		it("sends again a notification it recorded and failed to publish", async () => {
+			const chat = await projectChat();
+			const mention = `@${handleFromName(members.bob.name)} look`;
+			const failing = await served(
+				unimplemented(EventBus.Service, {
+					publish: async () => {
+						throw new Error("The bus is down");
+					},
+				}),
+			);
+			try {
+				const { handler } = await failing.run(Notifications.Service);
+				const handled = joiningWhatItStarts(
+					transaction(handler([memberPosted(chat, members.ada, mention)])),
+				);
+				await failing.run(handled.handled);
+				await handled.allEnded;
+			} finally {
+				await failing.close();
+			}
+
+			await aWhileLater();
+			const { sendLeftBehind } = await notifications();
+			await run(sendLeftBehind);
+			await run(sendLeftBehind);
+
+			expect(sentTo(members.bob.id)).toEqual([expect.objectContaining({ body: mention })]);
+		});
+
+		it("sends an event's notifications it stopped before working out", async () => {
+			const chat = await projectChat();
+			const mention = `@${handleFromName(members.bob.name)} look`;
+			const stopped = await served();
+			const { handler } = await stopped.run(Notifications.Service);
+			// Who may be told waits on the workspace's lock, which a change of reach holds.
+			const changingReach = holdTransaction(
+				query((db) =>
+					db
+						.select({ id: workspace.id })
+						.from(workspace)
+						.where(eq(workspace.id, workspaceId))
+						.for("update"),
+				),
+			);
+			await changingReach.held;
+			await stopped.run(transaction(handler([memberPosted(chat, members.ada, mention)])));
+			await waitUntilWaitingOnLocks(1);
+			const stopping = stopped.close();
+			await changingReach.release();
+			await stopping;
+			const sentBeforeStopping = sentTo(members.bob.id).length;
+
+			await aWhileLater();
+			const { sendLeftBehind } = await notifications();
+			await run(sendLeftBehind);
+
+			expect(sentBeforeStopping).toBe(0);
+			expect(sentTo(members.bob.id)).toEqual([expect.objectContaining({ body: mention })]);
+		});
 	});
 
 	it("does not let a bot reach everyone with @channel", async () => {
@@ -995,6 +1072,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				turnId,
 				botId: botId,
 				messageId: crypto.randomUUID(),
+				execution: 1,
 				userMessage: userText`The model is unavailable.`,
 				willRetry: false,
 			});

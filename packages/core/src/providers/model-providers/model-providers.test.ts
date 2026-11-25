@@ -1,16 +1,19 @@
 import type { ModelProviderUpdate, NewModelProvider } from "@sugabots/contracts";
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import {
+	DiscoveryCredentialsRejected,
 	ModelInUse,
 	ProviderActivationRequiresCredential,
 } from "@sugabots/contracts/errors/providers";
 import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
-import { Layer } from "effect";
+import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { query } from "../../database/database.ts";
 import { bot, member, membership, modelProvider, workspace } from "../../database/schema.ts";
 import {
 	closeDatabase,
+	holdTransaction,
 	onDatabase,
 	type Promised,
 	runOnPostgres,
@@ -18,10 +21,12 @@ import {
 } from "../../database/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
+import { unimplemented } from "../../testing.ts";
 import { BotStore } from "../../workspaces/bots/bot-store.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
 import { providerIn, providersIn } from "./model-provider-reads.ts";
 import { ModelProviderStore } from "./model-provider-store.ts";
+import type { OAuthTokens } from "./sign-in/sign-in.ts";
 
 /**
  * Recording what a provider offers, against real SQL.
@@ -51,9 +56,14 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		{ allowPrivateNetwork = true, as = memberId } = {},
 	) => {
 		const call = await servedOperations({
-			egress: Layer.succeed(Egress.Service, {
+			egress: unimplemented(Egress.Service, {
 				providers: { for: () => async (url) => respond(String(url)) },
-				validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork })),
+				validateProviderUrl: urlValidation(
+					createEgressUrlValidator({
+						allowPrivateNetwork,
+						lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+					}),
+				),
 				oauth: async () => new Response(null, { status: 503 }),
 				webFetch: async () => new Response(null, { status: 503 }),
 			}),
@@ -74,6 +84,8 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			updateModel: operation("modelProviders.updateModel"),
 			switchOffModel: operation("modelProviders.switchOffModel"),
 			switchOff: operation("modelProviders.switchOff"),
+			startSignIn: operation("modelProviders.startSignIn"),
+			completeSignIn: operation("modelProviders.completeSignIn"),
 		};
 	};
 
@@ -152,36 +164,138 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		},
 	);
 
-	it.each(["first", "replacement"])(
-		"keeps a rejected %s API key saved but disabled",
-		async (key) => {
-			const openai = (await list(workspaceId)).find(({ builtIn }) => builtIn === "openai");
-			if (!openai) throw new Error("fixture");
-			expect(openai).toMatchObject({ active: false, hasApiKey: false });
-			if (key === "replacement") {
-				await store.update(workspaceId, openai.id, { apiKey: "old-key" }, memberId);
-				await switchOn(openai.id);
+	it("keeps a rejected first API key saved but disabled", async () => {
+		const openai = (await list(workspaceId)).find(({ builtIn }) => builtIn === "openai");
+		if (!openai) throw new Error("fixture");
+		const setup = await setupWith(() => new Response(null, { status: 401 }));
+
+		const saved = await setup.update({
+			workspace: workspaceId,
+			providerId: openai.id,
+			changes: { apiKey: "secret" },
+		});
+
+		expect(saved).toMatchObject({ active: false, hasApiKey: true, status: "error" });
+		expect(await view(openai.id)).toMatchObject({ active: false, hasApiKey: true });
+	});
+
+	it("refuses a replacement API key the provider rejects, and keeps the provider on with its old key", async () => {
+		const openai = (await list(workspaceId)).find(({ builtIn }) => builtIn === "openai");
+		if (!openai) throw new Error("fixture");
+		await store.update(workspaceId, openai.id, { apiKey: "old-key" }, memberId);
+		await switchOn(openai.id);
+		let activeDuringCheck: boolean | undefined;
+		const setup = await setupWith(async () => {
+			activeDuringCheck = (await view(openai.id))?.active;
+			return new Response(null, { status: 401 });
+		});
+
+		const refused = await setup
+			.update({ workspace: workspaceId, providerId: openai.id, changes: { apiKey: "secret" } })
+			.catch((error: unknown) => error);
+
+		expect(refused).toBeInstanceOf(DiscoveryCredentialsRejected);
+		expect(String((refused as DiscoveryCredentialsRejected).userMessage)).toBe(
+			"The provider didn't accept the API key or sign-in. Replace the key, or sign in again, then try again.",
+		);
+		expect(activeDuringCheck).toBe(true);
+		expect(await view(openai.id)).toMatchObject({ active: true, hasApiKey: true });
+		expect((await store.access(workspaceId, openai.id))?.apiKey).toBe("old-key");
+	});
+
+	it("refreshes a sign-in's tokens with the provider's row unlocked, spending its refresh token once for two turns", async () => {
+		const chatgpt = (await list(workspaceId)).find(({ builtIn }) => builtIn === "chatgpt");
+		if (!chatgpt) throw new Error("fixture");
+		const stale = { access: "old", refresh: "once", expiresAt: 0, accountId: null };
+		const fresh = {
+			access: "new",
+			refresh: "next",
+			expiresAt: Date.now() + 3_600_000,
+			accountId: null,
+		};
+		await store.saveOAuthTokens(workspaceId, chatgpt.id, { tokens: stale, signedInById: memberId });
+		const refreshing = Promise.withResolvers<void>();
+		const answered = Promise.withResolvers<void>();
+		const spent: string[] = [];
+		const renewal = {
+			isStale: (tokens: OAuthTokens) => Effect.succeed(tokens.expiresAt < Date.now()),
+			refresh: (tokens: OAuthTokens) =>
+				Effect.promise(async () => {
+					spent.push(tokens.refresh);
+					refreshing.resolve();
+					await answered.promise;
+					return fresh;
+				}),
+		};
+
+		const first = store.renewOAuthTokens(workspaceId, chatgpt.id, renewal);
+		await refreshing.promise;
+		const second = store.renewOAuthTokens(workspaceId, chatgpt.id, renewal);
+		const lockingTheRow = holdTransaction(
+			query((db) =>
+				db
+					.select({ id: modelProvider.id })
+					.from(modelProvider)
+					.where(eq(modelProvider.id, chatgpt.id))
+					.for("update", { noWait: true }),
+			),
+		);
+		const rowFree = await lockingTheRow.held.then(
+			() => true,
+			() => false,
+		);
+		await lockingTheRow.release().catch(() => undefined);
+		answered.resolve();
+
+		expect(rowFree).toBe(true);
+		expect(await first).toEqual(fresh);
+		expect(await second).toEqual(fresh);
+		expect(spent).toEqual(["once"]);
+		expect((await store.access(workspaceId, chatgpt.id))?.oauthTokens).toEqual(fresh);
+	});
+
+	it("refuses a new sign-in the provider rejects, and keeps the provider on as it was signed in", async () => {
+		const chatgpt = (await list(workspaceId)).find(({ builtIn }) => builtIn === "chatgpt");
+		if (!chatgpt) throw new Error("fixture");
+		const signedIn = {
+			access: "old-access",
+			refresh: "old-refresh",
+			expiresAt: Date.now() + 3_600_000,
+			accountId: null,
+		};
+		await store.saveOAuthTokens(workspaceId, chatgpt.id, {
+			tokens: signedIn,
+			signedInById: memberId,
+		});
+		await switchOn(chatgpt.id);
+		let activeDuringCheck: boolean | undefined;
+		const setup = await setupWith(async (url) => {
+			if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+				return Response.json({ device_auth_id: "device", user_code: "ABCD-EFGH" });
 			}
-			let activeDuringCheck: boolean | undefined;
-			const setup = await setupWith(async () => {
-				activeDuringCheck = (await view(openai.id))?.active;
-				return new Response(null, { status: 401 });
-			});
+			if (url.endsWith("/api/accounts/deviceauth/token")) {
+				return Response.json({ authorization_code: "code", code_verifier: "verifier" });
+			}
+			if (url.endsWith("/oauth/token")) {
+				return Response.json({ access_token: "new-access", refresh_token: "new-refresh" });
+			}
+			activeDuringCheck = (await view(chatgpt.id))?.active;
+			return new Response(null, { status: 401 });
+		});
+		const started = await setup.startSignIn({ workspace: workspaceId, providerId: chatgpt.id });
 
-			const saved = await setup.update({
-				workspace: workspaceId,
-				providerId: openai.id,
-				changes: { apiKey: "secret" },
-			});
+		const refused = await setup
+			.completeSignIn({ workspace: workspaceId, providerId: chatgpt.id, attempt: started.attempt })
+			.catch((error: unknown) => error);
 
-			expect(activeDuringCheck).toBe(false);
-			expect(saved).toMatchObject({ active: false, hasApiKey: true, status: "error" });
-			expect(await view(openai.id)).toMatchObject({
-				active: false,
-				hasApiKey: true,
-			});
-		},
-	);
+		expect(refused).toMatchObject({ _tag: "ProviderSignInFailed" });
+		expect(String((refused as { userMessage: unknown }).userMessage)).toBe(
+			"The provider didn't accept the API key or sign-in. Replace the key, or sign in again, then try again.",
+		);
+		expect(activeDuringCheck).toBe(true);
+		expect(await view(chatgpt.id)).toMatchObject({ active: true, signedIn: true });
+		expect((await store.access(workspaceId, chatgpt.id))?.oauthTokens?.access).toBe("old-access");
+	});
 
 	it.each([
 		{ requestedActive: undefined, active: true },

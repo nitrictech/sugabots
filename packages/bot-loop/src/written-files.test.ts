@@ -181,6 +181,26 @@ describe.skipIf(!process.env.DATABASE_URL)("written file tools, against Postgres
 		expect((await chatsAs(adminId).files.getVersion(report.id, 1)).content).toBe("# Weekly report");
 	});
 
+	it.each(["github", "webhook"] as const)(
+		"identifies a page written in a %s run",
+		async (outsideRun) => {
+			const runChat = await queueRun(await defaultProject(), outsideRun);
+			const input = { kind: "html", title: "Report", content: "<p>Weekly report</p>" };
+			const { model } = scriptedSteps(
+				{ calls: [{ toolCallId: "write-page", toolName: FILE_WRITE_TOOL, input }] },
+				{ text: ["Done."] },
+			);
+
+			await loop.runTurn(runChat, { model });
+
+			const [page] = await filesIn(runChat);
+			if (!page) throw new Error("The run did not write its page");
+			const files = chatsAs(adminId).files;
+			expect(await files.get(page.id)).toMatchObject({ ...input, outsideRun });
+			expect(await files.getVersion(page.id, 1)).toMatchObject({ ...input, outsideRun });
+		},
+	);
+
 	it("edits a routine run's own report without approval", async () => {
 		const runChat = await queueRun(await defaultProject(), "routine");
 		const report = await runOnPostgres(

@@ -4,7 +4,7 @@ import {
 	type StreamEvent,
 	streamEvent,
 } from "@sugabots/contracts";
-import { listedChat, type TestConnector, testMember } from "@sugabots/contracts/testing";
+import { listedChat, testMember } from "@sugabots/contracts/testing";
 import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -21,6 +21,7 @@ import {
 	storyProjectChatFor,
 	storyWorkspace,
 } from "../story-app.test-support.tsx";
+import { expiredConnector, expiredLinear } from "./ConnectorsNotice.test-support.ts";
 
 /*
  * A bot's chat as the app shows it: the sidebar with the projects' chats and bots beside it, the
@@ -293,46 +294,6 @@ export const SendingReturnsToLatest = meta.story({
 		await waitFor(() => expect(distanceFromLatest(viewport)).toBeLessThan(2));
 	},
 });
-
-/** A bot's connector whose sign-in the server refused during a turn. */
-function expiredConnector(n: number, name: string, url: string): TestConnector {
-	return {
-		id: `0199a3a0-0000-7000-8000-0000000007${String(n).padStart(2, "0")}`,
-		workspaceId: revenue.workspaceId,
-		projectId: growthDesk.defaultProjectId,
-		name,
-		handle: name.toLowerCase(),
-		url,
-		kind: "mcp",
-		auth: "oauth",
-		signedIn: false,
-		signInExpired: true,
-		secretHeader: null,
-		hasSecret: false,
-		appSettingsUrl: null,
-		status: "connected",
-		tools: [
-			{
-				name: "search",
-				description: "Search",
-				readOnly: true,
-				destructive: false,
-				access: "allow",
-			},
-		],
-		lastTestError: null,
-		connectedBy: {
-			id: "0199a3a0-0000-7000-8000-0000000000c3",
-			name: "Sam Rivera",
-			email: "sam.rivera@example.com",
-			image: null,
-		},
-		signedInAs: null,
-		createdAt: "2026-09-01T00:00:00.000Z",
-	};
-}
-
-const expiredLinear = expiredConnector(1, "Linear", "https://mcp.linear.app/mcp");
 
 /**
  * A connector whose sign-in expired: the composer says the bot can't use it,
@@ -645,7 +606,9 @@ export const NamedChat = meta.story({
 		);
 		await expect(canvas.getByRole("textbox", { name: "Message Pricing" })).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "More for Pricing" }));
-		await expect(await screen.findByRole("menuitem", { name: "Rename chat" })).toBeVisible();
+		await waitFor(() =>
+			expect(screen.getByRole("menuitem", { name: "Rename chat" })).toBeVisible(),
+		);
 	},
 });
 
@@ -1000,7 +963,7 @@ export const DetailsOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
 		await userEvent.click(
-			await canvas.findByRole("button", { name: storyChatFor(growthDesk).title }),
+			await canvas.findByRole("button", { name: `Details for ${storyChatFor(growthDesk).title}` }),
 		);
 		await expect(await canvas.findByRole("complementary", { name: "Details" })).toBeInTheDocument();
 	},
@@ -1058,7 +1021,9 @@ export const Computer = meta.story({
 	},
 	play: async ({ canvas }) => {
 		const details = await openDetails(canvas);
-		await expect(await within(details).findByRole("button", { name: "Not running" })).toBeVisible();
+		await waitFor(() =>
+			expect(within(details).getByRole("button", { name: "Not running" })).toBeVisible(),
+		);
 	},
 });
 

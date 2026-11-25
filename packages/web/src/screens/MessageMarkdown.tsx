@@ -346,7 +346,7 @@ const WRITERS = {
 		completesUnclosedMarkup: true,
 	},
 	member: {
-		className: "[--bot-mono:initial] [--bot-tint:initial]",
+		className: "member-markdown",
 		remarkPlugins: [...remarkPluginsWith({ singleTilde: false }), remarkOnlyWebLinks, remarkBreaks],
 		components: {
 			...COMPONENTS,

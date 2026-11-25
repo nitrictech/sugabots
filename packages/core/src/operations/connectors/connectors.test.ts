@@ -1,7 +1,6 @@
 import { createHmac } from "node:crypto";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { eq, sql } from "drizzle-orm";
-import { Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedAutomation, seedConnector } from "../../authentication/seed.test-support.ts";
 import { automationTrigger, connector } from "../../database/schema.ts";
@@ -25,6 +24,7 @@ import {
 import { ConnectorStore } from "../../providers/connectors/connector-store.ts";
 import { encryptAppCredential } from "../../providers/connectors/github/credential.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../../providers/network/egress.ts";
+import { unimplemented } from "../../testing.ts";
 import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
@@ -48,7 +48,7 @@ const NOWHERE = "http://127.0.0.1:9";
 const NO_CONNECTOR = "0199a3a0-0000-7000-8000-00000000c0de";
 
 /** Egress that lets connectors use addresses on this machine, and reaches only those. */
-const localEgress = Layer.succeed(Egress.Service, {
+const localEgress = unimplemented(Egress.Service, {
 	providers: { for: () => fetch },
 	validateProviderUrl: urlValidation(createEgressUrlValidator({ allowPrivateNetwork: true })),
 	oauth: fetch,

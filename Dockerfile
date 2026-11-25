@@ -13,6 +13,7 @@
 
 FROM --platform=$BUILDPLATFORM scratch AS manifests
 COPY package.json bun.lock /
+COPY patches /patches
 COPY --parents packages/*/package.json /
 
 # Bun installs, Node runs, as in CI.

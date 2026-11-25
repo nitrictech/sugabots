@@ -3,12 +3,12 @@ export * as WorkspaceSetup from "./workspace-setup.ts";
 import { NoModelChosen, NotReadyToFinish } from "@sugabots/contracts/errors/workspace";
 import { and, eq, isNull } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
-import { query, serviceOperations, transaction } from "../../database/database.ts";
+import { query, serviceOperations } from "../../database/database.ts";
 import { bot, workspace } from "../../database/schema.ts";
 import type { Named } from "../../proofs/proof.ts";
 import { eligibleSetupBot, type ReachesSetupBot } from "../../proofs/reaches-setup-bot.ts";
 import type { CanManageWorkspace } from "../../proofs/workspace-permissions.ts";
-import { holdingModel } from "../../providers/model-providers/held-models.ts";
+import { holdingModel, withHeldModelsLocked } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { BotStore } from "../bots/bot-store.ts";
@@ -53,7 +53,10 @@ export const make = Effect.gen(function* () {
 		complete: (canManage, chosenBot, target) =>
 			operation(
 				"complete",
-				transaction(
+				// The workspace's held-models lock comes before the chosen bot's row,
+				// as for a change of models that moves bots, so neither waits on the other.
+				withHeldModelsLocked(
+					target.workspace.value,
 					Effect.gen(function* () {
 						const resolved = target.workspace.value;
 						const [eligible] = yield* query((db) =>

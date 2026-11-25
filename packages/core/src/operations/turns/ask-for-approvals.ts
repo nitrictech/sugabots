@@ -1,8 +1,7 @@
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { turnsContracts } from "@sugabots/contracts/operations/turns";
 import { Effect } from "effect";
-import { Turns } from "../../chats/turns/turns.ts";
-import { underWorkspaceShare } from "../../proofs/workspace-lock.ts";
+import { Turns, WorkAdmission } from "../../chats/turns/turns.ts";
 import { defineOperation } from "../operation.ts";
 import { asRunningTurn } from "./running-turn.ts";
 
@@ -13,11 +12,15 @@ export const askForApprovals = defineOperation(
 			const records = yield* Turns.Records.Service;
 			if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun")
 				return yield* new ResourceHidden({ resource: "turn" });
-			return yield* underWorkspaceShare(
+			return yield* WorkAdmission.underApprovalAdmission(
+				principal.chat,
 				principal.workspace,
-				asRunningTurn(principal, input, (runsTurn) =>
-					records.askForApprovals(runsTurn, input.step, input.approvals),
-				),
+				(admitted) =>
+					asRunningTurn(principal, input, (runsTurn) =>
+						admitted
+							? records.askForApprovals(runsTurn, input.step, input.approvals, admitted)
+							: Effect.succeed({ _tag: "NotWaiting" } as const),
+					),
 			);
 		}),
 );

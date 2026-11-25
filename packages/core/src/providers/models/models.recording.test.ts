@@ -335,7 +335,8 @@ describe("the request a provider is sent", () => {
 				headers: {},
 				oauthTokens: tokens,
 			}),
-			(_workspaceId, _providerId, renew) => renew(tokens),
+			// Fresh, so nothing refreshes them.
+			() => Effect.succeed(tokens),
 		);
 
 		await answer(model, { ...input, model: "gpt-5.5" });
@@ -826,7 +827,7 @@ describe("recorded thinking paths", () => {
 		expect(sent[0]).not.toHaveProperty("reasoning");
 	});
 
-	it("combines the ChatGPT system instructions and stateless options with its thinking summary", async () => {
+	it("sends ChatGPT the system text only as its instructions, with stateless options and its thinking summary", async () => {
 		const { model, sent, addressed } = modelAnswering(
 			[responsesReply],
 			{
@@ -848,6 +849,9 @@ describe("recorded thinking paths", () => {
 			include: ["reasoning.encrypted_content"],
 			reasoning: { summary: "auto" },
 		});
+		// The system text goes once, as `instructions`: not again as a system or developer message.
+		const sentInput = sent[0]?.input as Array<{ role?: string }> | undefined;
+		expect(sentInput?.map(({ role }) => role)).toEqual(["user"]);
 	});
 
 	const withLookup = (delta: Record<string, unknown>) => () =>

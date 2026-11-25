@@ -6,11 +6,18 @@ import {
 	Sandbox as OpenSandbox,
 	SandboxApiException,
 	SandboxManager,
+	SandboxReadyTimeoutException,
 } from "@alibaba-group/opensandbox";
 import { createLifecycleClient } from "@alibaba-group/opensandbox/internal";
 import { DisplayName, userText } from "@sugabots/errors";
 import { Duration, Effect, Redacted } from "effect";
 import type { Ids } from "../../ids/ids.ts";
+import {
+	type Egress,
+	type EgressHttpClient,
+	EgressRefused,
+	workspaceUrlRefusal,
+} from "../../providers/network/egress.ts";
 import { Computers } from "../computers.ts";
 
 /**
@@ -31,16 +38,23 @@ const EXEC_GRACE = Duration.seconds(15);
  */
 const BOT_USER = { name: "bot", id: 1000, home: "/home/bot" } as const;
 
+/** How many sandboxes one page of a search by label asks for. */
+const LABELLED_PAGE_SIZE = 100;
+
 /** States in which the server has the sandbox but can't start it again. */
 const STOPPED_STATES: ReadonlySet<string> = new Set(["Terminated", "Failed"]);
 
 export const fromOpenSandbox = (
 	access: Computers.OpenSandboxAccess,
 	ids: Ids.Interface,
+	egress: Pick<Egress.Interface, "providers" | "validateProviderUrl">,
 ): Computers.Provider => {
 	const url = new URL(access.baseUrl);
+	const providerFetch: EgressHttpClient = (input, init) =>
+		egress.providers.for({ baseUrl: url.origin })(input, init);
+	const endpointFetch = Computers.fetchComputerEndpoint(egress);
 	const connectionConfig = () =>
-		new ConnectionConfig({
+		new EgressConnectionConfig(providerFetch, endpointFetch, {
 			domain: url.host,
 			protocol: url.protocol === "https:" ? "https" : "http",
 			apiKey: Redacted.value(access.apiKey),
@@ -55,6 +69,7 @@ export const fromOpenSandbox = (
 		const lifecycle = createLifecycleClient({
 			baseUrl: connectionConfig().getBaseUrl(),
 			apiKey: Redacted.value(access.apiKey),
+			fetch: providerFetch,
 		});
 		const { error, response } = await lifecycle.PUT("/sandboxes/{sandboxId}/networkpolicy", {
 			params: { path: { sandboxId } },
@@ -68,8 +83,14 @@ export const fromOpenSandbox = (
 			});
 		}
 	};
-	const unavailable = (cause: unknown) =>
-		new Computers.Unavailable({ provider: "opensandbox", cause });
+	const unavailable = (cause: unknown) => {
+		const refusal = cause instanceof SandboxReadyTimeoutException ? cause.cause : cause;
+		return new Computers.Unavailable({
+			provider: "opensandbox",
+			cause,
+			...(refusal instanceof EgressRefused && { reason: workspaceUrlRefusal(refusal) }),
+		});
+	};
 	const creationFailed = (cause: unknown) =>
 		cause instanceof SandboxApiException &&
 		cause.statusCode !== undefined &&
@@ -91,10 +112,16 @@ export const fromOpenSandbox = (
 		// root filesystem, and the server doesn't say which it runs on.
 		capabilities: { sleepKeeps: "disk", credentials: "host-and-path", blocksHosts: true },
 		networkMode: access.networkMode,
-		check: Effect.tryPromise({
-			try: () => manager().listSandboxInfos({ pageSize: 1 }),
-			catch: unavailable,
-		}).pipe(Effect.asVoid),
+		check: egress.validateProviderUrl(access.baseUrl).pipe(
+			Effect.mapError(unavailable),
+			Effect.andThen(
+				Effect.tryPromise({
+					try: () => manager().listSandboxInfos({ pageSize: 1 }),
+					catch: unavailable,
+				}),
+			),
+			Effect.asVoid,
+		),
 		create: (spec) =>
 			Effect.tryPromise({
 				try: () =>
@@ -189,6 +216,22 @@ export const fromOpenSandbox = (
 						}),
 				catch: unavailable,
 			}),
+		labelled: (key, value) =>
+			Effect.tryPromise({
+				try: async () => {
+					const found: Computers.ComputerId[] = [];
+					for (let page = 1; ; page++) {
+						const { items, pagination } = await manager().listSandboxInfos({
+							metadata: { [key]: value },
+							page,
+							pageSize: LABELLED_PAGE_SIZE,
+						});
+						for (const info of items) found.push(Computers.ComputerId(info.id));
+						if (!pagination?.hasNextPage) return found;
+					}
+				},
+				catch: unavailable,
+			}),
 	};
 
 	function toComputer(sandbox: OpenSandbox): Computers.Computer {
@@ -244,7 +287,11 @@ export const fromOpenSandbox = (
 						return { url: url.replace(/\/$/, ""), headers: { ...endpoint.headers } };
 					},
 					catch: unavailable,
-				}),
+				}).pipe(
+					Effect.flatMap((endpoint) =>
+						Computers.checkedEndpoint(egress, endpoint).pipe(Effect.mapError(unavailable)),
+					),
+				),
 			setNetwork: (network) =>
 				Effect.tryPromise({
 					try: async () => {
@@ -263,6 +310,45 @@ export const fromOpenSandbox = (
 		};
 	}
 };
+
+class EgressConnectionConfig extends ConnectionConfig {
+	constructor(
+		providerFetch: EgressHttpClient,
+		endpointFetch: EgressHttpClient,
+		options: ConstructorParameters<typeof ConnectionConfig>[0],
+	) {
+		super(options);
+		const api = new URL(this.getBaseUrl());
+		this.fetchStreaming = (input, init) => {
+			const request = new URL(input instanceof Request ? input.url : input.toString());
+			const fetch = request.origin === api.origin ? providerFetch : endpointFetch;
+			return fetch(input, init);
+		};
+		this.fetchWithTimeout = (input, init) => {
+			const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_SECONDS * 1000);
+			const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+			return this.fetchStreaming(input, {
+				...init,
+				signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+			});
+		};
+	}
+
+	private readonly fetchWithTimeout: EgressHttpClient;
+	private readonly fetchStreaming: EgressHttpClient;
+
+	override get fetch() {
+		return this.fetchWithTimeout;
+	}
+
+	override get sseFetch() {
+		return this.fetchStreaming;
+	}
+
+	override withTransportIfMissing(): ConnectionConfig {
+		return this;
+	}
+}
 
 /** The Docker volume or Kubernetes claim a sandbox's work is on. */
 export function workVolume(workName: string) {

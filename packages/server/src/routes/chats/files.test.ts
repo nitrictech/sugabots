@@ -22,6 +22,7 @@ import {
 	type MemberResolver,
 	signedInWith,
 } from "../../http/app.test-support.ts";
+import { MAX_JSON_BODY_BYTES } from "../../http/validation.ts";
 
 /**
  * The routes that upload and serve chat files. The uppercase address test runs
@@ -150,6 +151,29 @@ describe("uploading a chat file", () => {
 			contentType: "text/plain; charset=utf-8",
 			size: 5,
 		});
+	});
+
+	it.each([
+		["a small", 20],
+		["a larger than any JSON request", MAX_JSON_BODY_BYTES + 6 * 1024],
+	])("keeps %s JSON file whole", async (_size, bytes) => {
+		const json = JSON.stringify({ text: "x".repeat(bytes - 11) });
+		let received: string | undefined;
+		const response = await app({
+			"chats.uploadFile": (_principal, { name, content }) =>
+				Effect.gen(function* () {
+					const chunks = yield* Stream.runCollect(content).pipe(Effect.orDie);
+					received = Buffer.concat(chunks).toString();
+					return { id: FILE, name, contentType: "application/json", size: received.length };
+				}),
+		}).request(`/chats/${CHAT}/files?name=data.json&type=application%2Fjson`, {
+			method: "POST",
+			headers: { ...signedIn, "content-type": "application/json" },
+			body: json,
+		});
+
+		expect(response.status).toBe(201);
+		expect(received).toBe(json);
 	});
 
 	it("leaves the type to the name when the uploader names none", async () => {

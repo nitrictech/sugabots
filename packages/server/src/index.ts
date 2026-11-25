@@ -93,7 +93,8 @@ const ChatServiceLayers = ChatServices.layer.pipe(
 
 /**
  * Background runs the core and bot loop workflows, the scheduler, event
- * pruning, blob deletion, and computer measurement and upgrades.
+ * pruning, blob deletion, computer measurement and upgrades, and sending the
+ * notifications a stopped process left.
  */
 const Background = Layer.mergeAll(
 	ChatWorkflows.layer,
@@ -103,6 +104,7 @@ const Background = Layer.mergeAll(
 	BlobDeletions.layer,
 	UnsentAttachments.layer,
 	ProjectComputers.sweepLayer,
+	Notifications.sweepLayer,
 );
 
 /** The API and the web app on `PORT`, with better-auth answering who is calling. */
@@ -121,7 +123,7 @@ const Http = listeningLayer.pipe(
 );
 
 /**
- * The process, tier by tier. The tracer goes in at the bottom so that
+ * The process, layer by layer. The tracer goes in at the bottom so that
  * everything is traced: routes, better-auth's hooks, the background work, and
  * the statements they all send. The operation registry, with the services of
  * the domains moved onto operations, sits over the chat services, which some

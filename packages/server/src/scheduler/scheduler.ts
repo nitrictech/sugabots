@@ -17,6 +17,45 @@ const MAX_DELETION_RETRY_MS = Duration.toMillis(Duration.minutes(15));
 const UNINSTALL_POLL_INTERVAL = Duration.seconds(1);
 const SWEEP_ITEM_BACKOFF = Duration.minutes(5);
 
+/** When a sweep's item that failed is tried again, and the wait that set it. */
+interface SweepRetry {
+	readonly nextAtMs: number;
+	readonly delayMs: number;
+}
+
+/**
+ * One item's turn in a sweep. An item whose retry is not yet due is left as
+ * it is. Otherwise it is attempted: once it succeeds it has no retry; when it
+ * fails, the failure is logged and its retry is due after `retryDelayMs` of
+ * the wait before, or of none for a first failure.
+ */
+function attemptSweepItem<E>({
+	previous,
+	attempt,
+	retryDelayMs,
+	logFailure,
+}: {
+	readonly previous: SweepRetry | undefined;
+	readonly attempt: Effect.Effect<void, E>;
+	readonly retryDelayMs: (previousDelayMs: number | undefined) => number;
+	readonly logFailure: (cause: Cause.Cause<E>, retryInMs: number) => Effect.Effect<void>;
+}): Effect.Effect<SweepRetry | undefined, E> {
+	return Effect.gen(function* () {
+		if (previous && (yield* Clock.currentTimeMillis) < previous.nextAtMs) return previous;
+		return yield* attempt.pipe(
+			Effect.as(undefined),
+			Effect.catchCause((cause) =>
+				Effect.gen(function* () {
+					if (Cause.hasInterrupts(cause)) return yield* Effect.failCause(cause);
+					const delayMs = retryDelayMs(previous?.delayMs);
+					yield* logFailure(cause, delayMs);
+					return { nextAtMs: (yield* Clock.currentTimeMillis) + delayMs, delayMs };
+				}),
+			),
+		);
+	});
+}
+
 export const make = Effect.gen(function* () {
 	const authenticate = yield* SystemWorkAuthentication.Service;
 	const operations = yield* Operations.Service;
@@ -65,7 +104,8 @@ export const make = Effect.gen(function* () {
 			retryDelayMs?: (previousDelayMs: number | undefined) => number;
 		},
 	) => {
-		const retries = new Map<string, { nextAtMs: number; delayMs: number }>();
+		const retries = new Map<string, SweepRetry>();
+		const retryDelayMs = options.retryDelayMs ?? (() => Duration.toMillis(SWEEP_ITEM_BACKOFF));
 		return Effect.gen(function* () {
 			const due = new Map((yield* dueItems).map((item) => [options.key(item), item]));
 			for (const id of retries.keys()) {
@@ -74,27 +114,17 @@ export const make = Effect.gen(function* () {
 			yield* Effect.forEach(
 				due,
 				([id, item]) =>
-					Effect.gen(function* () {
-						const retry = retries.get(id);
-						if (retry && (yield* Clock.currentTimeMillis) < retry.nextAtMs) return;
-						yield* work(item, yield* request).pipe(
-							Effect.tap(() => Effect.sync(() => void retries.delete(id))),
-							Effect.catchCause((cause) =>
-								Effect.gen(function* () {
-									if (Cause.hasInterrupts(cause)) return yield* Effect.failCause(cause);
-									const now = yield* Clock.currentTimeMillis;
-									const delayMs =
-										options.retryDelayMs?.(retry?.delayMs) ?? Duration.toMillis(SWEEP_ITEM_BACKOFF);
-									retries.set(id, { nextAtMs: now + delayMs, delayMs });
-									yield* Effect.logError(message, {
-										[options.idField]: id,
-										cause,
-										retryInMs: delayMs,
-									});
-								}),
-							),
-						);
-					}),
+					attemptSweepItem({
+						previous: retries.get(id),
+						attempt: Effect.flatMap(request, (call) => work(item, call)),
+						retryDelayMs,
+						logFailure: (cause, retryInMs) =>
+							Effect.logError(message, { [options.idField]: id, cause, retryInMs }),
+					}).pipe(
+						Effect.tap((retry) =>
+							Effect.sync(() => (retry ? retries.set(id, retry) : retries.delete(id))),
+						),
+					),
 				{ concurrency: options.concurrency ?? 1, discard: true },
 			);
 		});

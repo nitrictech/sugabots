@@ -21,7 +21,7 @@ import { IconRail } from "@/shell/IconRail.tsx";
 import { useNewBot } from "@/shell/NewBot.tsx";
 import { OwnerSidebar, type OwnerSidebarPage } from "@/shell/OwnerSidebar.tsx";
 import { type BotStanding, SidebarBot } from "@/shell/SidebarBot.tsx";
-import { type ProjectStanding, SidebarProject } from "@/shell/SidebarProject.tsx";
+import { type ProjectWithAttention, SidebarProject } from "@/shell/SidebarProject.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
@@ -205,7 +205,7 @@ export function SidebarView({
 	/** The viewer's Personal Assistant, once it is there, with how it stands. */
 	assistant?: BotStanding;
 	/** The projects the viewer is in, with how each stands. */
-	projects: readonly ProjectStanding[];
+	projects: readonly ProjectWithAttention[];
 	/** The bots the viewer pinned, with how each stands. */
 	bots: readonly BotStanding[];
 	/** The project the page open is in, while it is in one. */
@@ -284,11 +284,11 @@ export function SidebarView({
 								</IconButton>
 							}
 						>
-							{projects.map((standing) => (
+							{projects.map((projectWithAttention) => (
 								<SidebarProject
-									key={standing.project.id}
-									standing={standing}
-									selected={standing.project.slug === currentProjectSlug}
+									key={projectWithAttention.project.id}
+									projectWithAttention={projectWithAttention}
+									selected={projectWithAttention.project.slug === currentProjectSlug}
 									notificationSettings={notificationSettings}
 								/>
 							))}

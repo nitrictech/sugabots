@@ -1,7 +1,7 @@
 export * as AutomationSettlement from "./settlement.ts";
 
 import { FILE_WRITING_TOOLS, filesWrittenBy, textWithoutNarration } from "@sugabots/contracts";
-import type { UserText } from "@sugabots/errors";
+import { UserText } from "@sugabots/errors";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
@@ -20,10 +20,10 @@ import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
 import { ChatStore } from "../store/store.ts";
 import { Turns } from "../turns/turns.ts";
-import type { AutomationRun } from "./automation.workflow.ts";
+import { Automation, type AutomationRun } from "./automation.workflow.ts";
 import { lockAutomationSettlement, lockAutomationSettlementOf } from "./execution.ts";
 import { AutomationRuns } from "./runs.ts";
-import { AutomationStore, endingAfter, endingOf, RUN_STOPPED_UNEXPECTEDLY } from "./store.ts";
+import { AutomationStore, endingAfter, endingOf } from "./store.ts";
 
 /**
  * Settles automation runs: records how a run ended once nothing in its chat
@@ -186,16 +186,20 @@ export const make = Effect.gen(function* () {
 				"failRun",
 				transaction(
 					Effect.gen(function* () {
+						const referenceId = yield* Automation.executionId(run);
+						const error = UserText.unchecked(
+							`The automation run stopped unexpectedly. Reference: ${referenceId}.`,
+						);
 						yield* lockAutomationSettlement(run.runId);
 						const chatId = yield* runChatOf(run.runId);
 						if (chatId) {
 							yield* settle(chatId, {
-								outcome: { state: "failed", error: RUN_STOPPED_UNEXPECTEDLY },
+								outcome: { state: "failed", error },
 							});
 						}
 						// Settling waits for work that is still stopping, but the run ends
 						// now: its automation's next run cannot start while it is running.
-						yield* automations.fail(run.runId, RUN_STOPPED_UNEXPECTEDLY);
+						yield* automations.fail(run.runId, error);
 					}),
 				),
 			),

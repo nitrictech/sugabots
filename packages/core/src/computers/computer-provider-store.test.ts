@@ -1,10 +1,11 @@
 import type { NewComputerProvider } from "@sugabots/contracts";
 import { Effect, Exit } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { member, workspace } from "../database/schema.ts";
+import { computerDestruction, member, workspace } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { toComputerProvider } from "./computer-provider-reads.ts";
 import { ComputerProviderStore } from "./computer-provider-store.ts";
+import { Computers } from "./computers.ts";
 
 /**
  * A workspace's computer providers against Postgres: as many as it likes, at
@@ -125,6 +126,42 @@ describe.skipIf(!process.env.DATABASE_URL)("computer providers, against Postgres
 
 		expect(updated && toComputerProvider(updated).hasApiKey).toBe(false);
 		expect(updated?.enabled).toBe(false);
+	});
+
+	it("keeps the key and address of a provider with a machine still to destroy, and takes a new key", async () => {
+		const provider = await create({ settings: { builtIn: "e2b" }, enabled: true, apiKey: "key" });
+		await onDatabase((db) =>
+			db.insert(computerDestruction).values({
+				workspaceId,
+				computerProviderId: provider.id,
+				providerComputerId: Computers.ComputerId("left-behind"),
+			}),
+		);
+		const refusal = (changes: Parameters<ComputerProviderStore.Interface["update"]>[2]) =>
+			runOnPostgres(Effect.flip(providers.update(workspaceId, provider.id, changes)));
+
+		const keyTaken = await refusal({ apiKey: null });
+		const moved = await refusal({
+			settings: {
+				builtIn: "e2b",
+				apiUrl: "https://e2b.example.com",
+				sandboxUrl: "https://computers.e2b.example.com",
+			},
+		});
+		const rotated = await runOnPostgres(
+			providers.update(workspaceId, provider.id, { apiKey: "another key" }),
+		);
+
+		for (const refused of [keyTaken, moved]) {
+			expect(refused).toBeInstanceOf(ComputerProviderStore.ComputerProviderHasComputers);
+			expect(
+				String((refused as ComputerProviderStore.ComputerProviderHasComputers).userMessage),
+			).toBe(
+				"This provider still has computers, which need its key and address to be removed. Reset its projects' computers, or remove the provider, before taking either away.",
+			);
+		}
+		expect(rotated?.enabled).toBe(true);
+		expect((await runOnPostgres(providers.access(workspaceId, provider.id)))?.access).toBeDefined();
 	});
 
 	it("forgets its template build once the template is another", async () => {

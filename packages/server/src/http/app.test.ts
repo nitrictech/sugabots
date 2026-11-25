@@ -1,15 +1,20 @@
 import { healthResponseSchema, meSchema } from "@sugabots/contracts";
+import { SessionAuthentication } from "@sugabots/core/authentication/session";
+import { noDatabase } from "@sugabots/core/database/testing";
 import { Operations } from "@sugabots/core/operations/registry";
 import { unimplemented } from "@sugabots/core/testing";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Logger, References, Schema } from "effect";
+import { HttpRouter } from "effect/unstable/http";
 import { describe, expect, it } from "vitest";
 import type { MemberResolver } from "./app.test-support.ts";
 import {
+	BASE_URL,
 	createTestApp,
 	identifiedBy,
 	serverSettingsWithWebAppAt,
 	sessionTokenIn,
 	signedInWith,
+	testRoutes,
 } from "./app.test-support.ts";
 import { MAX_JSON_BODY_BYTES } from "./validation.ts";
 
@@ -52,6 +57,32 @@ describe("GET /me", () => {
 	});
 });
 
+describe("GET /me after the session was revoked", () => {
+	it("answers signed out, though better-auth's cookie cache still holds the session", async () => {
+		const revokedApp = createTestApp(
+			Layer.merge(
+				identifiedBy(resolveMember),
+				Layer.effect(
+					SessionAuthentication.Service,
+					Effect.map(SessionAuthentication.make, (sessions) =>
+						SessionAuthentication.Service.of({
+							...sessions,
+							// The session's row is gone; only the cache still names it.
+							authenticateLongRunning: () =>
+								Effect.fail(new SessionAuthentication.SessionInvalid()),
+						}),
+					),
+				).pipe(Layer.provide(noDatabase)),
+			),
+		);
+
+		const response = await revokedApp.request("/me", { headers: signedInWith("good-token") });
+
+		expect(response.status).toBe(401);
+		expect(await response.json()).toMatchObject({ _tag: "Unauthorized" });
+	});
+});
+
 describe("unknown routes", () => {
 	it("answer in the API's error shape, not an empty body", async () => {
 		const response = await app.request("/nope");
@@ -61,44 +92,123 @@ describe("unknown routes", () => {
 	});
 });
 
+describe("a defect", () => {
+	it("answers a fixed message with a reference id, and logs the defect under the same id", async () => {
+		const logged: { message: unknown; reference: unknown }[] = [];
+		const capture = Logger.layer([
+			Logger.make(({ message, fiber }) => {
+				const annotations = fiber.getRef(References.CurrentLogAnnotations);
+				logged.push({ message, reference: annotations.reference });
+			}),
+		]);
+		const routes = testRoutes(
+			Layer.merge(
+				identifiedBy(resolveMember),
+				unimplemented(Operations.Service, {
+					"approvals.decide": () => Effect.die(new Error('relation "tool_call" does not exist')),
+				}),
+			),
+		);
+		const { handler, dispose } = HttpRouter.toWebHandler(routes, {
+			disableLogger: true,
+			middleware: (effect) => Effect.provide(effect, capture),
+		});
+
+		const response = await handler(
+			new Request(new URL("/api/tool-calls/call-id/approval", BASE_URL), {
+				method: "POST",
+				headers: { ...signedInWith("good-token"), "content-type": "application/json" },
+				body: JSON.stringify({ decision: "allow_once" }),
+			}),
+		);
+		await dispose();
+
+		expect(response.status).toBe(500);
+		const body = (await response.json()) as { reference?: string };
+		expect(body).toMatchObject({ _tag: "InternalServerError", reference: expect.any(String) });
+		expect(body).toMatchObject({
+			message: `Something unexpected went wrong. Reference: ${body.reference}`,
+		});
+		expect(JSON.stringify(body)).not.toContain("tool_call");
+		const entry = logged.find(({ reference }) => reference === body.reference);
+		expect(entry?.message).toEqual([
+			"Request failed",
+			new Error('relation "tool_call" does not exist'),
+		]);
+	});
+});
+
 describe("JSON body limit", () => {
-	it("rejects a declared oversized JSON body before routing or parsing it", async () => {
-		const response = await app.request("/nope", {
+	let decided = false;
+	const jsonApp = createTestApp(
+		Layer.merge(
+			identifiedBy(resolveMember),
+			unimplemented(Operations.Service, {
+				"approvals.decide": () =>
+					Effect.sync(() => {
+						decided = true;
+					}),
+			}),
+		),
+	);
+	/** Decides an approval, an endpoint that parses a JSON body. */
+	const decideApproval = (headers: Record<string, string>, body: string) =>
+		jsonApp.request("/tool-calls/call-id/approval", {
 			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				"content-length": String(MAX_JSON_BODY_BYTES + 1),
-			},
-			body: "{}",
+			headers: { ...signedInWith("good-token"), ...headers },
+			body,
+		});
+
+	it("rejects a declared oversized JSON body before parsing it", async () => {
+		const response = await decideApproval(
+			{ "content-type": "application/json", "content-length": String(MAX_JSON_BODY_BYTES + 1) },
+			JSON.stringify({ decision: "allow_once" }),
+		);
+
+		expect(response.status).toBe(413);
+		expect(await response.json()).toMatchObject({ _tag: "PayloadTooLarge" });
+		expect(decided).toBe(false);
+	});
+
+	it("rejects an oversized streamed body without content-length, whatever type it names", async () => {
+		const response = await decideApproval(
+			{ "content-type": "text/plain" },
+			JSON.stringify({ decision: "allow_once", padding: "x".repeat(MAX_JSON_BODY_BYTES) }),
+		);
+
+		expect(response.status).toBe(413);
+		expect(decided).toBe(false);
+	});
+
+	it("rejects an oversized body to better-auth's routes, which read it whole", async () => {
+		const response = await app.request("/auth/sign-in/email", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ email: "x".repeat(MAX_JSON_BODY_BYTES) }),
 		});
 
 		expect(response.status).toBe(413);
+	});
+
+	it("refuses a body of a type the endpoint does not take in the API's error shape", async () => {
+		const response = await decideApproval({ "content-type": "text/plain" }, "allow_once");
+
+		expect(response.status).toBe(415);
 		expect(await response.json()).toMatchObject({
-			_tag: "PayloadTooLarge",
+			_tag: "UnsupportedMediaType",
+			message: "This request's body is not of a type it takes. Send it as JSON",
 		});
+		expect(decided).toBe(false);
 	});
 
-	it("rejects an oversized streamed JSON body without content-length", async () => {
-		const response = await app.request("/nope", {
-			method: "POST",
-			headers: { "content-type": "application/problem+json" },
-			body: JSON.stringify({ value: "x".repeat(MAX_JSON_BODY_BYTES) }),
-		});
+	it("parses a JSON body under the limit", async () => {
+		const response = await decideApproval(
+			{ "content-type": "application/json" },
+			JSON.stringify({ decision: "allow_once" }),
+		);
 
-		expect(response.status).toBe(413);
-	});
-
-	it("does not apply the JSON limit to another media type", async () => {
-		const response = await app.request("/nope", {
-			method: "POST",
-			headers: {
-				"content-type": "text/plain",
-				"content-length": String(MAX_JSON_BODY_BYTES + 1),
-			},
-			body: "small",
-		});
-
-		expect(response.status).toBe(404);
+		expect(response.status).toBe(202);
+		expect(decided).toBe(true);
 	});
 });
 

@@ -50,7 +50,7 @@ export type ComposerAttachments = {
 };
 
 /** The files taken to send with a message. */
-type FilesForSending = {
+export type FilesForSending = {
 	/** The files as the message will show them, which it can before the API answers. */
 	parts: FilePart[];
 	/**

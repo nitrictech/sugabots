@@ -83,26 +83,37 @@ const lockOf = <P, W>(
 ): HoldsWorkspaceLock<P, W> =>
 	HoldsWorkspaceLockProof.prove([principal, workspace], { principal, workspace });
 
+export const readCommittedTransaction = <A, E, R>(body: Effect.Effect<A, E, R>) =>
+	transaction(
+		Effect.andThen(
+			query((db) => db.execute(sql`set transaction isolation level read committed`)),
+			body,
+		),
+	);
+
 /**
  * Runs an approval write, parking a call or deciding one, in a transaction
  * that first takes the workspace's row `FOR SHARE`, so it waits for a change
  * to who reaches what and sees it, and is refused in a workspace being
- * deleted. It takes the turn's row only after, in the lock order (see
- * `TurnStore`'s `lockedTurn`).
+ * deleted. If a transaction is already open, it must use `READ COMMITTED`.
+ * The workspace share precedes any turn locks.
  */
 export const underWorkspaceShare = <A, E, R>(workspaceId: string, body: Effect.Effect<A, E, R>) =>
-	transaction(
-		Effect.gen(function* () {
-			if (!isUuid(workspaceId)) return yield* new ResourceHidden({ resource: "workspace" });
-			yield* query((db) => db.execute(sql`set transaction isolation level read committed`));
-			const [locked] = yield* query((db) =>
-				db
-					.select({ deleting: workspaceTable.deleting })
-					.from(workspaceTable)
-					.where(eq(workspaceTable.id, workspaceId))
-					.for("share"),
-			);
-			if (!locked || locked.deleting) return yield* new ResourceHidden({ resource: "workspace" });
-			return yield* body;
-		}),
-	);
+	Effect.gen(function* () {
+		if (!isUuid(workspaceId)) return yield* new ResourceHidden({ resource: "workspace" });
+		const outer = yield* Effect.serviceOption(Transaction);
+		const withShare = Option.isSome(outer) ? transaction : readCommittedTransaction;
+		return yield* withShare(
+			Effect.gen(function* () {
+				const [locked] = yield* query((db) =>
+					db
+						.select({ deleting: workspaceTable.deleting })
+						.from(workspaceTable)
+						.where(eq(workspaceTable.id, workspaceId))
+						.for("share"),
+				);
+				if (!locked || locked.deleting) return yield* new ResourceHidden({ resource: "workspace" });
+				return yield* body;
+			}),
+		);
+	});

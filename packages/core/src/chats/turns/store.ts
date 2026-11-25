@@ -7,10 +7,10 @@ import {
 	stepThinkingSchema,
 } from "@sugabots/contracts";
 import { type CallPlan, callPlanSchema } from "@sugabots/contracts/turns";
-import { type UserText, userText } from "@sugabots/errors";
+import { type DomainError, type UserText, userText } from "@sugabots/errors";
 import type { ModelMessage, ToolModelMessage, ToolResultPart } from "ai";
 import { and, asc, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
-import { Context, Data, DateTime, Duration, Effect, Layer, Schema } from "effect";
+import { Context, DateTime, Duration, Effect, ErrorReporter, Layer, Schema } from "effect";
 import { askerColumns, askerOfMessage } from "../../authentication/turn-facts.ts";
 import type { BlobStore } from "../../blob-store/blob-store.ts";
 import {
@@ -37,7 +37,6 @@ import { ChatFileStore } from "../../files/chat-file-store.ts";
 import type { EndsTurn } from "../../proofs/ends-turn.ts";
 import type { RunsTurn } from "../../proofs/runs-turn.ts";
 import { processLayer, Tier } from "../../tiers.ts";
-import type { UserFacing } from "../../user-message.ts";
 import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
 import {
@@ -53,6 +52,7 @@ import {
 	type FollowUp,
 	RUN_ENDED,
 	runsAgainAfterFailure,
+	TURN_CANCELLED,
 	TurnEvent,
 	type TurnState,
 	transition,
@@ -180,12 +180,12 @@ export interface Interface {
 	/** The files the turn's reply carries, in the order attached. */
 	readonly replyFiles: (turn: ReplyTurn) => Effect.Effect<readonly FilePart[]>;
 	/**
-	 * Parks the turn until members decide the tool approvals its last step
-	 * asked for, which must still match `bound` when they run. `false` when
-	 * the turn was asked to stop, or its automation run takes no more turns.
+	 * Parks an admitted turn until members decide its last step's approvals,
+	 * which must still match `bound` when they run. Returns `false` if asked to stop.
 	 */
 	readonly suspend: <P, T>(
 		runsTurn: RunsTurn<P, T>,
+		admitted: WorkAdmission.ApprovalAdmission,
 		approvals: readonly ToolCallStore.PendingToolApproval[],
 		bound: readonly CheckpointApproval[],
 	) => Effect.Effect<boolean, FenceRefusal>;
@@ -205,9 +205,8 @@ export interface Interface {
 		failure: { userMessage: UserText; mayRunAgain: boolean; retryAfterMillis?: number },
 	) => Effect.Effect<boolean, FenceRefusal>;
 	/**
-	 * Completes an optional turn whose bot chose not to answer: its empty
-	 * reply is taken back, and the bot reacts 👀 to the message it read, so
-	 * members see it was read.
+	 * Completes an optional turn that wrote no reply, shared no files and made
+	 * no tool calls, deleting its empty reply and reacting 👀 to the message it read.
 	 */
 	readonly staySilent: <P, T>(
 		runsTurn: RunsTurn<P, T>,
@@ -244,13 +243,9 @@ export interface Interface {
 	 */
 	readonly standing: (turnId: string) => Effect.Effect<TurnStanding>;
 	/**
-	 * Ends the active turn the workflow execution `executionId` runs, which will not
-	 * run it again. `undefined` if there is none.
+	 * Ends the active or retrying turn of `executionId`. Returns `undefined` if there is none.
 	 */
-	readonly abandon: (
-		executionId: string,
-		outcome: { status: "failed" | "cancelled"; userMessage: UserText },
-	) => Effect.Effect<Ended | undefined>;
+	readonly abandon: (executionId: string, outcome: Abandonment) => Effect.Effect<Ended | undefined>;
 	/**
 	 * Records that a write/delete tool call crossed its dispatch boundary, so the turn
 	 * is not started again from here on, after a failure or after its server
@@ -316,7 +311,7 @@ export const make = Effect.gen(function* () {
 	 * records, and answers the time it wrote it at: when the turn finished, if
 	 * `next` ends it. Only failing records the turn as `retrying`. A turn that
 	 * ends clears its checkpoint unless the ending records one. A turn that
-	 * ends without answering for good hands its unread steers on.
+	 * ends without answering for good hands its unread steers on if it still reaches the chat.
 	 */
 	const write = (
 		turnId: string,
@@ -327,13 +322,16 @@ export const make = Effect.gen(function* () {
 				"checkpoint" | "retrying" | "retryAt" | keyof ContextMeasurement
 			>
 		> = {},
+		{ handOnSteers = true } = {},
 	) =>
 		Effect.gen(function* () {
 			const now = yield* DateTime.nowAsDate;
 			const active = next.status === "running" || next.status === "waiting";
 			const unanswered =
 				next.status === "cancelled" || (next.status === "failed" && !recorded.retrying);
-			if (unanswered) yield* handOnUnreadSteers(turnId);
+			if (unanswered && handOnSteers && next.endRequested !== "lost_reach") {
+				yield* handOnUnreadSteers(turnId);
+			}
 			yield* query((db) =>
 				db
 					.update(turn)
@@ -439,6 +437,7 @@ export const make = Effect.gen(function* () {
 						chatId: turn.chatId,
 						botId: turn.botId,
 						workspaceId: chat.workspaceId,
+						execution: turn.executionNumber,
 					})
 					.from(message)
 					.innerJoin(turn, eq(turn.id, message.turnId))
@@ -456,6 +455,17 @@ export const make = Effect.gen(function* () {
 				yield* emit([endAnnouncement({ turnId, finishedAt, ...reply }, ended)]);
 			}
 			return ended;
+		});
+
+	const abandon = (
+		locked: { id: string; state: TurnState },
+		{ handOnSteers, ...outcome }: Abandonment,
+	) =>
+		Effect.gen(function* () {
+			const decided = transition(locked.state, TurnEvent.Abandon(outcome));
+			if (decided._tag !== "Next" || decided.followUp?._tag !== "End") return undefined;
+			const writtenAt = yield* write(locked.id, decided.state, {}, { handOnSteers });
+			return yield* endRun(locked.id, decided.state, decided.followUp.userMessage, writtenAt);
 		});
 
 	/** Locks the turn found by `condition` and asks the lifecycle what `event` makes of it. */
@@ -482,7 +492,12 @@ export const make = Effect.gen(function* () {
 			const turnId = runsTurn.turn.value;
 			const [row] = yield* query((db) =>
 				db
-					.select({ ...stateColumns, botId: turn.botId, checkpoint: turn.checkpoint })
+					.select({
+						...stateColumns,
+						botId: turn.botId,
+						checkpoint: turn.checkpoint,
+						execution: turn.executionNumber,
+					})
 					.from(turn)
 					.where(fenced(runsTurn))
 					.limit(1)
@@ -508,7 +523,13 @@ export const make = Effect.gen(function* () {
 				row.checkpoint === null
 					? undefined
 					: yield* Schema.decodeUnknownEffect(TurnCheckpoint)(row.checkpoint).pipe(Effect.orDie);
-			return { id: row.id, state: stateOf(row), reply: replyTurn, checkpoint };
+			return {
+				id: row.id,
+				state: stateOf(row),
+				reply: replyTurn,
+				checkpoint,
+				execution: row.execution,
+			};
 		});
 
 	/** Writes the reply's text and parts, and its status when it ends. */
@@ -548,6 +569,7 @@ export const make = Effect.gen(function* () {
 					turnId: locked.id,
 					botId: reply.botId,
 					messageId: reply.messageId,
+					execution: locked.execution,
 					content: draft.content,
 					finishedAt,
 				}),
@@ -638,12 +660,18 @@ export const make = Effect.gen(function* () {
 						? TurnEvent.AutomationEnded()
 						: TurnEvent.Abandon({ status: "cancelled", userMessage: RUN_ENDED }),
 				);
-			if (!existing || decided?._tag !== "Next") {
+			if (!existing || decided?._tag !== "Next" || decided.followUp?._tag !== "End") {
 				const status = existing?.state.status;
 				return { ...notRunnable(reason), endedBefore: status === "done" || status === "cancelled" };
 			}
 			const writtenAt = yield* write(existing.id, decided.state);
-			return notRunnable(reason, yield* endRun(existing.id, decided.state, RUN_ENDED, writtenAt));
+			const ended = yield* endRun(
+				existing.id,
+				decided.state,
+				decided.followUp.userMessage,
+				writtenAt,
+			);
+			return notRunnable(reason, ended);
 		});
 
 	const announceStart = (request: ReplyTurnRequest, turnId: string, reply: Message) =>
@@ -683,7 +711,23 @@ export const make = Effect.gen(function* () {
 						Database | Transaction
 					> {
 						const refused = yield* admission.refusal(request.chatId);
-						if (refused === "chatUnavailable") return notRunnable("The chat is unavailable");
+						if (refused === "chatUnavailable") {
+							const retry = yield* lockedTurn(
+								and(
+									onTrigger(request),
+									eq(turn.executionId, request.executionId),
+									eq(turn.retrying, true),
+								),
+							);
+							const ended =
+								retry &&
+								(yield* abandon(retry, {
+									status: "cancelled",
+									userMessage: TURN_CANCELLED,
+									handOnSteers: false,
+								}));
+							return notRunnable("The chat is unavailable", ended);
+						}
 						// As a message deciding whether to join the turn or steer it holds
 						// its opening, it sees the turn opened or not, never in between.
 						yield* lockOpening(request);
@@ -1030,13 +1074,11 @@ export const make = Effect.gen(function* () {
 			),
 		replyFiles: (reply) => operation("replyFiles", files.replyAttachments(reply.messageId)),
 
-		suspend: (runsTurn, approvals, bound) =>
+		suspend: (runsTurn, admitted, approvals, bound) =>
 			operation(
 				"suspend",
 				transaction(
 					Effect.gen(function* () {
-						// Asked before the turn is locked, as settlement locks the run first.
-						if (yield* admission.refusal(runsTurn.chat)) return false;
 						const locked = yield* lockRunningTurn(runsTurn);
 						const decided = transition(locked.state, TurnEvent.Suspend());
 						if (decided._tag !== "Next") return false;
@@ -1081,7 +1123,7 @@ export const make = Effect.gen(function* () {
 						]);
 						return true;
 					}),
-				),
+				).pipe(WorkAdmission.withApprovalAdmission(admitted, runsTurn.chat)),
 			),
 
 		staySilent: (runsTurn, completion) =>
@@ -1099,10 +1141,7 @@ export const make = Effect.gen(function* () {
 							...measurementColumns(completion),
 							...(checkpoint
 								? {
-										checkpoint: Schema.encodeSync(TurnCheckpoint)({
-											...checkpoint,
-											reply: { ...checkpoint.reply, toolCalls: [] },
-										}),
+										checkpoint: Schema.encodeSync(TurnCheckpoint)(checkpoint),
 									}
 								: {}),
 						});
@@ -1166,6 +1205,7 @@ export const make = Effect.gen(function* () {
 								turnId: locked.id,
 								botId: reply.botId,
 								messageId: reply.messageId,
+								execution: locked.execution,
 								content: draft.content,
 								finishedAt,
 								contextTokens: completion.contextTokens,
@@ -1207,6 +1247,7 @@ export const make = Effect.gen(function* () {
 								turnId: locked.id,
 								botId: reply.botId,
 								messageId: reply.messageId,
+								execution: locked.execution,
 								userMessage,
 								willRetry,
 							}),
@@ -1239,14 +1280,21 @@ export const make = Effect.gen(function* () {
 						// took over ends nothing.
 						const locked = yield* lockAndTransition(
 							fenced(endsTurn),
-							ending._tag === "Failed"
-								? TurnEvent.Abandon({ status: "failed", userMessage: ending.userMessage })
-								: TurnEvent.EndAsRequested(),
+							ending._tag === "AsRequested"
+								? TurnEvent.EndAsRequested()
+								: TurnEvent.Abandon({ status: "failed", userMessage: ending.userMessage }),
 						);
 						if (!locked) return yield* Effect.fail(yield* fenceRefusal(endsTurn));
 						const { decided } = locked;
 						if (decided._tag !== "Next" || decided.followUp?._tag !== "End") return;
-						const writtenAt = yield* write(locked.id, decided.state);
+						const writtenAt = yield* write(
+							locked.id,
+							decided.state,
+							{},
+							{
+								handOnSteers: ending._tag !== "LostReach",
+							},
+						);
 						yield* endRun(locked.id, decided.state, decided.followUp.userMessage, writtenAt);
 					}),
 				),
@@ -1321,12 +1369,11 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const owned = and(
 							eq(turn.executionId, executionId),
-							inArray(turn.status, [...ACTIVE_TURN_STATUSES]),
+							or(inArray(turn.status, [...ACTIVE_TURN_STATUSES]), eq(turn.retrying, true)),
 						);
-						const locked = yield* lockAndTransition(owned, TurnEvent.Abandon(outcome));
-						if (locked?.decided._tag !== "Next") return undefined;
-						const writtenAt = yield* write(locked.id, locked.decided.state);
-						return yield* endRun(locked.id, locked.decided.state, outcome.userMessage, writtenAt);
+						const locked = yield* lockedTurn(owned);
+						if (!locked) return undefined;
+						return yield* abandon(locked, outcome);
 					}),
 				),
 			),
@@ -1490,16 +1537,25 @@ export const layerNoDeps = processLayer(Layer.effect(Service, make));
 /** Ending a turn ends its tool calls, and retrying a reply removes the files it attached. */
 export const layer = layerNoDeps.pipe(Layer.provide([ToolCallStore.layer, ChatFileStore.layer]));
 
+/** Abandonment is how an execution ends a turn it cannot run again. */
+export interface Abandonment {
+	readonly status: "failed" | "cancelled";
+	readonly userMessage: UserText;
+	readonly handOnSteers?: false;
+}
+
 /**
- * What became of a message offered to a turn as a steer: the turn took it,
- * withdrawing the approvals it waited for, if any, whose workflow execution
- * has to be told; or it takes no steer.
+ * LostEnding tells `endLost` whether the turn failed, lost reach and must
+ * keep its unread steers in the chat, or should end as requested.
  */
-/** How `endLost` ends a turn: as failed, telling members `userMessage`, or as it was asked to end. */
 export type LostEnding =
-	| { readonly _tag: "Failed"; readonly userMessage: UserText }
+	| { readonly _tag: "Failed" | "LostReach"; readonly userMessage: UserText }
 	| { readonly _tag: "AsRequested" };
 
+/**
+ * Whether the turn took a message offered as a steer, including which approvals
+ * it withdrew and which execution to tell.
+ */
 type SteerOutcome =
 	| {
 			readonly _tag: "Steered";
@@ -1536,7 +1592,12 @@ interface ReplyFile {
 }
 
 /** A file was shared to a reply after its turn had ended, as when it was cancelled. */
-export class ReplyEnded extends Data.TaggedError("ReplyEnded") implements UserFacing {
+export class ReplyEnded
+	extends Schema.TaggedError<ReplyEnded>()("ReplyEnded", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
 		return "A file was shared to a reply whose turn had ended";
 	}
@@ -1905,6 +1966,7 @@ function endAnnouncement(
 		workspaceId: string;
 		botId: string;
 		messageId: string;
+		execution: number;
 		content: string;
 		finishedAt: Date;
 	},
@@ -1917,6 +1979,7 @@ function endAnnouncement(
 				turnId: reply.turnId,
 				botId: reply.botId,
 				messageId: reply.messageId,
+				execution: reply.execution,
 				userMessage: ended.error,
 				willRetry: false,
 			})
@@ -1968,7 +2031,7 @@ function replyParts(reply: ReplyDraft): StoredMessagePart[] {
  * Records that the message `messageId` joined the turn of `joined.botId` on
  * `joined.triggerMessageId`, rather than get one of its own, so that turn
  * reads up to it (see `Collaboration.readingLimitOf`). The turns own
- * this write, as it is part of how a turn reads the chat..
+ * this write, as it is part of how a turn reads the chat.
  */
 export const recordJoin = (messageId: string, joined: JoinedTurn) =>
 	query((db) =>

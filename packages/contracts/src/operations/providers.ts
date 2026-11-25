@@ -126,6 +126,7 @@ export const providersContracts = {
 			UrlNotAllowed,
 			ProviderActivationRequiresCredential,
 			ModelInUse,
+			...discoveryFailures,
 		],
 		changes: true,
 	}),

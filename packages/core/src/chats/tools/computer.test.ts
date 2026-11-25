@@ -11,7 +11,12 @@ import { ComputerProviderStore } from "../../computers/computer-provider-store.t
 import { ComputerSignIn } from "../../computers/computer-sign-in.ts";
 import { Computers } from "../../computers/computers.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
-import { noComputers, recordingIds, removeWorkVolumes } from "../../computers/testing.ts";
+import {
+	localComputerEgress,
+	noComputers,
+	recordingIds,
+	removeWorkVolumes,
+} from "../../computers/testing.ts";
 import {
 	allowedHost,
 	bot as botTable,
@@ -23,8 +28,6 @@ import {
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
-import { Egress } from "../../providers/network/egress.ts";
-import { unimplemented } from "../../testing.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { seedChat } from "../seed.test-support.ts";
 import { stepOnComputer } from "./computer/testing.ts";
@@ -99,7 +102,7 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 				Effect.provide(ComputerSignIn.none),
 				Effect.provide(recordingIds(idsHandedOut)),
 				// Registries are asked what an image's tag names, as in production.
-				Effect.provide(unimplemented(Egress.Service, { providers: { for: () => fetch } })),
+				Effect.provide(localComputerEgress),
 			),
 		);
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

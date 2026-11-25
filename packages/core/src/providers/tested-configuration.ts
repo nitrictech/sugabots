@@ -4,7 +4,7 @@ import type { UserText } from "@sugabots/errors";
 import { type SQL, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { Clock, Effect } from "effect";
-import type { Egress } from "./network/egress.ts";
+import { type Egress, workspaceUrlRefusal } from "./network/egress.ts";
 
 /**
  * What model providers, search providers and connectors share: each is
@@ -52,7 +52,7 @@ export function configurationStatus(row: {
 export const requireAllowedUrl = (egress: Egress.Interface, url: string) =>
 	Effect.mapError(
 		egress.validateProviderUrl(url),
-		(refusal) => new UrlNotAllowed({ refusal: refusal.userMessage }),
+		(refusal) => new UrlNotAllowed({ refusal: workspaceUrlRefusal(refusal) }),
 	);
 
 /** How a test went, with what else it found: `error` is why it failed, if it did. */

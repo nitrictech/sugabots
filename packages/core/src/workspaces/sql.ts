@@ -226,7 +226,7 @@ export const invitation = pgTable(
  *
  * `lead_bot_id`'s foreign key is checked when the transaction commits, so
  * deleting a bot can delete the default project it leads with it. Drizzle has
- * no way to declare that, so `20261122231027_fresh_start_requirements` makes
+ * no way to declare that, so `20261125093952_bots_projects_and_chats` makes
  * it deferrable. A bot leading a project members made can't be deleted until
  * it is replaced as lead there.
  */
@@ -346,7 +346,7 @@ export const projectMember = pgTable(
  *
  * Every bot but a system bot has a default project, where its own chats
  * live, made with it by the `bot_default_project` trigger, which Drizzle has
- * no way to declare, in `20261119001412_default_projects_and_lead_bots`.
+ * no way to declare, in `20261125093952_bots_projects_and_chats`.
  */
 export const bot = pgTable(
 	"bot",

@@ -15,6 +15,7 @@ const UNREACHABLE =
 describe.skipIf(!process.env.DATABASE_URL)("provider discovery, against Postgres", () => {
 	let workspaceId: string;
 	let providerId: string;
+	let adminId: string;
 
 	afterAll(closeDatabase);
 
@@ -34,6 +35,7 @@ describe.skipIf(!process.env.DATABASE_URL)("provider discovery, against Postgres
 		);
 		if (!made || !somebody) throw new Error("could not create the fixtures");
 		workspaceId = made.id;
+		adminId = somebody.id;
 		await onDatabase((db) =>
 			db.insert(membership).values({ workspaceId, memberId: somebody.id, role: "admin" }),
 		);
@@ -91,5 +93,26 @@ describe.skipIf(!process.env.DATABASE_URL)("provider discovery, against Postgres
 
 		expect(result).toEqual({ added: 1, updated: 0, unchanged: 0 });
 		expect((await view())?.models.map(({ modelId }) => modelId)).toEqual(["twice"]);
+	});
+
+	it("records nothing a slow listing found once the provider has been given another key meanwhile", async () => {
+		const asked = Promise.withResolvers<void>();
+		const answer = Promise.withResolvers<Response>();
+		const httpClients = clientAnswering(() => {
+			asked.resolve();
+			return answer.promise;
+		});
+
+		const discovering = withStore((store) =>
+			fetchProviderModels(store, workspaceId, providerId, httpClients, { registry: emptyRegistry }),
+		);
+		await asked.promise;
+		await withStore((store) =>
+			store.update(workspaceId, providerId, { apiKey: "another" }, adminId),
+		);
+		answer.resolve(Response.json({ data: [{ id: "from-the-old-key" }] }));
+		await discovering;
+
+		expect(await view()).toMatchObject({ models: [], status: "untested", active: false });
 	});
 });

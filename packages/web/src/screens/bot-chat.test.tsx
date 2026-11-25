@@ -8,7 +8,7 @@ import {
 	START_CHAT_TOOL,
 	streamEvent,
 } from "@sugabots/contracts";
-import { InternalServerError, NotFound } from "@sugabots/contracts/http";
+import { InternalServerError, NotFound, Unauthorized } from "@sugabots/contracts/http";
 import { listedChat, testMember } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -650,12 +650,9 @@ describe("a bot's chat", () => {
 			);
 
 		think(1, 0, "Still checking.");
-		const disclosure = await screen.findByText("Thinking");
-		const details = disclosure.closest("details");
-		expect(details?.open).toBe(false);
-		screen.getByText("Still checking.");
+		const disclosure = await screen.findByRole("button", { name: "Thinking", expanded: false });
 		fireEvent.click(disclosure);
-		expect(details?.open).toBe(true);
+		await screen.findByText("Still checking.");
 
 		updates.emit(
 			streamEvent("message.execution_started", {
@@ -678,13 +675,14 @@ describe("a bot's chat", () => {
 		expect(screen.queryByText(/Still checking|Stale/)).toBeNull();
 	});
 
-	it("keeps thinking already fetched ahead of the first execution event", async () => {
+	it("keeps thinking its execution already wrote when that execution's start arrives after the fetch", async () => {
 		const updates = controlledEventStream();
 		client.events.chat.mockReturnValue(updates.stream);
 		const writing: Message = {
 			...botMessage,
 			status: "writing",
 			thinking: [{ step: 0, text: "Looked at the current record." }],
+			execution: 1,
 		};
 		client.api.chats.get.mockReturnValue(
 			Effect.succeed(botChatDetails({ messages: [mainMessage, writing] })),
@@ -704,7 +702,8 @@ describe("a bot's chat", () => {
 		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "Execution started." }));
 
 		await screen.findByText("Execution started.");
-		screen.getByText("Looked at the current record.");
+		fireEvent.click(screen.getByRole("button", { name: "Thinking" }));
+		await screen.findByText("Looked at the current record.");
 	});
 
 	it.each([true, false])(
@@ -789,6 +788,14 @@ describe("a bot's chat", () => {
 
 		// The turn resumed elsewhere, which writes the step again; the old
 		// process's late words are dropped.
+		updates.emit(
+			streamEvent("message.execution_started", {
+				chatId: chat.id,
+				messageId: writing.id,
+				execution: 2,
+				content: "",
+			}),
+		);
 		delta(2, 0, "The resumed turn wrote this");
 		delta(1, 26, " and then this");
 
@@ -828,7 +835,7 @@ describe("a bot's chat", () => {
 		expect(screen.queryByText(/Stale text after completion/)).toBeNull();
 	});
 
-	it("keeps the fetched reply when an execution event arrives with only its checkpoint text", async () => {
+	it("keeps the fetched reply when its execution's start arrives with only its checkpoint text", async () => {
 		const updates = controlledEventStream();
 		client.events.chat.mockReturnValue(updates.stream);
 		const content = "The report is ready to download.";
@@ -838,6 +845,7 @@ describe("a bot's chat", () => {
 			status: "writing",
 			content,
 			parts: [{ type: "text", text: content }],
+			execution: 2,
 		};
 		answerChatWith(() => Effect.succeed(botChatDetails({ messages: [mainMessage, writing] })));
 		mount(chatPage);
@@ -1376,5 +1384,345 @@ describe("members typing in the chat", () => {
 			}),
 		);
 		expect(client.api.events.typing).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("the chat's stream", () => {
+	/** A reply of Linear Handler's still being written by `execution`, saying `content`. */
+	const writingReply = (content: string, execution?: number): Message => ({
+		...botMessage,
+		id: "0199a3a0-0000-7000-8000-000000000301",
+		status: "writing",
+		content,
+		parts: content ? [{ type: "text", text: content }] : [],
+		createdAt: "2026-09-18T09:20:00.000Z",
+		...(execution === undefined ? {} : { execution }),
+	});
+
+	/** Opens the chat on a stream the case scripts, once the chat has been fetched and is followed. */
+	async function openChat() {
+		const updates = controlledEventStream();
+		client.events.chat.mockReturnValue(updates.stream);
+		const opened = mount(chatPage, { refresh: vi.fn(async () => {}) });
+		await screen.findByText(mainMessage.content);
+		await waitFor(() => expect(client.events.chat).toHaveBeenCalledWith(chat.id));
+		return { updates, ...opened };
+	}
+
+	it("shows what changed between the first fetch and the stream starting, and what follows it", async () => {
+		const { updates } = await openChat();
+		const madeMeanwhile: Message = {
+			...botMessage,
+			content: "Finished while the stream started.",
+			parts: [{ type: "text", text: "Finished while the stream started." }],
+		};
+		const afterReady: Message = {
+			...mainMessage,
+			id: "0199a3a0-0000-7000-8000-000000000302",
+			content: "And one after it.",
+			parts: [{ type: "text", text: "And one after it." }],
+			createdAt: "2026-09-18T09:40:00.000Z",
+		};
+		const refetched = pendingAnswer();
+		answerChatWith(() => refetched.effect as ReturnType<typeof client.api.chats.get>);
+
+		updates.emit(streamEvent("ready"));
+		updates.emit(streamEvent("message.created", { chatId: chat.id, message: afterReady }));
+		await waitFor(() => expect(client.api.chats.get).toHaveBeenCalledTimes(2));
+		refetched.answer(Effect.succeed(botChatDetails({ messages: [mainMessage, madeMeanwhile] })));
+
+		await screen.findByText("Finished while the stream started.");
+		await screen.findByText("And one after it.");
+	});
+
+	it("shows the chat as fetched after a reset, not what it held before", async () => {
+		const failed: Message = {
+			...writingReply("Partial answer"),
+			status: "failed",
+			error: "The model provider could not answer.",
+		};
+		answerChatWith(() => Effect.succeed(botChatDetails({ messages: [mainMessage, failed] })));
+		const { updates } = await openChat();
+		await screen.findByText("Partial answer");
+
+		// The turn ran again while the stream was away, starting its reply over.
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, writingReply("Trying again", 1)] })),
+		);
+		updates.emit(streamEvent("reset"));
+
+		await screen.findByText("Trying again");
+		expect(screen.queryByText("Partial answer")).toBeNull();
+	});
+
+	/** The reply as its first run left it, failed, which its turn runs again. */
+	const failedReply = (): Message => ({
+		...writingReply("Partial answer", 1),
+		status: "failed",
+		error: "The model provider could not answer.",
+	});
+
+	it("writes a reply its turn runs again over the failed one, as the retry's events arrive", async () => {
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, failedReply()] })),
+		);
+		const { updates } = await openChat();
+		await screen.findByText("Partial answer");
+
+		// Reopened, and not yet begun its first step: written by no execution yet.
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, writingReply("")] })),
+		);
+		updates.emit(streamEvent("turn.started", { chatId: chat.id }));
+		updates.emit(streamEvent("message.created", { chatId: chat.id, message: writingReply("") }));
+		const reply = { chatId: chat.id, messageId: writingReply("").id };
+		updates.emit(streamEvent("message.execution_started", { ...reply, execution: 2, content: "" }));
+		updates.emit(
+			streamEvent("message.delta", { ...reply, execution: 2, offset: 0, text: "Trying again" }),
+		);
+
+		await screen.findByText("Trying again");
+		expect(screen.queryByText("Partial answer")).toBeNull();
+		expect(screen.queryByText(/could not answer/)).toBeNull();
+	});
+
+	it("ignores a failure of an execution older than the one writing the reply", async () => {
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, writingReply("Trying again", 2)] })),
+		);
+		const { updates } = await openChat();
+		await screen.findByText("Trying again");
+		const reply = { chatId: chat.id, messageId: writingReply("").id };
+		const fetched = client.api.chats.get.mock.calls.length;
+
+		updates.emit(
+			streamEvent("message.failed", {
+				...reply,
+				execution: 1,
+				error: "The model provider could not answer.",
+			}),
+		);
+		updates.emit(
+			streamEvent("message.delta", {
+				...reply,
+				execution: 2,
+				offset: "Trying again".length,
+				text: ", with the logs.",
+			}),
+		);
+
+		await screen.findByText("Trying again, with the logs.");
+		expect(screen.queryByText(/could not answer/)).toBeNull();
+		// Taken as it came, with nothing to fetch again.
+		expect(client.api.chats.get.mock.calls.length).toBe(fetched);
+	});
+
+	it("takes a newer execution's fetched reply over the failed one", async () => {
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, failedReply()] })),
+		);
+		const { updates } = await openChat();
+		await screen.findByText("Partial answer");
+
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, writingReply("Trying again", 2)] })),
+		);
+		updates.emit(streamEvent("chat.changed", { chatId: chat.id }));
+
+		await screen.findByText("Trying again");
+		expect(screen.queryByText(/could not answer/)).toBeNull();
+	});
+
+	it("takes a newer execution's fetched text over an older one's longer streamed text", async () => {
+		answerChatWith(() =>
+			Effect.succeed(
+				botChatDetails({
+					messages: [mainMessage, writingReply("The plan has three steps", 1)],
+				}),
+			),
+		);
+		const { updates } = await openChat();
+		await screen.findByText("The plan has three steps");
+
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, writingReply("The plan", 2)] })),
+		);
+		updates.emit(streamEvent("chat.changed", { chatId: chat.id }));
+
+		await screen.findByText("The plan");
+		expect(screen.queryByText(/three steps/)).toBeNull();
+	});
+
+	it("adds a newer execution's words to its own text, not to what an older one wrote", async () => {
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, writingReply("Looking at it", 1)] })),
+		);
+		const { updates } = await openChat();
+		await screen.findByText("Looking at it");
+
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, writingReply("Looking again", 2)] })),
+		);
+		updates.emit(
+			streamEvent("message.delta", {
+				chatId: chat.id,
+				messageId: writingReply("").id,
+				offset: "Looking at it".length,
+				text: " now.",
+				execution: 2,
+			}),
+		);
+
+		await screen.findByText("Looking again now.");
+		expect(screen.queryByText(/Looking at it/)).toBeNull();
+	});
+
+	it("keeps a newer execution's delta that overtook its start until the text it follows is fetched", async () => {
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, writingReply("Old text", 1)] })),
+		);
+		const { updates } = await openChat();
+		await screen.findByText("Old text");
+		const reply = { chatId: chat.id, messageId: writingReply("").id };
+
+		// Fetched just before this delta's own text was saved.
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, writingReply("Hello", 2)] })),
+		);
+		updates.emit(
+			streamEvent("message.delta", { ...reply, execution: 2, offset: 5, text: " world" }),
+		);
+		updates.emit(streamEvent("message.execution_started", { ...reply, execution: 2, content: "" }));
+		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "All arrived." }));
+
+		await screen.findByText("All arrived.");
+		screen.getByText("Hello world");
+	});
+
+	it("keeps thinking that overtook its reply's creation until the reply arrives", async () => {
+		const { updates } = await openChat();
+		const reply = { chatId: chat.id, messageId: writingReply("").id };
+
+		updates.emit(
+			streamEvent("message.thinking_delta", {
+				...reply,
+				execution: 1,
+				step: 1,
+				offset: 0,
+				text: "Reading the chat.",
+			}),
+		);
+		updates.emit(streamEvent("message.created", { chatId: chat.id, message: writingReply("") }));
+
+		fireEvent.click(await screen.findByRole("button", { name: "Thinking" }));
+		await screen.findByText("Reading the chat.");
+	});
+
+	it("keeps one turn's early thinking when another turn ends and the chat can't be fetched", async () => {
+		const { updates } = await openChat();
+		const usualChat = client.api.chats.get.getMockImplementation();
+		const refetched = vi.fn();
+		// A refusal is not retried, so the refetch fails at once.
+		answerChatWith(() => {
+			refetched();
+			return Effect.fail(new NotFound({ message: userText`No such chat` }));
+		});
+
+		updates.emit(
+			streamEvent("message.thinking_delta", {
+				chatId: chat.id,
+				messageId: writingReply("").id,
+				execution: 1,
+				step: 1,
+				offset: 0,
+				text: "Reading the chat.",
+			}),
+		);
+		updates.emit(streamEvent("turn.completed", { chatId: chat.id }));
+		await waitFor(() => expect(refetched).toHaveBeenCalled());
+		if (usualChat) client.api.chats.get.mockImplementation(usualChat);
+		updates.emit(streamEvent("message.created", { chatId: chat.id, message: writingReply("") }));
+
+		fireEvent.click(await screen.findByRole("button", { name: "Thinking" }));
+		await screen.findByText("Reading the chat.");
+	});
+
+	it("keeps a reply fetched when its turn started over the empty one its creation carries", async () => {
+		const { updates } = await openChat();
+		answerChatWith(() =>
+			Effect.succeed(botChatDetails({ messages: [mainMessage, writingReply("Already on it", 1)] })),
+		);
+
+		updates.emit(streamEvent("turn.started", { chatId: chat.id }));
+		updates.emit(streamEvent("message.created", { chatId: chat.id, message: writingReply("") }));
+		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "Both arrived." }));
+
+		await screen.findByText("Both arrived.");
+		screen.getByText("Already on it");
+	});
+
+	it("fetches the chat's pages again on a reset, dropping a reply removed while the stream was away", async () => {
+		const draft = writingReply("Draft reply.", 1);
+		answerMessagesWith(draft);
+		answerChatWith(() => Effect.succeed(botChatDetails({ messages: [mainMessage, draft] })));
+		const { updates } = await openChat();
+		await screen.findByText("Draft reply.");
+
+		// The turn stayed silent while the stream was away, removing its reply.
+		chatAnswers();
+		updates.emit(streamEvent("reset"));
+
+		await waitFor(() => expect(screen.queryByText("Draft reply.")).toBeNull());
+		screen.getByText(botMessage.content);
+	});
+
+	it("takes a reply its silent turn removed out of the chat's pages too", async () => {
+		const draft = writingReply("Draft reply.", 1);
+		answerMessagesWith(draft);
+		answerChatWith(() => Effect.succeed(botChatDetails({ messages: [mainMessage, draft] })));
+		const { updates } = await openChat();
+		await screen.findByText("Draft reply.");
+
+		answerChatWith(() => Effect.succeed(botChatDetails({ messages: [mainMessage, botMessage] })));
+		updates.emit(streamEvent("turn.completed", { chatId: chat.id }));
+
+		await waitFor(() => expect(screen.queryByText("Draft reply.")).toBeNull());
+		screen.getByText(botMessage.content);
+	});
+
+	/** Opens the chat on a stream the server ends for good with `refuse`, once the chat is shown. */
+	async function openChatToBeRefused() {
+		const { promise: refusal, reject: refuse } = Promise.withResolvers<never>();
+		client.events.chat.mockReturnValue({
+			// biome-ignore lint/correctness/useYield: a stream the server refuses yields nothing.
+			async *[Symbol.asyncIterator]() {
+				await refusal;
+			},
+			close: vi.fn(),
+		});
+		const refresh = vi.fn(async () => {});
+		mount(chatPage, { refresh });
+		await screen.findByText(mainMessage.content);
+		return { refuse, refresh };
+	}
+
+	it("drops the chat from screen once its stream says the member no longer reaches it", async () => {
+		const { refuse } = await openChatToBeRefused();
+		const hidden = new NotFound({ message: userText`No such chat` });
+		answerChatWith(() => Effect.fail(hidden));
+		client.api.chats.messages.mockReturnValue(Effect.fail(hidden));
+		client.api.chats.projectChats.mockReturnValue(chatList({ listed: false }));
+
+		refuse(hidden);
+
+		await waitFor(() => expect(screen.queryByText(mainMessage.content)).toBeNull());
+	});
+
+	it("asks about the member's session again once the chat's stream ends with it", async () => {
+		const { refuse, refresh } = await openChatToBeRefused();
+
+		refuse(new Unauthorized({ message: userText`Invalid or expired session` }));
+
+		await waitFor(() => expect(refresh).toHaveBeenCalled());
 	});
 });

@@ -17,11 +17,7 @@ export function CopyIconButton({
 	return (
 		<IconButton {...props} label={copying.label} onClick={() => void copying.copy(text)}>
 			{copying.copied ? (
-				// Pops in where the copy icon was.
-				<Check
-					aria-hidden
-					className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-50 motion-safe:duration-200"
-				/>
+				<Check aria-hidden className="motion-safe:animate-copy-confirmation" />
 			) : (
 				<Copy aria-hidden />
 			)}

@@ -1,7 +1,7 @@
 import { botColorVariables } from "@sugabots/avatars";
 import type { BotParticipant, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Check, ChevronDown, Globe, X } from "lucide-react";
+import { Check, ChevronDown, type LucideIcon, X } from "lucide-react";
 import {
 	type CSSProperties,
 	Fragment,
@@ -11,18 +11,13 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { hostRequestPresentation } from "@/lib/approval-tool-source.ts";
 import { awaitedApprovers } from "@/lib/approvals.ts";
 import { useReviewToolCall } from "@/lib/chat-query.ts";
 import type { MarkedConnector } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { countOf } from "@/lib/name-list.ts";
-import {
-	connectorLabel,
-	HOST_REQUEST_TOOL,
-	splitToolKey,
-	stepLabel,
-	wordsFromKey,
-} from "@/lib/tool-names.ts";
+import { connectorLabel, splitToolKey, stepLabel, wordsFromKey } from "@/lib/tool-names.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
@@ -66,15 +61,13 @@ export function ToolApprovalCard({
 	const { handle, name } = splitToolKey(call.tool);
 	const where = handle ? connectorLabel(handle, connector?.name) : "";
 	const action = stepLabel(call.tool, name);
-	const hostRequest = call.tool === HOST_REQUEST_TOOL;
+	const hostRequest = hostRequestPresentation(call.tool, bot.name);
 	const step: Step = {
 		action,
-		who: hostRequest
-			? `${bot.name} wants the project's computer to reach a new host`
-			: `${bot.name} wants to use ${where || "a tool"}`,
+		who: hostRequest?.description ?? `${bot.name} wants to use ${where || "a tool"}`,
 		where,
 		connector,
-		hostRequest,
+		icon: hostRequest?.icon,
 	};
 	const answerable = awaitsApproval(call) && canApprove;
 	// The answer stays given from when it is sent until the chat's events say
@@ -196,8 +189,7 @@ interface Step {
 	who: string;
 	where: string;
 	connector: MarkedConnector | undefined;
-	/** A request for the computer to reach another host, which no connector makes. */
-	hostRequest: boolean;
+	icon: LucideIcon | undefined;
 }
 
 /** What the step uses: the connector's mark, or a globe for a host request. */
@@ -206,7 +198,7 @@ function StepMark({ step, size }: { step: Step; size: "md" | "sm" }) {
 		<ConnectorMark
 			markId={step.connector?.markId}
 			name={step.where || step.action}
-			icon={step.hostRequest ? Globe : undefined}
+			icon={step.icon}
 			size={size}
 		/>
 	);

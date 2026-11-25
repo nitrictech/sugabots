@@ -1,6 +1,5 @@
 export * as TurnRuns from "./runs.ts";
 
-import type { UserText } from "@sugabots/errors";
 import { Context, Effect, Layer } from "effect";
 import { serviceOperations, transaction } from "../../database/database.ts";
 import { processLayer, Tier } from "../../tiers.ts";
@@ -8,7 +7,7 @@ import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
 import { type OpenedTurn, TurnExecution, type TurnRun } from "./execution.ts";
 import type { TurnRequest } from "./requests.ts";
-import { type NotRunnable, type TurnStanding, TurnStore } from "./store.ts";
+import { type Abandonment, type NotRunnable, type TurnStanding, TurnStore } from "./store.ts";
 
 /**
  * What the bot loop's turn workflow does for a turn with no principal:
@@ -26,10 +25,7 @@ export interface Interface {
 	 * turn to end, members are told of a failure as a notice in the chat, so
 	 * nobody waits on a reply that cannot come.
 	 */
-	readonly abandon: (
-		run: TurnRun,
-		ending: { readonly status: "failed" | "cancelled"; readonly userMessage: UserText },
-	) => Effect.Effect<void>;
+	readonly abandon: (run: TurnRun, ending: Abandonment) => Effect.Effect<void>;
 	/**
 	 * Where the turn stands for whoever runs a step of it: running, as which
 	 * execution; asked to stop; failed, to run again, and when; or ended.

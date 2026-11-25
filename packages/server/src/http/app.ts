@@ -4,10 +4,11 @@ import type { SessionAuthentication } from "@sugabots/core/authentication/sessio
 import type { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
-import type { Ids } from "@sugabots/core/ids/ids";
+import { Ids } from "@sugabots/core/ids/ids";
+import type { Egress } from "@sugabots/core/providers/network/egress";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { processLayer } from "@sugabots/core/tiers";
-import { userText } from "@sugabots/errors";
+import { UserText, userText } from "@sugabots/errors";
 import { Clock, Effect, Layer, type Types } from "effect";
 import {
 	HttpMethod,
@@ -53,10 +54,14 @@ const betterAuthRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const router = yield* HttpRouter.HttpRouter;
 		const authentication = yield* Authentication.Service;
-		yield* router.add("*", `${API_BASE_PATH}/auth/*`, (request) =>
-			toWebRequest(request).pipe(
-				Effect.flatMap(authentication.handler),
-				Effect.map(HttpServerResponse.fromWeb),
+		// The request as `limitJsonBody` read it, not as the route was given it.
+		yield* router.add("*", `${API_BASE_PATH}/auth/*`, () =>
+			limitJsonBody(
+				HttpServerRequest.HttpServerRequest.pipe(
+					Effect.flatMap(toWebRequest),
+					Effect.flatMap(authentication.handler),
+					Effect.map(HttpServerResponse.fromWeb),
+				),
 			),
 		);
 	}),
@@ -116,9 +121,10 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 	HttpRouter.provideRequest(processLayer(Layer.effectContext(Effect.context<Database>()))),
 	Layer.provide(
 		HttpRouter.middleware(
-			Effect.map(ServerSettings.Service, ({ trustedOrigins, contentOrigin }) =>
-				everyRequest(trustedOrigins, contentOrigin),
-			),
+			Effect.gen(function* () {
+				const { trustedOrigins, contentOrigin } = yield* ServerSettings.Service;
+				return everyRequest(trustedOrigins, contentOrigin, yield* Ids.Service);
+			}),
 			{ global: true },
 		),
 	),
@@ -133,6 +139,7 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
  * platform the router serves from.
  */
 type ApiInfrastructure =
+	| Egress.Service
 	| Database
 	| ServerSettings.Service
 	| Authentication.Service
@@ -162,7 +169,11 @@ function toWebRequest(request: HttpServerRequest.HttpServerRequest): Effect.Effe
 }
 
 /** What happens to every request, the outermost first. */
-function everyRequest(origins: readonly string[], contentOrigin: string | undefined) {
+function everyRequest(
+	origins: readonly string[],
+	contentOrigin: string | undefined,
+	ids: Ids.Interface,
+) {
 	const cors = HttpMiddleware.cors({
 		allowedOrigins: origins,
 		allowedHeaders: ["content-type", "idempotency-key", "last-event-id"],
@@ -172,31 +183,32 @@ function everyRequest(origins: readonly string[], contentOrigin: string | undefi
 	const contentHostOnlyPages = onlyPagesOnContentHost(contentOrigin);
 	return (effect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
 		contentHostOnlyPages(
-			cors(
-				serverTiming(
-					defectsAsInternal(unknownRouteAsNotFound(cookieOrigin(limitJsonBody(effect)))),
-				),
-			),
+			cors(serverTiming(defectsAsInternal(ids, unknownRouteAsNotFound(cookieOrigin(effect))))),
 		);
 }
 
 /**
  * A defect is logged and answers `InternalServerError`. Its message may name a
- * table, a query or a file path, so it goes to the log and not to the caller.
+ * table, a query or a file path, so it goes to the log and not to the caller,
+ * who gets a reference id that finds the log entry.
  */
 function defectsAsInternal<E, R>(
+	ids: Ids.Interface,
 	effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> {
 	return Effect.catchDefect(effect, (defect) =>
-		Effect.logError("Request failed", defect).pipe(
-			Effect.as(
-				failureResponse(
-					InternalServerError,
-					new InternalServerError({ message: userText`Internal server error` }),
-					500,
-				),
-			),
-		),
+		Effect.gen(function* () {
+			const reference = yield* ids.random;
+			yield* Effect.logError("Request failed", defect).pipe(Effect.annotateLogs({ reference }));
+			return failureResponse(
+				InternalServerError,
+				new InternalServerError({
+					// The reference is an id minted here, never text from the defect.
+					message: userText`Something unexpected went wrong. Reference: ${UserText.unchecked(reference)}`,
+					reference,
+				}),
+			);
+		}),
 	);
 }
 
@@ -212,7 +224,6 @@ function unknownRouteAsNotFound<E, R>(
 				failureResponse(
 					NotFound,
 					new NotFound({ message: userText`There is nothing at this address.` }),
-					404,
 				),
 			),
 	);

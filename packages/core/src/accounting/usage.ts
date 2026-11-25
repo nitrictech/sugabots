@@ -1,7 +1,7 @@
 export * as Usage from "./usage.ts";
 
 import { DEFAULT_TIME_ZONE, type UsageMonth, type WorkspaceUsage } from "@sugabots/contracts";
-import { and, eq, gte, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, gte, lt, ne, or, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations } from "../database/database.ts";
 import { bot, modelProvider, modelRequest, providerModel, workspace } from "../database/schema.ts";
@@ -69,10 +69,7 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 	);
 	const byBots = eq(modelRequest.purpose, "bot-turn");
 	const bySystemBots = ne(modelRequest.purpose, "bot-turn");
-	const byPersonalAssistants = sql`exists (
-		select 1 from ${bot}
-		where ${bot.id} = ${modelRequest.botId} and ${bot.assistantOf} is not null
-	)`;
+	const byPersonalAssistants = eq(modelRequest.byPersonalAssistant, true);
 	const usageColumns = {
 		usd: sql<number>`coalesce(sum(${modelRequest.costUsd}), 0)`.mapWith(Number),
 		// A failed request answered nothing, which providers don't charge for.
@@ -117,7 +114,7 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 			})
 			.from(modelRequest)
 			.leftJoin(bot, eq(bot.id, modelRequest.botId))
-			.where(and(inMonth, byBots, isNull(bot.assistantOf)))
+			.where(and(inMonth, byBots, eq(modelRequest.byPersonalAssistant, false)))
 			.groupBy(modelRequest.botId, bot.name, bot.color, bot.eyes, bot.shape),
 	);
 	const models = yield* query((db) =>

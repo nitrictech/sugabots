@@ -4,6 +4,7 @@ import {
 	type Message,
 	type ProjectChat,
 	type Run,
+	streamEvent,
 } from "@sugabots/contracts";
 import { Conflict } from "@sugabots/contracts/http";
 import { listedChat, type TestConnector, testMember } from "@sugabots/contracts/testing";
@@ -14,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	apiAnswers,
 	bots,
+	controlledEventStream,
 	mount,
 	projects,
 	sam,
@@ -400,6 +402,48 @@ describe("a project's automation feed, at its own address", () => {
 
 		const download = await screen.findByRole("link", { name: "Download prices.csv" });
 		expect(download.getAttribute("href")).toContain(`/chats/${runChatId}/files/${fileId}`);
+	});
+
+	it("keeps the run's earlier messages, once loaded, when its stream starts over", async () => {
+		const earlier: Message = {
+			...result,
+			id: "0199a3a0-0000-7000-8000-0000000003f4",
+			chatId: runChatId,
+			parts: [{ type: "text", text: "Checked last week's prices first." }],
+			content: "Checked last week's prices first.",
+			createdAt: "2026-09-18T07:00:00.000Z",
+		};
+		const runPage = (query?: { cursor?: string }): ChatDetails =>
+			query?.cursor
+				? { ...runDetails, messages: [earlier], olderMessagesCursor: null }
+				: {
+						...runDetails,
+						messages: [{ ...result, chatId: runChatId }],
+						olderMessagesCursor: "before-the-result",
+					};
+		client.api.chats.get.mockImplementation(
+			({ params, query }: { params: { chatId: string }; query?: { cursor?: string } }) =>
+				Effect.succeed(params.chatId === runChatId ? runPage(query) : chats[params.chatId]),
+		);
+		const runEvents = controlledEventStream();
+		const usual = client.events.chat.getMockImplementation();
+		client.events.chat.mockImplementation((chatId: string) =>
+			chatId === runChatId ? runEvents.stream : usual?.(chatId),
+		);
+		mount(`${feedPage}?nestedChatPage=${runChatId}`);
+		fireEvent.click(await screen.findByRole("button", { name: "Load older messages" }));
+		await screen.findByText("Checked last week's prices first.");
+
+		runEvents.emit(streamEvent("reset"));
+		await waitFor(() =>
+			expect(
+				client.api.chats.get.mock.calls.filter(
+					([request]) => (request as { params: { chatId: string } }).params.chatId === runChatId,
+				).length,
+			).toBeGreaterThan(2),
+		);
+
+		screen.getByText("Checked last week's prices first.");
 	});
 
 	it("sends a failed run's page to the project's connectors, not its lead bot's", async () => {

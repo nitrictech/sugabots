@@ -6,7 +6,7 @@ import { failureMessage } from "@/lib/failure.ts";
 import { botLink, botSettingsLink } from "@/lib/links.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { useNewBot } from "@/shell/NewBot.tsx";
-import { Page } from "@/shell/Page.tsx";
+import { DirectoryBody, Page } from "@/shell/Page.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -36,7 +36,7 @@ export function BotsDirectory() {
 				)
 			}
 		>
-			<div className="mx-auto flex w-full max-w-180 flex-col gap-6 px-4 pt-6 pb-12">
+			<DirectoryBody>
 				{error ? <Alert>{failureMessage(error)}</Alert> : null}
 				{pin.error ? <Alert>{failureMessage(pin.error)}</Alert> : null}
 				{assistant.length > 0 && (
@@ -64,7 +64,7 @@ export function BotsDirectory() {
 						</SettingsGroup>
 					)
 				)}
-			</div>
+			</DirectoryBody>
 			{newBot.dialog}
 		</Page>
 	);

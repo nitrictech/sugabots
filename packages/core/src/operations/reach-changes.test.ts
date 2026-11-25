@@ -12,6 +12,7 @@ import {
 	seedProject,
 	seedWorkspace,
 } from "../authentication/seed.test-support.ts";
+import { localComputerEgress } from "../computers/testing.ts";
 import { type Database, query, transaction } from "../database/database.ts";
 import {
 	computer,
@@ -44,10 +45,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
 	"changes to who reaches what, under the workspace's lock",
 	() => {
 		let call: CallOperation;
+		/** Operations whose computer provider is reached through egress that lets local addresses through. */
+		let deleteWithProvider: CallOperation;
 		let signedIn: ReturnType<typeof principals>;
 
 		beforeAll(async () => {
 			call = await servedOperations();
+			deleteWithProvider = await servedOperations({ egress: localComputerEgress });
 			signedIn = principals(await authenticators());
 		});
 
@@ -284,7 +288,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					staff.workspaceId,
 					staff.project,
 					owner,
-					() => call(admin, "projects.remove", { projectId: staff.project }),
+					() => deleteWithProvider(admin, "projects.remove", { projectId: staff.project }),
 					async () => {
 						await call(owner, "workspaces.changeRole", {
 							workspace: staff.workspaceId,
@@ -303,7 +307,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					staff.workspaceId,
 					staff.project,
 					owner,
-					() => call(owner, "workspaces.delete", { workspace: staff.workspaceId }),
+					() => deleteWithProvider(owner, "workspaces.delete", { workspace: staff.workspaceId }),
 					async () => {
 						await expect(
 							call(owner, "workspaces.handOverOwnership", {
@@ -324,7 +328,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					staff.workspaceId,
 					target.defaultProject,
 					owner,
-					() => call(admin, "bots.remove", { botId: target.id }),
+					() => deleteWithProvider(admin, "bots.remove", { botId: target.id }),
 					async () => {
 						await expect(
 							call(owner, "projects.update", {

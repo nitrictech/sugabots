@@ -3,6 +3,7 @@ import { NoModelChosen } from "@sugabots/contracts/errors/workspace";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedBot, seedMember, seedWorkspace } from "../../authentication/seed.test-support.ts";
+import { query } from "../../database/database.ts";
 import {
 	bot,
 	member,
@@ -12,7 +13,12 @@ import {
 	workspace,
 	workspaceDefaultModel,
 } from "../../database/schema.ts";
-import { closeDatabase, onDatabase } from "../../database/testing.ts";
+import {
+	closeDatabase,
+	holdTransaction,
+	onDatabase,
+	waitUntilWaitingOnLocks,
+} from "../../database/testing.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
 import type { MemberSession } from "../../principal.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
@@ -158,6 +164,41 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 				.where(eq(workspaceDefaultModel.workspaceId, workspaceId)),
 		);
 		expect(chosen?.modelId).toBe("model");
+	});
+
+	it("waits for the workspace's models before it locks the chosen bot, as a change of models does", async () => {
+		// A change of models takes the workspace's lock, then the bots' rows it moves.
+		const changingModels = holdTransaction(
+			query((db) =>
+				db
+					.select({ id: workspace.id })
+					.from(workspace)
+					.where(eq(workspace.id, workspaceId))
+					.for("update"),
+			),
+		);
+		await changingModels.held;
+		const completing = complete(adminId, customBotId);
+		await waitUntilWaitingOnLocks(1);
+
+		const movingTheBot = holdTransaction(
+			query((db) =>
+				db
+					.select({ id: bot.id })
+					.from(bot)
+					.where(eq(bot.id, customBotId))
+					.for("update", { noWait: true }),
+			),
+		);
+		const botFree = await movingTheBot.held.then(
+			() => true,
+			() => false,
+		);
+		await movingTheBot.release().catch(() => undefined);
+		await changingModels.release();
+		await completing;
+
+		expect(botFree).toBe(true);
 	});
 
 	it("records when the workspace's setup was completed, the first time only", async () => {

@@ -35,6 +35,11 @@ import { matchesSearch } from "@/ui/search-field.tsx";
 import { sidebarRow } from "@/ui/sidebar-row.ts";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
+const HIDE_TIME_WHEN_ACTION_VISIBLE =
+	"group-has-focus-visible/chat:invisible group-hover/chat:invisible [@media(hover:none)]:invisible";
+const SHOW_CHAT_ACTION =
+	"opacity-0 transition-opacity group-has-focus-visible/chat:opacity-100 group-hover/chat:opacity-100 [@media(hover:none)]:opacity-100";
+
 /** How many of a section's chats or runs show before View all. */
 const ENTRIES_SHOWN = 8;
 
@@ -374,8 +379,7 @@ function ChatEntry({
 						dateTime={movedAt.toISOString()}
 						className={cn(
 							"flex h-5 min-w-17 shrink-0 items-center justify-end text-subtle-foreground text-xs tabular-nums",
-							mayResolve &&
-								"group-has-focus-visible/chat:invisible group-hover/chat:invisible [@media(hover:none)]:invisible",
+							mayResolve && HIDE_TIME_WHEN_ACTION_VISIBLE,
 						)}
 					>
 						{formatListTime(movedAt, new Date())}
@@ -410,7 +414,10 @@ function ChatEntry({
 					disabled={setResolved.isPending}
 					onClick={() => setResolved.mutate(true)}
 					aria-label={`Resolve: ${chat.title}`}
-					className="absolute top-1.5 right-0.5 h-6 gap-1 px-1.5 font-normal text-subtle-foreground text-xs tabular-nums opacity-0 transition-opacity group-has-focus-visible/chat:opacity-100 group-hover/chat:opacity-100 [@media(hover:none)]:opacity-100"
+					className={cn(
+						"absolute top-1.5 right-0.5 h-6 gap-1 px-1.5 font-normal text-subtle-foreground text-xs tabular-nums ",
+						SHOW_CHAT_ACTION,
+					)}
 				>
 					Resolve
 					<Check aria-hidden strokeWidth={2.25} className="size-3" />
@@ -475,8 +482,7 @@ function ResolvedEntry({
 						dateTime={movedAt.toISOString()}
 						className={cn(
 							"shrink-0 text-xs tabular-nums",
-							mayReopen &&
-								"group-has-focus-visible/chat:invisible group-hover/chat:invisible [@media(hover:none)]:invisible",
+							mayReopen && HIDE_TIME_WHEN_ACTION_VISIBLE,
 						)}
 					>
 						{formatListTime(movedAt, new Date())}
@@ -488,7 +494,10 @@ function ResolvedEntry({
 					label={`Reopen: ${row.chat.title}`}
 					disabled={setResolved.isPending}
 					onClick={() => setResolved.mutate(false)}
-					className="absolute top-1 right-1 rounded-md text-subtle-foreground opacity-0 transition-opacity group-has-focus-visible/chat:opacity-100 group-hover/chat:opacity-100 [@media(hover:none)]:opacity-100"
+					className={cn(
+						"absolute top-1 right-1 rounded-md text-subtle-foreground ",
+						SHOW_CHAT_ACTION,
+					)}
 				>
 					<RotateCcw aria-hidden strokeWidth={2} />
 				</IconButton>

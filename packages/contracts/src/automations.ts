@@ -198,7 +198,7 @@ const everySchema = (maximum: number) =>
  * weeks, or on `dayOfMonth` of those months. A `cron` timetable is a cron
  * expression kept as it was written: a bot writes its routines that way.
  */
-export const routineScheduleSchema = Schema.Union([
+export const routineSchema = Schema.Union([
 	Schema.Struct({
 		repeat: Schema.Literal("daily"),
 		every: everySchema(MAX_EVERY_DAYS),
@@ -230,10 +230,10 @@ export const routineScheduleSchema = Schema.Union([
 	}),
 	Schema.Struct({ repeat: Schema.Literal("cron"), expression: cronExpressionSchema }),
 ]);
-export type RoutineSchedule = typeof routineScheduleSchema.Type;
+export type Routine = typeof routineSchema.Type;
 
 /** A routine's timetable picked by its parts rather than written as cron. */
-export type CalendarSchedule = Exclude<RoutineSchedule, { repeat: "cron" }>;
+export type CalendarSchedule = Exclude<Routine, { repeat: "cron" }>;
 
 /**
  * A GitHub trigger's connector, the GitHub app of the automation's project,
@@ -250,7 +250,7 @@ const automationTriggerSchema = Schema.Union([
 	Schema.Struct({
 		id: uuidSchema,
 		kind: Schema.Literal("routine"),
-		schedule: routineScheduleSchema,
+		schedule: routineSchema,
 		timezone: timeZoneSchema,
 		/** Null while the automation is paused. */
 		nextScheduledAt: Schema.NullOr(isoTimestampSchema),
@@ -312,7 +312,7 @@ const webhookTriggerInputSchema = Schema.Struct({
 
 const routineInputSchema = Schema.Struct({
 	kind: Schema.Literal("routine"),
-	schedule: routineScheduleSchema,
+	schedule: routineSchema,
 	timezone: timeZoneSchema,
 });
 

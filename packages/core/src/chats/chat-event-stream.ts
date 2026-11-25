@@ -94,12 +94,13 @@ function streamEventsFor(event: ChatEvent): PendingEvent[] {
 				}),
 			),
 		],
-		TurnCompleted: ({ chatId, workspaceId, messageId, content, finishedAt }) => [
+		TurnCompleted: ({ chatId, workspaceId, messageId, execution, content, finishedAt }) => [
 			onChat(
 				chatId,
 				streamEvent("message.completed", {
 					chatId,
 					messageId,
+					execution,
 					content,
 					status: "complete",
 					finishedAt: finishedAt.toISOString(),
@@ -114,17 +115,21 @@ function streamEventsFor(event: ChatEvent): PendingEvent[] {
 			...chatChanged(workspaceId, chatId),
 		],
 		TurnSuspended: ({ chatId, workspaceId }) => [listedChatChanged(workspaceId, chatId)],
-		TurnFailed: ({ chatId, workspaceId, messageId, userMessage, willRetry }) => [
-			onChat(chatId, streamEvent("message.failed", { chatId, messageId, error: userMessage })),
+		TurnFailed: ({ chatId, workspaceId, messageId, execution, userMessage, willRetry }) => [
+			onChat(
+				chatId,
+				streamEvent("message.failed", { chatId, messageId, execution, error: userMessage }),
+			),
 			// The chat stops working only once nobody runs the turn again.
 			...(willRetry ? [] : [listedChatChanged(workspaceId, chatId)]),
 		],
-		TurnInterrupted: ({ chatId, workspaceId, messageId, content, finishedAt }) => [
+		TurnInterrupted: ({ chatId, workspaceId, messageId, execution, content, finishedAt }) => [
 			onChat(
 				chatId,
 				streamEvent("message.completed", {
 					chatId,
 					messageId,
+					execution,
 					content,
 					status: "cancelled",
 					finishedAt: finishedAt.toISOString(),

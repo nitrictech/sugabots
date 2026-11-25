@@ -130,12 +130,23 @@ export const turnFacts = (db: Executor, turnId: string) =>
 		return facts;
 	});
 
+export function startedFromOutside(facts: TurnFacts) {
+	return facts.run?.startedBy === "webhook" || facts.run?.startedBy === "github";
+}
+
+export function hasMemberBounds(facts: TurnFacts, asker = askerOf(facts)) {
+	return (
+		facts.assistantOf === asker &&
+		facts.inOwnChats &&
+		(facts.reason !== "brief" || facts.briefTurnRule === "memberBounds") &&
+		!startedFromOutside(facts)
+	);
+}
+
 export function asksBeforeAllTools(facts: TurnFacts) {
 	return (
 		facts.briefTurnRule === "askBeforeAllTools" ||
-		(facts.assistantOf !== null &&
-			facts.inOwnChats &&
-			(facts.run?.startedBy === "webhook" || facts.run?.startedBy === "github"))
+		(facts.assistantOf !== null && facts.inOwnChats && startedFromOutside(facts))
 	);
 }
 

@@ -12,6 +12,7 @@ import { type CallOperation, servedOperations } from "../../../operations/testin
 import type { Principal } from "../../../principal.ts";
 import { authenticators, principals } from "../../../proofs/world.test-support.ts";
 import { ServerSettings } from "../../../server-settings/server-settings.ts";
+import { unimplemented } from "../../../testing.ts";
 import { defaultProjectOf } from "../../../workspaces/projects/project-reads.ts";
 import { seedProject } from "../../../workspaces/projects/seed.test-support.ts";
 import { Egress } from "../../network/egress.ts";
@@ -154,7 +155,7 @@ function signedByApp(jwt: string) {
 
 /** Egress that reaches only `github`. */
 export const egressToGitHub = (github: typeof fetch) =>
-	Layer.succeed(Egress.Service, {
+	unimplemented(Egress.Service, {
 		providers: { for: () => github },
 		validateProviderUrl: () => Effect.void,
 		oauth: github,

@@ -121,7 +121,6 @@ function SignInAgain({
 			<Button
 				variant="secondary"
 				size="sm"
-				className="shrink-0"
 				aria-label={`Sign in to ${only.name}${forWhom}`}
 				disabled={actions.signIn.isPending}
 				onClick={() => actions.signIn.mutate({ connectorId: only.id })}
@@ -136,7 +135,7 @@ function SignInAgain({
 			owner={owner}
 			to={{ page: "connectors" }}
 			aria-label={`Open connectors${forWhom}`}
-			className={buttonStyles({ variant: "secondary", size: "sm", className: "shrink-0" })}
+			className={buttonStyles({ variant: "secondary", size: "sm" })}
 		>
 			<span className="max-md:hidden">Open connectors</span>
 			<span className="md:hidden">Open</span>

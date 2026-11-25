@@ -23,6 +23,8 @@ import { type BotMood, moods } from "./moods.ts";
 import { repeatAtRandom } from "./random.ts";
 import { useWatching } from "./watching.ts";
 
+export type FaceAction = "hop";
+
 /** A lively face, as its `ref` gives it. */
 export interface LivelyFace {
 	/** Hops once, as it does when pressed. */

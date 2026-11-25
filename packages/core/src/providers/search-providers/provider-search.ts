@@ -4,8 +4,8 @@ import {
 	StreamableHTTPError,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { EXA_FREE_SEARCH_URL } from "@sugabots/contracts";
-import { type UserText, userText } from "@sugabots/errors";
-import { Data, Effect, Schema } from "effect";
+import { type DomainError, type UserText, userText } from "@sugabots/errors";
+import { Effect, ErrorReporter, Schema } from "effect";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
 import { upstreamErrorText } from "../upstream-error-text.ts";
@@ -369,7 +369,19 @@ async function httpRefusal(
 type Service = "Brave Search" | "Exa" | "Tavily" | "SearXNG";
 
 /** Whatever a call threw, to be turned into a reason. */
-class CallFailed extends Data.TaggedError("CallFailed")<{ readonly cause: unknown }> {}
+class CallFailed
+	extends Schema.TaggedError<CallFailed>()("CallFailed", { cause: Schema.Defect() })
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return "The search provider request failed";
+	}
+	get userMessage() {
+		return userText`The search provider didn't answer. Try again shortly.`;
+	}
+}
 
 /** Runs one call under the time budget, turning whatever goes wrong into a reason. */
 function answer(

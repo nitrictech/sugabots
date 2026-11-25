@@ -14,7 +14,7 @@ import { providerBuiltIn, providerLacksCredential, seededBuiltIns } from "@sugab
 import { ModelNotEnabled, ModelProviderNameConflict } from "@sugabots/contracts/errors/providers";
 import { DisplayName, type UserText } from "@sugabots/errors";
 import { and, asc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
-import { Context, DateTime, Effect, Layer, Schema } from "effect";
+import { Context, DateTime, Duration, Effect, Layer, Schema } from "effect";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import {
@@ -78,16 +78,68 @@ export interface Interface {
 		signIn: { tokens: OAuthTokens; signedInById: string } | null,
 	) => Effect.Effect<boolean>;
 	/**
-	 * Replaces a signed-in provider's tokens with what `renew` makes of them,
-	 * holding its row locked meanwhile: a refresh token is good for one use, so
-	 * two turns must not both spend it. Not a configuration change, so the
-	 * provider's last test still stands. `undefined` if it is not signed in.
+	 * A signed-in provider's tokens, refreshed first when `renewal` finds them
+	 * stale, or `undefined` if it is not signed in. A refresh token is good for
+	 * one use, so one process at a time refreshes, under a claim it commits
+	 * before calling the sign-in service and holds no transaction across;
+	 * another waits for it, for at most the claim's lease, and then makes do
+	 * with what it has. The refreshed tokens are saved unless the provider was
+	 * signed in again meanwhile. Not a configuration change, so the provider's
+	 * last test still stands.
 	 */
 	readonly renewOAuthTokens: <E>(
 		workspaceId: string,
 		providerId: string,
-		renew: (current: OAuthTokens) => Effect.Effect<OAuthTokens, E>,
+		renewal: {
+			readonly isStale: (current: OAuthTokens) => Effect.Effect<boolean>;
+			readonly refresh: (current: OAuthTokens) => Effect.Effect<OAuthTokens, E>;
+		},
 	) => Effect.Effect<OAuthTokens | undefined, E>;
+	/**
+	 * How to reach the provider with `candidate` in place of its key or
+	 * sign-in, and the other changes given with a key, without storing any of
+	 * it, so the candidate can be tried before it replaces what works.
+	 * `configurationUpdatedAt` is the configuration it was built on, which
+	 * {@link Interface.replaceCredential} checks is still the provider's.
+	 */
+	readonly candidateAccess: (
+		workspaceId: string,
+		providerId: string,
+		candidate: CandidateCredential,
+	) => Effect.Effect<ProviderAccess | undefined>;
+	/**
+	 * Puts `candidate`, which has answered with `models`, in place of the
+	 * provider's key or sign-in, as one change: who connected it, whether it is
+	 * on, its test and its models. Run under the held-models lock. Changes
+	 * nothing, and answers why, when the configuration `candidateAccess` built on
+	 * has changed since (`reconfigured`), or the member signing in has left the
+	 * workspace (`signerGone`, checked under its membership lock).
+	 */
+	readonly replaceCredential: (
+		workspaceId: string,
+		providerId: string,
+		replacement: {
+			candidate: CandidateCredential;
+			builtOn: Date;
+			changedById: string;
+			active: boolean;
+			models: DiscoveredModel[];
+		},
+	) => Effect.Effect<ModelProviderRow | "reconfigured" | "signerGone">;
+	/**
+	 * Records the models the configuration last updated at `testedAt` listed,
+	 * and its successful test, as one change, switching it on when
+	 * `activateOnSuccess` asks; nothing, and `undefined`, once it has been
+	 * reconfigured since, so models one configuration listed are never
+	 * recorded against another.
+	 */
+	readonly recordDiscovery: (
+		workspaceId: string,
+		providerId: string,
+		testedAt: Date,
+		models: DiscoveredModel[],
+		activateOnSuccess: boolean,
+	) => Effect.Effect<{ added: number; updated: number } | undefined>;
 	/**
 	 * Records how a test of the configuration last updated at `testedAt` went,
 	 * unless the provider has been reconfigured since. A success switches it on
@@ -248,6 +300,56 @@ export const make = Effect.gen(function* () {
 			} satisfies ProviderAccess;
 		});
 
+	/** What `syncDiscovered` says: new models added, fetched ones brought up to date. */
+	const syncModels = (workspaceId: string, providerId: string, models: DiscoveredModel[]) =>
+		Effect.gen(function* () {
+			if (models.length === 0) return { added: 0, updated: 0 };
+			const elsewhere = yield* query((db) =>
+				db
+					.select({ modelId: providerModel.modelId })
+					.from(providerModel)
+					.where(
+						and(
+							eq(providerModel.workspaceId, workspaceId),
+							ne(providerModel.providerId, providerId),
+							inArray(
+								providerModel.modelId,
+								models.map(({ modelId }) => modelId),
+							),
+						),
+					),
+			);
+			const claimed = new Set(elsewhere.map(({ modelId }) => modelId));
+			const offered = models
+				.filter(({ modelId }) => !claimed.has(modelId))
+				.map((model) => ({
+					...model,
+					workspaceId,
+					providerId,
+					enabled: false,
+					source: "fetched" as const,
+				}));
+			if (offered.length === 0) return { added: 0, updated: 0 };
+			const rows = yield* query((db) =>
+				db
+					.insert(providerModel)
+					.values(offered)
+					.onConflictDoUpdate({
+						target: [providerModel.providerId, providerModel.modelId],
+						set: {
+							displayName: sql`excluded.display_name`,
+							capabilities: sql`excluded.capabilities`,
+							contextLength: sql`excluded.context_length`,
+						},
+						setWhere: sql`${providerModel.source} = 'fetched' and (${providerModel.displayName} is distinct from excluded.display_name or ${providerModel.capabilities} is distinct from excluded.capabilities or ${providerModel.contextLength} is distinct from excluded.context_length)`,
+					})
+					// Postgres leaves xmax at zero on a row this statement inserted.
+					.returning({ inserted: sql<boolean>`(xmax = 0)` }),
+			);
+			const added = rows.filter(({ inserted }) => inserted).length;
+			return { added, updated: rows.length - added };
+		});
+
 	const isEnabled = (workspaceId: string, modelId: string) =>
 		query((db) =>
 			db
@@ -390,6 +492,8 @@ export const make = Effect.gen(function* () {
 										? {
 												active: false,
 												oauthTokensEncrypted: cipher.encrypt(JSON.stringify(signIn.tokens)),
+												oauthRefreshId: null,
+												oauthRefreshUntil: null,
 												signedInById: signIn.signedInById,
 												connectedById: signIn.signedInById,
 												lastTestedAt: null,
@@ -406,40 +510,87 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		renewOAuthTokens: (workspaceId, providerId, renew) =>
+		renewOAuthTokens: (workspaceId, providerId, { isStale, refresh }) =>
 			operation(
 				"renewOAuthTokens",
-				transaction(
-					Effect.gen(function* () {
+				Effect.gen(function* () {
+					const inProvider = and(
+						eq(modelProvider.id, providerId),
+						eq(modelProvider.workspaceId, workspaceId),
+					);
+					// Kept as it was, so a test of the configuration still records against it.
+					const sameConfiguration = { updatedAt: sql<Date>`${modelProvider.updatedAt}` };
+					for (let waited = 0; ; waited++) {
 						const [row] = yield* query((db) =>
 							db
-								.select({
-									sealed: modelProvider.oauthTokensEncrypted,
-									updatedAt: modelProvider.updatedAt,
-								})
+								.select({ sealed: modelProvider.oauthTokensEncrypted })
 								.from(modelProvider)
-								.where(
-									and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId)),
-								)
-								.for("update"),
+								.where(inProvider),
 						);
 						if (!row?.sealed) return undefined;
-						const current = openOAuthTokens(row.sealed, cipher);
-						const renewed = yield* renew(current);
-						if (renewed === current) return current;
+						const sealed = row.sealed;
+						const current = openOAuthTokens(sealed, cipher);
+						if (!(yield* isStale(current))) return current;
+						const [claim] = yield* query((db) =>
+							db
+								.update(modelProvider)
+								.set({
+									oauthRefreshId: sql`uuidv7()`,
+									oauthRefreshUntil: sql`clock_timestamp() + ${Duration.toMillis(REFRESH_CLAIM)} * interval '1 millisecond'`,
+									...sameConfiguration,
+								})
+								.where(
+									and(
+										inProvider,
+										eq(modelProvider.oauthTokensEncrypted, sealed),
+										sql`coalesce(${modelProvider.oauthRefreshUntil}, '-infinity') <= clock_timestamp()`,
+									),
+								)
+								.returning({ id: modelProvider.oauthRefreshId }),
+						);
+						if (!claim?.id) {
+							// Another process is refreshing them: its tokens are the ones to use.
+							if (waited * Duration.toMillis(REFRESH_WAIT) >= Duration.toMillis(REFRESH_CLAIM)) {
+								return current;
+							}
+							yield* Effect.sleep(REFRESH_WAIT);
+							continue;
+						}
+						const claimId = claim.id;
+						const refreshed = yield* refresh(current).pipe(
+							Effect.onError(() =>
+								query((db) =>
+									db
+										.update(modelProvider)
+										.set({ oauthRefreshId: null, oauthRefreshUntil: null, ...sameConfiguration })
+										.where(and(inProvider, eq(modelProvider.oauthRefreshId, claimId))),
+								).pipe(Effect.ignore),
+							),
+						);
+						// Saved over the tokens it refreshed, even once its claim has run
+						// out, since they no longer refresh; not over a new sign-in.
 						yield* query((db) =>
 							db
 								.update(modelProvider)
-								// Kept as it was, so a test of the configuration still records against it.
 								.set({
-									oauthTokensEncrypted: cipher.encrypt(JSON.stringify(renewed)),
-									updatedAt: row.updatedAt,
+									oauthTokensEncrypted: cipher.encrypt(JSON.stringify(refreshed)),
+									oauthRefreshId: null,
+									oauthRefreshUntil: null,
+									...sameConfiguration,
 								})
-								.where(eq(modelProvider.id, providerId)),
+								.where(
+									and(
+										inProvider,
+										or(
+											eq(modelProvider.oauthRefreshId, claimId),
+											eq(modelProvider.oauthTokensEncrypted, sealed),
+										),
+									),
+								),
 						);
-						return renewed;
-					}),
-				),
+						return refreshed;
+					}
+				}),
 			),
 
 		recordTest: (workspaceId, providerId, testedAt, outcome) =>
@@ -490,55 +641,144 @@ export const make = Effect.gen(function* () {
 			),
 
 		syncDiscovered: (workspaceId, providerId, models) =>
+			operation("syncDiscovered", syncModels(workspaceId, providerId, models)),
+
+		candidateAccess: (workspaceId, providerId, candidate) =>
 			operation(
-				"syncDiscovered",
+				"candidateAccess",
 				Effect.gen(function* () {
-					if (models.length === 0) return { added: 0, updated: 0 };
-					const elsewhere = yield* query((db) =>
+					const [row] = yield* query((db) =>
 						db
-							.select({ modelId: providerModel.modelId })
-							.from(providerModel)
+							.select()
+							.from(modelProvider)
 							.where(
-								and(
-									eq(providerModel.workspaceId, workspaceId),
-									ne(providerModel.providerId, providerId),
-									inArray(
-										providerModel.modelId,
-										models.map(({ modelId }) => modelId),
-									),
-								),
+								and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId)),
 							),
 					);
-					const claimed = new Set(elsewhere.map(({ modelId }) => modelId));
-					const offered = models
-						.filter(({ modelId }) => !claimed.has(modelId))
-						.map((model) => ({
-							...model,
-							workspaceId,
-							providerId,
-							enabled: false,
-							source: "fetched" as const,
-						}));
-					if (offered.length === 0) return { added: 0, updated: 0 };
-					const rows = yield* query((db) =>
-						db
-							.insert(providerModel)
-							.values(offered)
-							.onConflictDoUpdate({
-								target: [providerModel.providerId, providerModel.modelId],
-								set: {
-									displayName: sql`excluded.display_name`,
-									capabilities: sql`excluded.capabilities`,
-									contextLength: sql`excluded.context_length`,
-								},
-								setWhere: sql`${providerModel.source} = 'fetched' and (${providerModel.displayName} is distinct from excluded.display_name or ${providerModel.capabilities} is distinct from excluded.capabilities or ${providerModel.contextLength} is distinct from excluded.context_length)`,
-							})
-							// Postgres leaves xmax at zero on a row this statement inserted.
-							.returning({ inserted: sql<boolean>`(xmax = 0)` }),
+					if (!row) return undefined;
+					const stored = Object.fromEntries(
+						row.customHeadersEncrypted.map(({ name, value }) => [name, cipher.decrypt(value)]),
 					);
-					const added = rows.filter(({ inserted }) => inserted).length;
-					return { added, updated: rows.length - added };
+					if ("tokens" in candidate) {
+						return {
+							providerId: row.id,
+							builtIn: row.builtIn,
+							baseUrl: row.baseUrl,
+							apiFormat: row.apiFormat,
+							apiKey: row.apiKeyEncrypted ? cipher.decrypt(row.apiKeyEncrypted) : undefined,
+							oauthTokens: candidate.tokens,
+							configurationUpdatedAt: row.updatedAt,
+							headers: stored,
+						} satisfies ProviderAccess;
+					}
+					return {
+						providerId: row.id,
+						builtIn: row.builtIn,
+						baseUrl: row.baseUrl,
+						apiFormat: candidate.apiFormat ?? row.apiFormat,
+						apiKey: candidate.apiKey,
+						configurationUpdatedAt: row.updatedAt,
+						headers: candidate.customHeaders
+							? Object.fromEntries(candidate.customHeaders.map(({ name, value }) => [name, value]))
+							: stored,
+					} satisfies ProviderAccess;
 				}),
+			),
+
+		replaceCredential: (
+			workspaceId,
+			providerId,
+			{ candidate, builtOn, changedById, active, models },
+		) =>
+			operation(
+				"replaceCredential",
+				transaction(
+					Effect.gen(function* () {
+						if (
+							"tokens" in candidate &&
+							!(yield* inWorkspaceUnderMembershipLock(workspaceId, candidate.signedInById))
+						) {
+							return "signerGone" as const;
+						}
+						const inProvider = and(
+							eq(modelProvider.id, providerId),
+							eq(modelProvider.workspaceId, workspaceId),
+						);
+						const [unchanged] = yield* query((db) =>
+							db
+								.select({ id: modelProvider.id })
+								.from(modelProvider)
+								.where(and(inProvider, stillConfiguredAs(modelProvider.updatedAt, builtOn)))
+								.for("update"),
+						);
+						if (!unchanged) return "reconfigured" as const;
+						const now = yield* DateTime.nowAsDate;
+						const credential =
+							"tokens" in candidate
+								? {
+										oauthTokensEncrypted: cipher.encrypt(JSON.stringify(candidate.tokens)),
+										oauthRefreshId: null,
+										oauthRefreshUntil: null,
+										signedInById: candidate.signedInById,
+										connectedById: candidate.signedInById,
+									}
+								: {
+										apiKeyEncrypted: cipher.encrypt(candidate.apiKey),
+										apiFormat: candidate.apiFormat,
+										customHeadersEncrypted: candidate.customHeaders?.map(({ name, value }) => ({
+											name,
+											value: cipher.encrypt(value),
+										})),
+										oauthTokensEncrypted: null,
+										signedInById: null,
+										connectedById: changedById,
+									};
+						const [row] = yield* query((db) =>
+							db
+								.update(modelProvider)
+								.set({ ...credential, active, lastTestedAt: now, lastTestError: null })
+								.where(inProvider)
+								.returning(),
+						);
+						yield* syncModels(workspaceId, providerId, models);
+						return row ?? ("reconfigured" as const);
+					}),
+				),
+			),
+
+		recordDiscovery: (workspaceId, providerId, testedAt, models, activateOnSuccess) =>
+			operation(
+				"recordDiscovery",
+				transaction(
+					Effect.gen(function* () {
+						const inProvider = and(
+							eq(modelProvider.id, providerId),
+							eq(modelProvider.workspaceId, workspaceId),
+							stillConfiguredAs(modelProvider.updatedAt, testedAt),
+						);
+						const [unchanged] = yield* query((db) =>
+							db
+								.select({ id: modelProvider.id })
+								.from(modelProvider)
+								.where(inProvider)
+								.for("update"),
+						);
+						if (!unchanged) return undefined;
+						const synced = yield* syncModels(workspaceId, providerId, models);
+						const now = yield* DateTime.nowAsDate;
+						yield* query((db) =>
+							db
+								.update(modelProvider)
+								.set({
+									lastTestedAt: now,
+									lastTestError: null,
+									active: activateOnSuccess ? true : undefined,
+								})
+								.where(inProvider),
+						);
+						return synced;
+					}),
+				),
 			),
 
 		updateModel: (workspaceId, providerId, modelId, changes) =>
@@ -644,6 +884,24 @@ export const make = Effect.gen(function* () {
 
 export const layer = processLayer(Layer.effect(Service, make));
 
+/** How long a process has a refresh of a provider's tokens to itself: more than the sign-in service is given to answer. */
+const REFRESH_CLAIM = Duration.seconds(30);
+
+/** How often a process waiting for another's refresh looks for its tokens. */
+const REFRESH_WAIT = Duration.millis(250);
+
+/**
+ * A key, with the headers and protocol given with it, or a member's
+ * subscription sign-in: what is tried in place of a provider's credential.
+ */
+export type CandidateCredential =
+	| {
+			apiKey: string;
+			apiFormat?: ProviderApiFormat;
+			customHeaders?: ReadonlyArray<{ name: string; value: string }>;
+	  }
+	| { tokens: OAuthTokens; signedInById: string };
+
 /** The provider that offers a model, and the names members know both by. */
 export interface ResolvedModel {
 	/** Nothing while the provider lacks the key or sign-in its built-in provider needs. */
@@ -736,6 +994,8 @@ function providerValues(input: NewModelProvider, cipher: Secrets.Interface) {
 const SIGNED_OUT = {
 	active: false,
 	oauthTokensEncrypted: null,
+	oauthRefreshId: null,
+	oauthRefreshUntil: null,
 	signedInById: null,
 	lastTestedAt: null,
 	lastTestError: null,

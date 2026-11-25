@@ -183,6 +183,10 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 					Queue.take(reproofs).pipe(
 						Effect.as(true),
 						Effect.catchIf(Cause.isDone, () => Effect.succeed(false)),
+						Effect.timeoutOrElse({
+							duration: "4 seconds",
+							orElse: () => Effect.die(new Error("Timed out waiting for the desktop to reprove")),
+						}),
 					),
 				),
 		};

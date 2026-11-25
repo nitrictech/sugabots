@@ -106,7 +106,7 @@ export function DesktopStage({
 			<section
 				aria-label={title}
 				{...phoneKeys}
-				className="fixed inset-0 outline-none z-50 flex flex-col bg-black pt-safe-or-3 pb-safe-or-4"
+				className="fixed inset-0 outline-none z-50 flex flex-col bg-background pt-safe-or-3 pb-safe-or-4 text-foreground"
 			>
 				<div className="shrink-0 px-4">
 					<CloseButton onClick={onClose} />

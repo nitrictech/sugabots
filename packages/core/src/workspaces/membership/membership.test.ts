@@ -8,7 +8,7 @@ import { seedAutomation, seedBot, seedRoutine } from "../../authentication/seed.
 import { SystemWorkAuthentication } from "../../authentication/system-work.ts";
 import { ComputerProviderStore } from "../../computers/computer-provider-store.ts";
 import { Computers } from "../../computers/computers.ts";
-import { recordingFirstComputer } from "../../computers/testing.ts";
+import { localComputerEgress, recordingFirstComputer } from "../../computers/testing.ts";
 import { query } from "../../database/database.ts";
 import {
 	automation,
@@ -918,7 +918,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			}),
 		);
 
-		expect(await run(ada.id, (m) => m.delete({ workspace: workspace.id }))).toEqual({
+		const withProvider = membershipWith({ egress: localComputerEgress });
+		expect(await withProvider.run(ada.id, (m) => m.delete({ workspace: workspace.id }))).toEqual({
 			failed: "ComputerUnavailable",
 		});
 		expect(

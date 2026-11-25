@@ -117,8 +117,9 @@ describe("GitHub and Linear, which sign the body", () => {
 		expect(deliveryAuthentic({ kind: "linear" }, SECRET, sent, NOW)).toBe(false);
 	});
 
-	it("admits Linear's bare hex signature", () => {
-		const sent = delivery({ "Linear-Signature": hmac("sha256", BODY).digest("hex") });
+	it("admits Linear's hex signature with a recent timestamp in the signed body", () => {
+		const body = JSON.stringify({ action: "create", webhookTimestamp: NOW.getTime() });
+		const sent = delivery({ "Linear-Signature": hmac("sha256", body).digest("hex") }, body);
 		expect(deliveryAuthentic({ kind: "linear" }, SECRET, sent, NOW)).toBe(true);
 	});
 });

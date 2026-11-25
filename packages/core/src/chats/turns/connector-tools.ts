@@ -169,7 +169,9 @@ export function connectorToolsForStep(
 														}),
 													);
 											}
-											return yield* Effect.fail(new ToolCallError(error.userMessage));
+											return yield* Effect.fail(
+												new ToolCallError({ userMessage: error.userMessage }),
+											);
 										}),
 									),
 								),

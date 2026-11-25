@@ -15,11 +15,12 @@ import { Email } from "@sugabots/core/email/email";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { processLayer, Tier } from "@sugabots/core/tiers";
 import { account, member, session, verification } from "@sugabots/core/workspaces/sql";
+import { type DomainError, userText } from "@sugabots/errors";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Config, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Config, Context, Effect, ErrorReporter, Layer, Option, Redacted, Schema } from "effect";
 import { Cookies } from "effect/unstable/http";
 import { Pool } from "pg";
 
@@ -301,9 +302,16 @@ function referralCodeIn(body: unknown): string | undefined {
 	);
 }
 
-class InvalidConfig extends Data.TaggedError("InvalidAuthConfig")<{
-	message: string;
-}> {}
+class InvalidConfig
+	extends Schema.TaggedError<InvalidConfig>()("InvalidAuthConfig", { message: Schema.String })
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	get userMessage() {
+		return userText`Sign-in is unavailable. Ask whoever runs Sugabots to check its sign-in settings.`;
+	}
+}
 
 const MIN_PRODUCTION_SECRET_LENGTH = 32;
 const PRODUCTION_SECRET_PLACEHOLDERS = new Set([

@@ -108,13 +108,10 @@ export function withSignInAccess(
 	const signIn = signInTo(service);
 	const http = httpClients.for({ baseUrl: signIn.issuer });
 	return Effect.gen(function* () {
-		const tokens = yield* store.renewOAuthTokens(workspaceId, access.providerId, (current) =>
-			needsRefresh(current).pipe(
-				Effect.flatMap((stale) =>
-					stale ? signIn.refresh(http, current) : Effect.succeed(current),
-				),
-			),
-		);
+		const tokens = yield* store.renewOAuthTokens(workspaceId, access.providerId, {
+			isStale: needsRefresh,
+			refresh: (current) => signIn.refresh(http, current),
+		});
 		if (!tokens) {
 			return yield* new ProviderSignInFailed({
 				userMessage: userText`Sign in to ${signInServiceNames[service]} again`,

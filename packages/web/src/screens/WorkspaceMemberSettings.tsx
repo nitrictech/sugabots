@@ -224,7 +224,10 @@ function Invitations({
 	const failure = invite.error ?? cancel.error;
 
 	return (
-		<SettingsGroup label="Invited" note={`Invites expire after ${INVITATION_LIFETIME_DAYS} days.`}>
+		<SettingsGroup
+			label="Invited"
+			note={`Invitations expire after ${INVITATION_LIFETIME_DAYS} days.`}
+		>
 			{invitations.map((invitation) => (
 				<SettingsRow
 					key={invitation.id}

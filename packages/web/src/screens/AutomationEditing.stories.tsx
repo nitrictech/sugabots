@@ -363,7 +363,9 @@ export const AddTrigger = meta.story({
 	render: () => <StoryApp path={pageOf(pullRequestReviews)} />,
 	play: async ({ canvas, userEvent }) => {
 		const step = await openAddTrigger(canvas, true);
-		await expect(within(step).getByRole("button", { name: /^Webhook/ })).toBeVisible();
+		await waitFor(() =>
+			expect(within(step).getByRole("button", { name: /^Webhook/ })).toBeVisible(),
+		);
 		await expect(await within(step).findByRole("button", { name: /^GitHub/ })).toBeVisible();
 		await expect(within(step).queryByRole("button", { name: /^Routine/ })).toBeNull();
 		await expect(within(step).getByRole("link", { name: /^Add another connector/ })).toBeVisible();

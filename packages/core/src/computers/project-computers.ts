@@ -17,7 +17,7 @@ import {
 	UpgradeFailed,
 } from "@sugabots/contracts/errors/computers";
 import { userText } from "@sugabots/errors";
-import { and, eq, gt, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import {
 	Clock,
 	Context,
@@ -36,9 +36,12 @@ import {
 	serviceOperations,
 	type Transaction,
 	transaction,
+	writtenRow,
 } from "../database/database.ts";
 import { violatedUniqueConstraint } from "../database/errors.ts";
 import {
+	CREATION_LABEL,
+	computerDestruction,
 	computerLease,
 	computerProvider as computerProviderTable,
 	computer as computerTable,
@@ -82,6 +85,15 @@ const IMAGE_RECHECK = Duration.minutes(10);
 const REGISTRY_TIMEOUT = Duration.seconds(5);
 /** How long after a computer fails to upgrade on its own before it is tried again. */
 const UPGRADE_RETRY = Duration.hours(1);
+/**
+ * How long making a computer may take before a machine it left at its
+ * provider, unrecorded, is looked for there by its label and destroyed.
+ */
+const CREATION_GRACE = Duration.minutes(15);
+/** How long a machine left behind waits before it is destroyed by the sweep, and between tries. */
+const LEFT_BEHIND_RETRY = Duration.minutes(5);
+/** How many machines left behind one sweep destroys at most. */
+const LEFT_BEHIND_BATCH = 20;
 /**
  * Clearing a filling disk stops once the work directory's disk is less than
  * this share full, leaving room for the next turn's clones and installs.
@@ -132,6 +144,13 @@ export interface Interface {
 	 * computer's disk doesn't change, so its last measurement still holds.
 	 */
 	readonly measureDisks: Effect.Effect<void>;
+	/**
+	 * Destroys, at their providers, the machines left behind whose time has
+	 * come (see `computer_destruction`): by their ids, or, for a creation that
+	 * never recorded one, by the label it was made with. One whose provider
+	 * can't be reached now is tried again later.
+	 */
+	readonly destroyLeftBehind: Effect.Effect<void>;
 	/** The last measurement of the project's computer's disk, if it has one. */
 	readonly diskOf: (project: Project) => Effect.Effect<MeasuredDisk | undefined>;
 	/** The last measurement of the disk of each of the workspace's projects' computers that has one. */
@@ -458,12 +477,157 @@ export const make = Effect.gen(function* () {
 	const forget = (row: ComputerRow) =>
 		query((db) => db.delete(computerTable).where(sameComputer(row)));
 
+	/**
+	 * Destroys `row`'s computer at its provider. One whose provider's settings
+	 * can't be read fails, keeping its record: forgetting it would leave the
+	 * machine running with nothing to find it.
+	 */
 	const destroyAtProvider = <E, R>(row: ComputerRow, beforeDestroy: Effect.Effect<void, E, R>) =>
 		Effect.gen(function* () {
-			const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
+			const at = yield* reachableProvider(row);
 			yield* beforeDestroy;
-			if (configured) {
-				yield* computers.forAccess(configured.access).destroy(row.providerComputerId);
+			yield* at.destroy(row.providerComputerId);
+		});
+
+	/** The provider that made `machine`, failing when its settings can't be read. */
+	const reachableProvider = (machine: { workspaceId: string; computerProviderId: string }) =>
+		Effect.flatMap(
+			providers.access(machine.workspaceId, machine.computerProviderId),
+			(configured) =>
+				configured
+					? Effect.succeed(computers.forAccess(configured.access))
+					: Effect.fail(
+							new Computers.Unavailable({
+								provider: "unconfigured",
+								reason: userText`The computer provider lacks the settings to reach its computers. Restore its key or address, then try again.`,
+								cause: undefined,
+							}),
+						),
+		);
+
+	/**
+	 * Writes down a creation about to start at `providerId`, as a machine to
+	 * look for once {@link CREATION_GRACE} has passed, which the transaction
+	 * recording its computer settles.
+	 */
+	const expectCreation = (workspaceId: string, providerId: string) =>
+		Effect.gen(function* () {
+			const creationId = yield* ids.random;
+			const now = yield* DateTime.now;
+			const written = yield* query((db) =>
+				db
+					.insert(computerDestruction)
+					.values({
+						workspaceId,
+						computerProviderId: providerId,
+						creationId,
+						dueAt: DateTime.toDateUtc(DateTime.addDuration(now, CREATION_GRACE)),
+					})
+					.returning({ id: computerDestruction.id }),
+			).pipe(Effect.flatMap(writtenRow("computer_destruction")));
+			return { id: written.id, creationId } satisfies Creation;
+		});
+
+	/**
+	 * Settles `creation` in the transaction recording its computer, so nothing
+	 * destroys it. Fails with `ClaimLost` once the sweep has claimed it, which
+	 * destroys the computer whatever the recording does.
+	 */
+	const settled = (creation: Creation) =>
+		query((db) =>
+			db
+				.delete(computerDestruction)
+				.where(and(eq(computerDestruction.id, creation.id), eq(computerDestruction.attempts, 0)))
+				.returning({ id: computerDestruction.id }),
+		).pipe(
+			Effect.flatMap((rows) => (rows.length > 0 ? Effect.void : Effect.fail(new ClaimLost()))),
+		);
+
+	/**
+	 * In the transaction that moves a project from `old` to `creation`'s
+	 * computer, `creation`'s record names `old`'s machine instead, to be
+	 * destroyed: at once by whoever moved it, or by the sweep if they stop first.
+	 */
+	const leftBehindBy = (creation: Creation, old: LeftBehind) =>
+		Effect.gen(function* () {
+			const now = yield* DateTime.now;
+			const [kept] = yield* query((db) =>
+				db
+					.update(computerDestruction)
+					.set({
+						computerProviderId: old.computerProviderId,
+						providerComputerId: old.providerComputerId,
+						creationId: null,
+						dueAt: DateTime.toDateUtc(DateTime.addDuration(now, LEFT_BEHIND_RETRY)),
+					})
+					.where(and(eq(computerDestruction.id, creation.id), eq(computerDestruction.attempts, 0)))
+					.returning({ id: computerDestruction.id }),
+			);
+			if (!kept) return yield* new ClaimLost();
+		});
+
+	/**
+	 * Destroys `machine` at `at` and forgets its `computer_destruction` row. One
+	 * that can't be destroyed now is left to the sweep.
+	 */
+	const destroyedNow = (
+		at: Computers.Provider,
+		machine: Computers.ComputerId,
+		destructionId: string,
+	) =>
+		at.destroy(machine).pipe(
+			Effect.andThen(
+				query((db) =>
+					db.delete(computerDestruction).where(eq(computerDestruction.id, destructionId)),
+				),
+			),
+			Effect.catchCause((cause) =>
+				Effect.logWarning("Could not destroy a computer left behind; the sweep tries again", cause),
+			),
+		);
+
+	/** Destroys the machines `left` names at `at`, then forgets it, unless someone claimed it since. */
+	const destroyLeftBehindAt = (at: Computers.Provider, left: LeftBehindRow) =>
+		Effect.gen(function* () {
+			const machines = left.providerComputerId
+				? [left.providerComputerId]
+				: left.creationId
+					? yield* at.labelled(CREATION_LABEL, left.creationId)
+					: [];
+			yield* Effect.forEach(machines, (machine) => at.destroy(machine), { discard: true });
+			yield* query((db) =>
+				db
+					.delete(computerDestruction)
+					.where(
+						and(
+							eq(computerDestruction.id, left.id),
+							eq(computerDestruction.attempts, left.attempts),
+						),
+					),
+			);
+		});
+
+	/** The machines left behind by `providerId`, or by any of the workspace's providers. */
+	const leftBehindIn = (workspaceId: string, providerId?: string) =>
+		query((db) =>
+			db
+				.select()
+				.from(computerDestruction)
+				.where(
+					and(
+						eq(computerDestruction.workspaceId, workspaceId),
+						providerId === undefined
+							? undefined
+							: eq(computerDestruction.computerProviderId, providerId),
+					),
+				),
+		);
+
+	/** Destroys every machine the workspace's providers, or `providerId`, left behind, stopping at the first that fails. */
+	const destroyAllLeftBehind = (workspaceId: string, providerId?: string) =>
+		Effect.gen(function* () {
+			for (const left of yield* leftBehindIn(workspaceId, providerId)) {
+				yield* destroyLeftBehindAt(yield* reachableProvider(left), left);
 			}
 		});
 
@@ -532,26 +696,39 @@ export const make = Effect.gen(function* () {
 		);
 
 	/**
-	 * Makes a computer through `access`, from its image pinned to its
-	 * digest, and hands it to `record` with what it was made from, as one step
-	 * that isn't stopped part-way when whoever asked goes away: a computer made
-	 * but never recorded is one nothing would find to destroy. One whose
-	 * recording fails is destroyed.
+	 * Makes a computer through `provider`'s access, from its image pinned to
+	 * its digest, and hands it to `record` with what it was made from, as one
+	 * step that isn't stopped part-way when whoever asked goes away. The
+	 * creation is written down first, and labels the computer, and `record`
+	 * settles it in the transaction recording the computer: a machine made by
+	 * a process that stopped before recording it is found by the sweep and
+	 * destroyed, as is one whose recording fails and can't be destroyed now.
 	 */
 	const madeAndRecorded = <E, R>(
-		access: Computers.ProviderAccess,
+		provider: { workspaceId: string; id: string; access: Computers.ProviderAccess },
 		spec: Computers.Spec,
-		record: (computer: Computers.Computer, image: string) => Effect.Effect<unknown, E, R>,
+		record: (
+			computer: Computers.Computer,
+			image: string,
+			creation: Creation,
+		) => Effect.Effect<unknown, E, R>,
 	) =>
-		Effect.flatMap(pinnedAccess(access), (pinned) => {
+		Effect.gen(function* () {
+			const pinned = yield* pinnedAccess(provider.access);
 			const at = computers.forAccess(pinned);
-			return Effect.uninterruptible(
-				Effect.tap(at.create(spec), (computer) =>
-					record(computer, imageOf(pinned)).pipe(
-						Effect.onError(() => at.destroy(computer.id).pipe(Effect.ignore)),
+			const creation = yield* expectCreation(provider.workspaceId, provider.id);
+			const labelled = {
+				...spec,
+				labels: { ...spec.labels, [CREATION_LABEL]: creation.creationId },
+			};
+			const computer = yield* Effect.uninterruptible(
+				Effect.tap(at.create(labelled), (computer) =>
+					record(computer, imageOf(pinned), creation).pipe(
+						Effect.onError(() => destroyedNow(at, computer.id, creation.id)),
 					),
 				),
 			);
+			return { computer, creation };
 		});
 
 	// A computer created while deletion starts is destroyed by madeAndRecorded
@@ -597,10 +774,10 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const id = yield* ids.next;
 			const at = computers.forAccess(provider.access);
-			return yield* madeAndRecorded(
-				provider.access,
+			const { computer } = yield* madeAndRecorded(
+				{ ...provider, workspaceId: project.workspaceId },
 				yield* specFor(project, id, at),
-				(computer, image) =>
+				(computer, image, creation) =>
 					recordWhileOpen(
 						project,
 						query((db) =>
@@ -612,31 +789,49 @@ export const make = Effect.gen(function* () {
 								providerComputerId: computer.id,
 								image,
 							}),
-						),
+						).pipe(Effect.andThen(settled(creation))),
 					),
 			);
+			return computer;
 		});
 
 	/**
-	 * Destroys the project's computer at a provider the workspace no longer uses.
-	 * A provider that can't be reached leaves it running there, which is
-	 * logged rather than blocking the project's work at its new provider.
+	 * Forgets the project's computer at a provider the workspace no longer
+	 * uses, writing its machine down to be destroyed in the same transaction,
+	 * then destroys it. A provider that can't be reached leaves it to the
+	 * sweep rather than blocking the project's work at its new provider.
 	 */
-	const leaveOldProvider = (workspaceId: string, providerId: string, id: Computers.ComputerId) =>
+	const leaveOldProvider = (row: ComputerRow) =>
 		Effect.gen(function* () {
-			const old = yield* providers.access(workspaceId, providerId);
-			if (!old) return;
-			yield* computers
-				.forAccess(old.access)
-				.destroy(id)
-				.pipe(
-					Effect.catchTag("ComputerUnavailable", (failure) =>
-						Effect.logWarning(
-							"Could not destroy a computer at a provider no longer in use",
-							failure,
-						),
-					),
+			const destruction = yield* transaction(
+				Effect.gen(function* () {
+					const [forgotten] = yield* query((db) =>
+						db.delete(computerTable).where(sameComputer(row)).returning({ id: computerTable.id }),
+					);
+					if (!forgotten) return undefined;
+					const now = yield* DateTime.now;
+					return yield* query((db) =>
+						db
+							.insert(computerDestruction)
+							.values({
+								workspaceId: row.workspaceId,
+								computerProviderId: row.computerProviderId,
+								providerComputerId: row.providerComputerId,
+								dueAt: DateTime.toDateUtc(DateTime.addDuration(now, LEFT_BEHIND_RETRY)),
+							})
+							.returning({ id: computerDestruction.id }),
+					).pipe(Effect.flatMap(writtenRow("computer_destruction")));
+				}),
+			);
+			if (!destruction) return;
+			const old = yield* providers.access(row.workspaceId, row.computerProviderId);
+			if (old) {
+				yield* destroyedNow(
+					computers.forAccess(old.access),
+					row.providerComputerId,
+					destruction.id,
 				);
+			}
 		});
 
 	const opened = (project: Project, provider: ComputerProviderStore.Configured) =>
@@ -675,8 +870,7 @@ export const make = Effect.gen(function* () {
 			if (existing) return existing;
 			if (!row)
 				return { computer: yield* made(project, provider), arrival: "made" } satisfies Opened;
-			yield* leaveOldProvider(project.workspaceId, row.computerProviderId, row.providerComputerId);
-			yield* forget(row);
+			yield* leaveOldProvider(row);
 			return replaced(yield* made(project, provider));
 		});
 
@@ -694,23 +888,20 @@ export const make = Effect.gen(function* () {
 			const at = computers.forAccess(access);
 			const spec = yield* specFor(project, row.id, at);
 			yield* requireIntent(row, intentId);
-			const fresh = yield* madeAndRecorded(access, spec, (computer, image) =>
-				moveRecord(row, intentId, row.computerProviderId, computer.id, image),
+			const { computer: fresh, creation } = yield* madeAndRecorded(
+				{ workspaceId: row.workspaceId, id: row.computerProviderId, access },
+				spec,
+				(computer, image, creation) =>
+					moveRecord(row, intentId, row.computerProviderId, computer.id, image, creation),
 			);
-
-			yield* at
-				.destroy(row.providerComputerId)
-				.pipe(
-					Effect.catchTag("ComputerUnavailable", (failure) =>
-						Effect.logWarning("Could not destroy a computer that stopped", failure),
-					),
-				);
+			yield* destroyedNow(at, row.providerComputerId, creation.id);
 			return fresh;
 		}).pipe(Effect.uninterruptible);
 
 	/**
 	 * Points the project's record, `row`, at its new computer, made from
-	 * `image`, which is running and unused. Losing the claim interrupts the write so
+	 * `image`, which is running and unused, and writes the old one down to be
+	 * destroyed in the same transaction. Losing the claim interrupts the write so
 	 * `madeAndRecorded` destroys the unrecorded replacement.
 	 */
 	const moveRecord = (
@@ -719,10 +910,12 @@ export const make = Effect.gen(function* () {
 		providerId: string,
 		computerId: Computers.ComputerId,
 		image: string,
+		creation: Creation,
 	) =>
 		recordWhileOpen(
 			row,
 			Effect.gen(function* () {
+				yield* leftBehindBy(creation, row);
 				const now = yield* DateTime.nowAsDate;
 				const [moved] = yield* query((db) =>
 					db
@@ -988,13 +1181,9 @@ export const make = Effect.gen(function* () {
 			}
 			const from = computers.forAccess(configured.access);
 			const to = computers.forAccess(provider.access);
-			const destroyOld = from
-				.destroy(row.providerComputerId)
-				.pipe(
-					Effect.catchTag("ComputerUnavailable", (failure) =>
-						Effect.logWarning("Could not destroy a computer after upgrading its project", failure),
-					),
-				);
+			const destroyOld = (creation: Creation) =>
+				destroyedNow(from, row.providerComputerId, creation.id);
+			const madeBy = { ...provider, workspaceId: row.workspaceId };
 			yield* requireIntent(row, intentId);
 			const { workKeptApart } = yield* from
 				.info(row.providerComputerId)
@@ -1002,10 +1191,13 @@ export const make = Effect.gen(function* () {
 			if (workKeptApart && provider.id === row.computerProviderId) {
 				const spec = yield* specFor(row, row.id, to);
 				yield* requireIntent(row, intentId);
-				const fresh = yield* madeAndRecorded(provider.access, spec, (computer, image) =>
-					moveRecord(row, intentId, provider.id, computer.id, image),
+				const { computer: fresh, creation } = yield* madeAndRecorded(
+					madeBy,
+					spec,
+					(computer, image, creation) =>
+						moveRecord(row, intentId, provider.id, computer.id, image, creation),
 				);
-				yield* destroyOld;
+				yield* destroyOld(creation);
 				return fresh;
 			}
 			const old = yield* openedAndRecorded(from, row, intentId).pipe(
@@ -1041,29 +1233,32 @@ export const make = Effect.gen(function* () {
 			);
 			const spec = yield* specFor(row, row.id, to);
 			yield* requireIntent(row, intentId);
-			const fresh = yield* madeAndRecorded(provider.access, spec, (computer, image) =>
-				computer.uploadFile(archivePath, archive).pipe(
-					Effect.andThen(
-						computer.exec(
-							`tar -xzf ${archivePath} -C ${Computers.WORK_DIRECTORY} && rm ${archivePath}`,
-							COPY_STEP,
+			const { computer: fresh, creation } = yield* madeAndRecorded(
+				madeBy,
+				spec,
+				(computer, image, creation) =>
+					computer.uploadFile(archivePath, archive).pipe(
+						Effect.andThen(
+							computer.exec(
+								`tar -xzf ${archivePath} -C ${Computers.WORK_DIRECTORY} && rm ${archivePath}`,
+								COPY_STEP,
+							),
+						),
+						Effect.map((execution) => execution.exitCode === 0),
+						Effect.catchTag("ComputerFileFailed", () => Effect.succeed(false)),
+						Effect.flatMap((unpacked) =>
+							Effect.gen(function* () {
+								if (!unpacked) {
+									return yield* new UpgradeFailed({
+										reason: userText`The work couldn't be unpacked in the new computer. The old one is untouched.`,
+									});
+								}
+								yield* moveRecord(row, intentId, provider.id, computer.id, image, creation);
+							}),
 						),
 					),
-					Effect.map((execution) => execution.exitCode === 0),
-					Effect.catchTag("ComputerFileFailed", () => Effect.succeed(false)),
-					Effect.flatMap((unpacked) =>
-						Effect.gen(function* () {
-							if (!unpacked) {
-								return yield* new UpgradeFailed({
-									reason: userText`The work couldn't be unpacked in the new computer. The old one is untouched.`,
-								});
-							}
-							yield* moveRecord(row, intentId, provider.id, computer.id, image);
-						}),
-					),
-				),
 			);
-			yield* destroyOld;
+			yield* destroyOld(creation);
 			return fresh;
 		});
 
@@ -1380,6 +1575,9 @@ export const make = Effect.gen(function* () {
 							at.destroy(row.providerComputerId).pipe(Effect.andThen(forget(row))),
 						);
 					}
+					for (const left of yield* leftBehindIn(workspaceId, provider.id)) {
+						yield* destroyLeftBehindAt(at, left);
+					}
 				}),
 			),
 
@@ -1406,7 +1604,10 @@ export const make = Effect.gen(function* () {
 		anyMadeBy: (workspaceId, providerId) =>
 			operation(
 				"anyMadeBy",
-				Effect.map(madeBy(workspaceId, providerId), (rows) => rows.length > 0),
+				Effect.map(
+					Effect.all([madeBy(workspaceId, providerId), leftBehindIn(workspaceId, providerId)]),
+					([made, left]) => made.length + left.length > 0,
+				),
 			),
 
 		status: (project, current) =>
@@ -1489,6 +1690,7 @@ export const make = Effect.gen(function* () {
 					for (const { projectId } of rows) {
 						yield* destroyProjectComputer({ workspaceId, projectId });
 					}
+					yield* destroyAllLeftBehind(workspaceId);
 				}),
 			),
 
@@ -1504,6 +1706,49 @@ export const make = Effect.gen(function* () {
 						),
 				).pipe(Effect.flatMap(({ row }) => (row ? Effect.void : Effect.fail(new NoComputer())))),
 			),
+
+		destroyLeftBehind: operation(
+			"destroyLeftBehind",
+			Effect.gen(function* () {
+				const now = yield* DateTime.now;
+				const due = DateTime.toDateUtc(now);
+				// Claimed by moving each on, so another process's sweep skips it, and
+				// one that fails waits its turn again.
+				const claimed = yield* query((db) =>
+					db
+						.update(computerDestruction)
+						.set({
+							attempts: sql`${computerDestruction.attempts} + 1`,
+							dueAt: DateTime.toDateUtc(DateTime.addDuration(now, LEFT_BEHIND_RETRY)),
+						})
+						.where(
+							inArray(
+								computerDestruction.id,
+								db
+									.select({ id: computerDestruction.id })
+									.from(computerDestruction)
+									.where(lte(computerDestruction.dueAt, due))
+									.orderBy(computerDestruction.dueAt, computerDestruction.id)
+									.limit(LEFT_BEHIND_BATCH)
+									.for("update", { skipLocked: true }),
+							),
+						)
+						.returning(),
+				);
+				for (const left of claimed) {
+					yield* reachableProvider(left).pipe(
+						Effect.flatMap((at) => destroyLeftBehindAt(at, left)),
+						Effect.catchCause((cause) =>
+							Effect.logWarning(
+								"Could not destroy a computer left behind; trying again later",
+								cause,
+							),
+						),
+						Effect.annotateLogs({ computerDestructionId: left.id }),
+					);
+				}
+			}),
+		),
 
 		upgradeIdle: operation(
 			"upgradeIdle",
@@ -1540,7 +1785,7 @@ export const layer = layerNoDeps.pipe(
 );
 
 /**
- * Runs `measureDisks` and `upgradeIdle` every minute on separate fibers.
+ * Runs `measureDisks`, `upgradeIdle` and `destroyLeftBehind` every minute on separate fibers.
  */
 export const sweepLayer = Layer.effectDiscard(
 	Effect.gen(function* () {
@@ -1558,6 +1803,10 @@ export const sweepLayer = Layer.effectDiscard(
 			);
 		yield* repeatedly(projectComputers.measureDisks, "Measuring computers' disks failed");
 		yield* repeatedly(projectComputers.upgradeIdle, "Upgrading idle computers failed");
+		yield* repeatedly(
+			projectComputers.destroyLeftBehind,
+			"Destroying computers left behind failed",
+		);
 	}),
 ).pipe(processLayer, Layer.provide(layer));
 
@@ -1648,6 +1897,17 @@ function imageIsBehind(madeFrom: string, configured: string, pinned: string | un
 }
 
 type ComputerRow = typeof computerTable.$inferSelect;
+
+type LeftBehindRow = typeof computerDestruction.$inferSelect;
+
+/** A machine given up at its provider. */
+type LeftBehind = Pick<ComputerRow, "computerProviderId" | "providerComputerId">;
+
+/** A creation written down before it starts: its `computer_destruction` row, and the label value it makes. */
+interface Creation {
+	readonly id: string;
+	readonly creationId: string;
+}
 
 /** What holds a lease: a turn using the computer, or a member viewing its desktop. */
 export interface Holder {
@@ -1779,7 +2039,14 @@ export const lockProviderWithoutComputers = (
 				.where(eq(computerTable.computerProviderId, providerId))
 				.limit(1),
 		);
-		if (madeMeanwhile) return yield* new ComputerMadeMeanwhile();
+		const [leftMeanwhile] = yield* query((db) =>
+			db
+				.select({ id: computerDestruction.id })
+				.from(computerDestruction)
+				.where(eq(computerDestruction.computerProviderId, providerId))
+				.limit(1),
+		);
+		if (madeMeanwhile || leftMeanwhile) return yield* new ComputerMadeMeanwhile();
 	});
 
 /**
@@ -1815,7 +2082,14 @@ export const lockWorkspaceWithoutComputers = (
 				.where(eq(computerTable.workspaceId, workspaceId))
 				.limit(1),
 		);
-		if (madeMeanwhile) return yield* new ComputerMadeMeanwhile();
+		const [leftMeanwhile] = yield* query((db) =>
+			db
+				.select({ id: computerDestruction.id })
+				.from(computerDestruction)
+				.where(eq(computerDestruction.workspaceId, workspaceId))
+				.limit(1),
+		);
+		if (madeMeanwhile || leftMeanwhile) return yield* new ComputerMadeMeanwhile();
 	});
 
 /**

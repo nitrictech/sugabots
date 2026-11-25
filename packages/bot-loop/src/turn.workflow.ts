@@ -1,6 +1,6 @@
 /**
  * A bot's turn, as a durable workflow: its definition and the order of its
- * steps. What each step does lives behind `TurnSteps`, implemented in
+ * steps. The work it runs lives behind `TurnActivities`, implemented in
  * `steps.ts`.
  *
  * A turn runs in steps: each one model request and the tool calls it makes.
@@ -98,8 +98,8 @@ export interface StepPlace {
 	readonly step: number;
 }
 
-export class TurnSteps extends Context.Service<
-	TurnSteps,
+export class TurnActivities extends Context.Service<
+	TurnActivities,
 	{
 		/** Opens the turn for its run `attempt`: its id, or that it may not run. */
 		readonly open: (turn: TurnRequest, attempt: number) => Effect.Effect<Opening>;
@@ -119,7 +119,11 @@ export class TurnSteps extends Context.Service<
 		 * Ends the turn as failed for the execution whose step died, unless a
 		 * newer execution took the turn over.
 		 */
-		readonly died: (principal: BotPrincipal, turnId: string) => Effect.Effect<StepResult>;
+		readonly died: (
+			principal: BotPrincipal,
+			turnId: string,
+			cause: Cause.Cause<unknown>,
+		) => Effect.Effect<StepResult>;
 		/** Ends the turn of run `attempt`, which has nobody to act for, as failed. */
 		readonly unauthenticated: (turn: TurnRequest, attempt: number) => Effect.Effect<void>;
 		/** Ends the turn as failed when its workflow fails. */
@@ -130,12 +134,12 @@ export class TurnSteps extends Context.Service<
 		 */
 		readonly announceReleased: (turn: TurnRequest) => Effect.Effect<void>;
 	}
->()("@sugabots/bot-loop/TurnSteps") {
+>()("@sugabots/bot-loop/TurnActivities") {
 	declare readonly [Tier]: "process";
 }
 
 /** The activities that need only the turn's request, each one run once per input. */
-const turnActivities = Activities.fromService<TurnRequest>()(TurnSteps, {
+const turnActivities = Activities.fromService<TurnRequest>()(TurnActivities, {
 	open: { input: Schema.Int, success: Opening },
 	unauthenticated: { input: Schema.Int },
 	abandon: {},
@@ -160,7 +164,7 @@ const stepActivity = (
 	Activity.make({
 		name: `step/${place.attempt}/${place.step}/${round}`,
 		success: StepOutcome,
-		execute: Effect.flatMap(TurnSteps, (steps) => steps.step(request, principal, place)).pipe(
+		execute: Effect.flatMap(TurnActivities, (steps) => steps.step(request, principal, place)).pipe(
 			Effect.flatMap((result) =>
 				result._tag === "Superseded"
 					? endSuperseded(place.turnId, `step ${place.step}`)
@@ -185,7 +189,7 @@ const cancelledActivity = (
 ) =>
 	Activity.make({
 		name: `cancelled/${attempt}/${step}`,
-		execute: Effect.flatMap(TurnSteps, (steps) => steps.cancelled(principal, turnId)),
+		execute: Effect.flatMap(TurnActivities, (steps) => steps.cancelled(principal, turnId)),
 	});
 
 /**
@@ -193,10 +197,15 @@ const cancelledActivity = (
  * authenticated `principal`; one a newer execution took over ends this
  * execution without a result.
  */
-const diedActivity = (principal: BotPrincipal, turnId: string, attempt: number) =>
+const diedActivity = (
+	principal: BotPrincipal,
+	turnId: string,
+	attempt: number,
+	cause: Cause.Cause<unknown>,
+) =>
 	Activity.make({
 		name: `died/${attempt}`,
-		execute: Effect.flatMap(TurnSteps, (steps) => steps.died(principal, turnId)).pipe(
+		execute: Effect.flatMap(TurnActivities, (steps) => steps.died(principal, turnId, cause)).pipe(
 			Effect.flatMap((result) =>
 				result._tag === "Superseded" ? endSuperseded(turnId, "its step that died") : Effect.void,
 			),
@@ -218,9 +227,11 @@ export const turnWorkflow = Lanes.workflow(Turn, {
 				// Every time the turn starts or resumes, this runs again, so each
 				// execution acts only for the principal it authenticated itself.
 				const authenticated = yield* Effect.exit(authentication.authenticate(opened.turnId));
-				const steps = yield* TurnSteps;
+				const steps = yield* TurnActivities;
 				if (Exit.isFailure(authenticated)) {
 					yield* steps.release({ turn: opened.turnId });
+					if (Cause.hasDies(authenticated.cause))
+						return yield* Effect.failCause(authenticated.cause);
 					return yield* turnActivities.activity("unauthenticated", request, attempt);
 				}
 				const principal = authenticated.value;
@@ -237,8 +248,7 @@ export const turnWorkflow = Lanes.workflow(Turn, {
 				// suspension, or an interruption, isn't a death.
 				if (Exit.isFailure(ran)) {
 					if (Cause.hasInterruptsOnly(ran.cause)) return yield* Effect.failCause(ran.cause);
-					yield* Effect.logError(`A step of turn ${opened.turnId} died`, ran.cause);
-					return yield* diedActivity(principal, opened.turnId, attempt);
+					return yield* diedActivity(principal, opened.turnId, attempt, ran.cause);
 				}
 				const after = ran.value;
 				if (after === undefined) return;
@@ -286,7 +296,7 @@ const runSteps = (request: TurnRequest, principal: BotPrincipal, turnId: string,
 					continue;
 				case "Waiting": {
 					const name = `${attempt}/${step}/${round}`;
-					yield* Effect.flatMap(TurnSteps, (steps) => steps.release(principal));
+					yield* Effect.flatMap(TurnActivities, (steps) => steps.release(principal));
 					yield* releaseForApproval(request, name);
 					const cancelled =
 						(yield* waitForApprovals(name, outcome.approvals)) ||

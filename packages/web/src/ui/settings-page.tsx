@@ -324,7 +324,7 @@ export function SettingsFieldRow({
 				placeholder={placeholder}
 				maxLength={maxLength}
 				className={cn(
-					"min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground",
+					"min-w-0 flex-1 bg-transparent text-xs rounded-sm text-foreground focus-ring placeholder:text-subtle-foreground",
 					mono && "font-mono",
 				)}
 			/>

@@ -1,5 +1,5 @@
 import type { WrittenFile } from "@sugabots/contracts";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiAnswers, mount, projects } from "@/api.test-support.tsx";
@@ -41,6 +41,23 @@ describe("a file opened by its address", () => {
 		mount(`/suga/projects/${salesProject.slug}/files/${salesPlan.id}`);
 
 		await screen.findByRole("heading", { name: salesPlan.title });
+	});
+
+	it("loads the HTML from a webhook run only on request", async () => {
+		const page: WrittenFile = {
+			...salesPlan,
+			kind: "html",
+			outsideRun: "webhook",
+			content: "<p>Sales figures</p>",
+		};
+		client.api.files.get.mockReturnValue(Effect.succeed(page));
+		mount(`/suga/projects/${salesProject.slug}/files/${page.id}`);
+
+		await screen.findByText("Written by a run started by a webhook.");
+		expect(screen.queryByTitle(page.title)).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "Load page" }));
+		expect(await screen.findByTitle(page.title)).toHaveProperty("tagName", "IFRAME");
+		expect(screen.getByText("Written by a run started by a webhook.")).toBeTruthy();
 	});
 
 	it("is not shown under another project, whose link and Delete it is not", async () => {

@@ -1,6 +1,6 @@
 export { InvalidRoutineSchedule } from "@sugabots/contracts/errors/automations";
 
-import type { RoutineSchedule } from "@sugabots/contracts";
+import type { Routine } from "@sugabots/contracts";
 import { InvalidRoutineSchedule } from "@sugabots/contracts/errors/automations";
 import { CronExpressionParser } from "cron-parser";
 import { Effect } from "effect";
@@ -25,7 +25,7 @@ const unparseable = (cause: unknown) =>
 
 /** The timetable's next run after `from`. A timetable that never runs again is refused. */
 export function nextOccurrence(
-	schedule: RoutineSchedule,
+	schedule: Routine,
 	timezone: string,
 	from: Date,
 ): Effect.Effect<Date, InvalidRoutineSchedule> {
@@ -56,7 +56,7 @@ export function nextOccurrence(
  * no run lately, as after it was changed, the latest is `now`.
  */
 export function latestMissedAndNextOccurrence(
-	schedule: RoutineSchedule,
+	schedule: Routine,
 	timezone: string,
 	now: Date,
 ): Effect.Effect<{ latest: Date; next: Date }, InvalidRoutineSchedule> {

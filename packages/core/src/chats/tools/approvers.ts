@@ -2,6 +2,7 @@ import type { JsonValue, ToolApprovers } from "@sugabots/contracts";
 import { HOST_REQUEST_TOOL } from "@sugabots/contracts";
 import { botLoopTools, manifest } from "@sugabots/contracts/operations";
 import { computersContracts } from "@sugabots/contracts/operations/computers";
+import { WEB_FETCH_TOOL, webContracts } from "@sugabots/contracts/operations/web";
 import { Schema } from "effect";
 
 /**
@@ -23,12 +24,18 @@ export function approversOf(tool: string): ToolApprovers {
 	return COMPUTER_REQUEST_TOOLS.includes(tool) ? "computer-managers" : "chat";
 }
 
-/** The validated host field that may be shown to a computer approver outside the chat. */
+/** Fixed fields an approver can see outside the chat. */
 export function fixedApprovalInput(call: {
 	tool: string;
 	input: JsonValue;
 	executionInput: JsonValue | null;
 }): JsonValue {
+	if (call.tool === WEB_FETCH_TOOL) {
+		const request = Schema.decodeUnknownOption(webContracts["web.fetch"].input)(
+			call.executionInput ?? call.input,
+		);
+		return request._tag === "Some" ? { url: request.value.url } : null;
+	}
 	if (call.tool !== HOST_REQUEST_TOOL) return null;
 	const request = Schema.decodeUnknownOption(computersContracts["computers.requestHost"].input)(
 		call.executionInput ?? call.input,

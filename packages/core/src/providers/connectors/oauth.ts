@@ -8,6 +8,8 @@ import {
 	UnauthorizedError,
 } from "@ai-sdk/mcp";
 import { extractWWWAuthenticateParams } from "@modelcontextprotocol/sdk/client/auth.js";
+import { type DomainError, userText } from "@sugabots/errors";
+import { ErrorReporter, Schema } from "effect";
 import { causesOf } from "../causes.ts";
 import type { EgressHttpClient } from "../network/egress.ts";
 
@@ -360,10 +362,17 @@ export function signInStartFailure(cause: unknown): SignInStartFailure {
  * The authorization server refused the connector's tokens, and only a member
  * signing in again can fix it.
  */
-export class SignInRequired extends Error {
-	override readonly name = "SignInRequired";
-	constructor() {
-		super("The connector needs signing in again");
+export class SignInRequired
+	extends Schema.TaggedError<SignInRequired>()("SignInRequired", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The connector needs signing in again";
+	}
+	get userMessage() {
+		return userText`The connector needs signing in again. Ask whoever manages the project to sign it in.`;
 	}
 }
 
