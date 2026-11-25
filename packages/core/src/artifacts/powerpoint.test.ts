@@ -6,7 +6,9 @@ import {
 } from "@sugabots/contracts/http";
 import { Effect } from "effect";
 import JSZip from "jszip";
+import { getDocumentProxy } from "unpdf";
 import { describe, expect, it } from "vitest";
+import { pdfFileOf } from "./pdf.ts";
 import { type PowerPointImage, powerPointFileOf } from "./powerpoint.ts";
 
 /*
@@ -130,6 +132,57 @@ const runHolding = (xml: string, text: string) =>
 const paragraphSaying = (xml: string, text: string) =>
 	paragraphsOf(xml).find((paragraph) => textOf(paragraph) === text) ?? "";
 
+/** The sizes, in hundredths of a point, of the runs of `xml`. */
+const runSizesOf = (xml: string) => [
+	...new Set([...xml.matchAll(/<a:rPr [^>]*\bsz="(\d+)"/g)].map(([, size]) => Number(size))),
+];
+
+/** The shape of `xml` holding a run of `text`. */
+const shapeHolding = (xml: string, text: string) =>
+	(xml.match(/<p:sp>[\s\S]*?<\/p:sp>|<p:graphicFrame>[\s\S]*?<\/p:graphicFrame>/g) ?? []).find(
+		(shape) => shape.includes(`<a:t>${text}</a:t>`),
+	) ?? "";
+
+/** Where a shape is on its slide, in points. */
+function boxOf(shape: string) {
+	const [x = 0, y = 0, w = 0, h = 0] = (
+		/<a:off x="(\d+)" y="(\d+)"\/>\s*<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(shape)?.slice(1) ?? []
+	).map((emus) => Number(emus) / 12_700);
+	return { x, y, w, h };
+}
+
+/**
+ * The step the deck's PDF draws its first slide's text at: the size of its
+ * last stretch of text, which is text of `fullSize` units at full size, over
+ * that full size, on a PDF page 720 points wide, which is 12 to the unit.
+ */
+async function pdfStepOf(markdown: string, fullSize: number): Promise<number> {
+	const file = await Effect.runPromise(
+		pdfFileOf(ARTIFACT, markdown, () => Effect.succeed(undefined)),
+	);
+	const page = await (await getDocumentProxy(file.slice())).getPage(1);
+	const last = (await page.getTextContent()).items
+		.flatMap((item) => ("str" in item ? [item] : []))
+		.at(-1);
+	return Math.hypot(last?.transform[0] ?? 0, last?.transform[1] ?? 0) / (fullSize * 12);
+}
+
+/** The owner's own deck's first slide: a paragraph and four bullets with bold lead-ins in one column, and an empty table in the other. */
+const TWO_COLUMNS = [
+	"<!-- layout: columns -->",
+	"## One page for people and bots",
+	"<!-- column -->",
+	"Shared documents let a team and its bots write one page together, without anyone losing work.",
+	[
+		"- **What it is:** one page that people and bots edit side by side.",
+		"- **Who it is for:** teams that already use bots to draft, review and tidy documents.",
+		"- **What changes:** edits from bots arrive as suggestions, so people stay in control.",
+		"- **Where we start:** our own workspaces, then teams who asked to join.",
+	].join("\n"),
+	"<!-- column -->",
+	"|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |",
+].join("\n\n");
+
 const LAYOUT_NAMES = [
 	"Title",
 	"Title and bullets",
@@ -231,15 +284,29 @@ describe("a deck's PowerPoint file", () => {
 		expect(relationships).not.toContain("javascript");
 	});
 
+	it("links only to absolute addresses, written as a reader can follow them, wherever the file is saved", async () => {
+		const { file } = await powerPointFile(
+			"## Links\n\n[in the app](/pods/abc/artifacts/def) [beside it](plan.pdf) [here](#top) [café](https://example.com/café?q=日本)",
+		);
+
+		const relationships = await partOf(file, "ppt/slides/_rels/slide1.xml.rels");
+		expect(
+			[...relationships.matchAll(/Target="([^"]*)" TargetMode="External"/g)].map(
+				([, target]) => target,
+			),
+		).toEqual(["https://example.com/caf%C3%A9?q=%E6%97%A5%E6%9C%AC"]);
+		expect((await slideXml(file, 1)).match(/<a:hlinkClick /g)).toHaveLength(1);
+	});
+
 	it("writes lists as PowerPoint's own, nested at their depth and numbered from where they start", async () => {
 		const { file } = await powerPointFile(DECK);
 
 		const xml = await slideXml(file, 2);
 		expect(paragraphSaying(xml, "Ship live slides")).toMatch(
-			/^<a:p><a:pPr marL="\d+" indent="-\d+">[\s\S]*<a:buChar char="&#x2022;"\/>/,
+			/^<a:p><a:pPr algn="l" marL="\d+" indent="-\d+">[\s\S]*<a:buChar char="&#x2022;"\/>/,
 		);
 		expect(paragraphSaying(xml, "with suggestions")).toMatch(
-			/^<a:p><a:pPr lvl="1" [^>]*>[\s\S]*<a:buChar char="&#x25E6;"\/>/,
+			/^<a:p><a:pPr algn="l" lvl="1" [^>]*>[\s\S]*<a:buChar char="&#x25E6;"\/>/,
 		);
 		expect(paragraphSaying(xml, "Third")).toContain(
 			'<a:buAutoNum type="arabicPeriod" startAt="3"/>',
@@ -321,6 +388,105 @@ describe("a deck's PowerPoint file", () => {
 		expect(runHolding(xml, "Ship it.")).toMatch(/<a:rPr [^>]*\bi="1"/);
 		expect(runHolding(xml, "bun run dev")).toContain('<a:latin typeface="Courier New"');
 		expect(shapesOf(xml).filter((shape) => shape.includes("<p:ph"))).toHaveLength(1);
+	});
+
+	it("states each region's alignment as the app draws it, to the left but for the image's column, leaving nothing to a centred default", async () => {
+		const { file } = await powerPointFile(DECK);
+
+		const slides = await Promise.all(LAYOUT_NAMES.map((_name, index) => slideXml(file, index + 1)));
+		for (const xml of slides) {
+			for (const paragraph of paragraphsOf(xml)) expect(paragraph).toMatch(/^<a:p><a:pPr algn="l"/);
+		}
+		const layouts = await Promise.all(
+			partsMatching(file, /^ppt\/slideLayouts\/slideLayout\d+\.xml$/).map((part) =>
+				partOf(file, part),
+			),
+		);
+		expect(
+			layouts.map((xml) => [
+				nameOf(xml),
+				[...xml.matchAll(/<a:lvl1pPr\b[^>]*>/g)].map(
+					([style]) => /\balgn="(\w+)"/.exec(style)?.[1],
+				),
+			]),
+		).toEqual([
+			["Title", ["l", "l"]],
+			["Title and bullets", ["l", "l"]],
+			["Two columns", ["l", "l", "l"]],
+			["Image and text", ["l", "l", "ctr"]],
+			["Section break", ["l", "l"]],
+			["Quote", ["l", "l"]],
+			["Table", ["l", "l"]],
+		]);
+		const master = await partOf(file, "ppt/slideMasters/slideMaster1.xml");
+		expect(/<p:titleStyle>\s*<a:lvl1pPr\b[^>]*>/.exec(master)?.[0]).toContain('algn="l"');
+		expect(/<p:bodyStyle>[\s\S]*<\/p:bodyStyle>/.exec(master)?.[0]).not.toMatch(
+			/<a:spcBef><a:spcPct val="[1-9]/,
+		);
+	});
+
+	it("sets a slide's text at full size where it fits, the text under the title as far below it as the app sets it", async () => {
+		const { file } = await powerPointFile("## Goals\n\n- Ship it\n- Keep it");
+
+		const xml = await slideXml(file, 1);
+		expect(runSizesOf(shapeHolding(xml, "Goals"))).toEqual([4000]);
+		expect(runSizesOf(shapeHolding(xml, "Ship it"))).toEqual([2400]);
+		// The padding is 4 units of 16 points, the title a line of 2.5 units at 1.15, and the gap under it 2 units.
+		expect(boxOf(shapeHolding(xml, "Ship it")).y).toBeCloseTo(64 + 40 * 1.15 + 32);
+	});
+
+	it("sets the text of a slide too long for full size at the step the PDF draws it at, every region placed for that step", async () => {
+		const step = await pdfStepOf(TWO_COLUMNS, 1.25);
+		const { file } = await powerPointFile(TWO_COLUMNS);
+
+		expect(step).toBeCloseTo(0.9);
+		const xml = await slideXml(file, 1);
+		const left = shapeHolding(xml, "What it is:");
+		expect(runSizesOf(shapeHolding(xml, "One page for people and bots"))).toEqual([
+			Math.round(4000 * step),
+		]);
+		expect(runSizesOf(left)).toEqual([Math.round(2000 * step)]);
+		const unit = 16 * step;
+		const title = boxOf(shapeHolding(xml, "One page for people and bots"));
+		const table = boxOf(/<p:graphicFrame>[\s\S]*?<\/p:graphicFrame>/.exec(xml)?.[0] ?? "");
+		expect(title.y).toBeCloseTo(64);
+		expect(boxOf(left).y).toBeCloseTo(64 + 2.5 * unit * 1.15 + 2 * unit);
+		expect(table.y).toBeCloseTo(boxOf(left).y);
+		expect(table.x - (boxOf(left).x + boxOf(left).w)).toBeCloseTo(3.5 * unit);
+		expect(xml).toContain(`marL="${Math.round(0.8 * 20 * step * 12_700)}"`);
+	});
+
+	it("sets the text of a slide that fits only at the smallest step at that step", async () => {
+		const points = Array.from({ length: 10 }, (_, index) => `- Point ${index + 1}`).join("\n");
+		const markdown = `## Points\n\n${points}`;
+		const step = await pdfStepOf(markdown, 1.5);
+		const { file } = await powerPointFile(markdown);
+
+		expect(step).toBeCloseTo(0.7);
+		const xml = await slideXml(file, 1);
+		expect(runSizesOf(shapeHolding(xml, "Points"))).toEqual([Math.round(4000 * step)]);
+		expect(runSizesOf(shapeHolding(xml, "Point 10"))).toEqual([Math.round(2400 * step)]);
+	});
+
+	it("sets a table's text and padding, and what is stacked in boxes of its own, at the slide's step", async () => {
+		const lines = Array.from({ length: 6 }, (_, index) => `Line ${index + 1}`).join("\n\n");
+		const markdown = `<!-- layout: title -->\n\n# Launch review\n\n${lines}\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n> Ship it.`;
+		const step = await pdfStepOf(markdown, 1.5);
+		const { file } = await powerPointFile(markdown);
+
+		expect(step).toBeLessThan(1);
+		const xml = await slideXml(file, 1);
+		const [text, table, quote] = ["Line 1", "A", "Ship it."].map((words) =>
+			shapeHolding(xml, words),
+		);
+		expect(runSizesOf(text ?? "")).toEqual([Math.round(2400 * step)]);
+		expect(runSizesOf(quote ?? "")).toEqual([Math.round(2400 * step)]);
+		expect(runSizesOf(table ?? "")).toEqual([Math.round(2000 * step)]);
+		expect(table).toContain(`marT="${Math.round(0.6 * 20 * step * 12_700)}"`);
+		expect(table).toContain(`marT="${Math.round(0.7 * 20 * step * 12_700)}"`);
+		const [textBox, tableBox, quoteBox] = [text, table, quote].map((shape) => boxOf(shape ?? ""));
+		expect(tableBox?.y).toBeGreaterThan((textBox?.y ?? 0) + 6 * 24 * step);
+		expect(quoteBox?.y).toBeGreaterThan((tableBox?.y ?? 0) + (tableBox?.h ?? 0));
 	});
 
 	it("writes each paragraph's properties once and first, and each shape an id of its own, as PowerPoint reads them", async () => {

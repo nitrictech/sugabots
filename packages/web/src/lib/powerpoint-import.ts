@@ -25,7 +25,7 @@ export interface PowerPointImported {
 	/**
 	 * How many other things on its slides the deck has no place for, such as
 	 * a chart, a video, SmartArt or a shape. A shape's words are kept, so only
-	 * a shape without any is counted.
+	 * a shape without any is counted, unless the file marks it as decorative.
 	 */
 	othersLeftOut: number;
 }
@@ -64,7 +64,9 @@ export async function importPowerPointFile(
  * masters are left out, and so are shapes without words, charts, videos,
  * sound and SmartArt, which are counted, as are images the deck doesn't keep.
  * A slide's footer, number and date and an empty box are left out without
- * being counted, as the deck draws none.
+ * being counted, as the deck draws none, and so is a shape without words the
+ * file marks as decorative, as PowerPoint marks one a screen reader passes
+ * over, such as a section break's accent bar.
  *
  * Fails when the file can't be read as a PowerPoint file, or with
  * `ImageNotKept` when an image the deck would keep couldn't be: importing
@@ -143,10 +145,11 @@ type Piece<Image> =
 	| { kind: "table"; box: Box; table: Node }
 	| { kind: "image"; box: Box; image: Image };
 
-/** What the file says of a shape that the library doesn't: the placeholder it is, if one, and an image's words. */
+/** What the file says of a shape that the library doesn't: the placeholder it is, if one, an image's words, and whether it only decorates the slide. */
 interface ShapeInFile {
 	placeholder: string | undefined;
 	words: string | undefined;
+	decorative: boolean;
 }
 
 /** Placeholders that say where a slide is, or when, rather than what it says. */
@@ -202,9 +205,10 @@ function elementsOn(
 
 /**
  * What the deck keeps of `element`: what it says, its table or its image.
- * Otherwise what is left out: `"decoration"`, not counted, for an empty box
- * or the slide's footer, number or date; `"drawing"` for a shape without
- * words; and `"content"` for a chart, a video, sound, SmartArt or an equation.
+ * Otherwise what is left out: `"decoration"`, not counted, for an empty box,
+ * the slide's footer, number or date, or a shape without words marked as
+ * decorative; `"drawing"` for another shape without words; and `"content"`
+ * for a chart, a video, sound, SmartArt or an equation.
  */
 function readElement(
 	element: Exclude<ElementOnSlide, { type: "group" }>,
@@ -217,7 +221,9 @@ function readElement(
 		case "shape": {
 			if (DECORATIVE_PLACEHOLDERS.has(shape?.placeholder ?? "")) return "decoration";
 			const blocks = blocksOf(element.content, schema);
-			if (blocks.length === 0) return element.type === "shape" ? "drawing" : "decoration";
+			if (blocks.length === 0) {
+				return element.type === "shape" && !shape?.decorative ? "drawing" : "decoration";
+			}
 			return {
 				kind: "text",
 				box,
@@ -706,12 +712,14 @@ function bytesOf(dataUrl: string): Uint8Array | undefined {
 
 /*
  * Reading what the library leaves out of the file's slides: which shapes are
- * placeholders, and of what, and the words an image is given.
+ * placeholders, and of what, the words an image is given, and which shapes
+ * are marked as decorative.
  */
 
 const PRESENTATION_NAMESPACE = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const RELATIONSHIP_NAMESPACE =
 	"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const DECORATIVE_NAMESPACE = "http://schemas.microsoft.com/office/drawing/2017/decorative";
 
 /**
  * What the file says of each slide's shapes, in the order of its slides, as
@@ -764,11 +772,18 @@ function shapesIn(slide: Document): Map<string, ShapeInFile> {
 					// A placeholder of no type is one for content of any kind.
 					placeholder: placeholder && (placeholder.getAttribute("type") ?? "obj"),
 					words: properties.getAttribute("descr") ?? undefined,
+					decorative: isMarkedDecorative(properties),
 				},
 			];
 		}),
 	);
 }
+
+/** Whether a shape's `properties` hold PowerPoint's mark for a shape that only decorates the slide. */
+const isMarkedDecorative = (properties: Element) =>
+	[...properties.getElementsByTagNameNS(DECORATIVE_NAMESPACE, "decorative")].some((mark) =>
+		["1", "true"].includes(mark.getAttribute("val") ?? ""),
+	);
 
 function nodeOf(
 	schema: Schema,

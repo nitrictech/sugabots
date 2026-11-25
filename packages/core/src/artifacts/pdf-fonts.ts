@@ -23,8 +23,9 @@ import { create, type Font } from "fontkit";
  *
  * The files are found where Node finds the packages, from this module, so a
  * built server finds them in the dependencies it is installed with. Each is
- * read once, the first time a deck needs it, and kept for the life of the
- * process.
+ * read once, the first time a deck needs it, and the font read from it is
+ * kept for the life of the process and drawn with by every document, which
+ * would otherwise read the file again for itself.
  *
  * Text in them is set and measured on a PDFKit document (`typesetterOn`):
  * the PDF's own, which draws it, or one the PowerPoint file only measures its
@@ -42,10 +43,9 @@ export interface Face {
 	italic: boolean;
 }
 
-/** One file of a face: what a document registers it under, its bytes, and the font read from them. */
+/** One file of a face: what a document registers it under, and the font read from it. */
 export interface FaceFile {
 	name: string;
-	bytes: Buffer;
 	font: Font;
 }
 
@@ -129,7 +129,7 @@ function familyFilesOf(
 		files = subsets.map((subset) => {
 			const name = `${source.prefix}-${subset}-${weight}-${style}`;
 			const bytes = readFileSync(resolve(`${source.package}/files/${name}.woff`));
-			return { name, bytes, font: fontIn(name, bytes) };
+			return { name, font: fontIn(name, bytes) };
 		});
 		filesOfFaces.set(key, files);
 	}
@@ -280,7 +280,7 @@ export function typesetterOn(document: PDFKit.PDFDocument): Typesetter {
 	const set = (face: Face, size: number, piece: DrawnPiece) => {
 		const file = piece.kind === "glyphs" ? piece.file : filesOf(face)[0];
 		if (!registered.has(file.name)) {
-			document.registerFont(file.name, file.bytes);
+			document.registerFont(file.name, file.font);
 			registered.add(file.name);
 		}
 		document.font(file.name).fontSize(size);
@@ -309,6 +309,18 @@ export function typesetterOn(document: PDFKit.PDFDocument): Typesetter {
 			return width;
 		},
 	};
+}
+
+declare global {
+	namespace PDFKit.Mixins {
+		interface PDFFont {
+			/**
+			 * Registers a font fontkit has already read, which PDFKit draws with as
+			 * it is, though its types list only a font's file or bytes.
+			 */
+			registerFont(name: string, src: Font): this;
+		}
+	}
 }
 
 /** The room `piece`'s spaces take set as `type`, letter spacing and all. */
