@@ -1,4 +1,4 @@
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -93,7 +93,7 @@ describe("the computers operations, for each kind of principal", () => {
 	});
 
 	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends OperationName>(
+	const tried = <Name extends RequestOperationName>(
 		principal: Principal,
 		name: Name,
 		input: InputOf<Name>,
@@ -238,7 +238,6 @@ describe("the computers operations, for each kind of principal", () => {
 				settings: { builtIn: "e2b" },
 			});
 			const ours = { workspace: a.workspace, providerId: made.id };
-			const theirs = { workspace: a.workspace, providerId: elsewhere.id };
 
 			expect(
 				await call(who.admin, "computerProviders.update", {
@@ -260,17 +259,30 @@ describe("the computers operations, for each kind of principal", () => {
 			expect(
 				await tried(who.admin, "computerProviders.update", { ...ours, changes: { enabled: true } }),
 			).toBe("ComputerProviderIncomplete");
-			for (const name of [
-				"computerProviders.test",
-				"computerProviders.template",
-				"computerProviders.remove",
-			] as const) {
-				expect({ name, outcome: await tried(who.owner, name, theirs) }).toEqual({
-					name,
-					outcome: "ComputerProviderNotFound",
-				});
+			const missing = crypto.randomUUID();
+			for (const { principal, ids, refusal } of [
+				{ principal: who.ed, ids: [made.id, missing], refusal: "ActionForbidden" },
+				{ principal: who.vi, ids: [made.id, missing], refusal: "ActionForbidden" },
+				{ principal: who.admin, ids: [elsewhere.id, missing], refusal: "ResourceHidden" },
+			]) {
+				for (const providerId of ids) {
+					const address = { workspace: a.workspace, providerId };
+					for (const name of [
+						"computerProviders.test",
+						"computerProviders.template",
+						"computerProviders.prepareTemplate",
+						"computerProviders.remove",
+					] as const) {
+						expect(await tried(principal, name, address), name).toBe(refusal);
+					}
+					expect(
+						await tried(principal, "computerProviders.update", {
+							...address,
+							changes: { enabled: false },
+						}),
+					).toBe(refusal);
+				}
 			}
-			expect(await tried(who.ed, "computerProviders.remove", ours)).toBe("ActionForbidden");
 			expect(await tried(who.admin, "computerProviders.remove", ours)).toBe("ok");
 			expect(
 				(await call(who.owner, "computerProviders.list", { workspace: a.workspace })).map(
@@ -426,8 +438,8 @@ describe("the computers operations, for each kind of principal", () => {
 						botInBounds: "ok",
 						botOutsideBounds: "ResourceHidden",
 						run: "ok",
-						webhook: "ok",
-						computerSleep: "ok",
+						webhook: "ResourceHidden",
+						computerSleep: "ResourceHidden",
 						compaction: "ResourceHidden",
 						page: "ResourceHidden",
 					},
@@ -472,8 +484,8 @@ describe("the computers operations, for each kind of principal", () => {
 				notInProject: "ResourceHidden",
 				editorsBot: "ActionForbidden",
 				run: "ActionForbidden",
-				webhook: "ActionForbidden",
-				computerSleep: "ActionForbidden",
+				webhook: "ResourceHidden",
+				computerSleep: "ResourceHidden",
 				page: "ResourceHidden",
 				owner: "ok, NoComputerProvider",
 				admin: "ok, NoComputerProvider",
@@ -534,8 +546,8 @@ describe("the computers operations, for each kind of principal", () => {
 				notInProject: "ResourceHidden",
 				adminsBotInChatBounds: "ActionForbidden",
 				run: "ActionForbidden",
-				webhook: "ActionForbidden",
-				computerSleep: "ActionForbidden",
+				webhook: "ResourceHidden",
+				computerSleep: "ResourceHidden",
 				page: "ResourceHidden",
 				owner: `${host}; 0`,
 				admin: `${host}; 0`,

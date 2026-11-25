@@ -1,6 +1,7 @@
 export * as ComputerSignIn from "./computer-sign-in.ts";
 
 import { Context, type DateTime, Effect, Layer } from "effect";
+import { processLayer, Tier } from "../tiers.ts";
 import type { Computers } from "./computers.ts";
 
 /**
@@ -20,7 +21,9 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ComputerSignIn",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 /** Sign-ins for a project's computer, and when they must be replaced. */
 export interface SignedIn {
@@ -32,6 +35,8 @@ export interface SignedIn {
 export const NOT_SIGNED_IN: SignedIn = { credentials: [], expiresAt: undefined };
 
 /** For a project whose computer is signed in to nothing. */
-export const none = Layer.succeed(Service, {
-	forProject: () => Effect.succeed(NOT_SIGNED_IN),
-});
+export const none = processLayer(
+	Layer.succeed(Service, {
+		forProject: () => Effect.succeed(NOT_SIGNED_IN),
+	}),
+);

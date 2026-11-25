@@ -1,7 +1,9 @@
 import { InternalServerError } from "@sugabots/contracts/http";
 import { UserText, userText } from "@sugabots/errors";
 import { createAuthClient } from "better-auth/client";
+import { Effect } from "effect";
 import { failureForStatus, isApiFailure } from "./errors.ts";
+import type { Api } from "./index.ts";
 
 /**
  * Signing up, in and out, which better-auth serves under `/auth` with a client
@@ -13,9 +15,11 @@ import { failureForStatus, isApiFailure } from "./errors.ts";
 interface AuthClientOptions {
 	baseUrl: string;
 	fetch?: typeof globalThis.fetch;
+	/** The API's routes, for what changes an account through an operation of its own. */
+	api: Api;
 }
 
-export function createAuthApi({ baseUrl, fetch }: AuthClientOptions) {
+export function createAuthApi({ baseUrl, fetch, api }: AuthClientOptions) {
 	// better-auth's `basePath` is ignored whenever `baseURL` already carries a
 	// path, and `baseUrl` carries the API's mount path, so /auth goes in the URL.
 	const auth = createAuthClient({
@@ -50,7 +54,15 @@ export function createAuthApi({ baseUrl, fetch }: AuthClientOptions) {
 		resetPassword: (input: { token: string; newPassword: string }) =>
 			orThrow(auth.resetPassword(input)),
 
-		updateName: (input: { name: string }) => orThrow(auth.updateUser(input)),
+		/**
+		 * Changes your name, which other members see and which makes your handle,
+		 * through the API rather than better-auth, so every workspace you are in
+		 * is told.
+		 */
+		updateName: async (input: { name: string }) => {
+			await Effect.runPromise(api.rename({ payload: input }));
+			return { status: true } as const;
+		},
 
 		async signOut(): Promise<void> {
 			await orThrow(auth.signOut());

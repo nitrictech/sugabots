@@ -35,7 +35,7 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			.handle("startProjectChat", ({ params, payload }) =>
 				callOperation("chats.startProjectChat", {
 					projectId: params.projectId,
-					id: payload.id,
+					retryKey: payload.retryKey,
 					message: payload.message,
 				}).pipe(asHttpError(chatErrors)),
 			)
@@ -57,13 +57,21 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			)
 			.handle("markResolved", ({ params }) =>
 				callOperation("chats.setResolved", { chatId: params.chatId, resolved: true }).pipe(
+					Effect.catchTags(botResolutionRefusals),
 					asHttpError(chatErrors),
 				),
 			)
 			.handle("reopen", ({ params }) =>
 				callOperation("chats.setResolved", { chatId: params.chatId, resolved: false }).pipe(
+					Effect.catchTags(botResolutionRefusals),
 					asHttpError(chatErrors),
 				),
+			)
+			.handle("interruptTurn", ({ params }) =>
+				callOperation("chats.interruptTurn", {
+					chatId: params.chatId,
+					turnId: params.turnId,
+				}).pipe(asHttpError(chatErrors)),
 			)
 			.handle("messages", ({ params, query }) =>
 				callOperation("chats.messages", { chatId: params.chatId, ...query }).pipe(
@@ -138,7 +146,7 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 /** What each way a chats operation can fail means over HTTP. */
 const chatErrors = {
 	...refusals,
-	MessageIdConflict: Conflict,
+	MessageRetryKeyConflict: Conflict,
 	ReplyTargetNotFound: BadRequest,
 	BotHasNoModel: Conflict,
 	InvalidCursor: BadRequest,
@@ -154,4 +162,11 @@ const fileErrors = {
 	TooManyUnsentAttachments: Conflict,
 	UploadInterrupted: BadRequest,
 	ChatFileNotFound: NotFound,
+};
+
+const botResolutionRefusals = {
+	ApprovalNeeded: Effect.die,
+	ApprovalRefused: Effect.die,
+	TurnEnded: Effect.die,
+	TurnExecutionSuperseded: Effect.die,
 };

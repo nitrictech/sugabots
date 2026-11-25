@@ -96,7 +96,7 @@ function BotRow({
 					<Link {...botLink(bot)} className={nameClassName}>
 						{bot.name}
 					</Link>
-				) : bot.permissions.update ? (
+				) : bot.permissions.resources.openSettings ? (
 					<Link {...botSettingsLink(bot)} className={nameClassName}>
 						{bot.name}
 					</Link>

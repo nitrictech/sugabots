@@ -23,9 +23,17 @@ import { listFilesInProject } from "./list-files-in-project.ts";
 import { messages } from "./messages.ts";
 import { pageAddress } from "./page-address.ts";
 import { projectChats } from "./project-chats.ts";
+import { readChatFile } from "./read-chat-file.ts";
+import { readDocs } from "./read-docs.ts";
+import { searchHistory } from "./search-history.ts";
+import { workspaceRole } from "./workspace-role.ts";
 import { writtenFile } from "./written-file.ts";
 
 export const chatReadsOperations = {
+	"chats.searchHistory": searchHistory,
+	"chats.readChatFile": readChatFile,
+	"chats.readDocs": readDocs,
+	"chats.workspaceRole": workspaceRole,
 	"chats.projectChats": projectChats,
 	"chats.attention": attention,
 	"chats.attentionMarks": attentionMarks,

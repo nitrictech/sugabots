@@ -1,0 +1,101 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "3df778dc-4887-4d8d-9996-f28a8104fa73",
+  "prevIds": [
+    "0828cfc2-f3f3-4e2f-8253-bdf3590f17b9"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "tool_call",
+        "tool_call_sdk_call_idx"
+      ],
+      "writes": [
+        "s|idx|public.tool_call_sdk_call_idx",
+        "n|idx|public.tool_call_sdk_call_idx",
+        "e|idx|public.tool_call_sdk_call_idx",
+        "n|rel|public.tool_call_sdk_call_idx"
+      ],
+      "reads": [
+        "n|tbl|public.tool_call",
+        "n|sch|public",
+        "e|col|public.tool_call.turn_id",
+        "e|col|public.tool_call.sdk_tool_call_id"
+      ],
+      "sharedWrites": [
+        "e|uniqueness|public.tool_call.sdk_tool_call_id.turn_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "tool_call",
+        "tool_call_step_call_idx"
+      ],
+      "writes": [
+        "s|idx|public.tool_call_step_call_idx",
+        "n|idx|public.tool_call_step_call_idx",
+        "e|idx|public.tool_call_step_call_idx",
+        "n|rel|public.tool_call_step_call_idx"
+      ],
+      "reads": [
+        "n|tbl|public.tool_call",
+        "n|sch|public",
+        "n|col|public.tool_call.turn_id",
+        "n|col|public.tool_call.step",
+        "n|col|public.tool_call.sdk_tool_call_id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "tool_call",
+        "name": "tool_call_step_call_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "turn_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "step",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "sdk_tool_call_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"tool_call_sdk_call_idx\"]"
+    }
+  ]
+}

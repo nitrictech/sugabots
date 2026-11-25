@@ -16,7 +16,8 @@ import { DateTime, Effect } from "effect";
 import { type Database, query, transaction } from "../../database/database.ts";
 import { automation, automationTrigger } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
-import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
+import { makeAcceptTrigger } from "./acceptance.ts";
+import { lockTriggers } from "./automation.ts";
 import { type Delivery, deliveryIdOf, slackChallengeOf } from "./webhook-auth.ts";
 import { meetsFilter } from "./webhook-filter.ts";
 
@@ -115,6 +116,7 @@ const enabledWebhook = (triggerId: string) =>
 								eq(automationTrigger.id, triggerId),
 								eq(automationTrigger.kind, "webhook"),
 								eq(automation.state, "enabled"),
+								isNull(automation.pauseAfterFailuresPendingAt),
 								isNull(automation.deletedAt),
 							),
 						)

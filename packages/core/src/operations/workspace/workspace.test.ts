@@ -1,4 +1,4 @@
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { and, eq } from "drizzle-orm";
 import { Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -88,7 +88,7 @@ describe("the workspace operations, for each kind of principal", () => {
 	});
 
 	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends OperationName>(
+	const tried = <Name extends RequestOperationName>(
 		principal: Principal,
 		name: Name,
 		input: InputOf<Name>,
@@ -307,6 +307,11 @@ describe("the workspace operations, for each kind of principal", () => {
 		const cancelling = (principal: Principal) =>
 			tried(principal, "workspaces.cancelInvitation", { invitationId: adminInvitation });
 		expect(await cancelling(who.outsider)).toBe("ResourceHidden");
+		expect(
+			await tried(who.outsider, "workspaces.cancelInvitation", {
+				invitationId: crypto.randomUUID(),
+			}),
+		).toBe("ResourceHidden");
 		expect(await cancelling(who.admin)).toBe("ActionForbidden");
 		expect(await cancelling(who.owner)).toBe("ok");
 		expect(await cancelling(who.owner)).toBe("ResourceHidden");

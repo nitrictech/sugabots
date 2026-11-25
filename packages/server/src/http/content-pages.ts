@@ -7,6 +7,7 @@ import {
 } from "@sugabots/contracts/file-pages";
 import { FilePages } from "@sugabots/core/files/pages";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { processLayer } from "@sugabots/core/tiers";
 import { Effect, Layer, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
@@ -68,7 +69,7 @@ export const contentPageRoutes = Layer.effectDiscard(
 			}),
 		);
 	}),
-);
+).pipe(processLayer);
 
 /** A page's sealed token: one path segment, no longer than an address may be. */
 const pageTokenSchema = Schema.String.check(

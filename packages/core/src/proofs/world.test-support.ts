@@ -163,9 +163,9 @@ const noCookie: SessionAuthentication.CookiesInterface = { read: () => Effect.su
 /** Each kind of principal, from its authenticator. */
 export function principals(auth: Authenticators) {
 	return {
-		/** `memberId`, signed in. */
-		member: async (memberId: string) => {
-			const { token } = await seedSession(memberId);
+		/** `memberId`, signed in with a session expiring `expiresInSeconds` from now. */
+		member: async (memberId: string, expiresInSeconds?: number) => {
+			const { token } = await seedSession(memberId, expiresInSeconds);
 			// A bearer token is read from its row, so no cookie is read.
 			return runOnPostgres(
 				auth.session

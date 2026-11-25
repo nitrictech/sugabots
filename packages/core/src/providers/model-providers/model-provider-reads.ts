@@ -1,9 +1,4 @@
-import type {
-	ModelProvider,
-	NamedMember,
-	ProviderModelCapability,
-	WorkspaceModelsResponse,
-} from "@sugabots/contracts";
+import type { ModelProvider, NamedMember, WorkspaceModelsResponse } from "@sugabots/contracts";
 import {
 	builtInSignsIn,
 	providerIsConnected,
@@ -26,7 +21,7 @@ import {
 } from "../../database/schema.ts";
 import { membershipOf } from "../../workspaces/membership/member-reads.ts";
 import { configurationStatus } from "../tested-configuration.ts";
-import { defaultModelOf, offeredIn } from "./model-provider-store.ts";
+import { capabilitiesOn, defaultModelOf, offeredIn } from "./model-provider-store.ts";
 
 /**
  * Every model provider in the workspace, each with its models: the defaults
@@ -240,13 +235,3 @@ export const modelAcceptsImages = (workspaceId: string, modelId: string) =>
 				),
 			),
 	).pipe(Effect.map((models) => models.some((model) => capabilitiesOn(model).includes("vision"))));
-
-/** The model's capabilities, less those someone switched off. */
-function capabilitiesOn(model: {
-	capabilities: readonly ProviderModelCapability[];
-	disabledCapabilities: readonly ProviderModelCapability[];
-}) {
-	return model.capabilities.filter(
-		(capability) => !model.disabledCapabilities.includes(capability),
-	);
-}

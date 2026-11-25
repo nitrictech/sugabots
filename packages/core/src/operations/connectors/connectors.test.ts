@@ -1,15 +1,20 @@
-import { createHmac } from "node:crypto";
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
-import { Layer } from "effect";
+import { createHash, createHmac } from "node:crypto";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
+import { eq } from "drizzle-orm";
+import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedConnector, seedMember } from "../../authentication/seed.test-support.ts";
+import { ConnectorCatalog } from "../../chats/tools/connector-catalog.ts";
+import { NO_TURN } from "../../chats/tools/testing.ts";
+import { connector } from "../../database/schema.ts";
 import {
 	closeDatabase,
+	onDatabase,
 	type Promised,
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import type { Principal } from "../../principal.ts";
+import type { MemberSession, Principal } from "../../principal.ts";
 import {
 	type Authenticators,
 	authenticators,
@@ -117,7 +122,7 @@ describe("the connectors operations, for each kind of principal", () => {
 	});
 
 	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends OperationName>(
+	const tried = <Name extends RequestOperationName>(
 		principal: Principal,
 		name: Name,
 		input: InputOf<Name>,
@@ -182,8 +187,8 @@ describe("the connectors operations, for each kind of principal", () => {
 						botOutsideBounds: "ResourceHidden",
 						botInMemberBounds: "ok",
 						run: "ok",
-						webhook: "ActionForbidden",
-						computerSleep: "ActionForbidden",
+						webhook: "ResourceHidden",
+						computerSleep: "ResourceHidden",
 						compaction: "ResourceHidden",
 						page: "ResourceHidden",
 					},
@@ -193,53 +198,41 @@ describe("the connectors operations, for each kind of principal", () => {
 	});
 
 	describe("managing a project's connectors", () => {
-		/**
-		 * Each operation that manages a project's connectors, on J, and what it
-		 * comes to once the proofs let it act: no connector or GitHub app has
-		 * the id it names, nothing answers at the address it is given, and J
-		 * has its GitHub app already.
-		 */
-		const manages = () =>
-			[
-				[
-					"connectors.update",
-					{ connectorId: NO_CONNECTOR, changes: { name: "Renamed" } },
-					"ConnectorNotFound",
-				],
-				["connectors.remove", { connectorId: NO_CONNECTOR }, "ConnectorNotFound"],
-				["connectors.test", { connectorId: NO_CONNECTOR }, "ConnectorNotFound"],
-				["connectors.startOAuth", { connectorId: NO_CONNECTOR }, "ConnectorNotFound"],
-				["connectors.testUnsaved", { url: `${NOWHERE}/mcp` }, "ok"],
-				["gitHubConnectors.start", { organization: undefined }, "ProjectHasGitHubConnector"],
-				["gitHubConnectors.installUrl", { connectorId: NO_CONNECTOR }, "NotGitHubConnector"],
-				[
-					"gitHubConnectors.reachableRepositories",
-					{ connectorId: NO_CONNECTOR },
-					"NotGitHubConnector",
-				],
-				[
-					"gitHubConnectors.addRepository",
-					{ connectorId: NO_CONNECTOR, repository: "acme/web" },
-					"NotGitHubConnector",
-				],
-				[
-					"gitHubConnectors.removeRepository",
-					{ connectorId: NO_CONNECTOR, repository: "acme/web" },
-					"NotGitHubConnector",
-				],
-			] as const;
+		const manages = [
+			["connectors.update", { changes: { access: "off" } }, "ok"],
+			["connectors.remove", {}, "ok"],
+			["connectors.test", {}, "ok"],
+			["connectors.startOAuth", {}, "ConnectorDoesNotUseOAuth"],
+			["connectors.testUnsaved", { url: `${NOWHERE}/mcp` }, "ok"],
+			["gitHubConnectors.start", { organization: undefined }, "ProjectHasGitHubConnector"],
+			["gitHubConnectors.installUrl", {}, "NotGitHubConnector"],
+			["gitHubConnectors.reachableRepositories", {}, "NotGitHubConnector"],
+			["gitHubConnectors.addRepository", { repository: "acme/web" }, "NotGitHubConnector"],
+			["gitHubConnectors.removeRepository", { repository: "acme/web" }, "NotGitHubConnector"],
+		] as const;
 
 		it("lets only J's owner and admins, or a bot acting for one, manage J's", async () => {
-			for (const [name, input, acted] of manages()) {
-				const manage = (principal: Principal) =>
-					tried(
-						principal,
-						name as "connectors.remove",
-						{
+			for (const [name, input, acted] of manages) {
+				const manage = async (principal: Principal) => {
+					const connectorId = await seedConnector(a.workspace, a.project);
+					try {
+						if (name === "connectors.test") {
+							await onDatabase((db) =>
+								db
+									.update(connector)
+									.set({ url: `${NOWHERE}/mcp` })
+									.where(eq(connector.id, connectorId)),
+							);
+						}
+						return await tried(principal, name, {
 							projectId: a.project,
+							connectorId,
 							...input,
-						} as InputOf<"connectors.remove">,
-					);
+						} as InputOf<typeof name>);
+					} finally {
+						await onDatabase((db) => db.delete(connector).where(eq(connector.id, connectorId)));
+					}
+				};
 				expect({
 					name,
 					outcomes: await outcomes(
@@ -270,11 +263,11 @@ describe("the connectors operations, for each kind of principal", () => {
 						notInProject: "ResourceHidden",
 						outsider: "ResourceHidden",
 						botForEditor: "ActionForbidden",
-						botForAdmin: acted,
+						botForAdmin: name === "connectors.startOAuth" ? "ActionForbidden" : acted,
 						botOutsideBounds: "ResourceHidden",
 						run: "ActionForbidden",
-						webhook: "ActionForbidden",
-						computerSleep: "ActionForbidden",
+						webhook: "ResourceHidden",
+						computerSleep: "ResourceHidden",
 						page: "ResourceHidden",
 					},
 				});
@@ -298,23 +291,40 @@ describe("the connectors operations, for each kind of principal", () => {
 				status: "connected",
 				connectedBy: { id: a.admin },
 			});
+			if (!("toolCounts" in changed)) throw new Error("Expected connector settings");
 			expect(changed.toolCounts).toMatchObject({ allow: 0, ask: 0 });
 			expect(
 				await tried(who.admin, "connectors.get", { projectId: a.project, connectorId: made.id }),
-			).toBe("ConnectorNotFound");
+			).toBe("ResourceHidden");
 		});
 
-		it("refuses a connector of another project, though the principal manages both", async () => {
-			const inK = await seedConnector(a.workspace, a.otherProject);
-
-			expect(
-				await tried(who.admin, "connectors.remove", { projectId: a.project, connectorId: inK }),
-			).toBe("ConnectorNotFound");
+		it("hides missing connectors and connectors of another project from every connector operation", async () => {
+			const elsewhere = await seedConnector(a.workspace, a.otherProject);
+			for (const connectorId of [elsewhere, NO_CONNECTOR]) {
+				expect(
+					await tried(who.admin, "connectors.update", {
+						projectId: a.personal.defaultProject,
+						connectorId,
+						changes: { enabled: false },
+					}),
+				).toBe("ResourceHidden");
+				const address = { projectId: a.project, connectorId };
+				for (const [name, input] of manages) {
+					if (name === "connectors.testUnsaved" || name === "gitHubConnectors.start") continue;
+					expect(
+						await tried(who.admin, name, { ...address, ...input } as InputOf<typeof name>),
+					).toBe("ResourceHidden");
+				}
+				expect(await tried(who.admin, "connectors.get", address)).toBe("ResourceHidden");
+				expect(await tried(who.admin, "gitHubConnectors.repositories", address)).toBe(
+					"ResourceHidden",
+				);
+			}
 		});
 	});
 
 	describe("a bot's own connectors", () => {
-		it("are read by whoever reaches the bot, and managed by its managers; an admin doesn't reach a personal bot's", async () => {
+		it("have full views for members who reach the bot and an off switch for admins of personal bots's", async () => {
 			const cases = {
 				publicBot: a.pub.defaultProject,
 				personalBot: a.personal.defaultProject,
@@ -322,34 +332,40 @@ describe("the connectors operations, for each kind of principal", () => {
 			};
 			const results: Record<string, Record<string, string>> = {};
 			for (const [bot, projectId] of Object.entries(cases)) {
-				results[bot] = await outcomes(
-					{ admin: who.admin, ed: who.ed, vi: who.vi, viewerCreator: who.viewerCreator },
-					async (principal) => {
-						const read = await tried(principal, "connectors.list", { projectId });
-						const manage = await tried(principal, "connectors.remove", {
-							projectId,
-							connectorId: NO_CONNECTOR,
-						});
-						return `${read}/${manage}`;
-					},
-				);
+				const connectorId = await seedConnector(a.workspace, projectId);
+				try {
+					results[bot] = await outcomes(
+						{ admin: who.admin, ed: who.ed, vi: who.vi, viewerCreator: who.viewerCreator },
+						async (principal) => {
+							const read = await tried(principal, "connectors.list", { projectId });
+							const manage = await tried(principal, "connectors.update", {
+								projectId,
+								connectorId,
+								changes: { access: "off" },
+							});
+							return `${read}/${manage}`;
+						},
+					);
+				} finally {
+					await onDatabase((db) => db.delete(connector).where(eq(connector.id, connectorId)));
+				}
 			}
 
 			expect(results).toEqual({
 				publicBot: {
-					admin: "ok/ConnectorNotFound",
-					ed: "ok/ConnectorNotFound",
+					admin: "ok/ok",
+					ed: "ok/ok",
 					vi: "ok/ActionForbidden",
 					viewerCreator: "ok/ActionForbidden",
 				},
 				personalBot: {
-					admin: "ResourceHidden/ResourceHidden",
-					ed: "ok/ConnectorNotFound",
+					admin: "ok/ResourceHidden",
+					ed: "ok/ok",
 					vi: "ResourceHidden/ResourceHidden",
 					viewerCreator: "ResourceHidden/ResourceHidden",
 				},
 				viewerCreatorsBot: {
-					admin: "ok/ConnectorNotFound",
+					admin: "ok/ok",
 					ed: "ok/ActionForbidden",
 					vi: "ok/ActionForbidden",
 					viewerCreator: "ok/ActionForbidden",
@@ -358,16 +374,101 @@ describe("the connectors operations, for each kind of principal", () => {
 		});
 	});
 
+	it("leaves a switched-off built-in connector out of a turn's tools and addable connectors", async () => {
+		const projectId = a.pub.defaultProject;
+		const offerTools = () =>
+			runOnPostgres(
+				Effect.flatMap(ConnectorCatalog.Service, (tools) =>
+					tools.forTurn(a.workspace, { projectId, ownProjectId: null }, NO_TURN),
+				).pipe(Effect.provide(ConnectorCatalog.layer), Effect.provide(localEgress)),
+			);
+		const before = await offerTools();
+		expect(before.addable.map(({ id }) => id)).toContain("linear");
+
+		const made = await store.create(a.workspace, projectId, a.admin, {
+			name: "Linear",
+			url: "https://mcp.linear.app/mcp",
+			auth: "header",
+		});
+		await call(who.admin, "connectors.update", {
+			projectId,
+			connectorId: made.id,
+			changes: { enabled: false },
+		});
+
+		const after = await offerTools();
+		try {
+			expect(after.tools).toEqual({});
+			expect(after.unavailable).toEqual([]);
+			expect(after.addable.map(({ id }) => id)).not.toContain("linear");
+		} finally {
+			await after.close();
+		}
+	});
+
+	it("lets an admin switch off a hidden personal bot's connector without reading or changing its settings", async () => {
+		const projectId = a.personal.defaultProject;
+		const made = await store.create(a.workspace, projectId, a.ed, {
+			name: "Personal connector",
+			url: `${NOWHERE}/mcp`,
+			auth: "oauth",
+		});
+		const address = { projectId, connectorId: made.id };
+		const restricted = { id: made.id, name: made.name, enabled: true, restricted: true };
+		expect(await call(who.admin, "connectors.list", { projectId })).toEqual([restricted]);
+		expect(await tried(who.admin, "connectors.get", address)).toBe("ResourceHidden");
+		for (const changes of [
+			{ enabled: true },
+			{ enabled: false, name: "Changed" },
+			{ access: "off" as const },
+		]) {
+			expect(await tried(who.admin, "connectors.update", { ...address, changes })).toBe(
+				"ResourceHidden",
+			);
+		}
+		expect(
+			await tried(who.admin, "connectors.update", {
+				...address,
+				connectorId: NO_CONNECTOR,
+				changes: { enabled: false },
+			}),
+		).toBe("ResourceHidden");
+		expect(
+			await call(who.admin, "connectors.update", { ...address, changes: { enabled: false } }),
+		).toEqual({ ...restricted, enabled: false });
+		expect((await store.targetsForProject(a.workspace, projectId)).targets).toEqual([]);
+		expect(await call(who.ed, "connectors.get", address)).toMatchObject({
+			name: made.name,
+			url: made.url,
+			enabled: false,
+		});
+		expect(
+			await call(who.ed, "connectors.update", { ...address, changes: { enabled: true } }),
+		).toMatchObject({ enabled: true });
+	});
+
 	describe("connectors.oauthCallback", () => {
-		/** An OAuth connector in J, waiting on the sign-in `startedByMemberId` started, and its state. */
-		const signInStartedBy = async (startedByMemberId: string) => {
-			const made = await store.create(a.workspace, a.project, startedByMemberId, {
+		const signInStartedBy = async (session: MemberSession) => {
+			const made = await store.create(a.workspace, a.project, session.member, {
 				name: `Signs in ${crypto.randomUUID().slice(0, 8)}`,
 				url: `${NOWHERE}/mcp`,
 				auth: "oauth",
 			});
 			const state = crypto.randomUUID();
-			await store.saveOauthRecord(a.workspace, made.id, { state, startedByMemberId });
+			await store.saveOauthRecord(
+				a.workspace,
+				made.id,
+				{
+					state,
+					startedByMemberId: session.member,
+					startedBySessionId: session.session,
+				},
+				{ kind: "since", version: null },
+			);
+			const [row] = await onDatabase((db) =>
+				db.select({ hash: connector.oauthState }).from(connector).where(eq(connector.id, made.id)),
+			);
+			expect(row?.hash).toBe(createHash("sha256").update(state).digest("hex"));
 			return state;
 		};
 		const back = (principal: Principal, input: InputOf<"connectors.oauthCallback">) =>
@@ -376,7 +477,7 @@ describe("the connectors operations, for each kind of principal", () => {
 		it("answers a callback with no state, or one no sign-in waits on, with only a code", async () => {
 			expect(await back(who.admin, { code: "c" })).toEqual({
 				kind: "failed",
-				failure: "missing_state",
+				failure: "unknown_state",
 				at: undefined,
 			});
 			expect(await back(who.admin, { code: "c", state: "nobody" })).toEqual({
@@ -386,14 +487,16 @@ describe("the connectors operations, for each kind of principal", () => {
 			});
 		});
 
-		it("finishes only for the member who started it, while they manage the project", async () => {
-			const admins = await signInStartedBy(a.admin);
-			const eds = await signInStartedBy(a.ed);
-			const notAllowed = { kind: "failed", failure: "not_allowed", at: undefined };
+		it("finishes only in the session that started it, while they manage the project", async () => {
+			const admins = await signInStartedBy(who.admin);
+			const secondSession = await principals(auth).member(a.admin);
+			const eds = await signInStartedBy(who.ed);
+			const unknownState = { kind: "failed", failure: "unknown_state", at: undefined };
 
-			expect(await back(who.owner, { code: "c", state: admins })).toEqual(notAllowed);
-			expect(await back(who.ed, { code: "c", state: eds })).toEqual(notAllowed);
-			expect(await back(who.outsider, { code: "c", state: admins })).toEqual(notAllowed);
+			expect(await back(who.owner, { code: "c", state: admins })).toEqual(unknownState);
+			expect(await back(secondSession, { code: "c", state: admins })).toEqual(unknownState);
+			expect(await back(who.ed, { code: "c", state: eds })).toEqual(unknownState);
+			expect(await back(who.outsider, { code: "c", state: admins })).toEqual(unknownState);
 			expect(await back(who.admin, { error: "access_denied", state: admins })).toEqual({
 				kind: "failed",
 				failure: "refused",
@@ -452,6 +555,13 @@ describe("the connectors operations, for each kind of principal", () => {
 				admin: "ResourceHidden",
 				run: "ResourceHidden",
 			});
+			expect(
+				await tried(jsDelivery, "automations.projectRuns", { projectId: a.project, limit: 10 }),
+			).toBe("ResourceHidden");
+			expect(await tried(jsDelivery, "chats.messages", { chatId: a.chat, limit: 10 })).toBe(
+				"ResourceHidden",
+			);
+
 			expect(
 				await call(jsDelivery, "gitHubWebhooks.delivery", {
 					connectorId: jsApp,

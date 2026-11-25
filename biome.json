@@ -48,6 +48,26 @@
 	},
 	"overrides": [
 		{
+			"includes": ["packages/core/src/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
 			"includes": ["packages/web/src/**/*.{ts,tsx}", "packages/website/src/**/*.{ts,tsx}"],
 			"plugins": ["./lint/no-fixed-tailwind-values.grit"]
 		},
@@ -62,7 +82,9 @@
 				"!packages/core/src/providers/model-providers/sign-in/*.test.ts",
 				"packages/core/src/providers/search-providers/search-providers.ts",
 				"packages/core/src/providers/search-providers/search-provider-store.ts",
+				"packages/core/src/providers/web/web.ts",
 				"packages/core/src/operations/**/*.ts",
+				"packages/core/src/files/files.ts",
 				"packages/core/src/authentication/**/*.ts",
 				"packages/core/src/proofs/**/*.ts",
 				"packages/core/src/workspaces/projects/**/*.ts",
@@ -108,10 +130,12 @@
 			"includes": [
 				"packages/**/src/**",
 				"!packages/core/src/chats/turns/**",
+				"!packages/bot-loop/src/**",
 				"!**/*.test.ts",
 				"!**/*.test.tsx",
 				"!**/testing.ts",
-				"!**/*.test-support.ts"
+				"!**/*.test-support.ts",
+				"!packages/core/src/**"
 			],
 			"linter": {
 				"rules": {
@@ -142,9 +166,48 @@
 		},
 		{
 			"includes": [
-				"packages/core/src/authentication/**",
+				"packages/core/src/**",
+				"!packages/core/src/chats/turns/**",
+				"!packages/bot-loop/src/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									},
+									{
+										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+									},
+									{
+										"group": [
+											"**/authentication/turn",
+											"**/authentication/turn.ts",
+											"**/authentication/system-work",
+											"**/authentication/system-work.ts"
+										],
+										"message": "Only the bot loop and the scheduler authenticate from stored ids: a turn's, or system work's. Anywhere else, take the principal an entrypoint passed in."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
 				"packages/server/src/scheduler/**",
-				"packages/core/src/chats/automations/scheduler.ts",
 				"!**/*.test.ts",
 				"!**/*.test.tsx",
 				"!**/testing.ts",
@@ -170,10 +233,73 @@
 		},
 		{
 			"includes": [
+				"packages/core/src/authentication/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									},
+									{
+										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
 				"packages/**/src/**/*.test.ts",
 				"packages/**/src/**/*.test.tsx",
 				"packages/**/src/**/testing.ts",
 				"packages/**/src/**/*.test-support.ts",
+				"!packages/core/src/chats/turns/**",
+				"!packages/core/src/**"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"**/turns/**",
+											"!**/turns/turns",
+											"!**/turns/turns.ts",
+											"!**/turns/testing",
+											"!**/turns/testing.ts"
+										],
+										"message": "Outside `chats/turns/`, a test imports the Turns module only through `turns/turns.ts` or `turns/testing.ts`."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/core/src/**/*.test.ts",
+				"packages/core/src/**/*.test.tsx",
+				"packages/core/src/**/testing.ts",
+				"packages/core/src/**/*.test-support.ts",
 				"!packages/core/src/chats/turns/**"
 			],
 			"linter": {
@@ -183,6 +309,10 @@
 							"level": "error",
 							"options": {
 								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									},
 									{
 										"group": [
 											"**/turns/**",
@@ -238,7 +368,6 @@
 		},
 		{
 			"includes": [
-				"packages/core/src/operations/**",
 				"packages/contracts/src/**",
 				"packages/sdk/src/**",
 				"packages/web/src/**",
@@ -254,6 +383,63 @@
 							"level": "error",
 							"options": {
 								"patterns": [
+									{
+										"group": [
+											"**/database/database",
+											"**/database/database.ts",
+											"**/database/schema",
+											"**/database/schema.ts",
+											"**/sql",
+											"**/sql.ts",
+											"drizzle-orm",
+											"drizzle-orm/*"
+										],
+										"message": "Only services reach the database. Call a service, which takes the proofs it needs."
+									},
+									{
+										"group": [
+											"**/turns/**",
+											"!**/turns/turns",
+											"!**/turns/turns.ts",
+											"!./turns/index.ts"
+										],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal. (`./turns/index.ts` in `operations/` is the turns domain's operations.)"
+									},
+									{
+										"group": [
+											"**/authentication/turn",
+											"**/authentication/turn.ts",
+											"**/authentication/system-work",
+											"**/authentication/system-work.ts"
+										],
+										"message": "Only the bot loop and the scheduler authenticate from stored ids: a turn's, or system work's. Anywhere else, take the principal an entrypoint passed in."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/core/src/operations/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									},
 									{
 										"group": [
 											"**/database/database",
@@ -345,6 +531,10 @@
 							"level": "error",
 							"options": {
 								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									},
 									{
 										"group": [
 											"node:*",

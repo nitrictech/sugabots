@@ -1,12 +1,10 @@
 import { Cause, Effect, Exit, Option } from "effect";
 import { afterCommit, serviceOperations, transaction } from "../../database/database.ts";
 import { Lanes } from "../../workflows/lanes.ts";
-import { ChatEvents } from "../chat-events.ts";
-import { ChatEvent } from "../events.ts";
 import { SYSTEM_TURN_INTERRUPTED, TURN_STOPPED_UNEXPECTEDLY } from "./lifecycle.ts";
+import { TURN_WORKFLOW } from "./requests.ts";
 import { TurnSignals } from "./signals.ts";
 import { TurnStore } from "./store.ts";
-import { admitTurn, Turn } from "./turn.workflow.ts";
 import type { Turns } from "./turns.ts";
 
 /** `Turns.Service`: what the rest of the system asks of turns. */
@@ -15,7 +13,6 @@ export const makeService = Effect.gen(function* () {
 	const lanes = yield* Lanes.Service;
 	const turns = yield* TurnStore.Service;
 	const signals = yield* TurnSignals.Service;
-	const { emit } = yield* ChatEvents.Service;
 
 	const recordSystemTurn: Turns.Interface["recordSystemTurn"] = (systemTurn, work) =>
 		Effect.gen(function* () {
@@ -48,33 +45,22 @@ export const makeService = Effect.gen(function* () {
 		});
 
 	return {
-		ask: (request) =>
-			operation(
-				"ask",
-				transaction(
-					Effect.gen(function* () {
-						const admission = yield* admitTurn(lanes, request);
-						if (admission === "waiting") {
-							yield* emit([ChatEvent.TurnQueued({ chatId: request.chatId })]);
-						}
-					}),
-				),
-			),
+		ask: (request) => operation("ask", turns.ask(request)),
 		stopUnder: (chatIds) =>
 			operation(
 				"stopUnder",
 				transaction(
 					Effect.gen(function* () {
 						if (chatIds.length === 0) return;
-						// A cancelled waiting turn's workflow still waits for its approvals,
-						// holding its lane, until it is told to stop.
+						// Workflows waiting on approvals or a retry still hold their lanes
+						// until they hear that their turns were cancelled.
 						const stillWaiting = yield* turns.cancelUnder(chatIds);
 						yield* afterCommit(
 							Effect.forEach(stillWaiting, (executionId) => signals.cancel(executionId), {
 								discard: true,
 							}),
 						);
-						yield* lanes.dropWaiting(chatIds, [Turn._tag]);
+						yield* lanes.dropWaiting(chatIds, [TURN_WORKFLOW]);
 					}),
 				),
 			),

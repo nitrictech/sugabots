@@ -108,21 +108,11 @@ export const CONNECTOR_SIGN_IN_RETURN_PATH = "/connectors/oauth/return";
  * Why a sign-in did not finish, as the web app is told it. The web app words
  * each one itself, so nothing an authorization server sent back is shown.
  *
- * - `missing_state`: the callback carried no `state`.
- * - `unknown_state`: no connector is waiting on that `state`.
- * - `not_allowed`: somebody other than the member who started the sign-in
- *   returned from it, or that member may no longer manage the project's
- *   connectors.
+ * - `unknown_state`: no sign-in that this session can finish matches the callback.
  * - `refused`: the authorization server refused, or sent no code.
  * - `not_completed`: exchanging the code for tokens failed.
  */
-export const connectorSignInFailures = [
-	"missing_state",
-	"unknown_state",
-	"not_allowed",
-	"refused",
-	"not_completed",
-] as const;
+export const connectorSignInFailures = ["unknown_state", "refused", "not_completed"] as const;
 const connectorSignInFailureSchema = Schema.Literals(connectorSignInFailures);
 export type ConnectorSignInFailure = typeof connectorSignInFailureSchema.Type;
 
@@ -151,6 +141,7 @@ export const connectorSchema = Schema.Struct({
 	/** The project it belongs to; a bot's are its default project's. */
 	projectId: uuidSchema,
 	name: Schema.String,
+	enabled: Schema.optional(Schema.Boolean),
 	/** Prefixes the server's tool names for the model: `exa__web_search_exa`. */
 	handle: handleSchema,
 	kind: connectorKindSchema,
@@ -191,6 +182,15 @@ export const connectorSchema = Schema.Struct({
 });
 
 export type Connector = typeof connectorSchema.Type;
+
+const restrictableConnectorSchema = Schema.Struct({
+	id: uuidSchema,
+	name: Schema.String,
+	enabled: Schema.Boolean,
+	restricted: Schema.Literal(true),
+});
+export type RestrictableConnector = typeof restrictableConnectorSchema.Type;
+export const connectorListItemSchema = Schema.Union([connectorSchema, restrictableConnectorSchema]);
 
 /** One connector with its tools, each with what bots may do with it. */
 export const connectorWithToolsSchema = Schema.Struct({
@@ -260,6 +260,7 @@ export const connectorOauthStartSchema = Schema.Struct({
 });
 
 export const connectorUpdateSchema = Schema.Struct({
+	enabled: Schema.optional(Schema.Boolean),
 	name: Schema.optional(connectorNameSchema),
 	url: Schema.optional(providerUrlSchema),
 	/** Absent leaves the header alone; null means the server takes no secret. */

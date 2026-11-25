@@ -1,3 +1,5 @@
+import { uuidSchema } from "@sugabots/contracts/uuid";
+
 export * as GitHubApps from "./github-app.ts";
 
 import { isIP } from "node:net";
@@ -20,6 +22,8 @@ import { type Database, query, serviceOperations } from "../../../database/datab
 import { bot, project } from "../../../database/schema.ts";
 import { Ids } from "../../../ids/ids.ts";
 import type { CanManageProject } from "../../../proofs/project-permissions.ts";
+import type { Named } from "../../../proofs/proof.ts";
+import type { ReachesConnector } from "../../../proofs/reaches-connector.ts";
 import type { ReachesProject } from "../../../proofs/reaches-project.ts";
 import { Secrets } from "../../../secrets/secrets.ts";
 import { ServerSettings } from "../../../server-settings/server-settings.ts";
@@ -76,9 +80,10 @@ export interface Interface {
 		installationId: number | undefined,
 	) => Effect.Effect<GitHubSetupOutcome>;
 	/** Where to install the connector's app, or to change which repositories it reaches. */
-	readonly installUrl: <P, J>(
+	readonly installUrl: <P, J, K>(
 		canManage: CanManageProject<P, J>,
-		connectorId: string,
+		connector: Named<K, string>,
+		target: ReachesConnector<P, J, K>,
 	) => Effect.Effect<string, NotGitHubConnector>;
 }
 
@@ -244,22 +249,25 @@ export const make = Effect.gen(function* () {
 					);
 					if (Option.isNone(found)) return failed(setup, "github");
 					const { id, account, onUserAccount } = found.value;
-					yield* connectors.installed(reach.workspace, row.id, {
+					const recorded = yield* connectors.installed(reach.workspace, row.id, {
 						installationId: id,
 						account,
 						// Only a member's own account is theirs alone, so only then is the installation theirs.
 						installedById: onUserAccount ? member.actor.memberId : null,
 					});
+					// The connector went meanwhile, or its member left the workspace or was removed.
+					if (!recorded) return failed(undefined, "expired");
 					return { kind: "done", at: projectIn(reach), connectorId: row.id };
 				}),
 			),
 
-		installUrl: (canManage, connectorId) =>
+		installUrl: (canManage, connector, target) =>
 			operation(
 				"installUrl",
 				Effect.gen(function* () {
-					const { reach, member } = canManage;
-					const project = projectIn(reach);
+					const { member } = canManage;
+					const connectorId = connector.value;
+					const project = { workspaceId: target.workspace, projectId: target.project.value };
 					const row = yield* gitHubConnectorForProject(project);
 					if (!row?.settings || row.id !== connectorId) return yield* new NotGitHubConnector();
 					const state = yield* stateFor({
@@ -311,10 +319,10 @@ export interface SetupStep extends SetupProject {
 const SetupStateJson = Schema.fromJsonString(
 	Schema.Struct({
 		step: Schema.Literals(["make", "install"]),
-		workspaceId: Schema.String,
-		projectId: Schema.String,
-		connectorId: Schema.String,
-		memberId: Schema.String,
+		workspaceId: uuidSchema,
+		projectId: uuidSchema,
+		connectorId: uuidSchema,
+		memberId: uuidSchema,
 		expiresAt: Schema.Finite,
 	}),
 );

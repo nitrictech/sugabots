@@ -4,17 +4,14 @@ import { Context, Effect, Layer } from "effect";
 import { DomainEvents } from "../database/events/domain-events.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { Notifications } from "../notifications/notifications.ts";
-import { BotAdministration } from "../workspaces/bots/bot-administration.ts";
+import { processLayer } from "../tiers.ts";
 import { WorkspaceTimeZone } from "../workspaces/time-zone/workspace-time-zone.ts";
-import { AssistantGuide } from "./assistant/assistant-guide.ts";
 import { AutomationRunner } from "./automations/automation-runner.ts";
 import { Automations } from "./automations/automations.ts";
-import { BotAutomations } from "./automations/bot-automations.ts";
 import { AutomationSettlement } from "./automations/settlement.ts";
 import { AutomationWorkAdmission } from "./automations/work-admission.ts";
 import { ChatEventStream } from "./chat-event-stream.ts";
 import { ChatEvents } from "./chat-events.ts";
-import { BotChats } from "./chats/bot-chats.ts";
 import { Compactions } from "./compaction/compactions.ts";
 import type { ChatEvent } from "./events.ts";
 import { FloorControl } from "./floor/floor-control.ts";
@@ -27,23 +24,17 @@ import { Turns } from "./turns/turns.ts";
  * it before it exists.
  */
 const services = Layer.mergeAll(
-	Automations.layer,
 	Automations.connectorEventsLayer,
-	// The turn's steps read it from here, for the automation tools.
-	BotAutomations.layer,
-	// The turn's steps read it from here, for start_chat.
-	BotChats.layer,
-	// The turn's steps read it from here, for a Personal Assistant's tools.
-	AssistantGuide.layer,
-	// The turn's steps read it from here, for save_instructions.
-	BotAdministration.layer,
 	// Moving the workspace's zone moves its automations' routines, through the store that emits.
 	WorkspaceTimeZone.layer,
 	AutomationRunner.layer,
 	Compactions.layer,
 	AutomationSettlement.layer,
 	FloorControl.layer,
-).pipe(Layer.provideMerge(Turns.layer), Layer.provideMerge(AutomationWorkAdmission.layer));
+).pipe(
+	Layer.provideMerge(Layer.merge(Turns.layer, Turns.controlsLayer)),
+	Layer.provideMerge(AutomationWorkAdmission.layer),
+);
 
 /** Everything `layer` provides. */
 export type Services = Layer.Success<typeof services> | ChatEvents.Service;
@@ -66,17 +57,17 @@ export const layer = Layer.effectContext(
 		// emits while they are being built.
 		const events = ChatEvents.Service.of({ emit: (batch) => dispatch(batch) });
 		const built = yield* Layer.build(
-			services.pipe(Layer.provide(Layer.succeed(ChatEvents.Service, events))),
+			services.pipe(Layer.provide(Layer.succeed(ChatEvents.Service, events).pipe(processLayer))),
 		);
 		const dispatch = DomainEvents.emitTo<ChatEvent>([
 			ChatEventStream.handler(outbox),
+			ChatEventStream.approvalHandler(outbox),
 			Context.get(built, AutomationSettlement.Service).handler,
 			Context.get(built, FloorControl.Service).handler,
 			Context.get(built, Compactions.Service).handler,
 			notifications.handler,
 		]);
-		// Internals included: the workflows' steps and the automation scheduler read
-		// them from here. Routes cannot, as `HttpServices` admits only public tags.
+		// The workflows' steps and the operation registry reuse the chat services built here.
 		return Context.add(built, ChatEvents.Service, events);
 	}),
-);
+).pipe(processLayer);

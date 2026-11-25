@@ -114,6 +114,32 @@ function pictureUrl(label: string, hue: number): string {
 	return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
+export const Thinking = meta.story({
+	parameters: { docs: { description: { story: "A bot reply with thinking readers can expand." } } },
+	args: {
+		viewerId: member.id,
+		messages: [
+			{
+				...message(
+					"0199a3a0-0000-7000-8000-000000000319",
+					host,
+					"The totals match the pricing page.",
+				),
+				thinking: [
+					{ step: 0, text: "Compare the quoted unit prices against the current pricing page." },
+				],
+			},
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		const disclosure = canvas.getByText("Thinking");
+		const details = disclosure.closest("details");
+		await expect(details?.open).toBe(false);
+		await userEvent.click(disclosure);
+		await expect(details?.open).toBe(true);
+	},
+});
+
 const attachedFiles: FilePart[] = [
 	["01", "pricing-page-old.png", "image/png", 412_000],
 	["02", "pricing-page-new.png", "image/png", 398_000],

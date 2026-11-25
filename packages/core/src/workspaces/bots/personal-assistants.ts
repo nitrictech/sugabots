@@ -3,6 +3,7 @@ export * as PersonalAssistants from "./personal-assistants.ts";
 import { Context, Effect, Layer } from "effect";
 import { serviceOperations, transaction } from "../../database/database.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import type { MemberFacingBotRow } from "./bot.ts";
 import { BotStore } from "./bot-store.ts";
 
@@ -35,7 +36,9 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/PersonalAssistants",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("PersonalAssistants");
@@ -94,6 +97,6 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 export const layer = layerNoDeps.pipe(Layer.provide([BotStore.layer, ModelProviderStore.layer]));

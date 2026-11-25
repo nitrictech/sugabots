@@ -181,6 +181,7 @@ describe("modelPrompt", () => {
 				{
 					...context(),
 					workspaceTimeZone: "Australia/Sydney",
+					askerId: crypto.randomUUID(),
 					bot: { ...context().bot, disabledTools },
 				},
 				environment({ builtInTools: [] }),
@@ -196,9 +197,9 @@ describe("modelPrompt", () => {
 		expect(instruction(["automations"])).not.toContain("Routines you set up");
 	});
 
-	it("says nothing of setting up routines to a Personal Assistant, which has no automation tools", () => {
+	it("says nothing of setting up routines in a run", () => {
 		const instruction = modelPrompt(
-			{ ...context(), bot: { ...context().bot, assistantOf: crypto.randomUUID() } },
+			{ ...context(), chat: { ...context().chat, kind: "run" }, reason: "automation" },
 			environment({ builtInTools: [] }),
 		).messages.at(-1)?.content;
 
@@ -554,7 +555,12 @@ Say hello`,
 	});
 });
 
-function context(): TurnContext {
+/** A turn's context a case changes before it makes the prompt: its fields and its chat's. */
+type EditableContext = Omit<{ -readonly [Key in keyof TurnContext]: TurnContext[Key] }, "chat"> & {
+	chat: { -readonly [Key in keyof TurnContext["chat"]]: TurnContext["chat"][Key] };
+};
+
+function context(): EditableContext {
 	return {
 		chat: {
 			id: "0199a3a0-0000-7000-8000-000000000001",

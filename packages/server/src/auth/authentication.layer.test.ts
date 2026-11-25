@@ -1,4 +1,5 @@
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { noDatabase } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
@@ -30,6 +31,7 @@ async function startup(env: Record<string, string>) {
 						ServerSettings.layer,
 						Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
 						unimplemented(Accounts.Service, { requireEmailVerification: false }),
+						unimplemented(EventOutbox.Service),
 					]),
 					Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
 				),

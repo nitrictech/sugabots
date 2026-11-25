@@ -6,27 +6,30 @@ import type {
 	ChatDetails,
 	ChatHistoryQuery,
 	PlacedChat,
-	ToolApprovers,
 } from "@sugabots/contracts";
 import { DEFAULT_CHAT_HISTORY_LIMIT } from "@sugabots/contracts";
 import type { InvalidCursor } from "@sugabots/contracts/errors/chat-reads";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { and, eq, type SQLWrapper, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type SQLWrapper, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import { membersReachingProject } from "../authorization/access.ts";
-import { type BotFacts, mayOnBot } from "../authorization/permissions.ts";
 import { type Executor, query, serviceOperations } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
-import { automation, chatCompaction, member, placedChat, turn } from "../database/schema.ts";
 import {
-	type MemberPlace,
-	mayInProjectAs,
-	memberActing,
-	type ProjectFacts,
-} from "../proofs/facts.ts";
+	ACTIVE_TURN_STATUSES,
+	automation,
+	chatCompaction,
+	member,
+	message,
+	placedChat,
+	toolCall,
+	turn,
+} from "../database/schema.ts";
+import { approvedBy, approverStandingWhere } from "../proofs/approvers.ts";
 import type { ReachesChat } from "../proofs/reaches-chat.ts";
 import { processLayer, Tier } from "../tiers.ts";
-import { automationFailing, resultPosted, runBotFactsOf, toRun } from "./automations/execution.ts";
+import { stateWithPendingPause } from "./automations/automation.ts";
+import { automationFailing, resultPosted, toRun } from "./automations/execution.ts";
 import { compactionLineTokens } from "./compaction/window.ts";
 import { type CursorPoint, earlierThan, encodeCursor, parseCursor } from "./cursor.ts";
 import {
@@ -50,8 +53,8 @@ import { Turns } from "./turns/turns.ts";
 export interface Interface {
 	/**
 	 * The chat `reach` is about, with a page of its messages, and what the
-	 * member acting may decide of its approvals: nothing, for a principal
-	 * acting for no member.
+	 * member signed in may decide of its approvals: nothing, for any other
+	 * principal, as only a member decides one.
 	 */
 	readonly get: <P, C>(
 		reach: ReachesChat<P, C>,
@@ -81,10 +84,17 @@ export const make = Effect.gen(function* () {
 					// Before anything is looked up, so a bad cursor says nothing about the chat.
 					const before = history.cursor ? yield* parseCursor(history.cursor) : undefined;
 					const row = yield* query((db) =>
-						loadChat(db, { chatId, workspaceId: reach.workspace }, history.limit, before),
+						loadChat(
+							db,
+							{ chatId, workspaceId: reach.workspace },
+							history.limit,
+							before,
+							reach.as.kind !== "webhook",
+						),
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "chat" });
-					const details = toChatDetails(row, memberActing(reach.as), reach.project, history.limit);
+					const approvals = yield* approvalPermissionsIn(reach, row);
+					const details = toChatDetails(row, approvals, history.limit);
 					const { automationId } = row;
 					if (!automationId) return details;
 					const [owned] = yield* query((db) =>
@@ -95,16 +105,22 @@ export const make = Effect.gen(function* () {
 								state: automation.state,
 								failed: automationFailing(),
 								pausedAfterFailuresAt: automation.pausedAfterFailuresAt,
+								pauseAfterFailuresPendingAt: automation.pauseAfterFailuresPendingAt,
 							})
 							.from(automation)
 							.where(eq(automation.id, automationId))
 							.limit(1),
 					);
 					if (!owned) return details;
-					const { pausedAfterFailuresAt, ...stands } = owned;
+					const { pausedAfterFailuresAt, pauseAfterFailuresPendingAt, ...stands } = owned;
 					return {
 						...details,
-						automation: { ...stands, pausedAfterFailures: pausedAfterFailuresAt !== null },
+						automation: {
+							...stands,
+							state: stateWithPendingPause(owned),
+							pausedAfterFailures:
+								pausedAfterFailuresAt !== null || pauseAfterFailuresPendingAt !== null,
+						},
 					};
 				}),
 			),
@@ -149,25 +165,28 @@ const loadChat = Effect.fn("ChatDetailsView.loadChat")(function* (
 	chat: { chatId: string; workspaceId: string },
 	limit: number,
 	before: CursorPoint | undefined,
+	includeProjectRoster: boolean,
 ) {
 	return yield* db.query.placedChat.findFirst({
 		where: { id: chat.chatId, workspaceId: chat.workspaceId },
 		extras: {
 			working: (row) => Turns.busyIn(sql`${row.id}`),
 			queuedSince: (row) => Turns.queuedSince(sql`${row.id}`),
-			// Who decides the approvals of a run turns on the run's bot.
-			runBot: (row) => runBotFactsOf(row.id),
 			// Not the project's members: a bot's default project has none, and the
 			// floor reads mentions of everyone who reaches the project.
-			membersReachingProject: (row) => sql<MemberIdentity[]>`(
+			membersReachingProject: (row) =>
+				includeProjectRoster
+					? sql<MemberIdentity[]>`(
 				select coalesce(json_agg(${memberJson} order by ${member.name}), '[]'::json)
 				from ${member}
 				where ${member.id} in (${membersReachingProject(sql`${row.projectId}`)})
-			)`,
+			)`
+					: sql<MemberIdentity[]>`'[]'::json`,
 		},
 		with: {
 			project: {
 				columns: {},
+				where: { RAW: () => sql`${includeProjectRoster}` },
 				with: {
 					bots: {
 						...botColumns,
@@ -207,26 +226,13 @@ const loadChat = Effect.fn("ChatDetailsView.loadChat")(function* (
 
 type Chat = NonNullable<Effect.Success<ReturnType<typeof loadChat>>>;
 
-/**
- * The chat as `viewer` sees it, the member acting, with the facts of the
- * project its reach was proved from.
- */
-function toChatDetails(
-	row: Chat,
-	viewer: MemberPlace | undefined,
-	project: ProjectFacts,
-	limit: number,
-): ChatDetails {
+/** The chat, with what the member reading it may decide of its approvals. */
+function toChatDetails(row: Chat, approvals: ApprovalPermissions, limit: number): ChatDetails {
 	const page = row.messages.slice(0, limit).reverse();
 	const oldest = page[0];
 	return {
 		chat: toPlacedChat(row, row.working),
-		// What this member may do with the approvals this chat raises, decided
-		// once here so the chat does not have to work it out from a role.
-		permissions: {
-			approveToolCalls: mayDecideIn(viewer, project, row.runBot ?? undefined, "chat"),
-			approveComputerRequests: mayDecideIn(viewer, project, undefined, "computer-managers"),
-		},
+		permissions: approvals,
 		// A run is always listed in its automation's feed.
 		automationRun:
 			row.automationRun && row.rootChatId
@@ -300,24 +306,74 @@ function toPlacedChat(row: schema.PlacedChatRow, working: boolean): PlacedChat {
 	};
 }
 
+type ApprovalPermissions = NonNullable<ChatDetails["permissions"]>;
+
+/** What a principal acting for no member, who decides no approval, may decide. */
+const NO_APPROVALS: ApprovalPermissions = {
+	approveToolCallsIn: [],
+	approveComputerRequests: false,
+	interruptTurns: [],
+};
+
 /**
- * Whether `viewer` may decide the approvals of a kind the chat raises, by the
- * rule the Approvals page selects them by (`mayDecideToolCall` in
- * `authorization/access.ts`), with their place in its project: a computer's
- * requests by those who decide them there; any other call by those who
- * decide approvals there, and in a run, who also manage `runBot`, the bot
- * doing it. A principal acting for no member decides nothing.
+ * What the member signed in may decide of the approvals the chat `row`
+ * raises, by the approver rule `approvals.decide` checks: the replies of its
+ * turns not yet ended, or still waiting on an approval, whose calls they
+ * approve, and whether they decide its computer's requests, which those who
+ * manage its project do. And the replies being written whose turns they may
+ * interrupt, by the rule `CanInterrupt` checks: their own turns, every turn if
+ * they manage the project, and a run's turns whose calls they approve. A bot,
+ * a run and any other principal decide nothing and interrupt nothing.
  */
-function mayDecideIn(
-	viewer: MemberPlace | undefined,
-	project: ProjectFacts,
-	runBot: BotFacts | undefined,
-	approvers: ToolApprovers,
-): boolean {
-	if (!viewer) return false;
-	if (approvers === "computer-managers") {
-		return mayInProjectAs(viewer, project, "computer.request.decide");
-	}
-	if (!mayInProjectAs(viewer, project, "approval.decide")) return false;
-	return runBot === undefined || mayOnBot(viewer.actor, "approval.automation.decide", runBot);
-}
+const approvalPermissionsIn = <P, C>(reach: ReachesChat<P, C>, row: Chat) =>
+	Effect.gen(function* () {
+		if (reach.as.kind !== "member") return NO_APPROVALS;
+		const member = reach.as.place.actor.memberId;
+		const { standing } = yield* query((db) =>
+			approverStandingWhere(db, member, {
+				project: reach.project.id,
+				computerProjectId: reach.project.id,
+				runBot: row.automationRun?.botId ?? null,
+			}),
+		);
+		const waitingOrActive = or(
+			inArray(turn.status, [...ACTIVE_TURN_STATUSES]),
+			sql`exists (select 1 from ${toolCall} where ${toolCall.turnId} = ${turn.id} and ${toolCall.approvalStatus} = 'pending')`,
+		);
+		const replies = yield* query((db) =>
+			db
+				.select({ id: message.id })
+				.from(message)
+				.innerJoin(turn, eq(turn.id, message.turnId))
+				.where(
+					and(
+						eq(message.chatId, row.id),
+						waitingOrActive,
+						approvedBy(standing, { turnId: turn.id, computerRequest: sql<boolean>`false` }),
+					),
+				),
+		);
+		const managesProject = standing.managedProjects.includes(reach.project.id);
+		const interruptible = yield* query((db) =>
+			db
+				.select({ replyId: message.id, turnId: turn.id })
+				.from(message)
+				.innerJoin(turn, eq(turn.id, message.turnId))
+				.where(
+					and(
+						eq(message.chatId, row.id),
+						inArray(turn.status, [...ACTIVE_TURN_STATUSES]),
+						isNull(turn.endRequested),
+						managesProject
+							? undefined
+							: approvedBy(standing, { turnId: turn.id, computerRequest: sql<boolean>`false` }),
+					),
+				),
+		);
+		const permissions: ApprovalPermissions = {
+			approveToolCallsIn: replies.map((reply) => reply.id),
+			approveComputerRequests: managesProject,
+			interruptTurns: interruptible,
+		};
+		return permissions;
+	});

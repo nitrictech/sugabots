@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "0828cfc2-f3f3-4e2f-8253-bdf3590f17b9",
+  "prevIds": [
+    "792fba3b-6294-4645-bade-85a9f614cf80"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "turn",
+        "execution_number"
+      ],
+      "writes": [
+        "s|col|public.turn.execution_number",
+        "n|col|public.turn.execution_number",
+        "e|col|public.turn.execution_number"
+      ],
+      "reads": [
+        "n|tbl|public.turn",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "turn",
+        "name": "execution_number",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

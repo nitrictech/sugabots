@@ -29,11 +29,12 @@ import {
 	query,
 	queryCatching,
 	serviceOperations,
-	type Transaction,
+	Transaction,
 	transaction,
 } from "../../database/database.ts";
 import { violatedUniqueConstraint } from "../../database/errors.ts";
 import { bot, pinnedBot, projectBot } from "../../database/schema.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { type LeadsProjects, refuseWhileLeading } from "../projects/project-leads.ts";
 import { defaultProjectIdOf, type MemberFacingBotRow, memberFacingBotRow } from "./bot.ts";
 import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
@@ -67,20 +68,8 @@ export interface Interface {
 		MemberFacingBotRow,
 		BotNameTaken | BotHandleReserved | BotGone | SystemBotImmutable | LeadsProjects
 	>;
-	/**
-	 * Deletes the bot, its default project with it, after `beforeDeleting`.
-	 * Refused while the bot leads a project members made (see
-	 * `refuseWhileLeading`), naming to `viewerId` the projects they see.
-	 * `beforeDeleting` runs once the bot is locked and found free to delete, and
-	 * the lock is held until the deletion commits, so no project can choose
-	 * the bot as lead in between; when it fails, the bot is kept.
-	 */
-	readonly remove: <E, R>(
-		workspaceId: string,
-		botId: string,
-		viewerId: string,
-		beforeDeleting: Effect.Effect<void, E, R>,
-	) => Effect.Effect<void, SystemBotImmutable | LeadsProjects | E, Exclude<R, Transaction>>;
+	/** Removes the bot and its default project once the computer is gone. */
+	readonly remove: (workspaceId: string, botId: string) => Effect.Effect<void, SystemBotImmutable>;
 	/**
 	 * `memberId`'s Personal Assistant, made on `model`, or with no model, if they
 	 * have none. One they have is returned exactly as they left it.
@@ -128,7 +117,9 @@ export interface Interface {
 	) => Effect.Effect<number>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/BotStore") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/BotStore") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("BotStore");
@@ -241,21 +232,15 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		remove: (workspaceId, botId, viewerId, beforeDeleting) =>
+		remove: (workspaceId, botId) =>
 			operation(
 				"remove",
 				transaction(
 					Effect.gen(function* () {
-						if (yield* isSystemBot(workspaceId, botId)) {
-							return yield* new SystemBotImmutable();
-						}
-						const named = and(eq(bot.id, botId), eq(bot.workspaceId, workspaceId));
-						// Locked first, and held through `beforeDeleting`, so a project
-						// choosing it as lead waits until it is gone.
-						yield* query((db) => db.select({ id: bot.id }).from(bot).where(named).for("update"));
-						yield* refuseWhileLeading(botId, { viewerId });
-						yield* beforeDeleting;
-						yield* query((db) => db.delete(bot).where(named));
+						if (yield* isSystemBot(workspaceId, botId)) return yield* new SystemBotImmutable();
+						yield* query((db) =>
+							db.delete(bot).where(and(eq(bot.id, botId), eq(bot.workspaceId, workspaceId))),
+						);
 					}),
 				),
 			),
@@ -393,7 +378,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /**
  * Every Personal Assistant's handle; only its member ever talks to it, so it
@@ -428,3 +413,21 @@ function nameTaken(
 	}
 	return undefined;
 }
+
+/** Checks the lead constraint while the workspace's lock prevents a new lead assignment. */
+export const lockForRemoval = Effect.fn("BotStore.lockForRemoval")(function* (
+	workspaceId: string,
+	botId: string,
+	viewerId: string,
+) {
+	yield* Transaction;
+	const [locked] = yield* query((db) =>
+		db
+			.select({ systemBotKey: bot.systemBotKey })
+			.from(bot)
+			.where(and(eq(bot.id, botId), eq(bot.workspaceId, workspaceId)))
+			.for("update"),
+	);
+	if (locked?.systemBotKey) return yield* new SystemBotImmutable();
+	yield* refuseWhileLeading(botId, { viewerId });
+});

@@ -11,7 +11,7 @@ export const removeWrittenFile = defineOperation(
 	(principal, input) =>
 		Effect.gen(function* () {
 			const files = yield* Files.Service;
-			return yield* named(principal, input.fileId, (principal, file) =>
+			return yield* named(principal, input.fileId.toLowerCase(), (principal, file) =>
 				Effect.gen(function* () {
 					const reach = yield* proveReachesFile(principal, file);
 					const canManage = yield* proveCanManageChats(reach);

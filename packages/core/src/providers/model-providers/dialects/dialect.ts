@@ -101,6 +101,7 @@ export interface ProviderDialect {
 		endpoint: RequestEndpoint,
 		modelId: string,
 		fetch: EgressHttpClient,
+		thinkingOptions?: ProviderOptions,
 	): Exclude<LanguageModel, string>;
 	/**
 	 * For a provider that won't take the system prompt as a message: the

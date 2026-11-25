@@ -1,8 +1,9 @@
 import { createServer } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
-import { DesktopViewer } from "@sugabots/core/chats/tools/browser/viewer";
 import { answerChallenge } from "@sugabots/core/chats/tools/browser/vnc-authentication";
-import { Context, Effect, Exit, Layer, Scope } from "effect";
+import { Operations } from "@sugabots/core/operations/registry";
+import { unimplemented } from "@sugabots/core/testing";
+import { Context, Effect, Exit, Layer, Scope, Stream } from "effect";
 import {
 	HttpRouter,
 	HttpServer,
@@ -17,6 +18,7 @@ import {
 	testRoutes,
 	WEB_ORIGIN,
 } from "./app.test-support.ts";
+import { DesktopViewerTiming } from "./desktop-viewer.ts";
 
 /**
  * The desktop viewer's WebSocket, served on real ports: the API relays the
@@ -39,7 +41,9 @@ const CHALLENGE = Uint8Array.from({ length: 16 }, (_, index) => index * 7);
 
 const scope = Effect.runSync(Scope.make());
 let apiPort: number;
-/** Whether the member the next desktop is opened for loses access to it at once. */
+/** Where the stand-in desktop listens. */
+let desktopPort: number;
+/** Whether the viewer opened next ends at once, as when its member loses access to the desktop. */
 let losesAccess = false;
 
 /** Serves `routes` on an ephemeral port until the tests end, and answers the port. */
@@ -59,7 +63,7 @@ const served = <E, R>(routes: Layer.Layer<never, E, R>) =>
 	);
 
 beforeAll(async () => {
-	const desktopPort = await served(
+	desktopPort = await served(
 		Layer.effectDiscard(
 			Effect.gen(function* () {
 				const router = yield* HttpRouter.HttpRouter;
@@ -103,12 +107,15 @@ beforeAll(async () => {
 		testRoutes(
 			Layer.mergeAll(
 				identifiedBy(resolveMember),
-				Layer.succeed(DesktopViewer.Service, {
-					open: () =>
+				unimplemented(Operations.LongRunning, {
+					"computers.viewDesktop": () =>
 						Effect.succeed({
-							endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },
-							password: PASSWORD,
-							accessLost: losesAccess ? Effect.void : Effect.never,
+							stream: Stream.make({
+								endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },
+								password: PASSWORD,
+								control: true,
+							}),
+							ended: losesAccess ? Effect.void : Effect.never,
 						}),
 				}),
 			),
@@ -162,6 +169,37 @@ describe("the desktop viewer's WebSocket", () => {
 		} finally {
 			losesAccess = false;
 		}
+	});
+
+	it("closes the socket once the viewer has been open its longest", async () => {
+		const shortLived = await served(
+			testRoutes(
+				Layer.mergeAll(
+					identifiedBy(resolveMember),
+					unimplemented(Operations.LongRunning, {
+						"computers.viewDesktop": () =>
+							Effect.succeed({
+								stream: Stream.make({
+									endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },
+									password: PASSWORD,
+									control: true,
+								}),
+								ended: Effect.never,
+							}),
+					}),
+					Layer.succeed(DesktopViewerTiming, { maxAge: "200 millis" }),
+				),
+			),
+		);
+		const socket = new WebSocket(`ws://127.0.0.1:${shortLived}${PATH}`, {
+			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
+		} as unknown as string[]);
+
+		await new Promise<void>((resolve, reject) => {
+			socket.onclose = () => resolve();
+			socket.onerror = () => reject(new Error("The socket failed"));
+			setTimeout(() => reject(new Error("The socket stayed open")), 5_000);
+		});
 	});
 
 	it("refuses a page on another origin, cookie or not", async () => {

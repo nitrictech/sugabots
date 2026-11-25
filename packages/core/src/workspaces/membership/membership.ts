@@ -2,26 +2,28 @@ export * as Membership from "./membership.ts";
 
 import {
 	type AssignableWorkspaceRole,
+	type CurrentUser,
 	INVITATION_LIFETIME_DAYS,
 	type InvitationPreview,
 	type Membership,
+	type MembershipDeparture,
 	type NewWorkspace,
 	type NewWorkspaceInvitation,
+	streamEvent,
 	type Workspace,
 	type WorkspaceAccess,
 	type WorkspaceDetails,
 	type WorkspaceInvitation,
 	type WorkspaceRole,
+	workspaceStream,
 } from "@sugabots/contracts";
-import {
-	type ComputerMadeMeanwhile,
-	ComputerUnavailable,
-} from "@sugabots/contracts/errors/computers";
+import type { ComputerMadeMeanwhile } from "@sugabots/contracts/errors/computers";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import {
 	AlreadyInvited,
 	AlreadyInWorkspace,
 	EmailUnverified,
+	MembershipRemovalPending,
 	OwnerStays,
 	SlugShapedLikeUuid,
 	SlugTaken,
@@ -30,22 +32,25 @@ import {
 } from "@sugabots/contracts/errors/workspace";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { Context, DateTime, Duration, Effect, Layer } from "effect";
-import { workspacePermissions } from "../../authorization/permissions.ts";
-import type { Computers } from "../../computers/computers.ts";
+import { pauseDepartingMembersAutomations } from "../../chats/automations/store.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import {
 	afterCommit,
-	type Database,
 	query,
 	queryCatching,
 	serviceOperations,
-	type Transaction,
+	Transaction,
 	transaction,
+	writtenRow,
 } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import { bot, invitation, member, membership, workspace } from "../../database/schema.ts";
+import { Audience } from "../../database/events/audience.ts";
+import { EventOutbox } from "../../database/events/outbox.ts";
+import { invitation, member, membership, workspace } from "../../database/schema.ts";
 import { Email } from "../../email/email.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
+import type { CanCancelInvitation } from "../../proofs/can-cancel-invitation.ts";
+import type { DeletionStarted, ProjectDeletionStarted } from "../../proofs/deletion-started.ts";
 import type { HoldsInvitation } from "../../proofs/holds-invitation.ts";
 import type { IsMember } from "../../proofs/is-member.ts";
 import type {
@@ -55,6 +60,8 @@ import type {
 	CanInvite,
 	CanLeaveWorkspace,
 } from "../../proofs/membership-changes.ts";
+import type { Named } from "../../proofs/proof.ts";
+import { workspacePermissionsShown } from "../../proofs/shown-permissions.ts";
 import type { CanManageWorkspace, CanReadWorkspace } from "../../proofs/workspace-permissions.ts";
 import { MemberSignIns } from "../../providers/member-sign-ins.ts";
 import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
@@ -62,21 +69,31 @@ import { ModelProviderStore } from "../../providers/model-providers/model-provid
 import { SearchProviderStore } from "../../providers/search-providers/search-provider-store.ts";
 import { ServerSettings } from "../../server-settings/server-settings.ts";
 import { invitationPath } from "../../server-settings/web-app-paths.ts";
+import { reachChanged } from "../../streams/reach-changes.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { BotStore } from "../bots/bot-store.ts";
 import { PersonalAssistants } from "../bots/personal-assistants.ts";
-import { defaultProjectOf } from "../projects/project-reads.ts";
+import { ProjectStore } from "../projects/project-store.ts";
+import { assistantProjectFor, membershipOf } from "./member-reads.ts";
 
 /**
  * The workspaces members are in, who else is, and who is invited, for
  * operations that have proved what each call needs. Each method takes the
  * workspace and the members it acts on from its proofs.
  *
- * A change to who is in a workspace is proved under the workspace's lock, in
- * the transaction that makes it, so it takes its prover's effect (see
- * {@link UnderLock}) rather than a proof, and runs it in that transaction.
+ * A change to who is in a workspace, or who is invited, is proved under the
+ * workspace's lock (see `HoldsWorkspaceLock`): its proofs can be made only
+ * there, and it demands the transaction that holds the lock, so it commits
+ * with it. A change to who is in it records a `reach.changed` event there
+ * too, as does deleting it.
  */
 export interface Interface {
+	/**
+	 * Changes the member's own name, which makes their handle, and records
+	 * `member.changed` on the stream of each workspace they are in, whose
+	 * members all see them.
+	 */
+	readonly rename: <P>(isMember: IsMember<P>, name: string) => Effect.Effect<CurrentUser>;
 	/** The workspaces the member is in, in the order they joined them. */
 	readonly workspaces: <P>(isMember: IsMember<P>) => Effect.Effect<readonly Workspace[]>;
 	/** A workspace owned by the member, with its system bots, built-in providers and their Personal Assistant. */
@@ -94,57 +111,61 @@ export interface Interface {
 		canRead: CanReadWorkspace<P, W>,
 	) => Effect.Effect<readonly Membership[]>;
 	/** Gives the member the role their proof says. A proof of a removal is a defect here. */
-	readonly changeRole: <P, W, U, E>(
-		canChange: UnderLock<CanChangeMembership<P, W, U>, E>,
-	) => Effect.Effect<void, E>;
+	readonly changeRole: <P, W, U>(
+		canChange: CanChangeMembership<P, W, U>,
+	) => Effect.Effect<void, never, Transaction>;
 	/**
 	 * Takes the member out. Their Personal Assistant, pins and project
 	 * memberships go with them, and so does what signs in as them (see
 	 * `MemberSignIns`); nobody is removed while a model provider signs in with
 	 * their subscription. A proof of a role change is a defect here.
 	 */
-	readonly remove: <P, W, U, E>(
-		canChange: UnderLock<CanChangeMembership<P, W, U>, E>,
-	) => Effect.Effect<void, E | SubscriptionInUse | ComputerUnavailable | ComputerMadeMeanwhile>;
+	readonly beginRemoval: <P, W, U>(
+		canChange: CanChangeMembership<P, W, U>,
+	) => Effect.Effect<MembershipDeparture, SubscriptionInUse, Transaction>;
 	/**
 	 * Takes the member leaving out, as a removal does. The owner stays until
 	 * they have handed ownership over.
 	 */
-	readonly leave: <P, W, E>(
-		canLeave: UnderLock<CanLeaveWorkspace<P, W>, E>,
-	) => Effect.Effect<
-		void,
-		E | OwnerStays | SubscriptionInUse | ComputerUnavailable | ComputerMadeMeanwhile
-	>;
+	readonly beginLeaving: <P, W>(
+		canLeave: CanLeaveWorkspace<P, W>,
+	) => Effect.Effect<MembershipDeparture, OwnerStays | SubscriptionInUse, Transaction>;
+	readonly finishRemoval: <W>(
+		started: ProjectDeletionStarted<W, "membership">,
+	) => Effect.Effect<void, ComputerMadeMeanwhile, Transaction>;
 	/**
 	 * Makes the member the workspace's owner, and the owner an administrator,
 	 * together. Handing it to the owner changes nothing.
 	 */
-	readonly handOverOwnership: <P, W, U, E>(
-		canHandOver: UnderLock<CanHandOverOwnership<P, W, U>, E>,
-	) => Effect.Effect<void, E>;
+	readonly handOverOwnership: <P, W, U>(
+		canHandOver: CanHandOverOwnership<P, W, U>,
+	) => Effect.Effect<void, never, Transaction>;
 	/** The invitations still waiting to be accepted. */
 	readonly invitations: <P, W>(
 		canRead: CanReadWorkspace<P, W>,
 	) => Effect.Effect<readonly WorkspaceInvitation[]>;
 	/** Invites `invitation.email` with the role the proof allows, and emails them once that commits. */
-	readonly invite: <P, W, E>(
-		canInvite: UnderLock<CanInvite<P, W>, E>,
+	readonly invite: <P, W>(
+		canInvite: CanInvite<P, W>,
 		invitation: Omit<NewWorkspaceInvitation, "role">,
-	) => Effect.Effect<WorkspaceInvitation, E | AlreadyInWorkspace | AlreadyInvited>;
+	) => Effect.Effect<
+		WorkspaceInvitation,
+		AlreadyInWorkspace | AlreadyInvited | MembershipRemovalPending,
+		Transaction
+	>;
 	/** Cancels the invitation, still pending in the workspace with the role the proof allows. */
-	readonly cancelInvitation: <P, W, E>(
-		canInvite: UnderLock<CanInvite<P, W>, E>,
-		invitationId: string,
-	) => Effect.Effect<void, E | ResourceHidden>;
+	readonly cancelInvitation: <P, W, I>(
+		addressed: Named<I, string>,
+		canCancel: CanCancelInvitation<P, W, I>,
+	) => Effect.Effect<void, ResourceHidden, Transaction>;
 	/** The invitation as its holder sees it before accepting. */
-	readonly invitation: <P, I, E>(
-		holds: UnderLock<HoldsInvitation<P, I>, E>,
-	) => Effect.Effect<InvitationPreview, E>;
+	readonly invitation: <P, I>(
+		holds: HoldsInvitation<P, I>,
+	) => Effect.Effect<InvitationPreview, never, Transaction>;
 	/** Lets the invitation's holder in, with their Personal Assistant. */
-	readonly accept: <P, I, E>(
-		holds: UnderLock<HoldsInvitation<P, I>, E>,
-	) => Effect.Effect<{ workspaceId: string }, E>;
+	readonly accept: <P, I>(
+		holds: HoldsInvitation<P, I>,
+	) => Effect.Effect<{ workspaceId: string }, ResourceHidden, Transaction>;
 	/**
 	 * The workspace of an invitation the member can't hold: one they accepted,
 	 * while they are still in its workspace, so its link leads back in. One
@@ -155,28 +176,13 @@ export interface Interface {
 		isMember: IsMember<P>,
 		invitationId: string,
 	) => Effect.Effect<{ workspaceId: string }, ResourceHidden | EmailUnverified>;
-	/**
-	 * Deletes the workspace: its projects, bots, chats and providers go with
-	 * it, and its members lose it. What its models cost stays on the ledger.
-	 * Its computers are destroyed first, outside any transaction, so no lock
-	 * waits on a provider and each destroyed computer's record is forgotten for
-	 * good, letting a retry resume. Then it is proved again under the lock
-	 * before the delete, so an owner who hands ownership on meanwhile no longer
-	 * deletes it; the new owner keeps it, with its computers destroyed, and
-	 * projects remake theirs when next used. When a provider can't be reached,
-	 * or a computer is made meanwhile, the workspace is kept, to try again.
-	 */
-	readonly delete: <P, W, E>(
-		canDelete: UnderLock<CanDeleteWorkspace<P, W>, E>,
-	) => Effect.Effect<void, E | ComputerUnavailable | ComputerMadeMeanwhile>;
+	readonly beginDeletion: <P, W>(
+		canDelete: CanDeleteWorkspace<P, W>,
+	) => Effect.Effect<void, never, Transaction>;
+	readonly delete: <W>(
+		started: DeletionStarted<W, "workspace">,
+	) => Effect.Effect<void, ComputerMadeMeanwhile, Transaction>;
 }
-
-/**
- * A prover's effect that takes the workspace's lock, such as
- * `proveCanChangeMembership(...)`, not yet run: the change runs it in the
- * transaction it is made in, so the lock is held until that commits.
- */
-export type UnderLock<Proven, E> = Effect.Effect<Proven, E, Database | Transaction>;
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Membership") {
 	declare readonly [Tier]: "process";
@@ -194,50 +200,65 @@ export const make = Effect.gen(function* () {
 	const email = yield* Email.Service;
 	const serverSettings = yield* ServerSettings.Service;
 	const sender = yield* Email.transactionalSender;
-	const projectComputers = yield* ProjectComputers.Service;
+	const projects = yield* ProjectStore.Service;
 	const memberSignIns = yield* MemberSignIns.Service;
 	const ids = yield* Ids.Service;
+	const outbox = yield* EventOutbox.Service;
+
+	/** Records, in the transaction that changed it, that `memberId`'s place in the workspace changed. */
+	const membershipChanged = (workspaceId: string, memberId: string) =>
+		outbox.publish([reachChanged(workspaceId, { kind: "membership", memberId })]);
 	const provisioning = yield* Effect.context<Provisioning>();
 
-	/**
-	 * Removes the membership, which cascades to their Personal Assistant, pins
-	 * and project memberships, and forgets what signs in as them, unless a
-	 * model provider signs in with their subscription. That is checked first,
-	 * so a refusal leaves everything as it was. Their assistant's computer is
-	 * destroyed next: its record is the only way to find the machine, so when
-	 * the provider can't be reached, or a computer is made meanwhile, the
-	 * membership stays, to try again.
-	 */
-	const deleteMembership = (removed: { workspaceId: string; memberId: string }) =>
+	const deleteMembership = ({ workspaceId, memberId }: { workspaceId: string; memberId: string }) =>
+		query((db) =>
+			db
+				.delete(membership)
+				.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId))),
+		);
+
+	const forgetDepartingMember = (departing: { workspaceId: string; memberId: string }) =>
+		Effect.andThen(memberSignIns.forget(departing), pauseDepartingMembersAutomations(departing));
+
+	const revokeMembership = (departing: { workspaceId: string; memberId: string }) =>
 		Effect.gen(function* () {
-			yield* memberSignIns.forget(removed);
-			const [assistant] = yield* query((db) =>
-				db
-					.select({ id: bot.id })
-					.from(bot)
-					.where(
-						and(eq(bot.workspaceId, removed.workspaceId), eq(bot.assistantOf, removed.memberId)),
-					)
-					.limit(1),
-			);
-			if (assistant) {
-				const assistantProject = {
-					workspaceId: removed.workspaceId,
-					projectId: yield* defaultProjectOf(assistant.id),
-				};
-				yield* projectComputers.destroy(assistantProject).pipe(asComputerUnavailable);
-				yield* ProjectComputers.lockWithoutComputer(assistantProject);
-			}
+			const { workspaceId, memberId } = departing;
+			yield* forgetDepartingMember(departing);
 			yield* query((db) =>
 				db
-					.delete(membership)
-					.where(
-						and(
-							eq(membership.workspaceId, removed.workspaceId),
-							eq(membership.memberId, removed.memberId),
-						),
-					),
+					.update(membership)
+					.set({ leaving: true })
+					.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId))),
 			);
+			yield* membershipChanged(workspaceId, memberId);
+		});
+
+	const recordDeparture = (departing: { workspaceId: string; memberId: string }) =>
+		Effect.gen(function* () {
+			const { workspaceId, memberId } = departing;
+			// A concurrent first provision needs a foreign-key lock on this membership.
+			yield* query((db) =>
+				db
+					.select({ id: membership.id })
+					.from(membership)
+					.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId)))
+					.for("update"),
+			);
+			yield* revokeMembership(departing);
+			const assistant = yield* assistantProjectFor(workspaceId, memberId);
+			if (assistant) {
+				yield* projects.markDeleting(workspaceId, assistant.id);
+				const cleanupPending = yield* ProjectComputers.lockWithoutComputer({
+					workspaceId,
+					projectId: assistant.id,
+				}).pipe(
+					Effect.as(false),
+					Effect.catchTag("ComputerMadeMeanwhile", () => Effect.succeed(true)),
+				);
+				if (cleanupPending) return { cleanupPending };
+			}
+			yield* deleteMembership(departing);
+			return { cleanupPending: false };
 		});
 
 	const sendInvitation = (
@@ -274,6 +295,41 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
+		rename: (isMember, name) =>
+			operation(
+				"rename",
+				transaction(
+					Effect.gen(function* () {
+						const renamed = yield* query((db) =>
+							db.update(member).set({ name }).where(eq(member.id, isMember.member)).returning({
+								id: member.id,
+								email: member.email,
+								name: member.name,
+								image: member.image,
+							}),
+						).pipe(Effect.flatMap(writtenRow("member")));
+						const memberships = yield* query((db) =>
+							db
+								.select({ workspaceId: membership.workspaceId })
+								.from(membership)
+								.where(
+									and(eq(membership.memberId, isMember.member), eq(membership.leaving, false)),
+								),
+						);
+						const changed = Audience.forWorkspace(
+							streamEvent("member.changed", { memberId: renamed.id }),
+						);
+						yield* outbox.publish(
+							memberships.map(({ workspaceId }) => ({
+								stream: workspaceStream(workspaceId),
+								event: changed,
+							})),
+						);
+						return renamed;
+					}),
+				),
+			),
+
 		workspaces: (isMember) =>
 			operation(
 				"workspaces",
@@ -282,7 +338,7 @@ export const make = Effect.gen(function* () {
 						.select(workspaceColumns)
 						.from(membership)
 						.innerJoin(workspace, eq(workspace.id, membership.workspaceId))
-						.where(eq(membership.memberId, isMember.member))
+						.where(and(eq(membership.memberId, isMember.member), eq(membership.leaving, false)))
 						.orderBy(asc(membership.createdAt)),
 				).pipe(Effect.map((rows) => rows.map(workspaceView))),
 			),
@@ -325,7 +381,7 @@ export const make = Effect.gen(function* () {
 				"access",
 				Effect.succeed({
 					role: canRead.actor.workspaceRole,
-					permissions: workspacePermissions(canRead.actor),
+					permissions: workspacePermissionsShown(canRead.actor),
 				}),
 			),
 
@@ -348,83 +404,102 @@ export const make = Effect.gen(function* () {
 							})
 							.from(membership)
 							.innerJoin(member, eq(member.id, membership.memberId))
-							.where(eq(membership.workspaceId, canRead.inWorkspace.workspace.value))
+							.where(
+								and(
+									eq(membership.workspaceId, canRead.inWorkspace.workspace.value),
+									eq(membership.leaving, false),
+								),
+							)
 							.orderBy(asc(membership.createdAt)),
 					);
 					return rows.map((row) => ({ ...row, joinedAt: row.joinedAt.toISOString() }));
 				}),
 			),
 
-		changeRole: (proving) =>
+		changeRole: (canChange) =>
 			operation(
 				"changeRole",
-				transaction(
-					Effect.gen(function* () {
-						const canChange = yield* proving;
-						const { change } = canChange;
-						if (change.kind !== "role") {
-							return yield* Effect.die(new Error("A role change was given a removal's proof"));
-						}
-						// Promoting puts them in every project members made, by the
-						// `administrator_projects` trigger; demoting leaves their projects as they are.
-						yield* setRole(canChange.workspace.value, canChange.member.value, change.role);
-					}),
-				),
+				Effect.gen(function* () {
+					yield* Transaction;
+					const { change } = canChange;
+					if (change.kind !== "role") {
+						return yield* Effect.die(new Error("A role change was given a removal's proof"));
+					}
+					const workspaceId = canChange.workspace.value;
+					// Promoting puts them in every project members made, by the
+					// `administrator_projects` trigger; demoting leaves their projects as they are.
+					yield* setRole(workspaceId, canChange.member.value, change.role);
+					yield* membershipChanged(workspaceId, canChange.member.value);
+				}),
 			),
 
-		remove: (proving) =>
+		beginRemoval: (canChange) =>
 			operation(
-				"remove",
-				transaction(
-					Effect.gen(function* () {
-						const canChange = yield* proving;
-						if (canChange.change.kind !== "removal") {
-							return yield* Effect.die(new Error("A removal was given a role change's proof"));
-						}
-						yield* deleteMembership({
-							workspaceId: canChange.workspace.value,
-							memberId: canChange.member.value,
-						});
-					}),
-				),
+				"beginRemoval",
+				Effect.gen(function* () {
+					yield* Transaction;
+					if (canChange.change.kind !== "removal") {
+						return yield* Effect.die(new Error("A removal was given a role change's proof"));
+					}
+					const removed = {
+						workspaceId: canChange.workspace.value,
+						memberId: canChange.member.value,
+					};
+					return yield* recordDeparture(removed);
+				}),
 			),
 
-		leave: (proving) =>
+		beginLeaving: (canLeave) =>
 			operation(
-				"leave",
-				transaction(
-					Effect.gen(function* () {
-						const canLeave = yield* proving;
-						if (canLeave.role === "owner") return yield* new OwnerStays();
-						yield* deleteMembership({
-							workspaceId: canLeave.workspace.value,
-							memberId: canLeave.member,
-						});
-					}),
-				),
+				"beginLeaving",
+				Effect.gen(function* () {
+					yield* Transaction;
+					if (canLeave.role === "owner") return yield* new OwnerStays();
+					const leaving = { workspaceId: canLeave.workspace.value, memberId: canLeave.member };
+					return yield* recordDeparture(leaving);
+				}),
 			),
 
-		handOverOwnership: (proving) =>
+		finishRemoval: ({ workspaceId, projectId, targetId: memberId }) =>
+			operation(
+				"finishRemoval",
+				Effect.gen(function* () {
+					yield* Transaction;
+					yield* ProjectComputers.lockWithoutComputer({ workspaceId, projectId });
+					// A backfilled departure may still have sign-ins and automations to clear.
+					yield* forgetDepartingMember({ workspaceId, memberId }).pipe(Effect.orDie);
+					yield* deleteMembership({ workspaceId, memberId });
+					yield* membershipChanged(workspaceId, memberId);
+				}),
+			),
+
+		handOverOwnership: (canHandOver) =>
 			operation(
 				"handOverOwnership",
-				transaction(
-					Effect.gen(function* () {
-						const canHandOver = yield* proving;
-						if (canHandOver.currentRole === "owner") return;
-						const workspaceId = canHandOver.workspace.value;
-						// The owner steps down first: `membership_owner_idx` allows
-						// one owner, and would refuse the new one while the old one stands.
-						// The new owner joins every project members made by the
-						// `administrator_projects` trigger, as an admin would.
-						yield* query((db) =>
-							db
-								.update(membership)
-								.set({ role: "admin" })
-								.where(and(eq(membership.workspaceId, workspaceId), eq(membership.role, "owner"))),
-						);
-						yield* setRole(workspaceId, canHandOver.member.value, "owner");
-					}),
-				),
+				Effect.gen(function* () {
+					yield* Transaction;
+					if (canHandOver.currentRole === "owner") return;
+					const workspaceId = canHandOver.workspace.value;
+					const [owner] = yield* query((db) =>
+						db
+							.select({ memberId: membership.memberId })
+							.from(membership)
+							.where(and(eq(membership.workspaceId, workspaceId), eq(membership.role, "owner"))),
+					);
+					// The owner steps down first: `membership_owner_idx` allows
+					// one owner, and would refuse the new one while the old one stands.
+					// The new owner joins every project members made by the
+					// `administrator_projects` trigger, as an admin would.
+					yield* query((db) =>
+						db
+							.update(membership)
+							.set({ role: "admin" })
+							.where(and(eq(membership.workspaceId, workspaceId), eq(membership.role, "owner"))),
+					);
+					yield* setRole(workspaceId, canHandOver.member.value, "owner");
+					if (owner) yield* membershipChanged(workspaceId, owner.memberId);
+					yield* membershipChanged(workspaceId, canHandOver.member.value);
+				}),
 			),
 
 		invitations: (canRead) =>
@@ -452,139 +527,146 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		invite: (proving, invited) =>
+		invite: (canInvite, invited) =>
 			operation(
 				"invite",
-				transaction(
-					Effect.gen(function* () {
-						const canInvite = yield* proving;
-						const workspaceId = canInvite.workspace.value;
-						const { role, inviter: inviterId } = canInvite;
-						const address = invited.email.toLowerCase();
-						const [existing] = yield* query((db) =>
-							db
-								.select({ id: membership.id })
-								.from(membership)
-								.innerJoin(member, eq(member.id, membership.memberId))
-								.where(
-									and(
-										eq(membership.workspaceId, workspaceId),
-										eq(sql`lower(${member.email})`, address),
-									),
+				Effect.gen(function* () {
+					yield* Transaction;
+					const workspaceId = canInvite.workspace.value;
+					const { role, inviter: inviterId } = canInvite;
+					const address = invited.email.toLowerCase();
+					const [existing] = yield* query((db) =>
+						db
+							.select({ leaving: membership.leaving })
+							.from(membership)
+							.innerJoin(member, eq(member.id, membership.memberId))
+							.where(
+								and(
+									eq(membership.workspaceId, workspaceId),
+									eq(sql`lower(${member.email})`, address),
 								),
-						);
-						if (existing) return yield* new AlreadyInWorkspace();
+							),
+					);
+					if (existing?.leaving) return yield* new MembershipRemovalPending();
+					if (existing) return yield* new AlreadyInWorkspace();
 
-						const now = yield* DateTime.now;
-						const expiresAt = DateTime.toDate(
-							DateTime.add(now, { milliseconds: Duration.toMillis(INVITATION_LIFETIME) }),
-						);
-						const [outstanding] = yield* query((db) =>
-							db
-								.select({ id: invitation.id })
-								.from(invitation)
-								.where(
-									and(
-										eq(invitation.workspaceId, workspaceId),
-										eq(invitation.email, address),
-										eq(invitation.status, "pending"),
-										gt(invitation.expiresAt, DateTime.toDate(now)),
-									),
+					const now = yield* DateTime.now;
+					const expiresAt = DateTime.toDate(
+						DateTime.add(now, { milliseconds: Duration.toMillis(INVITATION_LIFETIME) }),
+					);
+					const [outstanding] = yield* query((db) =>
+						db
+							.select({ id: invitation.id })
+							.from(invitation)
+							.where(
+								and(
+									eq(invitation.workspaceId, workspaceId),
+									eq(invitation.email, address),
+									eq(invitation.status, "pending"),
+									gt(invitation.expiresAt, DateTime.toDate(now)),
 								),
-						);
-						if (outstanding && !invited.resend) return yield* new AlreadyInvited();
+							),
+					);
+					if (outstanding && !invited.resend) return yield* new AlreadyInvited();
 
-						const [row] = outstanding
-							? yield* query((db) =>
-									db
-										.update(invitation)
-										.set({ role, expiresAt, inviterId })
-										.where(eq(invitation.id, outstanding.id))
-										.returning(),
-								)
-							: yield* Effect.flatMap(
-									// The id is the invitation link, so random v4 rather than the
-									// partly guessable time-ordered v7 default.
-									ids.random,
-									(id) =>
-										query((db) =>
-											db
-												.insert(invitation)
-												.values({ id, workspaceId, email: address, role, inviterId, expiresAt })
-												.returning(),
-										),
-								);
-						if (!row) return yield* Effect.die(new Error("The invitation was not saved"));
-						yield* sendInvitation(row.id, address, workspaceId, inviterId);
-						return invitationView(row);
-					}),
-				),
+					const [row] = outstanding
+						? yield* query((db) =>
+								db
+									.update(invitation)
+									.set({ role, expiresAt, inviterId })
+									.where(eq(invitation.id, outstanding.id))
+									.returning(),
+							)
+						: yield* Effect.flatMap(
+								// The id is the invitation link, so random v4 rather than the
+								// partly guessable time-ordered v7 default.
+								ids.random,
+								(id) =>
+									query((db) =>
+										db
+											.insert(invitation)
+											.values({ id, workspaceId, email: address, role, inviterId, expiresAt })
+											.returning(),
+									),
+							);
+					if (!row) return yield* Effect.die(new Error("The invitation was not saved"));
+					yield* sendInvitation(row.id, address, workspaceId, inviterId);
+					return invitationView(row);
+				}),
 			),
 
-		cancelInvitation: (proving, invitationId) =>
+		cancelInvitation: (addressed, canCancel) =>
 			operation(
 				"cancelInvitation",
-				transaction(
-					Effect.gen(function* () {
-						const canInvite = yield* proving;
-						const [canceled] = yield* query((db) =>
-							db
-								.update(invitation)
-								.set({ status: "canceled" })
-								.where(
-									and(
-										eq(invitation.id, invitationId),
-										eq(invitation.workspaceId, canInvite.workspace.value),
-										eq(invitation.status, "pending"),
-										// Sent again with another role since it was read, it needs proving again.
-										eq(invitation.role, canInvite.role),
-									),
-								)
-								.returning({ id: invitation.id }),
-						);
-						if (!canceled) return yield* new ResourceHidden({ resource: "invitation" });
-					}),
-				),
+				Effect.gen(function* () {
+					yield* Transaction;
+					const [canceled] = yield* query((db) =>
+						db
+							.update(invitation)
+							.set({ status: "canceled" })
+							.where(
+								and(
+									eq(invitation.id, addressed.value),
+									eq(invitation.workspaceId, canCancel.workspace.value),
+									eq(invitation.status, "pending"),
+									// Sent again with another role since it was read, it needs proving again.
+									eq(invitation.role, canCancel.role),
+								),
+							)
+							.returning({ id: invitation.id }),
+					);
+					if (!canceled) return yield* new ResourceHidden({ resource: "invitation" });
+				}),
 			),
 
-		invitation: (proving) =>
+		invitation: (holds) =>
 			operation(
 				"invitation",
-				transaction(
-					Effect.gen(function* () {
-						const holds = yield* proving;
-						const [found] = yield* query((db) =>
-							db
-								.select({ workspaceName: workspace.name, inviterName: member.name })
-								.from(invitation)
-								.innerJoin(workspace, eq(workspace.id, invitation.workspaceId))
-								.innerJoin(member, eq(member.id, invitation.inviterId))
-								.where(eq(invitation.id, holds.invitation.value)),
-						);
-						if (!found) return yield* Effect.die(new Error("The invitation held is missing"));
-						return { status: "pending" as const, ...found, role: holds.role };
-					}),
-				),
+				Effect.gen(function* () {
+					yield* Transaction;
+					const [found] = yield* query((db) =>
+						db
+							.select({ workspaceName: workspace.name, inviterName: member.name })
+							.from(invitation)
+							.innerJoin(workspace, eq(workspace.id, invitation.workspaceId))
+							.innerJoin(member, eq(member.id, invitation.inviterId))
+							.where(eq(invitation.id, holds.invitation.value)),
+					);
+					if (!found) return yield* Effect.die(new Error("The invitation held is missing"));
+					return { status: "pending" as const, ...found, role: holds.role };
+				}),
 			),
 
-		accept: (proving) =>
+		accept: (holds) =>
 			operation(
 				"accept",
-				transaction(
-					Effect.gen(function* () {
-						const holds = yield* proving;
-						yield* query((db) =>
-							db
-								.update(invitation)
-								.set({ status: "accepted" })
-								.where(eq(invitation.id, holds.invitation.value)),
-						);
-						yield* join(holds.workspace, holds.member, holds.role).pipe(
-							Effect.provideContext(provisioning),
-						);
-						return { workspaceId: holds.workspace };
-					}),
-				),
+				Effect.gen(function* () {
+					yield* Transaction;
+					const [leaving] = yield* query((db) =>
+						db
+							.select({ id: membership.id })
+							.from(membership)
+							.where(
+								and(
+									eq(membership.workspaceId, holds.workspace),
+									eq(membership.memberId, holds.member),
+									eq(membership.leaving, true),
+								),
+							),
+					);
+					if (leaving) return yield* new ResourceHidden({ resource: "invitation" });
+					yield* query((db) =>
+						db
+							.update(invitation)
+							.set({ status: "accepted" })
+							.where(eq(invitation.id, holds.invitation.value)),
+					);
+					yield* join(holds.workspace, holds.member, holds.role).pipe(
+						Effect.provideContext(provisioning),
+					);
+					yield* membershipChanged(holds.workspace, holds.member);
+					return { workspaceId: holds.workspace };
+				}),
 			),
 
 		alreadyAccepted: (isMember, invitationId) =>
@@ -605,13 +687,7 @@ export const make = Effect.gen(function* () {
 							})
 							.from(invitation)
 							.innerJoin(member, eq(member.id, isMember.member))
-							.leftJoin(
-								membership,
-								and(
-									eq(membership.workspaceId, invitation.workspaceId),
-									eq(membership.memberId, member.id),
-								),
-							)
+							.leftJoin(membership, membershipOf(invitation.workspaceId, member.id))
 							.where(
 								and(
 									eq(invitation.id, invitationId),
@@ -630,21 +706,32 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		delete: (proving) =>
+		beginDeletion: (canDelete) =>
+			operation(
+				"beginDeletion",
+				Effect.gen(function* () {
+					yield* Transaction;
+					const workspaceId = canDelete.workspace.value;
+					const [started] = yield* query((db) =>
+						db
+							.update(workspace)
+							.set({ deleting: true })
+							.where(and(eq(workspace.id, workspaceId), eq(workspace.deleting, false)))
+							.returning({ id: workspace.id }),
+					);
+					if (started) yield* outbox.publish([reachChanged(workspaceId, { kind: "workspace" })]);
+				}),
+			),
+
+		delete: ({ workspaceId }) =>
 			operation(
 				"delete",
 				Effect.gen(function* () {
-					const { workspace: workspaceId } = yield* transaction(proving);
-					yield* projectComputers.destroyAllIn(workspaceId.value).pipe(asComputerUnavailable);
-					yield* transaction(
-						Effect.gen(function* () {
-							const canDelete = yield* proving;
-							yield* ProjectComputers.lockWorkspaceWithoutComputers(canDelete.workspace.value);
-							yield* query((db) =>
-								db.delete(workspace).where(eq(workspace.id, canDelete.workspace.value)),
-							);
-						}),
-					);
+					yield* Transaction;
+					yield* ProjectComputers.lockWorkspaceWithoutComputers(workspaceId);
+					yield* query((db) => db.delete(workspace).where(eq(workspace.id, workspaceId)));
+					// Every stream in it proves again, and finds it gone.
+					yield* outbox.publish([reachChanged(workspaceId, { kind: "workspace" })]);
 				}),
 			),
 	});
@@ -658,7 +745,7 @@ export const layer = layerNoDeps.pipe(
 		BotStore.layer,
 		SearchProviderStore.layer,
 		ModelProviderStore.layer,
-		ProjectComputers.layer,
+		ProjectStore.layer,
 		MemberSignIns.layer,
 	]),
 );
@@ -733,23 +820,6 @@ function setRole(workspaceId: string, memberId: string, role: WorkspaceRole) {
 			.update(membership)
 			.set({ role })
 			.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId))),
-	);
-}
-
-/** A computer provider core couldn't reach, as the operations' error says it. */
-function asComputerUnavailable<A, R>(
-	effect: Effect.Effect<A, Computers.Unavailable, R>,
-): Effect.Effect<A, ComputerUnavailable, R> {
-	return effect.pipe(
-		Effect.catchTag("ComputerUnavailable", (failure) =>
-			Effect.fail(
-				new ComputerUnavailable({
-					provider: failure.provider,
-					reason: failure.reason,
-					cause: failure.cause,
-				}),
-			),
-		),
 	);
 }
 

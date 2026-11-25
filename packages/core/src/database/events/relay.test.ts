@@ -104,7 +104,13 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 
 		await writer.publish(
 			stream,
-			streamEvent("message.delta", { chatId: "t", messageId: "m", offset: 0, text: "hi" }),
+			streamEvent("message.delta", {
+				chatId: "t",
+				messageId: "m",
+				offset: 0,
+				text: "hi",
+				execution: 1,
+			}),
 		);
 		const large = streamEvent("message.completed", {
 			chatId: "t",

@@ -2,6 +2,7 @@ import { createRoute, Outlet } from "@tanstack/react-router";
 import { ApprovalPage } from "@/screens/ApprovalPage.tsx";
 import { Approvals } from "@/shell/Approvals.tsx";
 import { Panes } from "@/shell/Shell.tsx";
+import { decodeRouteId } from "./search.ts";
 import { shellRoute } from "./workspace.tsx";
 
 /** Every approval across the workspace, and each one in full on its own page. */
@@ -24,5 +25,6 @@ export const approvalsIndexRoute = createRoute({
 export const approvalRoute = createRoute({
 	getParentRoute: () => approvalsRoute,
 	path: "/$call",
+	params: { parse: ({ call }) => ({ call: decodeRouteId(call) }) },
 	component: () => <ApprovalPage callId={approvalRoute.useParams().call} />,
 });

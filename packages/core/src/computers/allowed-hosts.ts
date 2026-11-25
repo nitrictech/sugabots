@@ -76,7 +76,7 @@ export const blockedHostsOf = (workspaceId: string) =>
  * Every host the project's computer may reach: {@link TRUSTED_HOSTS}, the
  * workspace's hosts and the project's own, less what the workspace blocked.
  */
-const allowedHostsOf = (project: { workspaceId: string; projectId: string }) =>
+export const allowedHostsOf = (project: { workspaceId: string; projectId: string }) =>
 	Effect.map(
 		Effect.all([
 			addedHostsOf(project.workspaceId),

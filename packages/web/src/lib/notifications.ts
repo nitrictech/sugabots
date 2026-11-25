@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { MUTE_LENGTHS, type MuteLength } from "@/lib/notification-choices.ts";
+import { refreshEveryWorkspaceApprovals } from "./chats.ts";
 
 /*
  * Browser notifications, shown by Sugabots' open tabs as Slack's web app
@@ -213,9 +214,9 @@ function writeTurnedOn(on: boolean) {
  */
 export function useNotificationsInThisBrowser() {
 	const router = useRouter();
+	const queries = useQueryClient();
 
 	useEffect(() => {
-		if (!("Notification" in window)) return;
 		const stream = client.events.me();
 		const looking: LookingTabs = new Map();
 		void (async () => {
@@ -223,13 +224,16 @@ export function useNotificationsInThisBrowser() {
 				const parsed = Schema.decodeUnknownResult(memberUpdateEventSchema)(event);
 				if (parsed._tag === "Failure") continue;
 				const update = parsed.success;
-				if (update.type === "presence") {
+				if (update.type === "approvals.changed") {
+					void refreshEveryWorkspaceApprovals(queries);
+				} else if (update.type === "presence") {
 					rememberLooking(looking, update, Date.now());
 					// Every tab showed it, so each closes its own.
 					if (update.chatId) closeNotificationsAbout(update.chatId);
 				} else if (
 					update.type === "notification" &&
-					update.chatId !== lookingHere &&
+					"Notification" in window &&
+					(update.chatId === null || update.chatId !== lookingHere) &&
 					!someTabLooksAt(looking, update, Date.now())
 				) {
 					showFromThisTab(update, (path) => router.history.push(path));
@@ -238,7 +242,7 @@ export function useNotificationsInThisBrowser() {
 			// A stream that ends or fails only costs the notifications it would have carried.
 		})().catch(() => {});
 		return () => stream.close();
-	}, [router]);
+	}, [queries, router]);
 }
 
 /**
@@ -256,7 +260,9 @@ function rememberLooking(tabs: LookingTabs, { clientId, chatId, sequence }: Pres
 
 /** Whether one of the member's tabs is looking at what `notification` is about. */
 function someTabLooksAt(tabs: LookingTabs, { chatId }: NotificationContent, now: number): boolean {
-	return [...tabs.values()].some((tab) => tab.chatId === chatId && tab.until > now);
+	return (
+		chatId !== null && [...tabs.values()].some((tab) => tab.chatId === chatId && tab.until > now)
+	);
 }
 
 /**

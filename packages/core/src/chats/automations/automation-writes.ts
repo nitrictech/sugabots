@@ -1,11 +1,3 @@
-/**
- * Writing a project's automations, their triggers and webhook secrets, and
- * accepting a manual run: what `Automations` (the tools' legacy slice) and
- * `ProjectAutomations` (the operations') both do once each has decided who
- * may. Every write here takes the automation's workspace and project from
- * its caller, which found them by checking access.
- */
-
 import type {
 	AcceptedRun,
 	Automation,
@@ -30,6 +22,7 @@ import {
 	AutomationTriggerNotFound,
 	AutomationTriggerRejected,
 	TooManyAutomationTriggers,
+	TriggerSetInSettings,
 	WebhookDeliveryIdHeaderRejected,
 	WebhookSecretTooShort,
 } from "@sugabots/contracts/errors/automations";
@@ -39,13 +32,14 @@ import { type Database, query, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { automation, automationTrigger, connector } from "../../database/schema.ts";
 import { Secrets } from "../../secrets/secrets.ts";
-import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
+import { makeAcceptTrigger } from "./acceptance.ts";
 import {
 	automationWithTriggers,
 	inScope,
+	lockTriggers,
 	type RoutineInput,
 	type Scope,
-	TriggerSetInSettings,
+	stateWithPendingPause,
 	toAutomation,
 	triggersOf,
 } from "./automation.ts";
@@ -60,7 +54,7 @@ export interface Defined {
 }
 
 /** Who an automation is recorded as made by: a member, and the bot that made it for them, if one did. */
-export interface Maker {
+interface Maker {
 	readonly createdById: string;
 	readonly createdByBotId: string | null;
 }
@@ -192,8 +186,45 @@ export const makeAutomationWrites = Effect.gen(function* () {
 	const changeSettings = (scope: Scope, current: schema.AutomationRow, input: AutomationUpdate) =>
 		Effect.gen(function* () {
 			const row = yield* writeSettings(scope, current, input);
-			if (row.state !== current.state) yield* reschedule(scope.automationId, row.state);
+			if (
+				input.state &&
+				(row.state !== current.state || current.pauseAfterFailuresPendingAt !== null)
+			) {
+				yield* reschedule(scope.automationId, row.state);
+			}
 			return row;
+		});
+
+	const insertAutomation = (
+		project: { id: string; workspaceId: string },
+		maker: Maker,
+		input: Pick<NewAutomation, "name" | "instructions">,
+		state: AutomationState,
+		written: Written[],
+	) =>
+		Effect.gen(function* () {
+			const row = yield* store.create({
+				workspaceId: project.workspaceId,
+				projectId: project.id,
+				createdById: maker.createdById,
+				createdByBotId: maker.createdByBotId,
+				name: input.name,
+				instructions: input.instructions,
+				state,
+			});
+			const scope = {
+				workspaceId: project.workspaceId,
+				projectId: project.id,
+				automationId: row.id,
+			};
+			const triggers = yield* store.addTriggers(
+				scope,
+				written.map(({ values }) => values),
+			);
+			return {
+				automation: toAutomation(row, triggers),
+				secrets: secretsMade(triggers, written),
+			} satisfies Defined;
 		});
 
 	return {
@@ -201,35 +232,38 @@ export const makeAutomationWrites = Effect.gen(function* () {
 		 * Defines an automation in `project`, made by `maker`, returning the
 		 * secrets made for its webhook triggers.
 		 */
-		create: (project: { id: string; workspaceId: string }, maker: Maker, input: NewAutomation) =>
+		create: <E>(
+			project: { id: string; workspaceId: string },
+			maker: Maker,
+			input: NewAutomation,
+			guard: Effect.Effect<void, E, Database>,
+		) =>
 			transaction(
 				Effect.gen(function* () {
+					yield* guard;
 					const state = input.state ?? "enabled";
 					const written = yield* Effect.forEach(input.triggers, (trigger) =>
 						triggerValues(project, trigger, undefined, state),
 					);
-					const row = yield* store.create({
-						workspaceId: project.workspaceId,
-						projectId: project.id,
-						createdById: maker.createdById,
-						createdByBotId: maker.createdByBotId,
-						name: input.name,
-						instructions: input.instructions,
-						state,
-					});
-					const scope = {
-						workspaceId: project.workspaceId,
-						projectId: project.id,
-						automationId: row.id,
-					};
-					const triggers = yield* store.addTriggers(
-						scope,
-						written.map(({ values }) => values),
-					);
-					return {
-						automation: toAutomation(row, triggers),
-						secrets: secretsMade(triggers, written),
-					} satisfies Defined;
+					return yield* insertAutomation(project, maker, input, state, written);
+				}),
+			),
+
+		createWithRoutine: <E>(
+			project: { id: string; workspaceId: string },
+			maker: Maker,
+			input: Pick<NewAutomation, "name" | "instructions">,
+			routine: RoutineInput,
+			guard: Effect.Effect<void, E, Database>,
+		) =>
+			transaction(
+				Effect.gen(function* () {
+					yield* guard;
+					const written = yield* routineValues(routine, "enabled");
+					const { automation } = yield* insertAutomation(project, maker, input, "enabled", [
+						written,
+					]);
+					return automation;
 				}),
 			),
 
@@ -237,9 +271,10 @@ export const makeAutomationWrites = Effect.gen(function* () {
 		 * Changes an automation's own settings. Pausing it stops its routines;
 		 * enabling it again sets when each runs next from now.
 		 */
-		update: (scope: Scope, input: AutomationUpdate) =>
+		update: <E>(scope: Scope, input: AutomationUpdate, guard: Effect.Effect<void, E, Database>) =>
 			transaction(
 				Effect.gen(function* () {
+					yield* guard;
 					yield* lockTriggers(scope.automationId);
 					const current = yield* automationIn(scope);
 					const row = yield* changeSettings(scope, current, input);
@@ -253,9 +288,15 @@ export const makeAutomationWrites = Effect.gen(function* () {
 		 * or adds it when nothing starts the automation yet. Refused, changing
 		 * nothing, when it has another routine or a trigger.
 		 */
-		updateWithSoleRoutine: (scope: Scope, input: AutomationUpdate, routine: RoutineInput) =>
+		updateWithSoleRoutine: <E>(
+			scope: Scope,
+			input: AutomationUpdate,
+			routine: RoutineInput,
+			guard: Effect.Effect<void, E, Database>,
+		) =>
 			transaction(
 				Effect.gen(function* () {
+					yield* guard;
 					// Held across the check and both writes, so a trigger added meanwhile
 					// waits, and a refused routine leaves the settings as they were.
 					yield* lockTriggers(scope.automationId);
@@ -266,7 +307,10 @@ export const makeAutomationWrites = Effect.gen(function* () {
 						return yield* new TriggerSetInSettings();
 					}
 					// Written as the settings leave it, running or paused.
-					const written = yield* routineValues(routine, input.state ?? current.state);
+					const written = yield* routineValues(
+						routine,
+						input.state ?? stateWithPendingPause(current),
+					);
 					if (only) yield* store.updateTrigger(scope, only.id, written.values);
 					else yield* store.addTriggers(scope, [written.values]);
 					// The sole routine was just written for the state the settings leave.
@@ -289,7 +333,7 @@ export const makeAutomationWrites = Effect.gen(function* () {
 						{ id: scope.projectId, workspaceId: scope.workspaceId },
 						input,
 						undefined,
-						current.state,
+						stateWithPendingPause(current),
 					);
 					const added = yield* store.addTriggers(scope, [written.values]);
 					return {
@@ -316,7 +360,7 @@ export const makeAutomationWrites = Effect.gen(function* () {
 						{ id: scope.projectId, workspaceId: scope.workspaceId },
 						input,
 						trigger,
-						current.state,
+						stateWithPendingPause(current),
 					);
 					const updated = yield* store.updateTrigger(scope, triggerId, written.values);
 					if (!updated) return yield* new AutomationTriggerNotFound();

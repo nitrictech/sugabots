@@ -28,9 +28,17 @@ import {
 import { Config, Context, Data, Duration, Effect, Layer, Option, Schema, Stream } from "effect";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { type AttachedFileRow, loadFileParts } from "../chats/store/file-parts.ts";
-import { afterCommit, query, serviceOperations, transaction } from "../database/database.ts";
-import { file, message, WRITTEN_FILE_KINDS } from "../database/schema.ts";
+import {
+	afterCommit,
+	type Database,
+	query,
+	serviceOperations,
+	type Transaction,
+	transaction,
+} from "../database/database.ts";
+import { file, message, unsentAttachment, WRITTEN_FILE_KINDS } from "../database/schema.ts";
 import { Ids, isUuid } from "../ids/ids.ts";
+import { processLayer, Tier } from "../tiers.ts";
 import type { UserFacing } from "../user-message.ts";
 
 /**
@@ -51,12 +59,18 @@ export interface Interface {
 	 * it is over `CHAT_FILE_MAX_BYTES` or what the blob store keeps, and with
 	 * whatever `content.stream` fails with.
 	 */
-	readonly write: <E>(file: {
+	readonly write: <E, G = never>(file: {
 		chatId: string;
 		/** The call whose result `content` is. */
 		toolCallId: string;
 		content: BlobStore.Content<E>;
-	}) => Effect.Effect<FileDescription, E | FileTooLarge | BlobStore.Failure>;
+		/**
+		 * What must hold for the file to be kept, checked in the transaction
+		 * that keeps it: when it fails, nothing is kept and the failure is
+		 * this write's.
+		 */
+		guard?: Effect.Effect<void, G, Database | Transaction>;
+	}) => Effect.Effect<FileDescription, E | G | FileTooLarge | BlobStore.Failure>;
 	/**
 	 * Keeps `content` as a file `uploaderId` uploaded to the chat, unsent
 	 * until it is attached to a message. Fails as `write` does, with
@@ -159,9 +173,9 @@ export interface Interface {
 	readonly removeUnsentAttachments: (unsentFor: Duration.Duration) => Effect.Effect<number>;
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-	"@sugabots/core/ChatFileStore",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ChatFileStore") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ChatFileStore");
@@ -199,17 +213,21 @@ export const make = Effect.gen(function* () {
 		});
 
 	/** Keeps `content` as a new file in the chat, its row saying where it came from. */
-	const keep = <E>(
+	const keep = <E, G = never>(
 		chatId: string,
 		content: BlobStore.Content<E>,
 		source: FileSource,
 		maxSize = Number.POSITIVE_INFINITY,
+		guard: Effect.Effect<void, G, Database | Transaction> = Effect.void,
 	) =>
 		Effect.gen(function* () {
 			const kept = yield* putBlob(chatId, content, maxSize);
-			yield* query((db) => db.insert(file).values({ ...kept, chatId, ...source })).pipe(
-				Effect.onError(() => removeBlob(chatId, kept.id)),
-			);
+			yield* transaction(
+				Effect.andThen(
+					guard,
+					query((db) => db.insert(file).values({ ...kept, chatId, ...source })),
+				),
+			).pipe(Effect.onError(() => removeBlob(chatId, kept.id)));
 			return kept;
 		});
 
@@ -247,8 +265,11 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		write: ({ chatId, toolCallId, content }) =>
-			operation("write", keep(chatId, content, { kind: "tool_result", toolCallId })),
+		write: ({ chatId, toolCallId, content, guard }) =>
+			operation(
+				"write",
+				keep(chatId, content, { kind: "tool_result", toolCallId }, undefined, guard),
+			),
 		upload: ({ chatId, uploaderId, name, maxSize, maxUnsent, content }) =>
 			operation(
 				"upload",
@@ -452,7 +473,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /**
  * The largest file kept, from `CHAT_FILE_MAX_BYTES`, below what the blob
@@ -463,7 +484,7 @@ const maxFileBytesConfig = Config.schema(
 	"CHAT_FILE_MAX_BYTES",
 );
 
-interface FileDescription {
+export interface FileDescription {
 	id: string;
 	contentType: string;
 	/** In bytes. */
@@ -500,9 +521,6 @@ export interface UnsentAttachment extends FileDescription {
  * bot wrote, whose versions `files.ts` keeps.
  */
 const keptInChat = notInArray(file.kind, [...WRITTEN_FILE_KINDS]);
-
-/** An attachment whose message is not sent yet, which only its uploader knows of. */
-const unsentAttachment = sql`(${file.kind} = 'attachment' and ${file.messageId} is null)`;
 
 /** Which kind of file a row is, with the columns that kind sets. */
 type FileSource =

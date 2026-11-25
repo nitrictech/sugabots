@@ -50,15 +50,27 @@ export function freeDiskSpace(
 	workspaceId: string,
 	belowShare: number,
 ): Effect.Effect<Clearing, Computers.Unavailable, Database> {
+	return prepareDiskClearing(computer, workspaceId, belowShare).pipe(Effect.flatten);
+}
+
+/** prepareDiskClearing finds what can be deleted and returns the separate deletion effect. */
+export function prepareDiskClearing(
+	computer: Computers.Computer,
+	workspaceId: string,
+	belowShare: number,
+) {
 	return Effect.gen(function* () {
 		const clearable = yield* clearingOrder(workspaceId, yield* workFoldersIn(computer));
 		const order = clearable.slice(0, MAX_FOLDERS_CLEARED_AT_ONCE);
-		const clearing = yield* computer.exec(clearingScript(order, belowShare), CLEARING_OPTIONS);
-		const cleared = new Set(clearing.stdout.text.split("\n"));
-		return {
-			cleared: order.filter((folder) => cleared.has(pathOf(folder))),
-			stoppedAtTimeout: clearing.exitCode === null,
-		};
+		return computer.exec(clearingScript(order, belowShare), CLEARING_OPTIONS).pipe(
+			Effect.map((clearing): Clearing => {
+				const cleared = new Set(clearing.stdout.text.split("\n"));
+				return {
+					cleared: order.filter((folder) => cleared.has(pathOf(folder))),
+					stoppedAtTimeout: clearing.exitCode === null,
+				};
+			}),
+		);
 	});
 }
 

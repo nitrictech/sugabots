@@ -80,17 +80,24 @@ function createEventStream(context: StreamContext): EventStream {
 
 	async function* iterate(): AsyncGenerator<StreamEvent> {
 		let attempt = 0;
+		let connected = false;
 		let lastEventId: string | undefined;
 
 		while (!signal.aborted) {
 			try {
-				const connection = await connect(context, lastEventId, signal);
-				for await (const message of connection) {
+				const body = await connect(context, lastEventId, signal);
+				const reset = connected && lastEventId === undefined;
+				connected = true;
+				for await (const message of readMessages(body, reset)) {
+					if (message === undefined) {
+						yield resetEvent();
+						continue;
+					}
 					attempt = 0;
 
 					const event = Schema.decodeUnknownResult(streamEventSchema)(parseJson(message.data));
 					if (event._tag === "Success") {
-						if (message.id !== undefined) {
+						if (message.id !== undefined || event.success.type === "reset") {
 							lastEventId = message.id;
 						}
 						yield event.success;
@@ -153,7 +160,7 @@ async function connect(
 	{ url, fetch }: StreamContext,
 	lastEventId: string | undefined,
 	signal: AbortSignal,
-): Promise<AsyncGenerator<Message>> {
+): Promise<ReadableStream<Uint8Array>> {
 	const response = await fetch(url, {
 		signal,
 		credentials: "include",
@@ -177,10 +184,13 @@ async function connect(
 		throw malformed(userText`The event stream returned no body`, response.status);
 	}
 
-	return readMessages(response.body);
+	return response.body;
 }
 
-async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<Message> {
+async function* readMessages(
+	body: ReadableStream<Uint8Array>,
+	reset: boolean,
+): AsyncGenerator<Message | undefined> {
 	// A manual reader rather than `for await` over the body: async iteration of
 	// a ReadableStream is not available in every browser this has to run in.
 	const reader = body.getReader();
@@ -193,6 +203,7 @@ async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<M
 	});
 
 	try {
+		if (reset) yield undefined;
 		while (true) {
 			const { done, value } = await reader.read();
 			if (done) {

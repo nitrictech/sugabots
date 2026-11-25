@@ -108,6 +108,9 @@ export const file = pgTable(
 	],
 );
 
+/** An attachment whose message is not sent yet, which only its uploader knows of. */
+export const unsentAttachment = sql`(${file.kind} = 'attachment' and ${file.messageId} is null)`;
+
 export type FileRow = typeof file.$inferSelect;
 
 /**

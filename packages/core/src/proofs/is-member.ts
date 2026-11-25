@@ -10,6 +10,7 @@ import { defineProof, type Named, type Proof } from "./proof.ts";
 export interface IsMember<P> extends Proof<"IsMember", [P]> {
 	readonly principal: Named<P, Principal>;
 	readonly member: string;
+	readonly session: string;
 }
 
 const IsMemberProof = defineProof("IsMember");
@@ -21,6 +22,10 @@ export const proveIsMember = <P>(
 	if (acting._tag !== "MemberSession") {
 		return Effect.fail(new ActionForbidden({ proof: "IsMember" }));
 	}
-	const proof: IsMember<P> = IsMemberProof.prove([principal], { principal, member: acting.member });
+	const proof: IsMember<P> = IsMemberProof.prove([principal], {
+		principal,
+		member: acting.member,
+		session: acting.session,
+	});
 	return Effect.succeed(proof);
 };

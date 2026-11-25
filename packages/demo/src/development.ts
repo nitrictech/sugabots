@@ -1,6 +1,7 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { ComputerSignIn } from "@sugabots/core/computers/computer-sign-in";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
+import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { bot as botTable, workspace } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
@@ -9,6 +10,7 @@ import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderStore } from "@sugabots/core/providers/search-providers/search-provider-store";
 import { Secrets } from "@sugabots/core/secrets/secrets";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { processLayer } from "@sugabots/core/tiers";
 import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
 import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
@@ -142,7 +144,11 @@ seed.pipe(
 					Egress.layer,
 					ComputerSignIn.none,
 					seedAccountsLayer,
-					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
+					// No server runs, so no stream follows a session to hear it end.
+					Layer.succeed(EventOutbox.Service, { publish: () => Effect.void }).pipe(processLayer),
+					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })).pipe(
+						processLayer,
+					),
 				).pipe(Layer.provideMerge(ServerSettings.layer), Layer.provideMerge(databaseLayer)),
 			),
 		),

@@ -224,3 +224,22 @@ export class WebhookRefused
 		return userText`This webhook call wasn't accepted. Check its address and its secret`;
 	}
 }
+
+/**
+ * A routine changed only while it is all that starts its automation, as a bot
+ * changes one: one with another routine or a trigger has those set up in
+ * settings.
+ */
+export class TriggerSetInSettings
+	extends Schema.TaggedError<TriggerSetInSettings>()("TriggerSetInSettings", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The automation has another routine or a trigger, set up in settings";
+	}
+	get userMessage() {
+		return userText`That automation has more than one routine, or a trigger, which only its Automations page can change. Its name, instructions and whether it is paused can still be changed here.`;
+	}
+}

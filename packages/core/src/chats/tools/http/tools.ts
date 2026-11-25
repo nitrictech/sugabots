@@ -10,15 +10,18 @@ import { Schema } from "effect";
 import type { ConnectorTarget } from "../../../providers/connectors/connector-target.ts";
 import { HTTP_CONNECTOR_TOOLS } from "../../../providers/connectors/http-tools.ts";
 import { type EgressHttpClient, EgressRefused } from "../../../providers/network/egress.ts";
-import { type OfferedTool, offeredTool } from "../connectors.ts";
+import { readUpTo } from "../../../providers/web/fetch-page.ts";
+import { type OfferedTool, offeredTool } from "../connector-catalog.ts";
 import { type Failed, failed } from "../failed.ts";
-import { readUpTo } from "../web-fetch/fetch-page.ts";
+import { recordedCallOf } from "../recorded-call.ts";
 
 const TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 /** The response headers worth a model's attention; the rest are noise or the server's own business. */
 const SHOWN_HEADERS = ["content-type", "location", "retry-after", "x-request-id"];
 const REDACTED = "[credential]";
+/** The header a server that keys repeated requests reads. */
+const IDEMPOTENCY_KEY = "idempotency-key";
 
 /**
  * An HTTP connector's method tools, offered like an MCP server's through
@@ -47,10 +50,21 @@ export function httpTools(
 				? requestSchema
 				: requestWithBodySchema
 			).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-			execute: async (request: HttpRequest, { abortSignal }) => {
+			execute: async (request: HttpRequest, { abortSignal, context }) => {
 				const refusal = refusedHeader(request.headers, secret?.[0]);
 				if (refusal) return refusal;
 				const headers = new Headers(request.headers);
+				// A request that may change something is sent once a call, under the id
+				// its call was recorded as, so a server that keys on it does it once
+				// even when the call is sent again.
+				const recorded = recordedCallOf(context);
+				if (method !== "GET" && recorded) {
+					if (secret?.[0].toLowerCase() === IDEMPOTENCY_KEY)
+						return failed(
+							userText`This connector uses Idempotency-Key for its credential. Change its credential header before sending a request that can change something.`,
+						);
+					headers.set(IDEMPOTENCY_KEY, recorded);
+				}
 				if (request.body !== undefined && !headers.has("content-type")) {
 					headers.set("content-type", "application/json");
 				}

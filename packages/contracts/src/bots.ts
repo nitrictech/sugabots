@@ -147,7 +147,7 @@ export const botSchema = Schema.Struct({
 	workspaceId: uuidSchema,
 	name: Schema.String,
 	handle: handleSchema,
-	description: Schema.NullOr(Schema.String),
+	description: Schema.optional(Schema.NullOr(Schema.String)),
 	color: botColorSchema,
 	eyes: botEyesSchema,
 	shape: botShapeSchema,
@@ -155,28 +155,28 @@ export const botSchema = Schema.Struct({
 	 * Which model answers. `null` when nobody has chosen one, or somebody has
 	 * cleared it — the bot's turns then refuse rather than run on a guess.
 	 */
-	model: Schema.NullOr(modelIdSchema),
+	model: Schema.optional(Schema.NullOr(modelIdSchema)),
 	/** Who the bot is and how it works. Empty until somebody writes them. */
-	instructions: Schema.String,
+	instructions: Schema.optional(Schema.String),
 	/**
 	 * The built-in tools switched off for this bot, by key. A list of what is
 	 * off rather than what is on, so a new built-in tool reaches every existing
 	 * bot. Empty for a bot with everything.
 	 */
-	disabledTools: Schema.mutable(Schema.Array(Schema.String)),
+	disabledTools: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
 	/**
 	 * Whether it may run commands and edit files on its computer, while
 	 * the workspace has a computer provider enabled. Off until its creator or an
 	 * admin, who manage its computer, turns it on, unlike the other built-in
 	 * tools, and only they may change it. Experimental.
 	 */
-	usesComputer: Schema.Boolean,
+	usesComputer: Schema.optional(Schema.Boolean),
 	/**
 	 * Whether it browses in a way members watching its desktop can follow: a
 	 * cursor that moves to what it clicks, smooth scrolling, and typing at a
 	 * typing pace. Slower, so off unless somebody turns it on, as for a demo.
 	 */
-	naturalBrowsing: Schema.Boolean,
+	naturalBrowsing: Schema.optional(Schema.Boolean),
 	/** Who added it, by name: null when nobody did, or they are no longer in the workspace. */
 	createdBy: Schema.NullOr(namedMemberSchema),
 	/**
@@ -195,7 +195,7 @@ export const botSchema = Schema.Struct({
 	 */
 	defaultProjectId: uuidSchema,
 	permissions: botPermissionsSchema,
-	createdAt: isoTimestampSchema,
+	createdAt: Schema.optional(isoTimestampSchema),
 });
 
 export type Bot = typeof botSchema.Type;

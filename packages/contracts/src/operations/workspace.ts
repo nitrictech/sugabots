@@ -4,12 +4,19 @@
  */
 
 import { Schema } from "effect";
-import { ComputerMadeMeanwhile, ComputerUnavailable } from "../errors/computers.ts";
-import { ActionForbidden, ResourceHidden } from "../errors/proofs.ts";
+import { currentUserSchema, memberNameSchema } from "../api.ts";
+import { ClaimLost, ComputerMadeMeanwhile, ComputerUnavailable } from "../errors/computers.ts";
+import {
+	ActionForbidden,
+	ApprovalNeeded,
+	ApprovalRefused,
+	ResourceHidden,
+} from "../errors/proofs.ts";
 import {
 	AlreadyInvited,
 	AlreadyInWorkspace,
 	EmailUnverified,
+	MembershipRemovalPending,
 	NoModelChosen,
 	NotReadyToFinish,
 	OwnerStays,
@@ -22,6 +29,7 @@ import {
 import {
 	acceptedInvitationSchema,
 	invitationPreviewSchema,
+	membershipDepartureSchema,
 	membershipSchema,
 	newWorkspaceInvitationSchema,
 	newWorkspaceSchema,
@@ -36,6 +44,7 @@ import {
 import { referralLinkSchema, resetReferralLinkSchema } from "../referrals.ts";
 import { usageQuerySchema, workspaceUsageSchema } from "../usage.ts";
 import { uuidSchema } from "../uuid.ts";
+import { workspaceGuideSchema } from "../workspace-guide.ts";
 import { completeWorkspaceSetupSchema } from "../workspace-setup.ts";
 import { workspaceAccessSchema, workspaceIdOrSlugSchema } from "../workspaces.ts";
 import type { DomainExposure } from "./exposure.ts";
@@ -48,7 +57,6 @@ const memberRefusals = [ActionForbidden] as const;
 const workspaceRefusals = [ResourceHidden, ActionForbidden] as const;
 
 /** How taking a member out of the workspace can fail besides its refusals. */
-const departureErrors = [SubscriptionInUse, ComputerUnavailable, ComputerMadeMeanwhile] as const;
 
 /** A workspace, by its id or its slug. */
 const aWorkspace = Schema.Struct({ workspace: workspaceIdOrSlugSchema });
@@ -63,6 +71,14 @@ const anInvitation = Schema.Struct({ invitationId: uuidSchema });
 const nothing = Schema.Struct({});
 
 export const workspaceContracts = {
+	"workspaces.guide": OperationContract.make("workspaces.guide", {
+		description:
+			"See the workspace as your member does: its projects, the bots they can reach with what each is for, and what is waiting on them (approvals, unread mentions, failing automations), each with its link and id.",
+		input: nothing,
+		output: workspaceGuideSchema,
+		errors: [...workspaceRefusals, ApprovalNeeded, ApprovalRefused],
+		changes: false,
+	}),
 	"workspaces.list": OperationContract.make("workspaces.list", {
 		description: "List the workspaces you are in, in the order you joined them.",
 		input: nothing,
@@ -106,10 +122,10 @@ export const workspaceContracts = {
 	}),
 	"workspaces.delete": OperationContract.make("workspaces.delete", {
 		description:
-			"Delete the workspace, with its projects, bots, chats and providers. It is kept when its computers' provider can't be reached.",
+			"Delete the workspace, with its projects, bots, chats and providers. A recorded deletion resumes when the computer provider is reachable.",
 		input: aWorkspace,
 		output: Schema.Void,
-		errors: [...workspaceRefusals, ComputerUnavailable, ComputerMadeMeanwhile],
+		errors: [...workspaceRefusals, ComputerUnavailable, ComputerMadeMeanwhile, ClaimLost],
 		changes: true,
 	}),
 	"workspaces.memberships": OperationContract.make("workspaces.memberships", {
@@ -129,10 +145,10 @@ export const workspaceContracts = {
 	}),
 	"workspaces.removeMembership": OperationContract.make("workspaces.removeMembership", {
 		description:
-			"Take a member out of the workspace, with their Personal Assistant and the connector sign-ins they made. Only the owner removes an admin, and nobody removes the owner.",
+			"Remove a member from the workspace immediately, revoke their sessions and connector sign-ins, and queue any remaining Personal Assistant computer cleanup. Only the owner removes an admin, and nobody removes the owner.",
 		input: aMembership,
-		output: Schema.Void,
-		errors: [...workspaceRefusals, ...departureErrors],
+		output: membershipDepartureSchema,
+		errors: [...workspaceRefusals, SubscriptionInUse],
 		changes: true,
 	}),
 	"workspaces.handOverOwnership": OperationContract.make("workspaces.handOverOwnership", {
@@ -148,10 +164,10 @@ export const workspaceContracts = {
 	}),
 	"workspaces.leave": OperationContract.make("workspaces.leave", {
 		description:
-			"Take yourself out of the workspace, with your Personal Assistant and the connector sign-ins you made. The owner stays until they hand it over.",
+			"Leave the workspace immediately. This ends your sessions and connector sign-ins and queues any remaining Personal Assistant computer cleanup. The owner stays until they hand it over.",
 		input: aWorkspace,
-		output: Schema.Void,
-		errors: [...workspaceRefusals, OwnerStays, ...departureErrors],
+		output: membershipDepartureSchema,
+		errors: [...workspaceRefusals, OwnerStays, SubscriptionInUse],
 		changes: true,
 	}),
 	"workspaces.invitations": OperationContract.make("workspaces.invitations", {
@@ -169,7 +185,7 @@ export const workspaceContracts = {
 			...newWorkspaceInvitationSchema.fields,
 		}),
 		output: workspaceInvitationSchema,
-		errors: [...workspaceRefusals, AlreadyInWorkspace, AlreadyInvited],
+		errors: [...workspaceRefusals, AlreadyInWorkspace, AlreadyInvited, MembershipRemovalPending],
 		changes: true,
 	}),
 	"workspaces.cancelInvitation": OperationContract.make("workspaces.cancelInvitation", {
@@ -233,6 +249,14 @@ export const workspaceContracts = {
 		errors: workspaceRefusals,
 		changes: false,
 	}),
+	"system.rename": OperationContract.make("system.rename", {
+		description:
+			"Change your own name, which other members see in every workspace you are in, and which makes your handle.",
+		input: Schema.Struct({ name: memberNameSchema }),
+		output: currentUserSchema,
+		errors: [ActionForbidden],
+		changes: true,
+	}),
 } as const;
 
 /** Held back: it changes who is in the workspace, which a bot may do only in member bounds. */
@@ -263,6 +287,19 @@ const ownReferralLink = {
 } as const;
 
 export const workspaceExposure = {
+	"workspaces.guide": {
+		http: {
+			kind: "heldBack",
+			reason:
+				"It is a Personal Assistant's view of its member's workspace; the web app shows the same through the projects, bots and chat-reads operations.",
+		},
+		botLoop: {
+			kind: "offered",
+			tool: "workspace_guide",
+			offeredIn: "memberBounds",
+			approval: { kind: "never" },
+		},
+	},
 	"workspaces.list": {
 		http: { kind: "offered", endpoint: "workspaces.list" },
 		botLoop: {
@@ -369,6 +406,13 @@ export const workspaceExposure = {
 			kind: "heldBack",
 			reason:
 				"No tool reads the workspace's usage, which shows every bot's; offering one, in member bounds, waits for tools to become operations.",
+		},
+	},
+	"system.rename": {
+		http: { kind: "offered", endpoint: "system.rename" },
+		botLoop: {
+			kind: "heldBack",
+			reason: "A member's name is theirs to change; a bot acting for them never renames them.",
 		},
 	},
 	"system.workspaceAccess": {

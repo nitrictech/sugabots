@@ -1,14 +1,16 @@
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import { HOST_REQUEST_TOOL } from "@sugabots/contracts";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
+import { Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	seedMember,
 	seedMessage,
 	seedPage,
+	seedProjectChat,
 	seedTurnAnswering,
 } from "../../authentication/seed.test-support.ts";
-import { HOST_REQUEST_TOOL } from "../../chats/tools/host-request/name.ts";
-import { bot, toolCall } from "../../database/schema.ts";
+import { bot, file, toolCall } from "../../database/schema.ts";
 import { closeDatabase, onDatabase } from "../../database/testing.ts";
 import type { Principal } from "../../principal.ts";
 import {
@@ -83,7 +85,7 @@ describe("the chat operations, for each kind of principal", () => {
 	});
 
 	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends OperationName>(
+	const tried = <Name extends RequestOperationName>(
 		principal: Principal,
 		name: Name,
 		input: InputOf<Name>,
@@ -106,6 +108,71 @@ describe("the chat operations, for each kind of principal", () => {
 		);
 		return Object.fromEntries(entries) as Record<Key, string>;
 	};
+
+	it("hides a file in another chat and a missing file when reading or removing attachments", async () => {
+		const [elsewhere] = await onDatabase((db) =>
+			db
+				.insert(file)
+				.values({
+					chatId: a.otherChat,
+					kind: "attachment",
+					uploaderId: a.admin,
+					name: "notes.txt",
+					contentType: "text/plain",
+					size: 5,
+				})
+				.returning({ id: file.id }),
+		);
+		if (!elsewhere) throw new Error("Expected a file in the other chat");
+		for (const fileId of [elsewhere.id, crypto.randomUUID()]) {
+			const address = { chatId: a.chat, fileId };
+			expect(await tried(who.admin, "chats.file", address)).toBe("ResourceHidden");
+			expect(await tried(who.admin, "chats.removeFile", address)).toBe("ResourceHidden");
+		}
+	});
+
+	it("hides an unsent upload like a missing file and lets only its uploader remove it", async () => {
+		const uploaded = await call(who.ed, "chats.uploadFile", {
+			chatId: a.chat,
+			name: "notes.txt",
+			type: "text/plain",
+			content: Stream.make(new TextEncoder().encode("notes")),
+		});
+		for (const fileId of [uploaded.id, crypto.randomUUID()]) {
+			const address = { chatId: a.chat, fileId };
+			for (const principal of [who.ed, who.admin]) {
+				await expect(call(principal, "chats.file", address)).rejects.toMatchObject({
+					_tag: "ResourceHidden",
+					resource: "file",
+				});
+			}
+			await expect(call(who.admin, "chats.removeFile", address)).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+				resource: "file",
+			});
+		}
+		const address = { chatId: a.chat, fileId: uploaded.id };
+		expect(await tried(who.ed, "chats.removeFile", address)).toBe("ok");
+		expect(await tried(who.ed, "chats.removeFile", address)).toBe("ResourceHidden");
+	});
+
+	it("allows reading an attachment on a message and hides it from removal", async () => {
+		const chatId = await seedProjectChat(a.workspace, a.project, a.ed);
+		const uploaded = await call(who.ed, "chats.uploadFile", {
+			chatId,
+			name: "notes.txt",
+			type: "text/plain",
+			content: Stream.make(new TextEncoder().encode("notes")),
+		});
+		const messageId = await seedMessage(chatId, { member: a.ed });
+		await onDatabase((db) =>
+			db.update(file).set({ messageId, position: 0 }).where(eq(file.id, uploaded.id)),
+		);
+
+		const address = { chatId, fileId: uploaded.id };
+		expect(await call(who.admin, "chats.file", address)).toMatchObject({ id: uploaded.id });
+		expect(await tried(who.ed, "chats.removeFile", address)).toBe("ResourceHidden");
+	});
 
 	describe("chats.setResolved", () => {
 		it("lets whoever may change what is in the chat's project resolve it: not a viewer, a webhook or system work", async () => {
@@ -136,7 +203,7 @@ describe("the chat operations, for each kind of principal", () => {
 				botInBounds: "ok",
 				botOutsideBounds: "ResourceHidden",
 				run: "ok",
-				webhook: "ActionForbidden",
+				webhook: "ResourceHidden",
 				computerSleep: "ResourceHidden",
 				compaction: "ActionForbidden",
 				page: "ResourceHidden",
@@ -194,7 +261,7 @@ describe("the chat operations, for each kind of principal", () => {
 					(principal) =>
 						tried(principal, "chats.send", {
 							chatId: a.chat,
-							id: crypto.randomUUID(),
+							retryKey: crypto.randomUUID(),
 							message: "Ship it?",
 						}),
 				),
@@ -331,6 +398,7 @@ describe("the chat operations, for each kind of principal", () => {
 						messageId: reply,
 						turnId,
 						tool,
+						approvalComputerProjectId: tool === HOST_REQUEST_TOOL ? a.project : null,
 						input: {},
 						executionInput: {},
 						approvalStatus: "pending",

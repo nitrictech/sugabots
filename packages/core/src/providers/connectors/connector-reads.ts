@@ -4,6 +4,7 @@ import {
 	type ConnectorToolSetting,
 	type ConnectorWithTools,
 	type NamedMember,
+	type RestrictableConnector,
 	toolAccessCountsOf,
 } from "@sugabots/contracts";
 import { and, asc, eq, getColumns, type SQL, sql } from "drizzle-orm";
@@ -44,6 +45,19 @@ export const connectorsIn = (workspaceId: string, projectId: string, cipher: Sec
 	listedRows(and(eq(connector.workspaceId, workspaceId), eq(connector.projectId, projectId))).pipe(
 		Effect.map((rows) =>
 			rows.map(({ row, ...members }) => toConnector(row, members, cipher).connector),
+		),
+	);
+
+export const restrictableConnectorsIn = (workspaceId: string, projectId: string) =>
+	query((db) =>
+		db
+			.select({ id: connector.id, name: connector.name, enabled: connector.enabled })
+			.from(connector)
+			.where(and(eq(connector.workspaceId, workspaceId), eq(connector.projectId, projectId)))
+			.orderBy(asc(connector.createdAt)),
+	).pipe(
+		Effect.map((rows): RestrictableConnector[] =>
+			rows.map((row) => ({ ...row, restricted: true })),
 		),
 	);
 
@@ -121,6 +135,7 @@ function toConnector(
 			workspaceId: row.workspaceId,
 			projectId: row.projectId,
 			name: row.name,
+			enabled: row.enabled,
 			handle: row.handle,
 			kind: row.kind,
 			url: row.url,

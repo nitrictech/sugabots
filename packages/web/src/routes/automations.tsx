@@ -6,6 +6,7 @@ import {
 	resourcePermissions,
 	resourceProjectId,
 } from "@/lib/resource-owner.tsx";
+import { BotAutomationRestrictions } from "@/screens/BotRestrictions.tsx";
 import { AutomationsPage } from "@/shell/Automations.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { BotChatScreen, botRoute } from "./bots.tsx";
@@ -13,7 +14,7 @@ import { ChatPage } from "./chat.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { useBotRouteOwner, useProjectRouteOwner } from "./owner.ts";
 import { ProjectChatScreen, projectRoute } from "./projects.tsx";
-import { type ChatSearch, validateChatSearch } from "./search.ts";
+import { type ChatSearch, decodeRouteId, validateChatSearch } from "./search.ts";
 
 const AutomationSetup = lazyNamed(
 	() =>
@@ -43,6 +44,9 @@ function OwnerAutomations({
 }) {
 	const { automation } = useParams({ strict: false });
 	if (!owner) return null;
+	if ("bot" in owner && !owner.bot.permissions.talk) {
+		return <BotAutomationRestrictions bot={owner.bot} />;
+	}
 	return (
 		<AutomationsPage owner={owner} selectedAutomationId={automation} making={making}>
 			{children}
@@ -131,6 +135,7 @@ export const automationsIndexRoute = createRoute({
 export const automationFeedRoute = createRoute({
 	getParentRoute: () => automationsRoute,
 	path: "/$automation",
+	params: { parse: ({ automation }) => ({ automation: decodeRouteId(automation) }) },
 	validateSearch: validateChatSearch,
 	loader: () => ChatPage.preload(),
 	component: () => {
@@ -187,6 +192,7 @@ export const projectAutomationsIndexRoute = createRoute({
 export const projectAutomationRoute = createRoute({
 	getParentRoute: () => projectAutomationsRoute,
 	path: "/$automation",
+	params: { parse: ({ automation }) => ({ automation: decodeRouteId(automation) }) },
 	validateSearch: validateChatSearch,
 	loader: () => ChatPage.preload(),
 	component: () => {

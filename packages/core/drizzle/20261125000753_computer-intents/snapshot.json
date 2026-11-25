@@ -1,0 +1,111 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "cb01c0b2-385d-462a-a2e3-4bcf2cfd0b65",
+  "prevIds": [
+    "e81c38ee-338b-48b7-af44-a089ad434bf7"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "computer",
+        "intent_id"
+      ],
+      "writes": [
+        "s|col|public.computer.intent_id",
+        "n|col|public.computer.intent_id",
+        "e|col|public.computer.intent_id"
+      ],
+      "reads": [
+        "n|tbl|public.computer",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "computer",
+        "intent_expires_at"
+      ],
+      "writes": [
+        "s|col|public.computer.intent_expires_at",
+        "n|col|public.computer.intent_expires_at",
+        "e|col|public.computer.intent_expires_at"
+      ],
+      "reads": [
+        "n|tbl|public.computer",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "computer"
+      ],
+      "writes": [
+        "s|ck|public.computer.computer_intent_check",
+        "n|ck|public.computer.computer_intent_check",
+        "e|ck|public.computer.computer_intent_check",
+        "n|con|public.computer.computer_intent_check"
+      ],
+      "reads": [
+        "n|tbl|public.computer",
+        "n|sch|public",
+        "n|col|public.computer.intent_id",
+        "n|col|public.computer.intent_expires_at"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer",
+        "name": "intent_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer",
+        "name": "intent_expires_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer",
+        "name": "computer_intent_check",
+        "value": "(\"intent_id\" is null) = (\"intent_expires_at\" is null)",
+        "entityType": "checks"
+      }
+    }
+  ]
+}

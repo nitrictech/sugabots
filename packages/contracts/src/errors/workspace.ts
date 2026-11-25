@@ -85,6 +85,20 @@ export class AlreadyInWorkspace
 	}
 }
 
+export class MembershipRemovalPending
+	extends Schema.TaggedError<MembershipRemovalPending>()("MembershipRemovalPending", {})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The membership for the invited address is still being removed";
+	}
+	get userMessage() {
+		return userText`Their removal is still finishing. Try inviting them again shortly.`;
+	}
+}
+
 /** An invitation to the address is pending, and this one isn't sent again. */
 export class AlreadyInvited
 	extends Schema.TaggedError<AlreadyInvited>()("AlreadyInvited", {})

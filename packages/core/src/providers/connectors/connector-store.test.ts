@@ -17,6 +17,7 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { signedIn } from "../../operations/chats/testing.ts";
 import { Secrets } from "../../secrets/secrets.ts";
 import { connectorIn, connectorsIn } from "./connector-reads.ts";
 import { ConnectorStore } from "./connector-store.ts";
@@ -149,10 +150,15 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 			url: "https://mcp.notion.com/mcp",
 			auth: "oauth",
 		});
-		await connectors.saveOauthRecord(workspaceId, notion.id, {
-			clientInformation: { client_id: "client-1" },
-			signInRejectedAt: "2026-10-05T21:00:08.000Z",
-		});
+		await connectors.saveOauthRecord(
+			workspaceId,
+			notion.id,
+			{
+				clientInformation: { client_id: "client-1" },
+				signInRejectedAt: "2026-10-05T21:00:08.000Z",
+			},
+			{ kind: "since", version: null },
+		);
 		await listTools(wiki.id, [lookup, edit]);
 		await connectors.update(workspaceId, projectId, wiki.id, { toolAccess: { edit: "off" } });
 		await listTools(tracker.id, [lookup, wipe]);
@@ -170,7 +176,8 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 					toolAccess: { edit: "off" },
 				}),
 			],
-			signInExpired: [{ handle: "notion", url: "https://mcp.notion.com/mcp" }],
+			signInExpired: [{ handle: "notion" }],
+			installedUrls: [wiki.url, tracker.url, "https://mcp.linear.app/mcp", notion.url],
 		});
 		expect(await shown(notion.id)).toMatchObject({ signedIn: false, signInExpired: true });
 	});
@@ -385,27 +392,40 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 			headers: {},
 		});
 
-		await connectors.saveOauthRecord(workspaceId, made.id, {
-			clientInformation: { client_id: "client-1" },
-			codeVerifier: "verifier",
-			state: "state-1",
-		});
-		expect(await connectors.byOauthState("state-1")).toEqual({
+		const session = await signedIn(memberId);
+		const started = await connectors.saveOauthRecord(
+			workspaceId,
+			made.id,
+			{
+				startedByMemberId: memberId,
+				startedBySessionId: session.session,
+				clientInformation: { client_id: "client-1" },
+				codeVerifier: "verifier",
+				state: "state-1",
+			},
+			{ kind: "since", version: null },
+		);
+		expect(await connectors.byOauthState("state-1", session)).toEqual({
 			workspaceId,
 			projectId,
 			connectorId: made.id,
 		});
 		expect((await shown(made.id))?.signedIn).toBe(false);
 
-		await connectors.saveOauthRecord(workspaceId, made.id, {
-			clientInformation: { client_id: "client-1" },
-			tokens: { access_token: "token-1", token_type: "Bearer" },
-			state: "",
-		});
+		await connectors.saveOauthRecord(
+			workspaceId,
+			made.id,
+			{
+				clientInformation: { client_id: "client-1" },
+				tokens: { access_token: "token-1", token_type: "Bearer" },
+				state: "",
+			},
+			{ kind: "since", version: started ?? null },
+		);
 		expect(await connectors.oauthRecord(workspaceId, made.id)).toMatchObject({
 			tokens: { access_token: "token-1" },
 		});
-		expect(await connectors.byOauthState("state-1")).toBeUndefined();
+		expect(await connectors.byOauthState("state-1", session)).toBeUndefined();
 		expect((await shown(made.id))?.signedIn).toBe(true);
 	});
 
@@ -516,11 +536,16 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 				url: "https://mcp.linear.app/mcp",
 				auth: "oauth",
 			});
-			await connectors.saveOauthRecord(workspaceId, made.id, {
-				clientInformation: { client_id: "client-1" },
-				tokens: { access_token: "token-1", token_type: "Bearer" },
-				state: "",
-			});
+			await connectors.saveOauthRecord(
+				workspaceId,
+				made.id,
+				{
+					clientInformation: { client_id: "client-1" },
+					tokens: { access_token: "token-1", token_type: "Bearer" },
+					state: "",
+				},
+				{ kind: "since", version: null },
+			);
 
 			await connectors.update(workspaceId, projectId, made.id, {
 				url: "https://elsewhere.example/mcp",

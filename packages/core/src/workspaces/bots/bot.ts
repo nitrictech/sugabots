@@ -1,10 +1,11 @@
 import type { Bot, NamedMember } from "@sugabots/contracts";
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
-import { type Actor, botPermissions } from "../../authorization/permissions.ts";
+import type { Actor } from "../../authorization/permissions.ts";
 import { memberJson } from "../../chats/store/participants.ts";
 import type * as schema from "../../database/schema.ts";
 import { member, membership, pinnedBot, project } from "../../database/schema.ts";
 import { outerColumn } from "../../database/sql.ts";
+import { botPermissionsShown } from "../../proofs/shown-permissions.ts";
 
 /**
  * A bot row that is a bot members talk to: anything but a system bot, which
@@ -43,7 +44,7 @@ export function creatorOf(bot: {
 	createdById: SQLWrapper;
 	workspaceId: SQLWrapper;
 }): SQL<NamedMember | null> {
-	return sql<NamedMember | null>`(select ${memberJson} from ${membership} inner join ${member} on ${member.id} = ${membership.memberId} where ${membership.workspaceId} = ${bot.workspaceId} and ${membership.memberId} = ${bot.createdById})`;
+	return sql<NamedMember | null>`(select ${memberJson} from ${membership} inner join ${member} on ${member.id} = ${membership.memberId} where ${membership.workspaceId} = ${bot.workspaceId} and ${membership.memberId} = ${bot.createdById} and not ${membership.leaving})`;
 }
 
 /**
@@ -56,26 +57,31 @@ export function toBot(
 	row: MemberFacingBotRow & { defaultProjectId: string; createdBy: NamedMember | null },
 	viewer: { actor: Actor; pinned: boolean },
 ): Bot {
-	return {
+	const permissions = botPermissionsShown(viewer.actor, row, row.defaultProjectId);
+	const identity = {
 		id: row.id,
 		workspaceId: row.workspaceId,
 		name: row.name,
 		handle: row.handle,
-		description: row.description,
 		color: row.color,
 		eyes: row.eyes,
 		shape: row.shape,
-		model: row.model,
-		instructions: row.instructions,
-		disabledTools: row.disabledTools,
-		usesComputer: row.usesComputer,
-		naturalBrowsing: row.naturalBrowsing,
 		createdBy: row.createdBy,
 		visibility: row.visibility,
 		assistant: row.assistantOf !== null,
 		pinned: viewer.pinned,
 		defaultProjectId: row.defaultProjectId,
-		permissions: botPermissions(viewer.actor, row),
+		permissions,
+	};
+	if (!permissions.talk) return identity;
+	return {
+		...identity,
+		description: row.description,
+		model: row.model,
+		instructions: row.instructions,
+		disabledTools: row.disabledTools,
+		usesComputer: row.usesComputer,
+		naturalBrowsing: row.naturalBrowsing,
 		createdAt: row.createdAt.toISOString(),
 	};
 }

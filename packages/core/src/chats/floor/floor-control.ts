@@ -1,13 +1,17 @@
 export { BotHasNoModel } from "@sugabots/contracts/errors/chats";
 export * as FloorControl from "./floor-control.ts";
 
-import { helpersAskedBy, mentionedHandles } from "@sugabots/contracts";
+import { type FloorTurnReason, helpersAskedBy, mentionedHandles } from "@sugabots/contracts";
 import { BotHasNoModel } from "@sugabots/contracts/errors/chats";
-import { eq } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { type Database, query, serviceOperations, transaction } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
-import { message } from "../../database/schema.ts";
+import { ACTIVE_TURN_STATUSES, message, turn } from "../../database/schema.ts";
+import { named } from "../../proofs/proof.ts";
+import type { ReachesChat } from "../../proofs/reaches-chat.ts";
+import { proveCanSteer } from "../../proofs/turn-control.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import type { ChatEvent } from "../events.ts";
 import { ChatStore } from "../store/store.ts";
 import { Turns } from "../turns/turns.ts";
@@ -17,13 +21,20 @@ import { type FloorMessage, floorOf, loadFloorScope, loadRepliedTurn } from "./f
 export interface Interface {
 	/**
 	 * Decides who speaks after the committed message `committed` (see
-	 * `floorOf`) and asks for them: brings each addressed bot into the
-	 * chat and asks for its turn. Runs in the caller's transaction, so it
-	 * commits with the message. Refused, before any turn is asked for, when a
-	 * bot given the floor has no model, so the caller's transaction rolls the
-	 * message back rather than keep it with a turn that could only fail.
+	 * `floorOf`) and asks for them: brings each addressed bot into the chat,
+	 * and asks for its turn, unless a turn of the bot's for the message's author,
+	 * who `poster` proves reaches the chat, already answers it: it steers that
+	 * turn once running, or joins it before it opens. A message that starts a
+	 * chat has no `poster`, as no turn runs there yet.
+	 * Runs in the caller's transaction, so it commits with the message. Refused,
+	 * before any turn is asked for, when a bot given the floor has no model, so
+	 * the caller's transaction rolls the message back rather than keep it with
+	 * a turn that could only fail.
 	 */
-	readonly giveFloor: (committed: FloorMessage) => Effect.Effect<void, BotHasNoModel>;
+	readonly giveFloor: <P, C>(
+		committed: FloorMessage,
+		poster: ReachesChat<P, C> | undefined,
+	) => Effect.Effect<void, BotHasNoModel>;
 	/**
 	 * Asks for the turns bots' messages give (GLOSSARY.md's "Collaboration"):
 	 * a helper's for each bot a completed reply asks for help (see
@@ -34,14 +45,109 @@ export interface Interface {
 	readonly handler: DomainEvents.Handler<ChatEvent>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/FloorControl") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/FloorControl") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("FloorControl");
 	const chats = yield* ChatStore.Service;
 	const turns = yield* Turns.Service;
+	const controls = yield* Turns.Controls;
 
-	const giveFloor: Interface["giveFloor"] = (committed) =>
+	/**
+	 * Whether the member's message `request.triggerMessageId`, which the floor
+	 * gives the bot `request.botId`, is answered by a turn of theirs the bot
+	 * already has, rather than needing a turn of its own: it joins their turn
+	 * not yet opened, which reads it when it starts, or steers their turn
+	 * running or waiting for approvals. `poster`, the message's author, proves
+	 * they reach the chat; a message with none answers no turn already there.
+	 * It holds the opening of the bot's turns first, as opening one does, so the
+	 * message does exactly one of the two, or neither.
+	 */
+	const answeredByTurnOfTheirs = <P, C>(
+		request: Turns.TurnRequests.TurnRequest & { reason: FloorTurnReason },
+		poster: ReachesChat<P, C> | undefined,
+	) =>
+		Effect.gen(function* () {
+			if (!poster) return false;
+			const acting = poster.principal.value;
+			if (acting._tag !== "MemberSession") return false;
+			const held = yield* Turns.TurnRequests.holdOpening(request);
+			if (
+				held &&
+				!held.opened &&
+				Turns.TurnRequests.joinsUnopened({ ...request, askerId: acting.member }, held.running)
+			) {
+				yield* Turns.recordJoin(request.triggerMessageId, {
+					botId: held.running.botId,
+					triggerMessageId: held.running.triggerMessageId,
+				});
+				return true;
+			}
+			// Several may be active once a turn waiting for approval gives up its
+			// lane; the newest the member may steer is theirs. Their rows are
+			// locked by id, in the lock order (see `TurnStore`'s `lockedTurn`).
+			const working = yield* query((db) =>
+				db
+					.select({ id: turn.id, startedAt: turn.startedAt })
+					.from(turn)
+					.where(
+						and(
+							eq(turn.chatId, request.chatId),
+							eq(turn.botId, request.botId),
+							inArray(turn.status, [...ACTIVE_TURN_STATUSES]),
+							isNull(turn.endRequested),
+						),
+					)
+					.orderBy(asc(turn.id))
+					.for("update"),
+			);
+			// Sorted stably from newest id first, so turns started at once keep that order.
+			const newestFirst = working
+				.toReversed()
+				.toSorted((left, right) => right.startedAt.getTime() - left.startedAt.getTime());
+			for (const candidate of newestFirst) {
+				const steered = yield* named(candidate.id, (turnId) =>
+					proveCanSteer(poster, turnId).pipe(
+						Effect.flatMap((canSteer) =>
+							controls.steer(canSteer, {
+								messageId: request.triggerMessageId,
+								reason: request.reason,
+							}),
+						),
+						// Anyone but its asker gets a turn of their own.
+						Effect.catchTags({
+							ActionForbidden: () => Effect.succeed(false),
+							ResourceHidden: () => Effect.succeed(false),
+						}),
+					),
+				);
+				if (steered) return true;
+			}
+			return false;
+		});
+
+	/**
+	 * Gives the floor to the bots `requests` name, each on the message they
+	 * answer, in the lock order (see `TurnStore`'s `lockedTurn`): first each
+	 * bot's turn opening and turn rows, as a steer takes them, then each bot's
+	 * lane, as asking for a turn takes it, each by bot id.
+	 */
+	const answerOrAsk = <P, C>(
+		requests: ReadonlyArray<Turns.TurnRequests.TurnRequest & { reason: FloorTurnReason }>,
+		poster: ReachesChat<P, C> | undefined,
+	) =>
+		Effect.gen(function* () {
+			const byBot = requests.toSorted((left, right) => left.botId.localeCompare(right.botId));
+			const asks: Turns.TurnRequests.TurnRequest[] = [];
+			for (const request of byBot) {
+				if (!(yield* answeredByTurnOfTheirs(request, poster))) asks.push(request);
+			}
+			for (const request of asks) yield* turns.ask(request);
+		});
+
+	const giveFloor: Interface["giveFloor"] = (committed, poster) =>
 		operation(
 			"giveFloor",
 			transaction(
@@ -59,14 +165,15 @@ export const make = Effect.gen(function* () {
 						committed.chatId,
 						decision.bots.map(({ botId }) => botId),
 					);
-					for (const { botId, reason } of decision.bots) {
-						yield* turns.ask({
+					yield* answerOrAsk(
+						decision.bots.map(({ botId, reason }) => ({
 							chatId: committed.chatId,
 							botId,
 							triggerMessageId: committed.id,
 							reason,
-						});
-					}
+						})),
+						poster,
+					);
 				}),
 			),
 		);
@@ -203,6 +310,6 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 export const layer = layerNoDeps.pipe(Layer.provide(ChatStore.layer));

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { closeDatabase, runOnPostgres } from "../database/testing.ts";
+import { automation } from "../database/schema.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import {
 	seedAutomation,
 	seedBot,
@@ -147,6 +149,12 @@ describe("SystemWorkAuthentication", () => {
 		it("reaches an automation whose last runs all failed", async () => {
 			const automationId = await seedAutomation(workspaceId, projectId);
 			await runsEnding(automationId, ["completed", "failed", "failed"]);
+			await onDatabase((db) =>
+				db
+					.update(automation)
+					.set({ pauseAfterFailuresPendingAt: new Date() })
+					.where(eq(automation.id, automationId)),
+			);
 
 			const principal = await runOnPostgres(auth.pauseAfterFailures(automationId));
 

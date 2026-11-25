@@ -1,6 +1,6 @@
-import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import { toolApprovalDecisionSchema } from "../../approvals.ts";
+import { uuidOrStringSchema } from "../../uuid.ts";
 import { Conflict, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
@@ -11,7 +11,7 @@ export class ApprovalsApi extends HttpApiGroup.make("approvals")
 		// is recorded before this answers, and the call's status changes on the
 		// chat's event stream.
 		HttpApiEndpoint.post("decide", "/tool-calls/:toolCallId/approval", {
-			params: { toolCallId: Schema.String },
+			params: { toolCallId: uuidOrStringSchema },
 			payload: toolApprovalDecisionSchema,
 			success: HttpApiSchema.Empty(202),
 			error: [Conflict, ...refused],

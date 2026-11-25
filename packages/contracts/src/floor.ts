@@ -57,7 +57,7 @@ export interface AddressedMessage {
 }
 
 /** Why a bot was given the floor; see `decideFloor`. */
-type FloorTurnReason = "mention" | "reply" | "default" | "optional";
+export type FloorTurnReason = "mention" | "reply" | "default" | "optional";
 
 /** The bots that take a turn after a member's message, each with why, or that none does. */
 export type Floor =

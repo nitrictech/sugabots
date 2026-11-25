@@ -15,7 +15,7 @@ export const send = defineOperation(chatsContracts["chats.send"], (principal, in
 				const isMember = yield* proveIsMember(principal);
 				const canTakePart = yield* proveCanTakePart(yield* proveReachesChat(principal, chat));
 				return yield* chats.post(isMember, canTakePart, {
-					messageId: input.id,
+					retryKey: input.retryKey,
 					content: input.message,
 					attachments: input.attachments,
 					replyTo: input.replyTo,

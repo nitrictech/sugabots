@@ -1,6 +1,12 @@
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { Effect } from "effect";
-import { type MemberPlace, mayInProjectAs, memberActing } from "./facts.ts";
+import {
+	type MemberPlace,
+	mayInProjectAs,
+	memberActing,
+	type ProjectFacts,
+	type ReachedAs,
+} from "./facts.ts";
 import { defineProof, type Proof } from "./proof.ts";
 import type { ReachesChat } from "./reaches-chat.ts";
 import type { ReachesFile } from "./reaches-file.ts";
@@ -20,11 +26,20 @@ export interface CanManageChats<P, X> extends Proof<"CanManageChats", [P, X]> {
 
 const CanManageChatsProof = defineProof("CanManageChats");
 
+/**
+ * The member whose permissions let `as` rename the project's chats and delete
+ * the files written in them, if they do. `CanManageChats`.
+ */
+export function memberManagingChats(as: ReachedAs, project: ProjectFacts): MemberPlace | undefined {
+	const member = memberActing(as);
+	return member && mayInProjectAs(member, project, "project.chats.manage") ? member : undefined;
+}
+
 export const proveCanManageChats = <P, X>(
 	reach: ReachesChat<P, X> | ReachesFile<P, X>,
 ): Effect.Effect<CanManageChats<P, X>, ActionForbidden> => {
-	const member = memberActing(reach.as);
-	if (!member || !mayInProjectAs(member, reach.project, "project.chats.manage")) {
+	const member = memberManagingChats(reach.as, reach.project);
+	if (!member) {
 		return Effect.fail(new ActionForbidden({ proof: "CanManageChats" }));
 	}
 	const about = reach.kind === "ReachesChat" ? reach.chat : reach.file;

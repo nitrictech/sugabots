@@ -525,7 +525,8 @@ export function useSendMessage(chatId: string, signedIn: CurrentUser) {
 			const optimistic: ChatMessageItem = {
 				kind: "message",
 				message: {
-					id: input.id,
+					id: input.retryKey,
+					retryKey: input.retryKey,
 					chatId,
 					author: memberParticipantOf(signedIn),
 					status: "complete",
@@ -547,7 +548,7 @@ export function useSendMessage(chatId: string, signedIn: CurrentUser) {
 		},
 		onSettled: async (_result, _error, input) => {
 			queries.setQueryData<ChatMessageItem[]>(optimisticMessagesKey(chatId), (items) =>
-				items?.filter((item) => item.kind !== "message" || item.message.id !== input.id),
+				items?.filter((item) => item.kind !== "message" || item.message.id !== input.retryKey),
 			);
 			await Promise.all([
 				queries.invalidateQueries({ queryKey: chatMessagesKey(chatId) }),
@@ -587,23 +588,23 @@ export function useChatStarter(starting: { projectId: string }) {
 		onSettled: () => queries.invalidateQueries({ queryKey: projectChatsKey(workspaceId) }),
 	});
 	/**
-	 * The last draft sent that did not come back started, with its message's id.
+	 * The last draft sent that did not come back started, with its retry key.
 	 * Its chat may have started all the same, its answer lost, so sending the
-	 * same draft to the same project again reuses the id, which the API answers
+	 * same draft to the same project again reuses the key, which the API answers
 	 * with the chat it started rather than starting a second.
 	 */
-	const unconfirmed = useRef<{ projectId: string; message: string; id: string }>(undefined);
+	const unconfirmed = useRef<{ projectId: string; message: string; retryKey: string }>(undefined);
 	async function start(draft: string): Promise<ChatStart> {
 		const message = draft.trim();
 		if (startChat.isPending || message === "") return { outcome: "notSent" };
 		const retried = unconfirmed.current;
-		const id =
+		const retryKey =
 			retried?.projectId === starting.projectId && retried.message === message
-				? retried.id
+				? retried.retryKey
 				: uuidv4();
-		unconfirmed.current = { projectId: starting.projectId, message, id };
+		unconfirmed.current = { projectId: starting.projectId, message, retryKey };
 		try {
-			const chat = await startChat.mutateAsync({ id, message });
+			const chat = await startChat.mutateAsync({ retryKey, message });
 			unconfirmed.current = undefined;
 			return { outcome: "started", chat };
 		} catch {

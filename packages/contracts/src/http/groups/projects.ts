@@ -9,7 +9,7 @@ import {
 	projectSchema,
 	projectUpdateSchema,
 } from "../../projects.ts";
-import { uuidSchema } from "../../uuid.ts";
+import { uuidOrStringSchema, uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
@@ -63,7 +63,7 @@ export class ProjectsApi extends HttpApiGroup.make("projects")
 			error: refused,
 		}),
 		HttpApiEndpoint.delete("removeMember", "/projects/:projectId/members/:memberId", {
-			params: { projectId: uuidSchema, memberId: Schema.String },
+			params: { projectId: uuidSchema, memberId: uuidOrStringSchema },
 			error: refused,
 		}),
 		/** Takes the caller out of the project. */

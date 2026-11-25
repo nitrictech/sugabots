@@ -1,5 +1,5 @@
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, type SQL, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Actor } from "../authorization/permissions.ts";
 import { query } from "../database/database.ts";
@@ -30,6 +30,7 @@ const hidden = new ResourceHidden({ resource: "workspace" });
 export const proveInWorkspace = <P, W>(
 	principal: Named<P, Principal>,
 	workspaceId: Named<W, string>,
+	contains?: SQL,
 ) =>
 	Effect.gen(function* () {
 		const acting = principal.value;
@@ -58,10 +59,11 @@ export const proveInWorkspace = <P, W>(
 					membership,
 					and(
 						eq(membership.workspaceId, workspace.id),
+						eq(membership.leaving, false),
 						eq(membership.memberId, sql`${member ?? null}::uuid`),
 					),
 				)
-				.where(eq(workspace.id, id))
+				.where(and(eq(workspace.id, id), eq(workspace.deleting, false), contains))
 				.limit(1),
 		);
 		if (!row?.botInWorkspace) return yield* Effect.fail(hidden);

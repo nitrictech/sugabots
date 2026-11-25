@@ -58,6 +58,13 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly botId: string;
 		readonly reply: Message;
 	};
+	ReplyExecutionStarted: {
+		readonly chatId: string;
+		readonly messageId: string;
+		readonly execution: number;
+		readonly content: string;
+		readonly thinking?: Message["thinking"];
+	};
 	/** The turn finished and its reply is complete. */
 	TurnCompleted: {
 		readonly chatId: string;
@@ -75,8 +82,7 @@ export type ChatEvent = Data.TaggedEnum<{
 	};
 	/**
 	 * The bot's optional turn ended with nothing to say, so it stayed silent:
-	 * its empty reply `messageId` was taken back, and it reacted 👀 to the
-	 * message it read instead.
+	 * it reacted 👀 to the message it read and its reply was removed.
 	 */
 	TurnStayedSilent: {
 		readonly chatId: string;
@@ -88,6 +94,8 @@ export type ChatEvent = Data.TaggedEnum<{
 		readonly chatId: string;
 		readonly workspaceId: string;
 		readonly turnId: string;
+		readonly approvalCallIds: readonly string[];
+		readonly approvalIds?: readonly string[];
 	};
 	/**
 	 * A run of the turn failed, or the turn was found stopped and ended as

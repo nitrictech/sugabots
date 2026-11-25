@@ -3,6 +3,7 @@ export * as ProjectComputerSetup from "./project-computer-setup.ts";
 import type { ComputerDisk, ProjectComputer, ProjectComputerDisk } from "@sugabots/contracts";
 import { computerBuiltInProvider } from "@sugabots/contracts";
 import {
+	type ClaimLost,
 	type ComputerInUse,
 	type ComputerUnavailable,
 	type NoComputer,
@@ -36,12 +37,17 @@ export interface Interface {
 	readonly disks: <P, W>(reachSet: ReachSet<P, W>) => Effect.Effect<ProjectComputerDisk[]>;
 	readonly reset: <P, J>(
 		canManage: CanManageProject<P, J>,
-	) => Effect.Effect<ProjectComputer, ComputerInUse | ComputerUnavailable>;
+	) => Effect.Effect<ProjectComputer, ClaimLost | ComputerInUse | ComputerUnavailable>;
 	readonly upgrade: <P, J>(
 		canManage: CanManageProject<P, J>,
 	) => Effect.Effect<
 		ProjectComputer,
-		NoComputerProvider | ComputerInUse | NoComputer | UpgradeFailed | ComputerUnavailable
+		| NoComputerProvider
+		| ClaimLost
+		| ComputerInUse
+		| NoComputer
+		| UpgradeFailed
+		| ComputerUnavailable
 	>;
 }
 

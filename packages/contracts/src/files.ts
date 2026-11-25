@@ -1,5 +1,4 @@
 import { Schema } from "effect";
-import type { BuiltInToolKey } from "./built-in-tools.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
@@ -85,11 +84,19 @@ export const writtenFileSchema = Schema.Struct({
 });
 export type WrittenFile = typeof writtenFileSchema.Type;
 
+export const FILE_LIST_TOOL = "file_list";
+export const FILE_READ_TOOL = "file_read";
+export const FILE_WRITE_TOOL = "file_write";
+export const FILE_EDIT_TOOL = "file_edit";
+export const FILE_TOOLS: ReadonlySet<string> = new Set([
+	FILE_LIST_TOOL,
+	FILE_READ_TOOL,
+	FILE_WRITE_TOOL,
+	FILE_EDIT_TOOL,
+]);
+
 /** The tools whose completed calls write a file, returning what `fileWrittenSchema` reads. */
-export const FILE_WRITING_TOOLS: ReadonlySet<string> = new Set([
-	"file_write",
-	"file_edit",
-] satisfies BuiltInToolKey[]);
+export const FILE_WRITING_TOOLS: ReadonlySet<string> = new Set([FILE_WRITE_TOOL, FILE_EDIT_TOOL]);
 
 /**
  * What a call to one of `FILE_WRITING_TOOLS` returns when it writes: the
@@ -103,3 +110,4 @@ export const fileWrittenSchema = Schema.Struct({
 	title: Schema.String,
 	version: Schema.Int.check(Schema.isGreaterThan(0)),
 });
+export type FileWritten = typeof fileWrittenSchema.Type;

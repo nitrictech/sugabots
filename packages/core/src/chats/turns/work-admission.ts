@@ -1,28 +1,25 @@
 export * as WorkAdmission from "./work-admission.ts";
 
 import { Context, type Effect } from "effect";
-import type { BotFacts } from "../../authorization/permissions.ts";
+import type { Transaction } from "../../database/database.ts";
+import { Tier } from "../../tiers.ts";
 
 /**
  * Whether a chat takes more turns and tool calls. Turns asks before it
- * admits work; automation runs answer it, since a run that has started ending
- * takes no more. Supplied where the chat services are composed.
+ * admits work. The answer includes its project and any automation run it is
+ * in. Supplied where the chat services are composed.
  */
+export type Refusal = "chatUnavailable" | "automationEnded";
+
 export interface Interface {
 	/**
-	 * Whether the chat `chatId` takes more work. The answer stands until
+	 * Why the chat `chatId` refuses work, if it does. The answer stands until
 	 * the caller's transaction ends, so ask before locking the turn or tool
 	 * call the work is admitted into.
 	 */
-	readonly admits: (chatId: string) => Effect.Effect<boolean>;
-	/**
-	 * The bot doing the automation run the chat `chatId` does work for,
-	 * whose managers decide the run's approvals (see `mayDecideToolCall`);
-	 * undefined when it does work for none.
-	 */
-	readonly runBotOf: (chatId: string) => Effect.Effect<BotFacts | undefined>;
+	readonly refusal: (chatId: string) => Effect.Effect<Refusal | undefined, never, Transaction>;
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-	"@sugabots/core/WorkAdmission",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/WorkAdmission") {
+	declare readonly [Tier]: "process";
+}

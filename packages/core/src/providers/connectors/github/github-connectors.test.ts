@@ -1,9 +1,19 @@
 import { createHmac } from "node:crypto";
-import type { InputOf, OperationName, OutputOf } from "@sugabots/contracts/operations";
-import { Effect, Layer, Redacted } from "effect";
+import type { InputOf, OutputOf, RequestOperationName } from "@sugabots/contracts/operations";
+import { Deferred, Effect, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebhookAuthentication } from "../../../authentication/webhook.ts";
-import { closeDatabase, runOnPostgres } from "../../../database/testing.ts";
+import { ConnectorCatalog } from "../../../chats/tools/connector-catalog.ts";
+import { NO_TURN } from "../../../chats/tools/testing.ts";
+import { ComputerProviderStore } from "../../../computers/computer-provider-store.ts";
+import { Computers } from "../../../computers/computers.ts";
+import { ProjectComputers } from "../../../computers/project-computers.ts";
+import { computer, computerLease } from "../../../database/schema.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
+import { update } from "../../../operations/connectors/update.ts";
+import { ConnectorSignIn } from "../connector-sign-in.ts";
+import { ConnectorStore } from "../connector-store.ts";
+import { Connectors } from "../connectors.ts";
 import type { Connected } from "./connected.ts";
 import {
 	egressToGitHub,
@@ -22,6 +32,7 @@ import {
 } from "./github.test-support.ts";
 import { GitHubConnectors } from "./github-connectors.ts";
 import * as GitHubReads from "./github-reads.ts";
+import { GitHubSignIn } from "./github-sign-in.ts";
 
 /** What GitHub shows the stand-in's app, `acme-sugabots`, as the author of. */
 const BOT_LOGIN = "acme-sugabots[bot]";
@@ -191,9 +202,152 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 	/** Calls the operation `name` with `input`, signed in as `memberId`. */
 	const as =
 		(memberId: string) =>
-		async <Name extends OperationName>(name: Name, input: InputOf<Name>): Promise<OutputOf<Name>> =>
+		async <Name extends RequestOperationName>(
+			name: Name,
+			input: InputOf<Name>,
+		): Promise<OutputOf<Name>> =>
 			setup.call(await setup.member(memberId), name, input);
 	const project = () => ({ workspaceId: fixture.workspaceId, projectId: fixture.projectId });
+
+	it.each([
+		{ outcome: "on switch-off", refreshFails: false },
+		{ outcome: "at lease renewal after a failed refresh", refreshFails: true },
+	])("takes GitHub credentials away $outcome", async ({ refreshFails }) => {
+		const { workspaceId, projectId, adminId } = await workspaceWithProject("Switching off");
+		const project = { workspaceId, projectId };
+		const connectorId = await installedConnector(setup, { projectId, adminId });
+		await as(adminId)("gitHubConnectors.addRepository", {
+			projectId,
+			connectorId,
+			repository: "acme/web",
+		});
+
+		const savedProvider = await runOnPostgres(
+			Effect.flatMap(ComputerProviderStore.Service, (providers) =>
+				providers.create(workspaceId, {
+					createdById: adminId,
+					provider: {
+						settings: { builtIn: "opensandbox", serverUrl: "http://computers.test" },
+						enabled: true,
+						apiKey: "computer-provider-key",
+					},
+				}),
+			).pipe(Effect.provide(ComputerProviderStore.layer)),
+		);
+		const id = Computers.ComputerId("running-computer");
+		const computerId = crypto.randomUUID();
+		const holder = { kind: "turn", id: "turn-using-github" } satisfies ProjectComputers.Holder;
+		await onDatabase((db) =>
+			db.insert(computer).values({
+				...project,
+				id: computerId,
+				computerProviderId: savedProvider.id,
+				providerComputerId: id,
+				image: "test",
+			}),
+		);
+		await onDatabase((db) =>
+			db.insert(computerLease).values({
+				computerId,
+				providerComputerId: id,
+				holderKind: holder.kind,
+				holderId: holder.id,
+				expiresAt: new Date(Date.now() + 60_000),
+			}),
+		);
+		const unused = () => Effect.die("This test only refreshes a running computer");
+		let credentials: readonly Computers.Credential[] = [];
+		const credentialsRemoved = Deferred.makeUnsafe<void>();
+		let failRefresh = false;
+		const running: Computers.Computer = {
+			id,
+			exec: unused,
+			readFile: unused,
+			writeFile: unused,
+			downloadFile: unused,
+			uploadFile: unused,
+			endpoint: unused,
+			setNetwork: (network) =>
+				Effect.gen(function* () {
+					if (failRefresh) {
+						return yield* new Computers.Unavailable({
+							provider: "opensandbox",
+							cause: new Error("Could not update the network"),
+						});
+					}
+					credentials = network.credentials;
+					if (credentials.length === 0) yield* Deferred.succeed(credentialsRemoved, undefined);
+				}),
+		};
+		const provider: Computers.Provider = {
+			capabilities: { sleepKeeps: "disk", credentials: "host-and-path", blocksHosts: true },
+			networkMode: "open",
+			check: Effect.void,
+			create: unused,
+			open: () => Effect.succeed({ computer: running, resumed: false }),
+			info: unused,
+			sleep: unused,
+			destroy: unused,
+		};
+		const projectComputers = ProjectComputers.layerNoDeps.pipe(
+			Layer.provide([
+				ComputerProviderStore.layer,
+				GitHubSignIn.layer,
+				Layer.succeed(Computers.Service, { forAccess: () => provider }),
+			]),
+		);
+		const services = Layer.mergeAll(
+			projectComputers,
+			ConnectorCatalog.layer,
+			Connectors.layerNoDeps.pipe(
+				Layer.provide([ConnectorStore.layer, ConnectorSignIn.layer, projectComputers]),
+			),
+		).pipe(Layer.provide(egressToGitHub(github.fetch)));
+		const principal = await setup.member(adminId);
+		const setEnabled = (enabled: boolean) =>
+			update.run(
+				principal,
+				{ projectId, connectorId, changes: { enabled } },
+				{ kind: "request", request: crypto.randomUUID() },
+			);
+		const expectedCredentials = [
+			expect.objectContaining({ host: "github.com", pathPrefix: "/acme/" }),
+		];
+
+		await runOnPostgres(
+			Effect.gen(function* () {
+				const computers = yield* ProjectComputers.Service;
+				const tools = yield* ConnectorCatalog.Service;
+				const offered = () =>
+					tools.forTurn(workspaceId, { projectId, ownProjectId: null }, { ...NO_TURN, principal });
+				yield* computers.applyNetwork(project);
+				expect(credentials).toEqual(expectedCredentials);
+				const before = yield* offered();
+				expect(Object.keys(before.tools).length).toBeGreaterThan(0);
+				expect(Object.keys(before.instructions)).toHaveLength(1);
+
+				failRefresh = refreshFails;
+				const switchedOff = yield* setEnabled(false);
+
+				expect(switchedOff.enabled).toBe(false);
+				const after = yield* offered();
+				expect(after.tools).toEqual({});
+				expect(after.instructions).toEqual({});
+				expect(yield* connectors.forProject(project)).toBeUndefined();
+
+				if (refreshFails) {
+					expect(credentials).toEqual(expectedCredentials);
+					failRefresh = false;
+					yield* computers.renew(holder);
+					yield* Deferred.await(credentialsRemoved);
+				}
+				expect(credentials).toEqual([]);
+
+				yield* setEnabled(true);
+				expect(credentials).toEqual(expectedCredentials);
+			}).pipe(Effect.scoped, Effect.provide(services)),
+		);
+	});
 
 	it("lists what the app reaches, for someone who manages the bot's connectors", async () => {
 		const { projectId, adminId, editorId } = fixture;
@@ -558,7 +712,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 				projectId: other.projectId,
 				connectorId,
 			}),
-		).rejects.toMatchObject({ _tag: "NotGitHubConnector" });
+		).rejects.toMatchObject({ _tag: "ResourceHidden" });
 	});
 
 	describe("deliveries to the connector's webhook", () => {

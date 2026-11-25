@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect";
+import { processLayer } from "../../tiers.ts";
 import { AutomationSteps } from "./automation.workflow.ts";
 import { AutomationRunner } from "./automation-runner.ts";
 import { AutomationSettlement } from "./settlement.ts";
@@ -15,4 +16,4 @@ export const automationStepsLayer = Layer.effect(
 			fail: (stored) => settlement.failRun(stored),
 		});
 	}),
-);
+).pipe(processLayer);

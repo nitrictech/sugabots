@@ -5,7 +5,7 @@
 
 import { Schema } from "effect";
 import { botSchema } from "../bots.ts";
-import { ComputerMadeMeanwhile, ComputerUnavailable } from "../errors/computers.ts";
+import { ClaimLost, ComputerMadeMeanwhile, ComputerUnavailable } from "../errors/computers.ts";
 import {
 	AdministratorInEveryProject,
 	BotNotPublic,
@@ -18,7 +18,15 @@ import {
 	ProjectSlugTaken,
 	UnusableProjectName,
 } from "../errors/projects.ts";
-import { ActionForbidden, BotCannotReach, ResourceHidden } from "../errors/proofs.ts";
+import {
+	ActionForbidden,
+	ApprovalNeeded,
+	ApprovalRefused,
+	BotCannotReach,
+	ResourceHidden,
+	TurnEnded,
+} from "../errors/proofs.ts";
+import { TurnExecutionSuperseded } from "../errors/turns.ts";
 import { memberParticipantSchema } from "../messages.ts";
 import {
 	newProjectMemberSchema,
@@ -27,7 +35,7 @@ import {
 	projectSchema,
 	projectUpdateSchema,
 } from "../projects.ts";
-import { uuidSchema } from "../uuid.ts";
+import { uuidOrStringSchema, uuidSchema } from "../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../workspaces.ts";
 import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
@@ -41,8 +49,18 @@ const refusals = [...reachRefusals, ActionForbidden] as const;
 /** How an operation that proves what it may do in a workspace refuses. */
 const workspaceRefusals = [ResourceHidden, ActionForbidden] as const;
 
+/** How a bot's call that may wait for approval, and writes for its turn, is refused. */
+const approvalAndFenceRefusals = [
+	ApprovalNeeded,
+	ApprovalRefused,
+	TurnEnded,
+	TurnExecutionSuperseded,
+] as const;
+
+const projectIdSchema = uuidSchema.annotate({ description: "The project's id." });
+
 /** A project, by its id. */
-const aProject = Schema.Struct({ projectId: uuidSchema });
+const aProject = Schema.Struct({ projectId: projectIdSchema });
 
 export const projectsContracts = {
 	"projects.list": OperationContract.make("projects.list", {
@@ -55,8 +73,13 @@ export const projectsContracts = {
 	}),
 	"projects.create": OperationContract.make("projects.create", {
 		description:
-			"Make a project, with you in it, led by a public bot. Its address is derived from its name unless you give one.",
-		input: Schema.Struct({ workspace: workspaceIdOrSlugSchema, ...newProjectSchema.fields }),
+			"Make a project led by a public bot, with you in it, or for a bot, the member it acts for. Public projects are listed for anyone in the workspace to join; private ones only for the members added. Its address is derived from its name unless you give one.",
+		input: Schema.Struct({
+			workspace: workspaceIdOrSlugSchema.annotate({
+				description: "The workspace's id or address.",
+			}),
+			...newProjectSchema.fields,
+		}),
 		output: projectSchema,
 		errors: [
 			...workspaceRefusals,
@@ -64,6 +87,7 @@ export const projectsContracts = {
 			UnusableProjectName,
 			ProjectSlugTaken,
 			BotNotPublic,
+			...approvalAndFenceRefusals,
 		],
 		changes: true,
 	}),
@@ -77,10 +101,10 @@ export const projectsContracts = {
 	}),
 	"projects.remove": OperationContract.make("projects.remove", {
 		description:
-			"Delete a project, with its chats, files, connectors, automations and computer. It is kept when its computer provider can't be reached.",
+			"Delete a project, with its chats, files, connectors, automations and computer. A recorded deletion resumes when the computer provider is reachable.",
 		input: aProject,
 		output: Schema.Void,
-		errors: [...refusals, ComputerUnavailable, ComputerMadeMeanwhile],
+		errors: [...refusals, ComputerUnavailable, ComputerMadeMeanwhile, ClaimLost],
 		changes: true,
 	}),
 	"projects.listMembers": OperationContract.make("projects.listMembers", {
@@ -108,7 +132,7 @@ export const projectsContracts = {
 	"projects.removeMember": OperationContract.make("projects.removeMember", {
 		description:
 			"Take a member out of a project. The workspace's owner and admins stay in every one.",
-		input: Schema.Struct({ projectId: uuidSchema, memberId: Schema.String }),
+		input: Schema.Struct({ projectId: uuidSchema, memberId: uuidOrStringSchema }),
 		output: Schema.Void,
 		errors: [...refusals, AdministratorInEveryProject, NotInProject],
 		changes: true,
@@ -122,10 +146,10 @@ export const projectsContracts = {
 		changes: true,
 	}),
 	"projects.join": OperationContract.make("projects.join", {
-		description: "Put yourself in a public project.",
+		description: "Put yourself in a public project, or for a bot, the member it acts for.",
 		input: aProject,
 		output: projectSchema,
-		errors: workspaceRefusals,
+		errors: [...workspaceRefusals, ...approvalAndFenceRefusals],
 		changes: true,
 	}),
 	"projects.listBots": OperationContract.make("projects.listBots", {
@@ -136,10 +160,13 @@ export const projectsContracts = {
 		changes: false,
 	}),
 	"projects.addBot": OperationContract.make("projects.addBot", {
-		description: "Add a public bot to a project.",
-		input: Schema.Struct({ projectId: uuidSchema, botId: uuidSchema }),
+		description: "Add a public bot to a project, so members there can mention it.",
+		input: Schema.Struct({
+			projectId: projectIdSchema,
+			botId: uuidSchema.annotate({ description: "The bot's id." }),
+		}),
 		output: Schema.Void,
-		errors: [...refusals, BotNotPublic],
+		errors: [...refusals, BotNotPublic, ...approvalAndFenceRefusals],
 		changes: true,
 	}),
 	"projects.removeBot": OperationContract.make("projects.removeBot", {
@@ -151,11 +178,16 @@ export const projectsContracts = {
 	}),
 } as const;
 
-/** Held back until tools become operations: a Personal Assistant's `tool` does this today. */
-const doneByAssistantTool = <const Tool extends string>(tool: Tool) =>
+/**
+ * Offered as `tool` only in member bounds, a Personal Assistant's own turns,
+ * where each call asks its member: it changes who reaches what.
+ */
+const changesReachForMember = <const Tool extends string>(tool: Tool) =>
 	({
-		kind: "heldBack",
-		reason: `Until tools become operations: a Personal Assistant's ${tool} tool does this for its member, through AssistantGuide.`,
+		kind: "offered",
+		tool,
+		offeredIn: "memberBounds",
+		approval: { kind: "always", approvers: "turn" },
 	}) as const;
 
 /** Held back: it changes who reaches the project, which a bot may only in member bounds. */
@@ -168,11 +200,15 @@ const changesWhoReaches = {
 export const projectsExposure = {
 	"projects.list": {
 		http: { kind: "offered", endpoint: "projects.list" },
-		botLoop: doneByAssistantTool("workspace_guide"),
+		botLoop: {
+			kind: "coveredBy",
+			operation: "workspaces.guide",
+			reason: "A Personal Assistant's workspace guide lists the projects its member sees.",
+		},
 	},
 	"projects.create": {
 		http: { kind: "offered", endpoint: "projects.create" },
-		botLoop: doneByAssistantTool("create_project"),
+		botLoop: changesReachForMember("create_project"),
 	},
 	"projects.update": {
 		http: { kind: "offered", endpoint: "projects.update" },
@@ -220,7 +256,7 @@ export const projectsExposure = {
 	},
 	"projects.join": {
 		http: { kind: "offered", endpoint: "projects.join" },
-		botLoop: doneByAssistantTool("join_project"),
+		botLoop: changesReachForMember("join_project"),
 	},
 	"projects.listBots": {
 		http: { kind: "offered", endpoint: "projects.listBots" },
@@ -231,7 +267,7 @@ export const projectsExposure = {
 	},
 	"projects.addBot": {
 		http: { kind: "offered", endpoint: "projects.addBot" },
-		botLoop: doneByAssistantTool("add_bot_to_project"),
+		botLoop: changesReachForMember("add_bot_to_project"),
 	},
 	"projects.removeBot": {
 		http: { kind: "offered", endpoint: "projects.removeBot" },

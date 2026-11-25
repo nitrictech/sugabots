@@ -1,9 +1,10 @@
 export * as ToolCallStore from "./store.ts";
 
 import { isDeepStrictEqual } from "node:util";
-import type { JsonValue, ToolCallPart } from "@sugabots/contracts";
+import type { FileWritten, JsonValue, ToolApprovalStatus, ToolCallPart } from "@sugabots/contracts";
+import { ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import type { UserText } from "@sugabots/errors";
-import { and, asc, eq, exists, inArray, type SQL } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, isNotNull, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import {
 	type Database,
@@ -17,19 +18,31 @@ import {
 	chat,
 	connector,
 	member,
+	message,
 	projectBot,
 	type ToolCallRow,
 	toolCall,
 	turn,
 } from "../../../database/schema.ts";
+import type { RunsTurn } from "../../../proofs/runs-turn.ts";
+import { processLayer, Tier } from "../../../tiers.ts";
 import { ChatEvents } from "../../chat-events.ts";
 import { ChatEvent, type ToolCallChange } from "../../events.ts";
 import { toToolCallPart } from "../../store/tool-calls.ts";
 import { withImagesCounted } from "../../tools/images.ts";
+import { decodeRecordedBuiltInInput } from "../../tools/recorded-input.ts";
+import {
+	type FencedProof,
+	type FenceRefusal,
+	holdRunningTurn,
+	holdTurnForToolWrite,
+} from "../fence.ts";
 import { mayRunTools } from "../lifecycle.ts";
 import { WorkAdmission } from "../work-admission.ts";
 import {
+	APPROVAL_NO_LONGER_APPLIES,
 	type ApprovalDecision,
+	INTERRUPTED_CALL,
 	isFinished,
 	ToolCallEvent,
 	type ToolCallState,
@@ -52,23 +65,67 @@ import {
  * writes the row the reply being written is saved to.
  */
 export interface Interface {
-	/** Records that a tool needing no approval has been called. */
-	readonly open: (input: {
-		chatId: string;
-		messageId: string;
-		turnId: string;
-		tool: string;
-		input: unknown;
-		/** How far into the reply's text the call was made. */
-		atOffset: number;
-		/** Whether the tool may change something at the other end. */
-		writeOrDelete: boolean;
-	}) => Effect.Effect<ToolCallPart>;
+	/**
+	 * Records that the turn `runsTurn` is about is sending a call to a tool
+	 * needing no approval, before it is sent. `toolCallId` is the model's id
+	 * for the call in its step `step`; with the turn, they are the call's key,
+	 * so it is recorded once. `undefined` when an execution recorded it first.
+	 */
+	readonly open: <P, T>(
+		runsTurn: RunsTurn<P, T>,
+		input: {
+			/** The row's id, when the caller places the call before recording it. */
+			id?: string;
+			chatId: string;
+			messageId: string;
+			step: number;
+			toolCallId: string;
+			tool: string;
+			input: unknown;
+			/** How far into the reply's text the call was made. */
+			atOffset: number;
+			/** Whether the tool may change something at the other end. */
+			writeOrDelete: boolean;
+			/** The tool the call is bound to: a connector's, as configured now, or a built-in one. */
+			binding: ApprovalBinding;
+		},
+	) => Effect.Effect<ToolCallPart | undefined, FenceRefusal>;
+	/**
+	 * Claims the recorded call `callId`, still running, for this execution of
+	 * its turn to send again: `false` when this execution sent it already.
+	 */
+	readonly claim: <P, T>(
+		runsTurn: RunsTurn<P, T>,
+		callId: string,
+	) => Effect.Effect<boolean, FenceRefusal>;
+	/**
+	 * The call the turn `runsTurn` is about recorded under the key of its step
+	 * `step` and the model's id `toolCallId`, if one did; with no step, its
+	 * newest call with that id that waited for approval. Locks the turn's row,
+	 * so nothing else records it meanwhile.
+	 */
+	readonly sent: <P, T>(
+		runsTurn: RunsTurn<P, T>,
+		key: { readonly step?: number; readonly toolCallId: string },
+	) => Effect.Effect<ToolCallRow | undefined, FenceRefusal>;
+	/** The model's ids for calls already recorded for this step of the turn. */
+	readonly recordedCallIds: (turnId: string, step: number) => Effect.Effect<readonly string[]>;
+	/**
+	 * Ends the call `callId`, sent but not finished, as interrupted, telling
+	 * members `userMessage` of it; a pending approval is denied. `undefined`
+	 * if it had finished.
+	 */
+	readonly interrupt: <P, T>(
+		runsTurn: RunsTurn<P, T>,
+		callId: string,
+		userMessage: UserText,
+	) => Effect.Effect<ToolCallPart | undefined, FenceRefusal>;
 	/** Records what the tool returned or how it failed. `undefined` if the call is not running. */
-	readonly close: (
+	readonly close: <P, T>(
+		runsTurn: RunsTurn<P, T>,
 		toolCallId: string,
 		outcome: ToolCallOutcome,
-	) => Effect.Effect<ToolCallPart | undefined>;
+	) => Effect.Effect<ToolCallPart | undefined, FenceRefusal>;
 	/** Parks the calls a reply asked for until members decide them. */
 	readonly requestApprovals: (
 		reply: { chatId: string; messageId: string; turnId: string },
@@ -89,15 +146,20 @@ export interface Interface {
 	 * approved, and its automation run, if any, still takes work (see
 	 * `WorkAdmission`).
 	 */
-	readonly beginExecution: (input: {
-		chatId: string;
-		messageId: string;
-		turnId: string;
-		sdkToolCallId: string;
-		tool: string;
-		input: unknown;
-		binding: ApprovalBinding;
-	}) => Effect.Effect<BeganExecution>;
+	readonly beginExecution: <P, T>(
+		runsTurn: RunsTurn<P, T>,
+		input: {
+			sdkToolCallId: string;
+			tool: string;
+			input: unknown;
+			binding: ApprovalBinding;
+		},
+	) => Effect.Effect<BeganExecution, FenceRefusal>;
+	/** How each of the turn `turnId`'s approvals `approvalIds` stands, by approval. */
+	readonly decisions: (
+		turnId: string,
+		approvalIds: readonly string[],
+	) => Effect.Effect<ReadonlyMap<string, ToolApprovalStatus>>;
 	/**
 	 * Fails these turns' unfinished calls, denying pending approvals, for turns
 	 * that ended before their tools returned. `userMessage` is what members are
@@ -107,18 +169,23 @@ export interface Interface {
 		turnIds: readonly string[],
 		userMessage: UserText,
 	) => Effect.Effect<void>;
+	/**
+	 * Withdraws the approvals the turn `turnId` waits for that nobody has
+	 * decided, as its asker's steer does: each such call ends unmade, telling
+	 * members `userMessage`, and announces it. A call already allowed is left
+	 * for the turn to make. Says which approvals it withdrew.
+	 */
+	readonly withdrawPending: (
+		turnId: string,
+		userMessage: UserText,
+	) => Effect.Effect<readonly string[]>;
 	/** Forgets a reply's calls, for a retry that starts the reply again. */
 	readonly forgetReply: (messageId: string) => Effect.Effect<void>;
-	/** What the turn's completed calls to `tools` returned, oldest first. */
-	readonly completedOutputs: (
-		turnId: string,
-		tools: readonly string[],
-	) => Effect.Effect<JsonValue[]>;
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-	"@sugabots/core/ToolCallStore",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ToolCallStore") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ToolCallStore");
@@ -153,39 +220,137 @@ export const make = Effect.gen(function* () {
 	});
 
 	return Service.of({
-		open: (input) =>
+		open: (runsTurn, input) =>
 			operation(
 				"open",
 				transaction(
 					Effect.gen(function* () {
+						yield* holdRunningTurn(runsTurn, "share");
 						const startedAt = yield* DateTime.nowAsDate;
-						const row = yield* query((db) =>
+						const [row] = yield* query((db) =>
 							db
 								.insert(toolCall)
 								.values({
+									...(input.id === undefined ? {} : { id: input.id }),
 									chatId: input.chatId,
 									messageId: input.messageId,
-									turnId: input.turnId,
+									turnId: runsTurn.turn.value,
+									step: input.step,
+									sdkToolCallId: input.toolCallId,
 									tool: input.tool,
 									input: boundedJson(input.input),
 									atOffset: input.atOffset,
 									writeOrDelete: input.writeOrDelete,
+									...bindingColumns(input.binding),
+									executionInput: executionJson(input.input),
+									sentInExecution: runsTurn.execution,
 									startedAt,
 								})
+								.onConflictDoNothing({
+									target: [toolCall.turnId, toolCall.step, toolCall.sdkToolCallId],
+								})
 								.returning(),
-						).pipe(Effect.flatMap(writtenRow("tool_call")));
+						);
+						if (!row) return undefined;
 						yield* emit([ChatEvent.ToolCallStarted(toolCallChange(row))]);
 						return toToolCallPart(row);
 					}),
 				),
 			),
 
-		close: (toolCallId, outcome) =>
+		sent: (runsTurn, key) =>
+			operation(
+				"sent",
+				transaction(
+					Effect.gen(function* () {
+						yield* holdRunningTurn(runsTurn, "update");
+						const [row] = yield* query((db) =>
+							db
+								.select()
+								.from(toolCall)
+								.where(
+									and(
+										eq(toolCall.turnId, runsTurn.turn.value),
+										eq(toolCall.sdkToolCallId, key.toolCallId),
+										key.step === undefined
+											? isNotNull(toolCall.approvalId)
+											: eq(toolCall.step, key.step),
+									),
+								)
+								.orderBy(desc(toolCall.createdAt), desc(toolCall.id))
+								.limit(1),
+						);
+						return row;
+					}),
+				),
+			),
+
+		recordedCallIds: (turnId, step) =>
+			operation(
+				"recordedCallIds",
+				Effect.map(
+					query((db) =>
+						db
+							.select({ id: toolCall.sdkToolCallId })
+							.from(toolCall)
+							.where(and(eq(toolCall.turnId, turnId), eq(toolCall.step, step))),
+					),
+					(rows) => rows.flatMap(({ id }) => (id === null ? [] : [id])),
+				),
+			),
+
+		claim: (runsTurn, callId) =>
+			operation(
+				"claim",
+				transaction(
+					Effect.gen(function* () {
+						yield* holdRunningTurn(runsTurn, "share");
+						const claimed = yield* query((db) =>
+							db
+								.update(toolCall)
+								.set({ sentInExecution: runsTurn.execution })
+								.where(
+									and(
+										eq(toolCall.id, callId),
+										eq(toolCall.turnId, runsTurn.turn.value),
+										eq(toolCall.status, "running"),
+										sql`${toolCall.sentInExecution} is distinct from ${runsTurn.execution}`,
+									),
+								)
+								.returning({ id: toolCall.id }),
+						);
+						return claimed.length > 0;
+					}),
+				),
+			),
+
+		interrupt: (runsTurn, callId, userMessage) =>
+			operation(
+				"interrupt",
+				transaction(
+					Effect.gen(function* () {
+						yield* holdRunningTurn(runsTurn, "share");
+						const row = yield* lockedCall(
+							and(eq(toolCall.id, callId), eq(toolCall.turnId, runsTurn.turn.value)),
+						);
+						if (!row) return undefined;
+						const interrupted = yield* apply(row, ToolCallEvent.Abandon({ userMessage }));
+						if (!interrupted) return undefined;
+						yield* emit([ChatEvent.ToolCallFinished(toolCallChange(interrupted))]);
+						return toToolCallPart(interrupted);
+					}),
+				),
+			),
+
+		close: (runsTurn, toolCallId, outcome) =>
 			operation(
 				"close",
 				transaction(
 					Effect.gen(function* () {
-						const row = yield* lockedCall(eq(toolCall.id, toolCallId));
+						yield* holdRunningTurn(runsTurn, "share");
+						const row = yield* lockedCall(
+							and(eq(toolCall.id, toolCallId), eq(toolCall.turnId, runsTurn.turn.value)),
+						);
 						if (!row) return undefined;
 						const closed = yield* apply(
 							row,
@@ -209,30 +374,72 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						if (approvals.length === 0) return;
-						const rows = yield* query((db) =>
-							db
-								.insert(toolCall)
-								.values(
-									approvals.map((approval) => ({
-										id: approval.id,
-										chatId: reply.chatId,
-										messageId: reply.messageId,
-										turnId: reply.turnId,
-										tool: approval.tool,
-										sdkToolCallId: approval.sdkToolCallId,
+						const askedAt = yield* DateTime.nowAsDate;
+						const fresh = approvals.filter((call) => !call.reopen);
+						const rows =
+							fresh.length === 0
+								? []
+								: yield* query((db) =>
+										db
+											.insert(toolCall)
+											.values(
+												fresh.map((approval) => ({
+													id: approval.id,
+													chatId: reply.chatId,
+													messageId: reply.messageId,
+													turnId: reply.turnId,
+													step: approval.step,
+													tool: approval.tool,
+													sdkToolCallId: approval.sdkToolCallId,
+													approvalId: approval.approvalId,
+													approvalStatus: "pending" as const,
+													approvalReason: approval.reason ?? null,
+													approvalComputerProjectId: approval.computerProjectId ?? null,
+													approvalConnectorAccess: approval.connectorAccess ?? null,
+													approvalAskedAt: askedAt,
+													...bindingColumns(approval.binding),
+													input: boundedJson(approval.input),
+													executionInput: executionJson(approval.input),
+													status: "awaiting_approval" as const,
+													writeOrDelete: approval.writeOrDelete,
+													atOffset: approval.atOffset,
+												})),
+											)
+											.returning(),
+									);
+						for (const approval of approvals.filter((call) => call.reopen)) {
+							const row = yield* lockedCall(
+								and(
+									eq(toolCall.id, approval.id),
+									eq(toolCall.turnId, reply.turnId),
+									eq(toolCall.step, approval.step),
+									eq(toolCall.sdkToolCallId, approval.sdkToolCallId),
+									eq(toolCall.status, "running"),
+								),
+							);
+							if (!row || !sameCallAsApproved(row, approval))
+								return yield* Effect.die(new Error("Tool call cannot be reopened for approval"));
+							const updated = yield* query((db) =>
+								db
+									.update(toolCall)
+									.set({
 										approvalId: approval.approvalId,
-										approvalStatus: "pending" as const,
+										approvalStatus: "pending",
 										approvalReason: approval.reason ?? null,
-										...bindingColumns(approval.binding),
-										input: boundedJson(approval.input),
-										executionInput: executionJson(approval.input),
-										status: "awaiting_approval" as const,
-										writeOrDelete: approval.writeOrDelete,
-										atOffset: approval.atOffset,
-									})),
-								)
-								.returning(),
-						);
+										approvalComputerProjectId: approval.computerProjectId ?? null,
+										approvalConnectorAccess: approval.connectorAccess ?? null,
+										approvalAskedAt: askedAt,
+										decidedById: null,
+										decidedAt: null,
+										sentInExecution: null,
+										status: "awaiting_approval",
+										writeOrDelete: row.writeOrDelete || approval.writeOrDelete,
+									})
+									.where(eq(toolCall.id, row.id))
+									.returning(),
+							);
+							rows.push(...updated);
+						}
 						// In the order the reply asked for them, which is how the chat lists them.
 						const byId = new Map(rows.map((row) => [row.id, row]));
 						yield* emit(
@@ -280,29 +487,58 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		beginExecution: (input) =>
+		beginExecution: (runsTurn, input) =>
 			operation(
 				"beginExecution",
 				transaction(
-					Effect.gen(function* (): Effect.fn.Return<BeganExecution, never, Database | Transaction> {
-						if (!(yield* admission.admits(input.chatId))) {
+					Effect.gen(function* (): Effect.fn.Return<
+						BeganExecution,
+						FenceRefusal,
+						Database | Transaction
+					> {
+						// Settlement locks the automation run before it locks any turn.
+						const refused = yield* admission.refusal(runsTurn.chat);
+						if (refused === "chatUnavailable") return refusedExecution("The chat is unavailable");
+						if (refused === "automationEnded") {
 							return refusedExecution("The automation run takes no more work");
 						}
+						yield* holdRunningTurn(runsTurn, "update");
 						const [scope] = yield* query((db) =>
 							db
 								.select({
+									messageId: message.id,
 									workspaceId: chat.workspaceId,
 									botId: turn.botId,
 									status: turn.status,
-									interruptRequested: turn.interruptRequested,
+									endRequested: turn.endRequested,
 								})
 								.from(turn)
 								.innerJoin(chat, eq(chat.id, turn.chatId))
-								.where(and(eq(turn.id, input.turnId), eq(turn.chatId, input.chatId)))
-								.limit(1)
-								.for("update", { of: turn }),
+								.innerJoin(message, and(eq(message.turnId, turn.id), eq(message.chatId, chat.id)))
+								.where(and(eq(turn.id, runsTurn.turn.value), eq(turn.chatId, runsTurn.chat)))
+								.limit(1),
 						);
 						if (!scope || !mayRunTools(scope)) return refusedExecution("The turn is not running");
+						const row = yield* lockedCall(
+							and(
+								eq(toolCall.turnId, runsTurn.turn.value),
+								eq(toolCall.chatId, runsTurn.chat),
+								eq(toolCall.messageId, scope.messageId),
+								eq(toolCall.sdkToolCallId, input.sdkToolCallId),
+								eq(toolCall.status, "awaiting_approval"),
+							),
+						);
+						// Every call bound to an approval was parked for a member to allow first.
+						if (!row) return { _tag: "NoPendingApproval" };
+						const refuse = (reason: string) =>
+							Effect.gen(function* () {
+								const failed = yield* apply(
+									row,
+									ToolCallEvent.Abandon({ userMessage: APPROVAL_NO_LONGER_APPLIES }),
+								);
+								if (failed) yield* emit([ChatEvent.ToolCallFinished(toolCallChange(failed))]);
+								return refusedExecution(reason);
+							});
 						const { binding } = input;
 						if (binding.kind === "connector") {
 							const [approvedConnector] = yield* query((db) =>
@@ -332,22 +568,14 @@ export const make = Effect.gen(function* () {
 									.for("update"),
 							);
 							if (!approvedConnector) {
-								return refusedExecution("The connector's configuration changed after approval");
+								return yield* refuse("The connector's configuration changed after approval");
 							}
 							// Choosing what bots may do with a tool leaves the revision alone, so
 							// a tool somebody turned off after the approval is caught here.
 							if (approvedConnector.toolAccess[binding.remoteToolName] === "off") {
-								return refusedExecution("The tool was turned off after approval");
+								return yield* refuse("The tool was turned off after approval");
 							}
 						}
-						const row = yield* lockedCall(
-							and(
-								eq(toolCall.turnId, input.turnId),
-								eq(toolCall.sdkToolCallId, input.sdkToolCallId),
-							),
-						);
-						// Every call bound to an approval was parked for a member to allow first.
-						if (!row) return refusedExecution("The call has no approval record");
 						if (!sameCallAsApproved(row, input)) {
 							return refusedExecution(
 								"The call was already claimed, or no longer matches what was approved",
@@ -381,7 +609,13 @@ export const make = Effect.gen(function* () {
 								.for("update"),
 						);
 						const abandoned = yield* Effect.forEach(unfinished, (row) =>
-							apply(row, ToolCallEvent.Abandon({ userMessage })),
+							apply(
+								row,
+								ToolCallEvent.Abandon({
+									userMessage:
+										row.status === "running" && row.writeOrDelete ? INTERRUPTED_CALL : userMessage,
+								}),
+							),
 						);
 						yield* emit(
 							abandoned.flatMap((row) =>
@@ -392,6 +626,58 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
+		withdrawPending: (turnId, userMessage) =>
+			operation(
+				"withdrawPending",
+				transaction(
+					Effect.gen(function* () {
+						const pending = yield* query((db) =>
+							db
+								.select()
+								.from(toolCall)
+								.where(and(eq(toolCall.turnId, turnId), eq(toolCall.approvalStatus, "pending")))
+								.orderBy(toolCall.createdAt, toolCall.id)
+								.for("update"),
+						);
+						const withdrawn = yield* Effect.forEach(pending, (row) =>
+							apply(row, ToolCallEvent.Abandon({ userMessage })),
+						);
+						yield* emit(
+							withdrawn.flatMap((row) =>
+								row ? [ChatEvent.ToolCallFinished(toolCallChange(row))] : [],
+							),
+						);
+						return withdrawn.flatMap((row) => (row?.approvalId ? [row.approvalId] : []));
+					}),
+				),
+			),
+
+		decisions: (turnId, approvalIds) =>
+			operation(
+				"decisions",
+				Effect.map(
+					query((db) =>
+						approvalIds.length === 0
+							? Effect.succeed([])
+							: db
+									.select({ approvalId: toolCall.approvalId, status: toolCall.approvalStatus })
+									.from(toolCall)
+									.where(
+										and(
+											eq(toolCall.turnId, turnId),
+											inArray(toolCall.approvalId, [...approvalIds]),
+										),
+									),
+					),
+					(rows) =>
+						new Map(
+							rows.flatMap(({ approvalId, status }) =>
+								approvalId && status ? [[approvalId, status] as const] : [],
+							),
+						),
+				),
+			),
+
 		forgetReply: (messageId) =>
 			operation(
 				"forgetReply",
@@ -399,31 +685,10 @@ export const make = Effect.gen(function* () {
 					Effect.asVoid,
 				),
 			),
-
-		completedOutputs: (turnId, tools) =>
-			operation(
-				"completedOutputs",
-				Effect.map(
-					query((db) =>
-						db
-							.select({ output: toolCall.output })
-							.from(toolCall)
-							.where(
-								and(
-									eq(toolCall.turnId, turnId),
-									inArray(toolCall.tool, [...tools]),
-									eq(toolCall.status, "completed"),
-								),
-							)
-							.orderBy(asc(toolCall.startedAt)),
-					),
-					(rows) => rows.flatMap(({ output }) => (output === null ? [] : [output])),
-				),
-			),
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /** Stored inputs and outputs are cut at this many characters of JSON. */
 const MAX_STORED_JSON_CHARACTERS = 64_000;
@@ -447,11 +712,16 @@ export type ApprovalBinding =
 /** A tool call a reply asked for, to be parked until a member decides it. */
 export interface PendingToolApproval {
 	id: string;
+	reopen?: boolean;
 	approvalId: string;
+	/** The step that made the call. */
+	step: number;
 	sdkToolCallId: string;
 	tool: string;
 	input: unknown;
 	reason?: string;
+	computerProjectId?: string | undefined;
+	connectorAccess?: "allow" | "ask" | undefined;
 	binding: ApprovalBinding;
 	/** Whether the tool may change something, as opposed to one the connector's `ask` holds back. */
 	writeOrDelete: boolean;
@@ -461,6 +731,7 @@ export interface PendingToolApproval {
 /** A started call, or why it may not start; `reason` is for the logs. */
 type BeganExecution =
 	| { readonly _tag: "Running"; readonly call: ToolCallRow }
+	| { readonly _tag: "NoPendingApproval" }
 	| { readonly _tag: "Refused"; readonly reason: string };
 
 /**
@@ -486,6 +757,53 @@ function executionJson(value: unknown): JsonValue {
 	return JSON.parse(JSON.stringify(value ?? null));
 }
 
+export const replayWrittenFile = (fence: FencedProof, toolCallId: string) =>
+	Effect.gen(function* () {
+		const { receipt } = yield* fileWriteCall(fence, toolCallId, false);
+		if (receipt) yield* transaction(holdTurnForToolWrite(fence));
+		return receipt;
+	});
+
+/** commitWrittenFile saves the receipt with the file change while holding the turn's execution fence. */
+export const commitWrittenFile = <E>(
+	fence: FencedProof,
+	toolCallId: string,
+	write: Effect.Effect<FileWritten, E, Database>,
+) =>
+	transaction(
+		Effect.gen(function* () {
+			yield* holdTurnForToolWrite(fence);
+			// Lock the call before changing any file so concurrent retries share one receipt.
+			const { receipt: replay } = yield* fileWriteCall(fence, toolCallId, true);
+			if (replay) return { receipt: replay, usedContent: false };
+
+			const receipt = yield* write;
+			yield* query((db) =>
+				db
+					.update(toolCall)
+					.set({ writtenFileReceipt: receipt })
+					.where(fileWriteCallScope(fence, toolCallId)),
+			);
+			return { receipt, usedContent: true };
+		}),
+	);
+
+const fileWriteCallScope = (fence: FencedProof, toolCallId: string) =>
+	and(eq(toolCall.id, toolCallId), eq(toolCall.turnId, fence.turn.value));
+
+const fileWriteCall = (fence: FencedProof, toolCallId: string, lock: boolean) =>
+	Effect.gen(function* () {
+		const [row] = yield* query((db) => {
+			const select = db
+				.select({ receipt: toolCall.writtenFileReceipt })
+				.from(toolCall)
+				.where(fileWriteCallScope(fence, toolCallId));
+			return lock ? select.for("update") : select;
+		});
+		if (!row) return yield* new ApprovalRefused();
+		return row;
+	});
+
 const lockedCall = (condition: SQL | undefined) =>
 	Effect.map(
 		query((db) => db.select().from(toolCall).where(condition).limit(1).for("update")),
@@ -509,11 +827,13 @@ function refusedExecution(reason: string): BeganExecution {
 /** sameCallAsApproved reports whether the call about to run is the one a member saw and allowed. */
 function sameCallAsApproved(
 	row: ToolCallRow,
-	input: Parameters<Interface["beginExecution"]>[0],
+	input: {
+		tool: string;
+		input: unknown;
+		binding: ApprovalBinding;
+	},
 ): boolean {
 	return (
-		row.chatId === input.chatId &&
-		row.messageId === input.messageId &&
 		row.tool === input.tool &&
 		isDeepStrictEqual(
 			{
@@ -523,7 +843,43 @@ function sameCallAsApproved(
 			},
 			bindingColumns(input.binding),
 		) &&
-		isDeepStrictEqual(row.executionInput, executionJson(input.input))
+		sameExecutionInput({ ...row, executionInput: row.executionInput ?? row.input }, input.input)
+	);
+}
+
+/**
+ * sameCallAsSent reports whether `current` is the call recorded as `row`:
+ * the same tool, bound as it was, with the same input, and still classed as
+ * changing nothing if it was. A call that fails this is not sent again.
+ */
+export function sameCallAsSent(
+	row: ToolCallRow,
+	current: { tool: string; input: unknown; binding: ApprovalBinding; writeOrDelete: boolean },
+): boolean {
+	return (
+		row.tool === current.tool &&
+		row.writeOrDelete === current.writeOrDelete &&
+		isDeepStrictEqual(
+			{
+				connectorId: row.connectorId,
+				connectorRevision: row.connectorRevision,
+				remoteToolName: row.remoteToolName,
+			},
+			bindingColumns(current.binding),
+		) &&
+		sameExecutionInput(row, current.input)
+	);
+}
+
+function sameExecutionInput(row: ToolCallRow, input: unknown): boolean {
+	const current = executionJson(input);
+	if (isDeepStrictEqual(row.executionInput, current)) return true;
+	return (
+		row.connectorId === null &&
+		isDeepStrictEqual(
+			executionJson(decodeRecordedBuiltInInput(row.tool, row.executionInput)),
+			current,
+		)
 	);
 }
 

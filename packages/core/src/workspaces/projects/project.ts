@@ -9,13 +9,9 @@ import {
 } from "@sugabots/contracts";
 import { InvalidProjectDetails, UnusableProjectName } from "@sugabots/contracts/errors/projects";
 import { Effect, Schema } from "effect";
-import type { ProjectStanding } from "../../authorization/access.ts";
-import {
-	type Actor,
-	type ProjectFacts,
-	projectPermissions,
-} from "../../authorization/permissions.ts";
 import type * as schema from "../../database/schema.ts";
+import type { MemberPlace, ProjectFacts } from "../../proofs/facts.ts";
+import { projectPermissionsShown } from "../../proofs/shown-permissions.ts";
 
 /** The row as the API returns it: timestamps as ISO strings, no internals. */
 function toProject(
@@ -39,25 +35,22 @@ function toProject(
 }
 
 /**
- * The project as one member sees it, permissions and all.
- *
- * Takes a standing rather than a project and a member, so the permissions on
- * it are always the ones the caller who asked for it holds.
+ * The project, one members made, as the member at `place` sees it,
+ * permissions and all.
  */
-export function projectSeenBy({ project: row, actor, facts }: ProjectStanding): Project {
-	return projectSeenAs(row, actor, facts);
+export function projectSeenAs(row: schema.ProjectRow, place: MemberPlace): Project {
+	return toProject(row, place.inProject, projectPermissionsShown(place, projectFactsOf(row)));
 }
 
-/**
- * The project as `actor` sees it, permissions and all, from whether they are
- * in it and the bot whose default project it is.
- */
-export function projectSeenAs(row: schema.ProjectRow, actor: Actor, facts: ProjectFacts): Project {
-	return toProject(
-		row,
-		facts.isMember,
-		projectPermissions(actor, { ...facts, isPublic: row.visibility === "public" }),
-	);
+/** The facts of `row`, a project members made, as the provers decide from them. */
+export function projectFactsOf(row: schema.ProjectRow): ProjectFacts {
+	return {
+		id: row.id,
+		workspace: row.workspaceId,
+		leadBot: row.leadBotId,
+		visibility: row.visibility,
+		defaultOf: null,
+	};
 }
 
 /** A project's stored colour, or the default when it has none. */

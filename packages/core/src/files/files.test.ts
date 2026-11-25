@@ -1,10 +1,13 @@
 import { MAX_FILE_CONTENT_CHARACTERS } from "@sugabots/contracts";
-import { eq, like } from "drizzle-orm";
+import type { InputOf } from "@sugabots/contracts/operations";
+import { eq } from "drizzle-orm";
 import { Effect, Layer, Stream } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { seedMessage, seedTurnAnswering } from "../authentication/seed.test-support.ts";
+import { TurnAuthentication } from "../authentication/turn.ts";
+import { askerColumns } from "../authentication/turn-facts.ts";
 import { seedChat } from "../chats/seed.test-support.ts";
 import {
-	blobDeletion,
 	bot,
 	fileVersion,
 	member,
@@ -18,7 +21,8 @@ import {
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { asMember } from "../operations/chats/testing.ts";
-import { type CallOperation, servedOperations } from "../operations/testing.ts";
+import type { Operations } from "../operations/registry.ts";
+import { type CallOperation, operationsForTests, servedOperations } from "../operations/testing.ts";
 import { Secrets } from "../secrets/secrets.ts";
 import { ServerSettings } from "../server-settings/server-settings.ts";
 import { defaultProjectOf } from "../workspaces/projects/project-reads.ts";
@@ -31,75 +35,141 @@ import { FilePages } from "./pages.ts";
 const testCredentials = Secrets.fromKey(Buffer.alloc(32).toString("base64"));
 
 describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
-	let by: Files.BotInChat;
+	let by: { chatId: string; botId: string };
 	let editorId: string;
 	let outsiderId: string;
 	let adminId: string;
 	let projectId: string;
 	/** A bot outside the project, working in a chat of its own. */
-	let botElsewhere: Files.BotInChat;
+	let botElsewhere: { chatId: string; botId: string };
 	let call: CallOperation;
+	let operations: Operations.Interface;
+	let turnId: string;
+	let replyId: string;
 
 	beforeAll(async () => {
 		call = await servedOperations();
+		operations = await operationsForTests();
 	});
 
 	/** What `memberId`, signed in, reads and deletes of the files in chats. */
 	const filesAs = (memberId: string) => asMember(call, memberId).files;
 
-	const authoring = async () => ({
-		service: await runOnPostgres(Effect.provide(Files.Authoring, Files.authoringLayer)),
-		/** Runs `effect`, which should fail, to its failure. */
-		failureOf: <A, E>(effect: Effect.Effect<A, E>) => runOnPostgres(Effect.flip(effect)),
-	});
+	const seed = (input: Parameters<typeof Files.seedWrittenFile>[1], writer = by) =>
+		runOnPostgres(Files.seedWrittenFile(writer, input));
 
-	it("writes over a version in place, keeping its number and queueing its old content", async () => {
-		const { service } = await authoring();
-		const made = await runOnPostgres(
-			service.create(by, { kind: "markdown", title: "Notes", content: "# One" }),
+	const authenticate = (id: string) =>
+		runOnPostgres(
+			TurnAuthentication.Service.use((auth) => auth.authenticate(id)).pipe(
+				Effect.provide(TurnAuthentication.layer),
+			),
 		);
 
-		const over = await runOnPostgres(
-			service.edit(by, {
-				fileId: made.id,
-				baseVersion: 1,
-				oldText: "One",
-				newText: "Two",
-				inPlace: true,
-			}),
-		);
-
-		expect(over).toMatchObject({ version: 1, content: "# Two" });
-		expect(await runOnPostgres(service.read(by, made.id))).toMatchObject({
-			version: 1,
-			content: "# Two",
-		});
-		const queued = await onDatabase((db) =>
+	const allowedChange = async <Name extends "files.write" | "files.edit">(
+		name: Name,
+		input: InputOf<Name>,
+	) => {
+		const [row] = await onDatabase((db) =>
 			db
-				.select()
-				.from(blobDeletion)
-				.where(like(blobDeletion.prefix, `files/${made.id}/%`)),
+				.insert(toolCall)
+				.values({
+					chatId: by.chatId,
+					messageId: replyId,
+					turnId,
+					tool: name === "files.write" ? "file_write" : "file_edit",
+					input,
+					executionInput: input,
+					status: "awaiting_approval",
+					approvalStatus: "allowed",
+					decidedById: editorId,
+					atOffset: 0,
+				})
+				.returning({ id: toolCall.id }),
 		);
-		expect(queued).toHaveLength(1);
-	});
+		if (!row) throw new Error("Missing approved call");
+		const principal = await authenticate(turnId);
+		return (execution = principal) =>
+			runOnPostgres(operations[name](execution, input, { kind: "toolCall", toolCall: row.id }));
+	};
 
-	it("keeps both of two in-place edits made at once", async () => {
-		const { service } = await authoring();
-		const made = await runOnPostgres(
-			service.create(by, { kind: "markdown", title: "Notes", content: "# One\n\nTwo" }),
-		);
-		const inPlaceEdit = (oldText: string, newText: string) =>
-			service.edit(by, { fileId: made.id, baseVersion: 1, oldText, newText, inPlace: true });
+	it.each(["create", "replace", "edit"] as const)(
+		"fences a %s in a superseded execution",
+		async (change) => {
+			const made = await seed({ kind: "markdown", title: "Notes", content: "# One" });
+			const write = await (change === "edit"
+				? allowedChange("files.edit", {
+						fileId: made.id,
+						baseVersion: 1,
+						oldText: "One",
+						newText: "Two",
+					})
+				: allowedChange(
+						"files.write",
+						change === "create"
+							? { kind: "markdown", title: "New file", content: "# Two" }
+							: { fileId: made.id, baseVersion: 1, content: "# Two" },
+					));
+			await authenticate(turnId);
+			await expect(write()).rejects.toMatchObject({ _tag: "TurnExecutionSuperseded" });
+			expect(await filesAs(editorId).listInProject(projectId)).toMatchObject([
+				{ id: made.id, version: 1 },
+			]);
+			expect(await filesAs(editorId).versions(made.id)).toHaveLength(1);
+		},
+	);
 
-		await runOnPostgres(
-			Effect.all([inPlaceEdit("One", "Uno"), inPlaceEdit("Two", "Dos")], { concurrency: 2 }),
-		);
+	it.each(["create", "replace", "edit"] as const)(
+		"returns the original receipt when an approved %s is replayed",
+		async (change) => {
+			const made =
+				change === "create"
+					? undefined
+					: await seed({
+							kind: "markdown",
+							title: "Notes",
+							content: "# One",
+						});
+			const write =
+				made === undefined
+					? await allowedChange("files.write", {
+							kind: "markdown",
+							title: "Notes",
+							content: "# Two",
+						})
+					: change === "edit"
+						? await allowedChange("files.edit", {
+								fileId: made.id,
+								baseVersion: 1,
+								oldText: "One",
+								newText: "Two",
+							})
+						: await allowedChange("files.write", {
+								fileId: made.id,
+								baseVersion: 1,
+								content: "# Two",
+							});
+			const [first, duplicate] = await Promise.all([write(), write()]);
+			expect(first).toMatchObject({ status: "written", title: "Notes", version: made ? 2 : 1 });
+			expect(duplicate).toEqual(first);
 
-		expect(await runOnPostgres(service.read(by, made.id))).toMatchObject({
-			version: 1,
-			content: "# Uno\n\nDos",
-		});
-	});
+			const later = await allowedChange("files.write", {
+				fileId: first.fileId,
+				baseVersion: first.version,
+				title: "Renamed",
+				content: "# Later",
+			});
+			await later();
+			expect(await write(await authenticate(turnId))).toEqual(first);
+			const files = filesAs(editorId);
+			expect(await files.listInProject(projectId)).toMatchObject([
+				{ id: first.fileId, title: "Renamed", version: first.version + 1 },
+			]);
+			expect(await files.versions(first.fileId)).toHaveLength(first.version + 1);
+			expect(await files.getVersion(first.fileId, first.version)).toMatchObject({
+				content: "# Two",
+			});
+		},
+	);
 
 	describe("pages on the content origin", () => {
 		/**
@@ -126,12 +196,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 				open: (token: string) => runOnPostgres(pages.open(token)),
 			});
 		};
-		const aPage = async () => {
-			const { service } = await authoring();
-			return runOnPostgres(
-				service.create(by, { kind: "html", title: "Chart", content: "<p>chart</p>" }),
-			);
-		};
+		const aPage = () => seed({ kind: "html", title: "Chart", content: "<p>chart</p>" });
 
 		it("gives the project's members an address on the content origin that opens the page", async () => {
 			const made = await aPage();
@@ -146,10 +211,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 
 		it("gives no address without a content origin, nor for a document", async () => {
 			const made = await aPage();
-			const { service } = await authoring();
-			const notes = await runOnPostgres(
-				service.create(by, { kind: "markdown", title: "Notes", content: "# Notes" }),
-			);
+			const notes = await seed({ kind: "markdown", title: "Notes", content: "# Notes" });
 
 			const unset = (await pagesAt(undefined))(editorId);
 			const set = (await pagesAt("https://pages.example-content.com"))(editorId);
@@ -284,25 +346,23 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		);
 		by = { botId: writer.id, chatId: planning.id };
 		botElsewhere = { botId: stranger.id, chatId: strangersChat.id };
+		turnId = await seedTurnAnswering(by.chatId, by.botId, { member: editorId });
+		replyId = await seedMessage(by.chatId, { bot: by.botId, turn: turnId });
 	});
 
 	it("keeps every version of a document a bot writes, for members in its project to read", async () => {
-		const { service } = await authoring();
-		const made = await runOnPostgres(
-			service.create(by, {
-				kind: "markdown",
-				title: "Launch plan",
-				content: "# Launch plan\n\n## Goals\n\nShip.\n\n## Risks\n\nNone yet.\n",
-			}),
-		);
-		await runOnPostgres(
-			service.edit(by, {
-				fileId: made.id,
-				baseVersion: 1,
-				oldText: "Ship.",
-				newText: "Ship by Friday.",
-			}),
-		);
+		const made = await seed({
+			kind: "markdown",
+			title: "Launch plan",
+			content: "# Launch plan\n\n## Goals\n\nShip.\n\n## Risks\n\nNone yet.\n",
+		});
+		const edit = await allowedChange("files.edit", {
+			fileId: made.id,
+			baseVersion: 1,
+			oldText: "Ship.",
+			newText: "Ship by Friday.",
+		});
+		await edit();
 
 		const reader = filesAs(editorId);
 		expect(await reader.get(made.id)).toMatchObject({
@@ -318,87 +378,113 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		});
 	});
 
+	it("replaces, edits, and reads a file using its uppercase id", async () => {
+		const made = await seed({ kind: "markdown", title: "Notes", content: "# One" });
+		const fileId = made.id.toUpperCase();
+		const replace = await allowedChange("files.write", {
+			fileId,
+			baseVersion: 1,
+			content: "# Two",
+		});
+		expect(await replace()).toMatchObject({ fileId: made.id, version: 2 });
+
+		const edit = await allowedChange("files.edit", {
+			fileId,
+			baseVersion: 2,
+			oldText: "Two",
+			newText: "Three",
+		});
+		expect(await edit()).toMatchObject({ fileId: made.id, version: 3 });
+
+		const files = filesAs(editorId);
+		expect(await files.get(fileId)).toMatchObject({ id: made.id, content: "# Three" });
+		expect(await files.getVersion(fileId, 2)).toMatchObject({ content: "# Two" });
+		const principal = await authenticate(turnId);
+		expect(await call(principal, "files.readWritten", { fileId })).toMatchObject({
+			fileId: made.id,
+			content: "# Three",
+			version: 3,
+		});
+	});
+
 	it("refuses a change based on an older version, and keeps the newer one", async () => {
-		const { service, failureOf } = await authoring();
-		const made = await runOnPostgres(
-			service.create(by, { kind: "html", title: "Chart", content: "<p>one</p>" }),
-		);
-		await runOnPostgres(
-			service.replace(by, { fileId: made.id, baseVersion: 1, content: "<p>two</p>" }),
-		);
+		const made = await seed({ kind: "html", title: "Chart", content: "<p>one</p>" });
+		const replace = async (
+			change: Pick<InputOf<"files.write">, "baseVersion" | "kind" | "content">,
+		) => (await allowedChange("files.write", { fileId: made.id, ...change }))();
 
-		const stale = await failureOf(
-			service.replace(by, { fileId: made.id, baseVersion: 1, content: "<p>lost</p>" }),
-		);
-
-		expect(stale).toMatchObject({ _tag: "FileStale", currentVersion: 2 });
-		expect(
-			await failureOf(
-				service.replace(by, {
-					fileId: made.id,
-					baseVersion: 2,
-					content: "# Doc",
-					kind: "markdown",
-				}),
-			),
-		).toMatchObject({ _tag: "FileKindFixed", kind: "html" });
-		expect(await runOnPostgres(service.read(by, made.id))).toMatchObject({
+		await replace({ baseVersion: 1, content: "<p>two</p>" });
+		await expect(replace({ baseVersion: 1, content: "<p>lost</p>" })).rejects.toMatchObject({
+			_tag: "FileStale",
+			currentVersion: 2,
+		});
+		await expect(
+			replace({ baseVersion: 2, content: "# Doc", kind: "markdown" }),
+		).rejects.toMatchObject({
+			_tag: "FileKindFixed",
+			kind: "html",
+		});
+		expect(await filesAs(editorId).get(made.id)).toMatchObject({
 			version: 2,
 			content: "<p>two</p>",
 		});
 	});
 
 	it("refuses an edit whose text isn't in the file exactly once", async () => {
-		const { service, failureOf } = await authoring();
-		const made = await runOnPostgres(
-			service.create(by, { kind: "html", title: "Tiles", content: "<b>a</b><b>a</b>" }),
-		);
+		const made = await seed({ kind: "html", title: "Tiles", content: "<b>a</b><b>a</b>" });
+		const edit = async (oldText: string) =>
+			(
+				await allowedChange("files.edit", {
+					fileId: made.id,
+					baseVersion: 1,
+					oldText,
+					newText: "b",
+				})
+			)();
 
-		const edit = (oldText: string) =>
-			failureOf(service.edit(by, { fileId: made.id, baseVersion: 1, oldText, newText: "b" }));
-
-		expect(await edit("<b>a</b>")).toMatchObject({ _tag: "EditTextUnmatched", matches: 2 });
-		expect(await edit("<i>")).toMatchObject({ _tag: "EditTextUnmatched", matches: 0 });
-		expect(await runOnPostgres(service.read(by, made.id))).toMatchObject({ version: 1 });
+		await expect(edit("<b>a</b>")).rejects.toMatchObject({ _tag: "EditTextUnmatched", matches: 2 });
+		await expect(edit("<i>")).rejects.toMatchObject({ _tag: "EditTextUnmatched", matches: 0 });
+		expect(await filesAs(editorId).get(made.id)).toMatchObject({ version: 1 });
 	});
 
 	it("refuses an edit that would take a file over its size limit", async () => {
-		const { service, failureOf } = await authoring();
-		const made = await runOnPostgres(
-			service.create(by, {
-				kind: "markdown",
-				title: "Long",
-				content: `${"x".repeat(MAX_FILE_CONTENT_CHARACTERS - 1)}!`,
-			}),
-		);
-
-		expect(
-			await failureOf(
-				service.edit(by, { fileId: made.id, baseVersion: 1, oldText: "!", newText: "!!" }),
-			),
-		).toMatchObject({ _tag: "FileContentTooLarge", maxCharacters: MAX_FILE_CONTENT_CHARACTERS });
+		const made = await seed({
+			kind: "markdown",
+			title: "Long",
+			content: `${"x".repeat(MAX_FILE_CONTENT_CHARACTERS - 1)}!`,
+		});
+		const edit = await allowedChange("files.edit", {
+			fileId: made.id,
+			baseVersion: 1,
+			oldText: "!",
+			newText: "!!",
+		});
+		await expect(edit()).rejects.toMatchObject({
+			_tag: "FileContentTooLarge",
+			maxCharacters: MAX_FILE_CONTENT_CHARACTERS,
+		});
 	});
 
 	it("hides a project's files from members outside it and from bots outside it", async () => {
-		const { service, failureOf } = await authoring();
-		const made = await runOnPostgres(
-			service.create(by, { kind: "markdown", title: "Private", content: "# Private" }),
-		);
-
+		const made = await seed({ kind: "markdown", title: "Private", content: "# Private" });
 		await expect(filesAs(outsiderId).get(made.id)).rejects.toMatchObject({
 			_tag: "ResourceHidden",
 		});
-		expect(await failureOf(service.read(botElsewhere, made.id))).toMatchObject({
-			_tag: "FileNotFound",
+		const elsewhere = await seedTurnAnswering(botElsewhere.chatId, botElsewhere.botId, {
+			member: editorId,
+		});
+		await expect(
+			call(await authenticate(elsewhere), "files.readWritten", { fileId: made.id }),
+		).rejects.toMatchObject({
+			_tag: "ResourceHidden",
 		});
 	});
 
 	it("lets an admin delete a project's file with its versions, and refuses its members", async () => {
-		const { service } = await authoring();
-		const made = await runOnPostgres(
-			service.create(by, { kind: "markdown", title: "Draft", content: "# One" }),
-		);
-		await runOnPostgres(service.replace(by, { fileId: made.id, baseVersion: 1, content: "# Two" }));
+		const made = await seed({ kind: "markdown", title: "Draft", content: "# One" });
+		await (
+			await allowedChange("files.write", { fileId: made.id, baseVersion: 1, content: "# Two" })
+		)();
 		await expect(filesAs(editorId).remove(made.id)).rejects.toMatchObject({
 			_tag: "ActionForbidden",
 		});
@@ -415,13 +501,10 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 	});
 
 	it("shows the files a bot made in its chats to whoever reaches the bot, and to nobody else", async () => {
-		const { service } = await authoring();
 		await onDatabase((db) =>
 			db.update(bot).set({ visibility: "personal" }).where(eq(bot.id, botElsewhere.botId)),
 		);
-		const made = await runOnPostgres(
-			service.create(botElsewhere, { kind: "markdown", title: "Diary", content: "# Diary" }),
-		);
+		const made = await seed({ kind: "markdown", title: "Diary", content: "# Diary" }, botElsewhere);
 		expect(await filesAs(editorId).get(made.id)).toMatchObject({ title: "Diary" });
 		expect(
 			(
@@ -439,10 +522,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 	});
 
 	it("lists the files sent on a project's messages beside those bots wrote, and only those sent", async () => {
-		const { service } = await authoring();
-		const written = await runOnPostgres(
-			service.create(by, { kind: "markdown", title: "Plan", content: "# Plan" }),
-		);
+		const written = await seed({ kind: "markdown", title: "Plan", content: "# Plan" });
 		const files = await runOnPostgres(Effect.provide(ChatFileStore.Service, ChatFileStore.layer));
 		const content = (text: string) => ({
 			stream: Stream.succeed(new TextEncoder().encode(text)),
@@ -497,6 +577,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 						status: "done",
 						model: "test/model",
 						startedAt: new Date(),
+						...askerColumns({ chatId: by.chatId, botId: by.botId, triggerMessageId: replyId }),
 					})
 					.returning({ id: turn.id });
 				if (!ran) throw new Error("fixture");

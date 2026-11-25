@@ -1,0 +1,201 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "c5f9c536-a520-4c12-88ac-d5bc9617ebf6",
+  "prevIds": [
+    "811d3c75-b659-4330-ab69-d5f8f4f7fa18"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "message",
+        "retry_key"
+      ],
+      "writes": [
+        "s|col|public.message.retry_key",
+        "n|col|public.message.retry_key",
+        "e|col|public.message.retry_key"
+      ],
+      "reads": [
+        "n|tbl|public.message",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "project_chat",
+        "start_retry_key"
+      ],
+      "writes": [
+        "s|col|public.project_chat.start_retry_key",
+        "n|col|public.project_chat.start_retry_key",
+        "e|col|public.project_chat.start_retry_key"
+      ],
+      "reads": [
+        "n|tbl|public.project_chat",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "message",
+        "message_retry_idx"
+      ],
+      "writes": [
+        "s|idx|public.message_retry_idx",
+        "n|idx|public.message_retry_idx",
+        "e|idx|public.message_retry_idx",
+        "n|rel|public.message_retry_idx"
+      ],
+      "reads": [
+        "n|tbl|public.message",
+        "n|sch|public",
+        "n|col|public.message.chat_id",
+        "n|col|public.message.author_member_id",
+        "n|col|public.message.retry_key"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "project_chat",
+        "project_chat_start_retry_idx"
+      ],
+      "writes": [
+        "s|idx|public.project_chat_start_retry_idx",
+        "n|idx|public.project_chat_start_retry_idx",
+        "e|idx|public.project_chat_start_retry_idx",
+        "n|rel|public.project_chat_start_retry_idx"
+      ],
+      "reads": [
+        "n|tbl|public.project_chat",
+        "n|sch|public",
+        "n|col|public.project_chat.project_id",
+        "n|col|public.project_chat.started_by_id",
+        "n|col|public.project_chat.start_retry_key"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message",
+        "name": "retry_key",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_chat",
+        "name": "start_retry_key",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message",
+        "name": "message_retry_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "chat_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "author_member_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "retry_key",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"retry_key\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_chat",
+        "name": "project_chat_start_retry_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "project_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "started_by_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "start_retry_key",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"start_retry_key\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    }
+  ]
+}

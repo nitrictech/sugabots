@@ -8,7 +8,7 @@ import { ChatEvent } from "../events.ts";
  * The only writer of `compaction`: what each chat's bots read in
  * place of its older messages, written by the Compaction bot.
  */
-export interface CompactionStore {
+interface CompactionStore {
 	/**
 	 * Replaces the chat's compaction, so its bots read `condensed` and then
 	 * every message from `keptFrom` on, and announces it in the chat's workspace.

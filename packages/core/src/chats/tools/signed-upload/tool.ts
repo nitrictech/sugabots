@@ -5,6 +5,7 @@ import {
 	MAX_ATTACHMENT_BYTES,
 	MAX_URL_CHARACTERS,
 } from "@sugabots/contracts";
+import { uuidSchema } from "@sugabots/contracts/uuid";
 import { UserText, userText } from "@sugabots/errors";
 import { type Tool, tool } from "ai";
 import { Effect, Schema, Stream } from "effect";
@@ -20,7 +21,7 @@ import {
 } from "../computer/tools.ts";
 import { type Failed, failed } from "../failed.ts";
 import { refusedHeader } from "../http/tools.ts";
-import { unreadableFileRefusal } from "../read-chat-file/tool.ts";
+import { unreadableFileRefusal } from "../unreadable-file.ts";
 
 /** Longer than a signed URL lives, which is a minute for Linear's. */
 const TIMEOUT_MS = 60_000;
@@ -68,7 +69,7 @@ export function signedUploadTool(
 		description: `Upload a file to a signed upload URL. ${service.howTo} Give the file in this chat by its id, from the line that names it, or a file in the computer by its path. Pass the URL and every header you were given exactly as given; the file's bytes are sent as they are. Files up to ${MAX_CHAT_FILE_MEGABYTES} MB from the chat or ${MAX_SHARED_FILE_MEGABYTES} MB from the computer.`,
 		inputSchema: Schema.Struct({
 			file: Schema.optional(
-				Schema.String.check(Schema.isUUID()).annotate({
+				uuidSchema.annotate({
 					description: "The id of a file in this chat. Give this or path.",
 				}),
 			),

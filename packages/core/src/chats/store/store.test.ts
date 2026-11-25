@@ -1,13 +1,16 @@
 import { chatStream, handleFromName } from "@sugabots/contracts";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import type { InputOf } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { askerColumns } from "../../authentication/turn-facts.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import {
 	bot,
 	chat,
+	chatCompaction,
 	file,
 	member,
 	membership,
@@ -40,16 +43,15 @@ import { Compactions } from "../compaction/compactions.ts";
 import { compactionLineTokens } from "../compaction/window.ts";
 import { seedChat } from "../seed.test-support.ts";
 import { chatServicesForTests } from "../testing.ts";
-import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import {
+	completeTurn,
 	modelPrompt,
-	prepareRunnable,
+	openTurn,
+	prepareTurn,
 	queueTurnForTests,
 	releaseTurn,
-	replyTurnOf,
 	runningTurns,
-	TurnExecution,
-	TurnStore,
+	runOver,
 } from "../turns/testing.ts";
 
 /** What these tests set the workspace's system bots up with. */
@@ -64,8 +66,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	const viewAs = (memberId: string) => asMember(call, memberId);
 	const chatsAs = (memberId: string) => asMember(call, memberId);
 	const chatViewAs = (memberId: string) => asMember(call, memberId);
-	const turns = onPostgres({ prepare: Context.get(services, TurnExecution.Service).prepare });
-	const turnStore = onPostgres(Context.get(services, TurnStore.Service));
+	const drive = runOver(services);
 	const compactions = onPostgres({
 		prepare: Context.get(services, Compactions.Service).prepare,
 		complete: Context.get(services, Compactions.Service).complete,
@@ -100,6 +101,17 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 		if (!run) throw new Error("No turn is running in the chat");
 		return run;
+	}
+
+	async function markEarlierHistory(chatId: string) {
+		await onDatabase((db) =>
+			db.insert(chatCompaction).values({
+				chatId,
+				condensed: "Earlier messages",
+				historyStartsAt: new Date(0),
+				keptFrom: new Date(Date.now() + 60_000),
+			}),
+		);
 	}
 
 	/** Prepares the compaction `request` asks for, for a case that needs it to run. */
@@ -242,7 +254,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				reason: "mention",
 			}),
 		);
-		const prepared = await prepareRunnable(turns, await runningTurn(projectChat.id, otherRow.id));
+		const prepared = await drive(prepareTurn(await runningTurn(projectChat.id, otherRow.id)));
 
 		expect(prepared.context.bot.id).toBe(otherRow.id);
 	});
@@ -332,6 +344,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					model: "test/model",
 					startedAt: sharedCreatedAt,
 					finishedAt: sharedCreatedAt,
+					...askerColumns({ chatId: details.chat.id, botId, triggerMessageId }),
 				})),
 			),
 		);
@@ -371,11 +384,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			throw new Error("Chat creation did not commit its durable event");
 		}
 
-		const messageId = crypto.randomUUID();
+		const retryKey = crypto.randomUUID();
 		if (!details.chat.rootChatId) throw new Error("The chat has no root chat");
-		await chatsAs(memberId).post({
+		const posted = await chatsAs(memberId).post({
 			chatId: details.chat.rootChatId,
-			messageId,
+			messageId: retryKey,
 			content: "Second",
 		});
 
@@ -384,7 +397,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		await iterator.return?.();
 		expect(replayed.value?.event).toMatchObject({
 			type: "message.created",
-			message: { id: messageId, content: "Second" },
+			message: { id: posted.id, retryKey, content: "Second" },
 		});
 	});
 
@@ -460,7 +473,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		const bots = await servedOnPostgres(BotStore.Service, BotStore.layer);
-		await bots.remove(workspaceId, botId, memberId, Effect.void);
+		await bots.remove(workspaceId, botId);
 		expect(
 			await onDatabase((db) => db.select().from(chat).where(eq(chat.id, details.chat.id))),
 		).toHaveLength(0);
@@ -578,7 +591,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(chats.some((listed) => listed.chat.id === prepared.compactor.chatId)).toBe(false);
 		await compactions.complete(prepared, "The family is planning a trip.");
 
-		const turn = await prepareRunnable(turns, await runningTurn(details.chat.id));
+		const turn = await drive(prepareTurn(await runningTurn(details.chat.id)));
 		expect(turn.context.compaction).toEqual({
 			condensed: "The family is planning a trip.",
 			historyStartsAt: earlier[3]?.createdAt,
@@ -595,28 +608,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			computer: undefined,
 		});
 		expect(prompt.messages[0]?.content).toContain("The family is planning a trip.");
-		await turnStore.complete(
-			replyTurnOf(turn),
-			{ content: "Here is the plan.", toolCalls: [] },
-			{
-				contextTokens: 70_000,
-				contextCapacity: turn.context.windowTokens,
-				readKeptFrom: prepared.keptFrom.toISOString(),
-			},
-		);
-		expect(await viewAs(memberId).context(details.chat.id)).toMatchObject({
-			usedTokens: 70_000,
-			compactedAt: expect.any(String),
-		});
-
-		const search = searchHistoryTool({
-			chatId: details.chat.id,
-			before: prepared.keptFrom,
-			usesComputer: false,
-			run: runOnPostgres,
-		});
-		const searchFor = (input: { query?: string; after?: string; before?: string }) =>
-			search.execute?.(input, { toolCallId: "search", messages: [] } as never);
+		// The turn read from where the compaction kept history.
+		expect(turn.context.compaction?.keptFrom).toEqual(prepared.keptFrom);
+		const searchFor = (input: InputOf<"chats.searchHistory">) =>
+			call(turn.principal, "chats.searchHistory", input);
 		expect(await searchFor({ query: "hotel budget" })).toEqual({
 			messages: [
 				expect.objectContaining({
@@ -642,6 +637,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		).toEqual(["Message 14"]);
 		expect(await searchFor({})).toEqual({
 			refused: "Give words to look for, a time range, or both.",
+		});
+
+		await drive(completeTurn(turn, "Here is the plan.", 70_000));
+		expect(await viewAs(memberId).context(details.chat.id)).toMatchObject({
+			usedTokens: 70_000,
+			compactedAt: expect.any(String),
 		});
 
 		const readKeptFrom = prepared.keptFrom.toISOString();
@@ -693,6 +694,59 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		]);
 	});
 
+	it("condenses nothing a turn still to come answers, or anything after it", async () => {
+		const details = await startChatShown({
+			botId,
+			startedById: memberId,
+			message: "Plan the trip",
+		});
+		const long = (index: number) => `Message ${index}. ${"word ".repeat(8_000)}`;
+		const earlier = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values(
+					Array.from({ length: 20 }, (_, index) => ({
+						chatId: details.chat.id,
+						authorMemberId: memberId,
+						status: "complete" as const,
+						parts: [{ type: "text" as const, text: long(index + 1) }],
+						content: long(index + 1),
+						createdAt: new Date(Date.now() - (20 - index) * 60_000),
+					})),
+				)
+				.returning({ id: message.id, createdAt: message.createdAt }),
+		);
+		// A turn still running, answering the sixth of them.
+		const answered = earlier[5];
+		if (!answered) throw new Error("fixture");
+		await onDatabase((db) =>
+			db.insert(turn).values({
+				chatId: details.chat.id,
+				botId,
+				triggerMessageId: answered.id,
+				status: "running",
+				model: "test/model",
+				startedAt: new Date(),
+				...askerColumns({ chatId: details.chat.id, botId: botId, triggerMessageId: answered.id }),
+			}),
+		);
+
+		const prepared = await preparedCompaction({
+			chatId: details.chat.id,
+			botId,
+			sourceMessageId: details.messages[0]?.id ?? "",
+			readKeptFrom: null,
+		});
+
+		expect(prepared.keptFrom).toEqual(answered.createdAt);
+		expect(prepared.transcript.map(({ content }) => content.split(".")[0])).toEqual(
+			Array.from(
+				{ length: prepared.transcript.length },
+				(_, index) => `Message ${index + 6 - prepared.transcript.length}`,
+			),
+		);
+	});
+
 	it.each([
 		// A 128K model compacts at 70% of its own window, not of the 256K ceiling.
 		{ contextTokens: compactionLineTokens(128_000) - 1, asked: false },
@@ -700,22 +754,16 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	])(
 		"asks for a compaction only once a reply's prompt reaches the compaction line ($contextTokens tokens)",
 		async ({ contextTokens, asked }) => {
+			await modelsWithWindows();
 			const details = await startChatShown({
 				botId,
 				startedById: memberId,
 				message: "Plan the trip",
 			});
-			const prepared = await prepareRunnable(turns, await runningTurn(details.chat.id));
+			const prepared = await drive(prepareTurn(await runningTurn(details.chat.id)));
 
-			await turnStore.complete(
-				replyTurnOf(prepared),
-				{ content: "Here is the plan.", toolCalls: [] },
-				{
-					contextTokens,
-					contextCapacity: 128_000,
-					readKeptFrom: null,
-				},
-			);
+			expect(prepared.context.windowTokens).toBe(128_000);
+			await drive(completeTurn(prepared, "Here is the plan.", contextTokens));
 
 			const [compaction] = await onDatabase((db) =>
 				db
@@ -729,7 +777,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 							// Stored under the keys the first compactions were.
 							chatId: details.chat.id,
 							botId: botId,
-							sourceMessageId: prepared.responseMessage.id,
+							sourceMessageId: prepared.replyMessageId,
 							readKeptFrom: null,
 						}
 					: undefined,
@@ -765,18 +813,14 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				})),
 			),
 		);
-		const search = searchHistoryTool({
-			chatId: details.chat.id,
-			before: new Date(Date.now() + 60_000),
-			usesComputer: false,
-			run: runOnPostgres,
-		});
+		await markEarlierHistory(details.chat.id);
+		const turn = await drive(openTurn(await runningTurn(details.chat.id)));
 		const found = async (query: string) => {
-			const result = await search.execute?.({ query }, {
-				toolCallId: "search",
-				messages: [],
-			} as never);
-			return result && "messages" in result ? result.messages.map(({ text }) => text) : [];
+			const result = await call(turn.principal, "chats.searchHistory", {
+				chat: details.chat.id,
+				query,
+			});
+			return "messages" in result ? result.messages.map(({ text }) => text) : [];
 		};
 
 		expect(await found("hotel booking")).toEqual([said[0]]);
@@ -832,15 +876,15 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.returning({ id: file.id, name: file.name }),
 		);
 		const fileIdOf = (name: string) => attached.find((file) => file.name === name)?.id;
-		const search = searchHistoryTool({
-			chatId: details.chat.id,
-			before: new Date(Date.now() + 60_000),
-			usesComputer: true,
-			run: runOnPostgres,
-		});
-		const found = async (input: { query?: string; after?: string }) => {
-			const result = await search.execute?.(input, { toolCallId: "search", messages: [] } as never);
-			return result && "messages" in result ? result.messages.map(({ text }) => text) : [];
+		await onDatabase((db) => db.update(bot).set({ usesComputer: true }).where(eq(bot.id, botId)));
+		await markEarlierHistory(details.chat.id);
+		const turn = await drive(openTurn(await runningTurn(details.chat.id)));
+		const found = async (input: InputOf<"chats.searchHistory">) => {
+			const result = await call(turn.principal, "chats.searchHistory", {
+				chat: details.chat.id,
+				...input,
+			});
+			return "messages" in result ? result.messages.map(({ text }) => text) : [];
 		};
 
 		expect(await found({ query: "signed contract" })).toEqual([
@@ -855,12 +899,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 	});
 
-	/**
-	 * A chat of twenty long messages, about 10K tokens each, before its
-	 * first, with the bot's model given a 128K window and the system bots'
-	 * a 64K one.
-	 */
-	async function chatWithLongHistory() {
+	/** The bot's model given a 128K window and the system bots' a 64K one, both under the 256K ceiling. */
+	async function modelsWithWindows() {
 		const [provider] = await onDatabase((db) =>
 			db
 				.insert(modelProvider)
@@ -895,6 +935,15 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				},
 			]),
 		);
+	}
+
+	/**
+	 * A chat of twenty long messages, about 10K tokens each, before its
+	 * first, with the bot's model given a 128K window and the system bots'
+	 * a 64K one.
+	 */
+	async function chatWithLongHistory() {
+		await modelsWithWindows();
 		const details = await startChatShown({
 			botId,
 			startedById: memberId,
@@ -941,17 +990,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			"Message 17",
 		]);
 
-		const turn = await prepareRunnable(turns, await runningTurn(details.chat.id));
+		const turn = await drive(prepareTurn(await runningTurn(details.chat.id)));
 		expect(turn.context.windowTokens).toBe(128_000);
-		await turnStore.complete(
-			replyTurnOf(turn),
-			{ content: "Here is the plan.", toolCalls: [] },
-			{
-				contextTokens: 50_000,
-				contextCapacity: turn.context.windowTokens,
-				readKeptFrom: null,
-			},
-		);
+		await drive(completeTurn(turn, "Here is the plan.", 50_000));
 		expect(await viewAs(memberId).context(details.chat.id)).toMatchObject({
 			windowTokens: 128_000,
 			compactionLineTokens: 89_600,

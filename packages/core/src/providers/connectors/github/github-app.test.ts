@@ -1,4 +1,4 @@
-import type { InputOf, OperationName, OutputOf } from "@sugabots/contracts/operations";
+import type { InputOf, OutputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -54,7 +54,10 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 	/** Calls the operation `name` with `input`, signed in as `memberId`. */
 	const as =
 		(memberId: string) =>
-		async <Name extends OperationName>(name: Name, input: InputOf<Name>): Promise<OutputOf<Name>> =>
+		async <Name extends RequestOperationName>(
+			name: Name,
+			input: InputOf<Name>,
+		): Promise<OutputOf<Name>> =>
 			setup.call(await setup.member(memberId), name, input);
 
 	it("makes the project's app from a manifest, for someone who manages its connectors", async () => {

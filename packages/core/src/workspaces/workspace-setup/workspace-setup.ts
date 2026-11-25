@@ -5,6 +5,8 @@ import { and, eq, isNull } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { bot, workspace } from "../../database/schema.ts";
+import type { Named } from "../../proofs/proof.ts";
+import { eligibleSetupBot, type ReachesSetupBot } from "../../proofs/reaches-setup-bot.ts";
 import type { CanManageWorkspace } from "../../proofs/workspace-permissions.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
@@ -18,7 +20,7 @@ import { BotStore } from "../bots/bot-store.ts";
  */
 export interface Interface {
 	/**
-	 * Finishes setting up the workspace, once `botId` is a bot the member who
+	 * Finishes setting up the workspace, once `chosenBot` is a bot the member who
 	 * may manage it made there, and that bot runs on a model the workspace
 	 * offers. Finishing settles the first bot and the model the workspace runs
 	 * it on, so it takes managing the workspace.
@@ -29,9 +31,10 @@ export interface Interface {
 	 *
 	 * The first time, it records when the workspace's setup was completed.
 	 */
-	readonly complete: <P, W>(
+	readonly complete: <P, W, B>(
 		canManage: CanManageWorkspace<P, W>,
-		botId: string,
+		chosenBot: Named<B, string>,
+		target: ReachesSetupBot<P, W, B>,
 	) => Effect.Effect<void, NotReadyToFinish | NoModelChosen>;
 }
 
@@ -47,25 +50,17 @@ export const make = Effect.gen(function* () {
 	const bots = yield* BotStore.Service;
 
 	return Service.of({
-		complete: (canManage, botId) =>
+		complete: (canManage, chosenBot, target) =>
 			operation(
 				"complete",
 				transaction(
 					Effect.gen(function* () {
-						const resolved = canManage.inWorkspace.workspace.value;
-						const { actor } = canManage;
+						const resolved = target.workspace.value;
 						const [eligible] = yield* query((db) =>
 							db
 								.select({ model: bot.model })
 								.from(bot)
-								.where(
-									and(
-										eq(bot.id, botId),
-										eq(bot.workspaceId, resolved),
-										eq(bot.createdById, actor.memberId),
-										isNull(bot.systemBotKey),
-									),
-								)
+								.where(eligibleSetupBot(canManage, chosenBot))
 								.limit(1)
 								.for("update"),
 						);

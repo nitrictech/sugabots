@@ -20,7 +20,7 @@ const names = Schema.Array(Schema.String).pipe(
 );
 
 /** How OpenRouter's ids for Anthropic's models start, as in `anthropic/claude-sonnet-4.5`. */
-const ANTHROPIC_MODELS = "anthropic/";
+export const ANTHROPIC_MODELS = "anthropic/";
 
 /**
  * OpenRouter's listing says what each model takes in, gives out, and accepts

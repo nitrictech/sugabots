@@ -62,6 +62,9 @@ export const membershipSchema = Schema.Struct({
 });
 export type Membership = typeof membershipSchema.Type;
 
+export const membershipDepartureSchema = Schema.Struct({ cleanupPending: Schema.Boolean });
+export type MembershipDeparture = typeof membershipDepartureSchema.Type;
+
 export const roleChangeSchema = Schema.Struct({ role: assignableWorkspaceRoleSchema });
 
 /** Who the owner hands the workspace over to: a member in it, by their membership's id. */

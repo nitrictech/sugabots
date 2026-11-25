@@ -55,7 +55,7 @@ describe("WebhookAuthentication", () => {
 			);
 
 			const principal = await runOnPostgres(
-				auth.trigger(triggerId, delivery({ authorization: "Bearer whk_secret" })),
+				auth.trigger(triggerId.toUpperCase(), delivery({ authorization: "Bearer whk_secret" })),
 			);
 
 			expect(principal._tag).toBe("WebhookCall");

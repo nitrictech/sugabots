@@ -1,13 +1,11 @@
 import type { AutomationListStatus, Run, RunState } from "@sugabots/contracts";
 import { desc, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import type { BotFacts } from "../../authorization/permissions.ts";
 import { type Executor, query } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import {
 	automation,
 	automationRun,
-	bot,
 	message,
 	placedChat,
 	readCursor,
@@ -44,46 +42,19 @@ export function toRun(row: schema.RunRow, rootChatId: string, posted: boolean): 
 export const resultPosted = (runId: SQLWrapper) =>
 	sql<boolean>`exists (select 1 from ${message} where ${message.runId} = ${runId})`;
 
-/**
- * A column of the automation run whose chat is `chatId`, as a scalar
- * subquery. Null for any other chat.
- */
-export const runColumnOf = (chatId: SQLWrapper, column: "id" | "bot_id") => sql<string | null>`(
-	select chat_run.${sql.raw(column)}
+/** The id of the automation run whose chat is `chatId`, as a scalar subquery; null for any other chat. */
+const runIdOf = (chatId: SQLWrapper) => sql<string | null>`(
+	select chat_run.id
 	from ${automationRun} chat_run
 	where chat_run.chat_id = ${chatId}
 )`;
 
-export const findRunId = Effect.fn("Run.findRunId")(function* (db: Executor, chatId: string) {
+const findRunId = Effect.fn("Run.findRunId")(function* (db: Executor, chatId: string) {
 	const rows = yield* db.execute<{ id: string | null }>(
-		sql`select ${runColumnOf(sql`${chatId}`, "id")} as id`,
+		sql`select ${runIdOf(sql`${chatId}`)} as id`,
 		"objects",
 	);
 	return rows[0]?.id ?? undefined;
-});
-
-/**
- * What who decides a run's approvals is decided from about the bot doing
- * the run a chat belongs to (see `mayDecideToolCall`), as a scalar jsonb
- * subquery, which `select distinct` can compare; null outside a run.
- */
-export const runBotFactsOf = (chatId: SQLWrapper) => sql<BotFacts | null>`(
-	select jsonb_build_object(
-		'visibility', run_bot.visibility,
-		'createdById', run_bot.created_by_id,
-		'assistantOf', run_bot.assistant_of
-	)
-	from ${bot} run_bot
-	where run_bot.id = ${runColumnOf(chatId, "bot_id")}
-)`;
-
-/** The bot doing the run the chat `chatId` belongs to, as `runBotFactsOf` reads it; undefined outside a run. */
-export const findRunBot = Effect.fn("Run.findRunBot")(function* (db: Executor, chatId: string) {
-	const rows = yield* db.execute<{ bot: BotFacts | null }>(
-		sql`select ${runBotFactsOf(sql`${chatId}`)} as bot`,
-		"objects",
-	);
-	return rows[0]?.bot ?? undefined;
 });
 
 /**
@@ -160,7 +131,7 @@ export const automationAcceptsWork = Effect.fn("Run.automationAcceptsWork")(func
 export function automationFailing(
 	latestRunState: SQLWrapper = latestRunStateOf(automation.id),
 ): SQL<boolean> {
-	return sql<boolean>`(${automation.pausedAfterFailuresAt} is not null or (${automation.state} = 'enabled' and coalesce(${latestRunState} = 'failed', false)))`;
+	return sql<boolean>`(${automation.pausedAfterFailuresAt} is not null or ${automation.pauseAfterFailuresPendingAt} is not null or (${automation.state} = 'enabled' and coalesce(${latestRunState} = 'failed', false)))`;
 }
 
 /**

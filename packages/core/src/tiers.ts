@@ -18,20 +18,20 @@
  * export const layerNoDeps = processLayer(Layer.effect(Service, make));
  * ```
  *
+ * `lint/check-service-tiers.ts` fails lint for a service without a tier and
+ * for a layer building one that does not go through its wrapper. Where
+ * wrapping would re-indent a long layer, `layer.pipe(processLayer)` does the
+ * same.
+ *
  * The check reads a layer's requirements, not its code: a cache filled on
  * first use or state at the top of a module is still for review to catch.
  */
 
+import { Tier, type TierName } from "@sugabots/contracts/tiers";
 import type { Layer } from "effect";
 
-/**
- * The key of the field a service declares its tier in. A real symbol, not a
- * `declare const`, because service modules import it as a value to name the
- * field, and an import of something that doesn't exist fails at load time.
- */
-export const Tier: unique symbol = Symbol.for("@sugabots/core/Tier");
-
-export type TierName = "process" | "workspace" | "request";
+/** `Tier` and `TierName` are declared in `contracts`, so that a service there can declare its tier too. */
+export { Tier, type TierName };
 
 /** What a thing built at each tier may depend on: its own tier or a longer-lived one. */
 type MayDependOn<Built extends TierName> = Built extends "process"
@@ -61,7 +61,7 @@ type ShorterLived<Requirements, Built extends TierName> = Requirements extends u
  * compiler prints the rule beside the services that broke it. TypeScript has no
  * custom errors.
  */
-type ProcessTierCheck<Requirements> = [ShorterLived<Requirements, "process">] extends [never]
+type NeedsOnlyProcessTier<Requirements> = [ShorterLived<Requirements, "process">] extends [never]
 	? unknown
 	: {
 			readonly "built per workspace or per request, so a service built once at boot cannot depend on it": ShorterLived<
@@ -70,11 +70,26 @@ type ProcessTierCheck<Requirements> = [ShorterLived<Requirements, "process">] ex
 			>;
 		};
 
+/** Nothing when every service the layer provides is process tier; otherwise a property naming the rule. */
+type ProvidesOnlyProcessTier<Provides> = [ShorterLived<Provides, "process">] extends [never]
+	? unknown
+	: {
+			readonly "built per workspace or per request, so a layer built once at boot cannot provide it": ShorterLived<
+				Provides,
+				"process"
+			>;
+		};
+
 /**
  * Marks `layer` as building process-tier services: it fails to compile when
- * the layer needs a workspace-tier or request-tier service. Returns `layer`
- * unchanged.
+ * the layer needs, or provides, a workspace-tier or request-tier service. Returns
+ * `layer` unchanged.
+ *
+ * A layer that chooses what to build with `Layer.unwrap`, or builds a whole
+ * context, is wrapped as a whole: what the outer effect needs counts too.
  */
 export const processLayer = <Provides, Error, Requirements>(
-	layer: Layer.Layer<Provides, Error, Requirements> & ProcessTierCheck<Requirements>,
+	layer: Layer.Layer<Provides, Error, Requirements> &
+		NeedsOnlyProcessTier<Requirements> &
+		ProvidesOnlyProcessTier<Provides>,
 ): Layer.Layer<Provides, Error, Requirements> => layer;

@@ -1,6 +1,7 @@
 import { Duration, Effect, Layer } from "effect";
 import type { Database } from "../../database/database.ts";
 import { Models } from "../../providers/models/models.ts";
+import { processLayer } from "../../tiers.ts";
 import { Turns } from "../turns/turns.ts";
 import { type CompactionRequest, CompactionSteps } from "./compaction.workflow.ts";
 import { Compactions, type PreparedCompaction } from "./compactions.ts";
@@ -19,7 +20,7 @@ export const compactionStepsLayer = Layer.effect(
 			compact: (stored) => compact(stored, model).pipe(Effect.provideContext(services)),
 		});
 	}),
-);
+).pipe(processLayer);
 
 /**
  * Prepares, generates and records one compaction, as the Compaction bot's

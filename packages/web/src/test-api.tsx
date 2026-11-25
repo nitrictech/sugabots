@@ -86,12 +86,14 @@ export const workspace = {
 /** Everything with what a project or bot holds, as an admin gets it. */
 const MANAGER_OF_RESOURCES: ResourcePermissions = {
 	readHistory: true,
+	resolveChats: true,
 	openSettings: true,
 	deleteFiles: true,
 	manageConnectors: true,
 	manageComputer: true,
 	useDesktop: true,
 	manageAutomations: true,
+	pauseAutomations: true,
 	runAutomations: true,
 };
 
@@ -102,6 +104,7 @@ const USER_OF_RESOURCES: ResourcePermissions = {
 	manageConnectors: false,
 	manageComputer: false,
 	manageAutomations: false,
+	pauseAutomations: false,
 };
 
 /** Every project permission, as an admin gets them. */
@@ -129,7 +132,12 @@ const VIEWER_IN_PROJECT: ProjectPermissions = {
 	...EDITOR_IN_PROJECT,
 	manageMembers: false,
 	manageBots: false,
-	resources: { ...USER_OF_RESOURCES, runAutomations: false, useDesktop: false },
+	resources: {
+		...USER_OF_RESOURCES,
+		resolveChats: false,
+		runAutomations: false,
+		useDesktop: false,
+	},
 };
 
 /** Every bot permission, as its creator or an administrator gets them. */
@@ -454,8 +462,8 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		]),
 	);
 	client.api.workspaces.changeRole.mockReturnValue(Effect.succeed(undefined));
-	client.api.workspaces.removeMembership.mockReturnValue(Effect.succeed(undefined));
-	client.api.workspaces.leave.mockReturnValue(Effect.succeed(undefined));
+	client.api.workspaces.removeMembership.mockReturnValue(Effect.succeed({ cleanupPending: false }));
+	client.api.workspaces.leave.mockReturnValue(Effect.succeed({ cleanupPending: false }));
 	client.api.workspaces.cancelInvitation.mockReturnValue(Effect.succeed(undefined));
 	client.api.workspaces.invitations.mockReturnValue(
 		Effect.succeed([

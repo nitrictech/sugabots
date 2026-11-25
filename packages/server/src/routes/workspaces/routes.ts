@@ -43,6 +43,7 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 						...refusals,
 						ComputerUnavailable: Conflict,
 						ComputerMadeMeanwhile: Conflict,
+						ClaimLost: Conflict,
 					}),
 				),
 			)
@@ -82,7 +83,12 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 			)
 			.handle("invite", ({ params, payload }) =>
 				callOperation("workspaces.invite", { workspace: params.workspace, ...payload }).pipe(
-					asHttpError({ ...refusals, AlreadyInWorkspace: Conflict, AlreadyInvited: Conflict }),
+					asHttpError({
+						...refusals,
+						AlreadyInWorkspace: Conflict,
+						AlreadyInvited: Conflict,
+						MembershipRemovalPending: Conflict,
+					}),
 				),
 			)
 			.handle("cancelInvitation", ({ params }) =>
@@ -109,8 +115,6 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 const departureErrors = {
 	...refusals,
 	SubscriptionInUse: Conflict,
-	ComputerUnavailable: Conflict,
-	ComputerMadeMeanwhile: Conflict,
 };
 
 /**

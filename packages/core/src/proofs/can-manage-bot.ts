@@ -39,14 +39,9 @@ export const proveCanManageBot = <P, B>(principal: Named<P, Principal>, botId: N
 			return yield* Effect.fail(new ResourceHidden({ resource: "bot" }));
 		const met = yield* meetBot(principal.value, record);
 		const visible =
-			met.kind === "run"
-				? met.withinBounds
-				: met.kind === "member" && met.withinBounds && memberReachesBot(met.actor, record);
+			met.kind === "run" || (met.kind === "member" && memberReachesBot(met.actor, record));
 		const manages =
-			met.kind === "member" &&
-			met.withinBounds &&
-			met.mayManage !== "never" &&
-			managesBot(met.actor, record);
+			met.kind === "member" && met.mayManage !== "never" && managesBot(met.actor, record);
 		if (met.kind !== "member" || !manages) {
 			return yield* Effect.fail(
 				visible
@@ -64,3 +59,9 @@ export const proveCanManageBot = <P, B>(principal: Named<P, Principal>, botId: N
 		});
 		return proof;
 	});
+
+/**
+ * Whether the bot `principal` acts as may change itself for its asker, as
+ * `proveCanManageBot` decides: asking the asker to approve a change it can't
+ * make would ask in vain.
+ */

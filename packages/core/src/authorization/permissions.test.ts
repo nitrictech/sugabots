@@ -4,12 +4,10 @@ import {
 	type Actor,
 	type BotFacts,
 	type BotPermission,
-	botPermissions,
 	mayInProject,
 	mayInWorkspace,
 	mayOnBot,
 	type ProjectPermission,
-	projectPermissions,
 	reachesBot,
 	type WorkspacePermission,
 } from "./permissions.ts";
@@ -64,8 +62,6 @@ const WORKSPACE_PERMISSIONS = Object.keys({
 	"workspace.admins.manage": true,
 	"workspace.ownership.handOver": true,
 	"workspace.delete": true,
-	"workspace.systemModel.choose": true,
-	"workspace.usage.manage": true,
 	"project.create": true,
 	"bot.create": true,
 } satisfies Record<WorkspacePermission, true>) as WorkspacePermission[];
@@ -79,16 +75,13 @@ const PROJECT_PERMISSIONS = Object.keys({
 	"project.bots.manage": true,
 	"project.leave": true,
 	"project.chats.manage": true,
-	"approval.decide": true,
 	"connector.read": true,
-	"connector.manage": true,
 	"automation.read": true,
 	"automation.manage": true,
 	"automation.run": true,
 	"automation.history.read": true,
 	"computer.read": true,
 	"computer.manage": true,
-	"computer.request.decide": true,
 	"computer.desktop.use": true,
 } satisfies Record<ProjectPermission, true>) as ProjectPermission[];
 
@@ -97,17 +90,12 @@ const BOT_PERMISSIONS = Object.keys({
 	"bot.use": true,
 	"bot.settings.read": true,
 	"bot.update": true,
-	"bot.delete": true,
 	"connector.read": true,
-	"connector.manage": true,
 	"automation.read": true,
 	"automation.manage": true,
 	"automation.run": true,
 	"automation.history.read": true,
-	"approval.decide": true,
-	"approval.automation.decide": true,
 	"computer.manage": true,
-	"computer.request.decide": true,
 	"computer.desktop.use": true,
 } satisfies Record<BotPermission, true>) as BotPermission[];
 
@@ -132,7 +120,6 @@ const EDITOR_IN_PROJECT: ProjectPermission[] = [
 	"project.leave",
 	"project.members.manage",
 	"project.bots.manage",
-	"approval.decide",
 	"connector.read",
 	"automation.read",
 	"automation.history.read",
@@ -163,7 +150,6 @@ const USING_A_BOT: BotPermission[] = [
 	"automation.read",
 	"automation.history.read",
 	"automation.run",
-	"approval.decide",
 	"computer.desktop.use",
 ];
 
@@ -186,28 +172,15 @@ const MANAGING_A_BOT: BotPermission[] = [
 	"connector.read",
 	"automation.read",
 	"bot.update",
-	"bot.delete",
-	"connector.manage",
 	"automation.manage",
-	"approval.automation.decide",
 	"computer.manage",
-	"computer.request.decide",
 ];
 
 /**
  * What a member may do with their Personal Assistant besides use it: change its
- * look and connectors, manage and run its automations, and decide what it and
- * its computer ask.
+ * look and connectors, and manage and run its automations.
  */
-const OWNING_AN_ASSISTANT: BotPermission[] = [
-	"bot.update",
-	"connector.manage",
-	"automation.manage",
-	"automation.run",
-	"approval.automation.decide",
-	"computer.request.decide",
-	"approval.decide",
-];
+const OWNING_AN_ASSISTANT: BotPermission[] = ["bot.update", "automation.manage", "automation.run"];
 
 /** Everything that concerns a bot's automations, which on a Personal Assistant are its member's alone. */
 const AUTOMATIONS: Array<BotPermission & ProjectPermission> = [
@@ -310,12 +283,10 @@ describe("a bot's default project", () => {
 		const personalOne = defaultProjectOf(personalBotBy(BOB));
 		const managed: ProjectPermission[] = [
 			"connector.read",
-			"connector.manage",
 			"automation.read",
 			"automation.manage",
 			"computer.read",
 			"computer.manage",
-			"computer.request.decide",
 		];
 		for (const permission of PROJECT_PERMISSIONS) {
 			expect(mayInProject(actor("admin"), permission, personalOne)).toBe(
@@ -324,28 +295,26 @@ describe("a bot's default project", () => {
 		}
 	});
 
-	it("lets its bot's managers tidy its chats, and those who may decide the bot's calls decide them", () => {
+	it("lets its bot's managers tidy its chats", () => {
 		const own = defaultProjectOf(publicBotBy(BOB));
 		expect(mayInProject(actor("editor", BOB), "project.chats.manage", own)).toBe(true);
 		expect(mayInProject(actor("admin"), "project.chats.manage", own)).toBe(true);
 		expect(mayInProject(actor("editor"), "project.chats.manage", own)).toBe(false);
-		expect(mayInProject(actor("editor"), "approval.decide", own)).toBe(true);
-		expect(mayInProject(actor("viewer"), "approval.decide", own)).toBe(false);
 	});
 
 	it.each(["owner", "admin", "editor"] as const)(
-		"lets a %s never change it, staff it, join, leave or delete it",
+		"lets a %s never change it, staff it, leave or delete it",
 		(role) => {
 			const own = defaultProjectOf(publicBotBy(BOB));
-			const permissions = projectPermissions(actor(role, BOB), { ...own, isPublic: true });
-			expect(permissions).toMatchObject({
-				rename: false,
-				manageMembers: false,
-				manageBots: false,
-				leave: false,
-				join: false,
-				delete: false,
-			});
+			for (const permission of [
+				"project.update",
+				"project.members.manage",
+				"project.bots.manage",
+				"project.leave",
+				"project.delete",
+			] as const) {
+				expect(mayInProject(actor(role, BOB), permission, own)).toBe(false);
+			}
 		},
 	);
 });
@@ -425,7 +394,7 @@ describe("bot actions", () => {
 	});
 
 	it.each(BOT_PERMISSIONS)(
-		"its member may %s on their Personal Assistant only to use it, change its look, connectors and automations, or decide what it asks",
+		"its member may %s on their Personal Assistant only to use it, or change its look, connectors and automations",
 		(permission) => {
 			expect(mayOnBot(actor("editor"), permission, assistantOf(ALICE))).toBe(
 				USING_A_BOT.includes(permission) || OWNING_AN_ASSISTANT.includes(permission),
@@ -453,22 +422,6 @@ describe("bot actions", () => {
 		},
 	);
 
-	it("lets only its member decide what their Personal Assistant's runs ask, whatever their role", () => {
-		for (const role of WORKSPACE_ROLES) {
-			expect(mayOnBot(actor(role), "approval.automation.decide", assistantOf(ALICE))).toBe(true);
-		}
-		for (const role of ["owner", "admin"] as const) {
-			expect(mayOnBot(actor(role, BOB), "approval.automation.decide", assistantOf(ALICE))).toBe(
-				false,
-			);
-		}
-	});
-
-	it("lets a viewer decide what their own Personal Assistant asks to do for them", () => {
-		expect(mayOnBot(actor("viewer"), "approval.decide", assistantOf(ALICE))).toBe(true);
-		expect(mayInWorkspace(actor("viewer"), "project.create")).toBe(false);
-	});
-
 	it.each(BOT_PERMISSIONS)(
 		"nobody else may %s on a Personal Assistant, the workspace's owner included",
 		(permission) => {
@@ -478,152 +431,5 @@ describe("bot actions", () => {
 
 	it.each(BOT_PERMISSIONS)("somebody outside the workspace may not %s", (permission) => {
 		expect(mayOnBot(actor(undefined), permission, publicBotBy(ALICE))).toBe(false);
-	});
-});
-
-describe("what the API tells a client", () => {
-	it("lets an admin change, staff and delete a project, and not leave it", () => {
-		expect(
-			projectPermissions(actor("admin"), { isMember: true, defaultOf: null, isPublic: false }),
-		).toEqual({
-			rename: true,
-			manageMembers: true,
-			manageBots: true,
-			leave: false,
-			join: false,
-			delete: true,
-			resources: {
-				readHistory: true,
-				openSettings: true,
-				deleteFiles: true,
-				manageConnectors: true,
-				manageComputer: true,
-				useDesktop: true,
-				manageAutomations: true,
-				runAutomations: true,
-			},
-		});
-	});
-
-	it("lets an editor staff and leave a project they are in, run its automations and use its desktop, and not change or delete it", () => {
-		expect(
-			projectPermissions(actor("editor"), { isMember: true, defaultOf: null, isPublic: true }),
-		).toEqual({
-			rename: false,
-			manageMembers: true,
-			manageBots: true,
-			leave: true,
-			join: false,
-			delete: false,
-			resources: {
-				readHistory: true,
-				openSettings: true,
-				deleteFiles: false,
-				manageConnectors: false,
-				manageComputer: false,
-				useDesktop: true,
-				manageAutomations: false,
-				runAutomations: true,
-			},
-		});
-	});
-
-	it("lets anyone in the workspace join a public project they are not in, and nothing else", () => {
-		for (const role of ["editor", "viewer"] as const) {
-			expect(
-				projectPermissions(actor(role), { isMember: false, defaultOf: null, isPublic: true }),
-			).toEqual({
-				rename: false,
-				manageMembers: false,
-				manageBots: false,
-				leave: false,
-				join: true,
-				delete: false,
-				resources: {
-					readHistory: false,
-					openSettings: false,
-					deleteFiles: false,
-					manageConnectors: false,
-					manageComputer: false,
-					useDesktop: false,
-					manageAutomations: false,
-					runAutomations: false,
-				},
-			});
-		}
-	});
-
-	it("does not offer to join a private project, or a public one from outside the workspace", () => {
-		expect(
-			projectPermissions(actor("editor"), { isMember: false, defaultOf: null, isPublic: false })
-				.join,
-		).toBe(false);
-		expect(
-			projectPermissions(actor(undefined), { isMember: false, defaultOf: null, isPublic: true })
-				.join,
-		).toBe(false);
-	});
-
-	it("lets an editor talk to a public bot without managing it", () => {
-		expect(botPermissions(actor("editor"), publicBotBy(BOB))).toEqual({
-			update: false,
-			delete: false,
-			talk: true,
-			resources: {
-				readHistory: true,
-				openSettings: false,
-				deleteFiles: false,
-				manageConnectors: false,
-				manageComputer: false,
-				useDesktop: true,
-				manageAutomations: false,
-				runAutomations: true,
-			},
-		});
-	});
-
-	it("lets an admin manage another member's personal bot without talking to it", () => {
-		expect(botPermissions(actor("admin"), personalBotBy(BOB))).toEqual({
-			update: true,
-			delete: true,
-			talk: false,
-			resources: {
-				readHistory: false,
-				openSettings: true,
-				deleteFiles: false,
-				manageConnectors: true,
-				manageComputer: true,
-				useDesktop: false,
-				manageAutomations: true,
-				runAutomations: false,
-			},
-		});
-	});
-
-	it.each(["owner", "admin", "editor", "viewer"] as const)(
-		"tells a %s the same of what a bot holds as of its default project",
-		(role) => {
-			for (const bot of [
-				publicBotBy(BOB),
-				personalBotBy(BOB),
-				personalBotBy(ALICE),
-				assistantOf(ALICE),
-			]) {
-				expect(botPermissions(actor(role), bot).resources).toEqual(
-					projectPermissions(actor(role), { isMember: false, defaultOf: bot, isPublic: false })
-						.resources,
-				);
-			}
-		},
-	);
-
-	it("lets a member change their Personal Assistant but not delete it", () => {
-		const resolved = botPermissions(actor("editor"), assistantOf(ALICE));
-		expect(resolved).toMatchObject({
-			update: true,
-			talk: true,
-			resources: { manageConnectors: true },
-		});
-		expect(resolved.delete).toBe(false);
 	});
 });

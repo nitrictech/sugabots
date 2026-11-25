@@ -19,7 +19,7 @@ import {
 } from "@/lib/chats.ts";
 import { useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
-import { useLeadBot } from "@/lib/resource-owner.tsx";
+import { resourcePermissions, useLeadBot } from "@/lib/resource-owner.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import type { AutomationsView } from "./AutomationsStage.tsx";
@@ -138,7 +138,11 @@ export function ChatPane({
 		recipients,
 		scrollToLatest: position.scrollToLatest,
 	});
-	const chatResolved = useChatResolved(chatId, details);
+	const chatResolved = useChatResolved(
+		chatId,
+		details,
+		resourcePermissions(chatLocation).resolveChats,
+	);
 	const projectChat = useListedProjectChat(project, chatId, details?.chat.title);
 	// Beside a file or a computer, the chat is as wide as the viewer last dragged it.
 	const [chatWidth, setChatWidth] = usePaneWidth("staged-chat");

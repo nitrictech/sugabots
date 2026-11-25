@@ -7,6 +7,8 @@ import { Schema } from "effect";
 import {
 	botSchema,
 	botUpdateSchema,
+	DESCRIPTION_MAX_LENGTH,
+	INSTRUCTIONS_MAX_LENGTH,
 	modelIdSchema,
 	newBotSchema,
 	systemBotKeySchema,
@@ -22,10 +24,17 @@ import {
 	SystemBotImmutable,
 	SystemBotMissing,
 } from "../errors/bots.ts";
-import { ComputerMadeMeanwhile, ComputerUnavailable } from "../errors/computers.ts";
+import { ClaimLost, ComputerMadeMeanwhile, ComputerUnavailable } from "../errors/computers.ts";
 import { LeadsProjects } from "../errors/projects.ts";
-import { ActionForbidden, ResourceHidden } from "../errors/proofs.ts";
+import {
+	ActionForbidden,
+	ApprovalNeeded,
+	ApprovalRefused,
+	ResourceHidden,
+	TurnEnded,
+} from "../errors/proofs.ts";
 import { ModelNotEnabled } from "../errors/providers.ts";
+import { TurnExecutionSuperseded } from "../errors/turns.ts";
 import { systemBotSchema, systemBotUpdateSchema } from "../system-bots.ts";
 import { uuidSchema } from "../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../workspaces.ts";
@@ -35,8 +44,16 @@ import { OperationContract } from "./operation.ts";
 /** How an operation that proves what it may do in a workspace, or to a bot, refuses. */
 const refusals = [ResourceHidden, ActionForbidden] as const;
 
+/** How a bot's call that may wait for approval, and writes for its turn, is refused. */
+const approvalAndFenceRefusals = [
+	ApprovalNeeded,
+	ApprovalRefused,
+	TurnEnded,
+	TurnExecutionSuperseded,
+] as const;
+
 /** A bot, by its id. */
-const aBot = Schema.Struct({ botId: uuidSchema });
+const aBot = Schema.Struct({ botId: uuidSchema.annotate({ description: "The bot's id." }) });
 
 export const botsContracts = {
 	"bots.list": OperationContract.make("bots.list", {
@@ -75,6 +92,30 @@ export const botsContracts = {
 		],
 		changes: true,
 	}),
+	"bots.saveInstructions": OperationContract.make("bots.saveInstructions", {
+		description:
+			"Replace your instructions and description, passing the whole text. Call it when setting yourself up, when someone asks you to change how you work, or when their reply shows you set yourself up for the wrong kind of work: then set yourself up again for the work they meant, and do that work yourself. Not for remembering things about a member. The member approves it before it is saved. Returns your settings page, where members read and change them.",
+		input: Schema.Struct({
+			instructions: Schema.String.check(
+				Schema.isMinLength(1),
+				Schema.isMaxLength(INSTRUCTIONS_MAX_LENGTH),
+			).annotate({ description: "Your instructions in Markdown, addressed to yourself." }),
+			description: Schema.String.check(
+				Schema.isMinLength(1),
+				Schema.isMaxLength(DESCRIPTION_MAX_LENGTH),
+			).annotate({
+				description:
+					"One or two sentences telling the other bots in the workspace what to come to you for.",
+			}),
+		}),
+		output: Schema.Struct({
+			saved: Schema.Literal(true),
+			/** The bot's settings page, where members read and change what was saved. */
+			settingsUrl: Schema.String,
+		}),
+		errors: [...refusals, BotGone, AssistantInstructionsManaged, ...approvalAndFenceRefusals],
+		changes: true,
+	}),
 	"bots.remove": OperationContract.make("bots.remove", {
 		description:
 			"Delete a bot, with its chats, files, connectors, automations and computer. It is kept while it leads a project, or when its computer provider can't be reached.",
@@ -86,21 +127,24 @@ export const botsContracts = {
 			LeadsProjects,
 			ComputerUnavailable,
 			ComputerMadeMeanwhile,
+			ClaimLost,
 		],
 		changes: true,
 	}),
 	"bots.pin": OperationContract.make("bots.pin", {
-		description: "Pin a bot you can talk to in your sidebar.",
+		description:
+			"Pin a bot you can talk to in your sidebar, or for a bot, in the sidebar of the member it acts for.",
 		input: aBot,
 		output: botSchema,
-		errors: refusals,
+		errors: [...refusals, ...approvalAndFenceRefusals],
 		changes: true,
 	}),
 	"bots.unpin": OperationContract.make("bots.unpin", {
-		description: "Take a bot off your sidebar.",
+		description:
+			"Take a bot off your sidebar, or for a bot, off the sidebar of the member it acts for.",
 		input: aBot,
 		output: botSchema,
-		errors: refusals,
+		errors: [...refusals, ...approvalAndFenceRefusals],
 		changes: true,
 	}),
 	"bots.ensureAssistant": OperationContract.make("bots.ensureAssistant", {
@@ -135,11 +179,16 @@ export const botsContracts = {
 	}),
 } as const;
 
-/** Held back until tools become operations: a Personal Assistant's `tool` does this today. */
-const doneByAssistantTool = <const Tool extends string>(tool: Tool) =>
+/**
+ * Offered as `tool` only in member bounds, a Personal Assistant's own turns,
+ * where each call asks its member: it changes the member's own sidebar.
+ */
+const forMemberInMemberBounds = <const Tool extends string>(tool: Tool) =>
 	({
-		kind: "heldBack",
-		reason: `Until tools become operations: a Personal Assistant's ${tool} tool does this for its member, through BotAdministration.`,
+		kind: "offered",
+		tool,
+		offeredIn: "memberBounds",
+		approval: { kind: "always", approvers: "turn" },
 	}) as const;
 
 /** Held back: it manages the workspace or a bot, which a bot may do only in member bounds. */
@@ -152,7 +201,11 @@ const managesInMemberBounds = {
 export const botsExposure = {
 	"bots.list": {
 		http: { kind: "offered", endpoint: "bots.list" },
-		botLoop: doneByAssistantTool("workspace_guide"),
+		botLoop: {
+			kind: "coveredBy",
+			operation: "workspaces.guide",
+			reason: "A Personal Assistant's workspace guide lists the bots its member reaches.",
+		},
 	},
 	"bots.create": {
 		http: { kind: "offered", endpoint: "bots.create" },
@@ -163,7 +216,20 @@ export const botsExposure = {
 		botLoop: {
 			kind: "heldBack",
 			reason:
-				"Until tools become operations: a bot's save_instructions tool writes its own instructions and description in its own chats, through BotAdministration; any other change manages a bot, which a bot may do only in member bounds.",
+				"A bot changes only its own instructions and description, through bots.saveInstructions; any other change manages a bot, which a bot may do only in member bounds, and no tool does it yet.",
+		},
+	},
+	"bots.saveInstructions": {
+		http: {
+			kind: "heldBack",
+			reason:
+				"A bot saves its own instructions in a turn; members change a bot through bots.update.",
+		},
+		botLoop: {
+			kind: "offered",
+			tool: "save_instructions",
+			offeredIn: "ownChats",
+			approval: { kind: "always", approvers: "turn" },
 		},
 	},
 	"bots.remove": {
@@ -175,11 +241,11 @@ export const botsExposure = {
 	},
 	"bots.pin": {
 		http: { kind: "offered", endpoint: "bots.pin" },
-		botLoop: doneByAssistantTool("pin_bot"),
+		botLoop: forMemberInMemberBounds("pin_bot"),
 	},
 	"bots.unpin": {
 		http: { kind: "offered", endpoint: "bots.unpin" },
-		botLoop: doneByAssistantTool("pin_bot"),
+		botLoop: forMemberInMemberBounds("unpin_bot"),
 	},
 	"bots.ensureAssistant": {
 		http: { kind: "offered", endpoint: "bots.ensureAssistant" },

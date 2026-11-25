@@ -152,10 +152,12 @@ const approvalRequestSchema = Schema.Struct({
 	call: toolCallPartSchema,
 	/** The bot that asked. */
 	bot: botParticipantSchema,
-	/** The project it was asked in; null in a bot's chat, which is in the bot's default project. */
+	/** The reached chat's listed project, or the computer's project when the chat is out of reach. */
 	projectId: Schema.NullOr(uuidSchema),
-	/** The chat the call was made in: the one members open, or one opened beside it. */
-	chatId: uuidSchema,
+	/** The computer's project name, for a request from a chat out of reach. */
+	projectName: Schema.optional(Schema.String),
+	/** The chat the call was made in, when the member reaches it. */
+	chatId: Schema.NullOr(uuidSchema),
 	/** The chat members open that it is in. */
 	rootChatId: Schema.NullOr(uuidSchema),
 });
@@ -250,7 +252,7 @@ export type AttentionCounts = typeof attentionCountsSchema.Type;
  * in its default project.
  */
 export const firstChatMessageSchema = Schema.Struct({
-	id: uuidSchema,
+	retryKey: uuidSchema,
 	message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MESSAGE_MAX_LENGTH)),
 });
 

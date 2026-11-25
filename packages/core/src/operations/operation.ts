@@ -17,23 +17,44 @@
  * returns and fails with; the body's type must keep to it.
  */
 
+import { ApprovalNeeded } from "@sugabots/contracts/errors/proofs";
 import type { OperationContract } from "@sugabots/contracts/operations";
-import type { Effect } from "effect";
+import type { Effect, Scope, Stream } from "effect";
 import type { Principal } from "../principal.ts";
+
+/** Runs the operation's proofs up to Approved, before any write or provider call. */
+export interface ApprovalCheck {
+	readonly kind: "approvalCheck";
+}
+
+interface ApprovalCheckDetails {
+	readonly computerProjectId?: string;
+	readonly connectorAccess?: "allow" | "ask";
+	readonly writeOrDelete: boolean;
+}
+
+export class ApprovalCheckReached extends ApprovalNeeded {
+	declare readonly details: ApprovalCheckDetails;
+
+	static for(details: ApprovalCheckDetails): ApprovalCheckReached {
+		return Object.assign(new ApprovalCheckReached(), { details });
+	}
+}
 
 /**
  * One call of an operation, the `X` of `Approved<P, X>`, which the registry
  * hands its body with the principal and input. A bot's tool call is the
  * `tool_call` row the bot loop recorded before calling, which its approval is
- * stored against. Any other call (an HTTP request, one of the bot loop's own
- * calls, a webhook call or work the scheduler starts) is identified by the
- * entrypoint that made it, and is never approved by a stored decision.
+ * stored against. A request is identified by its entrypoint. An approval check stops at the
+ * approval proof after the operation has checked its other requirements.
  */
 export type Call =
+	| ApprovalCheck
 	| { readonly kind: "toolCall"; readonly toolCall: string }
 	| { readonly kind: "request"; readonly request: string };
 
 export interface Operation<Contract extends OperationContract.Contract, Services> {
+	readonly kind: "request";
 	readonly contract: Contract;
 	readonly run: (
 		principal: Principal,
@@ -46,14 +67,51 @@ export interface Operation<Contract extends OperationContract.Contract, Services
 	>;
 }
 
-export const defineOperation = <Contract extends OperationContract.Contract, Services>(
+export const defineOperation = <
+	Contract extends OperationContract.Contract & { readonly kind: "request" },
+	Services,
+>(
 	contract: Contract,
 	run: Operation<Contract, Services>["run"],
-): Operation<Contract, Services> => ({ contract, run });
+): Operation<Contract, Services> => ({ kind: "request", contract, run });
+
+/**
+ * A long-running operation's body (see `OperationContract.Kind`): it proves
+ * access as it starts, failing with a refusal then, and returns what it
+ * yields while it runs, a stream that ends once it must. What it holds open,
+ * such as its subscriptions and the proving again, belongs to the scope it is
+ * given, which its entrypoint closes when its caller leaves.
+ */
+export interface LongRunningOperation<Contract extends OperationContract.Contract, Services> {
+	readonly kind: "longRunning";
+	readonly contract: Contract;
+	readonly run: (
+		principal: Principal,
+		input: OperationContract.Input<Contract>,
+		call: Call,
+	) => Effect.Effect<
+		Running<OperationContract.Output<Contract>>,
+		OperationContract.Failure<Contract>,
+		Services | Scope.Scope
+	>;
+}
+
+export const defineLongRunningOperation = <
+	Contract extends OperationContract.Contract & { readonly kind: "longRunning" },
+	Services,
+>(
+	contract: Contract,
+	run: LongRunningOperation<Contract, Services>["run"],
+): LongRunningOperation<Contract, Services> => ({ kind: "longRunning", contract, run });
 
 /** The services an operation's body needs, which the registry supplies when it is built. */
 export type ServicesOf<Of> = Of extends {
 	readonly run: (...args: never) => Effect.Effect<unknown, unknown, infer Services>;
 }
-	? Services
+	? Exclude<Services, Scope.Scope>
 	: never;
+
+export interface Running<Output> {
+	readonly stream: Stream.Stream<Output>;
+	readonly ended: Effect.Effect<void>;
+}

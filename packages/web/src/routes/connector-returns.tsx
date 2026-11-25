@@ -15,7 +15,7 @@ import { useWorkspaces } from "@/lib/workspace.ts";
 import { Splash } from "@/shell/Splash.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { requireSignedIn, rootRoute } from "./root.tsx";
-import { optionalString } from "./search.ts";
+import { optionalRouteId, optionalString } from "./search.ts";
 
 interface SignInReturnSearch {
 	workspace?: string;
@@ -30,8 +30,8 @@ export const signInReturnRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: CONNECTOR_SIGN_IN_RETURN_PATH,
 	validateSearch: (search: Record<string, unknown>): SignInReturnSearch => ({
-		workspace: optionalString(search.workspace),
-		project: optionalString(search.project),
+		workspace: optionalRouteId(search.workspace),
+		project: optionalRouteId(search.project),
 		oauth_error: optionalString(search.oauth_error),
 	}),
 	beforeLoad: requireSignedIn,
@@ -79,9 +79,9 @@ export const gitHubSetupReturnRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: GITHUB_SETUP_RETURN_PATH,
 	validateSearch: (search: Record<string, unknown>) => ({
-		workspace: optionalString(search.workspace),
-		project: optionalString(search.project),
-		connector: optionalString(search.connector),
+		workspace: optionalRouteId(search.workspace),
+		project: optionalRouteId(search.project),
+		connector: optionalRouteId(search.connector),
 		github_error: optionalString(search.github_error),
 	}),
 	beforeLoad: requireSignedIn,

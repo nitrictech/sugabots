@@ -1,17 +1,21 @@
 import type { InputOf } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
-import { Context } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { Automations } from "../../chats/automations/automations.ts";
-import { anAutomationAdmin } from "../../chats/automations/testing.ts";
+import { lockTriggers } from "../../chats/automations/automation.ts";
+import { anAutomationAdmin, automationsAs } from "../../chats/automations/testing.ts";
 import { chatServicesForTests } from "../../chats/testing.ts";
+import { query } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { workspace } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, type Promised } from "../../database/testing.ts";
+import { automation, automationTrigger, workspace } from "../../database/schema.ts";
+import {
+	closeDatabase,
+	holdTransaction,
+	onDatabase,
+	waitUntilWaitingOnLocks,
+} from "../../database/testing.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
-import { onPostgresAs } from "../testing.ts";
 
 /** Moving a workspace to another time zone, with its automations' routines, against Postgres. */
 describe.skipIf(!process.env.DATABASE_URL)(
@@ -25,7 +29,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		let workspaceId: string;
 		let ownProjectId: string;
 		let timeZones: TimeZonesAs;
-		let automations: Promised<Automations.Interface>;
+		let automations: ReturnType<typeof automationsAs>;
 
 		const atNine = (timezone: string) => ({
 			kind: "routine" as const,
@@ -65,7 +69,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					.where(eq(workspace.id, workspaceId)),
 			);
 			timeZones = await timeZonesAs(memberId);
-			automations = onPostgresAs(memberId)(Context.get(services, Automations.Service));
+			automations = automationsAs(callOperation, memberId);
 		});
 
 		it("moves the routines in the workspace's zone, and leaves the ones set for another", async () => {
@@ -98,8 +102,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				automationsWithRoutines: 2,
 			});
 			const listed = await automations.list({ projectId: ownProjectId });
-			const triggersOf = (automationId: string) =>
-				listed.find((automation) => automation.id === automationId)?.triggers;
+			const triggersOf = (automationId: string) => {
+				const found = listed.find((automation) => automation.id === automationId);
+				return found && "triggers" in found ? found.triggers : undefined;
+			};
 			const moved = triggersOf(local.automation.id);
 			expect(moved).toEqual([
 				expect.objectContaining({ timezone: "Asia/Tokyo", nextScheduledAt: expect.any(String) }),
@@ -114,6 +120,34 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(triggersOf(elsewhere.automation.id)).toEqual([
 				expect.objectContaining({ timezone: "Europe/London" }),
 			]);
+		});
+
+		it("waits for an automation's trigger lock and moves its routine using the committed state", async () => {
+			const created = await automations.create(
+				{ projectId: ownProjectId },
+				{ name: "Standup", instructions: "Ask.", triggers: [atNine("Australia/Sydney")] },
+			);
+			const automationId = created.automation.id;
+			const pausing = holdTransaction(
+				lockTriggers(automationId),
+				query((db) =>
+					db.update(automation).set({ state: "paused" }).where(eq(automation.id, automationId)),
+				),
+			);
+			await pausing.held;
+
+			const moving = timeZones.change({ workspace: workspaceId, timeZone: "Asia/Tokyo" });
+			await waitUntilWaitingOnLocks(1);
+			await pausing.release();
+			await moving;
+
+			const [routine] = await onDatabase((db) =>
+				db.select().from(automationTrigger).where(eq(automationTrigger.automationId, automationId)),
+			);
+			expect(routine).toMatchObject({
+				settings: { timezone: "Asia/Tokyo" },
+				nextScheduledAt: null,
+			});
 		});
 
 		it("refuses a zone the database does not know, and stays where it was", async () => {

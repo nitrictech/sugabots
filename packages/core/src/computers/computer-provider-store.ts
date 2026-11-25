@@ -22,6 +22,7 @@ import { query, serviceOperations, transaction, writtenRow } from "../database/d
 import { type ComputerProviderRow, computerProvider } from "../database/schema.ts";
 import { stillConfiguredAs } from "../providers/tested-configuration.ts";
 import { Secrets } from "../secrets/secrets.ts";
+import { processLayer, Tier } from "../tiers.ts";
 import type { Computers } from "./computers.ts";
 
 /**
@@ -74,7 +75,9 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ComputerProviderStore",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 /** A provider row as something to make computers with. */
 export interface Configured {
@@ -287,7 +290,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 type Provider = Pick<ComputerProviderRow, "settings" | "apiKeyEncrypted" | "enabled">;
 

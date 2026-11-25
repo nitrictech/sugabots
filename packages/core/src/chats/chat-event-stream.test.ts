@@ -154,7 +154,7 @@ describe("the chat event stream", () => {
 		expect(told.map(({ stream, event }) => [stream, Audience.read(event).audience])).toEqual([
 			[chatStream(chatId), undefined],
 			[chatStream(chatId), undefined],
-			[workspaceStream(workspaceId), { chatId }],
+			[workspaceStream(workspaceId), { kind: "chat", chat: chatId }],
 		]);
 	});
 

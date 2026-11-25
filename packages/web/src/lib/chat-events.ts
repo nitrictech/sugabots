@@ -182,6 +182,11 @@ export function mergeChatMessages(current: Message[], incoming: Message[]): Mess
 	});
 }
 
+/**
+ * The newest execution heard for each message being written, by message id.
+ */
+const streamingExecutions = new Map<string, number>();
+
 async function consume(
 	stream: AsyncIterable<StreamEvent>,
 	apply: (event: StreamEvent) => void | Promise<void>,
@@ -203,6 +208,16 @@ async function applyChatEvent(
 	const update = parsed.success;
 	if ("chatId" in update && update.chatId !== chatId) {
 		return;
+	}
+	let previousExecution: number | undefined;
+	if (
+		update.type === "message.delta" ||
+		update.type === "message.thinking_delta" ||
+		update.type === "message.execution_started"
+	) {
+		previousExecution = streamingExecutions.get(update.messageId);
+		if (previousExecution !== undefined && update.execution < previousExecution) return;
+		streamingExecutions.set(update.messageId, update.execution);
 	}
 	if (update.type === "chat.notice") {
 		const notice = { id: uuidv4(), text: update.notice };
@@ -265,23 +280,54 @@ async function applyChatEvent(
 
 	let messageId: string;
 	let applyMessage: (message: Message) => Message;
-	if (update.type === "message.delta") {
+	if (update.type === "message.delta" || update.type === "message.thinking_delta") {
 		messageId = update.messageId;
 		const current = queries
 			.getQueryData<ChatDetails>(["chat", chatId])
 			?.messages.find((message) => message.id === messageId);
-		if (current && update.offset > current.content.length) {
-			// Text was missed, so appending would garble the message. The row is
-			// flushed as it streams; fetching it catches up.
+		if (current?.status !== "writing") {
+			if (current) streamingExecutions.delete(messageId);
+			return;
+		}
+		const step = update.type === "message.thinking_delta" ? update.step : undefined;
+		const currentText =
+			step === undefined
+				? current.content
+				: (current.thinking?.find((part) => part.step === step)?.text ?? "");
+		const { offset, text } = update;
+		const restarted = previousExecution !== undefined && update.execution > previousExecution;
+		const overlap = currentText.slice(offset);
+		if (!restarted && overlap.startsWith(text)) return;
+		if (offset > currentText.length || (!restarted && !text.startsWith(overlap))) {
 			await queries.invalidateQueries({ queryKey: ["chat", chatId] });
 			return;
 		}
-		const { offset, text } = update;
-		// A delta already applied (a reconnect, a duplicate) is skipped, not appended twice.
+		const combined = currentText.slice(0, offset) + text;
 		applyMessage = (message) =>
-			offset < message.content.length ? message : withContent(message, `${message.content}${text}`);
+			step === undefined
+				? withContent(message, combined)
+				: {
+						...message,
+						thinking: [
+							...(message.thinking ?? []).filter((part) => part.step !== step),
+							{ step, text: combined },
+						].sort((left, right) => left.step - right.step),
+					};
+	} else if (update.type === "message.execution_started") {
+		if (previousExecution === update.execution) return;
+		messageId = update.messageId;
+		const { content, thinking } = update;
+		applyMessage = (message) => {
+			if (message.status !== "writing") return message;
+			const fetchedAhead =
+				previousExecution === undefined &&
+				message.content.length > content.length &&
+				message.content.startsWith(content);
+			return fetchedAhead ? message : { ...withContent(message, content), thinking };
+		};
 	} else if (update.type === "message.completed") {
 		messageId = update.messageId;
+		streamingExecutions.delete(messageId);
 		const { content, status, finishedAt } = update;
 		applyMessage = (message) => ({ ...withContent(message, content), status, finishedAt });
 	} else if (
@@ -341,6 +387,24 @@ async function applyWorkspaceEvent(
 				// A message, a reply, or an approval asked for may change how a chat stands in the lists.
 				refreshAfterChatChange(queries, workspaceId),
 			]);
+			return;
+		case "reach.changed":
+			// Who reaches a project, bot or the workspace changed, so what the lists
+			// show of them may have too, and whose turns each member may interrupt in
+			// a chat; a stream that lost what it follows ends on its own.
+			await Promise.all([
+				queries.invalidateQueries({ queryKey: ["chat"] }),
+				queries.invalidateQueries({ queryKey: ["projects"] }),
+				queries.invalidateQueries({ queryKey: ["project-members"] }),
+				queries.invalidateQueries({ queryKey: ["project-bots"] }),
+				queries.invalidateQueries({ queryKey: ["bots"] }),
+				queries.invalidateQueries({ queryKey: ["workspaces"] }),
+				refreshAfterChatChange(queries, workspaceId),
+			]);
+			return;
+		case "member.changed":
+			// A member's name, and so their handle, shows wherever they do.
+			await queries.invalidateQueries();
 			return;
 		case "reset":
 			// Any number of the events above may have been missed, so everything they keep fresh is fetched again.

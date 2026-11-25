@@ -9,7 +9,7 @@ import type {
 } from "@sugabots/contracts";
 import { handleFromName, messageStatusSchema, quotedPreview } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { and, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import { inArray, type SQLWrapper, sql } from "drizzle-orm";
 import { Schema } from "effect";
 import type * as schema from "../../database/schema.ts";
 import { bot, member, message, projectBot } from "../../database/schema.ts";
@@ -92,10 +92,14 @@ export function toMessage(
 	/** What members are told of why the turn behind a failed reply failed. */
 	error?: UserText | null,
 ): Message {
+	const thinking = row.parts.flatMap((part) =>
+		part.type === "thinking" ? [{ step: part.step, text: part.text }] : [],
+	);
 	const parts = row.parts.flatMap((part): MessagePart[] => {
 		if (part.type === "text" || part.type === "written_file") {
 			return [part];
 		}
+		if (part.type === "thinking") return [];
 		const made = placed.toolCalls?.find((candidate) => candidate.id === part.toolCallId);
 		return made ? [made] : [];
 	});
@@ -103,10 +107,12 @@ export function toMessage(
 	parts.push(...(placed.files ?? []));
 	return {
 		id: row.id,
+		...(row.retryKey ? { retryKey: row.retryKey } : {}),
 		chatId: row.chatId,
 		author: row.automationTrigger ?? toParticipant(author),
 		status: Schema.decodeSync(messageStatusSchema)(row.status),
 		parts,
+		...(thinking.length > 0 ? { thinking } : {}),
 		content: row.content,
 		...(row.status === "failed" && error ? { error } : {}),
 		createdAt: row.createdAt.toISOString(),
@@ -359,9 +365,3 @@ export const inProject = (projectId: SQLWrapper | string) =>
 		bot.id,
 		sql`(select ${projectBot.botId} from ${projectBot} where ${projectBot.projectId} = ${projectId})`,
 	);
-
-/**
- * The condition on `bot` that selects bots members make: not a system bot,
- * such as Compaction, and not anybody's Personal Assistant.
- */
-export const madeByMembers = and(isNull(bot.systemBotKey), isNull(bot.assistantOf)) as SQL;

@@ -3,31 +3,32 @@
  * principal from these, and the provers that ask who a turn's asker is, or
  * whose approval its calls wait for, read the same facts.
  *
- * The asker isn't stored with the turn. It is the member who wrote the
- * message the turn answers; when a bot wrote that message in another turn,
- * as a helper's question or a hand-back's, it is that turn's asker, and so on
- * back. A message a bot wrote outside any turn, such as a brief, or a turn's
- * own reply, such as an interview's first, acts for the member who started
- * its chat. A run's own turns answer the message its automation's trigger
- * posted.
+ * The asker is stored with the turn when it is made (see `askerColumns`):
+ * the member who wrote the message the turn answers; when a bot wrote that
+ * message in another turn, as a helper's question or a hand-back's, that
+ * turn's asker. A message a bot wrote outside any turn, such as a brief, acts
+ * for the member who started its chat, and so does an interview's turn, which
+ * answers its own first reply. A run's own turns answer the message its
+ * automation's trigger posted, and a Personal Assistant's act for its member.
  */
 
 import type { RunTriggerKind } from "@sugabots/contracts";
-import { eq, sql } from "drizzle-orm";
+import { eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import type { Executor } from "../database/database.ts";
 import {
 	automationRun,
+	type BriefTurnRule,
 	bot,
 	message,
 	placedChat,
 	project,
-	projectChat,
 	type TurnReason,
 	type TurnStatus,
 	turn,
 } from "../database/schema.ts";
+import { outerColumn } from "../database/sql.ts";
 import { isUuid } from "../ids/ids.ts";
 
 export interface TurnFacts {
@@ -55,22 +56,18 @@ export interface TurnFacts {
 	readonly askedBy: AskedBy;
 	/** Whether a Personal Assistant wrote the brief this turn answers. */
 	readonly briefedByAssistant: boolean;
+	readonly briefTurnRule: BriefTurnRule | null;
 }
 
 /**
- * Who the message a turn answers comes from: a member, its automation's
- * trigger, or neither, when the chain of turns behind it ends nowhere else.
+ * Who the message a turn answers comes from: a member; its automation's
+ * trigger, with the member its run acts for, a Personal Assistant's; or
+ * neither, when the chain of turns behind it ends nowhere else.
  */
-export type AskedBy =
+type AskedBy =
 	| { readonly kind: "member"; readonly member: string }
-	| { readonly kind: "automation" }
+	| { readonly kind: "automation"; readonly member: string | null }
 	| { readonly kind: "nobody" };
-
-/**
- * How many turns back an asker is followed. A helper's question goes one back
- * and a hand-back's two; anything deeper is a chain no rule makes.
- */
-const MAX_ASKING_TURNS = 8;
 
 const triggerMessage = alias(message, "trigger_message");
 const triggerAuthorBot = alias(bot, "trigger_author_bot");
@@ -95,6 +92,7 @@ export const turnFacts = (db: Executor, turnId: string) =>
 				runBot: automationRun.botId,
 				runStartedBy: automationRun.triggerKind,
 				triggerAuthorAssistantOf: triggerAuthorBot.assistantOf,
+				briefTurnRule: triggerMessage.briefTurnRule,
 			})
 			.from(turn)
 			.innerJoin(placedChat, eq(placedChat.id, turn.chatId))
@@ -127,71 +125,91 @@ export const turnFacts = (db: Executor, turnId: string) =>
 					: null,
 			askedBy: yield* askedByOf(db, turnId),
 			briefedByAssistant: row.reason === "brief" && row.triggerAuthorAssistantOf !== null,
+			briefTurnRule: row.reason === "brief" ? row.briefTurnRule : null,
 		};
 		return facts;
 	});
 
-/** The member a turn acts for: whoever asked it, or for a Personal Assistant's run, its member. */
-export function askerOf(facts: TurnFacts): string | undefined {
-	switch (facts.askedBy.kind) {
-		case "member":
-			return facts.askedBy.member;
-		case "automation":
-			return facts.run && runActsForMember(facts) ? (facts.assistantOf ?? undefined) : undefined;
-		case "nobody":
-			return undefined;
-	}
+export function asksBeforeAllTools(facts: TurnFacts) {
+	return (
+		facts.briefTurnRule === "askBeforeAllTools" ||
+		(facts.assistantOf !== null &&
+			facts.inOwnChats &&
+			(facts.run?.startedBy === "webhook" || facts.run?.startedBy === "github"))
+	);
 }
 
-/** Whether the turn's run is a Personal Assistant's, which acts for its member. */
-function runActsForMember(facts: TurnFacts): boolean {
-	return facts.assistantOf !== null && facts.inOwnChats;
+/** The member a turn acts for: whoever asked it, or for a Personal Assistant's run, its member. */
+export function askerOf(facts: TurnFacts): string | undefined {
+	return facts.askedBy.kind === "nobody" ? undefined : (facts.askedBy.member ?? undefined);
 }
 
 /** Follows the message `turnId` answers back through the turns that wrote it. */
 const askedByOf = (db: Executor, turnId: string) =>
 	Effect.gen(function* () {
-		const [end] = yield* db.execute<{
-			author_member_id: string | null;
-			automation: boolean;
-			written_in_turn: string | null;
-			answered_by_turn: string;
-			started_by_id: string | null;
-		}>(
-			sql`with recursive asking(depth, turn_id, message_id) as (
-				select 0, asked.id, asked.trigger_message_id
-				from ${turn} as asked
-				where asked.id = ${turnId}
-				union all
-				select asking.depth + 1, earlier.id, earlier.trigger_message_id
-				from asking
-				inner join ${message} as asking_message on asking_message.id = asking.message_id
-				inner join ${turn} as earlier on earlier.id = asking_message.turn_id
-				where asking_message.author_bot_id is not null
-					and earlier.id <> asking.turn_id
-					and asking.depth < ${MAX_ASKING_TURNS}
-			)
-			select
-				end_message.author_member_id,
-				end_message.automation_trigger is not null as automation,
-				end_message.turn_id as written_in_turn,
-				asking.turn_id as answered_by_turn,
-				end_chat.started_by_id
-			from asking
-			inner join ${message} as end_message on end_message.id = asking.message_id
-			left join ${projectChat} as end_chat on end_chat.chat_id = end_message.chat_id
-			order by asking.depth desc
-			limit 1`,
+		const [end] = yield* db.execute<{ member_id: string | null; automation: boolean }>(
+			askedBy(sql`${turnId}::uuid`),
 			"objects",
 		);
-		if (!end) return { kind: "nobody" } as const;
-		if (end.author_member_id) return { kind: "member", member: end.author_member_id } as const;
-		if (end.automation) return { kind: "automation" } as const;
-		// A bot's message the chain can't follow further: one written outside any
-		// turn, or the answering turn's own reply. Deeper than the limit is neither.
-		const writtenOutsideAnother =
-			end.written_in_turn === null || end.written_in_turn === end.answered_by_turn;
-		return writtenOutsideAnother && end.started_by_id
-			? ({ kind: "member", member: end.started_by_id } as const)
-			: ({ kind: "nobody" } as const);
+		if (end?.automation) return { kind: "automation", member: end.member_id } as const;
+		if (end?.member_id) return { kind: "member", member: end.member_id } as const;
+		return { kind: "nobody" } as const;
 	});
+
+/**
+ * SQL selecting who the turn `turnId` acts for, as it was stored when the turn
+ * was made (see `askerColumns`): one row of `member_id`, the member it acts
+ * for if any, and `automation`, whether its automation's trigger posted the
+ * message it answers; no row for a turn there is none of. Its asker reads it
+ * for one turn, and the approver rule for each turn whose calls wait. `turnId`
+ * may be a column of an outer query.
+ */
+export function askedBy(turnId: SQLWrapper): SQL {
+	return sql`select asked.asker_id as member_id, asked.asked_by_automation as automation
+		from ${turn} as asked
+		where asked.id = ${outerColumn(turnId)}`;
+}
+
+/**
+ * Who the bot `botId`'s turn answering the message `triggerMessageId` in the
+ * chat `chatId` acts for: the member who wrote the message; when a bot's turn
+ * wrote it, as a helper's question or a hand-back's, that turn's asker, or its
+ * run; when its automation's trigger posted it, its run, with no member but a
+ * Personal Assistant's, which acts for its member in its own chats. A bot's
+ * message no turn wrote, such as a brief, acts for the member who started its
+ * chat, and so does an interview's turn, which answers its own first reply.
+ *
+ * The one definition, the database's `turn_asker`: worked out as a turn is
+ * asked for, to key its lane, and stored as the turn is made (see
+ * `askerColumns`).
+ */
+export const askerOfMessage = Effect.fn("TurnFacts.askerOfMessage")(function* (
+	db: Executor,
+	answering: Answering,
+) {
+	const [row] = yield* db.execute<{ member_id: string | null; automation: boolean }>(
+		sql`select member_id, automation from ${turnAsker(answering)}`,
+		"objects",
+	);
+	return { askerId: row?.member_id ?? null, automation: row?.automation ?? false };
+});
+
+/** A turn's place: the bot `botId` answering the message `triggerMessageId` in the chat `chatId`. */
+export interface Answering {
+	readonly chatId: string;
+	readonly botId: string;
+	readonly triggerMessageId: string;
+}
+
+/**
+ * The asker columns of a turn as it is written (see `askerOfMessage`), for the
+ * statement that makes it: whoever makes a turn row writes them, the turn
+ * store and seeds alike.
+ */
+export const askerColumns = (answering: Answering) => ({
+	askerId: sql<string | null>`(select member_id from ${turnAsker(answering)})`,
+	askedByAutomation: sql<boolean>`(select automation from ${turnAsker(answering)})`,
+});
+
+const turnAsker = ({ chatId, botId, triggerMessageId }: Answering) =>
+	sql`turn_asker(${chatId}::uuid, ${triggerMessageId}::uuid, ${botId}::uuid)`;

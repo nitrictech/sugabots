@@ -5,20 +5,27 @@ export * as ComputerNetwork from "./computer-network.ts";
 import {
 	COMPUTER_NETWORK_MODE_DEFAULT,
 	type ComputerNetworkSettings,
+	HOST_REQUEST_TOOL,
 	type ProjectComputerNetwork,
 } from "@sugabots/contracts";
 import { ComputerHostBlocked } from "@sugabots/contracts/errors/computers";
+import type { OutputOf } from "@sugabots/contracts/operations";
+import { computersContracts } from "@sugabots/contracts/operations/computers";
+import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
-import { type Database, query, serviceOperations } from "../database/database.ts";
+import { Context, Effect, Layer, Option, Schema } from "effect";
+import { afterCommit, query, serviceOperations } from "../database/database.ts";
 import {
 	allowedHost,
 	blockedHost,
-	placedChat,
 	projectAllowedHost,
+	project as projectTable,
 	toolCall,
-	turn,
 } from "../database/schema.ts";
+import type { Approved } from "../proofs/approved.ts";
+import type { CanDecide } from "../proofs/can-decide.ts";
+import type { CanUseChatComputer } from "../proofs/can-use-computer.ts";
+import type { IsMember } from "../proofs/is-member.ts";
 import type { CanChangeAllowedHosts } from "../proofs/project-permissions.ts";
 import type { ReachesProject } from "../proofs/reaches-project.ts";
 import type { CanManageWorkspace } from "../proofs/workspace-permissions.ts";
@@ -26,6 +33,7 @@ import { processLayer, Tier } from "../tiers.ts";
 import { memberNamesOf } from "../workspaces/membership/member-reads.ts";
 import {
 	addedHostsOf,
+	allowedHostsOf,
 	blockedHostsOf,
 	blockOn,
 	projectAddedHostsOf,
@@ -42,10 +50,10 @@ import { ProjectComputers } from "./project-computers.ts";
  * whatever allows them. A change reaches running computers at once, and the
  * others when they are next opened.
  *
- * Each method but `grantRequest` is for an operation that has proved what it
- * needs, and takes the workspace or the project from its proof: the
- * workspace's lists to those who may manage the workspace, a project's own
- * list to whoever reaches it to see, and to its managers to change.
+ * Each method is for an operation that has proved what it needs, and takes
+ * the workspace or the project from its proof: the workspace's lists to those
+ * who may manage the workspace, a project's own list to whoever reaches it to
+ * see, and to its managers to change, or to approve a bot's host request.
  */
 export interface Interface {
 	readonly settings: <P, W>(
@@ -83,22 +91,40 @@ export interface Interface {
 		host: string,
 	) => Effect.Effect<ProjectComputerNetwork>;
 	/**
-	 * Adds `host` to the project whose computer the turn worked on whose call
-	 * `sdkToolCallId` asked for it, if a member allowed that call and the
-	 * workspace hasn't blocked the host since.
-	 *
-	 * Takes no proof: it exists only because the `request_host` tool still
-	 * calls this service directly, and goes when tools become operations.
+	 * Refuses a host request for a host the workspace blocked, before anyone
+	 * is asked: nobody could allow it.
 	 */
-	readonly grantRequest: (input: {
-		turnId: string;
-		sdkToolCallId: string;
-		host: string;
-	}) => Effect.Effect<Grant>;
+	readonly refuseBlocked: <P, C>(
+		canUse: CanUseChatComputer<P, C>,
+		host: string,
+	) => Effect.Effect<void, ComputerHostBlocked>;
+	/**
+	 * Lets the computer of the project the host request `canDecide` is about
+	 * was made in reach the host it asks for, as the member `isMember` names,
+	 * who is deciding to allow it as one who may manage that project. In the
+	 * caller's transaction, the decision's, so the host is added only if the
+	 * decision commits; the project's running computer learns of it once it
+	 * has. A host the workspace blocked meanwhile is left out, which the turn
+	 * finds when it reads the outcome. Any other call changes nothing.
+	 */
+	readonly grantHostRequest: <P, X>(
+		isMember: IsMember<P>,
+		canDecide: CanDecide<P, X>,
+	) => Effect.Effect<void>;
+	/**
+	 * What became of the turn's host request for `host`, once `approved` shows
+	 * an approver allowed it: their decision added it, unless the workspace
+	 * blocked it, or someone took it off the project's hosts, since.
+	 */
+	readonly requestedHost: <P, C, X>(
+		canUse: CanUseChatComputer<P, C>,
+		approved: Approved<P, X>,
+		host: string,
+	) => Effect.Effect<OutputOf<"computers.requestHost">, ComputerHostBlocked>;
 }
 
-/** What became of an allowed request: added, refused by a block, or never allowed. */
-type Grant = { kind: "added" } | { kind: "blocked"; by: string } | { kind: "not-allowed" };
+/** The host a host request's stored input asks for, decoded again as the tool's input was. */
+const hostRequestInput = computersContracts["computers.requestHost"].input;
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ComputerNetwork",
@@ -303,39 +329,73 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		grantRequest: ({ turnId, sdkToolCallId, host }) =>
+		refuseBlocked: (canUse, host) =>
 			operation(
-				"grantRequest",
-				Effect.gen(function* (): Effect.fn.Return<Grant, never, Database> {
+				"refuseBlocked",
+				Effect.gen(function* () {
+					const by = yield* blockFor(canUse.workspace, host);
+					if (by !== undefined) return yield* new ComputerHostBlocked({ host, by });
+				}),
+			),
+
+		grantHostRequest: (isMember, canDecide) =>
+			operation(
+				"grantHostRequest",
+				Effect.gen(function* () {
+					const projectId = canDecide.computerProjectId;
+					if (!projectId) return;
 					const [call] = yield* query((db) =>
 						db
 							.select({
-								workspaceId: placedChat.workspaceId,
-								projectId: placedChat.projectId,
-								approvalStatus: toolCall.approvalStatus,
-								decidedById: toolCall.decidedById,
+								tool: toolCall.tool,
+								input: toolCall.input,
+								workspaceId: projectTable.workspaceId,
+								executionInput: toolCall.executionInput,
 							})
 							.from(toolCall)
-							.innerJoin(turn, eq(turn.id, toolCall.turnId))
-							.innerJoin(placedChat, eq(placedChat.id, toolCall.chatId))
-							.where(and(eq(toolCall.turnId, turnId), eq(toolCall.sdkToolCallId, sdkToolCallId)))
+							.innerJoin(projectTable, eq(projectTable.id, toolCall.approvalComputerProjectId))
+							.where(eq(toolCall.id, canDecide.call.value))
 							.limit(1),
 					);
-					if (call?.approvalStatus !== "allowed" || call.projectId === null) {
-						return { kind: "not-allowed" };
-					}
+					if (call?.tool !== HOST_REQUEST_TOOL) return;
+					const asked = Schema.decodeUnknownOption(hostRequestInput)(
+						call.executionInput ?? call.input,
+					);
+					if (Option.isNone(asked)) return;
+					const { host } = asked.value;
+					const project = { workspaceId: call.workspaceId, projectId };
 					// Blocked while the request waited for its answer.
-					const by = yield* blockFor(call.workspaceId, host);
-					if (by !== undefined) return { kind: "blocked", by };
-					if (!TRUSTED_HOSTS.includes(host)) {
-						yield* addToProject({
-							workspaceId: call.workspaceId,
-							projectId: call.projectId,
-							host,
-							addedById: call.decidedById,
-						});
-					}
-					return { kind: "added" };
+					if ((yield* blockFor(project.workspaceId, host)) !== undefined) return;
+					if (TRUSTED_HOSTS.includes(host)) return;
+					yield* query((db) =>
+						db
+							.insert(projectAllowedHost)
+							.values({ ...project, host, addedById: isMember.member })
+							.onConflictDoNothing(),
+					);
+					// Reaching the provider waits for the decision to commit, outside its transaction.
+					yield* afterCommit(projectComputers.applyNetwork(project));
+				}),
+			),
+
+		requestedHost: (canUse, _approved, host) =>
+			operation(
+				"requestedHost",
+				Effect.gen(function* () {
+					const project = { workspaceId: canUse.workspace, projectId: canUse.project };
+					const by = yield* blockFor(project.workspaceId, host);
+					if (by !== undefined) return yield* new ComputerHostBlocked({ host, by });
+					const allowed = yield* allowedHostsOf(project);
+					return allowed.includes(host)
+						? {
+								status: "allowed" as const,
+								host,
+								note: userText`Your computer can connect to it now.`,
+							}
+						: {
+								status: "failed" as const,
+								error: userText`The request was allowed, but the host has since been taken off the hosts this computer may reach.`,
+							};
 				}),
 			),
 	});

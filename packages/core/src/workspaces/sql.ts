@@ -144,6 +144,7 @@ export const workspace = pgTable(
 		timeZone: text("time_zone").notNull().default(DEFAULT_TIME_ZONE),
 		/** When its setup was finished; null while it is still being set up. */
 		setUpAt: timestamp("set_up_at", { withTimezone: true }),
+		deleting: boolean("deleting").notNull().default(false),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
@@ -168,12 +169,15 @@ export const membership = pgTable(
 			.notNull()
 			.references(() => member.id, { onDelete: "cascade" }),
 		role: workspaceRole("role").notNull().default("editor"),
+		/** Revoked membership retained until its Personal Assistant’s computer is gone. */
+		leaving: boolean("leaving").notNull().default(false),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
 		uniqueIndex("membership_idx").on(table.workspaceId, table.memberId),
 		index("membership_member_id_idx").on(table.memberId),
 		uniqueIndex("membership_owner_idx").on(table.workspaceId).where(sql`${table.role} = 'owner'`),
+		check("membership_owner_stays", sql`not ${table.leaving} or ${table.role} <> 'owner'`),
 		check("membership_role_check", roleIsOneOf(table.role, WORKSPACE_ROLES)),
 	],
 );
@@ -250,6 +254,7 @@ export const project = pgTable(
 		defaultOfBotId: uuid("default_of_bot_id").references((): AnyPgColumn => bot.id, {
 			onDelete: "cascade",
 		}),
+		deleting: boolean("deleting").notNull().default(false),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},

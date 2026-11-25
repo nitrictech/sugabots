@@ -8,14 +8,14 @@ import { compactionStepsLayer } from "./compaction/compaction.steps.ts";
 import { compactionWorkflow } from "./compaction/compaction.workflow.ts";
 import { Turns } from "./turns/turns.ts";
 
-/** Every durable workflow: compactions, turns and automation runs. */
-export const all = [compactionWorkflow, Turns.workflow, automationWorkflow] as const;
+/**
+ * Core's durable workflows: compactions and automation runs. A turn's
+ * workflow is the bot loop's, which the server runs beside these.
+ */
+export const all = [compactionWorkflow, automationWorkflow] as const;
 
 /** The definitions of the workflows in {@link all}. */
 export const definitions = all.map((workflow) => workflow.definition);
-
-/** The lanes the workflows in {@link all} run in. */
-export const lanes = Lanes.layerFor(definitions);
 
 /**
  * The workflows in {@link all}, run by the engine, each over its steps, and
@@ -25,6 +25,4 @@ export const layer = Layer.mergeAll(
 	Lanes.reconcileLayer,
 	Turns.cancelSweepLayer,
 	...all.map((workflow) => workflow.layer),
-).pipe(
-	Layer.provide(Layer.mergeAll(compactionStepsLayer, Turns.stepsLayer, Automations.stepsLayer)),
-);
+).pipe(Layer.provide(Layer.mergeAll(compactionStepsLayer, Automations.stepsLayer)));

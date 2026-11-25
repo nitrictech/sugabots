@@ -1,13 +1,16 @@
 import { API_BASE_PATH } from "@sugabots/contracts/http";
-import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { DesktopViewer } from "@sugabots/core/chats/tools/browser/viewer";
+import { computersContracts } from "@sugabots/contracts/operations/computers";
+import { SessionAuthentication } from "@sugabots/core/authentication/session";
 import {
 	answerChallenge,
 	CHALLENGE_BYTES,
 } from "@sugabots/core/chats/tools/browser/vnc-authentication";
 import type { Computers } from "@sugabots/core/computers/computers";
+import { Ids } from "@sugabots/core/ids/ids";
+import { Operations } from "@sugabots/core/operations/registry";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
-import { Data, Effect, Layer } from "effect";
+import { processLayer } from "@sugabots/core/tiers";
+import { Context, Data, Duration, Effect, Layer, Schema, Stream } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Socket } from "effect/unstable/socket";
 import { Authentication } from "../auth/authentication.ts";
@@ -17,15 +20,26 @@ import { Authentication } from "../auth/authentication.ts";
  * viewer opens, relayed to the desktop's VNC server in the computer. The relay
  * logs in to the server with its password and offers the viewer no
  * authentication, then passes frames both ways untouched; neither the
- * password nor the computer's address reaches the browser. It closes once the
- * member may no longer see the desktop as it was opened for them.
+ * password nor the computer's address reaches the browser.
+ *
+ * The desktop viewer is a long-running operation, `computers.viewDesktop`,
+ * authenticated from the session's row: it proves again whenever who reaches
+ * what changes, and the relay closes once it ends, because the member may no
+ * longer see the desktop as it was opened for them, or their session ended
+ * or expired. It closes after {@link DesktopViewerTiming}'s `maxAge` too, as
+ * an event stream does, so a viewer that went away without its socket
+ * noticing holds no computer awake for long.
  */
 export const desktopViewerRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
+		const { maxAge } = yield* DesktopViewerTiming;
 		const router = yield* HttpRouter.HttpRouter;
 		const authentication = yield* Authentication.Service;
-		const viewer = yield* DesktopViewer.Service;
+		const sessions = yield* SessionAuthentication.Service;
+		const operations = yield* Operations.LongRunning;
+		const ids = yield* Ids.Service;
 		const trusted = new Set((yield* ServerSettings.Service).trustedOrigins);
+		const decodeAddress = Schema.decodeSync(computersContracts["computers.viewDesktop"].input);
 
 		yield* router.add(
 			"GET",
@@ -37,24 +51,42 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 				if (!request.headers.origin || !trusted.has(request.headers.origin)) {
 					return HttpServerResponse.text("Untrusted origin", { status: 403 });
 				}
-				const holder = yield* authentication.identify(new Headers(request.headers));
-				if (!holder) return HttpServerResponse.text("Sign in first", { status: 401 });
+				const headers = new Headers(request.headers);
+				const holder = yield* authentication.identify(headers);
+				const principal = yield* sessions.authenticateLongRunning(headers).pipe(
+					Effect.provideService(SessionAuthentication.Cookies, {
+						read: () =>
+							Effect.succeed(holder && { session: holder.session, member: holder.member.id }),
+					}),
+					Effect.option,
+				);
+				if (principal._tag === "None") {
+					return HttpServerResponse.text("Sign in first", { status: 401 });
+				}
 				const { chatId, botId } = yield* HttpRouter.params;
 				if (!chatId || !botId) return HttpServerResponse.empty({ status: 404 });
+				const call = { kind: "request" as const, request: yield* ids.next };
 
 				return yield* Effect.scoped(
 					Effect.gen(function* () {
-						const desktop = yield* viewer.open({ chatId, botId });
-						const browserSide = yield* request.upgrade;
-						// Ending the relay closes the member's socket.
-						yield* Effect.raceFirst(
-							relay(browserSide, upstream(desktop.endpoint), desktop.password),
-							desktop.accessLost,
+						const viewing = yield* operations["computers.viewDesktop"](
+							principal.value,
+							decodeAddress({ chatId, botId }),
+							call,
 						);
+						const [desktop] = yield* Stream.runCollect(Stream.take(viewing.stream, 1));
+						if (!desktop) return HttpServerResponse.empty({ status: 404 });
+						const browserSide = yield* request.upgrade;
+						// Ending the relay closes the member's socket; the operation ending, or its
+						// time running out, ends the relay.
+						yield* Effect.raceAll([
+							relay(browserSide, upstream(desktop.endpoint), desktop.password),
+							viewing.ended,
+							Effect.sleep(maxAge),
+						]);
 						return HttpServerResponse.empty();
 					}),
 				).pipe(
-					CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(holder.member.id)),
 					Effect.catchTags({
 						DesktopUnavailable: (failure) =>
 							Effect.succeed(HttpServerResponse.text(failure.userMessage, { status: 404 })),
@@ -71,6 +103,21 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 			),
 		);
 	}),
+).pipe(processLayer);
+
+/** How long a desktop viewer stays open, which a test may shorten. */
+interface DesktopViewerTimingInterface {
+	/**
+	 * After this the viewer closes, and opening it again proves afresh.
+	 * Bounds what a viewer that went away without its socket noticing holds
+	 * open, and how long a desktop stays open on proofs that might be stale.
+	 */
+	readonly maxAge: Duration.Input;
+}
+
+export const DesktopViewerTiming = Context.Reference<DesktopViewerTimingInterface>(
+	"@sugabots/server/DesktopViewerTiming",
+	{ defaultValue: () => ({ maxAge: Duration.minutes(30) }) },
 );
 
 /**

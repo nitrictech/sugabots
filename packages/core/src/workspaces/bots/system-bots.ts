@@ -20,7 +20,7 @@ import { bot } from "../../database/schema.ts";
 /** The system bot that compacts what a bot reads when its chat gets long. */
 export const COMPACT_SYSTEM_BOT: SystemBotKey = "compact";
 
-export interface SystemBotDefinition {
+interface SystemBotDefinition {
 	/** What the system looks the bot up by. */
 	key: SystemBotKey;
 	name: string;

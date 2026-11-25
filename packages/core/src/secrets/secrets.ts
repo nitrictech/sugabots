@@ -2,6 +2,7 @@ export * as Secrets from "./secrets.ts";
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { Config, Context, Data, Effect, Layer, Option, Redacted } from "effect";
+import { processLayer, Tier } from "../tiers.ts";
 
 /**
  * Encrypts what Sugabots stores as secrets: credentials for model, search and
@@ -16,7 +17,9 @@ export interface Interface {
 	decrypt(value: string, purpose?: string): string;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Secrets") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Secrets") {
+	declare readonly [Tier]: "process";
+}
 
 /** The AES-256-GCM cipher keyed by `SECRETS_ENCRYPTION_KEY`. */
 export const make = Effect.gen(function* () {
@@ -35,7 +38,7 @@ export const make = Effect.gen(function* () {
 	return aes(key);
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 class InvalidConfig extends Data.TaggedError("InvalidSecretsKey")<{
 	message: string;

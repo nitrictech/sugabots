@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type { RunTrigger } from "@sugabots/contracts";
 import { handleFromName, MAX_CHAT_TITLE_CHARACTERS } from "@sugabots/contracts";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { query, transaction } from "../../database/database.ts";
 import {
@@ -17,7 +17,9 @@ import {
 	AutomationTriggerConflict,
 	AutomationTriggerRejected,
 	inScope,
+	lockTriggers,
 	type Scope,
+	stateWithPendingPause,
 } from "./automation.ts";
 import { AutomationRuns } from "./runs.ts";
 import { AutomationStore } from "./store.ts";
@@ -64,7 +66,10 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 						.limit(1),
 				);
 				if (!definition) return yield* new AutomationNotFound();
-				if (input.trigger.kind !== "manual" && definition.automation.state !== "enabled") {
+				if (
+					input.trigger.kind !== "manual" &&
+					stateWithPendingPause(definition.automation) !== "enabled"
+				) {
 					return yield* new AutomationTriggerRejected();
 				}
 				// Only a run someone started has no trigger; any other is one of the automation's own.
@@ -137,18 +142,6 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 			}),
 		);
 });
-
-/**
- * Holds the automation's trigger lock until the transaction ends, so its
- * triggers are accepted one at a time and none lands on an automation being
- * removed or having its secret replaced.
- */
-export const lockTriggers = (automationId: string) =>
-	query((db) =>
-		db.execute(
-			sql`select pg_advisory_xact_lock(hashtextextended(${`automation-trigger:${automationId}`}, 0))`,
-		),
-	);
 
 /** The run this trigger, or someone running the automation, already started with this identity, if any. */
 const acceptedAs = (input: Trigger, identity: string) =>

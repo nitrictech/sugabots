@@ -21,7 +21,7 @@ const sdk = vi.hoisted(() => ({
 	openAiChatModel: vi.fn(),
 	openAiResponsesModel: vi.fn(),
 	streamText: vi.fn(() => ({
-		textStream: [],
+		fullStream: [],
 		usage: Promise.resolve({
 			inputTokens: 0,
 			outputTokens: 0,
@@ -105,7 +105,6 @@ describe("models", () => {
 						model: "model-id",
 						system: "",
 						messages: [],
-						maxSteps: 1,
 					}),
 				),
 			);
@@ -120,7 +119,6 @@ describe("models", () => {
 		purpose: { name: "model-test" },
 		system: "",
 		messages: [],
-		maxSteps: 1,
 	} as const;
 
 	it.each([
@@ -179,7 +177,7 @@ describe("models", () => {
 			requests: { start: () => Effect.succeed("request-id"), finish: () => Effect.void },
 			registry: emptyRegistry,
 		});
-	const ask = (model: Models.Interface) =>
+	const ask = (model: Models.Interface, request: Partial<Models.StreamRequest> = {}) =>
 		Effect.scoped(
 			Effect.flatMap(
 				model.stream({
@@ -188,7 +186,7 @@ describe("models", () => {
 					model: "model-id",
 					system: "",
 					messages: [],
-					maxSteps: 1,
+					...request,
 				}),
 				(streamed) => streamed.finished,
 			),
@@ -213,7 +211,7 @@ describe("models", () => {
 				}),
 			});
 			return {
-				textStream: [],
+				fullStream: [],
 				steps: Promise.resolve([]),
 				responseMessages: Promise.resolve([]),
 			};
@@ -234,27 +232,53 @@ describe("models", () => {
 		sdk.streamText.mockImplementationOnce(((callbacks: StreamCallbacks) => {
 			events(callbacks);
 			return {
-				textStream: [],
+				fullStream: [],
 				steps: Promise.resolve([]),
 				responseMessages: Promise.resolve([]),
 			};
 		}) as never);
+
+	/** A request continuing a turn, after a step whose tool returned. */
+	const continuing: Partial<Models.StreamRequest> = {
+		continuationMessages: [
+			{
+				role: "tool",
+				content: [
+					{
+						type: "tool-result",
+						toolCallId: "call-1",
+						toolName: "lookup",
+						output: { type: "text", value: "It is here." },
+					},
+				],
+			},
+		],
+	};
 
 	it.each([
 		[
 			"giving the model what its tools returned",
 			(stream: StreamCallbacks) => {
 				stream.prepareStep({ stepNumber: 0, messages: [] });
-				stream.prepareStep({ stepNumber: 1, messages: [] });
 				stream.onError({ error: new Error("socket hang up") });
 			},
 			"after-tools",
+			continuing,
 		],
 		[
 			"the model's reply",
 			(stream: StreamCallbacks) => {
 				stream.prepareStep({ stepNumber: 0, messages: [] });
 				stream.onChunk({ chunk: { type: "text-delta" } });
+				stream.onError({ error: new Error("socket hang up") });
+			},
+			"answering",
+		],
+		[
+			"the model's thinking",
+			(stream: StreamCallbacks) => {
+				stream.prepareStep({ stepNumber: 0, messages: [] });
+				stream.onChunk({ chunk: { type: "reasoning-delta" } });
 				stream.onError({ error: new Error("socket hang up") });
 			},
 			"answering",
@@ -270,10 +294,10 @@ describe("models", () => {
 			},
 			"calling-tool",
 		],
-	])("says a request failed during %s", async (_, events, stage) => {
+	] as const)("says a request failed during %s", async (_, events, stage, request = {}) => {
 		streaming(events);
 
-		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(access)))));
+		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(access)), request)));
 
 		expect(failure).toMatchObject({ stage });
 	});
@@ -314,7 +338,6 @@ describe("models", () => {
 					model: "gpt-5.5",
 					system: "You are Suga.",
 					messages: [{ role: "user", content: "Hello" }],
-					maxSteps: 1,
 				}),
 			),
 		);

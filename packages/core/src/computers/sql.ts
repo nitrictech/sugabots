@@ -96,6 +96,8 @@ export const computer = pgTable(
 		sleptAt: timestamp("slept_at", { withTimezone: true }),
 		/** When it was last opened or let go of, which is when its idle time starts. */
 		lastUsedAt: stamp("last_used_at"),
+		intentId: uuid("intent_id"),
+		intentExpiresAt: timestamp("intent_expires_at", { withTimezone: true }),
 		/** How full its disk was at `diskMeasuredAt`; null until it is measured, and again once it is replaced. */
 		diskUsage: jsonb("disk_usage").$type<DiskUsage>(),
 		diskMeasuredAt: timestamp("disk_measured_at", { withTimezone: true }),
@@ -113,6 +115,10 @@ export const computer = pgTable(
 			name: "computer_provider_workspace_fkey",
 		}).onDelete("cascade"),
 		uniqueIndex("computer_project_id_idx").on(table.projectId),
+		check(
+			"computer_intent_check",
+			sql`(${table.intentId} is null) = (${table.intentExpiresAt} is null)`,
+		),
 		check(
 			"computer_disk_measured_check",
 			sql`(${table.diskUsage} is null) = (${table.diskMeasuredAt} is null)`,
@@ -132,6 +138,7 @@ export const computerLease = pgTable(
 		computerId: uuid("computer_id")
 			.notNull()
 			.references(() => computer.id, { onDelete: "cascade" }),
+		providerComputerId: text("provider_computer_id").$type<Computers.ComputerId>().notNull(),
 		/** Only a turn's lease stops a reset or upgrade; a viewer's just keeps the computer awake. */
 		holderKind: text("holder_kind").$type<ComputerLeaseHolderKind>().notNull(),
 		/** The turn's id, or the viewer's connection: one per connection, so closing one tab leaves the others' leases. */

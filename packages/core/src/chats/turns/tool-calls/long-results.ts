@@ -1,7 +1,10 @@
+import { READ_CHAT_FILE_TOOL } from "@sugabots/contracts/operations/chat-reads";
 import { Effect, Stream } from "effect";
-import type { ChatFileStore } from "../../../files/chat-file-store.ts";
+import type { BlobStore } from "../../../blob-store/blob-store.ts";
+import type { ChatFileStore, FileDescription } from "../../../files/chat-file-store.ts";
+import { splitLines } from "../../chats/read-chat-file-content.ts";
 import { hasImages } from "../../tools/images.ts";
-import { READ_CHAT_FILE_TOOL, splitLines } from "../../tools/read-chat-file/tool.ts";
+import type { FenceRefusal } from "../fence.ts";
 
 /**
  * Results longer than this, as JSON, are kept as a file and the model is given
@@ -30,7 +33,10 @@ export type LongResult = {
  * to read the rest with `read_chat_file`. Only its start when the blob store
  * can't keep it.
  */
-export const forModel = (output: unknown, keeping: Keeping): Effect.Effect<unknown> => {
+export const forModel = (
+	output: unknown,
+	keeping: Keeping,
+): Effect.Effect<unknown, FenceRefusal> => {
 	// Images reach the model as image parts rather than as text, so the limit
 	// is for the rest of the result.
 	if (!hasImages(output)) {
@@ -42,9 +48,24 @@ export const forModel = (output: unknown, keeping: Keeping): Effect.Effect<unkno
 	);
 };
 
+/**
+ * Where a long result is kept: a chat's files, behind the fence of the
+ * execution of the turn that made the call, which may refuse to keep it.
+ */
+export interface ResultFiles {
+	readonly write: <E>(file: {
+		chatId: string;
+		toolCallId: string;
+		content: BlobStore.Content<E>;
+	}) => Effect.Effect<
+		FileDescription,
+		E | ChatFileStore.FileTooLarge | BlobStore.Failure | FenceRefusal
+	>;
+}
+
 /** Where a long result is kept: the chat, and the call whose result it is. */
 interface Keeping {
-	files: Pick<ChatFileStore.Interface, "write">;
+	files: ResultFiles;
 	chatId: string;
 	toolCallId: string;
 }
@@ -53,7 +74,7 @@ interface Keeping {
 const longResultFor = (
 	output: unknown,
 	{ files, chatId, toolCallId }: Keeping,
-): Effect.Effect<LongResult | undefined> =>
+): Effect.Effect<LongResult | undefined, FenceRefusal> =>
 	Effect.gen(function* () {
 		const sent = JSON.stringify(output) ?? "";
 		if (sent.length <= MAX_RESULT_CHARACTERS) return undefined;

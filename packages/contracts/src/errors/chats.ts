@@ -6,18 +6,18 @@
 import { type DomainError, userText } from "@sugabots/errors";
 import { ErrorReporter, Schema } from "effect";
 
-/** A message's id, which its author's client chose, is already another message's. */
-export class MessageIdConflict
-	extends Schema.TaggedError<MessageIdConflict>()("MessageIdConflict", {})
+/** A retry key was used again in the same destination with a different message. */
+export class MessageRetryKeyConflict
+	extends Schema.TaggedError<MessageRetryKeyConflict>()("MessageRetryKeyConflict", {})
 	implements DomainError
 {
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return "A message id was reused for a different message";
+		return "A message retry key was reused for a different message";
 	}
 	get userMessage() {
-		return userText`That message ID is already used by a different message`;
+		return userText`That retry key is already used by a different message`;
 	}
 }
 

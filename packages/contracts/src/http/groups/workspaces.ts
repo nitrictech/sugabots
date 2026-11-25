@@ -3,6 +3,7 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/ht
 import {
 	acceptedInvitationSchema,
 	invitationPreviewSchema,
+	membershipDepartureSchema,
 	membershipSchema,
 	newWorkspaceInvitationSchema,
 	newWorkspaceSchema,
@@ -63,6 +64,7 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 		}),
 		HttpApiEndpoint.delete("removeMembership", "/workspaces/:workspace/memberships/:membershipId", {
 			params: { ...workspace, membershipId: uuidSchema },
+			success: membershipDepartureSchema,
 			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.put("handOverOwnership", "/workspaces/:workspace/owner", {
@@ -72,6 +74,7 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 		}),
 		HttpApiEndpoint.post("leave", "/workspaces/:workspace/leave", {
 			params: workspace,
+			success: membershipDepartureSchema,
 			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.get("invitations", "/workspaces/:workspace/invitations", {

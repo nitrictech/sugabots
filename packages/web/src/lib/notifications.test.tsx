@@ -70,10 +70,30 @@ function memberStream(...events: ReturnType<typeof streamEvent>[]) {
 	});
 }
 
+const withQueries = ({ children }: { children: ReactNode }) => (
+	<QueryClientProvider client={createQueryClient()}>{children}</QueryClientProvider>
+);
+
+it("refreshes the approvals list on the member’s own stream", async () => {
+	const queries = createQueryClient();
+	const invalidate = vi.spyOn(queries, "invalidateQueries");
+	memberStream(streamEvent("approvals.changed", { toolCallId: crypto.randomUUID() }));
+	renderHook(useNotificationsInThisBrowser, {
+		wrapper: ({ children }) => (
+			<QueryClientProvider client={queries}>{children}</QueryClientProvider>
+		),
+	});
+	await waitFor(() =>
+		expect(invalidate).toHaveBeenCalledWith(
+			expect.objectContaining({ queryKey: ["workspace-approvals"] }),
+		),
+	);
+});
+
 it("shows a notification about a chat none of the member's tabs is looking at", async () => {
 	memberStream(streamEvent("notification", about(release, "Scout in Release notes")));
 
-	renderHook(useNotificationsInThisBrowser);
+	renderHook(useNotificationsInThisBrowser, { wrapper: withQueries });
 
 	await waitFor(() => expect(shown).toEqual(["Scout in Release notes"]));
 });
@@ -90,7 +110,7 @@ it("holds back a notification about a chat another of their tabs is looking at, 
 		streamEvent("notification", about(release, "After looking away")),
 	);
 
-	renderHook(useNotificationsInThisBrowser);
+	renderHook(useNotificationsInThisBrowser, { wrapper: withQueries });
 
 	await waitFor(() => expect(shown).toEqual(["Elsewhere", "After looking away"]));
 });

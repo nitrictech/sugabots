@@ -74,7 +74,7 @@ export function DetailsPanel({
 	onClose: () => void;
 }) {
 	const context = useChatContext(chatId).data;
-	const modelName = useModelName(bot.model);
+	const modelName = useModelName(bot.model ?? null);
 	return (
 		<SidePanel label="Details" onClose={onClose} headerless floating>
 			<div className={DETAILS_SCROLL}>

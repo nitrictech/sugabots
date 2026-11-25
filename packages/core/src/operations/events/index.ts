@@ -4,8 +4,17 @@
  * adding an operation here touches no other file.
  */
 
-import { Layer } from "effect";
+import { Streams } from "../../streams/streams.ts";
+import { followChat } from "./follow-chat.ts";
+import { followOwn } from "./follow-own.ts";
+import { followWorkspace } from "./follow-workspace.ts";
+import { reportTyping } from "./report-typing.ts";
 
-export const eventsOperations = {};
+export const eventsOperations = {
+	"events.followWorkspace": followWorkspace,
+	"events.followChat": followChat,
+	"events.followOwn": followOwn,
+	"events.reportTyping": reportTyping,
+};
 
-export const eventsLayer = Layer.empty;
+export const eventsLayer = Streams.layer;

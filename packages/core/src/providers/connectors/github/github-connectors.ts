@@ -26,8 +26,10 @@ import {
 	type GitHubConnectorRepository,
 	type GitHubConnectorSettings,
 } from "../../../database/schema.ts";
+import type { ReachesEnabledConnector } from "../../../proofs/can-use-connector.ts";
 import type { CanManageProject, CanReadConnectors } from "../../../proofs/project-permissions.ts";
-import type { ReachesProject } from "../../../proofs/reaches-project.ts";
+import type { Named } from "../../../proofs/proof.ts";
+import type { ReachesConnector } from "../../../proofs/reaches-connector.ts";
 import type { SignedByGitHubApp } from "../../../proofs/signed-by-github-app.ts";
 import { Secrets } from "../../../secrets/secrets.ts";
 import { processLayer, Tier } from "../../../tiers.ts";
@@ -51,39 +53,41 @@ import { activityOf } from "./github-events.ts";
  */
 export interface Interface {
 	/** What the connector's app reaches, to choose the project's repositories from. */
-	readonly reachableRepositories: <P, J>(
+	readonly reachableRepositories: <P, J, K>(
 		canManage: CanManageProject<P, J>,
-		connectorId: string,
+		connector: Named<K, string>,
+		target: ReachesConnector<P, J, K>,
 	) => Effect.Effect<
 		readonly AccountRepository[],
 		NotGitHubConnector | GitHubAppNotInstalled | GitHubRequestFailed
 	>;
-	readonly repositories: <P, J>(
+	readonly repositories: <P, J, K>(
 		canRead: CanReadConnectors<P, J>,
-		connectorId: string,
+		connector: Named<K, string>,
+		target: ReachesConnector<P, J, K>,
 	) => Effect.Effect<ConnectorRepositories, NotGitHubConnector>;
 	/** Adds a repository the connector's app reaches, as added by the member who manages the project. */
-	readonly addRepository: <P, J>(
+	readonly addRepository: <P, J, K>(
 		canManage: CanManageProject<P, J>,
-		connectorId: string,
+		connector: Named<K, string>,
+		target: ReachesConnector<P, J, K>,
 		repository: string,
 	) => Effect.Effect<
 		ConnectorRepositories,
 		NotGitHubConnector | GitHubAppNotInstalled | RepositoryUnreachable | GitHubRequestFailed
 	>;
 	/** Removing one the connector doesn't have changes nothing. */
-	readonly removeRepository: <P, J>(
+	readonly removeRepository: <P, J, K>(
 		canManage: CanManageProject<P, J>,
-		connectorId: string,
+		connector: Named<K, string>,
+		target: ReachesConnector<P, J, K>,
 		repository: string,
 	) => Effect.Effect<ConnectorRepositories, NotGitHubConnector>;
-	/**
-	 * The project's GitHub app, for the turns in it and its computer;
-	 * undefined until its app is installed. It takes no proof because the
-	 * bot loop's connector tools and the computer's sign-in call it directly,
-	 * until tools become operations.
-	 */
+	/** The project's GitHub app used to sign in its computer. */
 	readonly forProject: (project: Project) => Effect.Effect<Connected | undefined>;
+	readonly forConnector: <P, K>(
+		reach: ReachesEnabledConnector<P, K>,
+	) => Effect.Effect<Connected | undefined>;
 	/**
 	 * What a delivery the connector's app signed says happened at one of its
 	 * account's repositories; `activity` is `undefined` for an event no
@@ -130,7 +134,7 @@ export const make = Effect.gen(function* () {
 			return { row, settings: row.settings };
 		});
 
-	/** The connector's app at the account it is installed on. */
+	/** installedAppOf reads the app for repository setup, including while bot calls are disabled. */
 	const installedAppOf = (project: Project, connectorId: string) =>
 		Effect.gen(function* () {
 			const { row } = yield* connectorOf(project, connectorId);
@@ -173,31 +177,40 @@ export const make = Effect.gen(function* () {
 			return yield* shown({ ...settings, repositories });
 		});
 
+	const connectedTo = (row: ConnectorRow | undefined) => {
+		if (!row?.enabled || !row.settings) return undefined;
+		const app = installedApp(secrets, row);
+		return app
+			? new Connected(row, app, row.settings, { api: gitHubApi(), storage: egress.webFetch })
+			: undefined;
+	};
+
 	return Service.of({
-		reachableRepositories: (canManage, connectorId) =>
+		reachableRepositories: (_canManage, connector, target) =>
 			operation(
 				"reachableRepositories",
 				Effect.gen(function* () {
-					const app = yield* installedAppOf(projectIn(canManage.reach), connectorId);
+					const app = yield* installedAppOf(projectIn(target), connector.value);
 					const reached = yield* GitHub.repositories(gitHubApi(), app);
 					return reached.map((one) => ({ repository: one.fullName, private: one.private }));
 				}),
 			),
 
-		repositories: (canRead, connectorId) =>
+		repositories: (_canRead, connector, target) =>
 			operation(
 				"repositories",
 				Effect.gen(function* () {
-					const { settings } = yield* connectorOf(projectIn(canRead.reach), connectorId);
+					const { settings } = yield* connectorOf(projectIn(target), connector.value);
 					return yield* shown(settings);
 				}),
 			),
 
-		addRepository: (canManage, connectorId, repository) =>
+		addRepository: (canManage, connector, target, repository) =>
 			operation(
 				"addRepository",
 				Effect.gen(function* () {
-					const project = projectIn(canManage.reach);
+					const project = projectIn(target);
+					const connectorId = connector.value;
 					const { settings } = yield* connectorOf(project, connectorId);
 					const app = yield* installedAppOf(project, connectorId);
 					const reached = yield* GitHub.repositories(gitHubApi(), app);
@@ -219,11 +232,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		removeRepository: (canManage, connectorId, repository) =>
+		removeRepository: (_canManage, connector, target, repository) =>
 			operation(
 				"removeRepository",
 				Effect.gen(function* () {
-					const project = projectIn(canManage.reach);
+					const project = projectIn(target);
+					const connectorId = connector.value;
 					const { settings } = yield* connectorOf(project, connectorId);
 					return yield* changed(project, connectorId, settings, (repositories) =>
 						repositories.filter((one) => one.path.toLowerCase() !== repository.toLowerCase()),
@@ -232,17 +246,18 @@ export const make = Effect.gen(function* () {
 			),
 
 		forProject: (project) =>
+			operation("forProject", Effect.map(gitHubConnectorForProject(project), connectedTo)),
+
+		forConnector: (reach) =>
 			operation(
-				"forProject",
-				Effect.gen(function* () {
-					const row = yield* gitHubConnectorForProject(project);
-					const app = row && installedApp(secrets, row);
-					if (!row?.settings || !app) return undefined;
-					return new Connected(row, app, row.settings, {
-						api: gitHubApi(),
-						storage: egress.webFetch,
-					});
-				}),
+				"forConnector",
+				Effect.map(
+					gitHubConnectorForProject({ workspaceId: reach.workspace, projectId: reach.project }),
+					(row) =>
+						row?.id === reach.connector.value && row.configurationRevision === reach.revision
+							? connectedTo(row)
+							: undefined,
+				),
 			),
 
 		readDelivery: (signed, { event, deliveryId, body }) =>
@@ -259,6 +274,7 @@ export const make = Effect.gen(function* () {
 									eq(connector.workspaceId, signed.workspace),
 									eq(connector.projectId, signed.project),
 									eq(connector.kind, "github"),
+									eq(connector.enabled, true),
 								),
 							)
 							.limit(1),
@@ -303,7 +319,7 @@ export const gitHubConnectorForProject = (project: Project) =>
 	);
 
 /** The project `reach` proved reached, by its workspace and its own id. */
-const projectIn = <P, J>(reach: ReachesProject<P, J>): Project => ({
+const projectIn = <J>(reach: { workspace: string; project: Named<J, string> }): Project => ({
 	workspaceId: reach.workspace,
 	projectId: reach.project.value,
 });

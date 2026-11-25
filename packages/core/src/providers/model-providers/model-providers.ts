@@ -18,7 +18,7 @@ import {
 	providerBuiltIn,
 	providerLacksCredential,
 } from "@sugabots/contracts";
-import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { type ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import {
 	FetchedModelCapabilitiesImmutable,
 	type MissingCredential,
@@ -36,8 +36,10 @@ import {
 	ProviderSignInNotOffered,
 	type UrlNotAllowed,
 } from "@sugabots/contracts/errors/providers";
+import { uuidSchema } from "@sugabots/contracts/uuid";
 import { Clock, Context, DateTime, Effect, Layer, Schema } from "effect";
 import { serviceOperations } from "../../database/database.ts";
+import { proveIsMember } from "../../proofs/is-member.ts";
 import type { CanManageWorkspace, CanReadWorkspace } from "../../proofs/workspace-permissions.ts";
 import { Secrets } from "../../secrets/secrets.ts";
 import { processLayer, Tier } from "../../tiers.ts";
@@ -116,7 +118,7 @@ export interface Interface {
 		providerId: string,
 	) => Effect.Effect<
 		ProviderSignInStarted,
-		ModelProviderNotFound | ProviderSignInNotOffered | ProviderSignInFailed
+		ActionForbidden | ModelProviderNotFound | ProviderSignInNotOffered | ProviderSignInFailed
 	>;
 	/**
 	 * Asks whether the member has entered the code of `attempt`, from
@@ -127,7 +129,7 @@ export interface Interface {
 	readonly completeSignIn: <P, W>(
 		canManage: CanManageWorkspace<P, W>,
 		providerId: string,
-		attempt: string,
+		attempt: string | undefined,
 	) => Effect.Effect<
 		ProviderSignInOutcome,
 		| ModelProviderNotFound
@@ -290,16 +292,22 @@ export const make = Effect.gen(function* () {
 
 	const encryptSignInAttempt = (attempt: SignInAttempt) => cipher.encrypt(JSON.stringify(attempt));
 
-	const openSignInAttempt = (sealed: string, workspaceId: string, providerId: string) =>
+	const openSignInAttempt = (
+		sealed: string | undefined,
+		forSession: Pick<SignInAttempt, "workspaceId" | "providerId" | "memberId" | "sessionId">,
+	) =>
 		Effect.gen(function* () {
+			if (!sealed) return yield* new ProviderSignInAttemptInvalid();
 			const now = yield* Clock.currentTimeMillis;
 			return yield* Effect.try(() => JSON.parse(cipher.decrypt(sealed)) as unknown).pipe(
 				Effect.flatMap(Schema.decodeUnknownEffect(SignInAttempt)),
 				Effect.mapError(() => new ProviderSignInAttemptInvalid()),
 				Effect.filterOrFail(
 					(attempt) =>
-						attempt.workspaceId === workspaceId &&
-						attempt.providerId === providerId &&
+						attempt.workspaceId === forSession.workspaceId &&
+						attempt.providerId === forSession.providerId &&
+						attempt.memberId === forSession.memberId &&
+						attempt.sessionId === forSession.sessionId &&
 						attempt.expiresAt > now,
 					() => new ProviderSignInAttemptInvalid(),
 				),
@@ -458,11 +466,14 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const workspaceId = canManage.inWorkspace.workspace.value;
 					const { signIn, http } = yield* requireSignIn(workspaceId, providerId);
+					const session = yield* proveIsMember(canManage.inWorkspace.principal);
 					const code = yield* signIn.requestDeviceCode(http);
 					return {
 						verificationUrl: code.verificationUrl,
 						userCode: code.userCode,
 						attempt: encryptSignInAttempt({
+							memberId: session.member,
+							sessionId: session.session,
 							workspaceId,
 							providerId,
 							deviceCode: code.deviceCode,
@@ -480,8 +491,16 @@ export const make = Effect.gen(function* () {
 				"completeSignIn",
 				Effect.gen(function* () {
 					const workspaceId = canManage.inWorkspace.workspace.value;
+					const session = yield* proveIsMember(canManage.inWorkspace.principal).pipe(
+						Effect.mapError(() => new ProviderSignInAttemptInvalid()),
+					);
+					const attempt = yield* openSignInAttempt(sealed, {
+						workspaceId,
+						providerId,
+						memberId: session.member,
+						sessionId: session.session,
+					});
 					const { signIn, http } = yield* requireSignIn(workspaceId, providerId);
-					const attempt = yield* openSignInAttempt(sealed, workspaceId, providerId);
 					const tokens = yield* signIn.redeemDeviceCode(http, attempt);
 					if (!tokens) return { status: "pending" as const };
 					return {
@@ -620,8 +639,10 @@ export const layer = layerNoDeps.pipe(Layer.provide([ModelProviderStore.layer, B
 
 /** A device code in progress, sealed and handed to the page so the server keeps no state for it. */
 const SignInAttempt = Schema.Struct({
-	workspaceId: Schema.String,
-	providerId: Schema.String,
+	memberId: uuidSchema,
+	sessionId: Schema.String,
+	workspaceId: uuidSchema,
+	providerId: uuidSchema,
 	deviceCode: Schema.String,
 	userCode: Schema.String,
 	expiresAt: Schema.Number,

@@ -1,6 +1,7 @@
 export * as EventPruning from "./prune.ts";
 
 import { DateTime, Duration, Effect, Layer, Schedule } from "effect";
+import { processLayer } from "../../tiers.ts";
 import { EventStore } from "./store.ts";
 
 /**
@@ -28,7 +29,7 @@ export const layer = Layer.effectDiscard(
 	Effect.flatMap(EventStore.Service, (store) =>
 		Effect.forkScoped(sweep(store).pipe(Effect.repeat(Schedule.spaced(NIGHTLY)), Effect.asVoid)),
 	),
-);
+).pipe(processLayer);
 
 /**
  * One sweep. A failure is logged and swallowed on purpose: the next sweep

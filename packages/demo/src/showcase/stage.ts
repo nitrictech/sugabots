@@ -3,9 +3,11 @@ import type { JsonValue, Message } from "@sugabots/contracts";
 import {
 	CONNECTOR_TOOL_SEPARATOR,
 	chatStream,
+	FILE_WRITE_TOOL,
 	handleFromName,
 	streamEvent,
 } from "@sugabots/contracts";
+import { askerColumns } from "@sugabots/core/authentication/turn-facts";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
 import { ChatEventStream } from "@sugabots/core/chats/chat-event-stream";
 import { ChatEvents } from "@sugabots/core/chats/chat-events";
@@ -21,7 +23,6 @@ import {
 	toReactions,
 } from "@sugabots/core/chats/store/participants";
 import { toToolCallPart } from "@sugabots/core/chats/store/tool-calls";
-import { FILE_WRITE_TOOL } from "@sugabots/core/chats/tools/files/tool";
 import { layer as databaseLayer, query, transaction } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { DomainEvents } from "@sugabots/core/database/events/domain-events";
@@ -54,6 +55,7 @@ import { Files } from "@sugabots/core/files/files";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Secrets } from "@sugabots/core/secrets/secrets";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { processLayer } from "@sugabots/core/tiers";
 import { defaultProjectIdOf } from "@sugabots/core/workspaces/bots/bot";
 import { and, eq, getColumns, gt, inArray, sql } from "drizzle-orm";
 import { Effect, Layer } from "effect";
@@ -404,6 +406,11 @@ const startReply = (
 							model: bot.model ?? "",
 							reason,
 							startedAt: new Date(),
+							...askerColumns({
+								chatId: inChat.id,
+								botId: bot.id,
+								triggerMessageId: triggerMessageId,
+							}),
 						})
 						.returning(),
 				);
@@ -565,6 +572,9 @@ const say = (reply: Reply, text: string) =>
 						messageId: reply.messageId,
 						offset,
 						text: delta,
+						// The showcase's turns are never resumed: each is written by the
+						// one execution its row starts with.
+						execution: 0,
 					}),
 				),
 			);
@@ -671,7 +681,7 @@ const playTicketDeskWork = (bot: BotRow, inChat: PlacedChatRow, triggerId: strin
 		yield* wait(BEFORE_REPLY_STARTS);
 		const handBack = yield* startReply(bot, inChat, reply.messageId, "hand_back");
 		yield* say(handBack, TICKET_DESK.handBack);
-		yield* callTool(handBack, {
+		const approvalCallId = yield* callTool(handBack, {
 			...stripeCall(TICKET_DESK.refund.tool),
 			input: TICKET_DESK.refund.input,
 			writeOrDelete: true,
@@ -687,6 +697,7 @@ const playTicketDeskWork = (bot: BotRow, inChat: PlacedChatRow, triggerId: strin
 						chatId: inChat.id,
 						workspaceId: inChat.workspaceId,
 						turnId: handBack.turnId,
+						approvalCallIds: [approvalCallId],
 					}),
 				]);
 			}),
@@ -724,19 +735,16 @@ const cueMention = Effect.gen(function* () {
  */
 const writeIncident = (reply: Reply) =>
 	Effect.gen(function* () {
-		const authoring = yield* Files.Authoring;
 		const { title, content } = BILLING_ENGINEER.incident;
 		const input = { kind: "markdown", title, content };
 		const call = yield* callTool(reply, { tool: FILE_WRITE_TOOL, input, writeOrDelete: true });
-		const written = yield* authoring
-			.create(
-				{
-					botId: reply.bot.id,
-					chatId: reply.chat.id,
-				},
-				{ kind: "markdown", title, content },
-			)
-			.pipe(Effect.orDie);
+		const written = yield* Files.seedWrittenFile(
+			{
+				botId: reply.bot.id,
+				chatId: reply.chat.id,
+			},
+			{ kind: "markdown", title, content },
+		).pipe(Effect.orDie);
 		yield* wait(BETWEEN_STEPS);
 		yield* finishCall(call, {
 			status: "written",
@@ -1024,7 +1032,7 @@ const chatEvents = Layer.effect(
 			emit: DomainEvents.emitTo<ChatEvent>([ChatEventStream.handler(outbox)]),
 		}),
 	),
-);
+).pipe(processLayer);
 
 const USAGE =
 	"Usage: stage.ts reset | start <botId> <messageId> <text> | send <chatId> <messageId> <text> | allow <toolCallId> | cue mention | sign-in-connectors";
@@ -1052,7 +1060,8 @@ const program = Effect.gen(function* () {
 program.pipe(
 	Effect.scoped,
 	Effect.provide(
-		Layer.mergeAll(chatEvents, Files.authoringLayer.pipe(Layer.provide(BlobStore.layer))).pipe(
+		chatEvents.pipe(
+			Layer.provideMerge(BlobStore.layer),
 			Layer.provideMerge(EventOutbox.layer),
 			Layer.provideMerge(EventBus.layer),
 			Layer.provideMerge(EventStore.layer),

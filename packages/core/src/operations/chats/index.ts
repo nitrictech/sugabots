@@ -9,6 +9,7 @@ import { ChatFiles } from "../../chats/chats/chat-files.ts";
 import { Chats } from "../../chats/chats/chats.ts";
 import { Reactions } from "../../chats/reactions/reactions.ts";
 import { Files } from "../../files/files.ts";
+import { interruptTurn } from "./interrupt-turn.ts";
 import { markNestedChatRead } from "./mark-nested-chat-read.ts";
 import { markRead } from "./mark-read.ts";
 import { openAutomationFeed } from "./open-automation-feed.ts";
@@ -18,12 +19,14 @@ import { removeWrittenFile } from "./remove-written-file.ts";
 import { renameChat } from "./rename-chat.ts";
 import { send } from "./send.ts";
 import { setResolved } from "./set-resolved.ts";
+import { startBriefedChat } from "./start-briefed-chat.ts";
 import { startInterview } from "./start-interview.ts";
 import { startProjectChat } from "./start-project-chat.ts";
 import { unreact } from "./unreact.ts";
 import { uploadFile } from "./upload-file.ts";
 
 export const chatsOperations = {
+	"chats.startBriefedChat": startBriefedChat,
 	"chats.startInterview": startInterview,
 	"chats.openAutomationFeed": openAutomationFeed,
 	"chats.startProjectChat": startProjectChat,
@@ -36,6 +39,7 @@ export const chatsOperations = {
 	"chats.removeFile": removeFile,
 	"chats.react": react,
 	"chats.unreact": unreact,
+	"chats.interruptTurn": interruptTurn,
 	"files.remove": removeWrittenFile,
 };
 

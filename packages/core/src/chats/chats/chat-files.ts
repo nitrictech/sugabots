@@ -7,17 +7,27 @@ import type {
 	TooManyUnsentAttachments,
 	UploadInterrupted,
 } from "@sugabots/contracts/errors/chats";
-import type { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import type { InputOf, OutputOf } from "@sugabots/contracts/operations";
+import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, type Stream } from "effect";
 import { contentType as mediaTypeForName } from "mime-types";
-import { serviceOperations } from "../../database/database.ts";
-import { OPENABLE_CHAT_KINDS } from "../../database/schema.ts";
+import { query, serviceOperations } from "../../database/database.ts";
+import { OPENABLE_CHAT_KINDS, turn } from "../../database/schema.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
+import type { Approved } from "../../proofs/approved.ts";
 import type { IsMember } from "../../proofs/is-member.ts";
 import type { CanTakePart } from "../../proofs/project-permissions.ts";
-import type { ReachesChat } from "../../proofs/reaches-chat.ts";
+import type { Named } from "../../proofs/proof.ts";
+import type {
+	OwnsUnsentAttachment,
+	ReachesFile,
+	ReachesMessageFile,
+} from "../../proofs/reaches-file.ts";
+import { modelAcceptsImages } from "../../providers/model-providers/model-provider-reads.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { reachedChatOfKind } from "./reached-chat.ts";
+import { readChatFileContent } from "./read-chat-file-content.ts";
 
 /**
  * Files members attach to messages in a chat, kept in its chat. Anyone
@@ -47,25 +57,21 @@ export interface Interface {
 		ChatFileStore.UnsentAttachment,
 		ResourceHidden | FileTooLarge | TooManyUnsentAttachments | UploadInterrupted
 	>;
-	/**
-	 * Removes `fileId` when it is one of the member's unsent attachments to
-	 * the chat `reach` is about, such as one taken off the message they are
-	 * writing. Anything else is left as it is.
-	 */
-	readonly removeUnsentAttachment: <P, C>(
-		isMember: IsMember<P>,
-		reach: ReachesChat<P, C>,
-		fileId: string,
-	) => Effect.Effect<void, ResourceHidden>;
-	/**
-	 * A file attached to a message in the chat `reach` is about. Any other
-	 * file in its chat, such as an unsent attachment or a tool call's result,
-	 * is not found.
-	 */
-	readonly read: <P, C>(
-		reach: ReachesChat<P, C>,
-		fileId: string,
-	) => Effect.Effect<ChatFileStore.StoredFile, ResourceHidden | ChatFileNotFound>;
+	/** Removes a member's upload to the chat before it is sent. */
+	readonly removeUnsentAttachment: <P, F>(
+		file: Named<F, string>,
+		owns: OwnsUnsentAttachment<P, F>,
+	) => Effect.Effect<void>;
+	/** Reads a file attached to a message in a chat the principal reaches. */
+	readonly read: <P, F>(
+		file: Named<F, string>,
+		reach: ReachesMessageFile<P, F>,
+	) => Effect.Effect<ChatFileStore.StoredFile, ChatFileNotFound>;
+	readonly readForTurn: <P, F, X>(
+		reach: ReachesFile<P, F>,
+		input: Omit<InputOf<"chats.readChatFile">, "file" | "chat">,
+		approved: Approved<P, X>,
+	) => Effect.Effect<OutputOf<"chats.readChatFile">, ResourceHidden>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ChatFiles") {
@@ -93,26 +99,40 @@ export const make = Effect.gen(function* () {
 				}).pipe(Effect.catchTags(storeOutagesAsDefects)),
 			),
 
-		removeUnsentAttachment: (isMember, reach, fileId) =>
+		removeUnsentAttachment: (file, owns) =>
 			operation(
 				"removeUnsentAttachment",
-				Effect.gen(function* () {
-					const chat = yield* reachedChatOfKind(reach, OPENABLE_CHAT_KINDS);
-					yield* files.removeUnsentAttachment({
-						chatId: chat.id,
-						uploaderId: isMember.member,
-						fileId,
-					});
+				files.removeUnsentAttachment({
+					chatId: owns.chat,
+					uploaderId: owns.uploader,
+					fileId: file.value,
 				}),
 			),
 
-		read: (reach, fileId) =>
+		read: (file, reach) =>
 			operation(
 				"read",
-				Effect.gen(function* () {
-					const chat = yield* reachedChatOfKind(reach, OPENABLE_CHAT_KINDS);
-					return yield* files.readMessageFile({ chatId: chat.id, fileId });
-				}).pipe(Effect.catchTags(storeOutagesAsDefects)),
+				files
+					.readMessageFile({ chatId: reach.chat, fileId: file.value })
+					.pipe(Effect.catchTags(storeOutagesAsDefects)),
+			),
+
+		readForTurn: (reach, input, approved) =>
+			operation(
+				"readForTurn",
+				readChatFileContent(
+					files.read({ chatId: reach.chat, fileId: reach.file.value }),
+					input,
+					Effect.gen(function* () {
+						const principal = approved.principal.value;
+						if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun")
+							return false;
+						const [stored] = yield* query((db) =>
+							db.select({ model: turn.model }).from(turn).where(eq(turn.id, principal.turn)),
+						);
+						return stored ? yield* modelAcceptsImages(reach.workspace, stored.model) : false;
+					}),
+				).pipe(Effect.catchTag("ChatFileNotFound", () => new ResourceHidden({ resource: "file" }))),
 			),
 	});
 });

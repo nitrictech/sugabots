@@ -22,10 +22,10 @@ type EndpointNamesOf<Group> = Group extends HttpApiGroup.Constraint
 	: never;
 
 /** An endpoint of `Api`, as `<group>.<endpoint>`, such as `chats.setResolved`. */
-export type EndpointName = EndpointNamesOf<ApiGroups>;
+type EndpointName = EndpointNamesOf<ApiGroups>;
 
 /** The HTTP API's decision: offer the operation at one endpoint, or hold it back and say why. */
-export type HttpDecision =
+type HttpDecision =
 	| { readonly kind: "offered"; readonly endpoint: EndpointName }
 	| { readonly kind: "heldBack"; readonly reason: string };
 
@@ -76,7 +76,7 @@ export type OfferedIn = "everywhere" | "chatBounds" | "ownChats" | "memberBounds
  * A tool offered in `chatBounds` or `ownChats` manages a project for the
  * asker, so it always waits for the asker's approval.
  */
-export type BotLoopDecision =
+type BotLoopDecision =
 	| {
 			readonly kind: "offered";
 			readonly tool: string;
@@ -232,16 +232,6 @@ export type HttpOperationName<Manifest> = {
 export type BotLoopOperationName<Manifest> = {
 	[Name in keyof Manifest]: Manifest[Name] extends {
 		readonly botLoop: { readonly kind: "offered" };
-	}
-		? Name
-		: never;
-}[keyof Manifest] &
-	string;
-
-/** The operations `Manifest` leaves for the bot loop to call itself, offered to no model. */
-export type LoopCalledOperationName<Manifest> = {
-	[Name in keyof Manifest]: Manifest[Name] extends {
-		readonly botLoop: { readonly kind: "calledByLoop" };
 	}
 		? Name
 		: never;

@@ -179,13 +179,21 @@ function WorkspaceSetupSteps({ session, workspace, onAddress, onCancel }: Worksp
 			) : !workspace || !assistant ? (
 				<AssistantMissing modelId={models.data?.models[0]?.modelId} />
 			) : step === "bot" ? (
-				<BotStep model={assistant.model} made={firstBot} onCreated={() => setChosen("invite")} />
+				<BotStep
+					model={assistant.model ?? null}
+					made={firstBot}
+					onCreated={() => setChosen("invite")}
+				/>
 			) : step === "invite" ? (
 				<InviteMembersStep workspaceId={workspace.id} onContinue={() => setChosen("ready")} />
 			) : firstBot ? (
 				<ReadyStep workspace={workspace} bot={firstBot} />
 			) : (
-				<BotStep model={assistant.model} made={undefined} onCreated={() => setChosen("invite")} />
+				<BotStep
+					model={assistant.model ?? null}
+					made={undefined}
+					onCreated={() => setChosen("invite")}
+				/>
 			)}
 		</WorkspaceSetupFrame>
 	);

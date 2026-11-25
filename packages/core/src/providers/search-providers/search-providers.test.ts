@@ -1,6 +1,6 @@
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { SearchProviderNotFound } from "@sugabots/contracts/errors/providers";
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { member, membership, workspace } from "../../database/schema.ts";
@@ -44,7 +44,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 		});
 		const principal = await signIn(as);
 		const operation =
-			<Name extends OperationName>(name: Name) =>
+			<Name extends RequestOperationName>(name: Name) =>
 			(input: InputOf<Name>) =>
 				call(principal, name, input);
 		return {

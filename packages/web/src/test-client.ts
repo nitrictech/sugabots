@@ -1,3 +1,4 @@
+import type { StreamEvent } from "@sugabots/contracts";
 import { vi } from "vitest";
 
 /**
@@ -127,6 +128,7 @@ export const client = {
 			startProjectChat: vi.fn(),
 			markResolved: vi.fn(),
 			reopen: vi.fn(),
+			interruptTurn: vi.fn(),
 			messages: vi.fn(),
 			history: vi.fn(),
 			send: vi.fn(),
@@ -166,7 +168,16 @@ export const client = {
 			projectRuns: vi.fn(),
 		},
 	},
-	events: { chat: vi.fn(), workspace: vi.fn(), me: vi.fn() },
+	events: {
+		chat: vi.fn(),
+		workspace: vi.fn(),
+		me: vi.fn<() => AsyncIterable<StreamEvent> & { close: () => void }>(() => ({
+			[Symbol.asyncIterator]: () => ({
+				next: async () => ({ done: true as const, value: undefined }),
+			}),
+			close: vi.fn(),
+		})),
+	},
 	auth: {
 		signIn: vi.fn(),
 		signUp: vi.fn(),

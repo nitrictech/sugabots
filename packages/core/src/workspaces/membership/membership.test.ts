@@ -1,17 +1,22 @@
 import type { Connector } from "@sugabots/contracts";
-import type { InputOf, OperationName, OutputOf } from "@sugabots/contracts/operations";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import type { InputOf, OutputOf, RequestOperationName } from "@sugabots/contracts/operations";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { Effect, type Layer } from "effect";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Accounts } from "../../accounts/accounts.ts";
+import { seedAutomation, seedBot, seedRoutine } from "../../authentication/seed.test-support.ts";
+import { SystemWorkAuthentication } from "../../authentication/system-work.ts";
 import { ComputerProviderStore } from "../../computers/computer-provider-store.ts";
 import { Computers } from "../../computers/computers.ts";
 import { recordingFirstComputer } from "../../computers/testing.ts";
 import { query } from "../../database/database.ts";
 import {
+	automation,
+	automationRun,
+	automationTrigger,
 	bot,
 	computer,
-	connector,
+	gitHubUninstall,
 	invitation,
 	member,
 	membership,
@@ -41,10 +46,8 @@ import {
 	egressToGitHub,
 	gitHubSetupAt,
 	installedConnector,
-	json,
 	standInGitHub,
 	USER_INSTALLATION_ID,
-	uninstalls,
 } from "../../providers/connectors/github/github.test-support.ts";
 import { providersIn } from "../../providers/model-providers/model-provider-reads.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
@@ -116,7 +119,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			const call = await callOperation();
 			const principal = await signIn(memberId);
 			const operation =
-				<Name extends OperationName>(name: Name) =>
+				<Name extends RequestOperationName>(name: Name) =>
 				(input: InputOf<Name>) =>
 					call(principal, name, input);
 			return {
@@ -759,7 +762,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		);
 		expect(await membershipOf(workspace.id, kim.id)).toMatchObject({ role: "editor" });
 		// An administrator may leave: the owner is still there to administer.
-		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toBeUndefined();
+		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toEqual({
+			cleanupPending: false,
+		});
 	});
 
 	it("hands over ownership, putting the new owner in every project members made and making the old one an admin", async () => {
@@ -924,7 +929,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await run(ada.id, (m) => m.workspaces)).toMatchObject([{ id: workspace.id }]);
 	});
 
-	it("keeps a member in the workspace whose Personal Assistant's first computer is recorded as they are removed", async () => {
+	it("revokes membership and queues cleanup when the Personal Assistant’s first computer is recorded during removal", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await newMember("Bob");
 		const bobMembership = await join(workspace.id, ada.id, bob);
@@ -960,7 +965,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		await waitUntilWaitingOnLocks(1);
 		await recording.release();
 
-		expect(await removing).toEqual({ failed: "ComputerMadeMeanwhile" });
+		expect(await removing).toEqual({ cleanupPending: true });
 		expect(
 			await onDatabase((db) =>
 				db
@@ -1049,7 +1054,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		);
 		if (!lead) throw new Error("The bot was not created");
 		// Holds Bob's membership, so his removal waits there with the workspace locked,
-		// as it would on his Personal Assistant's computer at its provider.
+		// before recording the departure.
 		const hold = holdTransaction(
 			query((db) =>
 				db
@@ -1106,7 +1111,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		);
 		if (!shared) throw new Error("The project was not created");
 
-		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toBeUndefined();
+		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toEqual({
+			cleanupPending: false,
+		});
 		expect(
 			await onDatabase((db) => db.select().from(project).where(eq(project.id, shared.id))),
 		).toHaveLength(1);
@@ -1249,6 +1256,74 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			membershipId: bobMembership.id,
 		});
 
+		it.each(departures)(
+			"stops a personal bot’s due routine when its creator %s",
+			async (_, depart) => {
+				const departing = bobGoing(await workspaceWithAdmins());
+				const personal = await seedBot(departing.workspaceId, {
+					createdById: departing.memberId,
+					visibility: "personal",
+				});
+				const publicBot = await seedBot(departing.workspaceId, { createdById: departing.memberId });
+				const own = await seedAutomation(departing.workspaceId, personal.defaultProject);
+				const shared = await seedAutomation(departing.workspaceId, publicBot.defaultProject);
+				const pending = await seedAutomation(departing.workspaceId, personal.defaultProject);
+				const ownRoutine = await seedRoutine(own, departing.workspaceId, -60);
+				const sharedRoutine = await seedRoutine(shared, departing.workspaceId, -30);
+				await onDatabase((db) =>
+					db
+						.update(automation)
+						.set({ pauseAfterFailuresPendingAt: new Date() })
+						.where(eq(automation.id, pending)),
+				);
+				const auth = await runOnPostgres(
+					Effect.provide(SystemWorkAuthentication.Service, SystemWorkAuthentication.layer),
+				);
+				const alreadyDue = await runOnPostgres(auth.dueRoutine(ownRoutine));
+				const { actorId, operation } = depart(departing);
+
+				expect(await run(actorId, operation)).toEqual({ cleanupPending: false });
+
+				const [paused] = await onDatabase((db) =>
+					db.select().from(automation).where(eq(automation.id, own)),
+				);
+				expect(paused?.state).toBe("paused");
+				const [routine] = await onDatabase((db) =>
+					db.select().from(automationTrigger).where(eq(automationTrigger.id, ownRoutine)),
+				);
+				expect(routine?.nextScheduledAt).toBeNull();
+				const [pausedFromPending] = await onDatabase((db) =>
+					db.select().from(automation).where(eq(automation.id, pending)),
+				);
+				expect(pausedFromPending).toMatchObject({
+					state: "paused",
+					pauseAfterFailuresPendingAt: null,
+					pausedAfterFailuresAt: null,
+				});
+				await expect(runOnPostgres(auth.dueRoutine(ownRoutine))).rejects.toMatchObject({
+					_tag: "StoredWorkGone",
+				});
+				const call = await servedOperations();
+				expect(
+					await call(alreadyDue, "automations.runDueRoutine", { triggerId: ownRoutine }),
+				).toBeUndefined();
+
+				const sharedWork = await runOnPostgres(auth.dueRoutine(sharedRoutine));
+				expect(
+					await call(sharedWork, "automations.runDueRoutine", { triggerId: sharedRoutine }),
+				).toMatchObject({
+					runId: expect.any(String),
+				});
+				const started = await onDatabase((db) =>
+					db
+						.select({ automationId: automationRun.automationId })
+						.from(automationRun)
+						.where(eq(automationRun.workspaceId, departing.workspaceId)),
+				);
+				expect(started).toEqual([{ automationId: shared }]);
+			},
+		);
+
 		const shownProviders = async (workspaceId: string) => {
 			const providers = await runOnPostgres(providersIn(workspaceId));
 			return (builtIn: string) => providers.find((one) => one.builtIn === builtIn);
@@ -1322,7 +1397,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 					workspaceId,
 					linear.id,
 					{ tokens: { access_token: "bob's", token_type: "Bearer" } },
-					bob.id,
+					{ kind: "signIn", signedInById: bob.id, version: null },
 				);
 
 				const { actorId, operation } = depart(bobGoing(fixture));
@@ -1385,7 +1460,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 				await wayOut(workspaceId, supergrok.id, cy);
 
-				expect(await removingBob(fixture)).toBeUndefined();
+				expect(await removingBob(fixture)).toEqual({ cleanupPending: false });
 				expect(await stillIn(workspaceId, bob.id)).toBe(false);
 			},
 		);
@@ -1473,7 +1548,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 					workspaceId,
 					linear.id,
 					{ tokens: { access_token: "bob's", token_type: "Bearer" } },
-					bob.id,
+					{ kind: "signIn", signedInById: bob.id, version: null },
 				);
 				// A sign-in replaced by another's is the other's.
 				const notion = await connectors.create(workspaceId, projectId, bob.id, {
@@ -1486,7 +1561,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 						workspaceId,
 						notion.id,
 						{ tokens: { access_token: `${signer.name}'s`, token_type: "Bearer" } },
-						signer.id,
+						{
+							kind: "signIn",
+							signedInById: signer.id,
+							version: (await connectors.readOauthRecord(workspaceId, notion.id))?.version ?? null,
+						},
 					);
 				}
 				await connectors.create(workspaceId, projectId, bob.id, {
@@ -1518,7 +1597,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				]);
 
 				const { actorId, operation } = depart(bobGoing(fixture));
-				expect(await run(actorId, operation)).toBeUndefined();
+				expect(await run(actorId, operation)).toEqual({ cleanupPending: false });
 
 				expect(signedInAs(await shownConnectors(workspaceId, projectId))).toEqual([
 					{ name: "Linear", signedIn: false, hasSecret: false, signedInAs: null },
@@ -1531,28 +1610,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			},
 		);
 
-		it("forgets the GitHub app a removed member installed on their own account, uninstalling it once that has committed, and keeps one on an organization", async () => {
+		it("queues uninstall of a removed member’s personal GitHub app and keeps organization installations", async () => {
 			const { ada, bob, bobMembership, workspaceId, projectId } = await workspaceWithAdmins();
 			const research = await newProject(workspaceId, "Research");
-			/** Each uninstall GitHub was asked for, and whether the workspace still recorded the installation then. */
-			const uninstalled: Array<{ installationId: number; stillRecorded: boolean }> = [];
-			const gitHub = standInGitHub(
-				uninstalls(async (installationId) => {
-					const recording = await onDatabase((db) =>
-						db
-							.select({ id: connector.id })
-							.from(connector)
-							.where(
-								and(
-									eq(connector.workspaceId, workspaceId),
-									sql`${connector.settings} ->> 'installationId' = ${String(installationId)}`,
-								),
-							),
-					);
-					uninstalled.push({ installationId, stillRecorded: recording.length > 0 });
-					return new Response(null, { status: 204 });
-				}),
-			);
+			const gitHub = standInGitHub();
 			const { run: runReaching, gitHubApps } = await reachingOnly(gitHub.fetch);
 			await installedConnector(gitHubApps, { projectId, adminId: bob.id }, USER_INSTALLATION_ID);
 			await installedConnector(gitHubApps, { projectId: research, adminId: bob.id });
@@ -1568,38 +1629,19 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				await runReaching(ada.id, (m) =>
 					m.remove({ workspace: workspaceId, membershipId: bobMembership.id }),
 				),
-			).toBeUndefined();
+			).toEqual({ cleanupPending: false });
 
-			await vi.waitFor(() =>
-				expect(uninstalled).toEqual([
-					{ installationId: USER_INSTALLATION_ID, stillRecorded: false },
-				]),
+			const queued = await onDatabase((db) =>
+				db.select().from(gitHubUninstall).where(eq(gitHubUninstall.workspaceId, workspaceId)),
 			);
+			expect(queued).toMatchObject([{ installationId: USER_INSTALLATION_ID, attempts: 0 }]);
+			expect(gitHub.asked.some(({ method }) => method === "DELETE")).toBe(false);
 			expect(await shownConnectors(workspaceId, projectId)).toMatchObject([
 				{ kind: "github", signedIn: false, url: "https://github.com/apps/acme-sugabots" },
 			]);
 			expect(await shownConnectors(workspaceId, research)).toMatchObject([
 				{ kind: "github", signedIn: true, url: "https://github.com/acme" },
 			]);
-		});
-
-		it("tries uninstalling again while GitHub can't be reached", async () => {
-			const { bob, workspaceId, projectId } = await workspaceWithAdmins();
-			let attempts = 0;
-			const gitHub = standInGitHub(
-				uninstalls(async () => {
-					attempts += 1;
-					return attempts === 1
-						? json({ message: "Server Error" }, 502)
-						: new Response(null, { status: 204 });
-				}),
-			);
-			const { run: runReaching, gitHubApps } = await reachingOnly(gitHub.fetch);
-			await installedConnector(gitHubApps, { projectId, adminId: bob.id }, USER_INSTALLATION_ID);
-
-			expect(await runReaching(bob.id, (m) => m.leave({ workspace: workspaceId }))).toBeUndefined();
-
-			await vi.waitFor(() => expect(attempts).toBe(2), { timeout: 5_000 });
 		});
 	});
 });
@@ -1615,7 +1657,7 @@ interface Departing {
 /** Who asks for a member to go, and what they ask for. */
 interface Departure {
 	actorId: string;
-	operation: (membership: MembershipAs) => Promise<void>;
+	operation: (membership: MembershipAs) => Promise<OutputOf<"workspaces.leave">>;
 }
 
 /** The workspace operations for one member signed in, by the names these cases use. */
@@ -1632,8 +1674,10 @@ interface MembershipAs {
 		input: InputOf<"workspaces.memberships">,
 	): Promise<OutputOf<"workspaces.memberships">>;
 	changeRole(input: InputOf<"workspaces.changeRole">): Promise<void>;
-	remove(input: InputOf<"workspaces.removeMembership">): Promise<void>;
-	leave(input: InputOf<"workspaces.leave">): Promise<void>;
+	remove(
+		input: InputOf<"workspaces.removeMembership">,
+	): Promise<OutputOf<"workspaces.removeMembership">>;
+	leave(input: InputOf<"workspaces.leave">): Promise<OutputOf<"workspaces.leave">>;
 	handOverOwnership(input: InputOf<"workspaces.handOverOwnership">): Promise<void>;
 	invitations(
 		input: InputOf<"workspaces.invitations">,

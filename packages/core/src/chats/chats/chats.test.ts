@@ -6,9 +6,9 @@ import {
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, desc, eq, like, sql } from "drizzle-orm";
-import { Context, Effect, Stream } from "effect";
+import { Context, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { Visibility } from "../../authorization/visibility.ts";
+import { askerColumns } from "../../authentication/turn-facts.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import {
@@ -30,49 +30,33 @@ import {
 	turn,
 	workspace,
 } from "../../database/schema.ts";
-import {
-	closeDatabase,
-	onDatabase,
-	onPostgres,
-	type Promised,
-	runOnPostgres,
-} from "../../database/testing.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { type AsMember, asMember } from "../../operations/chats/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
 import { INTERVIEW_PROMPT } from "../../workspaces/bots/interview-prompt.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
-import { onPostgresAs } from "../../workspaces/testing.ts";
-import { Automations } from "../automations/automations.ts";
-import { manualRunsOver, type StartRun } from "../automations/testing.ts";
+import { automationsAs, manualRunsOver, type StartRun } from "../automations/testing.ts";
 import { seedChat } from "../seed.test-support.ts";
 import { ChatStore } from "../store/store.ts";
 import { chatServicesForTests } from "../testing.ts";
-import { modelPrompt, prepareRunnable, runningTurns, TurnExecution } from "../turns/testing.ts";
+import { modelPrompt, prepareTurn, runningTurns, runOver } from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
-import { BotChats } from "./bot-chats.ts";
-import { ChatView } from "./chat-view.ts";
 import { startBotChat } from "./testing.ts";
 
 const eventStore = await runOnPostgres(EventStore.make);
 
 describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () => {
 	const services = await chatServicesForTests(EventBus.inProcess({ store: eventStore }));
+	const drive = runOver(services);
 	const call = await servedOperations({ chats: services });
-	/** What a Personal Assistant's guide reads for `memberId`, as they are its member. */
-	const guideAs = async (memberId: string) =>
-		onPostgresAs(memberId)(
-			await runOnPostgres(
-				Effect.provide(ChatView.ForAssistantGuide, ChatView.forAssistantGuideLayer),
-			),
-		);
 	const manualRunsAs = await manualRunsOver(services);
 	/** As the editor the chats are with. */
 	let chats: AsMember;
 	let view: AsMember;
 	/** As an administrator, who may define and run the bots' automations. */
-	let automations: Promised<Automations.Interface>;
+	let automations: ReturnType<typeof automationsAs>;
 	/** Starting the bots' automations' runs by hand, as that administrator. */
 	let runByHand: StartRun;
 	let workspaceId: string;
@@ -166,7 +150,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 		chats = asMember(call, memberId);
 		view = asMember(call, memberId);
-		automations = onPostgresAs(administrator.id)(Context.get(services, Automations.Service));
+		automations = automationsAs(call, administrator.id);
 		runByHand = manualRunsAs(administrator.id);
 		const room = await onDatabase((db) =>
 			seedProject(db, {
@@ -242,12 +226,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		await onDatabase((db) =>
 			db.insert(membership).values({ workspaceId, memberId: otherEditor.id, role: "editor" }),
 		);
-		const visibility = await runOnPostgres(Effect.provide(Visibility.Service, Visibility.layer));
-		const visibilityAs = (memberId: string) => onPostgresAs(memberId)({ chat: visibility.chat });
-
-		expect(await visibilityAs(memberId).chat(opened.id)).toMatchObject({ id: opened.id });
+		expect(await view.get(opened.id)).toMatchObject({ chat: { id: opened.id } });
 		for (const memberId of [otherEditor.id, stranger.id]) {
-			await expect(visibilityAs(memberId).chat(opened.id)).rejects.toMatchObject({
+			await expect(asMember(call, memberId).get(opened.id)).rejects.toMatchObject({
 				_tag: "ResourceHidden",
 				resource: "chat",
 			});
@@ -283,7 +264,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			title: "Budget review is Friday and bring the numbers",
 		});
 		expect(started.message).toMatchObject({
-			id: messageId,
+			retryKey: messageId,
 			chatId: started.chat.id,
 		});
 		expect(await runOnPostgres(runningTurns(started.chat.id))).toHaveLength(1);
@@ -329,166 +310,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		const [run] = await runOnPostgres(runningTurns(started.chat.id));
 		if (!run) throw new Error("The chat's bot was not asked");
 
-		const prepared = await prepareRunnable(
-			onPostgres({ prepare: Context.get(services, TurnExecution.Service).prepare }),
-			run,
-		);
+		const prepared = await drive(prepareTurn(run));
 
 		expect(prepared.context.messages).toEqual([
-			expect.objectContaining({ id: messageId, chatId: started.chat.id }),
+			expect.objectContaining({ id: started.message.id, chatId: started.chat.id }),
 		]);
 		expect(prepared.context.askerId).toBe(memberId);
-	});
-
-	describe("chats a bot starts for the member it is answering", () => {
-		const botChats = () => onPostgres(Context.get(services, BotChats.Service));
-		const handleOf = async (id: string) => {
-			const [row] = await onDatabase((db) =>
-				db.select({ handle: bot.handle }).from(bot).where(eq(bot.id, id)),
-			);
-			if (!row) throw new Error("fixture");
-			return row.handle;
-		};
-
-		it("starts it with the bot asked for, briefed by the starting bot, and asks that bot to work", async () => {
-			const started = await botChats().start(
-				{ botId, workspaceId, askerId: memberId },
-				{
-					title: "March refunds",
-					brief: "Pull the refunds issued in March.",
-					withHandle: `@${await handleOf(recipientBotId)}`,
-				},
-			);
-			expect(started).toEqual({
-				id: expect.any(String),
-				title: "March refunds",
-				with: "Impersonal Bot",
-				withBotId: recipientBotId,
-			});
-			const participants = await onDatabase((db) =>
-				db
-					.select({ memberId: chatParticipant.memberId, botId: chatParticipant.botId })
-					.from(chatParticipant)
-					.where(eq(chatParticipant.chatId, started.id)),
-			);
-			expect(participants).toEqual(
-				expect.arrayContaining([
-					{ memberId, botId: null },
-					{ memberId: null, botId: recipientBotId },
-				]),
-			);
-			expect(participants).toHaveLength(2);
-			const [run] = await runOnPostgres(runningTurns(started.id));
-			if (!run) throw new Error("The chat's bot was not asked");
-
-			const prepared = await prepareRunnable(
-				onPostgres({ prepare: Context.get(services, TurnExecution.Service).prepare }),
-				run,
-			);
-
-			expect(prepared.context.bot.id).toBe(recipientBotId);
-			// A bot wrote its brief, so it acts for the member only to mark the chat resolved.
-			expect(prepared.context.askerId).toBeNull();
-			expect(prepared.context.startedFor).toBe(memberId);
-			expect(prepared.context.messages).toEqual([
-				expect.objectContaining({
-					content: "Pull the refunds issued in March.",
-					author: expect.objectContaining({ kind: "bot", id: botId }),
-				}),
-			]);
-		});
-
-		it("starts it with the starting bot itself when no other bot is named", async () => {
-			const started = await botChats().start(
-				{ botId, workspaceId, askerId: memberId },
-				{ title: "Follow-up", brief: "Draft the follow-up email." },
-			);
-			expect(started).toEqual({ id: expect.any(String), title: "Follow-up" });
-			const [run] = await runOnPostgres(runningTurns(started.id));
-			if (!run) throw new Error("The chat's bot was not asked");
-
-			const prepared = await prepareRunnable(
-				onPostgres({ prepare: Context.get(services, TurnExecution.Service).prepare }),
-				run,
-			);
-
-			expect(prepared.context.bot.id).toBe(botId);
-			expect(prepared.context.askerId).toBeNull();
-			expect(prepared.context.startedFor).toBe(memberId);
-		});
-
-		it("marks the chat it is in resolved for the member who asked, a project's chat too", async () => {
-			const projectChat = await namedChat(projectId, "General");
-			const { chat: opened } = await startBotChat(chats, {
-				botId,
-				messageId: crypto.randomUUID(),
-				content: "Can you check the renewal numbers?",
-			});
-			const bot = { botId, workspaceId, askerId: memberId };
-			const resolvedAt = async (chatId: string) => {
-				const [row] = await onDatabase((db) =>
-					db
-						.select({ resolvedAt: placedChat.resolvedAt })
-						.from(placedChat)
-						.where(eq(placedChat.id, chatId)),
-				);
-				return row?.resolvedAt ?? null;
-			};
-
-			await botChats().markResolved(bot, opened.id);
-			await botChats().markResolved(bot, projectChat.id);
-
-			expect(await resolvedAt(opened.id)).toBeInstanceOf(Date);
-			expect(await resolvedAt(projectChat.id)).toBeInstanceOf(Date);
-			await expect(
-				botChats().markResolved({ ...bot, askerId: null }, opened.id),
-			).rejects.toMatchObject({ _tag: "NobodyAsked" });
-		});
-
-		it("refuses when nobody asked, no bot has the handle, or the member can't reach the bot or chat", async () => {
-			const [otherEditor] = await onDatabase((db) =>
-				db
-					.insert(member)
-					.values({ name: "Another editor", email: `editor-${crypto.randomUUID()}@example.com` })
-					.returning(),
-			);
-			if (!otherEditor) throw new Error("fixture");
-			await onDatabase((db) =>
-				db.insert(membership).values({ workspaceId, memberId: otherEditor.id, role: "editor" }),
-			);
-			// Personal to the editor the chats are with, so the other editor reaches neither it nor its chats.
-			await onDatabase((db) =>
-				db.update(bot).set({ visibility: "personal" }).where(eq(bot.id, recipientBotId)),
-			);
-			const brief = { title: "Elsewhere", brief: "Do it." };
-
-			await expect(
-				botChats().start({ botId, workspaceId, askerId: null }, brief),
-			).rejects.toMatchObject({ _tag: "NobodyAsked" });
-			await expect(
-				botChats().start(
-					{ botId, workspaceId, askerId: memberId },
-					{ ...brief, withHandle: "@nobody-here" },
-				),
-			).rejects.toMatchObject({ _tag: "NoBotWithHandle" });
-			await expect(
-				botChats().start(
-					{ botId, workspaceId, askerId: otherEditor.id },
-					{ ...brief, withHandle: `@${await handleOf(recipientBotId)}` },
-				),
-			).rejects.toMatchObject({ _tag: "BotUnavailable" });
-			const { chat: opened } = await startBotChat(chats, {
-				botId: recipientBotId,
-				messageId: crypto.randomUUID(),
-				content: "Can you check the renewal numbers?",
-			});
-			await expect(
-				botChats().markResolved(
-					{ botId: recipientBotId, workspaceId, askerId: otherEditor.id },
-					opened.id,
-				),
-			).rejects.toMatchObject({ _tag: "ChatHiddenFromAsker" });
-		});
 	});
 
 	it("lists a bot's automations by name, each with its feed once it has run", async () => {
@@ -899,6 +726,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 						status: "waiting",
 						model: "test/model",
 						startedAt: new Date(),
+						...askerColumns({ chatId: current.id, botId: botId, triggerMessageId: trigger.id }),
 					})
 					.returning({ id: turn.id }),
 			);
@@ -977,6 +805,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 							startedAt,
 							finishedAt: ended ? finishedAt : null,
 							error: status === "failed" ? userText`The model could not be reached.` : null,
+							...askerColumns({ chatId: chatId, botId: botId, triggerMessageId: asking.id }),
 						})
 						.returning({ id: turn.id }),
 				);
@@ -1088,11 +917,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect(runs).toHaveLength(1);
 			const run = runs[0];
 			if (!run) throw new Error("The interview did not start");
-			const execution = onPostgres({
-				prepare: Context.get(services, TurnExecution.Service).prepare,
-			});
-			const prepared = await prepareRunnable(execution, run);
-			expect(prepared.responseMessage.id).toBe(run.request.triggerMessageId);
+			const prepared = await drive(prepareTurn(run));
+			expect(prepared.replyMessageId).toBe(run.request.triggerMessageId);
 			const prompt = modelPrompt(prepared.context, {
 				now: new Date("2026-10-26T00:00:00Z"),
 				builtInTools: [],
@@ -1102,8 +928,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect(prompt.messages).toHaveLength(1);
 			expect(prompt.messages[0]?.content).toContain("Start the interview now");
 			expect(prompt.messages[0]?.content).toContain("They have not sent a message yet");
-			const resumed = await prepareRunnable(execution, run);
-			expect(resumed.responseMessage.id).toBe(prepared.responseMessage.id);
+			// Opened again for the same run, as after a crash, it is the same turn and reply.
+			const resumed = await drive(prepareTurn(run));
+			expect(resumed.replyMessageId).toBe(prepared.replyMessageId);
 			expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
 			expect(
 				await onDatabase((db) =>
@@ -1117,7 +944,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect(messages).toHaveLength(1);
 			expect(messages[0]).toMatchObject({
 				kind: "message",
-				message: { author: { kind: "bot", id: botId } },
+				message: {
+					id: prepared.replyMessageId,
+					retryKey: prepared.turnId,
+					author: { kind: "bot", id: botId },
+				},
 			});
 		});
 
@@ -1347,14 +1178,40 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			botId: null,
 			title: "Plan the launch by Friday",
 		});
-		expect(started.message).toMatchObject({ id: input.messageId });
+		expect(started.message).toMatchObject({ retryKey: input.messageId });
+		expect(started.message.id).not.toBe(input.messageId);
 		expect(await runOnPostgres(runningTurns(started.chat.id))).toEqual([
 			expect.objectContaining({ request: expect.objectContaining({ botId }) }),
 		]);
 		expect((await chats.startProjectChat(input)).chat.id).toBe(started.chat.id);
-		await expect(startBotChat(chats, { botId, ...input })).rejects.toMatchObject({
-			_tag: "MessageIdConflict",
+		await expect(chats.startProjectChat({ ...input, content: "Changed" })).rejects.toMatchObject({
+			_tag: "MessageRetryKeyConflict",
 		});
+	});
+
+	it("starts chats and posts equally with keys from a hidden chat or with fresh keys", async () => {
+		const hidden = await startBotChat(chats, {
+			botId,
+			messageId: crypto.randomUUID(),
+			content: "Private question",
+		});
+		await onDatabase((db) =>
+			db
+				.update(bot)
+				.set({ visibility: "personal", createdById: administratorId })
+				.where(eq(bot.id, botId)),
+		);
+		await expect(view.messages(hidden.chat.id)).rejects.toMatchObject({ _tag: "ResourceHidden" });
+		for (const key of [hidden.message.id, hidden.message.retryKey, crypto.randomUUID()]) {
+			if (!key) throw new Error("Message has no retry key");
+			const started = await chats.startProjectChat({ projectId, messageId: key, content: "Hello" });
+			const another = await namedChat(projectId, "Another chat");
+			const posted = await chats.post({ chatId: another.id, messageId: key, content: "Hello" });
+			expect(started.message).toMatchObject({ retryKey: key, content: "Hello" });
+			expect(posted).toMatchObject({ chatId: another.id, retryKey: key, content: "Hello" });
+			expect(started.message.id).not.toBe(posted.id);
+			expect(posted.id).not.toBe(key);
+		}
 	});
 
 	it("starts a chat in a project members made with its lead in it, though the first message asks another bot", async () => {
@@ -1455,7 +1312,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				chats.post({ chatId: current.id, messageId, content: "Anyone there?" }),
 			).rejects.toMatchObject({ _tag: "BotHasNoModel" });
 			expect(
-				await onDatabase((db) => db.select().from(message).where(eq(message.id, messageId))),
+				await onDatabase((db) => db.select().from(message).where(eq(message.retryKey, messageId))),
 			).toHaveLength(0);
 			expect(await runOnPostgres(runningTurns(current.id))).toHaveLength(0);
 		},
@@ -1469,7 +1326,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		// It offers the lead a turn it may decline, which it can't take.
 		await chats.post({ chatId: chat.id, messageId, content: "@chat-editor over to you" });
 		expect(
-			await onDatabase((db) => db.select().from(message).where(eq(message.id, messageId))),
+			await onDatabase((db) => db.select().from(message).where(eq(message.retryKey, messageId))),
 		).toHaveLength(1);
 		expect(await runOnPostgres(runningTurns(chat.id))).toHaveLength(0);
 	});
@@ -1485,10 +1342,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		const [first, retried] = await Promise.all([chats.post(send), chats.post(send)]);
 		expect(retried).toEqual(first);
 		await expect(chats.post({ ...send, content: "Another question" })).rejects.toMatchObject({
-			_tag: "MessageIdConflict",
+			_tag: "MessageRetryKeyConflict",
 		});
 		expect(
-			await onDatabase((db) => db.select().from(message).where(eq(message.id, messageId))),
+			await onDatabase((db) => db.select().from(message).where(eq(message.retryKey, messageId))),
 		).toHaveLength(1);
 		expect(await runOnPostgres(runningTurns(current.id))).toHaveLength(1);
 		expect(
@@ -1647,12 +1504,19 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		await post("Is checkout timing out?");
 		expect((await chatDetailsView.get(current.id)).queuedSince).toBeNull();
 		const changedBefore = await changesAnnounced();
+		// The editor's own follow-up would join their turn, so the admin follows up.
+		const adminPost = (content: string) =>
+			asMember(call, administratorId).post({
+				chatId: current.id,
+				messageId: crypto.randomUUID(),
+				content,
+			});
 
-		const followUp = await post("The Stripe webhook too?");
-		await post("Started around 9.");
+		const followUp = await adminPost("The Stripe webhook too?");
+		await adminPost("Started around 9.");
 
 		expect((await chatDetailsView.get(current.id)).queuedSince).toBe(followUp.createdAt);
-		// Once, when the turn started waiting; the next message joins it.
+		// Once, when the admin's turn started waiting; their next message joins it.
 		expect((await changesAnnounced()) - changedBefore).toBe(1);
 	});
 
@@ -1914,6 +1778,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 						status: "waiting",
 						model: "test/model",
 						startedAt: new Date(),
+						...askerColumns({ chatId: chatId, botId: askingBotId, triggerMessageId: reply.id }),
 					})
 					.returning({ id: turn.id }),
 			);
@@ -2012,6 +1877,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 						status: "waiting",
 						model: "test/model",
 						startedAt: new Date(),
+						...askerColumns({ chatId: run.chatId, botId: botId, triggerMessageId: reply.id }),
 					})
 					.returning({ id: turn.id }),
 			);
@@ -2057,24 +1923,15 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		/** How many unread messages and automation results mention the member. */
 		const unreadForYou = async () => (await view.attention(workspaceId)).unreadForYou;
 
-		it("lists and counts a message that mentions the member until they read it", async () => {
+		it("counts a message that mentions the member until they read it", async () => {
 			const current = await aChat();
 			await botWrites(current.id, "The deploy finished.", 1);
-			const mention = await botWrites(current.id, "@chat-editor can you check it?", 2);
+			await botWrites(current.id, "@chat-editor can you check it?", 2);
 
-			expect(await (await guideAs(memberId)).unreadMentions(workspaceId, 10)).toEqual([
-				expect.objectContaining({
-					messageId: mention.id,
-					preview: "@chat-editor can you check it?",
-					chatId: current.id,
-					projectSlug: null,
-				}),
-			]);
 			expect(await unreadForYou()).toBe(1);
 
 			await chats.markRead(current.id);
 
-			expect(await (await guideAs(memberId)).unreadMentions(workspaceId, 10)).toEqual([]);
 			expect(await unreadForYou()).toBe(0);
 		});
 
@@ -2279,7 +2136,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					attachments: [fresh.id, sentBefore.id],
 				}),
 			).rejects.toBeInstanceOf(ChatFileStore.UnsentAttachmentsNotFound);
-			expect(await shownMessage(chatId, messageId)).toBeUndefined();
+			expect((await view.messages(chatId)).items).not.toContainEqual(
+				expect.objectContaining({ message: expect.objectContaining({ retryKey: messageId }) }),
+			);
 			// The fresh upload is still the author's to send.
 			await expect(
 				chats.post({ chatId, messageId, content: "again", attachments: [fresh.id] }),
@@ -2296,7 +2155,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			const sent = await send([attached.id]);
 
 			await expect(send([attached.id])).resolves.toEqual(sent);
-			await expect(send([other.id])).rejects.toBeInstanceOf(ChatStore.MessageIdConflict);
+			await expect(send([other.id])).rejects.toBeInstanceOf(ChatStore.MessageRetryKeyConflict);
 		});
 	});
 

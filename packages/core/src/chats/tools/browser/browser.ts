@@ -2,14 +2,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { botPalettes } from "@sugabots/avatars/bot-colors";
 import type { BotColor } from "@sugabots/contracts";
+import { DesktopUnavailable } from "@sugabots/contracts/errors/computers";
 import { type UserText, userText } from "@sugabots/errors";
-import { jsonSchema, type ToolSet, tool } from "ai";
-import { Data, Effect } from "effect";
+import { Effect } from "effect";
 import { Computers } from "../../../computers/computers.ts";
-import type { UserFacing } from "../../../user-message.ts";
 import type { Place, TurnComputer } from "../computer/tools.ts";
 import type { Failed } from "../failed.ts";
-import { type Image, withImages } from "../images.ts";
+import type { Image } from "../images.ts";
 import playwrightTools from "./playwright-tools.json" with { type: "json" };
 
 /**
@@ -160,14 +159,7 @@ const desktopCommand = (
 	});
 
 /** There is no desktop to reach, for `reason`. */
-export class DesktopUnavailable
-	extends Data.TaggedError("DesktopUnavailable")<{ reason: UserText }>
-	implements UserFacing
-{
-	get userMessage() {
-		return this.reason;
-	}
-}
+export { DesktopUnavailable };
 
 export function browserSession(
 	turnComputer: TurnComputer,
@@ -349,20 +341,23 @@ function toBrowserResult(content: unknown, note: UserText | undefined): BrowserR
 	};
 }
 
+/** One of the browser tools, as the image's server lists it. */
+interface BrowserTool {
+	readonly name: string;
+	readonly description: string;
+	readonly inputSchema: Record<string, unknown>;
+}
+
 /**
- * The browser tools for a turn. A model that can't take images isn't offered
- * screenshots, and is given the text of any other result alone.
+ * The browser tools a turn is offered, in the order the server lists them. A
+ * model that can't take images isn't offered screenshots, and is given the
+ * text of any other result alone.
  */
-export function browserTools(session: BrowserSession, acceptsImages: boolean): ToolSet {
-	const tools: ToolSet = {};
-	for (const entry of playwrightTools) {
-		if (!acceptsImages && entry.name === SCREENSHOT_TOOL) continue;
-		tools[entry.name] = tool({
-			description: entry.description,
-			inputSchema: jsonSchema(entry.inputSchema as Parameters<typeof jsonSchema>[0]),
-			execute: (input, { abortSignal }) => session.call(entry.name, input, abortSignal),
-			toModelOutput: ({ output }) => withImages(output, acceptsImages),
-		});
-	}
-	return tools;
+export function offeredBrowserTools(acceptsImages: boolean): readonly BrowserTool[] {
+	return playwrightTools.filter((entry) => acceptsImages || entry.name !== SCREENSHOT_TOOL);
+}
+
+/** Whether `name` is a browser tool a turn whose model takes images, or not, is offered. */
+export function isBrowserTool(name: string, acceptsImages: boolean): boolean {
+	return offeredBrowserTools(acceptsImages).some((entry) => entry.name === name);
 }

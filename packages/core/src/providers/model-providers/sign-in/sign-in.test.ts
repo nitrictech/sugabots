@@ -1,4 +1,4 @@
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { member, membership, workspace } from "../../../database/schema.ts";
@@ -40,7 +40,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 		});
 		const principal = await signInAs(memberId);
 		const operation =
-			<Name extends OperationName>(name: Name) =>
+			<Name extends RequestOperationName>(name: Name) =>
 			(input: InputOf<Name>) =>
 				call(principal, name, input);
 		return {
@@ -130,6 +130,21 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			expect(waiting).toEqual({ status: "pending" });
 
 			openai.enterCode();
+			const secondSession = await setup();
+			const completion = { workspace: workspaceId, providerId, attempt: started.attempt };
+			await expect(secondSession.completeSignIn(completion)).rejects.toMatchObject({
+				_tag: "ProviderSignInAttemptInvalid",
+			});
+			for (const invalid of [
+				{ ...completion, attempt: undefined },
+				{ ...completion, providerId: crypto.randomUUID() },
+				{ ...completion, workspace: crypto.randomUUID() },
+			]) {
+				await expect(signIn.completeSignIn(invalid)).rejects.toMatchObject({
+					_tag: "ProviderSignInAttemptInvalid",
+				});
+			}
+			expect(await view()).toMatchObject({ status: "signed_out" });
 			const outcome = await signIn.completeSignIn({
 				workspace: workspaceId,
 				providerId,
@@ -174,7 +189,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					providerId: other.id,
 					attempt: started.attempt,
 				}),
-			).rejects.toMatchObject({ _tag: "ProviderSignInNotOffered" });
+			).rejects.toMatchObject({ _tag: "ProviderSignInAttemptInvalid" });
 		});
 
 		it("spends a lapsing refresh token once, however many turns start together", async () => {

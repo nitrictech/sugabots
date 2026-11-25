@@ -3,8 +3,9 @@ export * as WorkspaceTimeZone from "./workspace-time-zone.ts";
 import type { TimeZone, WorkspaceTimeZone as WorkspaceTimeZoneView } from "@sugabots/contracts";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { TimeZoneUnknown } from "@sugabots/contracts/errors/workspace";
-import { and, countDistinct, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, countDistinct, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
+import { lockTriggers } from "../../chats/automations/automation.ts";
 import { nextOccurrence } from "../../chats/automations/schedule.ts";
 import { AutomationStore } from "../../chats/automations/store.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
@@ -43,6 +44,18 @@ export const make = Effect.gen(function* () {
 	/** Rewrites each routine in `from` to run in `to`, from now. */
 	const moveRoutines = (workspaceId: string, from: string, to: TimeZone) =>
 		Effect.gen(function* () {
+			const affected = yield* query((db) =>
+				db
+					.selectDistinct({ id: automation.id })
+					.from(automationTrigger)
+					.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
+					.where(and(eq(automationTrigger.workspaceId, workspaceId), inZone(from)))
+					.orderBy(asc(automation.id)),
+			);
+			if (affected.length === 0) return;
+			const automationIds = affected.map(({ id }) => id);
+			// Departure takes these locks in ascending id order before it writes any rows.
+			yield* Effect.forEach(automationIds, lockTriggers, { discard: true });
 			const routines = yield* query((db) =>
 				db
 					.select({
@@ -52,7 +65,13 @@ export const make = Effect.gen(function* () {
 					})
 					.from(automationTrigger)
 					.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
-					.where(and(eq(automationTrigger.workspaceId, workspaceId), inZone(from)))
+					.where(
+						and(
+							eq(automationTrigger.workspaceId, workspaceId),
+							inArray(automationTrigger.automationId, automationIds),
+							inZone(from),
+						),
+					)
 					.for("update", { of: automationTrigger }),
 			);
 			const now = yield* DateTime.nowAsDate;
@@ -115,13 +134,13 @@ export const make = Effect.gen(function* () {
 					yield* requireTimeZoneKnownToPostgres(timeZone);
 					yield* transaction(
 						Effect.gen(function* () {
-							// Locked, so a change made meanwhile moves the routines this one leaves.
+							// Runs can still add rows that reference the workspace while this waits for trigger locks.
 							const [current] = yield* query((db) =>
 								db
 									.select({ timeZone: workspace.timeZone })
 									.from(workspace)
 									.where(eq(workspace.id, workspaceId))
-									.for("update"),
+									.for("no key update"),
 							);
 							if (!current) return yield* new ResourceHidden({ resource: "workspace" });
 							if (current.timeZone === timeZone) return;

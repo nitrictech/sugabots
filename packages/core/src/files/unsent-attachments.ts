@@ -1,6 +1,7 @@
 export * as UnsentAttachments from "./unsent-attachments.ts";
 
 import { Duration, Effect, Layer, Schedule } from "effect";
+import { processLayer } from "../tiers.ts";
 import { ChatFileStore } from "./chat-file-store.ts";
 
 /** How long an attachment may wait for its message to be sent before it is removed. */
@@ -24,4 +25,4 @@ export const layer = Layer.effectDiscard(
 			),
 		);
 	}),
-).pipe(Layer.provide(ChatFileStore.layer));
+).pipe(processLayer, Layer.provide(ChatFileStore.layer));

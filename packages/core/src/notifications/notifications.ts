@@ -10,8 +10,9 @@ import {
 	type Presence,
 	streamEvent,
 } from "@sugabots/contracts";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
+import { reachesChatFor } from "../authorization/access.ts";
 import type { ChatEvent } from "../chats/events.ts";
 import {
 	afterCommit,
@@ -19,10 +20,19 @@ import {
 	type Executor,
 	query,
 	serviceOperations,
+	Transaction,
+	transaction,
 } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
 import type { DomainEvents } from "../database/events/domain-events.ts";
-import { notificationOverride, notificationSettings } from "../database/schema.ts";
+import {
+	member,
+	notificationDelivery,
+	notificationOverride,
+	notificationSettings,
+	placedChat,
+	workspace,
+} from "../database/schema.ts";
 import type { IsMember } from "../proofs/is-member.ts";
 import type { ReachesBot } from "../proofs/reaches-bot.ts";
 import type { ReachesProject } from "../proofs/reaches-project.ts";
@@ -108,12 +118,63 @@ export const make = Effect.gen(function* () {
 			{ discard: true },
 		);
 
+	const recordDelivery = (chatId: string, deliveryId: string, addressed: Addressed) =>
+		Effect.gen(function* () {
+			const [recorded] = yield* query((db) =>
+				db
+					.insert(notificationDelivery)
+					.values({
+						chatId,
+						deliveryId,
+						memberId: addressed.memberId,
+						notification: addressed.notification,
+					})
+					.onConflictDoNothing()
+					.returning({ id: notificationDelivery.deliveryId }),
+			);
+			if (recorded) yield* afterCommit(deliver([addressed]));
+		});
+
+	const deliverAbout = (chatId: string, deliveryId: string, addressed: readonly Addressed[]) =>
+		Effect.forEach(
+			addressed,
+			(one) =>
+				transaction(
+					Effect.gen(function* () {
+						if (yield* reachesChatUnderLock(chatId, one.memberId)) {
+							yield* recordDelivery(chatId, deliveryId, one);
+						}
+					}),
+				),
+			{ discard: true },
+		);
+
+	const deliverApproval = (
+		event: Extract<ChatEvent, { _tag: "TurnSuspended" }>,
+		deliveryId: string,
+		now: Date,
+	) =>
+		transaction(
+			Effect.gen(function* () {
+				yield* shareWorkspaceLock(event.workspaceId);
+				const addressed = yield* query((db) => forApprovals(db, event, now));
+				for (const recipient of addressed)
+					yield* recordDelivery(event.chatId, deliveryId, recipient);
+			}),
+		);
+
 	const notifyOf = (events: ReadonlyArray<NotifyingEvent>) =>
 		Effect.gen(function* () {
 			const now = yield* DateTime.nowAsDate;
 			for (const event of events) {
+				const deliveryId = deliveryIdOf(event);
+				if (deliveryId === undefined) continue;
+				if (event._tag === "TurnSuspended") {
+					yield* deliverApproval(event, deliveryId, now);
+					continue;
+				}
 				const addressed = yield* query((db) => notificationsFor(db, event, now));
-				yield* deliver(addressed);
+				yield* deliverAbout(event.chatId, deliveryId, addressed);
 			}
 		});
 
@@ -278,6 +339,25 @@ type NotifyingEvent = Extract<
 	}
 >;
 
+function deliveryIdOf(event: NotifyingEvent): string | undefined {
+	switch (event._tag) {
+		case "MessagePosted":
+			return `message:${event.message.id}`;
+		case "TurnCompleted":
+			return `reply:${event.turnId}`;
+		case "TurnSuspended":
+			return approvalDeliveryId(event.approvalIds?.[0] ?? event.approvalCallIds[0]);
+		case "TurnFailed":
+			return `failure:${event.turnId}`;
+		case "RunSettled":
+			return `run:${event.chatId}`;
+	}
+}
+
+function approvalDeliveryId(id: string | undefined) {
+	return id === undefined ? undefined : `approval:${id}`;
+}
+
 function isNotifying(event: ChatEvent): event is NotifyingEvent {
 	switch (event._tag) {
 		case "MessagePosted":
@@ -295,7 +375,7 @@ function isNotifying(event: ChatEvent): event is NotifyingEvent {
 
 const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 	db: Executor,
-	event: NotifyingEvent,
+	event: Exclude<NotifyingEvent, { _tag: "TurnSuspended" }>,
 	now: Date,
 ) {
 	switch (event._tag) {
@@ -331,14 +411,56 @@ const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 		}
 		case "TurnCompleted":
 			return yield* forReply(db, event, now);
-		case "TurnSuspended":
-			return yield* forApprovals(db, event, now);
 		case "TurnFailed":
 			return yield* forFailedReply(db, event, now);
 		case "RunSettled":
 			return yield* forAutomationRun(db, event, now);
 	}
 });
+
+const shareWorkspaceLock = (workspaceId: string) =>
+	query((db) =>
+		db
+			.select({ id: workspace.id })
+			.from(workspace)
+			.where(eq(workspace.id, workspaceId))
+			.for("share"),
+	);
+
+/**
+ * Whether `memberId` reaches the chat `chatId`, read once a share of its
+ * workspace's lock (see `HoldsWorkspaceLock` in `proofs/`) is held until the
+ * enclosing transaction ends, so no change to who reaches what commits until
+ * then.
+ */
+const reachesChatUnderLock = (chatId: string, memberId: string) =>
+	Effect.gen(function* () {
+		yield* Transaction;
+		const [placed] = yield* query((db) =>
+			db
+				.select({ workspaceId: placedChat.workspaceId, projectId: placedChat.projectId })
+				.from(placedChat)
+				.where(eq(placedChat.id, chatId))
+				.limit(1),
+		);
+		if (!placed?.projectId) return false;
+		const { projectId } = placed;
+		yield* shareWorkspaceLock(placed.workspaceId);
+		// A statement of its own, so it reads what a change that held the lock committed.
+		const [reaching] = yield* query((db) =>
+			db
+				.select({ id: member.id })
+				.from(member)
+				.where(
+					and(
+						eq(member.id, memberId),
+						reachesChatFor({ projectId: sql`${projectId}::uuid` }, member.id),
+					),
+				)
+				.limit(1),
+		);
+		return reaching !== undefined;
+	});
 
 /** A project or a bot, where a member chooses in place of the level above. */
 export interface Place {

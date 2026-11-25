@@ -4,7 +4,7 @@ import {
 	ModelInUse,
 	ProviderActivationRequiresCredential,
 } from "@sugabots/contracts/errors/providers";
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -60,7 +60,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		});
 		const principal = await signIn(as);
 		const operation =
-			<Name extends OperationName>(name: Name) =>
+			<Name extends RequestOperationName>(name: Name) =>
 			(input: InputOf<Name>) =>
 				call(principal, name, input);
 		return {

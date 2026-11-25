@@ -1,7 +1,8 @@
-import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
-import { NoModelChosen, NotReadyToFinish } from "@sugabots/contracts/errors/workspace";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { NoModelChosen } from "@sugabots/contracts/errors/workspace";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { seedBot, seedMember, seedWorkspace } from "../../authentication/seed.test-support.ts";
 import {
 	bot,
 	member,
@@ -126,6 +127,13 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 		systemBotId = system.id;
 	});
 
+	it("hides a bot in another workspace and a missing bot", async () => {
+		const elsewhere = await seedBot(await seedWorkspace());
+		for (const botId of [elsewhere.id, crypto.randomUUID()]) {
+			await expect(complete(adminId, botId)).rejects.toBeInstanceOf(ResourceHidden);
+		}
+	});
+
 	it("does not complete for a bot with no model the workspace offers", async () => {
 		await onDatabase((db) =>
 			db.update(bot).set({ model: "not-switched-on" }).where(eq(bot.id, customBotId)),
@@ -157,7 +165,7 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 			onDatabase((db) =>
 				db.select({ at: workspace.setUpAt }).from(workspace).where(eq(workspace.id, workspaceId)),
 			).then(([row]) => row?.at);
-		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(NotReadyToFinish);
+		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(ResourceHidden);
 		expect(await setUpAt()).toBeNull();
 
 		await complete(adminId, customBotId);
@@ -168,16 +176,41 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 		expect(await setUpAt()).toEqual(first);
 	});
 
-	it("does not accept a system bot or an editor who may not choose the workspace's models", async () => {
-		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(NotReadyToFinish);
-		await expect(complete(editorId, customBotId)).rejects.toBeInstanceOf(ActionForbidden);
+	it("refuses editors and viewers before looking up the bot", async () => {
+		const viewerId = await seedMember(workspaceId, "viewer");
+		const personal = await seedBot(workspaceId, { createdById: adminId, visibility: "personal" });
+		for (const memberId of [editorId, viewerId]) {
+			for (const botId of [customBotId, personal.id, crypto.randomUUID()]) {
+				await expect(complete(memberId, botId)).rejects.toMatchObject({
+					_tag: "ActionForbidden",
+					proof: "CanManageWorkspace",
+				});
+			}
+		}
 	});
 
-	it("does not accept a bot somebody else created", async () => {
+	it("hides bots the admin cannot finish setup for, including another member's Personal Assistant", async () => {
+		const personal = await seedBot(workspaceId, { createdById: editorId, visibility: "personal" });
+		const assistant = await seedBot(workspaceId, {
+			createdById: editorId,
+			assistantOf: editorId,
+			visibility: "personal",
+		});
 		await onDatabase((db) =>
 			db.update(bot).set({ createdById: editorId }).where(eq(bot.id, customBotId)),
 		);
 
-		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(NotReadyToFinish);
+		for (const botId of [
+			systemBotId,
+			customBotId,
+			personal.id,
+			assistant.id,
+			crypto.randomUUID(),
+		]) {
+			await expect(complete(adminId, botId)).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+				resource: "bot",
+			});
+		}
 	});
 });

@@ -44,6 +44,21 @@ export class ComputerMadeMeanwhile
 	}
 }
 
+/** Work on a computer lost its claim before it could finish. */
+export class ClaimLost
+	extends Schema.TaggedError<ClaimLost>()("ClaimLost", {})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return "The computer claim expired or changed";
+	}
+	get userMessage() {
+		return userText`Work on the computer changed while this was running. Try again.`;
+	}
+}
+
 /** The workspace has no computer provider with the id asked for. */
 export class ComputerProviderNotFound
 	extends Schema.TaggedError<ComputerProviderNotFound>()("ComputerProviderNotFound", {})
@@ -230,5 +245,26 @@ export class NoComputerProvider
 	}
 	get userMessage() {
 		return userText`Enable a computer provider in the workspace's settings first.`;
+	}
+}
+
+/**
+ * A bot's desktop in a chat can't be shown: the bot takes no part in the
+ * chat, uses no computer, or the workspace's computers are switched off.
+ * `reason` says which, in members' words.
+ */
+export class DesktopUnavailable
+	extends Schema.TaggedError<DesktopUnavailable>()("DesktopUnavailable", {
+		reason: UserText.schema,
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The bot's desktop can't be shown";
+	}
+	get userMessage() {
+		return this.reason;
 	}
 }

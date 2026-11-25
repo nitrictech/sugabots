@@ -11,9 +11,9 @@ import {
 } from "@sugabots/contracts/errors/projects";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { BadRequest, Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
-import { projectPermissions } from "@sugabots/core/authorization/permissions";
 import { Operations } from "@sugabots/core/operations/registry";
 import type { Principal } from "@sugabots/core/principal";
+import { projectPermissionsShown } from "@sugabots/core/proofs/shown-permissions";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
@@ -71,9 +71,9 @@ const projectFor = (memberId: string, isMember = true): Project => ({
 	visibility: "public",
 	leadBotId: BOT,
 	isMember,
-	permissions: projectPermissions(
-		{ memberId, workspaceRole: "admin" },
-		{ isMember, defaultOf: null, isPublic: true },
+	permissions: projectPermissionsShown(
+		{ actor: { memberId, workspaceRole: "admin" }, inProject: isMember },
+		{ id: PROJECT, workspace: WORKSPACE, leadBot: BOT, visibility: "public", defaultOf: null },
 	),
 	createdAt: "2026-09-09T00:00:00.000Z",
 });

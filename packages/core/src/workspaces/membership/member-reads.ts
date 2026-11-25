@@ -2,7 +2,7 @@ import { and, eq, inArray, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
-import { invitation, member, membership, workspace } from "../../database/schema.ts";
+import { bot, member, membership, project, workspace } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 
 /** The names of the members `memberIds` name, by id; a null id names nobody. */
@@ -27,15 +27,18 @@ export const memberNamesOf = (memberIds: ReadonlyArray<string | null>) => {
  * they are still in the workspace.
  */
 export function membershipOf(workspaceId: PgColumn, memberId: PgColumn): SQL | undefined {
-	return and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId));
+	return and(
+		eq(membership.workspaceId, workspaceId),
+		eq(membership.memberId, memberId),
+		eq(membership.leaving, false),
+	);
 }
 
 /**
- * Whether `memberId` is in the workspace, read once a share of its membership
- * lock (see `membership-changes.ts` in `proofs/`) is held until the enclosing
- * transaction ends. A removal or leaving waits for that transaction, so its
- * own checks see what it records as theirs; one that held the lock first has
- * committed by then, so a member it took away is not in the workspace.
+ * Whether `memberId` can record a sign-in, read under a share of the workspace
+ * lock. A departure waits for these sign-ins, and a sign-in that waits for a
+ * departure sees its intent even while the Personal Assistant's computer is
+ * being destroyed.
  */
 export const inWorkspaceUnderMembershipLock = (workspaceId: string, memberId: string) =>
 	Effect.gen(function* () {
@@ -51,10 +54,29 @@ export const inWorkspaceUnderMembershipLock = (workspaceId: string, memberId: st
 			db
 				.select({ id: membership.id })
 				.from(membership)
-				.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId))),
+				.where(
+					and(
+						eq(membership.workspaceId, workspaceId),
+						eq(membership.memberId, memberId),
+						eq(membership.leaving, false),
+					),
+				),
 		);
-		return found !== undefined;
+		return found !== undefined && !(yield* assistantProjectFor(workspaceId, memberId))?.deleting;
 	});
+
+/** The member's Personal Assistant's default project, if they have one. */
+export const assistantProjectFor = (workspaceId: string, memberId: string) =>
+	query((db) =>
+		db
+			.select({ id: project.id, deleting: project.deleting })
+			.from(bot)
+			.innerJoin(
+				project,
+				and(eq(project.defaultOfBotId, bot.id), eq(project.workspaceId, bot.workspaceId)),
+			)
+			.where(and(eq(bot.workspaceId, workspaceId), eq(bot.assistantOf, memberId))),
+	).pipe(Effect.map(([found]) => found));
 
 /**
  * The member whose membership of the workspace `membershipId` is, for an
@@ -74,17 +96,3 @@ export const memberOfMembership = (workspaceId: string, membershipId: string) =>
 					.limit(1),
 			).pipe(Effect.map(([found]) => found?.memberId ?? membershipId))
 		: Effect.succeed(membershipId);
-
-/**
- * The workspace and role of the pending invitation `invitationId`, for an
- * operation that names its workspace to prove it may cancel it. None for one
- * that isn't pending, which is hidden like one to a workspace the caller isn't in.
- */
-export const pendingInvitationOf = (invitationId: string) =>
-	query((db) =>
-		db
-			.select({ workspaceId: invitation.workspaceId, role: invitation.role })
-			.from(invitation)
-			.where(and(eq(invitation.id, invitationId), eq(invitation.status, "pending")))
-			.limit(1),
-	).pipe(Effect.map(([found]) => found));

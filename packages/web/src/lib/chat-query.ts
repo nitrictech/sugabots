@@ -24,15 +24,23 @@ import { refreshEveryWorkspaceApprovals } from "@/lib/chats.ts";
 function keepStreamedText(current: ChatDetails): (fetched: Message) => Message {
 	return (fetched) => {
 		const streamed = current.messages.find((message) => message.id === fetched.id);
-		if (
-			!streamed ||
-			fetched.status !== "writing" ||
-			streamed.content.length <= fetched.content.length ||
-			!streamed.content.startsWith(fetched.content)
-		) {
-			return fetched;
+		if (!streamed || fetched.status !== "writing") return fetched;
+		if (streamed.status !== "writing") return streamed;
+		const textAhead =
+			streamed.content.length > fetched.content.length &&
+			streamed.content.startsWith(fetched.content);
+		const thinking = new Map((fetched.thinking ?? []).map((part) => [part.step, part]));
+		for (const part of streamed.thinking ?? []) {
+			const stored = thinking.get(part.step);
+			if (!stored || part.text.startsWith(stored.text)) thinking.set(part.step, part);
 		}
-		return { ...fetched, content: streamed.content, parts: streamed.parts };
+		return {
+			...fetched,
+			...(textAhead ? { content: streamed.content, parts: streamed.parts } : {}),
+			...(thinking.size > 0
+				? { thinking: [...thinking.values()].sort((a, b) => a.step - b.step) }
+				: {}),
+		};
 	};
 }
 
@@ -73,13 +81,14 @@ export function chatQuery(chatId: string | undefined) {
 					if (!current) {
 						return latest;
 					}
-					const retainedOlderMessages = current.messages.length > latest.messages.length;
+					const fetchedIds = new Set(latest.messages.map(({ id }) => id));
+					const retained = current.messages.filter(
+						(message) => message.status !== "writing" || fetchedIds.has(message.id),
+					);
+					const retainedOlderMessages = retained.length > latest.messages.length;
 					return {
 						...latest,
-						messages: mergeChatMessages(
-							current.messages,
-							latest.messages.map(keepStreamedText(current)),
-						),
+						messages: mergeChatMessages(retained, latest.messages.map(keepStreamedText(current))),
 						olderMessagesCursor: retainedOlderMessages
 							? current.olderMessagesCursor
 							: latest.olderMessagesCursor,
@@ -130,7 +139,7 @@ export function useChat(chatId: string | undefined) {
 	};
 }
 
-export function useReviewToolCall(chatId: string) {
+export function useReviewToolCall(chatId: string | null) {
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: async ({
@@ -145,8 +154,19 @@ export function useReviewToolCall(chatId: string) {
 			),
 		onSuccess: () =>
 			Promise.all([
-				queries.invalidateQueries({ queryKey: ["chat", chatId] }),
+				...(chatId ? [queries.invalidateQueries({ queryKey: ["chat", chatId] })] : []),
 				refreshEveryWorkspaceApprovals(queries),
 			]),
+	});
+}
+
+/**
+ * Interrupts the turn `turnId` in the chat: the step under way ends at once and
+ * the turn ends with what it wrote. How it ends arrives on the chat's stream.
+ */
+export function useInterruptTurn(chatId: string) {
+	return useMutation({
+		mutationFn: async (turnId: string) =>
+			Effect.runPromise(client.api.chats.interruptTurn({ params: { chatId, turnId } })),
 	});
 }

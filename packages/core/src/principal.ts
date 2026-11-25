@@ -33,7 +33,7 @@ export type TurnBounds = ChatBounds | MemberBounds;
  * bot's own connectors. In a bot's own chats the project is its default
  * project.
  */
-export interface ChatBounds {
+interface ChatBounds {
 	readonly kind: "chat";
 	readonly project: string;
 }
@@ -42,7 +42,7 @@ export interface ChatBounds {
  * A Personal Assistant's own turns, and its automations' routine and manual
  * runs: everything its member reaches.
  */
-export interface MemberBounds {
+interface MemberBounds {
 	readonly kind: "member";
 }
 
@@ -69,8 +69,16 @@ class BotForAsker extends Authenticated<"BotForAsker"> {
 	readonly workspace: string;
 	readonly bot: string;
 	readonly asker: string;
+	/** Whether the turn answers an automation's trigger for a Personal Assistant's member. */
+	readonly askedByAutomation: boolean;
 	readonly chat: string;
 	readonly turn: string;
+	/**
+	 * Which execution of the turn this is: its authenticator raises the turn's
+	 * number each time it starts or resumes, and every write the turn makes
+	 * checks it is still the current one.
+	 */
+	readonly executionNumber: number;
 	readonly bounds: TurnBounds;
 
 	constructor(fields: Omit<BotForAsker, "_tag">) {
@@ -78,8 +86,10 @@ class BotForAsker extends Authenticated<"BotForAsker"> {
 		this.workspace = fields.workspace;
 		this.bot = fields.bot;
 		this.asker = fields.asker;
+		this.askedByAutomation = fields.askedByAutomation;
 		this.chat = fields.chat;
 		this.turn = fields.turn;
+		this.executionNumber = fields.executionNumber;
 		this.bounds = Object.freeze({ ...fields.bounds });
 		Object.freeze(this);
 	}
@@ -98,6 +108,8 @@ class AutomationRun extends Authenticated<"AutomationRun"> {
 	readonly run: string;
 	readonly chat: string;
 	readonly turn: string;
+	/** Which execution of the turn this is (see `BotForAsker.executionNumber`). */
+	readonly executionNumber: number;
 	readonly bounds: ChatBounds;
 
 	constructor(fields: Omit<AutomationRun, "_tag">) {
@@ -108,6 +120,7 @@ class AutomationRun extends Authenticated<"AutomationRun"> {
 		this.run = fields.run;
 		this.chat = fields.chat;
 		this.turn = fields.turn;
+		this.executionNumber = fields.executionNumber;
 		this.bounds = Object.freeze({ ...fields.bounds });
 		Object.freeze(this);
 	}
@@ -139,11 +152,11 @@ class WebhookCall extends Authenticated<"WebhookCall"> {
 	}
 }
 
-/**
- * The work a {@link SystemWork} was stored to do, which is all it reaches:
- * compacting a chat, putting a computer to sleep, running an automation whose
- * routine fell due, or pausing an automation whose stored failures pause it.
- */
+export type DeletionTarget =
+	| { readonly kind: "workspace"; readonly id: string }
+	| { readonly kind: "project"; readonly id: string };
+
+/** The work a {@link SystemWork} was stored to do, which is all it reaches. */
 export type StoredWork =
 	| { readonly kind: "compaction"; readonly chat: string }
 	| { readonly kind: "computerSleep"; readonly computer: string; readonly project: string }
@@ -153,7 +166,10 @@ export type StoredWork =
 			readonly trigger: string;
 			readonly project: string;
 	  }
-	| { readonly kind: "pauseAfterFailures"; readonly automation: string; readonly project: string };
+	| { readonly kind: "pauseAfterFailures"; readonly automation: string; readonly project: string }
+	| { readonly kind: "approvalExpiry"; readonly approval: string }
+	| { readonly kind: "gitHubUninstall"; readonly uninstall: string }
+	| { readonly kind: "deletion"; readonly targetKind: DeletionTarget["kind"]; readonly id: string };
 
 /** Work Sugabots does on its own: a system bot's, or upkeep, started from a stored request. */
 class SystemWork extends Authenticated<"SystemWork"> {

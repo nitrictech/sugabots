@@ -1,6 +1,6 @@
 import { asSchema, type JSONSchema7, type Tool } from "ai";
 import MiniSearch from "minisearch";
-import type { OfferedTool } from "../connectors.ts";
+import type { OfferedTool } from "../connector-catalog.ts";
 
 const SEARCH_RESULT_LIMIT = 5;
 
@@ -25,7 +25,7 @@ export const BUILT_IN_HANDLE = "sugabots";
  * across turns.
  */
 export function buildCatalog(
-	tools: Readonly<Record<string, OfferedTool>>,
+	tools: Readonly<Record<string, Omit<OfferedTool, "tool">>>,
 	builtIn: Readonly<Record<string, Tool>>,
 ): CatalogEntry[] {
 	const own = Object.entries(builtIn).map(([key, found]) => builtInEntry(key, found));

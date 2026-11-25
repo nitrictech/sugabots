@@ -13,11 +13,14 @@ import { computersContracts, computersExposure } from "./computers.ts";
 import { connectorsContracts, connectorsExposure } from "./connectors.ts";
 import { eventsContracts, eventsExposure } from "./events.ts";
 import { defineManifest } from "./exposure.ts";
+import { filesContracts, filesExposure } from "./files.ts";
 import { notificationsContracts, notificationsExposure } from "./notifications.ts";
 import type { OperationContract } from "./operation.ts";
 import { projectsContracts, projectsExposure } from "./projects.ts";
 import { providersContracts, providersExposure } from "./providers.ts";
+import { scheduledWorkContracts, scheduledWorkExposure } from "./scheduled-work.ts";
 import { turnsContracts, turnsExposure } from "./turns.ts";
+import { webContracts, webExposure } from "./web.ts";
 import { workspaceContracts, workspaceExposure } from "./workspace.ts";
 
 export * from "./exposure.ts";
@@ -29,19 +32,33 @@ export const operationContracts = {
 	...botsContracts,
 	...chatsContracts,
 	...chatReadsContracts,
+	...filesContracts,
 	...automationsContracts,
 	...computersContracts,
 	...connectorsContracts,
 	...providersContracts,
+	...webContracts,
 	...approvalsContracts,
 	...eventsContracts,
 	...turnsContracts,
 	...notificationsContracts,
+	...scheduledWorkContracts,
 };
 
 export type OperationContracts = typeof operationContracts;
 
 export type OperationName = keyof OperationContracts & string;
+
+/**
+ * The operations of the long-running kind: following a stream, and the
+ * desktop viewer (see `OperationContract.Kind`).
+ */
+export type LongRunningOperationName = {
+	[Name in OperationName]: OperationContracts[Name]["kind"] extends "longRunning" ? Name : never;
+}[OperationName];
+
+/** The operations that run once per call. */
+export type RequestOperationName = Exclude<OperationName, LongRunningOperationName>;
 
 export const manifest = defineManifest<OperationContracts>()({
 	...workspaceExposure,
@@ -49,14 +66,17 @@ export const manifest = defineManifest<OperationContracts>()({
 	...botsExposure,
 	...chatsExposure,
 	...chatReadsExposure,
+	...filesExposure,
 	...automationsExposure,
 	...computersExposure,
 	...connectorsExposure,
 	...providersExposure,
+	...webExposure,
 	...approvalsExposure,
 	...eventsExposure,
 	...turnsExposure,
 	...notificationsExposure,
+	...scheduledWorkExposure,
 });
 
 export type Manifest = typeof manifest;

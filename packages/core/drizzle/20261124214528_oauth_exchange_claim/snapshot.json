@@ -1,0 +1,81 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "5bc43962-f253-47ea-8872-cf323f86f756",
+  "prevIds": [
+    "3df778dc-4887-4d8d-9996-f28a8104fa73"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "connector",
+        "oauth_exchange_id"
+      ],
+      "writes": [
+        "s|col|public.connector.oauth_exchange_id",
+        "n|col|public.connector.oauth_exchange_id",
+        "e|col|public.connector.oauth_exchange_id"
+      ],
+      "reads": [
+        "n|tbl|public.connector",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "connector",
+        "oauth_exchange_until"
+      ],
+      "writes": [
+        "s|col|public.connector.oauth_exchange_until",
+        "n|col|public.connector.oauth_exchange_until",
+        "e|col|public.connector.oauth_exchange_until"
+      ],
+      "reads": [
+        "n|tbl|public.connector",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connector",
+        "name": "oauth_exchange_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connector",
+        "name": "oauth_exchange_until",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

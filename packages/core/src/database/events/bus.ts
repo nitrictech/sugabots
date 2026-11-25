@@ -7,6 +7,7 @@ import {
 	type StreamEvent,
 } from "@sugabots/contracts";
 import { Context, Effect, Layer } from "effect";
+import { processLayer, Tier } from "../../tiers.ts";
 import type { CommittedEvent } from "./outbox.ts";
 import { type EventRelay, postgresEventRelay } from "./relay.ts";
 import { EventStore } from "./store.ts";
@@ -38,7 +39,9 @@ export interface Interface {
 	close(): Promise<void>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/EventBus") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/EventBus") {
+	declare readonly [Tier]: "process";
+}
 
 /**
  * The process's bus, over the event store and relayed to the other processes
@@ -56,7 +59,7 @@ export const make = Effect.gen(function* () {
 	);
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /** An event as a subscriber receives it. Only durable events carry a `seq`. */
 export interface Delivery {

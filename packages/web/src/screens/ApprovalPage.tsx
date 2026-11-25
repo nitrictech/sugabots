@@ -209,7 +209,8 @@ export function RequestChatLink({
 	project: Project | undefined;
 	className: string;
 }) {
-	if (!request.rootChatId || (request.projectId !== null && !project)) return null;
+	if (!request.chatId || !request.rootChatId || (request.projectId !== null && !project))
+		return null;
 	return (
 		<ChatLink
 			project={project ?? null}

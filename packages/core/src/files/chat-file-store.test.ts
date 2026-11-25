@@ -2,6 +2,7 @@ import { MAX_ATTACHMENTS_PER_MESSAGE } from "@sugabots/contracts";
 import { and, eq, isNull, like } from "drizzle-orm";
 import { ConfigProvider, Duration, Effect, Layer, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { askerColumns } from "../authentication/turn-facts.ts";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { BlobDeletions } from "../blob-store/deletions.ts";
 import { anAutomationAdmin } from "../chats/automations/testing.ts";
@@ -76,6 +77,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chat files, against Postgres", () =>
 						status: "done",
 						model: "test/model",
 						startedAt: new Date(),
+						...askerColumns({ chatId: chatId, botId: botId, triggerMessageId: reply.id }),
 					})
 					.returning({ id: turn.id });
 				if (!ran) throw new Error("Could not create turn");

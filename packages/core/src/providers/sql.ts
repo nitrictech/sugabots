@@ -11,9 +11,11 @@ import type {
 } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import {
+	bigint,
 	boolean,
 	check,
 	foreignKey,
+	index,
 	integer,
 	jsonb,
 	pgTable,
@@ -185,8 +187,11 @@ export const connector = pgTable(
 		secretEncrypted: text("secret_encrypted"),
 		/** The OAuth client, its tokens and an in-flight sign-in's verifier, sealed as one JSON document. */
 		oauthEncrypted: text("oauth_encrypted"),
-		/** The `state` of a sign-in under way, so the callback can find its connector. */
+		oauthExchangeId: uuid("oauth_exchange_id"),
+		oauthExchangeUntil: timestamp("oauth_exchange_until", { withTimezone: true }),
+		/** The SHA-256 hash of the OAuth state for a sign-in in progress. */
 		oauthState: text("oauth_state"),
+		enabled: boolean("enabled").notNull().default(true),
 		/**
 		 * Who finished the OAuth sign-in whose tokens it holds, which sign in as
 		 * them, so their leaving the workspace signs it out; null while it holds none.
@@ -296,3 +301,19 @@ export type ToolAccess = Record<string, ConnectorAccess>;
 
 export type ModelProviderRow = typeof modelProvider.$inferSelect;
 export type ProviderModelRow = typeof providerModel.$inferSelect;
+
+/** GitHub installations pending uninstall, even if the original connector is deleted. */
+export const gitHubUninstall = pgTable(
+	"github_uninstall",
+	{
+		id: primaryKey(),
+		workspaceId: uuid("workspace_id").notNull(),
+		connectorId: uuid("connector_id").notNull(),
+		appId: bigint("app_id", { mode: "number" }).notNull(),
+		installationId: bigint("installation_id", { mode: "number" }).notNull(),
+		appCredentialEncrypted: text("app_credential_encrypted").notNull(),
+		attempts: integer("attempts").notNull().default(0),
+		nextAttemptAt: stamp("next_attempt_at"),
+	},
+	(table) => [index("github_uninstall_due_idx").on(table.nextAttemptAt, table.id)],
+);

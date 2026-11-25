@@ -23,7 +23,9 @@ const OWNERS: Record<string, readonly string[]> = {
 	automationRun: ["core/src/chats/automations/store.ts"],
 	chatCompaction: ["core/src/chats/compaction/store.ts"],
 	readCursor: ["core/src/chats/store/store.ts"],
-	turn: ["core/src/chats/turns/store.ts"],
+	// The turn authenticator raises a turn's execution number each time it
+	// starts or resumes, which is how it authenticates a new execution.
+	turn: ["core/src/chats/turns/store.ts", "core/src/authentication/turn.ts"],
 	toolCall: ["core/src/chats/turns/tool-calls/store.ts"],
 };
 

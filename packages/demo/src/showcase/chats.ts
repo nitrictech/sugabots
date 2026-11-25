@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { ConnectorTool, JsonValue, WrittenFileKind } from "@sugabots/contracts";
-import { CONNECTOR_TOOL_SEPARATOR } from "@sugabots/contracts";
+import { CONNECTOR_TOOL_SEPARATOR, FILE_WRITE_TOOL } from "@sugabots/contracts";
+import { askerColumns } from "@sugabots/core/authentication/turn-facts";
 import { reachesChatFor } from "@sugabots/core/authorization/access";
 import { chatTitleFrom } from "@sugabots/core/chats/chats/chat-title";
 import { seedChat } from "@sugabots/core/chats/seed.test-support";
-import { FILE_WRITE_TOOL } from "@sugabots/core/chats/tools/files/tool";
 import { query } from "@sugabots/core/database/database";
 import {
 	automation,
@@ -612,6 +612,11 @@ const writeTurn = (
 				startedAt,
 				finishedAt: input.waiting ? null : input.at,
 				createdAt: startedAt,
+				...askerColumns({
+					chatId: input.chatId,
+					botId: idOf(cast.botIds, input.bot),
+					triggerMessageId: input.triggerMessageId,
+				}),
 			}),
 		);
 		return id;
@@ -737,17 +742,14 @@ const writeFile = (
 	},
 ) =>
 	Effect.gen(function* () {
-		const authoring = yield* Files.Authoring;
 		const { kind, title, content } = input;
-		const written = yield* authoring
-			.create(
-				{
-					botId: idOf(cast.botIds, input.bot),
-					chatId: input.chatId,
-				},
-				{ kind, title, content },
-			)
-			.pipe(Effect.orDie);
+		const written = yield* Files.seedWrittenFile(
+			{
+				botId: idOf(cast.botIds, input.bot),
+				chatId: input.chatId,
+			},
+			{ kind, title, content },
+		).pipe(Effect.orDie);
 		yield* query((db) =>
 			db
 				.update(file)

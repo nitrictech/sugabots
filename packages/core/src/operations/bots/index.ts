@@ -11,6 +11,7 @@ import { list } from "./list.ts";
 import { listSystemBots } from "./list-system-bots.ts";
 import { pin } from "./pin.ts";
 import { remove } from "./remove.ts";
+import { saveInstructions } from "./save-instructions.ts";
 import { unpin } from "./unpin.ts";
 import { update } from "./update.ts";
 import { updateSystemBot } from "./update-system-bot.ts";
@@ -19,6 +20,7 @@ export const botsOperations = {
 	"bots.list": list,
 	"bots.create": create,
 	"bots.update": update,
+	"bots.saveInstructions": saveInstructions,
 	"bots.remove": remove,
 	"bots.pin": pin,
 	"bots.unpin": unpin,

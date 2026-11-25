@@ -59,7 +59,7 @@ describe("Sugabots' own tools in the catalog", () => {
 			{
 				notes__list_notes: {
 					...notes,
-					tool: readDocs,
+					described: { name: "list_notes", readOnly: true, destructive: null },
 					writeOrDelete: false,
 					access: "allow",
 					connectorId: "",

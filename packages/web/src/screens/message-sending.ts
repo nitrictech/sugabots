@@ -5,7 +5,7 @@ import {
 	type MessageReplyTo,
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
-import { type Dispatch, type SetStateAction, useState } from "react";
+import { type Dispatch, type SetStateAction, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { useSendMessage } from "@/lib/chats.ts";
 import { type ComposerAttachments, isFileGoneRefusal } from "@/lib/composer-attachments.ts";
@@ -50,6 +50,7 @@ export function useMessageSending({
 }): MessageSending {
 	const send = useSendMessage(chatId, signedIn);
 	const [startError, setStartError] = useState<string>();
+	const unconfirmed = useRef<{ fingerprint: string; retryKey: string }>(undefined);
 
 	async function submit() {
 		if (send.isPending) return;
@@ -64,19 +65,29 @@ export function useMessageSending({
 		}
 		const files = attachments.takeForSending(draft);
 		if (!files) return;
+		const fingerprint = JSON.stringify([
+			chatId,
+			addressedMessage,
+			replyingTo?.id,
+			files.parts.map(({ id }) => id),
+		]);
+		const retryKey =
+			unconfirmed.current?.fingerprint === fingerprint ? unconfirmed.current.retryKey : uuidv4();
+		unconfirmed.current = { fingerprint, retryKey };
 		const submitted = draft;
 		const answered = replyingTo;
 		setDraft("");
 		setReplyingTo(undefined);
 		try {
 			const sent = send.mutateAsync({
-				id: uuidv4(),
+				retryKey,
 				message: addressedMessage,
 				replyTo: answered,
 				files: files.parts,
 			});
 			scrollToLatest();
 			await sent;
+			unconfirmed.current = undefined;
 			scrollToLatest();
 		} catch (failure) {
 			setDraft((current) => (current === "" ? submitted : current));

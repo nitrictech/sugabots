@@ -1,5 +1,6 @@
 import type {
 	AutomationRunNotifications,
+	NotificationContent,
 	NotificationLevel,
 	QuietHours,
 } from "@sugabots/contracts";
@@ -7,6 +8,7 @@ import { sql } from "drizzle-orm";
 import {
 	boolean,
 	check,
+	primaryKey as compositePrimaryKey,
 	jsonb,
 	pgTable,
 	text,
@@ -14,6 +16,7 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
+import { chat } from "../chats/sql.ts";
 import { primaryKey, updatedStamp } from "../database/sql.ts";
 import { bot, member, project } from "../workspaces/sql.ts";
 
@@ -82,4 +85,19 @@ export const notificationOverride = pgTable(
 			.on(table.memberId, table.botId)
 			.where(sql`${table.botId} is not null`),
 	],
+);
+
+export const notificationDelivery = pgTable(
+	"notification_delivery",
+	{
+		chatId: uuid("chat_id")
+			.notNull()
+			.references(() => chat.id, { onDelete: "cascade" }),
+		deliveryId: text("delivery_id").notNull(),
+		memberId: uuid("member_id")
+			.notNull()
+			.references(() => member.id, { onDelete: "cascade" }),
+		notification: jsonb("notification").$type<NotificationContent>().notNull(),
+	},
+	(table) => [compositePrimaryKey({ columns: [table.chatId, table.deliveryId, table.memberId] })],
 );

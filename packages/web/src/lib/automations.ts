@@ -10,6 +10,7 @@ import type {
 } from "@sugabots/contracts";
 import {
 	type QueryClient,
+	queryOptions,
 	skipToken,
 	useMutation,
 	useQuery,
@@ -87,10 +88,25 @@ export function useProjectRuns(projectId: string): Run[] {
  */
 export function useAutomations(projectId: string) {
 	return useQuery({
+		...automationListQuery(projectId),
+		select: (rows) => rows.filter((row) => "instructions" in row),
+	});
+}
+
+export function useRestrictableAutomations(projectId: string) {
+	return useQuery({
+		...automationListQuery(projectId),
+		select: (rows) => rows.filter((row) => "restricted" in row),
+	});
+}
+
+function automationListQuery(projectId: string) {
+	return queryOptions({
 		queryKey: [AUTOMATIONS_KEY, "project", projectId],
 		queryFn: ({ signal }) =>
 			Effect.runPromise(client.api.automations.list({ params: { projectId } }), { signal }),
-		refetchInterval: (query) => pollWhileAutomationsRun(query.state.data),
+		refetchInterval: (query) =>
+			pollWhileAutomationsRun(query.state.data?.filter((row) => "instructions" in row)),
 	});
 }
 
@@ -166,7 +182,13 @@ export function useAutomationActions() {
 				Effect.runPromise(
 					automations.update({ params: { projectId, automationId }, payload: json }),
 				),
-			onSuccess: written,
+			onSuccess: (result) =>
+				"restricted" in result.automation
+					? refresh()
+					: written({
+							automation: result.automation,
+							secrets: [...result.secrets],
+						}),
 		}),
 		remove: useMutation({
 			mutationFn: ({ projectId, automationId }: { projectId: string; automationId: string }) =>

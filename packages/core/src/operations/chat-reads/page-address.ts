@@ -10,7 +10,7 @@ export const pageAddress = defineOperation(
 	(principal, input) =>
 		Effect.gen(function* () {
 			const pages = yield* FilePages.Service;
-			return yield* named(principal, input.fileId, (principal, file) =>
+			return yield* named(principal, input.fileId.toLowerCase(), (principal, file) =>
 				Effect.gen(function* () {
 					const reach = yield* proveReachesFile(principal, file);
 					const url = yield* pages.address(reach, input.version);

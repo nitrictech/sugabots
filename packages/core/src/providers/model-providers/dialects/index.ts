@@ -4,15 +4,17 @@ import { chatgpt } from "./chatgpt.ts";
 import type { ProviderDialect, ProviderIdentity } from "./dialect.ts";
 import { gemini } from "./gemini.ts";
 import { ollama } from "./ollama.ts";
+import { openai } from "./openai.ts";
 import { openaiCompatible } from "./openai-compatible.ts";
 import { openrouter } from "./openrouter.ts";
 
 export type { DiscoveredModel, ProviderDialect, ProviderIdentity } from "./dialect.ts";
 export { type ModelRegistry, modelsDev } from "./registry.ts";
-export { anthropic, chatgpt, gemini, ollama, openaiCompatible, openrouter };
+export { anthropic, chatgpt, gemini, ollama, openai, openaiCompatible, openrouter };
 
 /** The code behind each name a built-in provider may give. */
 const dialects: Record<ProviderDialectId, ProviderDialect> = {
+	openai,
 	"openai-compatible": openaiCompatible,
 	anthropic,
 	openrouter,

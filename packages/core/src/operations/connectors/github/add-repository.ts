@@ -2,7 +2,7 @@ import { connectorsContracts } from "@sugabots/contracts/operations/connectors";
 import { Effect } from "effect";
 import { proveCanManageProject } from "../../../proofs/project-permissions.ts";
 import { named } from "../../../proofs/proof.ts";
-import { proveReachesProject } from "../../../proofs/reaches-project.ts";
+import { proveReachesConnector } from "../../../proofs/reaches-connector.ts";
 import { GitHubConnectors } from "../../../providers/connectors/github/github-connectors.ts";
 import { defineOperation } from "../../operation.ts";
 
@@ -11,17 +11,21 @@ export const addRepository = defineOperation(
 	(principal, input) =>
 		Effect.gen(function* () {
 			const gitHubConnectors = yield* GitHubConnectors.Service;
-			return yield* named(principal, input.projectId, (principal, project) =>
-				Effect.gen(function* () {
-					const canManage = yield* proveCanManageProject(
-						yield* proveReachesProject(principal, project),
-					);
-					return yield* gitHubConnectors.addRepository(
-						canManage,
-						input.connectorId,
-						input.repository,
-					);
-				}),
+			return yield* named(
+				principal,
+				input.projectId,
+				input.connectorId,
+				(principal, project, connector) =>
+					Effect.gen(function* () {
+						const { reach, target } = yield* proveReachesConnector(principal, project, connector);
+						const canManage = yield* proveCanManageProject(reach);
+						return yield* gitHubConnectors.addRepository(
+							canManage,
+							connector,
+							target,
+							input.repository,
+						);
+					}),
 			);
 		}),
 );

@@ -217,7 +217,7 @@ describe("resume", () => {
 		vi.useFakeTimers();
 		const { fetch, calls } = scripted("", "", 401);
 		const stream = createEventsApi({ baseUrl: BASE, fetch, retryMs: 100 }).workspace("w1");
-		const finished = expect(take(stream, 1)).rejects.toMatchObject({ _tag: "Unauthorized" });
+		const finished = expect(take(stream, 2)).rejects.toMatchObject({ _tag: "Unauthorized" });
 
 		try {
 			await vi.advanceTimersByTimeAsync(0);
@@ -244,6 +244,15 @@ describe("resume", () => {
 		expect(seen.map((event) => event.type)).toEqual(["message.created", "message.completed"]);
 		expect(calls[0]?.headers.get("last-event-id")).toBeNull();
 		expect(calls[1]?.headers.get("last-event-id")).toBe("7");
+	});
+
+	it("asks the caller to refetch when the first connection ends before an event id", async () => {
+		const { fetch, calls } = scripted(": ping\n\n", frame({ event: "message.completed", id: 8 }));
+
+		const seen = await take(events(fetch).chat("c1"), 2);
+
+		expect(seen.map((event) => event.type)).toEqual(["reset", "message.completed"]);
+		expect(calls[1]?.headers.get("last-event-id")).toBeNull();
 	});
 
 	it("does not let a delta move the resume point", async () => {
@@ -278,9 +287,9 @@ describe("resume", () => {
 			frame({ event: "message.completed", id: 9 }),
 		);
 
-		const seen = await take(events(fetch).chat("c1"), 2);
+		const seen = await take(events(fetch).chat("c1"), 3);
 
-		expect(seen.map((event) => event.type)).toEqual(["reset", "message.completed"]);
+		expect(seen.map((event) => event.type)).toEqual(["reset", "reset", "message.completed"]);
 		expect(calls[1]?.headers.get("last-event-id")).toBeNull();
 	});
 

@@ -34,7 +34,7 @@ function automationRun(failed: boolean): ChatDetails {
 			createdAt: "2026-09-18T06:00:00.000Z",
 			updatedAt: "2026-09-18T06:02:00.000Z",
 		},
-		permissions: { approveToolCalls: true, approveComputerRequests: true },
+		permissions: { approveToolCallsIn: [], approveComputerRequests: true, interruptTurns: [] },
 		participants: [runBot],
 		projectBots: [runBot],
 		membersReachingProject: [],

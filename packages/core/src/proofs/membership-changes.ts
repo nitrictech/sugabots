@@ -3,28 +3,23 @@ import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proo
 import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Actor, mayInWorkspace } from "../authorization/permissions.ts";
-import { query, Transaction } from "../database/database.ts";
-import { membership, workspace as workspaceTable } from "../database/schema.ts";
+import { query } from "../database/database.ts";
+import { membership } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
+import { assistantProjectFor } from "../workspaces/membership/member-reads.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
+import type { HoldsWorkspaceLock } from "./workspace-lock.ts";
 
 /**
- * Changes to who is in a workspace, proved under the workspace's lock in the
- * transaction that makes them, so two admins can't each act on a role the
- * other has just changed. Admins manage members but not admins; only the
- * owner makes or removes admins; nobody, the owner included, changes or
- * removes the owner's membership, which changes only by handing over
- * ownership. A bot may only in member bounds, for its asker.
- *
- * The workspace's lock is its row, locked for no key update. Deleting the
- * workspace takes it too, so an owner who hands ownership on meanwhile no
- * longer deletes it, and a subscription sign-in shares it, so a removal waits
- * for one landing for the member it removes. Rows that refer to the
- * workspace, such as its chats and projects, can still be added meanwhile:
- * `lock_project_membership` would hold up a project being made while a
- * removal waits on its member's Personal Assistant's computer at its
- * provider, and a promotion's trigger takes that lock itself.
+ * Changes to who is in a workspace, proved under the workspace's lock (see
+ * `HoldsWorkspaceLock`) in the transaction that makes them, so two admins
+ * can't each act on a role the other has just changed. Admins manage members
+ * but not admins; only the owner makes or removes admins; nobody, the owner
+ * included, changes or removes the owner's membership, which changes only by
+ * handing over ownership. A bot may only in member bounds, for its asker.
+ * The workspace deletion intent takes that same lock, so the ownership
+ * check and the decision to delete commit together.
  */
 
 /** A role to give a member, or their removal from the workspace. */
@@ -72,9 +67,9 @@ export interface CanLeaveWorkspace<P, W> extends Proof<"CanLeaveWorkspace", [P, 
 }
 
 /**
- * P is W's owner, and may delete it, proved under its row's lock in the
- * transaction that deletes it, so an owner who hands ownership on meanwhile
- * no longer deletes it.
+ * P is W's owner, and may delete it, proved under its lock in the transaction
+ * that records the deletion, so an owner who hands it on first can't commit
+ * an intent to delete it.
  */
 export interface CanDeleteWorkspace<P, W> extends Proof<"CanDeleteWorkspace", [P, W]> {
 	readonly principal: Named<P, Principal>;
@@ -95,22 +90,6 @@ function memberDeciding(principal: Principal): string | undefined {
 	return undefined;
 }
 
-/**
- * Locks the workspace's row for no key update, until the enclosing
- * transaction ends. Needs that transaction.
- */
-const lockWorkspaceRow = (workspaceId: string) =>
-	Effect.gen(function* () {
-		yield* Transaction;
-		yield* query((db) =>
-			db
-				.select({ id: workspaceTable.id })
-				.from(workspaceTable)
-				.where(eq(workspaceTable.id, workspaceId))
-				.for("no key update"),
-		);
-	});
-
 /** `memberIds`' roles in the workspace, by member, read in a statement of its own. */
 const rolesIn = (workspaceId: string, memberIds: readonly string[]) =>
 	Effect.map(
@@ -122,18 +101,12 @@ const rolesIn = (workspaceId: string, memberIds: readonly string[]) =>
 					and(
 						eq(membership.workspaceId, workspaceId),
 						inArray(membership.memberId, [...memberIds]),
+						eq(membership.leaving, false),
 					),
 				),
 		),
 		(rows) => new Map(rows.map((row) => [row.member, row.role])),
 	);
-
-/**
- * Takes the workspace's lock, which every change to who is in it takes, and
- * reads `memberIds`' roles under it. Needs the transaction the change is made in.
- */
-const rolesUnderLock = (workspaceId: string, memberIds: readonly string[]) =>
-	Effect.andThen(lockWorkspaceRow(workspaceId), rolesIn(workspaceId, memberIds));
 
 /** The deciding member as an `Actor`, with their role from `roles`. */
 const actorFrom = (deciding: string, roles: ReadonlyMap<string, WorkspaceRole>): Actor => ({
@@ -141,18 +114,37 @@ const actorFrom = (deciding: string, roles: ReadonlyMap<string, WorkspaceRole>):
 	workspaceRole: roles.get(deciding),
 });
 
+/**
+ * Whether `actor`'s role lets them invite members, change their roles and
+ * remove them, as far as {@link mayHandle} lets them. `CanInvite`,
+ * `CanChangeMembership`.
+ */
+export function managesMembers(actor: Actor): boolean {
+	return mayInWorkspace(actor, "workspace.members.manage");
+}
+
 /** Whether `actor` may give or take away the role `role`: admins only by the owner. */
-function mayHandle(actor: Actor, role: WorkspaceRole): boolean {
+export function mayHandle(actor: Actor, role: WorkspaceRole): boolean {
 	return role !== "admin" || mayInWorkspace(actor, "workspace.admins.manage");
 }
 
+/** Whether `actor`'s role lets them hand the workspace over. `CanHandOverOwnership`. */
+export function handsOverOwnership(actor: Actor): boolean {
+	return mayInWorkspace(actor, "workspace.ownership.handOver");
+}
+
+/** Whether `actor`'s role lets them delete the workspace. `CanDeleteWorkspace`. */
+export function deletesWorkspace(actor: Actor): boolean {
+	return mayInWorkspace(actor, "workspace.delete");
+}
+
 export const proveCanChangeMembership = <P, W, U>(
-	principal: Named<P, Principal>,
-	workspaceId: Named<W, string>,
+	lock: HoldsWorkspaceLock<P, W>,
 	memberId: Named<U, string>,
 	change: MembershipChange,
 ) =>
 	Effect.gen(function* () {
+		const { principal, workspace: workspaceId } = lock;
 		const deciding = memberDeciding(principal.value);
 		const workspace = workspaceId.value;
 		const target = memberId.value;
@@ -163,14 +155,14 @@ export const proveCanChangeMembership = <P, W, U>(
 					: new ActionForbidden({ proof: "CanChangeMembership" }),
 			);
 		}
-		const roles = yield* rolesUnderLock(workspace, [deciding, target]);
+		const roles = yield* rolesIn(workspace, [deciding, target]);
 		const actor = actorFrom(deciding, roles);
 		const currentRole = roles.get(target);
 		if (!actor.workspaceRole)
 			return yield* Effect.fail(new ResourceHidden({ resource: "workspace" }));
 		if (!currentRole) return yield* Effect.fail(new ResourceHidden({ resource: "membership" }));
 		const allowed =
-			mayInWorkspace(actor, "workspace.members.manage") &&
+			managesMembers(actor) &&
 			currentRole !== "owner" &&
 			mayHandle(actor, currentRole) &&
 			(change.kind === "removal" || mayHandle(actor, change.role));
@@ -183,20 +175,20 @@ export const proveCanChangeMembership = <P, W, U>(
 	});
 
 export const proveCanInvite = <P, W>(
-	principal: Named<P, Principal>,
-	workspaceId: Named<W, string>,
+	lock: HoldsWorkspaceLock<P, W>,
 	role: AssignableWorkspaceRole,
 ) =>
 	Effect.gen(function* () {
+		const { principal, workspace: workspaceId } = lock;
 		const deciding = memberDeciding(principal.value);
 		const workspace = workspaceId.value;
 		if (!deciding) return yield* Effect.fail(new ActionForbidden({ proof: "CanInvite" }));
 		if (!isUuid(workspace))
 			return yield* Effect.fail(new ResourceHidden({ resource: "workspace" }));
-		const actor = actorFrom(deciding, yield* rolesUnderLock(workspace, [deciding]));
+		const actor = actorFrom(deciding, yield* rolesIn(workspace, [deciding]));
 		if (!actor.workspaceRole)
 			return yield* Effect.fail(new ResourceHidden({ resource: "workspace" }));
-		if (!mayInWorkspace(actor, "workspace.members.manage") || !mayHandle(actor, role)) {
+		if (!managesMembers(actor) || !mayHandle(actor, role)) {
 			return yield* Effect.fail(new ActionForbidden({ proof: "CanInvite" }));
 		}
 		const proof: CanInvite<P, W> = CanInviteProof.prove([principal, workspaceId], {
@@ -209,11 +201,11 @@ export const proveCanInvite = <P, W>(
 	});
 
 export const proveCanHandOverOwnership = <P, W, U>(
-	principal: Named<P, Principal>,
-	workspaceId: Named<W, string>,
+	lock: HoldsWorkspaceLock<P, W>,
 	memberId: Named<U, string>,
 ) =>
 	Effect.gen(function* () {
+		const { principal, workspace: workspaceId } = lock;
 		const deciding = memberDeciding(principal.value);
 		const workspace = workspaceId.value;
 		const target = memberId.value;
@@ -223,13 +215,13 @@ export const proveCanHandOverOwnership = <P, W, U>(
 		if (!isUuid(workspace))
 			return yield* Effect.fail(new ResourceHidden({ resource: "workspace" }));
 		if (!isUuid(target)) return yield* Effect.fail(new ResourceHidden({ resource: "membership" }));
-		const roles = yield* rolesUnderLock(workspace, [deciding, target]);
+		const roles = yield* rolesIn(workspace, [deciding, target]);
 		const actor = actorFrom(deciding, roles);
 		const currentRole = roles.get(target);
 		if (!actor.workspaceRole)
 			return yield* Effect.fail(new ResourceHidden({ resource: "workspace" }));
 		if (!currentRole) return yield* Effect.fail(new ResourceHidden({ resource: "membership" }));
-		if (!mayInWorkspace(actor, "workspace.ownership.handOver")) {
+		if (!handsOverOwnership(actor) || (yield* assistantProjectFor(workspace, target))?.deleting) {
 			return yield* Effect.fail(new ActionForbidden({ proof: "CanHandOverOwnership" }));
 		}
 		const proof: CanHandOverOwnership<P, W, U> = CanHandOverOwnershipProof.prove(
@@ -239,17 +231,15 @@ export const proveCanHandOverOwnership = <P, W, U>(
 		return proof;
 	});
 
-export const proveCanLeaveWorkspace = <P, W>(
-	principal: Named<P, Principal>,
-	workspaceId: Named<W, string>,
-) =>
+export const proveCanLeaveWorkspace = <P, W>(lock: HoldsWorkspaceLock<P, W>) =>
 	Effect.gen(function* () {
+		const { principal, workspace: workspaceId } = lock;
 		const leaving = memberDeciding(principal.value);
 		const workspace = workspaceId.value;
 		if (!leaving) return yield* Effect.fail(new ActionForbidden({ proof: "CanLeaveWorkspace" }));
 		if (!isUuid(workspace))
 			return yield* Effect.fail(new ResourceHidden({ resource: "workspace" }));
-		const role = (yield* rolesUnderLock(workspace, [leaving])).get(leaving);
+		const role = (yield* rolesIn(workspace, [leaving])).get(leaving);
 		if (!role) return yield* Effect.fail(new ResourceHidden({ resource: "workspace" }));
 		const proof: CanLeaveWorkspace<P, W> = CanLeaveWorkspaceProof.prove([principal, workspaceId], {
 			principal,
@@ -260,20 +250,18 @@ export const proveCanLeaveWorkspace = <P, W>(
 		return proof;
 	});
 
-export const proveCanDeleteWorkspace = <P, W>(
-	principal: Named<P, Principal>,
-	workspaceId: Named<W, string>,
-) =>
+export const proveCanDeleteWorkspace = <P, W>(lock: HoldsWorkspaceLock<P, W>) =>
 	Effect.gen(function* () {
+		const { principal, workspace: workspaceId } = lock;
 		const deciding = memberDeciding(principal.value);
 		const workspace = workspaceId.value;
 		if (!deciding) return yield* Effect.fail(new ActionForbidden({ proof: "CanDeleteWorkspace" }));
 		if (!isUuid(workspace))
 			return yield* Effect.fail(new ResourceHidden({ resource: "workspace" }));
-		const actor = actorFrom(deciding, yield* rolesUnderLock(workspace, [deciding]));
+		const actor = actorFrom(deciding, yield* rolesIn(workspace, [deciding]));
 		if (!actor.workspaceRole)
 			return yield* Effect.fail(new ResourceHidden({ resource: "workspace" }));
-		if (!mayInWorkspace(actor, "workspace.delete")) {
+		if (!deletesWorkspace(actor)) {
 			return yield* Effect.fail(new ActionForbidden({ proof: "CanDeleteWorkspace" }));
 		}
 		const proof: CanDeleteWorkspace<P, W> = CanDeleteWorkspaceProof.prove(

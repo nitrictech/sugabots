@@ -1,12 +1,15 @@
 import { Context } from "effect";
 import { HttpApiMiddleware } from "effect/unstable/httpapi";
 import type { CurrentUser } from "../api.ts";
+import { Tier } from "../tiers.ts";
 import { BadRequest, InternalServerError, PayloadTooLarge, Unauthorized } from "./errors.ts";
 
 /** The member whose session cookie the request carried. */
 export class CurrentUserOfRequest extends Context.Service<CurrentUserOfRequest, CurrentUser>()(
 	"sugabots/http/CurrentUserOfRequest",
-) {}
+) {
+	declare readonly [Tier]: "request";
+}
 
 /**
  * Refuses the request unless its credentials resolve to a session.

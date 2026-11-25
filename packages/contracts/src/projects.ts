@@ -94,6 +94,8 @@ export function leastUsedProjectColor(taken: readonly ProjectColor[]): ProjectCo
 export const resourcePermissionsSchema = Schema.Struct({
 	/** Read its chats and what its automations' runs said, which managing them alone does not give. */
 	readHistory: Schema.Boolean,
+	/** Mark its chats resolved, and reopen them. A viewer reads and takes part, but changes neither. */
+	resolveChats: Schema.Boolean,
 	/** Open its settings: a bot's for whoever may change it, a project's for anyone in it. */
 	openSettings: Schema.Boolean,
 	/** Delete the files made in its chats. */
@@ -106,6 +108,11 @@ export const resourcePermissionsSchema = Schema.Struct({
 	useDesktop: Schema.Boolean,
 	/** Make, change and delete its automations, and rotate their webhook secrets. */
 	manageAutomations: Schema.Boolean,
+	/**
+	 * Pause its automations: whoever manages them, and an admin on another
+	 * member's personal bot, who may do nothing else with them.
+	 */
+	pauseAutomations: Schema.Boolean,
 	/** Run its automations by hand. */
 	runAutomations: Schema.Boolean,
 });

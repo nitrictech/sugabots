@@ -6,7 +6,7 @@ import {
 } from "@sugabots/contracts";
 import { and, asc, count, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { listedProjectStandingsFor, membersReachingProject } from "../../authorization/access.ts";
+import { membersReachingProject } from "../../authorization/access.ts";
 import { memberColumns, toMember } from "../../chats/store/participants.ts";
 import { query } from "../../database/database.ts";
 import {
@@ -17,7 +17,8 @@ import {
 	projectBot,
 	projectMember,
 } from "../../database/schema.ts";
-import { projectSeenBy } from "./project.ts";
+import { actorOf, memberReaches } from "../../proofs/facts.ts";
+import { projectFactsOf, projectSeenAs } from "./project.ts";
 
 /** The members in the project, by name. Administrators, who are in every one, can't be taken out. */
 export const projectMembers = (projectId: string) =>
@@ -37,6 +38,7 @@ export const projectMembers = (projectId: string) =>
 				and(
 					eq(membership.workspaceId, projectMember.workspaceId),
 					eq(membership.memberId, projectMember.memberId),
+					eq(membership.leaving, false),
 				),
 			)
 			.where(eq(projectMember.projectId, projectId))
@@ -59,7 +61,7 @@ export const membersReachingProjectNamed = (projectId: string) =>
  * How many members and bots are in each of the projects `projectIds`, counted
  * as the project's members list and bots list would list them.
  */
-export const projectHeadcounts = (projectIds: readonly string[]) =>
+const projectHeadcounts = (projectIds: readonly string[]) =>
 	Effect.gen(function* () {
 		const members = yield* query((db) =>
 			db
@@ -70,6 +72,7 @@ export const projectHeadcounts = (projectIds: readonly string[]) =>
 					and(
 						eq(membership.workspaceId, projectMember.workspaceId),
 						eq(membership.memberId, projectMember.memberId),
+						eq(membership.leaving, false),
 					),
 				)
 				.where(inArray(projectMember.projectId, [...projectIds]))
@@ -111,12 +114,47 @@ export const defaultProjectOf = (botId: string) =>
  */
 export const projectsListedTo = (workspaceId: string, memberId: string) =>
 	Effect.gen(function* () {
-		const listed = yield* query((db) => listedProjectStandingsFor(db, workspaceId, memberId));
-		const headcountOf = yield* projectHeadcounts(
-			listed.filter((standing) => standing.may("project.read")).map(({ project }) => project.id),
+		const rows = yield* query((db) =>
+			db
+				.select({ project, role: membership.role, projectMemberId: projectMember.id })
+				.from(project)
+				.leftJoin(
+					membership,
+					and(
+						eq(membership.workspaceId, project.workspaceId),
+						eq(membership.memberId, memberId),
+						eq(membership.leaving, false),
+					),
+				)
+				.leftJoin(
+					projectMember,
+					and(eq(projectMember.projectId, project.id), eq(projectMember.memberId, memberId)),
+				)
+				.where(
+					and(
+						eq(project.workspaceId, workspaceId),
+						isNull(project.defaultOfBotId),
+						sql`(${project.visibility} = 'public' or ${projectMember.id} is not null)`,
+					),
+				)
+				.orderBy(asc(project.name)),
 		);
-		return listed.map((standing): Project => {
-			const seen = projectSeenBy(standing);
-			return standing.may("project.read") ? { ...seen, ...headcountOf(seen.id) } : seen;
+		const listed = rows.map((row) => {
+			const place = {
+				actor: actorOf(memberId, row.role ?? undefined),
+				inProject: row.projectMemberId !== null,
+			};
+			return {
+				row: row.project,
+				place,
+				reaches: memberReaches(place, projectFactsOf(row.project)),
+			};
+		});
+		const headcountOf = yield* projectHeadcounts(
+			listed.filter(({ reaches }) => reaches).map(({ row }) => row.id),
+		);
+		return listed.map(({ row, place, reaches }): Project => {
+			const seen = projectSeenAs(row, place);
+			return reaches ? { ...seen, ...headcountOf(seen.id) } : seen;
 		});
 	});

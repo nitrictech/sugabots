@@ -17,22 +17,32 @@ import {
 import {
 	BotHasNoModel,
 	FileTooLarge,
-	MessageIdConflict,
 	MessageNotFinished,
+	MessageRetryKeyConflict,
 	ReplyTargetNotFound,
 	TooManyReactionEmoji,
 	TooManyUnsentAttachments,
 	UnsentAttachmentsNotFound,
 	UploadInterrupted,
 } from "../errors/chats.ts";
-import { ActionForbidden, BotCannotReach, ResourceHidden } from "../errors/proofs.ts";
 import {
+	ActionForbidden,
+	ApprovalNeeded,
+	ApprovalRefused,
+	BotCannotReach,
+	ResourceHidden,
+	TurnEnded,
+} from "../errors/proofs.ts";
+import { TurnExecutionSuperseded } from "../errors/turns.ts";
+import {
+	botStartedChatSchema,
 	messageReactionsSchema,
 	messageSchema,
 	newMessageSchema,
 	reactionEmojiSchema,
+	START_CHAT_TOOL,
 } from "../messages.ts";
-import { uuidSchema } from "../uuid.ts";
+import { uuidOrStringSchema, uuidSchema } from "../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../workspaces.ts";
 import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
@@ -47,10 +57,10 @@ const refusals = [...reachRefusals, ActionForbidden] as const;
 const workspaceRefusals = [ResourceHidden, ActionForbidden] as const;
 
 /** A chat, by its id. */
-const aChat = Schema.Struct({ chatId: Schema.String });
+const aChat = Schema.Struct({ chatId: uuidOrStringSchema });
 
 /** A reaction: one emoji on a message. */
-const aReaction = Schema.Struct({ messageId: Schema.String, emoji: reactionEmojiSchema });
+const aReaction = Schema.Struct({ messageId: uuidOrStringSchema, emoji: reactionEmojiSchema });
 
 /** A file's bytes as they arrive, which fail with `UploadInterrupted` if they stop short. */
 const uploadedBytesSchema = Schema.declare(
@@ -58,18 +68,25 @@ const uploadedBytesSchema = Schema.declare(
 	{ title: "UploadedBytes" },
 );
 
+const approvalAndFenceRefusals = [
+	ApprovalNeeded,
+	ApprovalRefused,
+	TurnEnded,
+	TurnExecutionSuperseded,
+] as const;
+
 export const chatsContracts = {
 	"chats.startInterview": OperationContract.make("chats.startInterview", {
 		description:
 			"Start the chat in which a bot you just made interviews you to write its instructions. Nothing when it isn't due one.",
-		input: Schema.Struct({ botId: Schema.String }),
+		input: Schema.Struct({ botId: uuidOrStringSchema }),
 		output: Schema.NullOr(projectChatSchema),
 		errors: workspaceRefusals,
 		changes: true,
 	}),
 	"chats.openAutomationFeed": OperationContract.make("chats.openAutomationFeed", {
 		description: "The feed where an automation's runs post, opened the first time it is asked for.",
-		input: Schema.Struct({ workspace: workspaceIdOrSlugSchema, automationId: Schema.String }),
+		input: Schema.Struct({ workspace: workspaceIdOrSlugSchema, automationId: uuidOrStringSchema }),
 		output: automationFeedSchema,
 		errors: [ResourceHidden],
 		changes: true,
@@ -77,24 +94,45 @@ export const chatsContracts = {
 	"chats.startProjectChat": OperationContract.make("chats.startProjectChat", {
 		description:
 			"Start a chat in a project, for everyone in it, with its first message, which its lead bot answers unless it mentions others. A bot's chat starts in its default project.",
-		input: Schema.Struct({ projectId: Schema.String, ...firstChatMessageSchema.fields }),
+		input: Schema.Struct({ projectId: uuidOrStringSchema, ...firstChatMessageSchema.fields }),
 		output: startedChatSchema,
-		errors: [...refusals, BotHasNoModel, MessageIdConflict],
+		errors: [...refusals, BotHasNoModel, MessageRetryKeyConflict],
+		changes: true,
+	}),
+	"chats.startBriefedChat": OperationContract.make("chats.startBriefedChat", {
+		description:
+			"Ask the member to approve starting a new chat with you or another bot for a separate piece of work. The new chat's bot answers your brief, so include the work and the facts it needs. Tell the member the title of the chat once it starts.",
+		input: Schema.Struct({
+			title: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(120)).annotate({
+				description: 'A short title for the work, like "Refund report for March".',
+			}),
+			brief: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(8000)).annotate({
+				description: "The work and the facts the bot needs, as the new chat's first message.",
+			}),
+			with: Schema.optional(
+				Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+			).annotate({
+				description:
+					"The recipient bot's handle, like @support. Leave it out to do the work yourself.",
+			}),
+		}),
+		output: Schema.Struct({ chat: botStartedChatSchema }),
+		errors: [ResourceHidden, BotHasNoModel, ...approvalAndFenceRefusals],
 		changes: true,
 	}),
 	"chats.renameChat": OperationContract.make("chats.renameChat", {
 		description: "Rename one of a project's chats.",
-		input: Schema.Struct({ chatId: Schema.String, ...chatNameSchema.fields }),
+		input: Schema.Struct({ chatId: uuidOrStringSchema, ...chatNameSchema.fields }),
 		output: Schema.Void,
 		errors: refusals,
 		changes: true,
 	}),
 	"chats.setResolved": OperationContract.make("chats.setResolved", {
 		description:
-			"Mark one of a project's chats resolved, or reopen it. It is reopened when somebody writes in it.",
-		input: Schema.Struct({ chatId: Schema.String, resolved: Schema.Boolean }),
+			"Mark a project's chat resolved, or reopen it. When acting for an asker, do this only when they ask, normally in this chat. A resolved chat reopens when somebody writes in it.",
+		input: Schema.Struct({ chatId: uuidOrStringSchema, resolved: Schema.Boolean }),
 		output: Schema.Void,
-		errors: refusals,
+		errors: [...refusals, ...approvalAndFenceRefusals],
 		changes: true,
 	}),
 	"chats.markRead": OperationContract.make("chats.markRead", {
@@ -115,11 +153,11 @@ export const chatsContracts = {
 	"chats.send": OperationContract.make("chats.send", {
 		description:
 			"Post a message in a chat, with files you uploaded to it, quoting the message it replies to. The bots it asks then answer. Sending it again returns it unchanged.",
-		input: Schema.Struct({ chatId: Schema.String, ...newMessageSchema.fields }),
+		input: Schema.Struct({ chatId: uuidOrStringSchema, ...newMessageSchema.fields }),
 		output: messageSchema,
 		errors: [
 			...refusals,
-			MessageIdConflict,
+			MessageRetryKeyConflict,
 			ReplyTargetNotFound,
 			UnsentAttachmentsNotFound,
 			BotHasNoModel,
@@ -130,7 +168,7 @@ export const chatsContracts = {
 		description:
 			"Upload a file to a chat, to attach to a message you send there. It is kept as the type given, or else the type its name suggests.",
 		input: Schema.Struct({
-			chatId: Schema.String,
+			chatId: uuidOrStringSchema,
 			...uploadAttachmentQuerySchema.fields,
 			content: uploadedBytesSchema,
 		}),
@@ -140,8 +178,8 @@ export const chatsContracts = {
 	}),
 	"chats.removeFile": OperationContract.make("chats.removeFile", {
 		description:
-			"Remove one of your uploads to a chat before it is sent. Anything else is left as it is.",
-		input: Schema.Struct({ chatId: Schema.String, fileId: Schema.String }),
+			"Remove one of your uploads to a chat before it is sent. A missing upload, another member's upload or one already sent is hidden.",
+		input: Schema.Struct({ chatId: uuidOrStringSchema, fileId: uuidOrStringSchema }),
 		output: Schema.Void,
 		errors: refusals,
 		changes: true,
@@ -161,6 +199,14 @@ export const chatsContracts = {
 		errors: refusals,
 		changes: true,
 	}),
+	"chats.interruptTurn": OperationContract.make("chats.interruptTurn", {
+		description:
+			"Interrupt a bot's turn in a chat: the step under way ends at once, any approval it waits for is withdrawn, and the turn ends with what it wrote so far. Its asker may interrupt it, and so may anyone who may manage its project and reaches its chat, or for a run's turn, anyone who may approve its calls. Interrupting a turn that has ended changes nothing.",
+		input: Schema.Struct({ chatId: Schema.String, turnId: Schema.String }),
+		output: Schema.Void,
+		errors: refusals,
+		changes: true,
+	}),
 	"files.remove": OperationContract.make("files.remove", {
 		description: "Delete a file a bot wrote, with every version of it.",
 		input: Schema.Struct({ fileId: uuidSchema }),
@@ -169,16 +215,6 @@ export const chatsContracts = {
 		changes: true,
 	}),
 } as const;
-
-/** Held back until tools become operations: a bot's `tool` does this for its asker today. */
-const doneByBotTool = <const Tool extends string, const Service extends string>(
-	tool: Tool,
-	service: Service,
-) =>
-	({
-		kind: "heldBack",
-		reason: `Until tools become operations: a bot's ${tool} tool does this for its asker, through ${service}.`,
-	}) as const;
 
 /** Held back: a member's own place in a chat, which a bot reading the chat in its turn has none of. */
 const membersOwn = {
@@ -212,9 +248,18 @@ export const chatsExposure = {
 	"chats.startProjectChat": {
 		http: { kind: "offered", endpoint: "chats.startProjectChat" },
 		botLoop: {
-			kind: "heldBack",
-			reason:
-				"A bot starts a chat with a brief instead, which its start_chat tool writes for its asker through BotChats, until tools become operations.",
+			kind: "coveredBy",
+			operation: "chats.startBriefedChat",
+			reason: "A bot starts a chat with an approved brief.",
+		},
+	},
+	"chats.startBriefedChat": {
+		http: { kind: "heldBack", reason: "A brief is written by a bot in a turn for its asker." },
+		botLoop: {
+			kind: "offered",
+			tool: START_CHAT_TOOL,
+			offeredIn: "chatBounds",
+			approval: { kind: "always", approvers: "turn" },
 		},
 	},
 	"chats.renameChat": {
@@ -223,7 +268,12 @@ export const chatsExposure = {
 	},
 	"chats.setResolved": {
 		http: { kind: "offered", endpoint: "chats.markResolved" },
-		botLoop: doneByBotTool("mark_resolved", "BotChats"),
+		botLoop: {
+			kind: "offered",
+			tool: "mark_resolved",
+			offeredIn: "everywhere",
+			approval: { kind: "never" },
+		},
 	},
 	"chats.markRead": {
 		http: { kind: "offered", endpoint: "chats.markRead" },
@@ -262,6 +312,14 @@ export const chatsExposure = {
 		botLoop: {
 			kind: "heldBack",
 			reason: "A reaction taken back is a member's own; a bot takes none back.",
+		},
+	},
+	"chats.interruptTurn": {
+		http: { kind: "offered", endpoint: "chats.interruptTurn" },
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"Only a member interrupts a turn, so one going wrong can be ended while its asker is away; a bot never interrupts its own or another's.",
 		},
 	},
 	"files.remove": {

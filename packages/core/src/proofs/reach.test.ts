@@ -5,6 +5,7 @@ import { seedProjectChat } from "../authentication/seed.test-support.ts";
 import { projectBot, projectMember } from "../database/schema.ts";
 import { closeDatabase, onDatabase } from "../database/testing.ts";
 import type { Principal } from "../principal.ts";
+import { workspaceOfProject } from "../workspaces/workspace-reference.ts";
 import {
 	proveCanChangeChat,
 	proveCanChangeProjectMembers,
@@ -15,6 +16,7 @@ import { named } from "./proof.ts";
 import { proveReachesBot } from "./reaches-bot.ts";
 import { proveReachesChat } from "./reaches-chat.ts";
 import { proveReachesProject } from "./reaches-project.ts";
+import { underWorkspaceLock } from "./workspace-lock.ts";
 import {
 	type Authenticators,
 	authenticators,
@@ -51,10 +53,18 @@ describe("reach and what it permits", () => {
 				proveReachesProject(p, j).pipe(Effect.flatMap(proveCanManageProject), Effect.asVoid),
 			),
 		);
+	/** Proved under the project's workspace's lock, as changing a project's members is. */
 	const changesMembers = (principal: Principal, projectId: string) =>
 		outcome(
-			named(principal, projectId, (p, j) =>
-				proveReachesProject(p, j).pipe(Effect.flatMap(proveCanChangeProjectMembers), Effect.asVoid),
+			Effect.flatMap(workspaceOfProject(projectId), (workspaceId) =>
+				underWorkspaceLock(principal, workspaceId ?? projectId, (lock) =>
+					named(projectId, (j) =>
+						proveReachesProject(lock.principal, j).pipe(
+							Effect.flatMap((reach) => proveCanChangeProjectMembers(lock, reach)),
+							Effect.asVoid,
+						),
+					),
+				),
 			),
 		);
 	const takesPart = (principal: Principal, chatId: string) =>
@@ -160,17 +170,17 @@ describe("reach and what it permits", () => {
 			expect(await reachesProject(assistant, b.project)).toBe("ResourceHidden");
 		});
 
-		it("lets a run, a webhook call and system work reach only the project they come from", async () => {
+		it("lets runs reach their project while webhooks and scheduled work use target-specific proofs", async () => {
 			const { a } = world;
 			const { principal: run } = await as.run(a.workspace, a.project, a.pub.id);
 			const webhook = await as.webhook(a.workspace, a.project);
 			const { principal: sleep } = await as.computerSleep(a.workspace, a.project);
 			const compaction = await as.compaction(a.chat, a.pub.id);
 			const page = await as.page(a.chat);
-			for (const principal of [run, webhook, sleep]) {
-				expect(await reachesProject(principal, a.project)).toBe("ok");
-				expect(await reachesProject(principal, a.otherProject)).toBe("ResourceHidden");
-			}
+			expect(await reachesProject(run, a.project)).toBe("ok");
+			expect(await reachesProject(run, a.otherProject)).toBe("ResourceHidden");
+			expect(await reachesProject(webhook, a.project)).toBe("ResourceHidden");
+			expect(await reachesProject(sleep, a.project)).toBe("ResourceHidden");
 			expect(await reachesProject(compaction, a.project)).toBe("ResourceHidden");
 			expect(await reachesProject(page, a.project)).toBe("ResourceHidden");
 		});
@@ -244,7 +254,7 @@ describe("reach and what it permits", () => {
 			expect(await managesProject(ownersBot, a.project)).toBe("ok");
 			expect(await managesProject(edsBot, a.project)).toBe("ActionForbidden");
 			expect(await managesProject(run, a.project)).toBe("ActionForbidden");
-			expect(await managesProject(webhook, a.project)).toBe("ActionForbidden");
+			expect(await managesProject(webhook, a.project)).toBe("ResourceHidden");
 		});
 
 		it("lets anyone in a project but viewers change its members, and a bot only in member bounds", async () => {

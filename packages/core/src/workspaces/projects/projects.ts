@@ -8,10 +8,7 @@ import type {
 	ProjectMember,
 	ProjectUpdate,
 } from "@sugabots/contracts";
-import type {
-	ComputerMadeMeanwhile,
-	ComputerUnavailable,
-} from "@sugabots/contracts/errors/computers";
+import type { ComputerMadeMeanwhile } from "@sugabots/contracts/errors/computers";
 import {
 	AdministratorInEveryProject,
 	type BotNotPublic,
@@ -27,20 +24,26 @@ import {
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { Context, Effect, Layer } from "effect";
 import type { Actor } from "../../authorization/permissions.ts";
+import { type FenceRefusal, holdTurnOf } from "../../chats/turns/turns.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
-import { serviceOperations, transaction } from "../../database/database.ts";
-import type * as schema from "../../database/schema.ts";
+import { serviceOperations, Transaction } from "../../database/database.ts";
+import { EventOutbox } from "../../database/events/outbox.ts";
+import type { Approved } from "../../proofs/approved.ts";
 import type { CanJoinProject } from "../../proofs/can-join-project.ts";
-import { type MemberPlace, memberActing, type ProjectFacts } from "../../proofs/facts.ts";
+import type { ProjectDeletionStarted } from "../../proofs/deletion-started.ts";
+import { type MemberPlace, memberActing } from "../../proofs/facts.ts";
 import type {
 	CanChangeProjectMembers,
 	CanChangeProjectSettings,
 	CanDeleteProject,
 	CanLeaveProject,
 } from "../../proofs/project-permissions.ts";
+import type { Named } from "../../proofs/proof.ts";
 import type { ReachesBot } from "../../proofs/reaches-bot.ts";
 import type { ReachesProject } from "../../proofs/reaches-project.ts";
+import type { HoldsWorkspaceLock } from "../../proofs/workspace-lock.ts";
 import type { CanCreateProjects, CanReadWorkspace } from "../../proofs/workspace-permissions.ts";
+import { reachChanged } from "../../streams/reach-changes.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { projectBots } from "../bots/bot-reads.ts";
 import { newProjectDetails, projectSeenAs } from "./project.ts";
@@ -52,6 +55,12 @@ import { ProjectStore } from "./project-store.ts";
  * have proved what each call needs. Each method takes the workspace and the
  * project from its proofs, and returns projects as the member acting sees
  * them, permissions and all: a member signed in, or a bot's asker.
+ *
+ * Making or deleting a project, and changing who is in it, member or bot,
+ * its lead included, are proved under its workspace's lock (see
+ * `HoldsWorkspaceLock`), demand the transaction that holds it, and record a
+ * `reach.changed` event there. Those a bot may do for its asker demand the
+ * call's `Approved` proof, and hold its turn's fence in that transaction.
  */
 export interface Interface {
 	/** The projects of the workspace its reader is in, and the public ones they could join, by name. */
@@ -61,29 +70,37 @@ export interface Interface {
 	 * must be a public bot of the workspace, at the address `details.slug`, or
 	 * one derived from its name when that is left out.
 	 */
-	readonly create: <P, W, B>(
+	readonly create: <P, W, B, X>(
+		lock: HoldsWorkspaceLock<P, W>,
 		canCreate: CanCreateProjects<P, W>,
 		lead: ReachesBot<P, B>,
 		details: Omit<NewProject, "leadBotId">,
+		approved: Approved<P, X>,
 	) => Effect.Effect<
 		Project,
-		InvalidProjectDetails | UnusableProjectName | ProjectSlugTaken | BotNotPublic
+		InvalidProjectDetails | UnusableProjectName | ProjectSlugTaken | BotNotPublic | FenceRefusal,
+		Transaction
 	>;
-	/** Changes the project's settings, and with `lead` its lead bot, which must be public. */
+	/**
+	 * Changes the project's settings, and with `lead` its lead bot, which must
+	 * be public and becomes one of its bots, under its workspace's lock, in
+	 * whose transaction the change is made.
+	 */
 	readonly update: <P, J, B>(
 		canChange: CanChangeProjectSettings<P, J>,
 		changes: Omit<ProjectUpdate, "leadBotId">,
 		lead: ReachesBot<P, B> | undefined,
-	) => Effect.Effect<Project, EmptyProjectUpdate | ProjectGone | ProjectSlugTaken | BotNotPublic>;
-	/**
-	 * Deletes the project, with everything in it. Its computer is destroyed at
-	 * its provider first, since its record is the only way to find the machine:
-	 * when the provider can't be reached, or a computer is made meanwhile, the
-	 * project is kept, to try again.
-	 */
-	readonly remove: <P, J>(
+	) => Effect.Effect<
+		Project,
+		EmptyProjectUpdate | ProjectGone | ProjectSlugTaken | BotNotPublic,
+		Transaction
+	>;
+	readonly beginRemoval: <P, J>(
 		canDelete: CanDeleteProject<P, J>,
-	) => Effect.Effect<void, ComputerUnavailable | ComputerMadeMeanwhile>;
+	) => Effect.Effect<ProjectComputers.Project, never, Transaction>;
+	readonly remove: <W>(
+		started: ProjectDeletionStarted<W, "project">,
+	) => Effect.Effect<void, ComputerMadeMeanwhile, Transaction>;
 	/** The members in the project, by name. */
 	readonly members: <P, J>(reach: ReachesProject<P, J>) => Effect.Effect<ProjectMember[]>;
 	/**
@@ -94,38 +111,42 @@ export interface Interface {
 	readonly membersReaching: <P, J>(
 		reach: ReachesProject<P, J>,
 	) => Effect.Effect<MemberParticipant[]>;
-	/** Adds `memberId` to the project. Adding somebody already in it changes nothing. */
-	readonly addMember: <P, J>(
+	/** Adds `member` to the project. Adding somebody already in it changes nothing. */
+	readonly addMember: <P, J, U>(
 		canChange: CanChangeProjectMembers<P, J>,
-		memberId: string,
-	) => Effect.Effect<void, NotInWorkspace>;
-	/** Takes `memberId` out of the project. Refuses an administrator, who belongs to every one. */
-	readonly removeMember: <P, J>(
+		member: Named<U, string>,
+	) => Effect.Effect<void, NotInWorkspace, Transaction>;
+	/** Takes `member` out of the project. Refuses an administrator, who belongs to every one. */
+	readonly removeMember: <P, J, U>(
 		canChange: CanChangeProjectMembers<P, J>,
-		memberId: string,
-	) => Effect.Effect<void, AdministratorInEveryProject | NotInProject>;
+		member: Named<U, string>,
+	) => Effect.Effect<void, AdministratorInEveryProject | NotInProject, Transaction>;
 	/** Takes the member leaving out of the project, on the same terms as {@link Interface.removeMember}. */
 	readonly leave: <P, J>(
 		canLeave: CanLeaveProject<P, J>,
-	) => Effect.Effect<void, AdministratorInEveryProject | NotInProject>;
+	) => Effect.Effect<void, AdministratorInEveryProject | NotInProject, Transaction>;
 	/**
 	 * Puts the member joining in the project. Joining one they are in changes
 	 * nothing. Checked again as they join, so a project made private
 	 * meanwhile is hidden from them.
 	 */
-	readonly join: <P, J>(canJoin: CanJoinProject<P, J>) => Effect.Effect<Project, ResourceHidden>;
+	readonly join: <P, J, X>(
+		canJoin: CanJoinProject<P, J>,
+		approved: Approved<P, X>,
+	) => Effect.Effect<Project, ResourceHidden | FenceRefusal, Transaction>;
 	/** The project's bots, by name, as the member acting sees them. */
 	readonly bots: <P, J>(reach: ReachesProject<P, J>) => Effect.Effect<Bot[]>;
 	/** Adds `bot`, which must be a public bot of the workspace. Adding one already in it changes nothing. */
-	readonly addBot: <P, J, B>(
+	readonly addBot: <P, J, B, X>(
 		canChange: CanChangeProjectMembers<P, J>,
 		bot: ReachesBot<P, B>,
-	) => Effect.Effect<void, BotNotPublic>;
+		approved: Approved<P, X>,
+	) => Effect.Effect<void, BotNotPublic | FenceRefusal, Transaction>;
 	/** Refused for the project's lead bot, until another is chosen. */
-	readonly removeBot: <P, J>(
+	readonly removeBot: <P, J, B>(
 		canChange: CanChangeProjectMembers<P, J>,
-		botId: string,
-	) => Effect.Effect<void, LeadsProjects>;
+		bot: Named<B, string>,
+	) => Effect.Effect<void, LeadsProjects, Transaction>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Projects") {
@@ -135,14 +156,21 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Projects");
 	const store = yield* ProjectStore.Service;
-	const projectComputers = yield* ProjectComputers.Service;
+	const outbox = yield* EventOutbox.Service;
+
+	/** Records, in the transaction that changed them, that the project's members or bots changed. */
+	const membersChanged = <P, J>(reach: ReachesProject<P, J>) =>
+		outbox.publish([
+			reachChanged(reach.workspace, { kind: "project", projectId: reach.project.value }),
+		]);
 
 	const takeOut = <P, J>(reach: ReachesProject<P, J>, memberId: string) =>
 		Effect.gen(function* () {
+			yield* Transaction;
 			const outcome = yield* store.removeMember(reach.workspace, reach.project.value, memberId);
 			switch (outcome) {
 				case "removed":
-					return;
+					return yield* membersChanged(reach);
 				case "administrator":
 					return yield* new AdministratorInEveryProject();
 				case "not_a_member":
@@ -157,18 +185,25 @@ export const make = Effect.gen(function* () {
 				projectsListedTo(canRead.inWorkspace.workspace.value, canRead.actor.memberId),
 			),
 
-		create: (canCreate, lead, input) =>
+		create: (lock, canCreate, lead, input, approved) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
+					yield* Transaction;
+					yield* holdTurnOf(approved.principal.value);
+					const workspaceId = lock.workspace.value;
 					const details = yield* newProjectDetails(input);
-					const row = yield* store.create(canCreate.inWorkspace.workspace.value, {
+					// Its creator, the workspace's owner and admins and its lead are in it from the start.
+					const row = yield* store.create(workspaceId, {
 						...input,
 						...details,
 						creatorId: canCreate.actor.memberId,
 						leadBotId: lead.bot.value,
 					});
-					return projectSeenAs(row, canCreate.actor, { isMember: true, defaultOf: null });
+					yield* outbox.publish([
+						reachChanged(workspaceId, { kind: "project", projectId: row.id }),
+					]);
+					return projectSeenAs(row, { actor: canCreate.actor, inProject: true });
 				}),
 			),
 
@@ -184,28 +219,39 @@ export const make = Effect.gen(function* () {
 					) {
 						return yield* new EmptyProjectUpdate();
 					}
+					yield* Transaction;
 					const updated = yield* store.update(
 						reach.workspace,
 						reach.project.value,
 						leadBotId === undefined ? changes : { ...changes, leadBotId },
 					);
-					return seenByMember(updated, member, reach.facts);
+					// A new lead becomes one of its bots.
+					if (leadBotId !== undefined) yield* membersChanged(reach);
+					return projectSeenAs(updated, member);
 				}),
 			),
 
-		remove: (canDelete) =>
+		beginRemoval: ({ reach }) =>
+			operation(
+				"beginRemoval",
+				Effect.gen(function* () {
+					yield* Transaction;
+					const removed = { workspaceId: reach.workspace, projectId: reach.project.value };
+					if (yield* store.markDeleting(removed.workspaceId, removed.projectId)) {
+						yield* membersChanged(reach);
+					}
+					return removed;
+				}),
+			),
+
+		remove: ({ workspaceId, projectId }) =>
 			operation(
 				"remove",
 				Effect.gen(function* () {
-					const { reach } = canDelete;
-					const removed = { workspaceId: reach.workspace, projectId: reach.project.value };
-					yield* projectComputers.destroy(removed);
-					yield* transaction(
-						Effect.andThen(
-							ProjectComputers.lockWithoutComputer(removed),
-							store.remove(removed.workspaceId, removed.projectId),
-						),
-					);
+					yield* Transaction;
+					yield* ProjectComputers.lockWithoutComputer({ workspaceId, projectId });
+					yield* store.remove(workspaceId, projectId);
+					yield* outbox.publish([reachChanged(workspaceId, { kind: "project", projectId })]);
 				}),
 			),
 
@@ -214,27 +260,31 @@ export const make = Effect.gen(function* () {
 		membersReaching: (reach) =>
 			operation("membersReaching", membersReachingProjectNamed(reach.project.value)),
 
-		addMember: (canChange, memberId) =>
+		addMember: (canChange, member) =>
 			operation(
 				"addMember",
 				Effect.gen(function* () {
+					yield* Transaction;
 					const { reach } = canChange;
-					if (!(yield* store.addMember(reach.workspace, reach.project.value, memberId))) {
+					if (!(yield* store.addMember(reach.workspace, reach.project.value, member.value))) {
 						return yield* new NotInWorkspace();
 					}
+					yield* membersChanged(reach);
 				}),
 			),
 
-		removeMember: (canChange, memberId) =>
-			operation("removeMember", takeOut(canChange.reach, memberId)),
+		removeMember: (canChange, member) =>
+			operation("removeMember", takeOut(canChange.reach, member.value)),
 
 		leave: (canLeave) =>
 			operation("leave", takeOut(canLeave.reach, canLeave.member.actor.memberId)),
 
-		join: (canJoin) =>
+		join: (canJoin, approved) =>
 			operation(
 				"join",
 				Effect.gen(function* () {
+					yield* Transaction;
+					yield* holdTurnOf(approved.principal.value);
 					const { member } = canJoin;
 					const joined = yield* store.join(
 						canJoin.workspace,
@@ -242,43 +292,52 @@ export const make = Effect.gen(function* () {
 						member.actor.memberId,
 					);
 					if (!joined) return yield* new ResourceHidden({ resource: "project" });
-					return projectSeenAs(joined, member.actor, { isMember: true, defaultOf: null });
+					yield* outbox.publish([
+						reachChanged(canJoin.workspace, {
+							kind: "project",
+							projectId: canJoin.project.value,
+						}),
+					]);
+					return projectSeenAs(joined, { ...member, inProject: true });
 				}),
 			),
 
 		bots: (reach) =>
 			operation("bots", projectBots(reach.project.value, viewerOf(memberActing(reach.as)))),
 
-		addBot: (canChange, bot) =>
+		addBot: (canChange, bot, approved) =>
 			operation(
 				"addBot",
-				store.addBot(canChange.reach.workspace, canChange.reach.project.value, bot.bot.value),
+				Effect.gen(function* () {
+					yield* Transaction;
+					yield* holdTurnOf(approved.principal.value);
+					const { reach } = canChange;
+					yield* store.addBot(reach.workspace, reach.project.value, bot.bot.value);
+					yield* membersChanged(reach);
+				}),
 			),
 
-		removeBot: (canChange, botId) =>
+		removeBot: (canChange, bot) =>
 			operation(
 				"removeBot",
-				store.removeBot(
-					canChange.reach.workspace,
-					canChange.reach.project.value,
-					botId,
-					canChange.member.actor.memberId,
-				),
+				Effect.gen(function* () {
+					yield* Transaction;
+					const { reach } = canChange;
+					yield* store.removeBot(
+						reach.workspace,
+						reach.project.value,
+						bot.value,
+						canChange.member.actor.memberId,
+					);
+					yield* membersChanged(reach);
+				}),
 			),
 	});
 });
 
 export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(Layer.provide([ProjectStore.layer, ProjectComputers.layer]));
-
-/** `row` as `member` sees it, from their place in it and the facts its reach was proved from. */
-function seenByMember(row: schema.ProjectRow, member: MemberPlace, facts: ProjectFacts): Project {
-	return projectSeenAs(row, member.actor, {
-		isMember: member.inProject,
-		defaultOf: facts.defaultOf,
-	});
-}
+export const layer = layerNoDeps.pipe(Layer.provide(ProjectStore.layer));
 
 /**
  * Who a view is shown to, with what they may do: the member acting, or for a

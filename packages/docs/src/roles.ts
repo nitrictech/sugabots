@@ -16,11 +16,15 @@ const EVERYONE = WORKSPACE_ROLES;
 const ALL_BUT_VIEWERS: readonly WorkspaceRole[] = ["owner", "admin", "editor"];
 const ADMINISTRATORS: readonly WorkspaceRole[] = ["owner", "admin"];
 
-/** Editors change only the bots they made; administrators change every bot members made, but nobody's Personal Assistant. */
+/**
+ * Editors change only the bots they made; administrators change every public
+ * or private bot, may only delete another member's personal bot or pause its
+ * automations, and never touch another member's Personal Assistant.
+ */
 const BOTS_THEY_MADE =
-	"Editors, for bots they made; the owner and admins, for every bot members made, but not another member's Personal Assistant";
+	"Editors, for bots they made; the owner and admins, for every public or private bot, but another member's personal bot only to delete it or pause its automations, and never another member's Personal Assistant";
 
-/** What each role may do, as packages/core/src/authorization/permissions.ts grants it. */
+/** What each role may do, as the provers in packages/core/src/proofs/ allow it. */
 export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Talk to bots and take part in their chats",
@@ -46,7 +50,7 @@ export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Answer approvals from automation runs",
 		roles: ALL_BUT_VIEWERS,
-		note: "In chats they can see, of runs done by: editors, bots they made, in the bots' own chats and the projects they lead; the owner and admins, every bot members made, but not another member's Personal Assistant",
+		note: "In chats they can see, of runs done by bots they manage: editors, bots they made; the owner and admins, every public or private bot. A Personal Assistant's runs ask only its member",
 	},
 	{
 		label: "Start automation runs",
@@ -56,7 +60,17 @@ export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Answer a bot's approval in a chat",
 		roles: EVERYONE,
-		note: "Chats of bots they can talk to, and projects they're in; viewers, only their Personal Assistant's chats",
+		note: "Only for calls a bot makes while working for them: a bot asks the member whose message it is answering",
+	},
+	{
+		label: "Answer a bot's request to change a computer, such as a host it may reach",
+		roles: ALL_BUT_VIEWERS,
+		note: "Editors, in their own bots' chats; the owner and admins, in projects members made and public or private bots' chats",
+	},
+	{
+		label: "Mark chats resolved and reopen them",
+		roles: ALL_BUT_VIEWERS,
+		note: "Chats they can see",
 	},
 	{
 		label: "Use a project's desktop",

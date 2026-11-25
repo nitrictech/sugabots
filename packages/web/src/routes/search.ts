@@ -1,6 +1,16 @@
-import { validate as isUuid } from "uuid";
+import { uuidOrStringSchema, uuidSchema } from "@sugabots/contracts/uuid";
+import { Schema } from "effect";
 import type { AutomationsView } from "@/screens/AutomationsStage.tsx";
 import type { Staged } from "@/screens/staged.ts";
+
+/** A route parameter naming something by id, with a UUID lowercased as the API returns it. */
+export const decodeRouteId = Schema.decodeSync(uuidOrStringSchema);
+
+/** A search parameter naming something by id, if it is a string. */
+export const optionalRouteId = (value: unknown) =>
+	typeof value === "string" ? decodeRouteId(value) : undefined;
+
+const decodeUuid = Schema.decodeUnknownResult(uuidSchema);
 
 export const optionalString = (value: unknown) => (typeof value === "string" ? value : undefined);
 
@@ -44,6 +54,7 @@ export interface ChatSearch {
 
 export const validateChatSearch = (search: Record<string, unknown>): ChatSearch => {
 	const { file } = idParam(search, "file");
+	const automations = parseAutomationsView(search.automations);
 	return {
 		...idParam(search, "message"),
 		...idParam(search, "nestedChatPage"),
@@ -51,8 +62,8 @@ export const validateChatSearch = (search: Record<string, unknown>): ChatSearch 
 			? { file, ...validateFileSearch(search) }
 			: search.desktop === true
 				? { desktop: true }
-				: typeof search.automations === "string" && isAutomationsView(search.automations)
-					? { automations: search.automations }
+				: automations !== undefined
+					? { automations }
 					: {}),
 	};
 };
@@ -61,8 +72,11 @@ export const validateChatSearch = (search: Record<string, unknown>): ChatSearch 
 const ALL_AUTOMATIONS = "all";
 const NEW_AUTOMATION = "new";
 
-const isAutomationsView = (value: string) =>
-	value === ALL_AUTOMATIONS || value === NEW_AUTOMATION || isUuid(value);
+function parseAutomationsView(value: unknown): string | undefined {
+	if (value === ALL_AUTOMATIONS || value === NEW_AUTOMATION) return value;
+	const decoded = decodeUuid(value);
+	return decoded._tag === "Success" ? decoded.success : undefined;
+}
 
 const automationsViewFromSearch = (value: string): AutomationsView =>
 	value === NEW_AUTOMATION
@@ -100,8 +114,8 @@ function idParam<Name extends string>(
 	search: Record<string, unknown>,
 	name: Name,
 ): { [key in Name]: string | undefined } {
-	const value = search[name];
-	return { [name]: typeof value === "string" && isUuid(value) ? value : undefined } as {
+	const decoded = decodeUuid(search[name]);
+	return { [name]: decoded._tag === "Success" ? decoded.success : undefined } as {
 		[key in Name]: string | undefined;
 	};
 }

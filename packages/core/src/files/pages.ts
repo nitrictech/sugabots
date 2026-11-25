@@ -1,3 +1,5 @@
+import { uuidSchema } from "@sugabots/contracts/uuid";
+
 export * as FilePages from "./pages.ts";
 
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
@@ -108,7 +110,7 @@ export const SECRET_PURPOSE = "file-page-address";
 
 /** What a page address's token holds once opened: which version of which page, and until when. */
 export const pageAddressSchema = Schema.Struct({
-	fileId: Schema.String,
+	fileId: uuidSchema,
 	version: Schema.Int,
 	/** In milliseconds since the epoch. */
 	expiresAt: Schema.Number,

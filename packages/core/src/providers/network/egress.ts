@@ -11,6 +11,7 @@ import {
 	fetch as undiciFetch,
 } from "undici";
 import { ServerSettings } from "../../server-settings/server-settings.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import type { UserFacing } from "../../user-message.ts";
 
 /** The clients the API reaches the outside world with, each under this server's egress policy. */
@@ -29,7 +30,9 @@ export interface Interface {
 	readonly webFetch: EgressHttpClient;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Egress") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Egress") {
+	declare readonly [Tier]: "process";
+}
 
 /**
  * Reads the two policies: the addresses a workspace gives, for its model and
@@ -60,7 +63,7 @@ export const make = Effect.gen(function* () {
 	} satisfies Interface;
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /**
  * How the API reaches the outside world: `fetch`, with this server's

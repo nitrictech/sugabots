@@ -9,7 +9,8 @@ import {
 	type ClosableEgressHttpClients,
 	createEgressHttpClients,
 } from "../../../providers/network/egress.ts";
-import { ConnectorTools } from "../connectors.ts";
+import { ConnectorCatalog } from "../connector-catalog.ts";
+import { withRecordedCall } from "../recorded-call.ts";
 import { NO_TURN } from "../testing.ts";
 
 /**
@@ -82,9 +83,10 @@ const target = (extra: Partial<ConnectorTarget> = {}): ConnectorTarget => ({
 });
 
 async function toolsFor(connector: ConnectorTarget) {
-	const offered = ConnectorTools.from({
+	const offered = ConnectorCatalog.from({
 		connectors: {
-			targetsForProject: () => Effect.succeed({ targets: [connector], signInExpired: [] }),
+			targetsForProject: () =>
+				Effect.succeed({ targets: [connector], signInExpired: [], installedUrls: [connector.url] }),
 		},
 		httpClients: clients,
 	});
@@ -94,6 +96,19 @@ async function toolsFor(connector: ConnectorTarget) {
 async function call(connector: ConnectorTarget, method: string, input: unknown) {
 	const tool = (await toolsFor(connector))[`alerts__${method}`];
 	return tool?.tool.execute?.(input, { toolCallId: "1", messages: [] } as never);
+}
+
+/** The call's id as the turn recorded it, which it keeps each time it is sent. */
+const RECORDED_CALL_ID = "0199a3a0-0000-7000-8000-0000000000c1";
+
+/** Calls `method` as a turn's recorded call `RECORDED_CALL_ID`. */
+async function callRecorded(method: string, input: unknown, connector = target()) {
+	const tool = (await toolsFor(connector))[`alerts__${method}`];
+	return tool?.tool.execute?.(input, {
+		toolCallId: "sdk-1",
+		messages: [],
+		context: withRecordedCall(undefined, RECORDED_CALL_ID),
+	} as never);
 }
 
 describe("an HTTP connector's tools", () => {
@@ -171,6 +186,38 @@ describe("an HTTP connector's tools", () => {
 			expect(received).toEqual([]);
 		},
 	);
+
+	it("sends a change under its recorded call's id as its idempotency key, the same each time it is sent", async () => {
+		await callRecorded("post", { path: "/events", body: "{}" });
+		await callRecorded("post", { path: "/events", body: "{}" });
+		await callRecorded("get", { path: "/events" });
+
+		expect(received.map(({ method, headers }) => [method, headers["idempotency-key"]])).toEqual([
+			["POST", RECORDED_CALL_ID],
+			["POST", RECORDED_CALL_ID],
+			["GET", undefined],
+		]);
+	});
+
+	it("uses the recorded id even when the model gave an idempotency key", async () => {
+		await callRecorded("put", {
+			path: "/events/1",
+			headers: { "Idempotency-Key": "mine" },
+			body: "{}",
+		});
+
+		expect(received[0]?.headers["idempotency-key"]).toBe(RECORDED_CALL_ID);
+	});
+
+	it("refuses a recorded change when its credential would replace the idempotency key", async () => {
+		const result = await callRecorded(
+			"post",
+			{ path: "/events" },
+			target({ headers: { "Idempotency-Key": SECRET } }),
+		);
+		expect(result).toMatchObject({ status: "failed" });
+		expect(received).toEqual([]);
+	});
 
 	it("answers a redirect as it is, without following it", async () => {
 		const result = await call(target(), "get", { path: "/moved" });

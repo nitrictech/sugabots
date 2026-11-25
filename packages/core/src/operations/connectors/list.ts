@@ -1,5 +1,6 @@
 import { connectorsContracts } from "@sugabots/contracts/operations/connectors";
 import { Effect } from "effect";
+import { proveCanRestrictBotsProject } from "../../proofs/can-restrict-bot.ts";
 import { proveCanReadConnectors } from "../../proofs/project-permissions.ts";
 import { named } from "../../proofs/proof.ts";
 import { proveReachesProject } from "../../proofs/reaches-project.ts";
@@ -10,12 +11,16 @@ export const list = defineOperation(connectorsContracts["connectors.list"], (pri
 	Effect.gen(function* () {
 		const connectors = yield* Connectors.Service;
 		return yield* named(principal, input.projectId, (principal, project) =>
-			Effect.gen(function* () {
-				const canRead = yield* proveCanReadConnectors(
-					yield* proveReachesProject(principal, project),
-				);
-				return yield* connectors.list(canRead);
-			}),
+			proveReachesProject(principal, project).pipe(
+				Effect.flatMap(proveCanReadConnectors),
+				Effect.flatMap(connectors.list),
+				Effect.catchTag("ResourceHidden", (hidden) =>
+					proveCanRestrictBotsProject(principal, project).pipe(
+						Effect.flatMap(connectors.listForRestriction),
+						Effect.mapError(() => hidden),
+					),
+				),
+			),
 		);
 	}),
 );

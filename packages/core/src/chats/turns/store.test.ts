@@ -1,19 +1,31 @@
 import { UserText, userText } from "@sugabots/errors";
 import { eq, like } from "drizzle-orm";
-import { Context } from "effect";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { BlobStore } from "../../blob-store/blob-store.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
-import { blob, bot, turn } from "../../database/schema.ts";
+import { blob, bot, message, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { asMember } from "../../operations/chats/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
 import { chatServicesForTests } from "../testing.ts";
-import { type PreparedTurn, replyTurnOf, TurnExecution } from "./execution.ts";
 import { MAX_TURN_RUNS } from "./lifecycle.ts";
-import { type TurnCheckpoint, TurnStore } from "./store.ts";
-import { aChatAwaitingReply, prepareRunnable, runningTurns } from "./testing.ts";
-import { ToolCallStore } from "./tool-calls/store.ts";
+import { TurnRecords } from "./records.ts";
+import { TurnRuns } from "./runs.ts";
+import { TurnStore } from "./store.ts";
+import {
+	aChatAwaitingReply,
+	asTheLoop,
+	endTurn,
+	type OpenedTurnForTests,
+	openTurn,
+	parkTurn,
+	recordToolCall,
+	replyTurnOf,
+	runningTurns,
+	runOver,
+	writeReply,
+} from "./testing.ts";
 
 /**
  * Turns against Postgres: how a turn opens again for another run, gives up,
@@ -26,17 +38,14 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			delivered.push(...events);
 		},
 	});
+	const run = runOver(services);
 	const turns = onPostgres(Context.get(services, TurnStore.Service));
-	const calls = onPostgres(Context.get(services, ToolCallStore.Service));
+	const runs = onPostgres(Context.get(services, TurnRuns.Service));
 	const call = await servedOperations({ chats: services });
 	const chatsAs = (memberId: string) => asMember(call, memberId);
-	const execution = onPostgres({
-		prepare: Context.get(services, TurnExecution.Service).prepare,
-	});
-	const emptyReply = { content: "", toolCalls: [] };
 	const providerDown = userText`The model provider could not answer.`;
 	let chatId: string;
-	let prepared: PreparedTurn;
+	let opened: OpenedTurnForTests;
 
 	afterAll(async () => {
 		await closeDatabase();
@@ -44,77 +53,79 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 
 	beforeEach(async () => {
 		({ chatId } = await aChatAwaitingReply(chatsAs));
-		const [run] = await runOnPostgres(runningTurns(chatId));
-		if (!run) throw new Error("no turn running");
-		prepared = await prepareRunnable(execution, run);
+		const [running] = await runOnPostgres(runningTurns(chatId));
+		if (!running) throw new Error("no turn running");
+		opened = await run(openTurn(running));
 		delivered = [];
 	});
 
 	const storedTurn = async () => {
 		const [row] = await onDatabase((db) =>
-			db.select().from(turn).where(eq(turn.id, prepared.turnId)),
+			db.select().from(turn).where(eq(turn.id, opened.turnId)),
 		);
 		return row;
 	};
 
 	const deliveredEvents = () => delivered.map(({ event }) => event);
 
-	const checkpoint = (): TurnCheckpoint => ({
-		messages: [{ role: "assistant", content: "I need approval." }],
-		approvals: [],
-		modelInput: { model: "test", system: "test", messages: [{ role: "user", content: "Go" }] },
-		reply: { content: "Waiting.", toolCalls: [] },
-		modelRequests: 1,
-	});
+	const markActed = (of: OpenedTurnForTests) =>
+		run(
+			asTheLoop(of, (runsTurn) =>
+				Effect.flatMap(TurnStore.Service, (store) => store.markActed(runsTurn)),
+			),
+		);
+
+	const load = (of: OpenedTurnForTests, step: number) =>
+		run(
+			asTheLoop(of, (runsTurn) =>
+				Effect.flatMap(TurnRecords.Service, (records) => records.load(runsTurn, step)),
+			),
+		);
 
 	it("runs a failed turn again, starting its reply over, while no change stands in the way", async () => {
-		const blobsInChat = () => blobKeysUnder(BlobStore.key("chats", prepared.context.chat.id));
-		const shared = await turns.attachFile(replyTurnOf(prepared), {
-			name: "chart.png",
-			contentType: "image/png",
-			content: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
-		});
+		const blobsInChat = () => blobKeysUnder(BlobStore.key("chats", chatId));
+		const shared = await turns.attachFile(
+			{ ...replyTurnOf(opened), executionNumber: opened.principal.executionNumber },
+			{
+				name: "chart.png",
+				contentType: "image/png",
+				content: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+			},
+		);
 		expect(deliveredEvents()).toContainEqual(
 			expect.objectContaining({ type: "message.files_changed", files: [shared] }),
 		);
 		expect(await blobsInChat()).toHaveLength(1);
 		expect(
-			await turns.fail(replyTurnOf(prepared), emptyReply, {
-				userMessage: providerDown,
-				mayRunAgain: true,
-			}),
-		).toBe(true);
+			await run(endTurn(opened, { kind: "failed", userMessage: providerDown, mayRunAgain: true })),
+		).toEqual({ willRetry: true, steered: false });
 
-		const second = await prepareRunnable(execution, prepared.run);
+		const second = await run(openTurn(opened.run));
 
-		expect(second.turnId).toBe(prepared.turnId);
-		expect(second.responseMessage).toMatchObject({
-			id: prepared.responseMessage.id,
+		expect(second.turnId).toBe(opened.turnId);
+		expect(second.reply).toMatchObject({
+			id: opened.replyMessageId,
+			retryKey: opened.turnId,
 			status: "writing",
 		});
+		expect(second.reply.id).not.toBe(second.reply.retryKey);
 		expect(await storedTurn()).toMatchObject({ status: "running", runs: 2, error: null });
 		// The reply starts over without the file its last run shared, blob and all.
 		expect(await turns.replyFiles(replyTurnOf(second))).toEqual([]);
 		expect(await blobsInChat()).toEqual([]);
 		// Running again could act again, so the turn stops here for a member.
-		await turns.markActed(second.turnId);
+		await markActed(second);
 		expect(
-			await turns.fail(replyTurnOf(second), emptyReply, {
-				userMessage: providerDown,
-				mayRunAgain: true,
-			}),
-		).toBe(false);
+			await run(endTurn(second, { kind: "failed", userMessage: providerDown, mayRunAgain: true })),
+		).toEqual({ willRetry: false, steered: false });
 	});
 
 	it("does not run a failed turn again when its failure rules that out", async () => {
 		const told = userText`The reply stopped before answering.`;
 
 		expect(
-			await turns.fail(replyTurnOf(prepared), emptyReply, {
-				userMessage: told,
-				mayRunAgain: false,
-			}),
-		).toBe(false);
+			await run(endTurn(opened, { kind: "failed", userMessage: told, mayRunAgain: false })),
+		).toEqual({ willRetry: false, steered: false });
 
 		expect(await storedTurn()).toMatchObject({ status: "failed" });
 		expect(deliveredEvents()).toContainEqual(
@@ -122,70 +133,90 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		);
 		// A file shared by a call still running when the turn ended isn't shared.
 		await expect(
-			turns.attachFile(replyTurnOf(prepared), {
-				name: "late.csv",
-				contentType: "text/csv",
-				content: new Uint8Array([0x61]),
-			}),
+			turns.attachFile(
+				{ ...replyTurnOf(opened), executionNumber: opened.principal.executionNumber },
+				{
+					name: "late.csv",
+					contentType: "text/csv",
+					content: new Uint8Array([0x61]),
+				},
+			),
 		).rejects.toBeInstanceOf(TurnStore.ReplyEnded);
-		expect(await turns.replyFiles(replyTurnOf(prepared))).toEqual([]);
-		expect(await blobKeysUnder(BlobStore.key("chats", prepared.context.chat.id))).toEqual([]);
+		expect(await turns.replyFiles(replyTurnOf(opened))).toEqual([]);
+		expect(await blobKeysUnder(BlobStore.key("chats", chatId))).toEqual([]);
 	});
 
 	it("gives up on a turn that keeps stopping before it gets anywhere", async () => {
 		await onDatabase((db) =>
-			db.update(turn).set({ runs: MAX_TURN_RUNS }).where(eq(turn.id, prepared.turnId)),
+			db.update(turn).set({ runs: MAX_TURN_RUNS }).where(eq(turn.id, opened.turnId)),
 		);
 
-		expect(await execution.prepare(prepared.run)).toMatchObject({
+		expect(await runs.open(opened.run)).toMatchObject({
 			_tag: "NotRunnable",
 			ended: { state: "failed" },
 		});
 		expect(await storedTurn()).toMatchObject({ status: "failed" });
 		expect(deliveredEvents()).toContainEqual(
-			expect.objectContaining({ type: "message.failed", messageId: prepared.responseMessage.id }),
+			expect.objectContaining({ type: "message.failed", messageId: opened.replyMessageId }),
 		);
+	});
+
+	it("gives up on a step a crash keeps cutting short", async () => {
+		expect(await load(opened, 0)).toMatchObject({ _tag: "Begun", requested: false });
+
+		// Each time the step begins again, the turn has stopped once more.
+		for (let again = 1; again < MAX_TURN_RUNS - 1; again++) {
+			expect(await load(opened, 0)).toMatchObject({ _tag: "Begun" });
+		}
+		expect(await load(opened, 0)).toEqual({ _tag: "Ended" });
+
+		expect(await storedTurn()).toMatchObject({ status: "failed" });
 	});
 
 	it("counts a turn's runs again from its last stop for approvals", async () => {
 		expect((await storedTurn())?.runs).toBe(1);
 
-		expect(await turns.suspend(replyTurnOf(prepared), checkpoint(), [])).toBe(true);
+		expect(await run(parkTurn(opened, []))).toEqual({ _tag: "Waiting", approvals: [] });
 
 		expect(await storedTurn()).toMatchObject({ status: "waiting", runs: 0 });
 	});
 
-	it("resumes a checkpointed turn left running by a stopped server from its checkpoint", async () => {
-		const saved = checkpoint();
-		await turns.suspend(replyTurnOf(prepared), saved, []);
-		await onDatabase((db) =>
-			db.update(turn).set({ status: "running" }).where(eq(turn.id, prepared.turnId)),
+	it("finds a turn its run opened before a crash again, with what its steps wrote", async () => {
+		await run(writeReply(opened, "Waiting."));
+
+		const reopened = await run(openTurn(opened.run));
+
+		expect(reopened.turnId).toBe(opened.turnId);
+		expect(await storedTurn()).toMatchObject({
+			status: "running",
+			runs: 2,
+			checkpoint: expect.objectContaining({
+				reply: { content: "Waiting.", toolCalls: [] },
+			}),
+		});
+		const [reply] = await onDatabase((db) =>
+			db.select().from(message).where(eq(message.id, opened.replyMessageId)),
 		);
-
-		const resumed = await prepareRunnable(execution, prepared.run);
-
-		expect(resumed.turnId).toBe(prepared.turnId);
-		expect(resumed.checkpoint).toEqual(saved);
+		expect(reply).toMatchObject({ content: "Waiting.", status: "writing" });
 	});
 
-	it("ends a turn whose checkpoint cannot be read rather than resuming it", async () => {
-		await turns.suspend(replyTurnOf(prepared), checkpoint(), []);
+	it("does not load a turn whose checkpoint cannot be read, rather than carrying it on", async () => {
 		await onDatabase((db) =>
 			db
 				.update(turn)
 				.set({ checkpoint: { messages: "not a transcript" } })
-				.where(eq(turn.id, prepared.turnId)),
+				.where(eq(turn.id, opened.turnId)),
 		);
 
-		await expect(execution.prepare(prepared.run)).rejects.toThrow();
+		await expect(load(opened, 0)).rejects.toThrow();
 	});
 
 	it("ends a turn somebody asked to stop instead of opening it again after a crash", async () => {
 		await onDatabase((db) =>
-			db.update(turn).set({ interruptRequested: true }).where(eq(turn.id, prepared.turnId)),
+			db.update(turn).set({ endRequested: "interrupted" }).where(eq(turn.id, opened.turnId)),
 		);
 
-		expect(await execution.prepare(prepared.run)).toMatchObject({
+		expect(await runs.open(opened.run)).toMatchObject({
 			_tag: "NotRunnable",
 			ended: { state: "cancelled" },
 		});
@@ -193,53 +224,130 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		expect(deliveredEvents()).toContainEqual(
 			expect.objectContaining({
 				type: "message.completed",
-				messageId: prepared.responseMessage.id,
+				messageId: opened.replyMessageId,
+				status: "cancelled",
+			}),
+		);
+	});
+
+	it("cancels a turn somebody asked to stop between its steps once its next step begins", async () => {
+		await run(writeReply(opened, "Halfway."));
+		// The turn's automation run ends while no step runs to hear it.
+		await turns.cancelUnder([chatId]);
+		expect(await storedTurn()).toMatchObject({ status: "running", endRequested: "run_ended" });
+
+		expect(await load(opened, 1)).toEqual({ _tag: "Ended" });
+
+		expect(await storedTurn()).toMatchObject({ status: "cancelled" });
+		const [reply] = await onDatabase((db) =>
+			db.select().from(message).where(eq(message.id, opened.replyMessageId)),
+		);
+		expect(reply).toMatchObject({ content: "Halfway.", status: "cancelled" });
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({
+				type: "message.completed",
+				messageId: opened.replyMessageId,
+				status: "cancelled",
+			}),
+		);
+	});
+
+	it("ends a turn whose automation run asked it to end as asked, rather than failing it or running it again", async () => {
+		await turns.cancelUnder([chatId]);
+
+		expect(
+			await run(
+				endTurn(opened, {
+					kind: "failed",
+					userMessage: userText`The model provider could not answer.`,
+					mayRunAgain: true,
+					retryAfterMillis: 30_000,
+				}),
+			),
+		).toEqual({ willRetry: false, steered: false });
+		expect(await storedTurn()).toMatchObject({
+			status: "cancelled",
+			endRequested: "run_ended",
+			retrying: false,
+			retryAt: null,
+		});
+	});
+
+	it("cancels a turn waiting to retry when its automation run ends", async () => {
+		expect(
+			await run(
+				endTurn(opened, {
+					kind: "failed",
+					userMessage: userText`The model provider could not answer.`,
+					mayRunAgain: true,
+					retryAfterMillis: 30_000,
+				}),
+			),
+		).toEqual({ willRetry: true, steered: false });
+
+		expect(await turns.cancelUnder([chatId])).toEqual([opened.run.executionId]);
+		expect(await storedTurn()).toMatchObject({
+			status: "cancelled",
+			retrying: false,
+			retryAt: null,
+		});
+		expect(await runs.open(opened.run)).toMatchObject({ _tag: "NotRunnable", endedBefore: true });
+		expect(deliveredEvents()).toContainEqual(
+			expect.objectContaining({
+				type: "message.completed",
+				messageId: opened.replyMessageId,
 				status: "cancelled",
 			}),
 		);
 	});
 
 	it("tells the chat that a turn its workflow gave up on failed, calls and all", async () => {
-		const opened = await calls.open({
-			chatId,
-			messageId: prepared.responseMessage.id,
-			turnId: prepared.turnId,
-			tool: "web_fetch",
-			input: { url: "https://example.com" },
-			atOffset: 0,
-			writeOrDelete: false,
-		});
+		const callId = await run(
+			recordToolCall(opened, {
+				toolCallId: "sdk-1",
+				tool: "web_fetch",
+				input: { url: "https://example.com" },
+			}),
+		);
 		delivered = [];
 		const stopped = userText`The reply stopped unexpectedly.`;
 
 		expect(
-			await turns.abandon(prepared.run.executionId, { status: "failed", userMessage: stopped }),
+			await turns.abandon(opened.run.executionId, { status: "failed", userMessage: stopped }),
 		).toEqual({ state: "failed", error: stopped });
 
 		expect(deliveredEvents()).toEqual([
 			expect.objectContaining({
 				type: "tool_call.completed",
-				toolCall: expect.objectContaining({ id: opened.id, status: "failed" }),
+				toolCall: expect.objectContaining({ id: callId, status: "failed" }),
 			}),
 			expect.objectContaining({
 				type: "message.failed",
-				messageId: prepared.responseMessage.id,
+				messageId: opened.replyMessageId,
 				error: "The reply stopped unexpectedly.",
 			}),
 			expect.objectContaining({ type: "chat.changed", chatId }),
 		]);
 	});
 
-	it("records a waiting turn as cancelled once its workflow stops waiting, and says so", async () => {
-		await turns.suspend(replyTurnOf(prepared), checkpoint(), []);
+	it("cancels a waiting turn once its workflow stops waiting, and says so", async () => {
+		await run(parkTurn(opened, []));
 		delivered = [];
 
-		await turns.cancelWaiting(prepared.run.request);
+		await run(endTurn(opened, { kind: "cancelled" }));
 
 		expect(await storedTurn()).toMatchObject({ status: "cancelled", checkpoint: null });
 		expect(deliveredEvents()).toContainEqual(
 			expect.objectContaining({ type: "message.completed", status: "cancelled" }),
 		);
+	});
+
+	it("records nothing more for a turn that has ended", async () => {
+		await run(endTurn(opened, { kind: "cancelled" }));
+
+		await expect(run(writeReply(opened, "Too late."))).rejects.toMatchObject({
+			_tag: "TurnEnded",
+		});
 	});
 
 	describe("a bot with no model chosen", () => {
@@ -248,7 +356,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 				db
 					.update(bot)
 					.set({ model: null })
-					.where(eq(bot.id, prepared.run.request.botId))
+					.where(eq(bot.id, opened.run.request.botId))
 					.returning({ name: bot.name }),
 			);
 			if (!host) throw new Error("no host");
@@ -258,7 +366,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		it("fails the turn it was running, saying why", async () => {
 			const told = await noModel();
 
-			expect(await execution.prepare(prepared.run)).toMatchObject({ _tag: "NotRunnable" });
+			expect(await runs.open(opened.run)).toMatchObject({ _tag: "NotRunnable" });
 			expect(await storedTurn()).toMatchObject({ status: "failed", error: told });
 			expect(deliveredEvents()).toContainEqual(
 				expect.objectContaining({ type: "message.failed", error: told }),
@@ -267,9 +375,9 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 
 		it("tells the chat why it cannot reply when it has no turn to end", async () => {
 			const told = await noModel();
-			const unowned = { ...prepared.run, executionId: crypto.randomUUID() };
+			const unowned = { ...opened.run, executionId: crypto.randomUUID() };
 
-			expect(await execution.prepare(unowned)).toMatchObject({ _tag: "NotRunnable" });
+			expect(await runs.open(unowned)).toMatchObject({ _tag: "NotRunnable" });
 			expect(deliveredEvents()).toContainEqual(
 				expect.objectContaining({ type: "chat.notice", chatId, notice: told }),
 			);

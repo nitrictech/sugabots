@@ -1,11 +1,12 @@
 import type { BuiltInConnector } from "@sugabots/contracts";
 import { jsonSchema, tool } from "ai";
 import { describe, expect, it } from "vitest";
-import type { OfferedTool } from "../connectors.ts";
+import type { OfferedTool } from "../connector-catalog.ts";
 import { buildCatalog } from "./catalog.ts";
 import { toolCatalogNote } from "./tool.ts";
 
 const lookup: OfferedTool = {
+	described: { name: "lookup", readOnly: true, destructive: null },
 	tool: tool({ inputSchema: jsonSchema({ type: "object" }), execute: async () => ({}) }),
 	handle: "wiki",
 	description: "Looks a page up.",

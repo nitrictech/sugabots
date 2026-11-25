@@ -28,7 +28,7 @@ interface SearchResult {
 	published: string | null;
 }
 
-export type SearchOutcome =
+type SearchOutcome =
 	| { ok: true; results: SearchResult[] }
 	| {
 			ok: false;
@@ -40,13 +40,11 @@ export interface SearchRequest {
 	query: string;
 	/** How many results to ask for; a provider may return fewer. */
 	count: number;
-	signal?: AbortSignal;
 }
 
 /** Never fails: what goes wrong is an outcome, and its details are logged. */
 type ProviderSearch = (request: SearchRequest) => Effect.Effect<SearchOutcome>;
 
-export const MAX_SEARCH_RESULTS = 10;
 const SEARCH_TIMEOUT_MS = 10_000;
 
 /**
@@ -199,8 +197,8 @@ function tavilySearch(access: SearchProviderAccess, fetch: EgressHttpClient): Pr
  * is one short MCP session.
  */
 function exaFreeSearch(fetch: EgressHttpClient): ProviderSearch {
-	return ({ query, count, signal }) =>
-		answer("Exa", signal, async (stop) => {
+	return ({ query, count }) =>
+		answer("Exa", async (stop) => {
 			const client = new Client({ name: "sugabots", version: VERSION });
 			const transport = new StreamableHTTPClientTransport(new URL(EXA_FREE_SEARCH_URL), {
 				fetch,
@@ -334,7 +332,7 @@ function jsonSearch<S extends Schema.Decoder<unknown>>(
 	search: JsonSearch<S>,
 ): ProviderSearch {
 	return (request) =>
-		answer(search.service, request.signal, async (stop) => {
+		answer(search.service, async (stop) => {
 			const { url, ...init } = search.request(request);
 			const response = await fetch(url, { ...init, signal: stop });
 			const refusal = search.refusalOf?.(response);
@@ -376,13 +374,11 @@ class CallFailed extends Data.TaggedError("CallFailed")<{ readonly cause: unknow
 /** Runs one call under the time budget, turning whatever goes wrong into a reason. */
 function answer(
 	service: Service,
-	signal: AbortSignal | undefined,
 	call: (stop: AbortSignal) => Promise<SearchOutcome>,
 ): Effect.Effect<SearchOutcome> {
 	const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
-	const stop = signal ? AbortSignal.any([timeout, signal]) : timeout;
 	return Effect.tryPromise({
-		try: () => call(stop),
+		try: (signal) => call(AbortSignal.any([timeout, signal])),
 		catch: (cause) => new CallFailed({ cause }),
 	}).pipe(
 		Effect.tap((outcome) =>
@@ -391,9 +387,6 @@ function answer(
 				: Effect.logWarning(`${service} refused a search`, outcome.providerMessage),
 		),
 		Effect.catch(({ cause }) => {
-			if (signal?.aborted) {
-				return Effect.succeed(refused(userText`The turn was stopped before the search answered`));
-			}
 			if (timeout.aborted) {
 				return Effect.succeed(
 					refused(userText`${service} did not answer within ${SEARCH_TIMEOUT_MS / 1000} seconds`),

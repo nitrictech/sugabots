@@ -32,6 +32,7 @@ export type BuiltInProviderId = typeof builtInProviderIdSchema.Type;
  * OpenAI-format endpoint gets.
  */
 const providerDialectIdSchema = Schema.Literals([
+	"openai",
 	"openai-compatible",
 	"anthropic",
 	"openrouter",
@@ -110,7 +111,7 @@ export const builtInProviders: readonly BuiltInProvider[] = [
 		name: "OpenAI",
 		baseUrl: "https://api.openai.com/v1",
 		apiFormat: "openai",
-		dialect: "openai-compatible",
+		dialect: "openai",
 		hosting: "remote",
 		credential: "api-key",
 		hint: "GPT models. Keys are issued at platform.openai.com.",

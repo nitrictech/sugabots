@@ -182,13 +182,14 @@ describe("connectors and computers", () => {
 			expect(await usesComputer(run, projectsComputer)).toBe("ActionForbidden");
 		});
 
-		it("lets system work reach only the computer it puts to sleep, and a webhook call none", async () => {
+		it("hides computers from system work and webhook calls", async () => {
 			const { a } = world;
 			const sleep = await runOnPostgres(auth.systemWork.computerSleep(projectsComputer));
-			expect(await usesComputer(sleep, projectsComputer)).toBe("ok");
+			expect(await usesComputer(sleep, projectsComputer)).toBe("ResourceHidden");
+			expect(await usesComputer(sleep, projectsComputer, "watch")).toBe("ResourceHidden");
 			expect(await usesComputer(sleep, othersComputer)).toBe("ResourceHidden");
 			expect(await usesComputer(await as.webhook(a.workspace, a.project), projectsComputer)).toBe(
-				"ActionForbidden",
+				"ResourceHidden",
 			);
 		});
 	});

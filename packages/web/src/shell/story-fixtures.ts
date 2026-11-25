@@ -24,12 +24,14 @@ const PERMISSIONS: ProjectPermissions = {
 	delete: true,
 	resources: {
 		readHistory: true,
+		resolveChats: true,
 		openSettings: true,
 		deleteFiles: true,
 		manageConnectors: true,
 		manageComputer: true,
 		useDesktop: true,
 		manageAutomations: true,
+		pauseAutomations: true,
 		runAutomations: true,
 	},
 };

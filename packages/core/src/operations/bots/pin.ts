@@ -1,18 +1,21 @@
 import { botsContracts } from "@sugabots/contracts/operations/bots";
 import { Effect } from "effect";
-import { proveIsMember } from "../../proofs/is-member.ts";
+import { proveActsForMember } from "../../proofs/acts-for-member.ts";
+import { approvalRule, proveApproved } from "../../proofs/approved.ts";
 import { named } from "../../proofs/proof.ts";
 import { proveReachesBot } from "../../proofs/reaches-bot.ts";
 import { Bots } from "../../workspaces/bots/bots.ts";
 import { defineOperation } from "../operation.ts";
 
-export const pin = defineOperation(botsContracts["bots.pin"], (principal, input) =>
+export const pin = defineOperation(botsContracts["bots.pin"], (principal, input, call) =>
 	Effect.gen(function* () {
 		const bots = yield* Bots.Service;
-		return yield* named(principal, input.botId, (principal, bot) =>
+		return yield* named(principal, input.botId, call, (principal, bot, call) =>
 			Effect.gen(function* () {
 				const reach = yield* proveReachesBot(principal, bot);
-				return yield* bots.setPinned(yield* proveIsMember(principal), reach, true);
+				const forMember = yield* proveActsForMember(principal);
+				const approved = yield* proveApproved(principal, call, approvalRule("bots.pin"), input);
+				return yield* bots.setPinned(forMember, reach, true, approved);
 			}),
 		);
 	}),

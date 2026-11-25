@@ -1,6 +1,6 @@
 export {
-	MessageIdConflict,
 	MessageNotFinished,
+	MessageRetryKeyConflict,
 	ReplyTargetNotFound,
 	TooManyReactionEmoji,
 } from "@sugabots/contracts/errors/chats";
@@ -16,8 +16,8 @@ import {
 	type WrittenFilePart,
 } from "@sugabots/contracts";
 import {
-	MessageIdConflict,
 	MessageNotFinished,
+	MessageRetryKeyConflict,
 	ReplyTargetNotFound,
 	TooManyReactionEmoji,
 } from "@sugabots/contracts/errors/chats";
@@ -41,6 +41,7 @@ import {
 	systemChat,
 } from "../../database/schema.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
 import type { StoredMessagePart } from "../sql.ts";
@@ -78,14 +79,16 @@ export interface Interface {
 	 */
 	readonly startChat: (placement: NewChat) => Effect.Effect<schema.PlacedChatRow>;
 	/**
-	 * Starts a chat in the bot's default project `projectId` for the member
-	 * `startedById`, with them and the bot in it. Its first message is `brief`,
-	 * written by the bot `briefingBotId`, which may be the chat's own bot;
-	 * announced so the chat's bot takes its turn on the brief. Dies on a
-	 * project members made, which has no bot of its own to brief.
+	 * Starts a chat in `projectId` for `startedById` with `recipientBotId`.
+	 * `briefingBotId` writes `brief` as its first message, which `recipientBotId` answers.
 	 */
 	readonly startBriefedChat: (
-		input: NewChat & { briefingBotId: string; brief: string },
+		input: NewChat & {
+			recipientBotId: string;
+			briefingBotId: string;
+			brief: string;
+			briefTurnRule: schema.BriefTurnRule | null;
+		},
 	) => Effect.Effect<schema.PlacedChatRow>;
 	/**
 	 * Marks the project's chat `chat` resolved, or reopens it, and announces it
@@ -112,15 +115,13 @@ export interface Interface {
 	/**
 	 * Posts a member's message with the files they attach, making them a
 	 * participant, and announces it. Posting a message again with the same
-	 * `id` returns the one already posted, unchanged and unannounced; an `id`
-	 * already used by a different message, or the same text with other files,
-	 * fails, and so does quoting a message that is not in the chat.
+	 * `retryKey` for the same author and chat returns the message already posted.
+	 * Reusing it with different content, files or a quote fails.
 	 * Fails with `UnsentAttachmentsNotFound`, posting nothing, when an attachment is not
 	 * one of the author's unsent uploads in the chat.
 	 */
 	readonly post: (input: {
-		/** The id the member's client chose, which makes sending it again safe to detect. */
-		id: string;
+		retryKey: string;
 		chatId: string;
 		author: MemberIdentity;
 		/** May be empty when the message carries files. */
@@ -131,7 +132,7 @@ export interface Interface {
 		replyTo?: string;
 	}) => Effect.Effect<
 		Posted | AlreadyPosted,
-		MessageIdConflict | ReplyTargetNotFound | ChatFileStore.UnsentAttachmentsNotFound
+		MessageRetryKeyConflict | ReplyTargetNotFound | ChatFileStore.UnsentAttachmentsNotFound
 	>;
 	/** Brings bots into the chat, announcing the ones who were not there yet. */
 	readonly addBots: (chatId: string, botIds: readonly string[]) => Effect.Effect<void>;
@@ -224,14 +225,17 @@ export interface Reaction {
 }
 
 /** A new chat in the project `projectId`. */
-export interface NewChat {
+interface NewChat {
 	workspaceId: string;
 	projectId: string;
 	startedById: string;
+	startRetryKey?: string;
 	title: string;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ChatStore") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ChatStore") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ChatStore");
@@ -364,7 +368,7 @@ export const make = Effect.gen(function* () {
 	 * project's lead bot, which answers it by default: in a bot's default
 	 * project, the bot.
 	 */
-	const insertProjectChat = (input: NewChat) =>
+	const insertProjectChat = (input: NewChat, recipientBotId?: string) =>
 		Effect.gen(function* () {
 			const created = yield* insertChat({
 				workspaceId: input.workspaceId,
@@ -377,6 +381,7 @@ export const make = Effect.gen(function* () {
 					workspaceId: input.workspaceId,
 					projectId: input.projectId,
 					startedById: input.startedById,
+					startRetryKey: input.startRetryKey,
 				}),
 			);
 			const [led] = yield* query((db) =>
@@ -390,7 +395,7 @@ export const make = Effect.gen(function* () {
 			yield* query((db) =>
 				db.insert(chatParticipant).values([
 					{ chatId: created.id, memberId: input.startedById },
-					{ chatId: created.id, botId: led.leadBotId },
+					{ chatId: created.id, botId: recipientBotId ?? led.leadBotId },
 				]),
 			);
 			return yield* placedById(created.id);
@@ -424,6 +429,25 @@ export const make = Effect.gen(function* () {
 				"startChat",
 				transaction(
 					Effect.gen(function* () {
+						if (input.startRetryKey) {
+							const retryKey = input.startRetryKey;
+							yield* lockMessageRetry("start", input.projectId, input.startedById, retryKey);
+							const [existing] = yield* query((db) =>
+								db
+									.select({ id: projectChat.chatId })
+									.from(projectChat)
+									.where(
+										and(
+											eq(projectChat.workspaceId, input.workspaceId),
+											eq(projectChat.projectId, input.projectId),
+											eq(projectChat.startedById, input.startedById),
+											eq(projectChat.startRetryKey, retryKey),
+										),
+									)
+									.limit(1),
+							);
+							if (existing) return yield* placedById(existing.id);
+						}
 						const created = yield* insertProjectChat(input);
 						yield* emit([
 							ChatEvent.ChatStarted({
@@ -442,23 +466,37 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						// One bot per chat: the briefing bot writes the first message without joining.
-						const created = yield* insertProjectChat(input);
-						const briefedBotId = created.botId;
-						if (!briefedBotId) {
-							return yield* Effect.die(
-								new Error(`Project ${input.projectId} is not a bot's default project`),
+						if (input.startRetryKey) {
+							const retryKey = input.startRetryKey;
+							yield* lockMessageRetry("start", input.projectId, input.startedById, retryKey);
+							const [existing] = yield* query((db) =>
+								db
+									.select({ id: projectChat.chatId })
+									.from(projectChat)
+									.where(
+										and(
+											eq(projectChat.workspaceId, input.workspaceId),
+											eq(projectChat.projectId, input.projectId),
+											eq(projectChat.startedById, input.startedById),
+											eq(projectChat.startRetryKey, retryKey),
+										),
+									)
+									.limit(1),
 							);
+							if (existing) return yield* placedById(existing.id);
 						}
+						const created = yield* insertProjectChat(input, input.recipientBotId);
 						const brief = yield* insertTextMessage({
 							chatId: created.id,
 							authorBotId: input.briefingBotId,
+							briefTurnRule: input.briefTurnRule,
 							content: input.brief,
 						});
 						yield* emit([
 							ChatEvent.BriefedChatStarted({
 								workspaceId: created.workspaceId,
 								chatId: created.id,
-								briefedBotId,
+								briefedBotId: input.recipientBotId,
 								briefMessageId: brief.id,
 							}),
 						]);
@@ -533,19 +571,25 @@ export const make = Effect.gen(function* () {
 				"post",
 				transaction(
 					Effect.gen(function* () {
-						// Two sends of one message wait here for each other, so the second
-						// finds the first rather than failing on its primary key.
-						yield* lockMessageId(input.id);
+						yield* lockMessageRetry("send", input.chatId, input.author.id, input.retryKey);
 						const [existing] = yield* query((db) =>
-							db.select().from(message).where(eq(message.id, input.id)).limit(1),
+							db
+								.select()
+								.from(message)
+								.where(
+									and(
+										eq(message.chatId, input.chatId),
+										eq(message.authorMemberId, input.author.id),
+										eq(message.retryKey, input.retryKey),
+									),
+								)
+								.limit(1),
 						);
 						const author = memberAuthor(input.author);
 						if (existing) {
 							const attached =
 								(yield* query((db) => loadFileParts(db, [existing.id]))).get(existing.id) ?? [];
 							if (
-								existing.chatId !== input.chatId ||
-								existing.authorMemberId !== input.author.id ||
 								existing.content !== input.content ||
 								(existing.replyToMessageId ?? undefined) !== input.replyTo ||
 								!sameIds(
@@ -553,7 +597,7 @@ export const make = Effect.gen(function* () {
 									input.attachments,
 								)
 							) {
-								return yield* new MessageIdConflict();
+								return yield* new MessageRetryKeyConflict();
 							}
 							const replyTo = yield* quotedIn(existing.chatId, existing.replyToMessageId);
 							return {
@@ -564,7 +608,7 @@ export const make = Effect.gen(function* () {
 						const replyTo = yield* quotedIn(input.chatId, input.replyTo);
 						if (input.replyTo && !replyTo) return yield* new ReplyTargetNotFound();
 						const created = yield* insertTextMessage({
-							id: input.id,
+							retryKey: input.retryKey,
 							chatId: input.chatId,
 							authorMemberId: input.author.id,
 							content: input.content,
@@ -877,7 +921,9 @@ export const make = Effect.gen(function* () {
 });
 
 /** Posting a message ends its files' wait to be sent, so this provides `ChatFileStore`. */
-export const layer = Layer.effect(Service, make).pipe(Layer.provide(ChatFileStore.layer));
+export const layer = processLayer(Layer.effect(Service, make)).pipe(
+	Layer.provide(ChatFileStore.layer),
+);
 
 /** A message posted now, and announced. */
 export interface Posted {
@@ -892,12 +938,19 @@ export interface AlreadyPosted {
 }
 
 /**
- * Holds the message id `messageId` until the transaction ends, so two sends
- * of one message, which may start what it is posted in, run one at a time.
+ * lockMessageRetry serializes attempts with the same retry key, author and
+ * destination until the transaction ends.
  */
-export const lockMessageId = (messageId: string) =>
+const lockMessageRetry = (
+	kind: "start" | "send",
+	destinationId: string,
+	memberId: string,
+	retryKey: string,
+) =>
 	query((db) =>
-		db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`message:${messageId}`}, 0))`),
+		db.execute(
+			sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["message", kind, destinationId.toLowerCase(), memberId, retryKey.toLowerCase()])}, 0))`,
+		),
 	);
 
 /** The message `messageId` in `chatId`, as a reply quotes it, or nothing when it is not there. */

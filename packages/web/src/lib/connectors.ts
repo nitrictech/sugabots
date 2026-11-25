@@ -21,7 +21,7 @@ import { client } from "@/api.ts";
 
 /** How many of the connector's tools bots can use: every one not set to off. */
 export function usableToolCount(connector: Connector): number {
-	return connector.toolCounts.allow + connector.toolCounts.ask;
+	return connector.enabled === false ? 0 : connector.toolCounts.allow + connector.toolCounts.ask;
 }
 
 /** Whether someone must sign the connector in again, or fix it: it is not signed in, its sign-in expired, or it is failing. */
@@ -37,7 +37,21 @@ export function useConnectors(projectId: string) {
 	return useQuery(connectorsQuery(projectId));
 }
 
+export function useRestrictableConnectors(projectId: string) {
+	return useQuery({
+		...connectorListQuery(projectId),
+		select: (rows) => rows.filter((row) => "restricted" in row),
+	});
+}
+
 function connectorsQuery(projectId: string) {
+	return queryOptions({
+		...connectorListQuery(projectId),
+		select: (rows) => rows.filter((row) => "url" in row),
+	});
+}
+
+function connectorListQuery(projectId: string) {
 	return queryOptions({
 		queryKey: ["connectors", projectId],
 		queryFn: ({ signal }) =>
@@ -290,9 +304,7 @@ export function signInFailureReason(code: string): string {
 }
 
 const SIGN_IN_FAILURE_REASONS: Record<ConnectorSignInFailure, string> = {
-	missing_state: "The sign-in came back incomplete. Try again.",
-	unknown_state: "The sign-in does not match any connector.",
-	not_allowed: "You are not allowed to connect a server here.",
+	unknown_state: "The sign-in could not be found. Try again.",
 	refused: "The server's sign-in was refused or cancelled.",
 	not_completed: "The server did not accept the sign-in. Try again.",
 };

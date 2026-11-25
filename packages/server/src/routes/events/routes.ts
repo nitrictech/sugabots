@@ -1,36 +1,26 @@
-import { type EventStream, type StreamEvent, streamEvent } from "@sugabots/contracts";
-import { CurrentUserOfRequest, NotFound } from "@sugabots/contracts/http";
-import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { toMember } from "@sugabots/core/chats/store/participants";
-import { Audience } from "@sugabots/core/database/events/audience";
-import { EventBus } from "@sugabots/core/database/events/bus";
-import { userText } from "@sugabots/errors";
-import {
-	Clock,
-	Context,
-	Deferred,
-	Duration,
-	Effect,
-	Option,
-	Queue,
-	Schedule,
-	Stream,
-} from "effect";
-import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { IncomingMessage } from "node:http";
+import { Readable } from "node:stream";
+import type { StreamEvent } from "@sugabots/contracts";
+import { NotFound } from "@sugabots/contracts/http";
+import type { Delivery } from "@sugabots/contracts/operations/events";
+import type { Running } from "@sugabots/core/operations/operation";
+import { Context, Deferred, Duration, Effect, Exit, Schedule, Scope, Stream } from "effect";
+import { HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asCurrentUser } from "../../auth/middleware.ts";
+import { longRunningCaller, operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
-import { StreamAccess } from "./access.ts";
+import { asHttpError, memberOnly, refusals } from "../../http/errors.ts";
 
 /**
- * The HTTP end of a stream: one event stream, held open, until the client leaves or
- * the clock turns out. Everything about *what* is on the stream belongs to the
- * bus; this file is the transport and its housekeeping.
+ * The event stream entrypoint: each stream is the long-running operation that
+ * follows it, held open as server-sent events until the client leaves, the
+ * operation ends (the member stops reaching what it follows, or their session
+ * ends or expires) or the clock turns out. Who hears what is the operation's
+ * to decide; this file is the transport and its housekeeping.
  *
- * It is a `Stream` rather than a callback with its own bookkeeping. The client
- * hanging up cancels the web stream, which interrupts the fibre, which runs the
- * subscription's finaliser — so there is no abort controller to wire, no
- * interval to clear, and no `finally` that has to be right.
+ * The operation's subscriptions and its proving again belong to a scope of
+ * the stream's own, closed when the response ends: the client hanging up
+ * cancels the web stream, which interrupts the fibre, which closes it.
  */
 
 /** A comment line often enough to keep an idle stream out of a proxy's timeout. */
@@ -43,12 +33,6 @@ const PING = Duration.seconds(15);
  */
 const MAX_AGE = Duration.minutes(30);
 
-/**
- * How long a stream trusts its last access check. A reply streams many events
- * a second, and each check is a query; revoked access is noticed within this.
- */
-const RECHECK = Duration.seconds(5);
-
 const STREAM_HEADERS = {
 	// Private workspace events must not be written to an intermediary cache.
 	"cache-control": "no-store",
@@ -58,207 +42,154 @@ const STREAM_HEADERS = {
 
 const STREAM_CONTENT_TYPE = "text/event-stream";
 
-/** How often a stream pings, how long it lives, and how long it trusts an access check. */
+/** How often a stream pings, and how long it lives. */
 export interface Timing {
 	readonly ping: Duration.Input;
 	readonly maxAge: Duration.Input;
-	readonly recheck: Duration.Input;
 }
 
 /** The streams' timing, which a test may shorten. */
 export const StreamTiming = Context.Reference<Timing>("@sugabots/server/StreamTiming", {
-	defaultValue: () => ({ ping: PING, maxAge: MAX_AGE, recheck: RECHECK }),
+	defaultValue: () => ({ ping: PING, maxAge: MAX_AGE }),
 });
 
-/** The workspace, chat and personal streams, with authorization resolved before streaming. */
+/** The workspace, chat and personal streams, each its long-running operation, and typing. */
 export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) =>
 	Effect.gen(function* () {
-		const bus = yield* EventBus.Service;
-		const access = yield* StreamAccess.Service;
+		const follow = yield* longRunningCaller;
+		const callOperation = yield* operationCaller;
 		const timing = yield* StreamTiming;
-		const openStream = (
-			request: HttpServerRequest.HttpServerRequest,
-			resolveStream: () => Effect.Effect<EventStream | undefined, never, CurrentActor.Service>,
-		) =>
-			Effect.gen(function* () {
-				const stream = yield* resolveStream();
-				if (!stream) {
-					return yield* new NotFound({ message: userText`No such stream` });
-				}
-				return yield* streamEvents({
-					bus,
-					stream,
-					since: resumeFrom(request.headers["last-event-id"]),
-					timing,
-					stillAuthorized: Effect.map(
-						Effect.suspend(resolveStream),
-						(current) => current === stream,
-					),
-					mayHear: (audience) => access.hears(audience),
-				});
-			}).pipe(asCurrentUser);
-
+		const streamed = <E>(
+			following: Effect.Effect<Running<Delivery>, E, Scope.Scope>,
+			source: object,
+		) => respond(following, timing, source instanceof IncomingMessage);
 		return handlers
 			.handle("workspace", ({ params, request }) =>
-				openStream(request, () => access.workspace(params.workspace)),
+				streamed(
+					follow("events.followWorkspace", {
+						workspace: params.workspace,
+						since: resumeFrom(request.headers["last-event-id"]),
+					}),
+					request.source,
+				).pipe(memberOnly, asHttpError({ ResourceHidden: NotFound })),
 			)
 			.handle("chat", ({ params, request }) =>
-				openStream(request, () => access.chat(params.chatId)),
-			)
-			.handle("me", ({ request }) => openStream(request, access.me))
-			.handle("typing", ({ params }) =>
-				Effect.gen(function* () {
-					const stream = yield* access.chat(params.chatId);
-					if (!stream) {
-						return yield* new NotFound({ message: userText`No such chat` });
-					}
-					const signedIn = yield* CurrentUserOfRequest;
-					const typing = streamEvent("member.typing", {
+				streamed(
+					follow("events.followChat", {
 						chatId: params.chatId,
-						member: toMember(signedIn),
-					});
-					yield* Effect.promise(() => bus.publish(stream, typing));
-				}).pipe(asCurrentUser),
+						since: resumeFrom(request.headers["last-event-id"]),
+					}),
+					request.source,
+				).pipe(memberOnly, asHttpError({ ResourceHidden: NotFound, BotCannotReach: NotFound })),
+			)
+			.handle("me", ({ request }) =>
+				streamed(
+					follow("events.followOwn", { since: resumeFrom(request.headers["last-event-id"]) }),
+					request.source,
+				).pipe(memberOnly),
+			)
+			.handle("typing", ({ params }) =>
+				callOperation("events.reportTyping", { chatId: params.chatId }).pipe(asHttpError(refusals)),
 			);
 	}),
 );
 
-/** One event, as the wire format, without the audience it was routed by. */
+/**
+ * Starts the operation in a scope of the stream's own, and answers with what
+ * it yields, as server-sent events. A refusal as it starts closes the scope
+ * and is the response; otherwise the scope closes once the response ends.
+ * The operation listens before it returns, so nothing published straight
+ * after the response arrives is lost.
+ */
+const respond = <E>(
+	following: Effect.Effect<Running<Delivery>, E, Scope.Scope>,
+	{ ping, maxAge }: Timing,
+	node: boolean,
+) =>
+	Effect.suspend(() => {
+		const scope = Scope.makeUnsafe();
+		return Effect.gen(function* () {
+			const { stream, ended } = yield* Scope.provide(scope)(following);
+			const frames = Stream.merge(
+				stream.pipe(Stream.map(({ seq, event }) => frame(seq, event))),
+				Stream.fromEffectRepeat(Effect.succeed(": ping\n\n")).pipe(
+					Stream.schedule(Schedule.spaced(ping)),
+				),
+			);
+			const upstream = (yield* frames.pipe(
+				Stream.encodeText,
+				Stream.toReadableStreamEffect({ strategy: { highWaterMark: 0 } }),
+			)).getReader();
+			const cancelled = Deferred.makeUnsafe<void>();
+			const transport = new AbortController();
+			let finished = false;
+			const body = new ReadableStream<Uint8Array>(
+				{
+					start(controller) {
+						Effect.runFork(
+							Effect.raceAllFirst([
+								ended.pipe(Effect.as("revoked" as const)),
+								Effect.sleep(maxAge).pipe(Effect.as("expired" as const)),
+								Deferred.await(cancelled).pipe(Effect.as("cancelled" as const)),
+							]).pipe(
+								Effect.tap((reason) =>
+									Effect.sync(() => {
+										finished = true;
+										if (reason === "revoked") {
+											const error = new Error("The event stream ended");
+											controller.error(error);
+											transport.abort(error);
+										} else if (reason === "expired") {
+											controller.close();
+										}
+									}),
+								),
+								Effect.ensuring(
+									Effect.all(
+										[
+											Scope.close(scope, Exit.void),
+											Effect.promise(() => upstream.cancel().catch(() => {})),
+										],
+										{ concurrency: "unbounded", discard: true },
+									),
+								),
+							),
+						);
+					},
+					async pull(controller) {
+						try {
+							const { value, done } = await upstream.read();
+							if (!done && !finished) controller.enqueue(value);
+						} catch (cause) {
+							if (!finished) controller.error(cause);
+							Deferred.doneUnsafe(cancelled, Effect.void);
+						}
+					},
+					cancel() {
+						finished = true;
+						Deferred.doneUnsafe(cancelled, Effect.void);
+						return Scope.close(scope, Exit.void).pipe(Effect.runPromise);
+					},
+				},
+				{ highWaterMark: 0 },
+			);
+			// The Node pipeline also needs cancellation when it is waiting for the socket to drain.
+			const writer = node ? Readable.fromWeb(body, { signal: transport.signal }) : body;
+			if (writer instanceof Readable) writer.on("error", () => {});
+			return HttpServerResponse.raw(writer, {
+				headers: STREAM_HEADERS,
+				contentType: STREAM_CONTENT_TYPE,
+			});
+		}).pipe(Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))));
+	});
+
+/** One event, as the wire format. */
 function frame(seq: number | undefined, event: StreamEvent): string {
 	// An ephemeral event carries no id, so it does not move the client's resume
 	// point past a state change it never saw.
 	const id = seq === undefined ? "" : `id: ${seq}\n`;
 	return `${id}event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 }
-
-/**
- * Streams what the caller's authorisation resolved to.
- *
- * A stream the caller may not have is answered with 404 before this, rather
- * than 403: a stream for a chat you cannot see should not confirm the chat
- * exists.
- */
-const streamEvents = Effect.fnUntraced(function* ({
-	bus,
-	stream,
-	since,
-	timing: { ping, maxAge, recheck },
-	stillAuthorized,
-	mayHear,
-}: {
-	bus: EventBus.Interface;
-	stream: EventStream;
-	since: number | undefined;
-	timing: Timing;
-	/**
-	 * Re-asked before an event once `recheck` has passed since it last said
-	 * yes, as the principal the stream was opened for. It is the only thing that
-	 * notices access being revoked mid-stream, which is why it is required.
-	 */
-	stillAuthorized: Effect.Effect<boolean, never, CurrentActor.Service>;
-	/**
-	 * Whether the principal may hear an event meant only for `audience` (see
-	 * `Audience`). One they may not is skipped, not the end of the stream.
-	 */
-	mayHear: (audience: Audience.Group) => Effect.Effect<boolean, never, CurrentActor.Service>;
-}) {
-	const maxAgeMillis = Duration.toMillis(Duration.fromInputUnsafe(maxAge));
-	const recheckMillis = Duration.toMillis(Duration.fromInputUnsafe(recheck));
-	const ready = yield* Deferred.make<void>();
-	const runPromise = Effect.runPromiseWith(yield* Effect.context<CurrentActor.Service>());
-	// Each re-check is a trace of its own, linked to the stream's request. As a
-	// child of the request it would sit under a span that is not exported until
-	// the stream closes, up to `maxAge` later.
-	const streamSpan = yield* Effect.option(Effect.currentParentSpan);
-	const stillAuthorizedFor = ({ seq, event }: EventBus.Delivery) =>
-		runPromise(
-			stillAuthorized.pipe(
-				Effect.withSpan("EventStream.recheckAccess", {
-					root: true,
-					links: Option.toArray(streamSpan).map((span) => ({ span, attributes: {} })),
-					attributes: {
-						"event.stream": stream,
-						"event.type": event.type,
-						...(seq === undefined ? {} : { "event.seq": seq }),
-					},
-				}),
-			),
-		);
-
-	// Abort wakes a parked bus iterator before its cleanup waits for it to finish.
-	const subscribed = Stream.callback<string>(
-		(queue) =>
-			Effect.gen(function* () {
-				const leaving = new AbortController();
-				const expiry = setTimeout(() => leaving.abort(), maxAgeMillis);
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() => {
-						clearTimeout(expiry);
-						leaving.abort();
-					}),
-				);
-
-				void (async () => {
-					let authorizedUntil = Number.NEGATIVE_INFINITY;
-					try {
-						for await (const delivery of bus.subscribe(stream, {
-							since,
-							signal: leaving.signal,
-						})) {
-							const now = await runPromise(Clock.currentTimeMillis);
-							if (now >= authorizedUntil) {
-								if (!(await stillAuthorizedFor(delivery))) break;
-								authorizedUntil = now + recheckMillis;
-							}
-							if (leaving.signal.aborted) break;
-							const heard = Audience.read(delivery.event);
-							if (heard.audience && !(await runPromise(mayHear(heard.audience)))) {
-								continue;
-							}
-							if (
-								!(await runPromise(Queue.offer(queue, frame(delivery.seq, heard.event)), {
-									signal: leaving.signal,
-								}))
-							) {
-								break;
-							}
-						}
-					} catch (failure) {
-						if (!leaving.signal.aborted) {
-							await runPromise(Effect.logError(`Streaming ${stream} failed`, failure));
-						}
-					} finally {
-						clearTimeout(expiry);
-						Queue.endUnsafe(queue);
-					}
-				})();
-				Deferred.doneUnsafe(ready, Effect.void);
-			}),
-		{ bufferSize: 16 },
-	);
-
-	// Merged rather than written from a timer, so a ping is its own chunk and can
-	// never land inside an event. `haltStrategy: "left"` ends the response when
-	// the events end rather than pinging an empty stream forever.
-	const withPings = Stream.merge(
-		subscribed,
-		Stream.fromEffectRepeat(Effect.succeed(": ping\n\n")).pipe(
-			Stream.schedule(Schedule.spaced(ping)),
-		),
-		{ haltStrategy: "left" },
-	);
-
-	// Started here rather than when the response is written, and not answered
-	// until the subscription is set up, or events published straight after the
-	// response arrives are lost.
-	const body = yield* withPings.pipe(Stream.encodeText, Stream.toReadableStreamEffect());
-	yield* Deferred.await(ready);
-
-	return HttpServerResponse.stream(
-		Stream.fromReadableStream({ evaluate: () => body, onError: (cause) => cause }),
-		{ headers: STREAM_HEADERS, contentType: STREAM_CONTENT_TYPE },
-	);
-});
 
 /**
  * `Last-Event-ID` is whatever the client sent, including nothing at all. Only a

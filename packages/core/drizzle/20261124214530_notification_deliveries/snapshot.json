@@ -1,0 +1,206 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "da09f8f9-2510-462d-8203-de14ee536c87",
+  "prevIds": [
+    "6a54bfe2-70ac-44e0-8c84-27218d50d824"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "notification_delivery"
+      ],
+      "writes": [
+        "s|tbl|public.notification_delivery",
+        "n|tbl|public.notification_delivery",
+        "e|tbl|public.notification_delivery",
+        "n|rel|public.notification_delivery",
+        "n|type|public.notification_delivery",
+        "n|rel|public.notification_delivery_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "notification_delivery"
+      ],
+      "writes": [
+        "s|fk|public.notification_delivery.notification_delivery_chat_id_chat_id_fkey",
+        "n|fk|public.notification_delivery.notification_delivery_chat_id_chat_id_fkey",
+        "e|fk|public.notification_delivery.notification_delivery_chat_id_chat_id_fkey",
+        "n|con|public.notification_delivery.notification_delivery_chat_id_chat_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.notification_delivery",
+        "n|sch|public",
+        "n|tbl|public.chat",
+        "n|sch|public",
+        "n|col|public.notification_delivery.chat_id",
+        "n|col|public.chat.id",
+        "e|uniqueness|public.chat.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "notification_delivery"
+      ],
+      "writes": [
+        "s|fk|public.notification_delivery.notification_delivery_member_id_member_id_fkey",
+        "n|fk|public.notification_delivery.notification_delivery_member_id_member_id_fkey",
+        "e|fk|public.notification_delivery.notification_delivery_member_id_member_id_fkey",
+        "n|con|public.notification_delivery.notification_delivery_member_id_member_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.notification_delivery",
+        "n|sch|public",
+        "n|tbl|public.member",
+        "n|sch|public",
+        "n|col|public.notification_delivery.member_id",
+        "n|col|public.member.id",
+        "e|uniqueness|public.member.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "notification_delivery",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "chat_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "delivery_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "member_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "notification",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "notification_delivery_chat_id_chat_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "chat_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "chat",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "notification_delivery_member_id_member_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "member_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "member",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "notification_delivery_pkey",
+        "columns": [
+          "chat_id",
+          "delivery_id",
+          "member_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    }
+  ]
+}

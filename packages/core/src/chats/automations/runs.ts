@@ -3,6 +3,7 @@ export * as AutomationRuns from "./runs.ts";
 import { Context, Effect, Layer } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterCommit } from "../../database/database.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import {
 	Automation,
@@ -21,7 +22,9 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/AutomationRuns",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const lanes = yield* Lanes.Service;
@@ -43,4 +46,4 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));

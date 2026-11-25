@@ -2,6 +2,7 @@ export * as ChatEvents from "./chat-events.ts";
 
 import { Context } from "effect";
 import type { DomainEvents } from "../database/events/domain-events.ts";
+import { Tier } from "../tiers.ts";
 import type { ChatEvent } from "./events.ts";
 
 /**
@@ -17,4 +18,6 @@ export interface Interface {
 	readonly emit: DomainEvents.Emit<ChatEvent>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ChatEvents") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ChatEvents") {
+	declare readonly [Tier]: "process";
+}

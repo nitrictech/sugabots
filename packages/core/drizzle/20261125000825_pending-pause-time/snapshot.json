@@ -1,0 +1,98 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "0cb2c0db-ffff-4580-91ed-15e7ab41bc7f",
+  "prevIds": [
+    "cb01c0b2-385d-462a-a2e3-4bcf2cfd0b65"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "automation",
+        "pause_after_failures_pending_at"
+      ],
+      "writes": [
+        "s|col|public.automation.pause_after_failures_pending_at",
+        "n|col|public.automation.pause_after_failures_pending_at",
+        "e|col|public.automation.pause_after_failures_pending_at"
+      ],
+      "reads": [
+        "n|tbl|public.automation",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "automation",
+        "pause_after_failures_pending"
+      ],
+      "writes": [
+        "s|col|public.automation.pause_after_failures_pending",
+        "n|col|public.automation.pause_after_failures_pending",
+        "e|col|public.automation.pause_after_failures_pending"
+      ],
+      "reads": [
+        "n|tbl|public.automation",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "recreate_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "automation",
+        "automation_pending_pause_idx"
+      ],
+      "writes": [
+        "s|idx|public.automation_pending_pause_idx",
+        "n|idx|public.automation_pending_pause_idx",
+        "e|idx|public.automation_pending_pause_idx",
+        "n|rel|public.automation_pending_pause_idx"
+      ],
+      "reads": [
+        "n|tbl|public.automation",
+        "n|sch|public",
+        "n|col|public.automation.id"
+      ],
+      "sharedWrites": [],
+      "sqlHash": "803983f1cb708e6e"
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "automation",
+        "name": "pause_after_failures_pending_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"automation\",\"pause_after_failures_pending\"]"
+    },
+    {
+      "op": "alter",
+      "key": "indexes\u0000[\"public\",\"automation_pending_pause_idx\"]",
+      "set": {
+        "where": "\"pause_after_failures_pending_at\" is not null"
+      }
+    }
+  ]
+}

@@ -5,6 +5,7 @@
  */
 
 import { Layer } from "effect";
+import { DesktopViewer } from "../../chats/tools/browser/viewer.ts";
 import { ComputerNetwork } from "../../computers/computer-network.ts";
 import { ComputerProviderSetup } from "../../computers/computer-provider-setup.ts";
 import { ProjectComputerSetup } from "../../computers/project-computer-setup.ts";
@@ -22,11 +23,21 @@ import { providerTemplate } from "./provider-template.ts";
 import { removeProjectHost } from "./remove-project-host.ts";
 import { removeProvider } from "./remove-provider.ts";
 import { removeWorkspaceHost } from "./remove-workspace-host.ts";
+import { requestHost } from "./request-host.ts";
 import { resetComputer } from "./reset-computer.ts";
 import { testProvider } from "./test-provider.ts";
 import { unblockHost } from "./unblock-host.ts";
 import { updateProvider } from "./update-provider.ts";
 import { upgradeComputer } from "./upgrade-computer.ts";
+import {
+	copyChatFile,
+	readFile,
+	runCommand,
+	shareFile,
+	useBrowser,
+	writeFile,
+} from "./use-computer.ts";
+import { viewDesktop } from "./view-desktop.ts";
 import { workspaceNetwork } from "./workspace-network.ts";
 
 export const computersOperations = {
@@ -50,10 +61,19 @@ export const computersOperations = {
 	"projectComputer.network": projectNetwork,
 	"projectComputer.addHost": addProjectHost,
 	"projectComputer.removeHost": removeProjectHost,
+	"computers.viewDesktop": viewDesktop,
+	"computers.runCommand": runCommand,
+	"computers.readFile": readFile,
+	"computers.writeFile": writeFile,
+	"computers.copyChatFile": copyChatFile,
+	"computers.shareFile": shareFile,
+	"computers.useBrowser": useBrowser,
+	"computers.requestHost": requestHost,
 };
 
 export const computersLayer = Layer.mergeAll(
 	ComputerProviderSetup.layer,
 	ComputerNetwork.layer,
 	ProjectComputerSetup.layer,
+	DesktopViewer.layer,
 );

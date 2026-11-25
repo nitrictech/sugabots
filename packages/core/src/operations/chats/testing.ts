@@ -6,7 +6,7 @@ import {
 	type ToolApprovalDecision,
 } from "@sugabots/contracts";
 import type { UploadInterrupted } from "@sugabots/contracts/errors/chats";
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { Effect, type Stream } from "effect";
 import { seedSession } from "../../authentication/seed.test-support.ts";
 import { SessionAuthentication } from "../../authentication/session.ts";
@@ -38,7 +38,7 @@ export async function signedIn(memberId: string): Promise<MemberSession> {
  */
 export function asMember(call: CallOperation, memberId: string) {
 	let session: Promise<MemberSession> | undefined;
-	const as = async <Name extends OperationName>(name: Name, input: InputOf<Name>) => {
+	const as = async <Name extends RequestOperationName>(name: Name, input: InputOf<Name>) => {
 		session ??= signedIn(memberId);
 		return call(await session, name, input);
 	};
@@ -54,7 +54,7 @@ export function asMember(call: CallOperation, memberId: string) {
 		startProjectChat: (input: { projectId: string; messageId: string; content: string }) =>
 			as("chats.startProjectChat", {
 				projectId: input.projectId,
-				id: input.messageId,
+				retryKey: input.messageId,
 				message: input.content,
 			}),
 		renameChat: (input: { chatId: string; name: string }) => as("chats.renameChat", input),
@@ -70,7 +70,7 @@ export function asMember(call: CallOperation, memberId: string) {
 		}) =>
 			as("chats.send", {
 				chatId: input.chatId,
-				id: input.messageId,
+				retryKey: input.messageId,
 				message: input.content,
 				...(input.attachments && { attachments: input.attachments }),
 				...(input.replyTo && { replyTo: input.replyTo }),
@@ -111,6 +111,7 @@ export function asMember(call: CallOperation, memberId: string) {
 		context: (chatId: string) => as("chats.context", { chatId }),
 		decide: (input: { toolCallId: string; decision: ToolApprovalDecision["decision"] }) =>
 			as("approvals.decide", input),
+		interruptTurn: (input: { chatId: string; turnId: string }) => as("chats.interruptTurn", input),
 		/** The files in chats: those bots wrote, by their ids. */
 		files: {
 			listInProject: (projectId: string) => as("files.listInProject", { projectId }),

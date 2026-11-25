@@ -10,6 +10,7 @@
         "@types/node": "^26.6.6",
         "@vitejs/plugin-react": "^6.3.0",
         "drizzle-kit": "1.0.0-rc.5",
+        "oxc-parser": "0.127.0",
         "portless": "^0.17.0",
         "typescript": "^7.0.2",
         "vite": "catalog:",
@@ -44,6 +45,21 @@
         "react": "^19.3.1",
       },
     },
+    "packages/bot-loop": {
+      "name": "@sugabots/bot-loop",
+      "version": "0.0.0",
+      "dependencies": {
+        "@sugabots/contracts": "workspace:*",
+        "@sugabots/core": "workspace:*",
+        "@sugabots/errors": "workspace:*",
+        "@sugabots/workflow": "workspace:*",
+        "ai": "^7.0.173",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "drizzle-orm": "catalog:",
+      },
+    },
     "packages/contracts": {
       "name": "@sugabots/contracts",
       "version": "0.0.0",
@@ -63,10 +79,11 @@
       "name": "@sugabots/core",
       "version": "0.0.0",
       "dependencies": {
-        "@ai-sdk/anthropic": "^4.0.105",
-        "@ai-sdk/google": "^4.0.121",
+        "@ai-sdk/anthropic": "4.0.105",
+        "@ai-sdk/google": "4.0.121",
         "@ai-sdk/mcp": "^2.0.99",
-        "@ai-sdk/openai": "^4.0.118",
+        "@ai-sdk/openai": "4.0.118",
+        "@ai-sdk/openai-compatible": "^3.0.92",
         "@ai-sdk/provider-utils": "^5.0.81",
         "@alibaba-group/opensandbox": "1.1.0",
         "@effect/platform-node": "catalog:",
@@ -164,6 +181,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect/platform-node": "catalog:",
+        "@sugabots/bot-loop": "workspace:*",
         "@sugabots/contracts": "workspace:*",
         "@sugabots/core": "workspace:*",
         "@sugabots/errors": "workspace:*",
@@ -322,6 +340,7 @@
     "@ai-sdk/mcp": ["@ai-sdk/mcp@2.0.99", "", { "dependencies": { "@ai-sdk/provider": "4.0.38", "@ai-sdk/provider-utils": "5.0.81", "cross-spawn": "^7.0.6", "pkce-challenge": "^5.0.1" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-9yDWp5WABLMRNKYuLrLIXGtJpIkjwXAdJyYUSu5XpD0cqtuM11LGqk3gb5XGiShco3RT/79W8CkqXskegTtWKw=="],
 
     "@ai-sdk/openai": ["@ai-sdk/openai@4.0.118", "", { "dependencies": { "@ai-sdk/provider": "4.0.38", "@ai-sdk/provider-utils": "5.0.81" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-pBsFeB+IudrX96P0ic9AO/1NPnfB6IyoS2B2pnhBJ/Ovt4bsvAmBOPeUxwEfYbQyfetJdVFep9sfYX42uVX3SQ=="],
+    "@ai-sdk/openai-compatible": ["@ai-sdk/openai-compatible@3.0.92", "", { "dependencies": { "@ai-sdk/provider": "4.0.38", "@ai-sdk/provider-utils": "5.0.81" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-2gV7HHV4qpx+8GotOZMmGqY270ExkftwFG5+DM6nChLmRaP6WP9JKj4e9WjLhih/GsPL9dSGnZHzwCsofHwiAQ=="],
 
     "@ai-sdk/provider": ["@ai-sdk/provider@4.0.38", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-GElz70UUCuDFFyD6m6aQJFgRY0HEABQzB5otzgkrisYaF5mnss7o0upAmbBTSD6KWiM9h7lZm1ls2c7xzHR8CA=="],
 
@@ -962,6 +981,8 @@
     "@sugabots/accounting": ["@sugabots/accounting@workspace:packages/accounting"],
 
     "@sugabots/avatars": ["@sugabots/avatars@workspace:packages/avatars"],
+
+    "@sugabots/bot-loop": ["@sugabots/bot-loop@workspace:packages/bot-loop"],
 
     "@sugabots/contracts": ["@sugabots/contracts@workspace:packages/contracts"],
 

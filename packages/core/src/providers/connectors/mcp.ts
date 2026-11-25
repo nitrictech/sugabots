@@ -1,11 +1,11 @@
-import { createMCPClient, type ListToolsResult, type OAuthClientProvider } from "@ai-sdk/mcp";
+import { createMCPClient, type ListToolsResult } from "@ai-sdk/mcp";
 import type { ConnectorTool } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import type { JSONSchema7, Tool, ToolExecutionOptions } from "ai";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
 import { upstreamErrorText } from "../upstream-error-text.ts";
-import { needsSignIn } from "./oauth.ts";
+import { needsSignIn, type OAuthClient } from "./oauth.ts";
 
 /**
  * Talking to an MCP server: one session over Streamable HTTP, through the
@@ -27,14 +27,14 @@ interface ServerTarget {
 	url: string;
 	headers: Record<string, string>;
 	/** For a server signed in to with OAuth: the SDK adds and refreshes the tokens itself. */
-	authProvider?: OAuthClientProvider;
+	oauth?: OAuthClient;
 }
 
 /** One of the server's tools: as the server described it, and as a model can call it. */
 interface ServerTool {
 	described: ConnectorTool;
 	inputSchema: JSONSchema7;
-	tool: Tool;
+	tool: Pick<Tool, "inputSchema">;
 }
 
 /** A server's tool list, which any later session can run its tools from. */
@@ -75,8 +75,7 @@ export async function connectServer(
 				type: "http",
 				url: target.url,
 				headers: target.headers,
-				authProvider: target.authProvider,
-				fetch,
+				fetch: target.oauth?.fetch ?? fetch,
 			},
 			initializationOptions: { timeout: SERVER_TIMEOUT_MS },
 			protocolVersionDiscovery,
@@ -105,7 +104,7 @@ export async function connectServer(
 									destructive: definition.annotations?.destructiveHint ?? null,
 								},
 								inputSchema: definition.inputSchema as JSONSchema7,
-								tool,
+								tool: { inputSchema: tool.inputSchema },
 							},
 						]
 					: [];
@@ -126,10 +125,9 @@ export async function connectServer(
 				// The model is told why a server rejected a call, so it can correct it.
 				const said = isServerError(cause) ? cause.message : httpErrorAnswer(cause);
 				if (said === undefined) throw cause;
-				const signedIn = await target.authProvider?.tokens();
 				const text = upstreamErrorText(said, [
 					...Object.values(target.headers),
-					signedIn?.access_token,
+					...(target.oauth?.sentTokens() ?? []),
 				]);
 				return { isError: true, content: [{ type: "text", text }] };
 			}
@@ -166,7 +164,7 @@ function describe(cause: unknown, target: ServerTarget): UserText {
 	if (needsSignIn(cause)) return userText`Sign in again to reconnect`;
 	const message = cause instanceof Error ? cause.message : String(cause);
 	const status = Number(/\bHTTP (\d{3})\b/.exec(message)?.[1]);
-	if (status === 401 && target.authProvider) return userText`Sign in again to reconnect`;
+	if (status === 401 && target.oauth) return userText`Sign in again to reconnect`;
 	if (status === 401 && Object.keys(target.headers).length > 0) {
 		return userText`The server didn't accept the access token or secret. Check that it hasn't expired and was copied in full (HTTP 401)`;
 	}

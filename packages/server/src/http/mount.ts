@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
+import { processLayer } from "@sugabots/core/tiers";
 import { Effect, Layer } from "effect";
 import {
 	HttpRouter,
@@ -41,7 +42,7 @@ export const webAppLayer = existsSync(WEB_ROOT)
 							),
 				);
 			}),
-		)
+		).pipe(processLayer)
 	: Layer.empty;
 
 /** An unknown API path is a 404, not the web app's `index.html`. */

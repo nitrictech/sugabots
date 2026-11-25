@@ -10,13 +10,11 @@ import {
 	type QuietHours,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { type AnyColumn, and, eq, isNull, type SQL, sql } from "drizzle-orm";
+import { type AnyColumn, and, eq, inArray, isNull, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
-import { chatStandingFor, mayDecideToolCall, reachesChatFor } from "../authorization/access.ts";
-import type { BotFacts } from "../authorization/permissions.ts";
-import { findRunBot } from "../chats/automations/execution.ts";
-import { approversOf } from "../chats/tools/approvers.ts";
+import { reachesChatFor } from "../authorization/access.ts";
+import { fixedApprovalInput } from "../chats/tools/approvers.ts";
 import type { Executor } from "../database/database.ts";
 import {
 	automation,
@@ -34,6 +32,7 @@ import {
 	turn,
 	workspace,
 } from "../database/schema.ts";
+import { approvalAudience } from "../proofs/approvers.ts";
 import { approvalPath, chatPath } from "../server-settings/web-app-paths.ts";
 
 /**
@@ -232,7 +231,12 @@ const answeredBy = Effect.fn("Notifications.answeredBy")(function* (db: Executor
  */
 export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 	db: Executor,
-	waiting: { chatId: string; turnId: string },
+	waiting: {
+		chatId: string;
+		turnId: string;
+		approvalCallIds: readonly string[];
+		approvalIds?: readonly string[];
+	},
 	now: Date,
 ) {
 	const place = yield* placeOf(db, waiting.chatId);
@@ -242,29 +246,53 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 		.from(toolCall)
 		.innerJoin(turn, eq(turn.id, toolCall.turnId))
 		.innerJoin(bot, eq(bot.id, turn.botId))
-		.where(and(eq(toolCall.turnId, waiting.turnId), eq(toolCall.approvalStatus, "pending")))
-		.orderBy(toolCall.startedAt);
+		.where(
+			and(
+				eq(toolCall.turnId, waiting.turnId),
+				eq(toolCall.approvalStatus, "pending"),
+				inArray(toolCall.id, waiting.approvalCallIds),
+				waiting.approvalIds ? inArray(toolCall.approvalId, waiting.approvalIds) : undefined,
+			),
+		)
+		.orderBy(toolCall.startedAt, toolCall.id);
 	const [first] = calls;
 	if (!first) return [];
-	const runBot = yield* findRunBot(db, waiting.chatId);
-	const reaching = yield* membersReaching(db, place, first.botId, now);
+	const audience = yield* approvalAudience(
+		db,
+		calls.map(({ id }) => id),
+	);
+	if (audience.length === 0) return [];
+	const preferences = yield* membersReaching(
+		db,
+		place,
+		first.botId,
+		now,
+		audience.map(({ memberId }) => memberId),
+	);
 	const addressed: Addressed[] = [];
-	for (const member of reaching) {
-		if (!wants(member, "approval", now)) continue;
-		const decidable = yield* callsDecidableBy(db, waiting.chatId, member.id, calls, runBot);
+	for (const { memberId, reachesChat, calls: decidable } of audience) {
+		const member = preferences.find(({ id }) => id === memberId);
+		if (!member || !wants(member, "approval", now)) continue;
 		const [firstDecidable] = decidable;
 		if (!firstDecidable) continue;
+		const fixedInput = fixedApprovalInput(firstDecidable);
+		const host =
+			fixedInput && typeof fixedInput === "object" && "host" in fixedInput
+				? fixedInput.host
+				: undefined;
+		const description = decidable.length === 1 ? firstDecidable.tool : `${decidable.length} tools`;
 		addressed.push({
-			memberId: member.id,
+			memberId,
 			notification: {
 				title: `${first.botName} needs your approval`,
-				body:
-					decidable.length === 1
-						? `To run ${firstDecidable.tool} in ${place.title}`
-						: `To run ${decidable.length} tools in ${place.title}`,
+				body: reachesChat
+					? `To run ${description} in ${place.title}`
+					: typeof host === "string"
+						? `To let its computer reach ${host}`
+						: `To run ${description}`,
 				tag: `approval:${waiting.turnId}`,
 				path: approvalPath(place.workspaceSlug, firstDecidable.id),
-				chatId: place.rootChatId,
+				chatId: reachesChat ? place.rootChatId : null,
 			},
 		});
 	}
@@ -419,6 +447,7 @@ const membersReaching = Effect.fn("Notifications.membersReaching")(function* (
 	place: Place,
 	botId: string | null,
 	now: Date,
+	approvalRecipients?: readonly string[],
 ) {
 	const botLevel = alias(notificationOverride, "bot_level");
 	const projectLevel = alias(notificationOverride, "project_level");
@@ -456,7 +485,9 @@ const membersReaching = Effect.fn("Notifications.membersReaching")(function* (
 		.where(
 			and(
 				eq(membership.workspaceId, place.workspaceId),
-				reachesChatFor({ projectId: sql`${place.projectId}::uuid` }, member.id),
+				approvalRecipients
+					? inArray(member.id, approvalRecipients)
+					: reachesChatFor({ projectId: sql`${place.projectId}::uuid` }, member.id),
 			),
 		);
 });
@@ -475,29 +506,4 @@ function wants(member: Member, reason: Reason, now: Date): boolean {
 	if (member.pausedUntil && member.pausedUntil > now) return false;
 	if (member.quietHours && inQuietHours(member.quietHours, now)) return false;
 	return levelAdmits(member.level ?? DEFAULT_LEVEL, reason);
-}
-
-/**
- * The calls among `calls`, in the run `runBot` does if any, that `memberId`
- * may decide, in their order: none unless they reach the chat, then each that
- * `mayDecideToolCall` lets them decide.
- */
-const callsDecidableBy = Effect.fn("Notifications.callsDecidableBy")(function* (
-	db: Executor,
-	chatId: string,
-	memberId: string,
-	calls: ReadonlyArray<PendingCall>,
-	runBot: BotFacts | undefined,
-) {
-	const reached = yield* chatStandingFor(db, chatId, memberId);
-	if (!reached) return [];
-	return calls.filter((call) =>
-		mayDecideToolCall(reached.standing, runBot, approversOf(call.tool)),
-	);
-});
-
-/** A tool call waiting for approval, as an approval notification names it. */
-interface PendingCall {
-	id: string;
-	tool: string;
 }

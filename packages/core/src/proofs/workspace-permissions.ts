@@ -47,20 +47,46 @@ const CanManageWorkspaceProof = defineProof("CanManageWorkspace");
 const CanCreateBotsProof = defineProof("CanCreateBots");
 const CanCreateProjectsProof = defineProof("CanCreateProjects");
 
-/** The member whose role `inWorkspace` carries, when it grants every one of `permissions`. */
+/** Whether `actor`'s role lets them see the workspace's directory. `CanReadWorkspace`. */
+function readsWorkspace(actor: Actor): boolean {
+	return mayInWorkspace(actor, "workspace.read");
+}
+
+/**
+ * Whether `actor`'s role lets them manage the workspace's settings, providers,
+ * system bots' models and usage. `CanManageWorkspace`.
+ */
+export function managesWorkspace(actor: Actor): boolean {
+	return grantsAll(actor, ["workspace.update", "workspace.providers.manage"]);
+}
+
+/** Whether `actor`'s role lets them make bots. `CanCreateBots`. */
+export function createsBots(actor: Actor): boolean {
+	return mayInWorkspace(actor, "bot.create");
+}
+
+/** Whether `actor`'s role lets them make projects. `CanCreateProjects`. */
+export function createsProjects(actor: Actor): boolean {
+	return mayInWorkspace(actor, "project.create");
+}
+
+function grantsAll(actor: Actor, permissions: readonly WorkspacePermission[]): boolean {
+	return permissions.every((permission) => mayInWorkspace(actor, permission));
+}
+
+/** The member whose role `inWorkspace` carries, when `rule` grants it. */
 const grantedTo = <P, W>(
 	inWorkspace: InWorkspace<P, W>,
-	permissions: readonly WorkspacePermission[],
+	rule: (actor: Actor) => boolean,
 ): Actor | undefined => {
 	const actor = inWorkspace.permissionsOf;
-	if (actor === undefined) return undefined;
-	return permissions.every((permission) => mayInWorkspace(actor, permission)) ? actor : undefined;
+	return actor !== undefined && rule(actor) ? actor : undefined;
 };
 
 export const proveCanReadWorkspace = <P, W>(
 	inWorkspace: InWorkspace<P, W>,
 ): Effect.Effect<CanReadWorkspace<P, W>, ActionForbidden> => {
-	const actor = grantedTo(inWorkspace, ["workspace.read"]);
+	const actor = grantedTo(inWorkspace, readsWorkspace);
 	if (!actor) {
 		return Effect.fail(new ActionForbidden({ proof: "CanReadWorkspace" }));
 	}
@@ -74,7 +100,7 @@ export const proveCanReadWorkspace = <P, W>(
 export const proveCanManageWorkspace = <P, W>(
 	inWorkspace: InWorkspace<P, W>,
 ): Effect.Effect<CanManageWorkspace<P, W>, ActionForbidden> => {
-	const actor = grantedTo(inWorkspace, ["workspace.update", "workspace.providers.manage"]);
+	const actor = grantedTo(inWorkspace, managesWorkspace);
 	if (!actor) {
 		return Effect.fail(new ActionForbidden({ proof: "CanManageWorkspace" }));
 	}
@@ -88,7 +114,7 @@ export const proveCanManageWorkspace = <P, W>(
 export const proveCanCreateBots = <P, W>(
 	inWorkspace: InWorkspace<P, W>,
 ): Effect.Effect<CanCreateBots<P, W>, ActionForbidden> => {
-	const actor = grantedTo(inWorkspace, ["bot.create"]);
+	const actor = grantedTo(inWorkspace, createsBots);
 	if (!actor) {
 		return Effect.fail(new ActionForbidden({ proof: "CanCreateBots" }));
 	}
@@ -102,7 +128,7 @@ export const proveCanCreateBots = <P, W>(
 export const proveCanCreateProjects = <P, W>(
 	inWorkspace: InWorkspace<P, W>,
 ): Effect.Effect<CanCreateProjects<P, W>, ActionForbidden> => {
-	const actor = grantedTo(inWorkspace, ["project.create"]);
+	const actor = grantedTo(inWorkspace, createsProjects);
 	if (!actor) {
 		return Effect.fail(new ActionForbidden({ proof: "CanCreateProjects" }));
 	}

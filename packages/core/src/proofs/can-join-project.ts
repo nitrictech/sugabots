@@ -11,13 +11,15 @@ import {
 	whoActs,
 } from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
+import type { HoldsWorkspaceLock } from "./workspace-lock.ts";
 
 /**
  * P's member may put themselves in the project J: a public project members
  * made, in a workspace they belong to, or one they are in already. A bot, for
  * its asker, may only in member bounds, as this changes who reaches what. A
  * private project they aren't in, or a bot's default project, which nobody
- * joins, is hidden from them.
+ * joins, is hidden from them. Proved under J's workspace's lock (see
+ * `HoldsWorkspaceLock`), so a project made private meanwhile is hidden.
  */
 export interface CanJoinProject<P, J> extends Proof<"CanJoinProject", [P, J]> {
 	readonly principal: Named<P, Principal>;
@@ -44,20 +46,23 @@ function joiner(principal: Principal, facts: ReachFacts): MemberPlace | undefine
 }
 
 /** Whether `member` may join the project `facts` describes, or is in it already. */
-function mayJoin(member: MemberPlace, facts: ProjectFacts): boolean {
+export function mayJoin(member: MemberPlace, facts: ProjectFacts): boolean {
 	if (member.actor.workspaceRole === undefined) return false;
 	if (facts.defaultOf !== null) return false;
 	return member.inProject || facts.visibility === "public";
 }
 
-export const proveCanJoinProject = <P, J>(
-	principal: Named<P, Principal>,
+export const proveCanJoinProject = <P, W, J>(
+	lock: HoldsWorkspaceLock<P, W>,
 	projectId: Named<J, string>,
 ) =>
 	Effect.gen(function* () {
+		const { principal } = lock;
 		const acting = principal.value;
 		const facts = yield* query((db) => reachFacts(db, projectId.value, whoActs(acting)));
-		if (!facts) return yield* Effect.fail(hidden);
+		if (!facts || facts.project.workspace !== lock.workspace.value) {
+			return yield* Effect.fail(hidden);
+		}
 		const member = joiner(acting, facts);
 		if (!member) {
 			// Anyone else joins nothing: refused where they reach the project, hidden elsewhere.

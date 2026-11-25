@@ -1,7 +1,5 @@
 import type { NewBot } from "@sugabots/contracts";
-import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { noComputers } from "../../computers/testing.ts";
 import { bot, member, membership, workspace } from "../../database/schema.ts";
 import {
 	closeDatabase,
@@ -9,24 +7,23 @@ import {
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { servedOnPostgresAs } from "../testing.ts";
-import { BotAdministration } from "./bot-administration.ts";
+import { type CallOperation, servedOperations } from "../../operations/testing.ts";
+import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { BotStore } from "./bot-store.ts";
 import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 	let repository: Promised<BotStore.Interface>;
-	let administrationAs: (memberId: string) => Promised<BotAdministration.Interface>;
+	let callOperation: CallOperation;
+	let signedIn: ReturnType<typeof principals>;
 	let workspaceId: string;
 	let adminId: string;
 	let editorId: string;
 
 	beforeAll(async () => {
 		repository = await servedOnPostgres(BotStore.Service, BotStore.layer);
-		administrationAs = await servedOnPostgresAs(
-			BotAdministration.Service,
-			BotAdministration.layer.pipe(Layer.provide(noComputers)),
-		);
+		callOperation = await servedOperations();
+		signedIn = principals(await authenticators());
 	});
 
 	afterAll(async () => {
@@ -35,8 +32,8 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 
 	const create = (createdById: string, input: NewBot) =>
 		repository.create(workspaceId, { createdById, bot: input });
-	const visibleTo = (memberId: string) =>
-		administrationAs(memberId).list({ workspace: workspaceId });
+	const visibleTo = async (memberId: string) =>
+		callOperation(await signedIn.member(memberId), "bots.list", { workspace: workspaceId });
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -110,7 +107,7 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 		expect(plain.shape).toBe("circle");
 		expect(starred.shape).toBe("star");
 
-		const reshaped = await administrationAs(adminId).update({
+		const reshaped = await callOperation(await signedIn.member(adminId), "bots.update", {
 			botId: plain.id,
 			changes: { shape: "bear" },
 		});
@@ -198,9 +195,9 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 
 	it("does not individually delete a system bot", async () => {
 		const system = await placeCompaction();
-		await expect(
-			repository.remove(workspaceId, system.id, adminId, Effect.void),
-		).rejects.toBeInstanceOf(BotStore.SystemBotImmutable);
+		await expect(repository.remove(workspaceId, system.id)).rejects.toBeInstanceOf(
+			BotStore.SystemBotImmutable,
+		);
 	});
 
 	it("does not change a system bot as a bot members talk to", async () => {

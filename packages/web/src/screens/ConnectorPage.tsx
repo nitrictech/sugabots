@@ -44,6 +44,7 @@ import {
 	SettingsTestOutcome,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
+import { Toggle } from "@/ui/toggle.tsx";
 import { GitHubRepositoriesGroup } from "./GitHubConnect.tsx";
 import { AccessToggle } from "./tool-access.tsx";
 
@@ -152,6 +153,23 @@ function ConnectorCard({
 			}
 		>
 			{error && <Alert>{failureMessage(error)}</Alert>}
+			{canManage && (
+				<SettingsGroup label="Access" headingLevel={2}>
+					<SettingsRow
+						label="Connector on"
+						trailing={
+							<Toggle
+								label="Connector on"
+								checked={connector.enabled !== false}
+								disabled={actions.update.isPending}
+								onChange={(enabled) =>
+									actions.update.mutate({ connectorId: connector.id, json: { enabled } })
+								}
+							/>
+						}
+					/>
+				</SettingsGroup>
+			)}
 			<SettingsGroup
 				label={connector.auth === "oauth" || !isServer ? "Account" : "Connector"}
 				headingLevel={2}

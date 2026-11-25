@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
 /** Longer than any IANA name, short enough that nothing slow runs on a long one. */
-export const MAX_TIMEZONE_CHARACTERS = 100;
+const MAX_TIMEZONE_CHARACTERS = 100;
 
 /**
  * An IANA time zone, such as `Australia/Sydney`. Named zones only: an offset

@@ -16,11 +16,18 @@ import {
 	workspaceApprovalsSchema,
 } from "../chats.ts";
 import { ChatFileNotFound, InvalidCursor } from "../errors/chat-reads.ts";
-import { ActionForbidden, BotCannotReach, ResourceHidden } from "../errors/proofs.ts";
+import {
+	ActionForbidden,
+	ApprovalNeeded,
+	ApprovalRefused,
+	BotCannotReach,
+	ResourceHidden,
+} from "../errors/proofs.ts";
 import { listedFileSchema, listedFileVersionSchema, writtenFileSchema } from "../files.ts";
 import { chatContextSchema, chatDetailsSchema, chatHistoryQuerySchema } from "../messages.ts";
-import { uuidSchema } from "../uuid.ts";
-import { workspaceIdOrSlugSchema } from "../workspaces.ts";
+import { isoTimestampSchema } from "../timestamps.ts";
+import { uuidOrStringSchema, uuidSchema } from "../uuid.ts";
+import { workspaceIdOrSlugSchema, workspaceRoleSchema } from "../workspaces.ts";
 import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
 
@@ -31,7 +38,7 @@ const reachRefusals = [ResourceHidden, BotCannotReach] as const;
 const workspaceRefusals = [ResourceHidden, ActionForbidden] as const;
 
 /** A chat, by its id. */
-const aChat = Schema.Struct({ chatId: Schema.String });
+const aChat = Schema.Struct({ chatId: uuidOrStringSchema });
 
 /** A workspace, by its id or its address. */
 const aWorkspace = Schema.Struct({ workspace: workspaceIdOrSlugSchema });
@@ -62,11 +69,152 @@ const chatFileSchema = Schema.Struct({
 	stream: fileBytesSchema,
 });
 
+export const SEARCH_HISTORY_TOOL = "search_history";
+export const READ_CHAT_FILE_TOOL = "read_chat_file";
+export const READ_DOCS_TOOL = "read_docs";
+const WORKSPACE_ROLE_TOOL = "workspace_role";
+export const HISTORY_SEARCH_MAX_MATCHES = 10;
+export const CHAT_FILE_READ_DEFAULT_LINES = 2_000;
+
+const turnReadErrors = [...reachRefusals, ApprovalNeeded, ApprovalRefused] as const;
+const refused = Schema.Struct({ refused: Schema.String });
+const memberRole = Schema.Struct({
+	name: Schema.String,
+	handle: Schema.String,
+	role: Schema.Union([workspaceRoleSchema, Schema.Literal("none")]),
+});
+
 export const chatReadsContracts = {
+	"chats.searchHistory": OperationContract.make("chats.searchHistory", {
+		description: `Search chat messages by words, time range, or both. Leave out chat to search here, give a chat id to search there, or pass "all" to search chats you can reach. In this chat, the search covers earlier messages from before the part you read word for word. Returns up to ${HISTORY_SEARCH_MAX_MATCHES} messages, best first with words or oldest first with only a time range. When searching across chats, each result includes its chat id.`,
+		input: Schema.Struct({
+			chat: Schema.optional(
+				Schema.Union([uuidSchema, Schema.Literal("all")]).annotate({
+					description: 'A chat id, or "all" for chats within reach. Leave out to search this chat.',
+				}),
+			),
+			query: Schema.optional(
+				Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)).annotate({
+					description:
+						'Words to look for, like "hotel budget". Supports "quoted phrases", OR, and -excluded words.',
+				}),
+			),
+			after: Schema.optional(
+				isoTimestampSchema.annotate({
+					description: "Only messages written at or after this time, like 2026-05-15T17:00:00Z.",
+				}),
+			),
+			before: Schema.optional(
+				isoTimestampSchema.annotate({
+					description: "Only messages written before this time, like 2026-05-15T18:00:00Z.",
+				}),
+			),
+		}),
+		output: Schema.Union([
+			Schema.Struct({
+				messages: Schema.Array(
+					Schema.Struct({
+						author: Schema.String,
+						at: Schema.String,
+						text: Schema.String,
+						chatId: Schema.optional(uuidSchema),
+					}),
+				),
+				more: Schema.Boolean,
+			}),
+			refused,
+		]),
+		errors: turnReadErrors,
+		changes: false,
+	}),
+	"chats.readChatFile": OperationContract.make("chats.readChatFile", {
+		description: `Read a file in a chat you can reach, such as an attachment or a kept tool result. Returns up to ${CHAT_FILE_READ_DEFAULT_LINES} numbered lines with the file's total lines and, when there is more, where to continue. Give pattern to find lines containing it. A supported image is shown if your model can see images.`,
+		input: Schema.Struct({
+			file: uuidSchema.annotate({ description: "The file's id." }),
+			chat: Schema.optional(
+				uuidSchema.annotate({
+					description: "The id of the chat that holds the file, if known.",
+				}),
+			),
+			offset: Schema.optional(
+				Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({
+					description: "The line to start at, counting from 1. Defaults to the first.",
+				}),
+			),
+			limit: Schema.optional(
+				Schema.Int.check(
+					Schema.isBetween({
+						minimum: 1,
+						maximum: CHAT_FILE_READ_DEFAULT_LINES,
+					}),
+				).annotate({
+					description: `The most lines to return. Defaults to ${CHAT_FILE_READ_DEFAULT_LINES}.`,
+				}),
+			),
+			pattern: Schema.optional(
+				Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)).annotate({
+					description:
+						"Return only lines containing this text, ignoring case, searching from offset.",
+				}),
+			),
+		}),
+		output: Schema.Union([
+			Schema.Struct({
+				lines: Schema.String,
+				totalLines: Schema.Int,
+				continueFrom: Schema.optional(Schema.Int),
+			}),
+			Schema.Struct({
+				text: Schema.String,
+				images: Schema.Array(Schema.Struct({ data: Schema.String, mediaType: Schema.String })),
+			}),
+			refused,
+		]),
+		errors: turnReadErrors,
+		changes: false,
+	}),
+	"chats.readDocs": OperationContract.make("chats.readDocs", {
+		description:
+			"Read Sugabots' documentation when someone asks how to use it or how it works. Give a page and, to read only part of it, its section headings.",
+		input: Schema.Struct({
+			page: Schema.String.check(Schema.isMaxLength(200)).annotate({
+				description: "The page's name, as listed, like automations.",
+			}),
+			sections: Schema.optional(
+				Schema.Array(Schema.String.check(Schema.isMaxLength(200)))
+					.check(Schema.isMaxLength(20))
+					.annotate({
+						description: "The section headings, as listed. Leave out for the whole page.",
+					}),
+			),
+		}),
+		output: Schema.Union([Schema.Struct({ markdown: Schema.String }), refused]),
+		errors: turnReadErrors,
+		changes: false,
+	}),
+	"chats.workspaceRole": OperationContract.make("chats.workspaceRole", {
+		description:
+			"Look up a chat participant's workspace role and who can change it. Use when someone can't do something, a setting or tool seems missing, or they want to know who to ask. The docs explain what each role may do.",
+		input: Schema.Struct({
+			member: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
+				description: "The handle of a member in this chat, like @sam.",
+			}),
+		}),
+		output: Schema.Union([
+			Schema.Struct({
+				member: memberRole,
+				canHelp: Schema.Array(memberRole),
+				more: Schema.Boolean,
+			}),
+			refused,
+		]),
+		errors: turnReadErrors,
+		changes: false,
+	}),
 	"chats.projectChats": OperationContract.make("chats.projectChats", {
 		description:
 			"List a project's chats and automations, newest message first, with what you haven't read. A bot's are its default project's.",
-		input: Schema.Struct({ projectId: Schema.String }),
+		input: Schema.Struct({ projectId: uuidOrStringSchema }),
 		output: projectChatListSchema,
 		errors: reachRefusals,
 		changes: false,
@@ -98,7 +246,7 @@ export const chatReadsContracts = {
 	"chats.messages": OperationContract.make("chats.messages", {
 		description:
 			"A page of a chat's messages and its automations' runs, newest last, before the cursor given.",
-		input: Schema.Struct({ chatId: Schema.String, ...chatPageQuerySchema.fields }),
+		input: Schema.Struct({ chatId: uuidOrStringSchema, ...chatPageQuerySchema.fields }),
 		output: chatMessagesPageSchema,
 		errors: [...reachRefusals, InvalidCursor],
 		changes: false,
@@ -106,14 +254,14 @@ export const chatReadsContracts = {
 	"chats.history": OperationContract.make("chats.history", {
 		description:
 			"A page of the automation runs listed in a chat, newest activity first, before the cursor given.",
-		input: Schema.Struct({ chatId: Schema.String, ...chatPageQuerySchema.fields }),
+		input: Schema.Struct({ chatId: uuidOrStringSchema, ...chatPageQuerySchema.fields }),
 		output: chatHistoryPageSchema,
 		errors: [...reachRefusals, InvalidCursor],
 		changes: false,
 	}),
 	"chats.file": OperationContract.make("chats.file", {
 		description: "A file attached to a message in a chat, with its own media type.",
-		input: Schema.Struct({ chatId: Schema.String, fileId: Schema.String }),
+		input: Schema.Struct({ chatId: uuidOrStringSchema, fileId: uuidOrStringSchema }),
 		output: chatFileSchema,
 		errors: [...reachRefusals, ChatFileNotFound],
 		changes: false,
@@ -121,7 +269,7 @@ export const chatReadsContracts = {
 	"chats.get": OperationContract.make("chats.get", {
 		description:
 			"A chat with a page of its messages, who has taken part and read it, its project's bots, and what you may decide of its approvals.",
-		input: Schema.Struct({ chatId: Schema.String, ...chatHistoryQuerySchema.fields }),
+		input: Schema.Struct({ chatId: uuidOrStringSchema, ...chatHistoryQuerySchema.fields }),
 		output: chatDetailsSchema,
 		errors: [...reachRefusals, InvalidCursor],
 		changes: false,
@@ -180,21 +328,30 @@ const readInTurn = {
 		"A bot reads the chat it works in as its turn's context; reading other chats waits for tools to become operations.",
 } as const;
 
-/** Held back: what waits for a member, which a Personal Assistant reads for its member through its own tool. */
+/** Covered: what waits for a member, which a Personal Assistant's workspace guide tells them. */
 const whatWaitsForYou = {
-	kind: "heldBack",
-	reason:
-		"It is what waits for a member; until tools become operations, a Personal Assistant's workspace_guide tool tells its member, through AssistantGuide.",
+	kind: "coveredBy",
+	operation: "workspaces.guide",
+	reason: "It is what waits for a member, which a Personal Assistant's workspace guide tells them.",
 } as const;
 
-/** Held back until tools become operations: a bot's file tools read the files of the chat it works in. */
 const readByFileTools = {
 	kind: "heldBack",
 	reason:
-		"Until tools become operations: a bot's file tools read the files written where it works, through Files.Authoring.",
+		"Members use this to browse files and versions. The file tools read written files at their current versions.",
 } as const;
 
+const turnReadTool = (tool: string) =>
+	({
+		http: { kind: "heldBack", reason: "Formats a read for the bot in a turn." },
+		botLoop: { kind: "offered", tool, offeredIn: "everywhere", approval: { kind: "never" } },
+	}) as const;
+
 export const chatReadsExposure = {
+	"chats.searchHistory": turnReadTool(SEARCH_HISTORY_TOOL),
+	"chats.readChatFile": turnReadTool(READ_CHAT_FILE_TOOL),
+	"chats.readDocs": turnReadTool(READ_DOCS_TOOL),
+	"chats.workspaceRole": turnReadTool(WORKSPACE_ROLE_TOOL),
 	"chats.projectChats": {
 		http: { kind: "offered", endpoint: "chats.projectChats" },
 		botLoop: readInTurn,

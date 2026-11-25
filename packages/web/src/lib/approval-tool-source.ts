@@ -29,8 +29,9 @@ export function useApprovalToolSource(request: ApprovalRequest) {
 export function useAskedIn(request: ApprovalRequest) {
 	const { data: projects } = useProjects();
 	const project = projects?.find((candidate) => candidate.id === request.projectId);
+	const projectName = request.projectName ?? project?.name;
 	const askedIn = [
-		project && `in ${project.name}`,
+		projectName && `in ${projectName}`,
 		formatTimeAfterVerb(new Date(request.call.startedAt), new Date()),
 	]
 		.filter(Boolean)

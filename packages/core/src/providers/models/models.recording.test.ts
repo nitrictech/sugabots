@@ -1,12 +1,16 @@
-import { jsonSchema, tool } from "ai";
-import { Effect, ManagedRuntime } from "effect";
+import type { ProviderModelCapability } from "@sugabots/contracts";
+import { jsonSchema, type ToolResultPart, type ToolSet, tool } from "ai";
+import { Cause, Effect, Exit, ManagedRuntime, Option } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ModelRequests } from "../../accounting/model-requests.ts";
+import { seedMember, seedWorkspace } from "../../authentication/seed.test-support.ts";
 import { withImages } from "../../chats/tools/images.ts";
 import { effectRunner } from "../../database/database.ts";
-import { noDatabase } from "../../database/testing.ts";
+import { providerModel } from "../../database/schema.ts";
+import { noDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import type { ProviderIdentity } from "../model-providers/dialects/index.ts";
 import { IMAGE_MOVED_NOTE } from "../model-providers/dialects/tool-images.ts";
+import { ModelProviderStore } from "../model-providers/model-provider-store.ts";
 import { Models } from "./models.ts";
 import { resolvedModel } from "./testing.ts";
 
@@ -69,6 +73,8 @@ const OPENAI = {
 function modelAnswering(
 	responses: Array<(recorded: readonly Recorded[]) => Response>,
 	provider: ProviderIdentity = OPENAI,
+	capabilities: readonly ProviderModelCapability[] = [],
+	resolve?: ModelProviderStore.Interface["resolve"],
 ) {
 	const recorded: Recorded[] = [];
 	/** Each request's body, as the provider was sent it. */
@@ -79,16 +85,21 @@ function modelAnswering(
 	const model = Models.make({
 		modelProviders: {
 			renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
-			resolve: () =>
-				Effect.succeed(
-					resolvedModel({
-						providerId: PROVIDER_ID,
-						...provider,
-						apiKey: "secret",
-						headers: {},
-						configurationUpdatedAt: new Date(0),
-					}),
-				),
+			resolve:
+				resolve ??
+				(() =>
+					Effect.succeed(
+						resolvedModel(
+							{
+								providerId: PROVIDER_ID,
+								...provider,
+								apiKey: "secret",
+								headers: {},
+								configurationUpdatedAt: new Date(0),
+							},
+							capabilities,
+						),
+					)),
 		},
 		httpClients: {
 			for: (endpoint) => async (url, init) => {
@@ -123,7 +134,6 @@ const input: Models.StreamRequest = {
 			execute: async () => "It is here.",
 		}),
 	},
-	maxSteps: 8,
 };
 
 /** Reads the whole response: its text, and how it ended. */
@@ -133,9 +143,9 @@ const answer = (model: ReturnType<typeof modelAnswering>["model"], request = inp
 			Effect.gen(function* () {
 				const generated = yield* model.stream(request);
 				let text = "";
-				yield* Models.forEachDelta(generated.text, (delta) =>
+				yield* Models.forEachDelta(generated.deltas, (delta) =>
 					Effect.sync(() => {
-						text += delta;
+						text += delta.kind === "text" ? delta.text : "";
 					}),
 				);
 				return { text, finished: yield* Effect.exit(generated.finished) };
@@ -143,11 +153,74 @@ const answer = (model: ReturnType<typeof modelAnswering>["model"], request = inp
 		),
 	);
 
+/**
+ * Makes a turn's two steps' requests as the bot loop does: the first, offered
+ * the tools with nothing to run them with; then each tool call it made, from
+ * `request.tools`; then the second request, continuing from the first's
+ * answer and the calls' results, told it is the last when `lastStep` says so.
+ * Returns how the second ended.
+ */
+async function answerAsTheLoop(
+	model: ReturnType<typeof modelAnswering>["model"],
+	request: Models.StreamRequest = input,
+	{ lastStep = false }: { lastStep?: boolean } = {},
+) {
+	const tools = request.tools ?? {};
+	const offered: ToolSet = Object.fromEntries(
+		Object.entries(tools).map(([name, { execute: _runsHere, ...definition }]) => [
+			name,
+			definition,
+		]),
+	);
+	const first = await run(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const generated = yield* model.stream({ ...request, tools: offered, step: 0 });
+				yield* Models.forEachDelta(generated.deltas, () => Effect.void);
+				return yield* generated.finished;
+			}),
+		),
+	);
+	const results = await Promise.all(
+		first.toolCalls.map(async (call): Promise<ToolResultPart> => {
+			const called = tools[call.toolName];
+			const output: unknown = await called?.execute?.(
+				call.input as never,
+				{
+					toolCallId: call.toolCallId,
+					messages: [],
+				} as never,
+			);
+			return {
+				type: "tool-result",
+				toolCallId: call.toolCallId,
+				toolName: call.toolName,
+				output: called?.toModelOutput
+					? await called.toModelOutput({
+							toolCallId: call.toolCallId,
+							input: call.input as never,
+							output: output as never,
+						})
+					: typeof output === "string"
+						? { type: "text", value: output }
+						: { type: "json", value: output as never },
+			};
+		}),
+	);
+	return answer(model, {
+		...request,
+		tools: offered,
+		step: 1,
+		lastRequest: lastStep,
+		continuationMessages: [...first.responseMessages, { role: "tool", content: results }],
+	});
+}
+
 describe("recording model requests", () => {
-	it("records each request a turn makes, with what it used and what it cost", async () => {
+	it("records each request a turn makes, as the step it is, with what it used and what it cost", async () => {
 		const { model, recorded } = modelAnswering([toolCall, reply]);
 
-		await answer(model);
+		await answerAsTheLoop(model);
 
 		expect(recorded).toMatchObject([
 			{
@@ -231,7 +304,7 @@ describe("a rate-limited provider", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const generated = yield* model.stream(input);
-					yield* Models.forEachDelta(generated.text, () => Effect.void);
+					yield* Models.forEachDelta(generated.deltas, () => Effect.void);
 				}),
 			).pipe(Effect.timeoutOption("50 millis")),
 		);
@@ -241,11 +314,11 @@ describe("a rate-limited provider", () => {
 	});
 });
 
-describe("a response at its step limit", () => {
-	it("tells its last model request to answer, changing nothing earlier calls sent", async () => {
+describe("a turn's last step", () => {
+	it("tells its model request to answer, changing nothing earlier requests sent", async () => {
 		const { model, sent } = modelAnswering([toolCall, reply]);
 
-		const { text } = await answer(model, { ...input, maxSteps: 2 });
+		const { text } = await answerAsTheLoop(model, input, { lastStep: true });
 
 		expect(text).toBe("Found it.");
 		expect(sent).toHaveLength(2);
@@ -281,7 +354,11 @@ describe("images a tool returns", () => {
 			toModelOutput: ({ output }) => withImages(output, true),
 		});
 
-		await answer(model, { ...input, model: "google/gemini-test", tools: { lookup: showing } });
+		await answerAsTheLoop(model, {
+			...input,
+			model: "google/gemini-test",
+			tools: { lookup: showing },
+		});
 
 		const [, second = {}] = sent;
 		expect((second.messages as unknown[]).slice(-2)).toEqual([
@@ -351,7 +428,7 @@ describe("prompt caching", () => {
 			apiFormat: "openai",
 		});
 
-		await answer(model, { ...turn, model: "anthropic/claude-test" });
+		await answerAsTheLoop(model, { ...turn, model: "anthropic/claude-test" });
 
 		// System text, history, turn.
 		expect(markedMessages(sent[0])).toEqual([true, false, true, true]);
@@ -379,7 +456,7 @@ describe("prompt caching", () => {
 			apiFormat: "openai",
 		});
 
-		await answer(model, { ...turn, model: "anthropic/claude-test" });
+		await answerAsTheLoop(model, { ...turn, model: "anthropic/claude-test" });
 
 		// System text, history, turn, the tool calls, then one message per result.
 		expect(markedMessages(sent[1])).toEqual([true, false, true, false, false, false, false, true]);
@@ -397,11 +474,363 @@ describe("prompt caching", () => {
 		async (_name, provider, modelId) => {
 			const { model, sent } = modelAnswering([toolCall, reply], provider);
 
-			await answer(model, { ...turn, model: modelId });
+			await answerAsTheLoop(model, { ...turn, model: modelId });
 
 			expect(JSON.stringify(sent)).not.toContain("cache_control");
 		},
 	);
+});
+
+describe("thinking options", () => {
+	const ANTHROPIC = {
+		builtIn: "anthropic",
+		baseUrl: "https://api.anthropic.com",
+		apiFormat: "anthropic",
+	} satisfies ProviderIdentity;
+	const refused = () => new Response("Unavailable", { status: 503 });
+
+	it.each(["claude-sonnet-4-5", "claude-haiku-4-5", "claude-3-haiku", "claude-unknown"])(
+		"sends no thinking options to %s",
+		async (modelId) => {
+			const { model, sent } = modelAnswering([refused], ANTHROPIC, ["thinking"]);
+			await answer(model, { ...input, model: modelId });
+			expect(sent[0]).toBeDefined();
+			expect(sent[0]).not.toHaveProperty("thinking");
+		},
+	);
+
+	it("asks for adaptive thinking and replays an unchanged signed Claude block", async () => {
+		const { model, sent } = modelAnswering([refused], ANTHROPIC, ["thinking"]);
+		const block = { type: "thinking", thinking: "Check this first.", signature: "opaque-clause" };
+		await answer(model, {
+			...input,
+			model: "claude-sonnet-4-6",
+			continuationMessages: [
+				{
+					role: "assistant",
+					content: [
+						{
+							type: "reasoning",
+							text: block.thinking,
+							providerOptions: { anthropic: { signature: block.signature } },
+						},
+						{ type: "tool-call", toolCallId: "call-1", toolName: "lookup", input: {} },
+					],
+				},
+				{
+					role: "tool",
+					content: [
+						{
+							type: "tool-result",
+							toolCallId: "call-1",
+							toolName: "lookup",
+							output: { type: "text", value: "Found." },
+						},
+					],
+				},
+			],
+		});
+		expect(sent[0]).toMatchObject({
+			thinking: { type: "adaptive", display: "summarized" },
+			messages: expect.arrayContaining([
+				{
+					role: "assistant",
+					content: [block, expect.objectContaining({ type: "tool_use", id: "call-1" })],
+				},
+			]),
+		});
+	});
+
+	it("asks OpenAI for a visible summary and replays the opaque item using Responses", async () => {
+		const { model, sent, addressed } = modelAnswering([refused], OPENAI, ["thinking"]);
+		await answer(model, {
+			...input,
+			model: "o4-mini",
+			continuationMessages: [
+				{
+					role: "assistant",
+					content: [
+						{
+							type: "reasoning",
+							text: "Check this first.",
+							providerOptions: {
+								openai: { itemId: "rs_1", reasoningEncryptedContent: "encrypted" },
+							},
+						},
+					],
+				},
+			],
+		});
+		expect(addressed[0]?.url).toBe("https://api.openai.com/v1/responses");
+		expect(sent[0]).toMatchObject({
+			store: false,
+			reasoning: { summary: "auto" },
+			input: expect.arrayContaining([
+				expect.objectContaining({ type: "reasoning", id: "rs_1", encrypted_content: "encrypted" }),
+			]),
+		});
+		expect(sent[0]?.reasoning).not.toHaveProperty("effort");
+	});
+
+	it("asks OpenRouter for its default thinking budget", async () => {
+		const { model, sent } = modelAnswering(
+			[reply],
+			{
+				builtIn: "openrouter",
+				baseUrl: "https://openrouter.ai/api/v1",
+				apiFormat: "openai",
+			},
+			["thinking"],
+		);
+		await answer(model, { ...input, model: "openai/o4-mini" });
+		expect(sent[0]?.reasoning).toEqual({ enabled: true });
+	});
+});
+
+const responsesSse = (...events: Record<string, unknown>[]) =>
+	new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+		headers: { "content-type": "text/event-stream" },
+	});
+
+const responsesReply = () =>
+	responsesSse(
+		{ type: "response.output_item.added", output_index: 0, item: { type: "message", id: "msg_1" } },
+		{ type: "response.output_text.delta", item_id: "msg_1", output_index: 0, delta: "Found it." },
+		{ type: "response.output_item.done", output_index: 0, item: { type: "message", id: "msg_1" } },
+		{ type: "response.completed", response: {} },
+	);
+
+const unsupportedResponsesParameter = (param: string) => () =>
+	Response.json(
+		{
+			error: {
+				message: "The request cannot use this parameter.",
+				type: "invalid_request_error",
+				code: "unsupported_value",
+				param,
+			},
+		},
+		{ status: 400 },
+	);
+
+describe("recorded thinking paths", () => {
+	it("answers after retrying a Responses summary refusal once without the summary", async () => {
+		const { model, sent, recorded } = modelAnswering(
+			[unsupportedResponsesParameter("reasoning.summary"), responsesReply],
+			OPENAI,
+			["thinking"],
+		);
+
+		const { text, finished } = await answer(model, { ...input, model: "o4-mini" });
+
+		expect(text).toBe("Found it.");
+		expect(finished._tag).toBe("Success");
+		expect(sent).toHaveLength(2);
+		expect(sent[0]?.reasoning).toMatchObject({ summary: "auto" });
+		expect(sent[1]).not.toHaveProperty("reasoning.summary");
+		expect(sent[1]).toMatchObject({ store: false, include: ["reasoning.encrypted_content"] });
+		expect(recorded.map(({ outcome }) => outcome)).toEqual(["completed"]);
+	});
+
+	it.each([
+		["reasoning.summary", 2],
+		["max_output_tokens", 1],
+	] as const)("limits Responses retries when %s is refused", async (param, attempts) => {
+		const refusal = unsupportedResponsesParameter(param);
+		const { model, sent } = modelAnswering([refusal, refusal, responsesReply], OPENAI, [
+			"thinking",
+		]);
+		const { finished } = await answer(model, { ...input, model: "o4-mini" });
+		if (Exit.isSuccess(finished)) throw new Error("The provider refused this request");
+		expect(Option.getOrUndefined(Cause.findErrorOption(finished.cause))).toBeInstanceOf(
+			Models.ProviderRejectedRequest,
+		);
+		expect(sent).toHaveLength(attempts);
+	});
+
+	it("classifies a Responses failure from its nested error code", async () => {
+		const { model } = modelAnswering(
+			[
+				() =>
+					responsesSse({
+						type: "response.failed",
+						sequence_number: 1,
+						response: { error: { code: "context_length_exceeded", message: "Input too large." } },
+					}),
+			],
+			OPENAI,
+			["thinking"],
+		);
+
+		const { finished } = await answer(model, { ...input, model: "o4-mini" });
+
+		if (Exit.isSuccess(finished)) throw new Error("Responses accepted oversized input");
+		expect(Option.getOrUndefined(Cause.findErrorOption(finished.cause))).toBeInstanceOf(
+			Models.ProviderContextLengthExceeded,
+		);
+	});
+
+	it("keeps non-thinking OpenAI models on Chat Completions", async () => {
+		const { model, sent, addressed } = modelAnswering([reply]);
+		const { text, finished } = await answer(model, { ...input, model: "gpt-4.1" });
+		expect(finished._tag).toBe("Success");
+		expect(text).toBe("Found it.");
+		expect(addressed[0]?.url).toBe("https://api.openai.com/v1/chat/completions");
+		expect(sent[0]).not.toHaveProperty("reasoning");
+	});
+
+	it("combines the ChatGPT system instructions and stateless options with its thinking summary", async () => {
+		const { model, sent, addressed } = modelAnswering(
+			[responsesReply],
+			{
+				builtIn: "chatgpt",
+				baseUrl: "https://chatgpt.com/backend-api/codex",
+				apiFormat: "openai",
+			},
+			["thinking"],
+		);
+
+		const { text, finished } = await answer(model, { ...input, model: "gpt-5-codex" });
+
+		expect(text).toBe("Found it.");
+		expect(finished._tag).toBe("Success");
+		expect(addressed[0]?.url).toBe("https://chatgpt.com/backend-api/codex/responses");
+		expect(sent[0]).toMatchObject({
+			instructions: input.system,
+			store: false,
+			include: ["reasoning.encrypted_content"],
+			reasoning: { summary: "auto" },
+		});
+	});
+
+	const withLookup = (delta: Record<string, unknown>) => () =>
+		streamed(
+			{
+				...delta,
+				tool_calls: [
+					{
+						index: 0,
+						id: "call-1",
+						type: "function",
+						function: { name: "lookup", arguments: "{}" },
+					},
+				],
+			},
+			"tool_calls",
+			{ prompt_tokens: 100, completion_tokens: 20 },
+		);
+
+	it("replays thinking as reasoning_content beside the OpenAI-compatible tool call", async () => {
+		const { model, sent } = modelAnswering(
+			[withLookup({ reasoning_content: "Look up the record." }), reply],
+			{ builtIn: "deepseek", baseUrl: "https://api.deepseek.com/v1", apiFormat: "openai" },
+			["thinking"],
+		);
+
+		const { text, finished } = await answerAsTheLoop(model, {
+			...input,
+			model: "deepseek-reasoner",
+		});
+
+		expect(finished._tag).toBe("Success");
+		expect(text).toBe("Found it.");
+		expect(sent[1]?.messages).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					role: "assistant",
+					reasoning_content: "Look up the record.",
+					tool_calls: [expect.objectContaining({ id: "call-1" })],
+				}),
+				expect.objectContaining({ role: "tool", tool_call_id: "call-1", content: "It is here." }),
+			]),
+		);
+	});
+
+	it("replays OpenRouter's signed reasoning_details beside the tool call", async () => {
+		const detail = {
+			type: "reasoning.text",
+			text: "Look up the record.",
+			signature: "signature-1",
+			format: "anthropic-claude-v1",
+			index: 0,
+		};
+		const { model, sent } = modelAnswering(
+			[withLookup({ reasoning_details: [detail] }), reply],
+			{ builtIn: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiFormat: "openai" },
+			["thinking"],
+		);
+
+		const { text, finished } = await answerAsTheLoop(model, {
+			...input,
+			model: "anthropic/claude-sonnet-4.6",
+		});
+
+		expect(finished._tag).toBe("Success");
+		expect(text).toBe("Found it.");
+		expect(sent[1]?.messages).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					role: "assistant",
+					reasoning_details: [expect.objectContaining(detail)],
+					tool_calls: [expect.objectContaining({ id: "call-1" })],
+				}),
+			]),
+		);
+	});
+});
+
+describe.skipIf(!process.env.DATABASE_URL)("a workspace's per-model Thinking switch", () => {
+	it.each([
+		["anthropic", "claude-sonnet-4-6", "thinking"],
+		["openai", "gpt-5", "reasoning"],
+		["gemini", "gemini-2.5-flash", "generationConfig.thinkingConfig"],
+	] as const)("honors disabledCapabilities for %s", async (builtIn, modelId, field) => {
+		const store = await runOnPostgres(
+			Effect.provide(ModelProviderStore.Service, ModelProviderStore.layer),
+		);
+		const workspaceId = await seedWorkspace();
+		const memberId = await seedMember(workspaceId, "admin");
+		const provider = await runOnPostgres(
+			store.create(workspaceId, {
+				createdById: memberId,
+				provider: { builtIn, apiKey: "test-key" },
+			}),
+		);
+		await runOnPostgres(store.update(workspaceId, provider.id, { active: true }, memberId));
+		const [modelRow] = await onDatabase((db) =>
+			db
+				.insert(providerModel)
+				.values({
+					workspaceId,
+					providerId: provider.id,
+					modelId,
+					source: "manual",
+					capabilities: ["thinking"],
+					enabled: true,
+				})
+				.returning({ id: providerModel.id }),
+		);
+		if (!modelRow) throw new Error("Failed to add the model");
+		const providerUnavailable = () => new Response("Unavailable", { status: 503 });
+		const { model, sent } = modelAnswering(
+			[providerUnavailable, providerUnavailable],
+			provider,
+			[],
+			store.resolve,
+		);
+
+		await answer(model, { ...input, workspaceId, model: modelId });
+		await runOnPostgres(
+			store.updateModel(workspaceId, provider.id, modelRow.id, {
+				disabledCapabilities: ["thinking"],
+			}),
+		);
+		await answer(model, { ...input, workspaceId, model: modelId });
+
+		expect(sent).toHaveLength(2);
+		expect(sent[0]).toHaveProperty(field);
+		expect(sent[1]).not.toHaveProperty(field);
+	});
 });
 
 describe("Gemini", () => {
@@ -430,27 +859,42 @@ describe("Gemini", () => {
 			[
 				() =>
 					geminiStreamed([
+						{ text: "Look it up first.", thought: true, thoughtSignature: "signature-thinking" },
 						{ functionCall: { name: "lookup", args: {} }, thoughtSignature: "signature-1" },
 					]),
 				() => geminiStreamed([{ text: "Found it." }]),
 			],
 			GEMINI,
+			["thinking"],
 		);
 
-		const { text, finished } = await answer(model, { ...input, model: "gemini-test" });
+		const { text, finished } = await answerAsTheLoop(model, {
+			...input,
+			model: "gemini-2.5-flash",
+		});
 
 		expect(finished._tag).toBe("Success");
 		expect(text).toBe("Found it.");
 		expect(addressed).toEqual([
 			{
-				url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:streamGenerateContent?alt=sse",
+				url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
 				boundTo: "https://generativelanguage.googleapis.com/v1beta",
 			},
 			expect.objectContaining({ boundTo: "https://generativelanguage.googleapis.com/v1beta" }),
 		]);
+		expect(sent[0]).toMatchObject({
+			generationConfig: { thinkingConfig: { includeThoughts: true, thinkingBudget: -1 } },
+		});
 		expect(sent[1]?.contents).toContainEqual({
 			role: "model",
-			parts: [expect.objectContaining({ thoughtSignature: "signature-1" })],
+			parts: [
+				expect.objectContaining({
+					text: "Look it up first.",
+					thought: true,
+					thoughtSignature: "signature-thinking",
+				}),
+				expect.objectContaining({ thoughtSignature: "signature-1" }),
+			],
 		});
 	});
 

@@ -352,6 +352,9 @@ export const computerHostSchema = Schema.String.check(
 	),
 );
 
+/** The tool a bot asks for its computer to reach another host with, which its project's managers decide. */
+export const HOST_REQUEST_TOOL = "request_host";
+
 /** A host a workspace let every computer reach, or a project its own, beyond the trusted ones. */
 const computerAddedHostSchema = Schema.Struct({
 	host: computerHostSchema,

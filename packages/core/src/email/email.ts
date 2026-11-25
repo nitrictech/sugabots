@@ -3,6 +3,7 @@ export * as Email from "./email.ts";
 import { Config, Context, Data, Effect, Layer, Option } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { ServerSettings } from "../server-settings/server-settings.ts";
+import { processLayer, Tier } from "../tiers.ts";
 import { fromConsole } from "./implementations/console.ts";
 import { fromResend } from "./implementations/resend.ts";
 import { fromWebhook, type WebhookConfig } from "./implementations/webhook.ts";
@@ -11,7 +12,9 @@ export interface Interface {
 	readonly send: (message: Message) => Effect.Effect<void, DeliveryFailed>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Email") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Email") {
+	declare readonly [Tier]: "process";
+}
 
 /** Select the implementation using `EMAIL_PROVIDER`, defaults to the console. */
 export const make = Effect.gen(function* () {
@@ -28,7 +31,7 @@ export const make = Effect.gen(function* () {
 	}
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 export const layer = layerNoDeps.pipe(Layer.provide(FetchHttpClient.layer));
 

@@ -141,7 +141,7 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 });
 
 /** The turn that wrote a bot's reply, and what `helpersAskedBy` reads the reply against. */
-export interface RepliedTurn {
+interface RepliedTurn {
 	reason: TurnReason | null;
 	/** The message the turn answered: for a helper's turn, the message that asked it. */
 	triggerMessageId: string;

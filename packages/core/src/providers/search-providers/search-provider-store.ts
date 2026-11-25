@@ -9,6 +9,7 @@ import { Context, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { type SearchProviderRow, searchProvider } from "../../database/schema.ts";
 import { Secrets } from "../../secrets/secrets.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import type { SearchProviderAccess } from "./search-provider-access.ts";
 import { searchProviderRowOf } from "./search-provider-reads.ts";
@@ -55,7 +56,9 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/SearchProviderStore",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("SearchProviderStore");
@@ -226,4 +229,4 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));

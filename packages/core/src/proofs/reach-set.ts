@@ -3,8 +3,10 @@ import { reachesBotFor, reachesChatFor, reachesProjectFor } from "../authorizati
 import { bot, project, projectBot } from "../database/schema.ts";
 import { outerColumn } from "../database/sql.ts";
 import type { Principal } from "../principal.ts";
+import { botRemovalStarted } from "./facts.ts";
 import type { InWorkspace } from "./in-workspace.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
+import { webhookReachesChat } from "./webhook-chats.ts";
 
 /** The columns of a chat, or an alias of `placedChat`, that whether it is reached is decided from. */
 export interface ChatColumns {
@@ -48,7 +50,7 @@ const projectInWorkspace = (projectId: SQLWrapper, workspaceId: string) =>
  * member reaches, so only acting for `askerId`.
  */
 const botReachesProject = (projectId: SQLWrapper, botId: string, askerId: string | null) =>
-	sql<boolean>`(
+	sql<boolean>`(not ${botRemovalStarted(sql`${botId}::uuid`)} and (
 		exists (select 1 from ${bot} as reach_set_assistant where reach_set_assistant.id = ${botId}::uuid and reach_set_assistant.assistant_of = ${askerId}::uuid)
 		or exists (
 			select 1 from ${project} as reach_set_led
@@ -59,7 +61,7 @@ const botReachesProject = (projectId: SQLWrapper, botId: string, askerId: string
 			select 1 from ${projectBot} as reach_set_bot
 			where reach_set_bot.project_id = ${outerColumn(projectId)} and reach_set_bot.bot_id = ${botId}::uuid
 		)
-	)`;
+	))`;
 
 /** SQL for "the bot `botId` names is the bot `ownBotId`, or one the project `projectId` has". */
 const ownOrProjectBot = (botId: SQLWrapper, ownBotId: string, projectId: string) =>
@@ -105,34 +107,37 @@ function predicatesOf(principal: Principal) {
 		}
 		case "AutomationRun": {
 			const { project: runProject } = principal.bounds;
+			const runProjectIsActive = sql<boolean>`exists (
+				select 1 from ${project} as reach_set_run_project
+				where reach_set_run_project.id = ${runProject}::uuid
+					and not reach_set_run_project.deleting
+			)`;
+			const reachesProject = (projectId: SQLWrapper) =>
+				sql<boolean>`(${outerColumn(projectId)} = ${runProject}::uuid
+					and ${runProjectIsActive}
+					and ${botReachesProject(projectId, principal.bot, null)})`;
 			return {
-				reachesProject: (projectId: SQLWrapper) =>
-					sql<boolean>`(${outerColumn(projectId)} = ${runProject}::uuid and ${botReachesProject(projectId, principal.bot, null)})`,
-				reachesChat: (chat: ChatColumns) =>
-					sql<boolean>`(${outerColumn(chat.projectId)} = ${runProject}::uuid and ${botReachesProject(chat.projectId, principal.bot, null)})`,
+				reachesProject,
+				reachesChat: (chat: ChatColumns) => reachesProject(chat.projectId),
 				reachesBot: (botId: SQLWrapper) =>
-					sql<boolean>`(${ownOrProjectBot(botId, principal.bot, runProject)} and exists (
+					sql<boolean>`(${runProjectIsActive}
+						and ${ownOrProjectBot(botId, principal.bot, runProject)}
+						and not ${botRemovalStarted(botId)}
+						and exists (
 						select 1 from ${bot} as reach_set_talked where reach_set_talked.id = ${outerColumn(botId)} and reach_set_talked.system_bot_key is null
 					))`,
 			};
 		}
-		case "WebhookCall": {
-			const signedProject = principal.source.project;
+		case "WebhookCall":
 			return {
-				reachesProject: (projectId: SQLWrapper) =>
-					sql<boolean>`${outerColumn(projectId)} = ${signedProject}::uuid`,
-				reachesChat: (chat: ChatColumns) =>
-					sql<boolean>`${outerColumn(chat.projectId)} = ${signedProject}::uuid`,
+				reachesProject: never,
+				reachesChat: (chat: ChatColumns) => webhookReachesChat(principal, chat.id),
 				reachesBot: never,
 			};
-		}
 		case "SystemWork": {
 			const { work } = principal;
 			return {
-				reachesProject: (projectId: SQLWrapper) =>
-					work.kind === "compaction"
-						? never()
-						: sql<boolean>`${outerColumn(projectId)} = ${work.project}::uuid`,
+				reachesProject: never,
 				reachesChat: (chat: ChatColumns) =>
 					work.kind === "compaction"
 						? sql<boolean>`${outerColumn(chat.id)} = ${work.chat}::uuid`
@@ -144,6 +149,9 @@ function predicatesOf(principal: Principal) {
 			return { reachesProject: never, reachesChat: never, reachesBot: never };
 	}
 }
+
+export const projectReachPredicate = (principal: Principal, projectId: SQLWrapper): SQL<boolean> =>
+	predicatesOf(principal).reachesProject(projectId);
 
 export const proveReachSet = <P, W>(inWorkspace: InWorkspace<P, W>): ReachSet<P, W> => {
 	const workspaceId = inWorkspace.workspace.value;

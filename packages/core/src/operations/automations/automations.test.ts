@@ -1,15 +1,18 @@
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	seedAutomation,
 	seedBot,
+	seedConnector,
 	seedMember,
 	seedProject,
 	seedProjectChat,
 	seedWebhookTrigger,
 	unique,
 } from "../../authentication/seed.test-support.ts";
-import { closeDatabase } from "../../database/testing.ts";
+import { projectBot } from "../../database/schema.ts";
+import { closeDatabase, onDatabase } from "../../database/testing.ts";
 import type { Principal } from "../../principal.ts";
 import {
 	authenticators,
@@ -88,7 +91,7 @@ describe("the automations operations, for each kind of principal", () => {
 	});
 
 	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends OperationName>(
+	const tried = <Name extends RequestOperationName>(
 		principal: Principal,
 		name: Name,
 		input: InputOf<Name>,
@@ -148,33 +151,62 @@ describe("the automations operations, for each kind of principal", () => {
 				botInBounds: "ok",
 				botOutsideBounds: "ResourceHidden",
 				run: "ok",
-				webhook: "ok",
-				computerSleep: "ok",
+				webhook: "ResourceHidden",
+				computerSleep: "ResourceHidden",
 				compaction: "ResourceHidden",
 				page: "ResourceHidden",
 			});
 		});
 
-		it("lists a project's runs to whoever reaches it", async () => {
-			// A project of its own: the runs the world seeds for principals have no feed to be listed in.
+		it("lists a project's runs only to members, askers and runs that reach it", async () => {
 			const projectId = await seedProject(a.workspace, {
 				leadBotId: a.pub.id,
 				members: [a.ed, a.vi],
 			});
 			const runs = (principal: Principal) =>
 				tried(principal, "automations.projectRuns", { projectId, limit: 20 });
+			const chatId = await seedProjectChat(a.workspace, projectId, a.ed);
+			const { principal: run } = await as.run(a.workspace, projectId, a.pub.id);
+			if (run._tag !== "AutomationRun") throw new Error("Expected an automation run");
+			await call(who.admin, "chats.openAutomationFeed", {
+				workspace: a.workspace,
+				automationId: run.automation,
+			});
 
 			expect(
-				await outcomes({ admin: who.admin, viewer: who.vi, notInProject: who.erin }, runs),
-			).toEqual({ admin: "ok", viewer: "ok", notInProject: "ResourceHidden" });
+				await outcomes(
+					{
+						admin: who.admin,
+						viewer: who.vi,
+						asker: await as.botFor(a.ed, a.pub.id, chatId),
+						run,
+						notInProject: who.erin,
+						computerSleep: (await as.computerSleep(a.workspace, projectId)).principal,
+						compaction: await as.compaction(chatId, a.pub.id),
+					},
+					runs,
+				),
+			).toEqual({
+				admin: "ok",
+				viewer: "ok",
+				asker: "ok",
+				run: "ok",
+				notInProject: "ResourceHidden",
+				computerSleep: "ResourceHidden",
+				compaction: "ResourceHidden",
+			});
 		});
 
-		it("shows an admin a personal bot's automations as set up, though not their runs", async () => {
+		it("shows an admin only a personal bot’s automation names and states", async () => {
 			const own = a.personal.defaultProject;
-			await anAutomation(own);
+			const created = await anAutomation(own);
 			const listed = await call(who.admin, "automations.list", { projectId: own });
 
-			expect(listed.map((automation) => "status" in automation)).toEqual([false]);
+			expect(listed).toEqual([
+				{ id: created.automationId, name: expect.any(String), state: "enabled", restricted: true },
+			]);
+			const ownView = await call(who.ed, "automations.list", { projectId: own });
+			expect(ownView[0]).toHaveProperty("instructions");
 			expect({
 				adminsRuns: await tried(who.admin, "automations.projectRuns", {
 					projectId: own,
@@ -191,7 +223,7 @@ describe("the automations operations, for each kind of principal", () => {
 	});
 
 	describe("managing a project's automations", () => {
-		it("sets them up for those who manage the project, and a bot for them in its bounds", async () => {
+		it("accepts the web app’s automation definition from signed-in project managers", async () => {
 			const create = (principal: Principal, projectId = a.project) =>
 				tried(principal, "automations.create", {
 					projectId,
@@ -227,12 +259,12 @@ describe("the automations operations, for each kind of principal", () => {
 				editor: "ActionForbidden",
 				viewer: "ActionForbidden",
 				notInProject: "ResourceHidden",
-				adminsBotInChatBounds: "ok",
-				adminsAssistant: "ok",
+				adminsBotInChatBounds: "ActionForbidden",
+				adminsAssistant: "ActionForbidden",
 				editorsAssistant: "ActionForbidden",
 				run: "ActionForbidden",
-				webhook: "ActionForbidden",
-				computerSleep: "ActionForbidden",
+				webhook: "ResourceHidden",
+				computerSleep: "ResourceHidden",
 				compaction: "ResourceHidden",
 				page: "ResourceHidden",
 				creatorInBotsOwnProject: "ok",
@@ -244,8 +276,13 @@ describe("the automations operations, for each kind of principal", () => {
 			const automation = await anAutomation(a.personal.defaultProject);
 
 			expect({
-				pausing: await tried(who.admin, "automations.update", {
+				pausing: await call(who.admin, "automations.update", {
 					...automation,
+					changes: { state: "paused" },
+				}),
+				missingAutomation: await tried(who.admin, "automations.update", {
+					...automation,
+					automationId: crypto.randomUUID(),
 					changes: { state: "paused" },
 				}),
 				renaming: await tried(who.admin, "automations.update", {
@@ -266,14 +303,126 @@ describe("the automations operations, for each kind of principal", () => {
 					changes: { name: "Renamed" },
 				}),
 			}).toEqual({
-				pausing: "ok",
-				renaming: "ActionForbidden",
-				resuming: "ActionForbidden",
+				pausing: {
+					automation: {
+						id: automation.automationId,
+						name: expect.any(String),
+						state: "paused",
+						restricted: true,
+					},
+					secrets: [],
+				},
+				missingAutomation: "ResourceHidden",
+				renaming: "ResourceHidden",
+				resuming: "ResourceHidden",
 				deleting: "ResourceHidden",
 				editorWhoDidNotMakeIt: "ResourceHidden",
 				creator: "ok",
 			});
 		});
+	});
+
+	it("hides child ids from a bot that lost reach to a project its asker still reaches", async () => {
+		const projectId = await seedProject(a.workspace, {
+			leadBotId: a.pub.id,
+			bots: [a.helper.id],
+			members: [a.ed],
+		});
+		const chat = await seedProjectChat(a.workspace, projectId, a.ed);
+		const acting = await as.botFor(a.ed, a.helper.id, chat);
+		const { automationId } = await anAutomation(projectId);
+		const triggerId = await seedWebhookTrigger(automationId, a.workspace, { kind: "bearer" }, null);
+		const connectorId = await seedConnector(a.workspace, projectId);
+
+		await onDatabase((db) =>
+			db
+				.delete(projectBot)
+				.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, a.helper.id))),
+		);
+
+		expect(await tried(acting, "automations.list", { projectId })).toBe("BotCannotReach");
+		const missing = crypto.randomUUID();
+		for (const id of [connectorId, missing]) {
+			await expect(
+				call(acting, "connectors.get", { projectId, connectorId: id }),
+			).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+				resource: "connector",
+			});
+		}
+		for (const id of [automationId, missing]) {
+			await expect(
+				call(acting, "automations.remove", { projectId, automationId: id }),
+			).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+				resource: "automation",
+			});
+		}
+		for (const id of [triggerId, missing]) {
+			await expect(
+				call(acting, "automations.removeTrigger", { projectId, automationId, triggerId: id }),
+			).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+				resource: "automation trigger",
+			});
+		}
+	});
+
+	it("hides foreign and missing automations and triggers from their project operations", async () => {
+		const local = await anAutomation(a.project);
+		const foreign = await anAutomation(a.otherProject);
+		const foreignTrigger = await seedWebhookTrigger(
+			foreign.automationId,
+			a.workspace,
+			{ kind: "bearer" },
+			null,
+		);
+		const sameProjectTrigger = await seedWebhookTrigger(
+			(await anAutomation(a.project)).automationId,
+			a.workspace,
+			{ kind: "bearer" },
+			null,
+		);
+		const missing = crypto.randomUUID();
+		for (const automationId of [foreign.automationId, missing]) {
+			const address = { projectId: a.project, automationId };
+			expect(
+				await tried(who.admin, "automations.addTrigger", {
+					...address,
+					trigger: { kind: "webhook", auth: { kind: "bearer" } },
+				}),
+			).toBe("ResourceHidden");
+			expect(await tried(who.admin, "automations.remove", address)).toBe("ResourceHidden");
+			expect(
+				await tried(who.admin, "automations.run", { ...address, requestId: crypto.randomUUID() }),
+			).toBe("ResourceHidden");
+			expect(
+				await tried(who.admin, "automations.update", { ...address, changes: { state: "paused" } }),
+			).toBe("ResourceHidden");
+		}
+		for (const triggerId of [foreignTrigger, sameProjectTrigger, missing]) {
+			const address = { ...local, triggerId };
+			expect(
+				await tried(who.admin, "automations.updateTrigger", {
+					...address,
+					trigger: { kind: "webhook", auth: { kind: "bearer" } },
+				}),
+			).toBe("ResourceHidden");
+			expect(await tried(who.admin, "automations.removeTrigger", address)).toBe("ResourceHidden");
+			expect(await tried(who.admin, "automations.getSecret", address)).toBe("ResourceHidden");
+			expect(
+				await tried(who.admin, "automations.rotateSecret", { ...address, secret: undefined }),
+			).toBe("ResourceHidden");
+		}
+		const anotherWorkspace = await seedAutomation(world.b.workspace, world.b.project);
+		for (const automationId of [anotherWorkspace, missing]) {
+			expect(
+				await tried(who.admin, "chats.openAutomationFeed", {
+					workspace: a.workspace,
+					automationId,
+				}),
+			).toBe("ResourceHidden");
+		}
 	});
 
 	describe("automations.run", () => {
@@ -306,14 +455,74 @@ describe("the automations operations, for each kind of principal", () => {
 				botInBounds: "ok",
 				botOutsideBounds: "ResourceHidden",
 				run: "ActionForbidden",
-				webhook: "ActionForbidden",
-				computerSleep: "ActionForbidden",
+				webhook: "ResourceHidden",
+				computerSleep: "ResourceHidden",
 				page: "ResourceHidden",
 			});
 		});
 	});
 
 	describe("automations.webhook", () => {
+		it("lets a trigger reach only its own automation’s feed and runs", async () => {
+			const projectId = await seedProject(a.workspace, { leadBotId: a.pub.id });
+			const projectChat = await seedProjectChat(a.workspace, projectId, a.admin);
+			const callFromTrigger = await as.webhook(a.workspace, projectId);
+			const anotherTriggerCall = await as.webhook(a.workspace, projectId);
+			const start = async (principal: typeof callFromTrigger) => {
+				if (principal.source.kind !== "trigger") throw new Error("Expected a trigger");
+				const { automation, trigger } = principal.source;
+				const feed = await call(principal, "chats.openAutomationFeed", {
+					workspace: a.workspace,
+					automationId: automation,
+				});
+				const run = await call(principal, "automations.webhook", {
+					triggerId: trigger,
+					headers: {},
+					payload: {},
+				});
+				if (!("runId" in run)) throw new Error("The webhook didn't start a run");
+				return { automation, feed: feed.id, run: run.runId };
+			};
+			const own = await start(callFromTrigger);
+			const other = await start(anotherTriggerCall);
+			const page = { projectId, limit: 20 };
+			const runs = await call(who.admin, "automations.projectRuns", page);
+			const chatOf = (runId: string) => {
+				const run = runs.items.find(({ id }) => id === runId);
+				if (!run) throw new Error("Expected the run in the project");
+				return run.chatId;
+			};
+
+			expect(await tried(callFromTrigger, "automations.projectRuns", page)).toBe("ResourceHidden");
+			expect(
+				await tried(callFromTrigger, "chats.openAutomationFeed", {
+					workspace: a.workspace,
+					automationId: other.automation,
+				}),
+			).toBe("ResourceHidden");
+			expect(await tried(callFromTrigger, "chats.messages", { chatId: own.feed, limit: 20 })).toBe(
+				"ok",
+			);
+			expect(
+				await call(callFromTrigger, "chats.get", { chatId: chatOf(own.run), limit: 20 }),
+			).toMatchObject({
+				automationRun: { id: own.run },
+				membersReachingProject: [],
+				projectBots: [],
+			});
+			for (const chatId of [
+				other.feed,
+				chatOf(other.run),
+				projectChat,
+				a.chat,
+				crypto.randomUUID(),
+			]) {
+				expect(await tried(callFromTrigger, "chats.get", { chatId, limit: 20 })).toBe(
+					"ResourceHidden",
+				);
+			}
+		});
+
 		it("starts a run only for a call its own trigger's authenticator accepted", async () => {
 			const own = who.webhook._tag === "WebhookCall" ? who.webhook.source : undefined;
 			if (own?.kind !== "trigger") throw new Error("Expected a call to a trigger's webhook");

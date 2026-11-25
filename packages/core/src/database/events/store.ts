@@ -1,8 +1,9 @@
 export * as EventStore from "./store.ts";
 
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
-import { and, asc, count, eq, gt, lt } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, lt, max, or } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
+import { processLayer, Tier } from "../../tiers.ts";
 import { type Database, type Executor, type QueryFailure, query } from "../database.ts";
 import { event } from "../schema.ts";
 import type { CommittedEvent } from "./outbox.ts";
@@ -21,6 +22,19 @@ export interface Interface {
 	replay(stream: EventStream, since: number, limit: number): Promise<Stored[]>;
 
 	/**
+	 * Events on several streams, each after its own `since` and, where it says,
+	 * only of its `types`, oldest first across them all, at most `limit`.
+	 * Within one stream events commit in the order of their `seq`, so a reader
+	 * that moves each stream's `since` to the last event it read misses none;
+	 * and an event committed before another was stored has the lower `seq`, so
+	 * one read in this order is read before anything stored after it.
+	 */
+	following(feeds: ReadonlyArray<Feed>, limit: number): Promise<StoredOn[]>;
+
+	/** The `seq` of the newest event on the stream, or 0 when it has none. */
+	latest(stream: EventStream): Promise<number>;
+
+	/**
 	 * Whether the event a client claims to have last seen is still here.
 	 *
 	 * This is how a resume point is judged, rather than comparing it to the
@@ -34,7 +48,9 @@ export interface Interface {
 	prune(before: Date): Promise<number>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/EventStore") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/EventStore") {
+	declare readonly [Tier]: "process";
+}
 
 /**
  * The store on the database the Effect is run with. Its methods are promises
@@ -58,6 +74,43 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 			);
 
 			return rows.map((row) => ({ seq: row.seq, event: row.payload }));
+		},
+
+		async following(feeds, limit) {
+			if (feeds.length === 0) return [];
+			const rows = await run((db) =>
+				db
+					.select({ seq: event.seq, stream: event.stream, payload: event.payload })
+					.from(event)
+					.where(
+						or(
+							...feeds.map(({ stream, since, types }) =>
+								and(
+									eq(event.stream, stream),
+									gt(event.seq, since),
+									types === undefined ? undefined : inArray(event.type, [...types]),
+								),
+							),
+						),
+					)
+					.orderBy(asc(event.seq))
+					.limit(limit),
+			);
+			return rows.map((row) => ({
+				seq: row.seq,
+				stream: row.stream as EventStream,
+				event: row.payload,
+			}));
+		},
+
+		async latest(stream) {
+			const [row] = await run((db) =>
+				db
+					.select({ seq: max(event.seq) })
+					.from(event)
+					.where(eq(event.stream, stream)),
+			);
+			return row?.seq ?? 0;
 		},
 
 		async has(stream, seq) {
@@ -86,12 +139,24 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 	};
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /** A durable event as it was stored, with the `seq` clients resume from. */
 export interface Stored {
 	seq: number;
 	event: StreamEvent;
+}
+
+/** A stored event, and the stream it is on. */
+interface StoredOn extends Stored {
+	stream: EventStream;
+}
+
+/** One stream to read, after `since`, and only `types` of its events where given. */
+export interface Feed {
+	readonly stream: EventStream;
+	readonly since: number;
+	readonly types?: ReadonlyArray<DurableEventType>;
 }
 
 interface MemoryRow extends Stored {
@@ -106,7 +171,7 @@ interface InMemoryOptions {
 }
 
 /** The memory store, and `record`, which stands in for the outbox's insert. */
-export interface InMemory extends Interface {
+interface InMemory extends Interface {
 	/** Stores `event` as the outbox would, ready to hand to `EventBus.publishCommitted`. */
 	record(stream: EventStream, event: StreamEvent & { type: DurableEventType }): CommittedEvent;
 }
@@ -131,6 +196,24 @@ export function inMemory({ now = () => new Date() }: InMemoryOptions = {}): InMe
 				.filter((row) => row.stream === stream && row.seq > since)
 				.slice(0, limit)
 				.map(({ seq, event }) => ({ seq, event }));
+		},
+
+		async following(feeds, limit) {
+			return rows
+				.filter((row) =>
+					feeds.some(
+						(feed) =>
+							feed.stream === row.stream &&
+							row.seq > feed.since &&
+							(feed.types === undefined || feed.types.some((type) => type === row.event.type)),
+					),
+				)
+				.slice(0, limit)
+				.map(({ seq, stream, event }) => ({ seq, stream, event }));
+		},
+
+		async latest(stream) {
+			return rows.filter((row) => row.stream === stream).at(-1)?.seq ?? 0;
 		},
 
 		async has(stream, seq) {

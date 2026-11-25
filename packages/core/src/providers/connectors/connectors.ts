@@ -7,6 +7,7 @@ import type {
 	ConnectorUpdate,
 	ConnectorWithTools,
 	NewConnector,
+	RestrictableConnector,
 	UnsavedConnector,
 } from "@sugabots/contracts";
 import {
@@ -17,16 +18,22 @@ import {
 	ConnectorOAuthStartFailed,
 	type UnknownConnectorTool,
 } from "@sugabots/contracts/errors/connectors";
+import { type ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { UrlNotAllowed } from "@sugabots/contracts/errors/providers";
 import { Clock, Context, Effect, Layer } from "effect";
+import { ProjectComputers } from "../../computers/project-computers.ts";
 import { type Database, serviceOperations } from "../../database/database.ts";
+import type { MemberSession } from "../../principal.ts";
+import type { CanRestrictBotsProject } from "../../proofs/can-restrict-bot.ts";
+import { proveIsMember } from "../../proofs/is-member.ts";
 import type { CanManageProject, CanReadConnectors } from "../../proofs/project-permissions.ts";
-import type { ReachesProject } from "../../proofs/reaches-project.ts";
+import type { Named } from "../../proofs/proof.ts";
+import type { CanSwitchOffConnector, ReachesConnector } from "../../proofs/reaches-connector.ts";
 import { Secrets } from "../../secrets/secrets.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { Egress, type EgressHttpClient } from "../network/egress.ts";
 import { requireAllowedUrl } from "../tested-configuration.ts";
-import { connectorIn, connectorsIn } from "./connector-reads.ts";
+import { connectorIn, connectorsIn, restrictableConnectorsIn } from "./connector-reads.ts";
 import { ConnectorSignIn } from "./connector-sign-in.ts";
 import { ConnectorStore } from "./connector-store.ts";
 import type { ConnectorTarget } from "./connector-target.ts";
@@ -44,9 +51,18 @@ import { signInStartFailure } from "./oauth.ts";
 export interface Interface {
 	/** The project's connectors, oldest first. */
 	readonly list: <P, J>(canRead: CanReadConnectors<P, J>) => Effect.Effect<Connector[]>;
-	readonly get: <P, J>(
+	readonly listForRestriction: <P, J>(
+		canRestrict: CanRestrictBotsProject<P, J>,
+	) => Effect.Effect<RestrictableConnector[]>;
+	readonly switchOff: <P, J, K>(
+		canRestrict: CanRestrictBotsProject<P, J>,
+		connector: Named<K, string>,
+		target: CanSwitchOffConnector<P, J, K>,
+	) => Effect.Effect<RestrictableConnector, ResourceHidden>;
+	readonly get: <P, J, K>(
 		canRead: CanReadConnectors<P, J>,
-		connectorId: string,
+		connector: Named<K, string>,
+		target: ReachesConnector<P, J, K>,
 	) => Effect.Effect<ConnectorWithTools, ConnectorNotFound>;
 	/** Learns a server's tools straight away, unless it waits on a sign-in. */
 	readonly create: <P, J>(
@@ -59,26 +75,29 @@ export interface Interface {
 		server: UnsavedConnector,
 	) => Effect.Effect<ConnectorTestResult, UrlNotAllowed>;
 	/** A new address or secret sends the connector back to learn its tools. */
-	readonly update: <P, J>(
+	readonly update: <P, J, K>(
 		canManage: CanManageProject<P, J>,
-		connectorId: string,
+		connector: Named<K, string>,
+		target: ReachesConnector<P, J, K>,
 		changes: ConnectorUpdate,
 	) => Effect.Effect<
 		Connector,
 		ConnectorNotFound | UrlNotAllowed | ConnectorNameTaken | UnknownConnectorTool
 	>;
-	readonly remove: <P, J>(
+	readonly remove: <P, J, K>(
 		canManage: CanManageProject<P, J>,
-		connectorId: string,
+		connector: Named<K, string>,
+		target: ReachesConnector<P, J, K>,
 	) => Effect.Effect<void, ConnectorNotFound>;
 	/**
 	 * Asks the server for its tools, or checks an HTTP endpoint's address
 	 * without sending it anything, and records the outcome against the
 	 * configuration tested.
 	 */
-	readonly test: <P, J>(
+	readonly test: <P, J, K>(
 		canManage: CanManageProject<P, J>,
-		connectorId: string,
+		connector: Named<K, string>,
+		target: ReachesConnector<P, J, K>,
 	) => Effect.Effect<ConnectorTestResult, ConnectorNotFound>;
 	/**
 	 * Adds a built-in connector, which signs in with OAuth, and starts its
@@ -90,18 +109,23 @@ export interface Interface {
 		server: { name: string; url: string },
 	) => Effect.Effect<
 		{ connectorId: string; authorizationUrl: string },
-		UrlNotAllowed | ConnectorNameTaken | ConnectorOAuthStartFailed | ConnectorNeededNoSignIn
+		| ActionForbidden
+		| UrlNotAllowed
+		| ConnectorNameTaken
+		| ConnectorOAuthStartFailed
+		| ConnectorNeededNoSignIn
 	>;
 	/**
 	 * Where to send the browser to sign in, as the member who manages the
 	 * project, or `null` when the server is already signed in to.
 	 */
-	readonly startSignIn: <P, J>(
+	readonly startSignIn: <P, J, K>(
 		canManage: CanManageProject<P, J>,
-		connectorId: string,
+		connector: Named<K, string>,
+		target: ReachesConnector<P, J, K>,
 	) => Effect.Effect<
 		{ authorizationUrl: string | null },
-		ConnectorNotFound | ConnectorDoesNotUseOAuth | ConnectorOAuthStartFailed
+		ActionForbidden | ConnectorNotFound | ConnectorDoesNotUseOAuth | ConnectorOAuthStartFailed
 	>;
 	/**
 	 * The sign-in a callback's `state` belongs to, for the operation to name
@@ -109,33 +133,36 @@ export interface Interface {
 	 * secret, handed only to the browser that started it, so finding it proves
 	 * nothing; `finishSignIn` demands the proof.
 	 */
-	readonly signInWaitingOn: (state: string) => Effect.Effect<SignInUnderWay | undefined>;
+	readonly signInWaitingOn: (
+		state: string,
+		session: MemberSession,
+	) => Effect.Effect<SignInUnderWay | undefined>;
 	/**
-	 * Finishes `signIn` with what the authorization server sent back, only
-	 * for the member who started it, as the member whose management of the
+	 * Finishes the sign-in for `connectorId` with what the authorization server sent back, only
+	 * in the session that started it, as the member whose management of the
 	 * project was proved when they came back: authority can be withdrawn while
 	 * they are away at the authorization server.
 	 */
-	readonly finishSignIn: <P, J>(
+	readonly finishSignIn: <P, J, K>(
 		canManage: CanManageProject<P, J>,
-		signIn: SignInUnderWay,
+		connector: Named<K, string>,
+		target: ReachesConnector<P, J, K>,
 		callback: SignInCallback,
-	) => Effect.Effect<ConnectorSignInOutcome, ConnectorNotFound>;
+	) => Effect.Effect<ConnectorSignInOutcome>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Connectors") {
 	declare readonly [Tier]: "process";
 }
 
-/** A connector's sign-in waiting on its callback: its project and connector, and who started it. */
-export interface SignInUnderWay {
+/** A connector and its project waiting for the initiating session to finish signing in. */
+interface SignInUnderWay {
 	readonly projectId: string;
 	readonly connectorId: string;
-	readonly startedByMemberId: string | undefined;
 }
 
 /** What an authorization server sent the browser back with. */
-export interface SignInCallback {
+interface SignInCallback {
 	readonly code?: string | undefined;
 	readonly state: string;
 	readonly error?: string | undefined;
@@ -150,7 +177,10 @@ interface ConnectorLocation {
 }
 
 /** The connector `connectorId` of the project `reach` proved reached. */
-const locationIn = <P, J>(reach: ReachesProject<P, J>, connectorId: string): ConnectorLocation => ({
+const locationIn = <J>(
+	reach: { workspace: string; project: Named<J, string> },
+	connectorId: string,
+): ConnectorLocation => ({
 	workspaceId: reach.workspace,
 	projectId: reach.project.value,
 	connectorId,
@@ -159,6 +189,7 @@ const locationIn = <P, J>(reach: ReachesProject<P, J>, connectorId: string): Con
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Connectors");
 	const connectors = yield* ConnectorStore.Service;
+	const computers = yield* ProjectComputers.Service;
 	const signIn = yield* ConnectorSignIn.Service;
 	const egress = yield* Egress.Service;
 	const cipher = yield* Secrets.Service;
@@ -184,8 +215,10 @@ export const make = Effect.gen(function* () {
 				{
 					url: target.url,
 					headers: target.headers,
-					authProvider:
-						target.auth === "oauth" ? clients.for(at.workspaceId, at.connectorId) : undefined,
+					oauth:
+						target.auth === "oauth"
+							? clients.for(at.workspaceId, at.connectorId, target.url)
+							: undefined,
 				},
 				target.auth === "oauth" ? egress.oauth : egress.providers.for({ baseUrl: target.url }),
 			);
@@ -261,8 +294,34 @@ export const make = Effect.gen(function* () {
 		list: (canRead) =>
 			operation("list", connectorsIn(canRead.reach.workspace, canRead.reach.project.value, cipher)),
 
-		get: (canRead, connectorId) =>
-			operation("get", requireConnector(locationIn(canRead.reach, connectorId))),
+		listForRestriction: (canRestrict) =>
+			operation(
+				"listForRestriction",
+				restrictableConnectorsIn(canRestrict.workspace, canRestrict.project.value),
+			),
+
+		switchOff: (_canRestrict, connector, target) =>
+			operation(
+				"switchOff",
+				Effect.gen(function* () {
+					const changed = yield* connectors.switchOff(
+						target.workspace,
+						target.project.value,
+						connector.value,
+					);
+					if (!changed) return yield* new ResourceHidden({ resource: "project" });
+					if (changed.kind === "github") {
+						yield* computers.applyNetwork({
+							workspaceId: target.workspace,
+							projectId: target.project.value,
+						});
+					}
+					return { id: changed.id, name: changed.name, enabled: changed.enabled, restricted: true };
+				}),
+			),
+
+		get: (_canRead, connector, target) =>
+			operation("get", requireConnector(locationIn(target, connector.value))),
 
 		create: (canManage, connector) =>
 			operation(
@@ -299,11 +358,11 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		update: (canManage, connectorId, changes) =>
+		update: (_canManage, connector, target, changes) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
-					const at = locationIn(canManage.reach, connectorId);
+					const at = locationIn(target, connector.value);
 					if (changes.url) {
 						yield* requireAllowedUrl(egress, changes.url);
 					}
@@ -316,34 +375,38 @@ export const make = Effect.gen(function* () {
 					if (!updated) {
 						return yield* new ConnectorNotFound();
 					}
+					if (updated.kind === "github" && changes.enabled !== undefined) {
+						yield* computers.applyNetwork(at);
+					}
 					if (ConnectorStore.changesReach(changes)) yield* discoverQuietly(at);
 					return yield* requireConnector(at);
 				}),
 			),
 
-		remove: (canManage, connectorId) =>
+		remove: (_canManage, connector, target) =>
 			operation(
 				"remove",
 				Effect.gen(function* () {
-					const at = locationIn(canManage.reach, connectorId);
+					const at = locationIn(target, connector.value);
 					if (!(yield* connectors.remove(at.workspaceId, at.projectId, at.connectorId))) {
 						return yield* new ConnectorNotFound();
 					}
 				}),
 			),
 
-		test: (canManage, connectorId) =>
-			operation("test", test(locationIn(canManage.reach, connectorId))),
+		test: (_canManage, connector, target) =>
+			operation("test", test(locationIn(target, connector.value))),
 
 		connectBuiltIn: (canManage, server) =>
 			operation(
 				"connectBuiltIn",
 				Effect.gen(function* () {
-					const { reach, member } = canManage;
+					const { reach } = canManage;
+					const session = yield* proveIsMember(reach.principal);
 					const workspaceId = reach.workspace;
 					const projectId = reach.project.value;
 					yield* requireAllowedUrl(egress, server.url);
-					const made = yield* connectors.create(workspaceId, projectId, member.actor.memberId, {
+					const made = yield* connectors.create(workspaceId, projectId, session.member, {
 						...server,
 						auth: "oauth",
 					});
@@ -351,7 +414,8 @@ export const make = Effect.gen(function* () {
 						workspaceId,
 						connectorId: made.id,
 						serverUrl: made.url,
-						startedByMemberId: member.actor.memberId,
+						startedByMemberId: session.member,
+						startedBySessionId: session.session,
 					}).pipe(Effect.tapError(() => connectors.remove(workspaceId, projectId, made.id)));
 					if ("authorized" in started) {
 						// Nothing to sign in to, so nothing the member asked for was made.
@@ -362,11 +426,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		startSignIn: (canManage, connectorId) =>
+		startSignIn: (canManage, connector, target) =>
 			operation(
 				"startSignIn",
 				Effect.gen(function* () {
-					const at = locationIn(canManage.reach, connectorId);
+					const session = yield* proveIsMember(canManage.reach.principal);
+					const at = locationIn(target, connector.value);
 					const found = yield* requireConnector(at);
 					if (found.auth !== "oauth") {
 						return yield* new ConnectorDoesNotUseOAuth();
@@ -375,7 +440,8 @@ export const make = Effect.gen(function* () {
 						workspaceId: at.workspaceId,
 						connectorId: at.connectorId,
 						serverUrl: found.url,
-						startedByMemberId: canManage.member.actor.memberId,
+						startedByMemberId: session.member,
+						startedBySessionId: session.session,
 					});
 					if ("authorized" in started) {
 						yield* discoverQuietly(at);
@@ -385,35 +451,27 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		signInWaitingOn: (state) =>
-			operation(
-				"signInWaitingOn",
-				Effect.map(
-					connectors.byOauthState(state),
-					(found): SignInUnderWay | undefined =>
-						found && {
-							projectId: found.projectId,
-							connectorId: found.connectorId,
-							startedByMemberId: found.startedByMemberId,
-						},
-				),
-			),
+		signInWaitingOn: (state, session) =>
+			operation("signInWaitingOn", connectors.byOauthState(state, session)),
 
-		finishSignIn: (canManage, waiting, callback) =>
+		finishSignIn: (canManage, connector, target, callback) =>
 			operation(
 				"finishSignIn",
-				Effect.gen(function* (): Effect.fn.Return<
-					ConnectorSignInOutcome,
-					ConnectorNotFound,
-					Database
-				> {
-					const { reach, member } = canManage;
-					const memberId = member.actor.memberId;
-					// Somebody else's browser bringing the callback would otherwise store
-					// the credential they signed in with on a connector they never chose.
-					if (waiting.startedByMemberId !== memberId) {
-						return { kind: "failed", failure: "not_allowed", at: undefined };
-					}
+				Effect.gen(function* (): Effect.fn.Return<ConnectorSignInOutcome, never, Database> {
+					const { reach } = canManage;
+					const session = reach.principal.value;
+					const unknown = { kind: "failed", failure: "unknown_state", at: undefined } as const;
+					if (session._tag !== "MemberSession") return unknown;
+					const at = locationIn(target, connector.value);
+					const record = yield* connectors.oauthRecord(at.workspaceId, at.connectorId);
+					if (
+						record?.state !== callback.state ||
+						record.startedByMemberId !== session.member ||
+						record.startedBySessionId !== session.session
+					)
+						return unknown;
+					const found = yield* Effect.option(requireConnector(at));
+					if (found._tag === "None") return unknown;
 					const project = { workspaceId: reach.workspace, projectId: reach.project.value };
 					if (callback.error || !callback.code) {
 						yield* Effect.logWarning("An authorization server refused a connector's sign-in", {
@@ -422,15 +480,13 @@ export const make = Effect.gen(function* () {
 						});
 						return { kind: "failed", failure: "refused", at: project };
 					}
-					const at = locationIn(reach, waiting.connectorId);
-					const found = yield* requireConnector(at);
 					const finished = yield* Effect.result(
 						signIn.finish(
 							at.workspaceId,
 							at.connectorId,
-							found.url,
+							found.value.url,
 							{ code: callback.code, state: callback.state },
-							memberId,
+							session.member,
 						),
 					);
 					if (finished._tag === "Failure") {
@@ -447,4 +503,6 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(Layer.provide([ConnectorStore.layer, ConnectorSignIn.layer]));
+export const layer = layerNoDeps.pipe(
+	Layer.provide([ConnectorStore.layer, ConnectorSignIn.layer, ProjectComputers.layer]),
+);

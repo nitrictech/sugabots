@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { NewModelProvider } from "@sugabots/contracts";
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
 import { Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -95,7 +95,7 @@ describe("the providers operations, for each kind of principal", () => {
 	});
 
 	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends OperationName>(
+	const tried = <Name extends RequestOperationName>(
 		principal: Principal,
 		name: Name,
 		input: InputOf<Name>,
@@ -205,6 +205,8 @@ describe("the providers operations, for each kind of principal", () => {
 		};
 
 		for (const [name, attempt] of Object.entries(managing)) {
+			const invalidAttempt =
+				name === "modelProviders.completeSignIn" ? "ProviderSignInAttemptInvalid" : undefined;
 			expect({
 				name,
 				outcomes: await outcomes(
@@ -219,10 +221,10 @@ describe("the providers operations, for each kind of principal", () => {
 			}).toEqual({
 				name,
 				outcomes: {
-					editor: "ActionForbidden",
-					outsider: "ResourceHidden",
-					adminsBotInChatBounds: "ActionForbidden",
-					run: "ActionForbidden",
+					editor: invalidAttempt ?? "ActionForbidden",
+					outsider: invalidAttempt ?? "ResourceHidden",
+					adminsBotInChatBounds: invalidAttempt ?? "ActionForbidden",
+					run: invalidAttempt ?? "ActionForbidden",
 				},
 			});
 		}

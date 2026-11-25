@@ -7,6 +7,7 @@ import { Schema } from "effect";
 import {
 	connectBuiltInResultSchema,
 	connectBuiltInSchema,
+	connectorListItemSchema,
 	connectorOauthStartSchema,
 	connectorSchema,
 	connectorSignInOutcomeSchema,
@@ -29,8 +30,16 @@ import {
 	RepositoryUnreachable,
 	UnknownConnectorTool,
 } from "../errors/connectors.ts";
-import { ActionForbidden, BotCannotReach, ResourceHidden } from "../errors/proofs.ts";
+import {
+	ActionForbidden,
+	ApprovalNeeded,
+	ApprovalRefused,
+	BotCannotReach,
+	ResourceHidden,
+	TurnEnded,
+} from "../errors/proofs.ts";
 import { UrlNotAllowed } from "../errors/providers.ts";
+import { TurnExecutionSuperseded } from "../errors/turns.ts";
 import {
 	accountRepositorySchema,
 	connectorRepositoriesSchema,
@@ -57,12 +66,37 @@ const aProject = Schema.Struct({ projectId: uuidSchema });
 /** One of a project's connectors, by the project's id and its own. */
 const aConnector = Schema.Struct({ projectId: uuidSchema, connectorId: uuidSchema });
 
+export const TOOL_SEARCH = "tool_search";
+
 export const connectorsContracts = {
+	"connectors.searchTools": OperationContract.make("connectors.searchTools", {
+		description:
+			"Find tools your connectors provide. Give a few words for what you want to do, a connector's name, or a tool's full name. The best matches include their input schema. Then run one with call_tool. If nothing matches, try other words before telling the member it can't be done.",
+		input: Schema.Struct({
+			query: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
+				description: "What you want to do, such as 'list open issues', or a tool's full name",
+			}),
+		}),
+		output: Schema.Unknown,
+		errors: [...refusals, ApprovalNeeded, ApprovalRefused, TurnEnded],
+		changes: false,
+	}),
+	"connectors.callTool": OperationContract.make("connectors.callTool", {
+		description: "Call a connector tool found by tool_search, with the arguments its schema takes.",
+		input: Schema.Struct({
+			connectorId: uuidSchema,
+			tool: Schema.String.check(Schema.isMinLength(1)),
+			arguments: Schema.Record(Schema.String, Schema.Unknown),
+		}),
+		output: Schema.Unknown,
+		errors: [...refusals, ApprovalNeeded, ApprovalRefused, TurnEnded, TurnExecutionSuperseded],
+		changes: true,
+	}),
 	"connectors.list": OperationContract.make("connectors.list", {
 		description:
 			"List a project's connectors, with how many of each one's tools are at each access.",
 		input: aProject,
-		output: Schema.Array(connectorSchema),
+		output: Schema.Array(connectorListItemSchema),
 		errors: refusals,
 		changes: false,
 	}),
@@ -97,7 +131,7 @@ export const connectorsContracts = {
 			connectorId: uuidSchema,
 			changes: connectorUpdateSchema,
 		}),
-		output: connectorSchema,
+		output: connectorListItemSchema,
 		errors: [
 			...refusals,
 			ConnectorNotFound,
@@ -146,7 +180,7 @@ export const connectorsContracts = {
 	}),
 	"connectors.oauthCallback": OperationContract.make("connectors.oauthCallback", {
 		description:
-			"Finish a connector's OAuth sign-in with what its authorization server sent the browser back with, for the member who started it, while they may still manage the project's connectors.",
+			"Finish a connector's OAuth sign-in with what its authorization server sent the browser back with, in the session that started it, while the member may still manage the project's connectors.",
 		input: Schema.Struct({
 			code: Schema.optional(Schema.String),
 			state: Schema.optional(Schema.String),
@@ -154,7 +188,7 @@ export const connectorsContracts = {
 			errorDescription: Schema.optional(Schema.String),
 		}),
 		output: connectorSignInOutcomeSchema,
-		errors: [ConnectorNotFound],
+		errors: [],
 		changes: true,
 	}),
 	"gitHubConnectors.start": OperationContract.make("gitHubConnectors.start", {
@@ -278,6 +312,24 @@ const throughTheBrowser = <const Site extends string>(site: Site) =>
 	}) as const;
 
 export const connectorsExposure = {
+	"connectors.searchTools": {
+		http: { kind: "heldBack", reason: "Searches the connector tools offered to the current turn." },
+		botLoop: {
+			kind: "offered",
+			tool: TOOL_SEARCH,
+			offeredIn: "everywhere",
+			approval: { kind: "never" },
+		},
+	},
+	"connectors.callTool": {
+		http: { kind: "heldBack", reason: "Connector tool calls belong to a turn." },
+		botLoop: {
+			kind: "offered",
+			tool: "call_tool",
+			offeredIn: "everywhere",
+			approval: { kind: "byToolAccess" },
+		},
+	},
 	"connectors.list": {
 		http: { kind: "offered", endpoint: "connectors.list" },
 		botLoop: {

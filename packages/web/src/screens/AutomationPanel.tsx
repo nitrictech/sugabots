@@ -108,6 +108,8 @@ export function AutomationPanel({
 	const [controlFailure, setControlFailure] = useState<unknown>();
 	const mayManage = may.manageAutomations;
 	const active = standing.state === "enabled";
+	// An admin restricting another member's personal bot may pause its automations, and nothing more.
+	const mayToggle = mayManage || (may.pauseAutomations && active);
 	const close = () => setDialog(undefined);
 
 	async function control(work: () => Promise<unknown>) {
@@ -160,7 +162,7 @@ export function AutomationPanel({
 			label="Automation on"
 			tooltip={active ? "Pause automation" : "Resume automation"}
 			checked={active}
-			disabled={!mayManage || controls.pending}
+			disabled={!mayToggle || controls.pending}
 			onChange={(on) => void control(() => controls.setPaused(!on))}
 		/>
 	);

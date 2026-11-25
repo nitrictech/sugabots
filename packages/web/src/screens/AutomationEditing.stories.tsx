@@ -659,6 +659,7 @@ export const AsAnEditor = meta.story({
 				resources: {
 					...bot.permissions.resources,
 					manageAutomations: false,
+					pauseAutomations: false,
 					runAutomations: false,
 				},
 			},

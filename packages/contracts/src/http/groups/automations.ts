@@ -3,27 +3,28 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/ht
 import {
 	acceptedAutomationWebhookSchema,
 	automationCurrentSecretSchema,
+	automationListItemSchema,
 	automationSchema,
 	automationSecretReplacementSchema,
 	automationSecretSchema,
 	automationTriggerInputSchema,
+	automationUpdateResultSchema,
 	automationUpdateSchema,
 	automationWebhookChallengeSchema,
 	automationWriteResultSchema,
 	ignoredAutomationWebhookSchema,
-	listedAutomationDefinitionSchema,
 	manualAutomationRunSchema,
 	newAutomationSchema,
 	runPageQuerySchema,
 	runPageSchema,
 } from "../../automations.ts";
-import { uuidSchema } from "../../uuid.ts";
+import { uuidOrStringSchema, uuidSchema } from "../../uuid.ts";
 import { BadRequest, Conflict, refused, Unauthorized } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 /** A project's automations: a bot's own are its default project's. */
 const inProject = { projectId: uuidSchema };
-const automation = { projectId: uuidSchema, automationId: Schema.String };
+const automation = { projectId: uuidSchema, automationId: uuidOrStringSchema };
 const trigger = { ...automation, triggerId: uuidSchema };
 
 /** A run queued, a call its trigger's filter turned away, or Slack's address check. */
@@ -41,7 +42,7 @@ const webhookAnswers = [
 export class AutomationsApi extends HttpApiGroup.make("automations").add(
 	HttpApiEndpoint.get("list", "/projects/:projectId/automations", {
 		params: inProject,
-		success: Schema.Array(listedAutomationDefinitionSchema),
+		success: Schema.Array(automationListItemSchema),
 		error: refused,
 	}).middleware(Session),
 	HttpApiEndpoint.post("create", "/projects/:projectId/automations", {
@@ -53,7 +54,7 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 	HttpApiEndpoint.patch("update", "/projects/:projectId/automations/:automationId", {
 		params: automation,
 		payload: automationUpdateSchema,
-		success: automationWriteResultSchema,
+		success: automationUpdateResultSchema,
 		error: [Conflict, ...refused],
 	}).middleware(Session),
 	HttpApiEndpoint.delete("remove", "/projects/:projectId/automations/:automationId", {
@@ -115,7 +116,7 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 	// the run the first delivery started. Slack's URL check is answered
 	// with its challenge, and starts nothing.
 	HttpApiEndpoint.post("webhook", "/webhooks/triggers/:triggerId", {
-		params: { triggerId: Schema.String },
+		params: { triggerId: uuidOrStringSchema },
 		payload: Schema.Json,
 		success: webhookAnswers,
 		error: [BadRequest, Unauthorized, Conflict],

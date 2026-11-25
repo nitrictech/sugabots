@@ -5,6 +5,7 @@ import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
 import type { Ids } from "@sugabots/core/ids/ids";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { processLayer } from "@sugabots/core/tiers";
 import { userText } from "@sugabots/errors";
 import { Clock, Effect, Layer, type Types } from "effect";
 import {
@@ -58,7 +59,7 @@ const betterAuthRoutes = Layer.effectDiscard(
 			),
 		);
 	}),
-);
+).pipe(processLayer);
 
 /**
  * The API, as routes on an `HttpRouter`.
@@ -111,7 +112,7 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 ).pipe(
 	// Each handler's Effect runs against the process's database, which the
 	// router hands to it per request rather than capturing it once.
-	HttpRouter.provideRequest(Layer.effectContext(Effect.context<Database>())),
+	HttpRouter.provideRequest(processLayer(Layer.effectContext(Effect.context<Database>()))),
 	Layer.provide(
 		HttpRouter.middleware(
 			Effect.map(ServerSettings.Service, ({ trustedOrigins, contentOrigin }) =>

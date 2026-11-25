@@ -1,4 +1,5 @@
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	seedBot,
@@ -6,7 +7,7 @@ import {
 	seedProjectChat,
 	unique,
 } from "../../authentication/seed.test-support.ts";
-import { modelProvider, providerModel } from "../../database/schema.ts";
+import { bot, modelProvider, providerModel } from "../../database/schema.ts";
 import { closeDatabase, onDatabase } from "../../database/testing.ts";
 import type { Principal } from "../../principal.ts";
 import {
@@ -107,7 +108,7 @@ describe("the bots operations, for each kind of principal", () => {
 	});
 
 	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends OperationName>(
+	const tried = <Name extends RequestOperationName>(
 		principal: Principal,
 		name: Name,
 		input: InputOf<Name>,
@@ -135,6 +136,32 @@ describe("the bots operations, for each kind of principal", () => {
 	const erinsBot = () => seedBot(a.workspace, { createdById: a.erin });
 
 	describe("reading the workspace's bots", () => {
+		it("lists only the identity and restriction permissions of another member's personal bot", async () => {
+			await onDatabase((db) =>
+				db
+					.update(bot)
+					.set({
+						instructions: "Private instructions",
+						description: "Private description",
+					})
+					.where(eq(bot.id, a.personal.id)),
+			);
+			const list = (principal: Principal) =>
+				call(principal, "bots.list", { workspace: a.workspace });
+			const shown = (await list(who.admin)).find(({ id }) => id === a.personal.id);
+			expect(shown).toMatchObject({
+				id: a.personal.id,
+				defaultProjectId: a.personal.defaultProject,
+				permissions: { talk: false, delete: true, update: false },
+			});
+			expect(shown).not.toHaveProperty("instructions");
+			expect(shown).not.toHaveProperty("description");
+			expect(shown).not.toHaveProperty("model");
+			expect((await list(who.ed)).find(({ id }) => id === a.personal.id)).toHaveProperty(
+				"instructions",
+				"Private instructions",
+			);
+		});
 		it("lists its bots and system bots to its members, and to a bot only in member bounds", async () => {
 			for (const name of ["bots.list", "systemBots.list"] as const) {
 				expect({
@@ -320,7 +347,7 @@ describe("the bots operations, for each kind of principal", () => {
 	});
 
 	describe("pinning a bot", () => {
-		it("pins and unpins a bot for a member signed in who can talk to it, and for nobody else", async () => {
+		it("pins and unpins a bot for a member signed in who can talk to it, and for a bot in member bounds only once they approve", async () => {
 			for (const name of ["bots.pin", "bots.unpin"] as const) {
 				expect({
 					name,
@@ -345,7 +372,8 @@ describe("the bots operations, for each kind of principal", () => {
 						editor: "ok",
 						viewer: "ok",
 						outsider: "ResourceHidden",
-						botInMemberBounds: "ActionForbidden",
+						// Its member approves the call in the bot loop first.
+						botInMemberBounds: "ApprovalNeeded",
 						run: "ActionForbidden",
 						webhook: "ResourceHidden",
 						page: "ResourceHidden",

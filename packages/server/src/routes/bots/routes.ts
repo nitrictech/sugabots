@@ -26,10 +26,16 @@ export const botRoutes = HttpApiBuilder.group(ServerApi, "bots", (handlers) =>
 				callOperation("bots.remove", { botId: params.botId }).pipe(asHttpError(botErrors)),
 			)
 			.handle("pin", ({ params }) =>
-				callOperation("bots.pin", { botId: params.botId }).pipe(asHttpError(botErrors)),
+				callOperation("bots.pin", { botId: params.botId }).pipe(
+					Effect.catchTags(botCallRefusals),
+					asHttpError(botErrors),
+				),
 			)
 			.handle("unpin", ({ params }) =>
-				callOperation("bots.unpin", { botId: params.botId }).pipe(asHttpError(botErrors)),
+				callOperation("bots.unpin", { botId: params.botId }).pipe(
+					Effect.catchTags(botCallRefusals),
+					asHttpError(botErrors),
+				),
 			)
 			.handle("ensureAssistant", ({ params, payload }) =>
 				callOperation("bots.ensureAssistant", {
@@ -54,5 +60,17 @@ const botErrors = {
 	AssistantManaged: BadRequest,
 	ComputerUnavailable: Conflict,
 	ComputerMadeMeanwhile: Conflict,
+	ClaimLost: Conflict,
 	LeadsProjects: Conflict,
+};
+
+/**
+ * How the operation refuses a bot's call, waiting for approval or outside
+ * its turn, which a member signed in never meets.
+ */
+const botCallRefusals = {
+	ApprovalNeeded: Effect.die,
+	ApprovalRefused: Effect.die,
+	TurnEnded: Effect.die,
+	TurnExecutionSuperseded: Effect.die,
 };

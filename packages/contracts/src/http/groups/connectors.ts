@@ -4,6 +4,7 @@ import {
 	CONNECTOR_SIGN_IN_CALLBACK_PATH,
 	connectBuiltInResultSchema,
 	connectBuiltInSchema,
+	connectorListItemSchema,
 	connectorOauthStartSchema,
 	connectorSchema,
 	connectorTestResultSchema,
@@ -25,7 +26,7 @@ export class ConnectorsApi extends HttpApiGroup.make("connectors")
 	.add(
 		HttpApiEndpoint.get("list", root, {
 			params: project,
-			success: Schema.Array(connectorSchema),
+			success: Schema.Array(connectorListItemSchema),
 			error: refused,
 		}),
 		HttpApiEndpoint.post("create", root, {
@@ -49,7 +50,7 @@ export class ConnectorsApi extends HttpApiGroup.make("connectors")
 		HttpApiEndpoint.patch("update", `${root}/:connectorId`, {
 			params: connector,
 			payload: connectorUpdateSchema,
-			success: connectorSchema,
+			success: connectorListItemSchema,
 			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.delete("remove", `${root}/:connectorId`, {

@@ -7,13 +7,15 @@ import type {
 	NewAutomation,
 	ProjectColor,
 } from "@sugabots/contracts";
-import { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { API_BASE_PATH } from "@sugabots/contracts/http";
+import { SessionAuthentication } from "@sugabots/core/authentication/session";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
-import { Automations } from "@sugabots/core/chats/automations/automations";
+import { ProjectAutomations } from "@sugabots/core/chats/automations/project-automations";
 import { AutomationRuns } from "@sugabots/core/chats/automations/runs";
 import { ChatEvents } from "@sugabots/core/chats/chat-events";
 import { ComputerSignIn } from "@sugabots/core/computers/computer-sign-in";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
+import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import {
 	automationTrigger,
 	bot as botTable,
@@ -26,14 +28,16 @@ import {
 	workspaceDefaultModel,
 } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
-import { Files } from "@sugabots/core/files/files";
 import { Ids } from "@sugabots/core/ids/ids";
+import { automationsOperations } from "@sugabots/core/operations/automations/index";
+import type { MemberSession } from "@sugabots/core/principal";
 import { ModelProviderStore } from "@sugabots/core/providers/model-providers/model-provider-store";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderStore } from "@sugabots/core/providers/search-providers/search-provider-store";
 import { Secrets } from "@sugabots/core/secrets/secrets";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
+import { processLayer } from "@sugabots/core/tiers";
 import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
 import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
@@ -43,7 +47,7 @@ import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/worksp
 import { userText } from "@sugabots/errors";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { ensureAccount, seedAccountsLayer } from "../accounts.ts";
 import {
 	type AutomationRun,
@@ -1219,16 +1223,17 @@ const seed = Effect.gen(function* () {
 	const projectIds = yield* ensureProjects(workspaceId, members, botIds);
 	yield* placeBots({ workspaceId, members, projectIds, botIds });
 
+	const owner = yield* signInOwner;
 	yield* Effect.forEach(
 		AUTOMATIONS,
 		({ bot, automation }) => {
 			const botId = botIds.get(bot);
 			return botId
-				? ensureAutomation({ botId, automation })
+				? ensureAutomation(owner, { botId, automation })
 				: Effect.die(new Error(`No bot is named ${bot}`));
 		},
 		{ discard: true },
-	).pipe(CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(members[OWNER])));
+	);
 	yield* holdScheduledAutomations(workspaceId);
 
 	yield* ensureConnectors({
@@ -1485,15 +1490,46 @@ const ensureBot = (input: {
 		return existing.id;
 	});
 
-const ensureAutomation = (input: { botId: string; automation: NewAutomation }) =>
+const signInOwner = Effect.gen(function* () {
+	const { publicUrl } = yield* ServerSettings.Service;
+	const authentication = yield* Authentication.Service;
+	const sessions = yield* SessionAuthentication.Service;
+	const response = yield* authentication.handler(
+		new Request(`${publicUrl}${API_BASE_PATH}/auth/sign-in/email`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: new URL(publicUrl).origin,
+			},
+			body: JSON.stringify({ email: MEMBERS[OWNER].email, password: PASSWORD }),
+		}),
+	);
+	if (!response.ok) return yield* Effect.die(new Error("Could not sign in the showcase owner"));
+	const body: unknown = yield* Effect.promise(() => response.json());
+	const { token } = yield* Schema.decodeUnknownEffect(Schema.Struct({ token: Schema.String }))(
+		body,
+	);
+	return yield* sessions.authenticate(new Headers({ authorization: `Bearer ${token}` })).pipe(
+		Effect.provideService(SessionAuthentication.Cookies, {
+			read: () => Effect.succeed(undefined),
+		}),
+	);
+}).pipe(Effect.orDie);
+
+const ensureAutomation = (
+	owner: MemberSession,
+	input: { botId: string; automation: NewAutomation },
+) =>
 	Effect.gen(function* () {
-		const automations = yield* Automations.Service;
 		const projectId = yield* defaultProjectOf(input.botId);
-		yield* automations.create({ projectId }, input.automation).pipe(
-			Effect.asVoid,
-			Effect.catchTag("AutomationNameTaken", () => Effect.void),
-			Effect.orDie,
-		);
+		const ids = yield* Ids.Service;
+		yield* automationsOperations["automations.create"]
+			.run(owner, { projectId, ...input.automation }, { kind: "request", request: yield* ids.next })
+			.pipe(
+				Effect.asVoid,
+				Effect.catchTag("AutomationNameTaken", () => Effect.void),
+				Effect.orDie,
+			);
 	});
 
 /** How far off the seeded automations' next runs are put. */
@@ -1660,15 +1696,15 @@ seed.pipe(
 	Effect.provide(
 		Layer.mergeAll(
 			Authentication.layer,
+			SessionAuthentication.layer,
 			ProjectStore.layer,
 			BotStore.layer,
 			ModelProviderStore.layer,
 			// What a workspace is made with, and a member let in with: providers and Personal Assistants.
 			PersonalAssistants.layer,
 			SearchProviderStore.layer,
-			Files.authoringLayer,
 			// The seed defines automations and never runs one, which is all these are for.
-			Automations.layer.pipe(
+			ProjectAutomations.layer.pipe(
 				Layer.provide([
 					unimplemented(AutomationRuns.Service, {}),
 					unimplemented(ChatEvents.Service, {}),
@@ -1682,8 +1718,12 @@ seed.pipe(
 					Egress.layer,
 					ComputerSignIn.none,
 					seedAccountsLayer,
+					// No server runs, so no stream follows a session to hear it end.
+					Layer.succeed(EventOutbox.Service, { publish: () => Effect.void }).pipe(processLayer),
 					BlobStore.layer,
-					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
+					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })).pipe(
+						processLayer,
+					),
 				).pipe(
 					Layer.provideMerge(Ids.layer),
 					Layer.provideMerge(ServerSettings.layer),

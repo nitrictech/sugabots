@@ -10,8 +10,8 @@ import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
 import type { ConnectorTarget } from "../../providers/connectors/connector-target.ts";
 import { connectServer } from "../../providers/connectors/mcp.ts";
-import { SignInRequired, storedOAuthProvider } from "../../providers/connectors/oauth.ts";
-import { ConnectorTools } from "./connectors.ts";
+import { oauthClient, SignInRequired } from "../../providers/connectors/oauth.ts";
+import { ConnectorCatalog } from "./connector-catalog.ts";
 import { NO_TURN } from "./testing.ts";
 
 /**
@@ -114,8 +114,15 @@ const target = (extra: Partial<ConnectorTarget> = {}): ConnectorTarget => ({
 });
 
 function toolsFor(...targets: ConnectorTarget[]) {
-	const offered = ConnectorTools.from({
-		connectors: { targetsForProject: () => Effect.succeed({ targets, signInExpired: [] }) },
+	const offered = ConnectorCatalog.from({
+		connectors: {
+			targetsForProject: () =>
+				Effect.succeed({
+					targets,
+					signInExpired: [],
+					installedUrls: targets.map(({ url }) => url),
+				}),
+		},
 		httpClients: { for: () => fetch },
 	});
 	return offered;
@@ -208,9 +215,14 @@ describe("a turn's connector tools", () => {
 			url: "https://mcp.linear.app/mcp",
 			toolAccess: {},
 		});
-		const offered = ConnectorTools.from({
+		const offered = ConnectorCatalog.from({
 			connectors: {
-				targetsForProject: () => Effect.succeed({ targets: [linear, target()], signInExpired: [] }),
+				targetsForProject: () =>
+					Effect.succeed({
+						targets: [linear, target()],
+						signInExpired: [],
+						installedUrls: [linear.url, url],
+					}),
 			},
 			httpClients: { for: () => fetch },
 			// Linear's address, answered by the fixture server.
@@ -247,12 +259,13 @@ describe("a turn's connector tools", () => {
 			url: "https://mcp.linear.app/mcp",
 			auth: "oauth",
 		});
-		const offered = ConnectorTools.from({
+		const offered = ConnectorCatalog.from({
 			connectors: {
 				targetsForProject: () =>
 					Effect.succeed({
 						targets: [linear, target({ handle: "locked", headers: { "x-fixture-key": "nope" } })],
-						signInExpired: [{ handle: "notion", url: "https://mcp.notion.com/mcp" }],
+						signInExpired: [{ handle: "notion" }],
+						installedUrls: [linear.url, url, "https://mcp.notion.com/mcp"],
 					}),
 			},
 			httpClients: { for: () => fetch },
@@ -284,10 +297,16 @@ describe("a turn's connector tools", () => {
 				target({ connectorId: "0199a3a0-0000-7000-8000-0000000000f5", handle: "notes" }),
 			],
 		};
-		const offered = ConnectorTools.from({
+		const offered = ConnectorCatalog.from({
 			connectors: {
-				targetsForProject: (_workspaceId, projectId) =>
-					Effect.succeed({ targets: projects[projectId] ?? [], signInExpired: [] }),
+				targetsForProject: (_workspaceId, projectId) => {
+					const targets = projects[projectId] ?? [];
+					return Effect.succeed({
+						targets,
+						signInExpired: [],
+						installedUrls: targets.map(({ url }) => url),
+					});
+				},
 			},
 			httpClients: { for: () => fetch },
 		});
@@ -310,17 +329,18 @@ describe("a turn's connector tools", () => {
 	});
 
 	it("names each connector whose sign-in expired with the project it is signed in again from", async () => {
-		const expired: Record<string, { handle: string; url: string }[]> = {
-			project: [{ handle: "notion", url: "https://mcp.notion.com/mcp" }],
-			own: [
-				{ handle: "notion", url: "https://mcp.notion.com/mcp" },
-				{ handle: "linear", url: "https://mcp.linear.app/mcp" },
-			],
+		const expired: Record<string, { handle: string }[]> = {
+			project: [{ handle: "notion" }],
+			own: [{ handle: "notion" }, { handle: "linear" }],
 		};
-		const offered = ConnectorTools.from({
+		const offered = ConnectorCatalog.from({
 			connectors: {
 				targetsForProject: (_workspaceId, projectId) =>
-					Effect.succeed({ targets: [], signInExpired: expired[projectId] ?? [] }),
+					Effect.succeed({
+						targets: [],
+						signInExpired: expired[projectId] ?? [],
+						installedUrls: ["https://mcp.notion.com/mcp", "https://mcp.linear.app/mcp"],
+					}),
 			},
 			httpClients: { for: () => fetch },
 		});
@@ -345,8 +365,8 @@ describe("a turn's connector tools", () => {
 		}
 
 		const turnOn = (
-			offered: ConnectorTools.Interface,
-			use: (set: ConnectorTools.ConnectorToolSet) => Promise<unknown> = async () => undefined,
+			offered: ConnectorCatalog.Interface,
+			use: (set: ConnectorCatalog.ConnectorToolSet) => Promise<unknown> = async () => undefined,
 		) =>
 			Effect.gen(function* () {
 				const set = yield* offered.forTurn("w", OWN_PROJECT, NO_TURN);
@@ -432,17 +452,16 @@ describe("a turn's connector tools", () => {
 				auth: "oauth",
 				headers: {},
 			});
-			const provider = storedOAuthProvider(
-				{
-					load: async () => ({ tokens: { access_token: ACCESS_TOKEN, token_type: "Bearer" } }),
-					save: async () => undefined,
-					now: async () => new Date("2026-11-13T00:00:00.000Z"),
-				},
-				{ redirectUrl: "http://localhost:3000/connectors/oauth/callback", clientName: "Sugabots" },
-			);
-			const offered = ConnectorTools.from({
+			const tokens = async () => ({ access_token: ACCESS_TOKEN, token_type: "Bearer" });
+			const provider = oauthClient(fetch, signedIn.url, tokens, async () => undefined);
+			const offered = ConnectorCatalog.from({
 				connectors: {
-					targetsForProject: () => Effect.succeed({ targets: [signedIn], signInExpired: [] }),
+					targetsForProject: () =>
+						Effect.succeed({
+							targets: [signedIn],
+							signInExpired: [],
+							installedUrls: [signedIn.url],
+						}),
 				},
 				httpClients: { for: () => fetch },
 				oauth: { clients: Effect.succeed({ for: () => provider }), fetch },
@@ -470,8 +489,15 @@ describe("a turn's connector tools", () => {
 
 		it("asks again once the connector has been edited", async () => {
 			const targets = [target()];
-			const offered = ConnectorTools.from({
-				connectors: { targetsForProject: () => Effect.succeed({ targets, signInExpired: [] }) },
+			const offered = ConnectorCatalog.from({
+				connectors: {
+					targetsForProject: () =>
+						Effect.succeed({
+							targets,
+							signInExpired: [],
+							installedUrls: targets.map(({ url }) => url),
+						}),
+				},
 				httpClients: { for: () => fetch },
 			});
 			await run(turnOn(offered));

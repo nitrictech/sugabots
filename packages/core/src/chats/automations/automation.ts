@@ -12,20 +12,11 @@ export {
 } from "@sugabots/contracts/errors/automations";
 
 import type { Automation, AutomationTrigger, AutomationTriggerInput } from "@sugabots/contracts";
-import { type DomainError, userText } from "@sugabots/errors";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
-import { Effect, ErrorReporter, Schema } from "effect";
-import type { Authorization } from "../../authorization/authorization.ts";
-import type { ProjectPermission } from "../../authorization/permissions.ts";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { Effect } from "effect";
 import { query } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { automation, automationTrigger } from "../../database/schema.ts";
-
-/** An automation, by the project it belongs to and its own id. */
-export interface InProject {
-	projectId: string;
-	automationId: string;
-}
 
 /** A routine as it is written: when it repeats, and in which timezone. */
 export type RoutineInput = Extract<AutomationTriggerInput, { kind: "routine" }>;
@@ -37,24 +28,6 @@ export interface Scope {
 	readonly automationId: string;
 }
 
-/**
- * The scope of the automation named, once the current actor may take
- * `permission` in its project.
- */
-export const scopeOf = (
-	authorization: Authorization.Interface,
-	{ projectId, automationId }: InProject,
-	permission: ProjectPermission,
-) =>
-	Effect.map(
-		authorization.project(projectId, permission),
-		({ project }): Scope => ({
-			workspaceId: project.workspaceId,
-			projectId: project.id,
-			automationId,
-		}),
-	);
-
 /** The automation `scope` names, as a condition on `automation`, unless it has been removed. */
 export const inScope = (scope: Scope) =>
 	and(
@@ -64,29 +37,51 @@ export const inScope = (scope: Scope) =>
 		isNull(automation.deletedAt),
 	);
 
+/**
+ * Holds the automation's trigger lock until the transaction ends, so its
+ * triggers are accepted one at a time and none lands on an automation being
+ * removed or having its secret replaced.
+ */
+export const lockTriggers = (automationId: string) =>
+	query((db) =>
+		db.execute(
+			sql`select pg_advisory_xact_lock(hashtextextended(${`automation-trigger:${automationId}`}, 0))`,
+		),
+	);
+
+export const stateWithPendingPause = (
+	row: Pick<schema.AutomationRow, "state" | "pauseAfterFailuresPendingAt">,
+): Automation["state"] => (row.pauseAfterFailuresPendingAt !== null ? "paused" : row.state);
+
 export function toAutomation(
 	row: schema.AutomationRow,
 	triggers: readonly schema.AutomationTriggerRow[],
 ): Automation {
+	const state = stateWithPendingPause(row);
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
 		projectId: row.projectId,
 		name: row.name,
 		instructions: row.instructions,
-		triggers: triggers.map(toTrigger),
-		state: row.state,
-		pausedAfterFailures: row.pausedAfterFailuresAt !== null,
+		triggers: triggers.map((trigger) => toTrigger(trigger, state === "enabled")),
+		state,
+		pausedAfterFailures:
+			row.pausedAfterFailuresAt !== null || row.pauseAfterFailuresPendingAt !== null,
 		createdById: row.createdById,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};
 }
 
-function toTrigger(row: schema.AutomationTriggerRow): AutomationTrigger {
+function toTrigger(row: schema.AutomationTriggerRow, enabled: boolean): AutomationTrigger {
 	const { settings } = row;
 	return settings.kind === "routine"
-		? { id: row.id, ...settings, nextScheduledAt: row.nextScheduledAt?.toISOString() ?? null }
+		? {
+				id: row.id,
+				...settings,
+				nextScheduledAt: enabled ? (row.nextScheduledAt?.toISOString() ?? null) : null,
+			}
 		: { id: row.id, ...settings };
 }
 
@@ -108,22 +103,3 @@ export const triggersOf = (automationIds: readonly string[]) =>
 /** An automation's row as the API shows it, with its triggers read alongside. */
 export const automationWithTriggers = (row: schema.AutomationRow) =>
 	Effect.map(triggersOf([row.id]), (triggers) => toAutomation(row, triggers.get(row.id) ?? []));
-
-/**
- * A routine changed only while it is all that starts its automation, as a bot
- * changes one: one with another routine or a trigger has those set up in
- * settings.
- */
-export class TriggerSetInSettings
-	extends Schema.TaggedError<TriggerSetInSettings>()("TriggerSetInSettings", {})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Info" as const;
-	override get message() {
-		return "The automation has another routine or a trigger, set up in settings";
-	}
-	get userMessage() {
-		return userText`That automation has more than one routine, or a trigger, which only its Automations page can change. Its name, instructions and whether it is paused can still be changed here.`;
-	}
-}

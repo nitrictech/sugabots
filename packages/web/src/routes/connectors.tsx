@@ -1,11 +1,12 @@
 import { createRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { signInFailureReason } from "@/lib/connectors.ts";
+import { BotConnectorRestrictions } from "@/screens/BotRestrictions.tsx";
 import { botRoute } from "./bots.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { useBotRouteOwner, useProjectRouteOwner } from "./owner.ts";
 import { projectRoute } from "./projects.tsx";
-import { validateSignInErrorSearch } from "./search.ts";
+import { decodeRouteId, validateSignInErrorSearch } from "./search.ts";
 
 const ConnectorsPage = lazyNamed(() => import("@/screens/Connectors.tsx"), "ConnectorsPage");
 
@@ -25,6 +26,7 @@ export const botConnectorsRoute = createRoute({
 	component: () => {
 		const signInError = useSignInErrorOnce(botConnectorsRoute);
 		const owner = useBotRouteOwner();
+		if (owner && !owner.bot.permissions.talk) return <BotConnectorRestrictions bot={owner.bot} />;
 		return owner ? <ConnectorsPage owner={owner} signInError={signInError} /> : null;
 	},
 });
@@ -32,10 +34,12 @@ export const botConnectorsRoute = createRoute({
 export const botConnectorRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/connectors/$connector",
+	params: { parse: ({ connector }) => ({ connector: decodeRouteId(connector) }) },
 	loader: () => ConnectorsPage.preload(),
 	component: () => {
 		const { connector } = botConnectorRoute.useParams();
 		const owner = useBotRouteOwner();
+		if (owner && !owner.bot.permissions.talk) return <BotConnectorRestrictions bot={owner.bot} />;
 		return owner ? <ConnectorsPage owner={owner} connectorId={connector} /> : null;
 	},
 });
@@ -57,6 +61,7 @@ export const projectConnectorsRoute = createRoute({
 export const projectConnectorRoute = createRoute({
 	getParentRoute: () => projectRoute,
 	path: "/connectors/$connector",
+	params: { parse: ({ connector }) => ({ connector: decodeRouteId(connector) }) },
 	loader: () => ConnectorsPage.preload(),
 	component: () => {
 		const { connector } = projectConnectorRoute.useParams();

@@ -3,6 +3,7 @@ export * as EventOutbox from "./outbox.ts";
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
+import { processLayer, Tier } from "../../tiers.ts";
 import {
 	afterCommit,
 	batchedBeforeCommit,
@@ -25,7 +26,9 @@ export interface Interface {
 	readonly publish: (pending: readonly PendingEvent[]) => Effect.Effect<void, never, Database>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/EventOutbox") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/EventOutbox") {
+	declare readonly [Tier]: "process";
+}
 
 /**
  * An outbox whose events are delivered through the process's bus. Everything
@@ -42,7 +45,7 @@ export const make = Effect.map(EventBus.Service, (bus) => {
 	return Service.of({ publish: (pending) => transaction(appendBeforeCommit(pending)) });
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 export interface PendingEvent {
 	stream: EventStream;

@@ -15,8 +15,6 @@ import {
 	type ModelMessage,
 	stepCountIs,
 	streamText,
-	type ToolApprovalConfiguration,
-	type ToolApprovalRequestOutput,
 	type ToolModelMessage,
 	type ToolResultPart,
 	type ToolSet,
@@ -38,9 +36,23 @@ import {
 import { ModelRequests } from "../../accounting/model-requests.ts";
 import { streamLedger } from "../../accounting/stream-ledger.ts";
 import type { Database } from "../../database/database.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { causesOf } from "../causes.ts";
 import type { ProviderOptions } from "../model-providers/dialects/dialect.ts";
-import { dialectFor, type ModelRegistry, modelsDev } from "../model-providers/dialects/index.ts";
+import {
+	anthropic,
+	chatgpt,
+	dialectFor,
+	gemini,
+	type ModelRegistry,
+	modelsDev,
+	ollama,
+	openai,
+	openaiCompatible,
+	openrouter,
+	type ProviderDialect,
+} from "../model-providers/dialects/index.ts";
+import { ANTHROPIC_MODELS } from "../model-providers/dialects/openrouter.ts";
 import { ModelProviderStore } from "../model-providers/model-provider-store.ts";
 import { withSignInAccess } from "../model-providers/sign-in/sign-in.ts";
 import { Egress, type EgressHttpClients } from "../network/egress.ts";
@@ -55,6 +67,12 @@ import {
 	type RequestFailure,
 	type RequestStage,
 } from "./request-failures.ts";
+
+import {
+	claudeSupportsAdaptiveThinking,
+	geminiThinkingFormat,
+	openAIThinkingSupport,
+} from "./sdk-model-catalogs.ts";
 
 export * from "./request-failures.ts";
 
@@ -85,20 +103,25 @@ export interface PromptMessage {
 	cacheBreakpoint?: true;
 }
 
-/** A response streamed as it arrives, with tools the model may call along the way. */
+/**
+ * One model request, its response streamed as it arrives. The model may call
+ * the tools it is offered; it is answered by whoever made the request, which
+ * runs them and asks again.
+ */
 export interface StreamRequest extends Prompt {
 	/** What the request is for, which the ledger records as whose usage it counts as. */
 	purpose: ModelRequests.RequestPurpose;
-	/** Server-owned SDK messages appended when resuming a suspended tool call. */
+	/** What earlier requests of the same turn said and were given back, after the prompt. */
 	continuationMessages?: readonly ModelMessage[];
-	/** What the model may call. The SDK executes them as it streams. */
+	/** What the model may call. None of them runs here: a call is returned, not made. */
 	tools?: ToolSet;
-	toolApproval?: ToolApprovalConfiguration<ToolSet, unknown>;
 	/**
-	 * How many model requests the response may take, counting one per round of
-	 * tool calls. The last is told to answer rather than call more tools.
+	 * Whether this is the last request the response may take, so the model is
+	 * told to answer rather than call more tools.
 	 */
-	maxSteps: number;
+	lastRequest?: boolean;
+	/** Which step of its turn the request is, which the ledger records it as; 0 when it is no turn's. */
+	step?: number;
 }
 
 /** A whole answer, given up on if it runs past either limit. */
@@ -109,11 +132,17 @@ interface AnswerRequest extends Prompt {
 	timeout: Duration.Input;
 }
 
+/** A streamed piece of reply text or visible thinking. */
+export interface Delta {
+	readonly kind: "text" | "thinking";
+	readonly text: string;
+}
+
 export interface Streamed {
-	/** The response's text, one delta at a time. Read it with {@link forEachDelta}. */
-	text: AsyncIterable<string>;
+	/** The response's deltas in order. Read them with {@link forEachDelta}. */
+	deltas: AsyncIterable<Delta>;
 	/**
-	 * How the response ended. Meaningful only once `text` has been read to its
+	 * How the response ended. Meaningful only once `deltas` has been read to its
 	 * end; asked for after an abort, it fails. An Effect rather than a promise
 	 * so nothing exists until the caller asks, which is what keeps an aborted
 	 * response from leaving a rejection nobody handles.
@@ -122,21 +151,24 @@ export interface Streamed {
 }
 
 /**
- * What a finished response leaves for whoever carries it on. What each
+ * What a finished response leaves for whoever carries it on. What the
  * request used and cost is in the `model_request` ledger, not here.
  */
 export interface Finished {
-	/** How many model requests the response took, one per round of tool calls. */
-	modelRequests: number;
-	/**
-	 * The prompt's size at the response's first model request: its history, system
-	 * text and tools. What its tool calls return is left out.
-	 */
+	/** The prompt's size: its history, system text and tools. */
 	contextTokens?: number;
-	/** The tool calls waiting on someone's approval. */
-	approvalRequests: ToolApprovalRequestOutput<ToolSet>[];
-	/** The messages that carry the response on once those calls are decided. */
+	/** The tool calls the model made, in the order it made them, none of them made yet. */
+	toolCalls: ToolCallRequest[];
+	/** What the model said, its thinking and tool calls included, for the next request to continue from. */
 	responseMessages: Array<AssistantModelMessage | ToolModelMessage>;
+}
+
+/** A tool call a response asked for. `invalid` says what was wrong with its input, if anything was. */
+interface ToolCallRequest {
+	toolCallId: string;
+	toolName: string;
+	input: unknown;
+	invalid?: string;
 }
 
 export interface Answer {
@@ -225,15 +257,14 @@ function definedFields(record: Record<string, unknown>, names: readonly string[]
 }
 
 /**
- * failingWith passes `text` through, and throws `fail(cause)` for whatever
- * ends it early, so a reader of the text sees only a classified failure.
+ * failingWith passes `stream` through and throws `fail(cause)` if reading it fails.
  */
 async function* failingWith<T>(
-	text: AsyncIterable<T>,
+	stream: AsyncIterable<T>,
 	fail: (cause: unknown) => RequestFailure,
 ): AsyncGenerator<T> {
 	try {
-		yield* text;
+		yield* stream;
 	} catch (cause) {
 		throw fail(cause);
 	}
@@ -274,11 +305,20 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				purpose: input.purpose,
 				model: input.model,
 				access,
+				step: input.step ?? 0,
 			});
 			const dialect = dialectFor(access);
 			const baseUrl = access.baseUrl.replace(/\/$/, "");
 			const requestRoot = dialect.requestRoot?.(baseUrl) ?? baseUrl;
 			const systemOptions = dialect.systemOptions?.(input.system);
+			const thinkingOptions = thinkingOptionsFor(dialect, input, resolved.capabilities);
+			const providerOptions = {
+				...systemOptions,
+				...thinkingOptions,
+				...(systemOptions?.openai && thinkingOptions?.openai
+					? { openai: { ...systemOptions.openai, ...thinkingOptions.openai } }
+					: {}),
+			};
 			// Anthropic allows a request four marks. This spends three: the system
 			// text, the history's end and each step's newest message.
 			const breakpoint = dialect.cacheBreakpoint?.(input.model);
@@ -297,23 +337,25 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			// The SDK's callbacks run outside Effect, so they log through this.
 			const services = yield* Effect.context<never>();
 			const runLog = Effect.runForkWith(services);
-			const approvalRequests: ToolApprovalRequestOutput<ToolSet>[] = [];
+			const toolCalls: ToolCallRequest[] = [];
 			const result = streamText({
 				model: wrapLanguageModel({
 					model: dialect.languageModel(
 						{ ...access, baseUrl: requestRoot },
 						input.model,
 						httpClients.for({ baseUrl: requestRoot }),
+						thinkingOptions,
 					),
-					middleware: waitingOutRateLimits(services, context, dialect.recognizeFailure),
+					middleware: openModelStream(services, context, dialect.recognizeFailure),
 				}),
 				...(systemOptions
-					? { providerOptions: systemOptions }
+					? {}
 					: {
 							system: breakpoint
 								? withBreakpoint({ role: "system", content: input.system }, breakpoint)
 								: input.system,
 						}),
+				...(systemOptions || thinkingOptions ? { providerOptions } : {}),
 				messages: [
 					...input.messages.map(({ cacheBreakpoint, ...message }) =>
 						cacheBreakpoint && breakpoint ? markedMessage(message, breakpoint) : message,
@@ -321,15 +363,19 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 					...(input.continuationMessages ?? []),
 				],
 				tools: input.tools,
-				toolApproval: input.toolApproval,
 				abortSignal: signal,
 				onChunk: ({ chunk }) => {
-					if (chunk.type === "text-delta") stage = "answering";
+					if (chunk.type === "text-delta" || chunk.type === "reasoning-delta") stage = "answering";
 					if (chunk.type === "tool-input-start" || chunk.type === "tool-call") {
 						stage = "calling-tool";
 					}
-					if (chunk.type === "tool-approval-request" && !chunk.isAutomatic) {
-						approvalRequests.push(chunk);
+					if (chunk.type === "tool-call" && !chunk.providerExecuted) {
+						toolCalls.push({
+							toolCallId: chunk.toolCallId,
+							toolName: chunk.toolName,
+							input: chunk.input,
+							...(chunk.invalid ? { invalid: invalidInputText(chunk.error) } : {}),
+						});
 					}
 				},
 				onLanguageModelCallStart: () => ledger.started(),
@@ -348,20 +394,21 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 					);
 					return ledger.aborted();
 				},
-				// A response stopped by the step limit on a round of tool calls ends
-				// with nothing said, so the last round is told to answer. The note
+				// A response stopped by the request limit on a round of tool calls ends
+				// with nothing said, so the last request is told to answer. The note
 				// rides on the newest tool result, which no provider has cached yet:
 				// changing the tools or system text instead would cost the cache
-				// every earlier call built. Every other step marks its newest message
-				// for the next step to read up to from the cache; the last has no
-				// next step to read it.
-				prepareStep: ({ stepNumber, messages }) => {
-					// Every step after the first sends the previous step's tool results.
-					stage = stepNumber === 0 ? "asking" : "after-tools";
-					if (stepNumber === input.maxSteps - 1) return { messages: withLastStepNote(messages) };
+				// every earlier request built. Every other request marks its newest
+				// message for the next to read up to from the cache; the last has no
+				// next request to read it.
+				prepareStep: ({ messages }) => {
+					// A request continuing a turn sends the previous request's tool results.
+					stage = (input.continuationMessages?.length ?? 0) === 0 ? "asking" : "after-tools";
+					if (input.lastRequest) return { messages: withLastStepNote(messages) };
 					return markNewest ? { messages: markNewest(messages) } : undefined;
 				},
-				stopWhen: stepCountIs(input.maxSteps),
+				// One request: the tool calls it makes come back to the caller.
+				stopWhen: stepCountIs(1),
 				maxRetries: 0,
 			});
 			/** Logs what ended the request, and names it for whoever reads the response. */
@@ -375,7 +422,7 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				});
 			};
 			return {
-				text: failingWith(result.textStream, classified),
+				deltas: failingWith(modelDeltas(result.fullStream), classified),
 				finished: Effect.tryPromise({
 					try: async () => {
 						const [steps, responseMessages] = await Promise.all([
@@ -384,10 +431,10 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 						]);
 						if (providerFailure !== undefined) throw providerFailure;
 						return {
-							modelRequests: steps.length,
 							contextTokens: steps[0]?.usage.inputTokens,
-							approvalRequests: [...approvalRequests],
-							responseMessages,
+							toolCalls: [...toolCalls],
+							// The SDK answers an invalid call itself; the caller answers every call.
+							responseMessages: responseMessages.filter(({ role }) => role === "assistant"),
 						};
 					},
 					catch: classified,
@@ -395,6 +442,71 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			};
 		}),
 	);
+}
+
+const GEMINI_DYNAMIC_THINKING_BUDGET = -1;
+
+/** thinkingOptionsFor requests thinking when the provider has an adaptive or default mode and the workspace allows it. */
+function thinkingOptionsFor(
+	dialect: ProviderDialect,
+	input: StreamRequest,
+	capabilities: ModelProviderStore.ResolvedModel["capabilities"],
+): ProviderOptions | undefined {
+	if (input.purpose.name !== "bot-turn" || !capabilities.includes("thinking")) return undefined;
+	const { model } = input;
+	switch (dialect) {
+		case anthropic:
+			return claudeSupportsAdaptiveThinking(model)
+				? { anthropic: { thinking: { type: "adaptive", display: "summarized" } } }
+				: undefined;
+		case gemini:
+			return {
+				google: {
+					thinkingConfig: {
+						includeThoughts: true,
+						...(geminiThinkingFormat(model) === "budget"
+							? { thinkingBudget: GEMINI_DYNAMIC_THINKING_BUDGET }
+							: {}),
+					},
+				},
+			};
+		case openai:
+			// Discovery covers models and aliases newer than the SDK catalog. A
+			// catalogued model without thinking cannot accept Responses summaries.
+			if (openAIThinkingSupport(model) === false) return undefined;
+			return {
+				openai: {
+					reasoningSummary: "auto",
+					store: false,
+					include: ["reasoning.encrypted_content"],
+				},
+			};
+		case chatgpt:
+			return { openai: { reasoningSummary: "auto" } };
+		case openrouter:
+			if (
+				model.startsWith(ANTHROPIC_MODELS) &&
+				!claudeSupportsAdaptiveThinking(model.slice(ANTHROPIC_MODELS.length).replaceAll(".", "-"))
+			) {
+				return undefined;
+			}
+			return { openrouter: { reasoning: { enabled: true } } };
+		case openaiCompatible:
+		case ollama:
+			// The compatible SDK can replay the provider's thinking with tool results.
+			return { openai: {} };
+		default:
+			return undefined;
+	}
+}
+
+async function* modelDeltas(
+	stream: ReturnType<typeof streamText>["fullStream"],
+): AsyncGenerator<Delta> {
+	for await (const part of stream) {
+		if (part.type === "text-delta") yield { kind: "text", text: part.text };
+		if (part.type === "reasoning-delta") yield { kind: "thinking", text: part.text };
+	}
 }
 
 /** How many times one model request is sent again after the provider asks us to wait. */
@@ -407,7 +519,7 @@ const RATE_LIMIT_RETRIES = 3;
  * anything, so nothing the model said or a tool did is repeated. Aborting the
  * call, as cancelling a turn does, ends the wait.
  */
-function waitingOutRateLimits(
+function openModelStream(
 	services: Context.Context<never>,
 	provider: RequestContext,
 	recognize: RecognizeFailure | undefined,
@@ -423,12 +535,24 @@ function waitingOutRateLimits(
 			: undefined;
 	};
 	return {
-		wrapStream: async ({ doStream, params }) => {
+		wrapStream: async ({ doStream, params, model }) => {
+			const openaiOptions = params.providerOptions?.openai;
+			let sendRequest = doStream;
 			const send = (
 				retriesLeft: number,
 			): Effect.Effect<Awaited<ReturnType<typeof doStream>>, Cause.UnknownError> =>
-				Effect.tryPromise(doStream).pipe(
+				Effect.tryPromise(() => sendRequest()).pipe(
 					Effect.catch((refused) => {
+						if (
+							sendRequest === doStream &&
+							openaiOptions?.reasoningSummary &&
+							summaryWasRefused(refused.cause)
+						) {
+							const { reasoningSummary: _, ...withoutSummary } = openaiOptions;
+							const providerOptions = { ...params.providerOptions, openai: withoutSummary };
+							sendRequest = () => model.doStream({ ...params, providerOptions });
+							return send(retriesLeft);
+						}
 						const wait = shortWait(refused.cause);
 						if (wait === undefined || retriesLeft === 0) return Effect.fail(refused);
 						return Effect.logWarning(
@@ -446,6 +570,21 @@ function waitingOutRateLimits(
 	};
 }
 
+function summaryWasRefused(cause: unknown): boolean {
+	if (!APICallError.isInstance(cause) || cause.statusCode !== 400) return false;
+	const data: unknown = cause.data;
+	if (typeof data !== "object" || data === null || !("error" in data)) return false;
+	const { error } = data;
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"code" in error &&
+		error.code === "unsupported_value" &&
+		"param" in error &&
+		error.param === "reasoning.summary"
+	);
+}
+
 /**
  * A client whose whole answers are collected from `stream`. How the real one
  * is built, and how a test builds one from a scripted stream.
@@ -456,19 +595,21 @@ export function fromStream(stream: Interface["stream"]): Interface {
 		answer: (request) =>
 			Effect.scoped(
 				Effect.gen(function* () {
-					const streamed = yield* stream({ ...request, maxSteps: 1 });
+					const streamed = yield* stream(request);
 					const collected = yield* Ref.make("");
-					yield* forEachDelta(streamed.text, (delta) =>
-						Ref.updateAndGet(collected, (soFar) => soFar + delta).pipe(
-							Effect.filterOrFail(
-								(soFar) => soFar.length <= request.maxCharacters,
-								() =>
-									new UnusableAnswer({
-										reason: `The ${request.purpose.name} answer ran past ${request.maxCharacters} characters`,
-									}),
-							),
-							Effect.asVoid,
-						),
+					yield* forEachDelta(streamed.deltas, (delta) =>
+						delta.kind === "thinking"
+							? Effect.void
+							: Ref.updateAndGet(collected, (soFar) => soFar + delta.text).pipe(
+									Effect.filterOrFail(
+										(soFar) => soFar.length <= request.maxCharacters,
+										() =>
+											new UnusableAnswer({
+												reason: `The ${request.purpose.name} answer ran past ${request.maxCharacters} characters`,
+											}),
+									),
+									Effect.asVoid,
+								),
 					);
 					const { contextTokens } = yield* streamed.finished;
 					return { text: yield* Ref.get(collected), contextTokens };
@@ -484,6 +625,12 @@ export function fromStream(stream: Interface["stream"]): Interface {
 
 const LAST_STEP_NOTE =
 	"(This is your last step: you cannot call tools any more. Answer now from what you have found, and say what you could not check.)";
+
+/** What the model is told of a tool call whose input didn't fit the tool, from what the SDK found wrong. */
+function invalidInputText(error: unknown): string {
+	const reason = error instanceof Error ? error.message : String(error);
+	return `The input didn't match the tool's input schema, so it wasn't run: ${reason}`;
+}
 
 /** `messages` with {@link LAST_STEP_NOTE} added to the newest tool result, if the last message has one. */
 function withLastStepNote(messages: ModelMessage[]): ModelMessage[] {
@@ -570,7 +717,9 @@ function withBreakpoint<Marked extends ModelMessage | ToolResultPart>(
 	return { ...marked, providerOptions };
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Models") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Models") {
+	declare readonly [Tier]: "process";
+}
 
 export const layer = Layer.effect(
 	Service,
@@ -580,7 +729,9 @@ export const layer = Layer.effect(
 		const requests = yield* ModelRequests.make;
 		return make({ modelProviders, httpClients: egress.providers, requests, registry: modelsDev });
 	}),
-).pipe(Layer.provide(ModelProviderStore.layer));
+)
+	.pipe(processLayer)
+	.pipe(Layer.provide(ModelProviderStore.layer));
 
 /**
  * Reads the model's text one delta at a time and runs `onDelta` for each.
@@ -590,12 +741,12 @@ export const layer = Layer.effect(
  * will end, which happens when the stream's scope closes.
  */
 export const forEachDelta = <E, R>(
-	text: AsyncIterable<string>,
-	onDelta: (delta: string) => Effect.Effect<void, E, R>,
+	deltas: AsyncIterable<Delta>,
+	onDelta: (delta: Delta) => Effect.Effect<void, E, R>,
 ): Effect.Effect<void, E | RequestFailure, R> => {
-	const iterator = text[Symbol.asyncIterator]();
+	const iterator = deltas[Symbol.asyncIterator]();
 	// `make` ends its text with a classified failure, so anything else is a bug.
-	const next = Effect.callback<IteratorResult<string>, RequestFailure>((resume) => {
+	const next = Effect.callback<IteratorResult<Delta>, RequestFailure>((resume) => {
 		iterator.next().then(
 			(result) => resume(Effect.succeed(result)),
 			(cause: unknown) => resume(isRequestFailure(cause) ? Effect.fail(cause) : Effect.die(cause)),

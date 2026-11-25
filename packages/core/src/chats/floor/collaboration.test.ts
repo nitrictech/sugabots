@@ -2,6 +2,7 @@ import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { askerColumns } from "../../authentication/turn-facts.ts";
 import { transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
@@ -25,13 +26,14 @@ import { ChatEvent } from "../events.ts";
 import { seedChat } from "../seed.test-support.ts";
 import { chatServicesForTests } from "../testing.ts";
 import {
-	prepareRunnable,
+	completeTurn,
+	endTurn,
+	prepareTurn,
 	queueTurnForTests,
 	releaseTurn,
-	replyTurnOf,
 	runningTurns,
-	TurnExecution,
-	TurnStore,
+	runOver,
+	TurnRuns,
 	waitingTurns,
 } from "../turns/testing.ts";
 
@@ -45,8 +47,8 @@ import {
 describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", async () => {
 	const services = await chatServicesForTests(EventBus.inProcess({ store: EventStore.inMemory() }));
 	const call = await servedOperations({ chats: services });
-	const execution = onPostgres({ prepare: Context.get(services, TurnExecution.Service).prepare });
-	const turns = onPostgres(Context.get(services, TurnStore.Service));
+	const drive = runOver(services);
+	const runs = onPostgres(Context.get(services, TurnRuns.Service));
 	let post: (content: string) => Promise<{ id: string }>;
 	let samId: string;
 	let chatId: string;
@@ -144,14 +146,10 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 	/** `botId`'s running turn replies `content` and ends, freeing its lane as its workflow would. */
 	const answer = async (botId: string, content: string) => {
 		const run = await runningTurnOf(botId);
-		const prepared = await prepareRunnable(execution, run);
-		await turns.complete(
-			replyTurnOf(prepared),
-			{ content, toolCalls: [] },
-			{ contextCapacity: 128_000, readKeptFrom: null },
-		);
+		const prepared = await drive(prepareTurn(run));
+		await drive(completeTurn(prepared, content));
 		await runOnPostgres(releaseTurn(run));
-		return prepared.responseMessage;
+		return prepared.reply;
 	};
 
 	/** The turns running in the chat, as who answers what, and why. */
@@ -177,7 +175,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 			]),
 		);
 		expect((await running()).map(({ botId }) => botId)).not.toContain(bots.outsider.id);
-		const helping = await prepareRunnable(execution, await runningTurnOf(bots.helper.id));
+		const helping = await drive(prepareTurn(await runningTurnOf(bots.helper.id)));
 		expect(helping.context.askerId).toBe(samId);
 		expect(helping.context.messages.at(-1)?.id).toBe(asking.id);
 		// A helper's own mentions ask nobody, so it is offered nobody to ask.
@@ -198,7 +196,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 		expect(await running()).toEqual([
 			{ botId: bots.asker.id, triggerMessageId: asking.id, reason: "hand_back" },
 		]);
-		const handingBack = await prepareRunnable(execution, await runningTurnOf(bots.asker.id));
+		const handingBack = await drive(prepareTurn(await runningTurnOf(bots.asker.id)));
 		expect(handingBack.context.askerId).toBe(samId);
 		expect(handingBack.context.messages.at(-1)?.id).toBe(lastHelperReply.id);
 		expect(handingBack.context.botsToAsk.map(({ id }) => id)).toEqual([bots.scout.id]);
@@ -209,29 +207,89 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 		]);
 	});
 
+	it("hands back reading what the asking turn read and its helpers' replies, not what was posted since", async () => {
+		await post("@asker is the release ready?");
+		const asking = await answer(bots.asker.id, "@helper, can you check?");
+		// Posted straight to the chat, so nobody is asked to answer it.
+		const [later] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					chatId,
+					authorMemberId: samId,
+					status: "complete",
+					parts: [{ type: "text", text: "Posted after the asking reply." }],
+					content: "Posted after the asking reply.",
+				})
+				.returning(),
+		);
+		const reply = await answer(bots.helper.id, "Looks ready.");
+
+		const handingBack = await drive(prepareTurn(await runningTurnOf(bots.asker.id)));
+		const read = handingBack.context.messages.map(({ id }) => id);
+		expect(read).toContain(asking.id);
+		expect(read).toContain(reply.id);
+		expect(read).not.toContain(later?.id);
+	});
+
+	it("lets the asker steer a helper's turn, which answers for them", async () => {
+		await post("@asker is the release ready?");
+		await answer(bots.asker.id, "@helper, can you check?");
+		const helping = await drive(prepareTurn(await runningTurnOf(bots.helper.id)));
+
+		const steer = await post("@helper check the docs too.");
+
+		const [stored] = await onDatabase((db) =>
+			db.select({ steers: turn.steers }).from(turn).where(eq(turn.id, helping.turnId)),
+		);
+		expect(stored?.steers.map(({ messageId }) => messageId)).toEqual([steer.id]);
+		expect(await runOnPostgres(waitingTurns({ chatId, botId: bots.helper.id }))).toEqual([]);
+	});
+
+	it("leaves the other helpers going when one is interrupted, and still hands back once they are done", async () => {
+		await post("@asker is the release ready?");
+		const asking = await answer(bots.asker.id, "@helper and @checker, can you look?");
+		const helping = await drive(prepareTurn(await runningTurnOf(bots.helper.id)));
+
+		await asMember(call, samId).interruptTurn({ chatId, turnId: helping.turnId });
+		// The helper's step hears of it and ends its turn.
+		await drive(endTurn(helping, { kind: "cancelled" }));
+		await runOnPostgres(releaseTurn(helping.run));
+
+		expect(await running()).toEqual([
+			{ botId: bots.checker.id, triggerMessageId: asking.id, reason: "collaboration" },
+		]);
+		await answer(bots.checker.id, "The tests pass.");
+		expect(await running()).toEqual([
+			{ botId: bots.asker.id, triggerMessageId: asking.id, reason: "hand_back" },
+		]);
+	});
+
 	it("keeps a helper's turn apart from a member's turn for the same bot", async () => {
 		await post("@helper what changed today?");
 		await post("@asker is the release ready?");
 		const asking = await answer(bots.asker.id, "@helper, can you check the release too?");
 		await post("@helper and the docs?");
 
-		// Each waits behind the helper's turn answering the member, and neither joins the other.
+		// The helper's turn waits behind the one answering the member, and Sam's
+		// second message joins that one, not yet opened, rather than the helper's.
 		expect(await runOnPostgres(waitingTurns({ chatId, botId: bots.helper.id }))).toEqual([
 			expect.objectContaining({ triggerMessageId: asking.id, reason: "collaboration" }),
-			expect.objectContaining({ reason: "mention" }),
 		]);
 	});
 
 	it("waits for a helper whose turn failed and runs again before handing back", async () => {
 		await post("@asker is the release ready?");
 		const asking = await answer(bots.asker.id, "@helper and @checker, can you look?");
-		const failing = await prepareRunnable(execution, await runningTurnOf(bots.helper.id));
-		const runsAgain = await turns.fail(
-			replyTurnOf(failing),
-			{ content: "", toolCalls: [] },
-			{ userMessage: userText`The model is busy.`, mayRunAgain: true },
+		const failing = await drive(prepareTurn(await runningTurnOf(bots.helper.id)));
+		const runsAgain = await drive(
+			endTurn(failing, {
+				kind: "failed",
+				userMessage: userText`The model is busy.`,
+				mayRunAgain: true,
+			}),
 		);
-		expect(runsAgain).toBe(true);
+		expect(runsAgain).toEqual({ willRetry: true, steered: false });
 
 		await answer(bots.checker.id, "The tests pass.");
 		// Its workflow holds its lane, to run it again.
@@ -251,7 +309,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 		await answer(bots.checker.id, "The tests pass.");
 		await onDatabase((db) => db.delete(projectBot).where(eq(projectBot.botId, bots.helper.id)));
 
-		expect(await execution.prepare(await runningTurnOf(bots.helper.id))).toMatchObject({
+		expect(await runs.open(await runningTurnOf(bots.helper.id))).toMatchObject({
 			_tag: "NotRunnable",
 		});
 
@@ -270,7 +328,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 		const ownReply = await answer(bots.helper.id, "Two fixes landed today.");
 		await post("Unrelated: who's up for lunch?");
 
-		const helping = await prepareRunnable(execution, await runningTurnOf(bots.helper.id));
+		const helping = await drive(prepareTurn(await runningTurnOf(bots.helper.id)));
 
 		const read = helping.context.messages.map(({ id }) => id);
 		expect(read).toContain(asking.id);
@@ -302,7 +360,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 			}),
 		);
 
-		const handingBack = await prepareRunnable(execution, await runningTurnOf(bots.asker.id));
+		const handingBack = await drive(prepareTurn(await runningTurnOf(bots.asker.id)));
 
 		expect(handingBack.context.messages.at(-1)?.id).toBe(moved?.id);
 	});
@@ -333,6 +391,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 				model: "test/model",
 				startedAt: new Date(),
 				finishedAt: new Date(),
+				...askerColumns({ chatId: chatId, botId: bots.helper.id, triggerMessageId: brief.id }),
 			}),
 		);
 

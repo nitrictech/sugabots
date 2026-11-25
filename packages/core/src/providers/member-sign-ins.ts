@@ -4,15 +4,18 @@ export * as MemberSignIns from "./member-sign-ins.ts";
 import { SubscriptionInUse } from "@sugabots/contracts/errors/workspace";
 import { DisplayName } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
-import { Context, Duration, Effect, Layer, Schedule } from "effect";
-import { afterCommit, query, serviceOperations } from "../database/database.ts";
+import { Context, Effect, Layer } from "effect";
+import { query, serviceOperations, Transaction } from "../database/database.ts";
 import { member } from "../database/schema.ts";
-import { Secrets } from "../secrets/secrets.ts";
+import { processLayer, Tier } from "../tiers.ts";
 import { ConnectorStore } from "./connectors/connector-store.ts";
-import { openAppCredential } from "./connectors/github/credential.ts";
-import * as GitHub from "./connectors/github/github.ts";
+import { GitHubUninstalls } from "./connectors/github/uninstalls.ts";
 import { providersSignedInAs } from "./model-providers/model-provider-reads.ts";
-import { Egress } from "./network/egress.ts";
+
+interface DepartingMember {
+	readonly workspaceId: string;
+	readonly memberId: string;
+}
 
 /**
  * What in a workspace signs in as one member: the OAuth sign-ins they made for
@@ -34,83 +37,57 @@ export interface Interface {
 	 * signed in, so each shows as needing to be signed in again, and forgets
 	 * the GitHub apps they installed on their own GitHub account, so each
 	 * project must install its app again.
-	 * Each installation is uninstalled at GitHub once the enclosing transaction
-	 * commits, in the background, trying again while GitHub can't be reached.
+	 * Each installation is queued for the scheduler to uninstall after the
+	 * enclosing transaction commits.
 	 */
-	readonly forget: (departing: {
-		workspaceId: string;
-		memberId: string;
-	}) => Effect.Effect<void, SubscriptionInUse>;
+	readonly forget: (
+		departing: DepartingMember,
+	) => Effect.Effect<void, SubscriptionInUse, Transaction>;
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-	"@sugabots/core/MemberSignIns",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/MemberSignIns") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("MemberSignIns");
 	const connectors = yield* ConnectorStore.Service;
-	const secrets = yield* Secrets.Service;
-	const egress = yield* Egress.Service;
-	// Uninstalling outlives the transaction that asked for it, and its retries must not hold up the removal.
-	const uninstalling = yield* Effect.scope;
+	const uninstalls = yield* GitHubUninstalls.Service;
 
-	const uninstall = (installation: ConnectorStore.ForgottenInstallation) =>
+	const requireNoSubscription = ({ workspaceId, memberId }: DepartingMember) =>
 		Effect.gen(function* () {
-			const { privateKey } = openAppCredential(secrets, installation.appCredentialEncrypted);
-			yield* GitHub.uninstall(
-				egress.providers.for({ baseUrl: GitHub.API_URL }),
-				{ appId: installation.appId, privateKey },
-				installation.installationId,
-			).pipe(
-				Effect.retry({ while: (failure) => failure.isRetryable, schedule: UNINSTALL_RETRIES }),
-			);
-		}).pipe(
-			Effect.catchCause((cause) =>
-				Effect.logError(
-					"A forgotten GitHub app installation wasn't uninstalled; uninstall it on GitHub",
-					cause,
-				),
-			),
-			Effect.annotateLogs({
-				connectorId: installation.connectorId,
-				appId: installation.appId,
-				installationId: installation.installationId,
-			}),
-			Effect.forkIn(uninstalling),
-			Effect.asVoid,
-		);
+			yield* Transaction;
+			const signedIn = yield* providersSignedInAs(workspaceId, memberId);
+			if (signedIn.length > 0) {
+				return yield* new SubscriptionInUse({
+					member: yield* nameOf(memberId),
+					providers: signedIn,
+				});
+			}
+		});
 
 	return Service.of({
 		forget: ({ workspaceId, memberId }) =>
 			operation(
 				"forget",
 				Effect.gen(function* () {
-					const signedIn = yield* providersSignedInAs(workspaceId, memberId);
-					if (signedIn.length > 0) {
-						return yield* new SubscriptionInUse({
-							member: yield* nameOf(memberId),
-							providers: signedIn,
-						});
-					}
+					yield* requireNoSubscription({ workspaceId, memberId });
 					yield* connectors.signOutSignedInBy(workspaceId, memberId);
 					const installations = yield* connectors.forgetGitHubInstallationsBy(
 						workspaceId,
 						memberId,
 					);
-					yield* Effect.forEach(
-						installations,
-						(installation) => afterCommit(uninstall(installation)),
-						{ discard: true },
-					);
+					yield* uninstalls.enqueue(workspaceId, installations);
 				}),
 			),
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(Layer.provide(ConnectorStore.layer));
+export const layer = layerNoDeps.pipe(
+	Layer.provide([ConnectorStore.layer, GitHubUninstalls.layer]),
+);
 
 const nameOf = (memberId: string) =>
 	query((db) => db.select({ name: member.name }).from(member).where(eq(member.id, memberId))).pipe(
@@ -120,12 +97,3 @@ const nameOf = (memberId: string) =>
 				: Effect.die(new Error("The member going from the workspace is missing")),
 		),
 	);
-
-/**
- * Up to ten more attempts after the first, the first of them a second later
- * and each after that twice as long after the one before: about seventeen
- * minutes in all, to ride out GitHub being unreachable for a while.
- */
-const UNINSTALL_RETRIES = Schedule.exponential(Duration.seconds(1)).pipe(
-	Schedule.upTo({ times: 10 }),
-);

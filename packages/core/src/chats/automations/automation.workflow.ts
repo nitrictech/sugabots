@@ -6,15 +6,17 @@
  * A run starts its turn, then waits until settlement records how it ended.
  * Runs of one automation wait in its lane, so they happen one at a time.
  */
+import { uuidSchema } from "@sugabots/contracts/uuid";
 import { Activities } from "@sugabots/workflow/activities";
 import { Context, Duration, Effect, Schema } from "effect";
 import { DurableClock, DurableDeferred, Workflow } from "effect/unstable/workflow";
+import { Tier } from "../../tiers.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 
 /** The run a workflow carries out, as its payload: its automation, and the run itself. */
 export const AutomationRun = Schema.Struct({
-	automationId: Schema.String,
-	runId: Schema.String,
+	automationId: uuidSchema,
+	runId: uuidSchema,
 });
 export type AutomationRun = typeof AutomationRun.Type;
 
@@ -40,7 +42,9 @@ export class AutomationSteps extends Context.Service<
 		/** Records the run as failed, stopping its work, when its workflow fails. */
 		readonly fail: (run: AutomationRun) => Effect.Effect<void>;
 	}
->()("@sugabots/core/AutomationSteps") {}
+>()("@sugabots/core/AutomationSteps") {
+	declare readonly [Tier]: "process";
+}
 
 /** Each check whether the run has settled is a separate activity, numbered from 0. */
 const automationActivities = Activities.fromService<AutomationRun>()(AutomationSteps, {

@@ -2,6 +2,7 @@ import { createRoute, Navigate } from "@tanstack/react-router";
 import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
+import { decodeRouteId } from "./search.ts";
 import { shellRoute } from "./workspace.tsx";
 
 const WorkspaceSettings = lazyNamed(
@@ -30,6 +31,7 @@ export const settingsSectionRoute = createRoute({
 export const settingsMemberRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/members/$membership",
+	params: { parse: ({ membership }) => ({ membership: decodeRouteId(membership) }) },
 	loader: () => WorkspaceSettings.preload(),
 	component: SettingsMemberRoute,
 });
@@ -47,6 +49,7 @@ function SettingsMemberRoute() {
 export const settingsProviderRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/providers/$provider",
+	params: { parse: ({ provider }) => ({ provider: decodeRouteId(provider) }) },
 	loader: () => WorkspaceSettings.preload(),
 	component: SettingsProviderRoute,
 });

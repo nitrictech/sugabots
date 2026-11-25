@@ -165,7 +165,9 @@ describe("chat contracts", () => {
 	});
 
 	it("trims message content before validating", () => {
-		expect(Schema.decodeSync(newMessageSchema)({ id: ID, message: " hi " }).message).toBe("hi");
+		expect(Schema.decodeSync(newMessageSchema)({ retryKey: ID, message: " hi " }).message).toBe(
+			"hi",
+		);
 	});
 
 	it("validates nested JSON", () => {

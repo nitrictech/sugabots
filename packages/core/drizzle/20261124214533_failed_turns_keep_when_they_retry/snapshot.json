@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "e81c38ee-338b-48b7-af44-a089ad434bf7",
+  "prevIds": [
+    "4bfeba75-e557-4812-8ccc-e37bb7605d45"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "turn",
+        "retry_at"
+      ],
+      "writes": [
+        "s|col|public.turn.retry_at",
+        "n|col|public.turn.retry_at",
+        "e|col|public.turn.retry_at"
+      ],
+      "reads": [
+        "n|tbl|public.turn",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "turn",
+        "name": "retry_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

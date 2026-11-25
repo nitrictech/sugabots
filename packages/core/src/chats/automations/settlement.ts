@@ -15,6 +15,7 @@ import {
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import type * as schema from "../../database/schema.ts";
 import { automationRun, message, toolCall, turn } from "../../database/schema.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
 import { ChatStore } from "../store/store.ts";
@@ -28,8 +29,8 @@ import { AutomationStore, endingAfter, endingOf, RUN_STOPPED_UNEXPECTEDLY } from
  * Settles automation runs: records how a run ended once nothing in its chat
  * is running, waiting or about to start: its bot's turns, the turns of the
  * bots it asked for help and its hand-backs. A completed run has its bot's last
- * reply posted in the automation's feed. An automation that fails twice in a row pauses
- * itself (see `AutomationStore.settle`).
+ * reply posted in the automation's feed. An automation that fails twice in a row gets a pending pause when the
+ * second failure is recorded.
  *
  * `handler` reacts to the chat events that can end a run. In the
  * emitting transaction it only records how an event says the run should end,
@@ -60,7 +61,9 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/AutomationSettlement",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("AutomationSettlement");
@@ -199,7 +202,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 export const layer = layerNoDeps.pipe(Layer.provide([AutomationStore.layer, ChatStore.layer]));
 

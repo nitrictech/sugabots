@@ -5,13 +5,16 @@
  *
  * The rules come from the grant tables in `authorization/permissions.ts`,
  * except where the architecture docs differ from them, which each rule here
- * says. Nothing in this file makes a proof: each prover's own file does.
+ * says. Nothing in this file makes a proof: each prover's own file does. What
+ * the API tells a member they may do is decided by these rules too
+ * (`shown-permissions.ts`).
  */
 
 import type { ProjectVisibility, WorkspaceRole } from "@sugabots/contracts";
-import { and, eq, type SQL, sql } from "drizzle-orm";
+import { and, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
+import { askerOf, type TurnFacts } from "../authentication/turn-facts.ts";
 import {
 	type Actor,
 	type BotFacts,
@@ -22,11 +25,17 @@ import {
 	reachesBot,
 } from "../authorization/permissions.ts";
 import type { Executor } from "../database/database.ts";
-import { bot, membership, project, projectBot, projectMember } from "../database/schema.ts";
+import {
+	bot,
+	membership,
+	project,
+	projectBot,
+	projectMember,
+	workspace,
+} from "../database/schema.ts";
 import { outerColumn } from "../database/sql.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal, TurnBounds } from "../principal.ts";
-import { defaultProjectIdOf } from "../workspaces/bots/bot.ts";
 
 /** A project as reach is decided: its workspace and lead bot, and on a bot's default project, that bot. */
 export interface ProjectFacts {
@@ -51,6 +60,7 @@ export interface BotPlace {
 	readonly inProject: boolean;
 	readonly assistantOf: string | null;
 	readonly usesComputer: boolean;
+	readonly deleting: boolean;
 }
 
 export interface ReachFacts {
@@ -71,12 +81,49 @@ export const reachFacts = (
 	db: Executor,
 	projectId: string | SQL,
 	who: { readonly member?: string; readonly bot?: string },
+	forDeletion = false,
+	contains?: SQL,
 ) =>
 	Effect.gen(function* () {
 		if (typeof projectId === "string" && !isUuid(projectId)) return undefined;
+		const [facts] = yield* reachFactsWhere(
+			db,
+			and(
+				eq(project.id, projectId),
+				forDeletion ? undefined : eq(project.deleting, false),
+				contains,
+			),
+			who,
+			1,
+		);
+		return facts;
+	});
+
+/**
+ * Every project of the workspace `workspaceId`, bots' default projects
+ * included, with the places in each of `who.member` and `who.bot`, in one
+ * query: what a list decides each project's rules from.
+ */
+export const reachFactsIn = (
+	db: Executor,
+	workspaceId: string,
+	who: { readonly member?: string; readonly bot?: string },
+) =>
+	isUuid(workspaceId)
+		? reachFactsWhere(db, eq(project.workspaceId, workspaceId), who)
+		: Effect.succeed([]);
+
+/** The projects `where` picks, each with the places in it of `who.member` and `who.bot`. */
+const reachFactsWhere = (
+	db: Executor,
+	where: SQL | undefined,
+	who: { readonly member?: string; readonly bot?: string },
+	limit?: number,
+) =>
+	Effect.gen(function* () {
 		const memberId = who.member && isUuid(who.member) ? who.member : null;
 		const botId = who.bot && isUuid(who.bot) ? who.bot : null;
-		const [row] = yield* db
+		const selected = db
 			.select({
 				id: project.id,
 				workspace: project.workspaceId,
@@ -91,17 +138,23 @@ export const reachFacts = (
 				botWorkspace: actingBot.workspaceId,
 				botAssistantOf: actingBot.assistantOf,
 				botUsesComputer: actingBot.usesComputer,
+				botDeleting: botRemovalStarted(actingBot.id),
 				botInProject: sql<boolean>`exists (
 					select 1 from ${projectBot}
 					where ${projectBot.projectId} = ${project.id} and ${projectBot.botId} = ${botId}::uuid
 				)`,
 			})
 			.from(project)
+			.innerJoin(
+				workspace,
+				and(eq(workspace.id, project.workspaceId), eq(workspace.deleting, false)),
+			)
 			.leftJoin(defaultOfBot, eq(defaultOfBot.id, project.defaultOfBotId))
 			.leftJoin(
 				membership,
 				and(
 					eq(membership.workspaceId, project.workspaceId),
+					eq(membership.leaving, false),
 					eq(membership.memberId, sql`${memberId}::uuid`),
 				),
 			)
@@ -113,43 +166,45 @@ export const reachFacts = (
 				),
 			)
 			.leftJoin(actingBot, eq(actingBot.id, sql`${botId}::uuid`))
-			.where(eq(project.id, projectId))
-			.limit(1);
-		if (!row) return undefined;
-		const facts: ReachFacts = {
-			project: {
-				id: row.id,
-				workspace: row.workspace,
-				leadBot: row.leadBot,
-				visibility: row.visibility,
-				defaultOf:
-					row.defaultOfId && row.defaultOfVisibility
-						? {
-								id: row.defaultOfId,
-								visibility: row.defaultOfVisibility,
-								createdById: row.defaultOfCreatedBy,
-								assistantOf: row.defaultOfAssistantOf,
-							}
-						: null,
-			},
-			member: memberId
-				? {
-						actor: { memberId, workspaceRole: row.role ?? undefined },
-						inProject: row.projectMemberId !== null,
-					}
-				: undefined,
-			bot:
-				botId && row.botWorkspace
+			.where(where)
+			.$dynamic();
+		const rows = yield* limit === undefined ? selected : selected.limit(limit);
+		return rows.map(
+			(row): ReachFacts => ({
+				project: {
+					id: row.id,
+					workspace: row.workspace,
+					leadBot: row.leadBot,
+					visibility: row.visibility,
+					defaultOf:
+						row.defaultOfId && row.defaultOfVisibility
+							? {
+									id: row.defaultOfId,
+									visibility: row.defaultOfVisibility,
+									createdById: row.defaultOfCreatedBy,
+									assistantOf: row.defaultOfAssistantOf,
+								}
+							: null,
+				},
+				member: memberId
 					? {
-							id: botId,
-							workspace: row.botWorkspace,
-							inProject: row.botInProject,
-							assistantOf: row.botAssistantOf,
-							usesComputer: row.botUsesComputer ?? false,
+							actor: { memberId, workspaceRole: row.role ?? undefined },
+							inProject: row.projectMemberId !== null,
 						}
 					: undefined,
-		};
-		return facts;
+				bot:
+					botId && row.botWorkspace
+						? {
+								id: botId,
+								workspace: row.botWorkspace,
+								inProject: row.botInProject,
+								assistantOf: row.botAssistantOf,
+								usesComputer: row.botUsesComputer ?? false,
+								deleting: row.botDeleting,
+							}
+						: undefined,
+			}),
+		);
 	});
 
 /** `memberId`'s role in `workspaceId`, or `undefined` when they aren't in it. */
@@ -159,7 +214,13 @@ export const roleIn = (db: Executor, workspaceId: string, memberId: string) =>
 		const [row] = yield* db
 			.select({ role: membership.role })
 			.from(membership)
-			.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId)))
+			.where(
+				and(
+					eq(membership.workspaceId, workspaceId),
+					eq(membership.memberId, memberId),
+					eq(membership.leaving, false),
+				),
+			)
 			.limit(1);
 		return row?.role;
 	});
@@ -170,6 +231,7 @@ export interface BotRecord extends BotFacts {
 	readonly workspace: string;
 	readonly systemBot: boolean;
 	readonly defaultProject: string | null;
+	readonly deleting: boolean;
 }
 
 /** The bot `botId`, or `undefined` when there is none. */
@@ -184,9 +246,14 @@ export const botRecord = (db: Executor, botId: string) =>
 				createdById: bot.createdById,
 				assistantOf: bot.assistantOf,
 				systemBotKey: bot.systemBotKey,
-				defaultProject: defaultProjectIdOf(bot.id),
+				defaultProject: project.id,
+				deleting: project.deleting,
 			})
 			.from(bot)
+			.leftJoin(
+				project,
+				and(eq(project.defaultOfBotId, bot.id), eq(project.workspaceId, bot.workspaceId)),
+			)
 			.where(eq(bot.id, botId))
 			.limit(1);
 		if (!row) return undefined;
@@ -198,6 +265,7 @@ export const botRecord = (db: Executor, botId: string) =>
 			assistantOf: row.assistantOf,
 			systemBot: row.systemBotKey !== null,
 			defaultProject: row.defaultProject,
+			deleting: row.deleting ?? false,
 		};
 		return record;
 	});
@@ -246,12 +314,12 @@ export function mayInProjectAs(
  * default project. A Personal Assistant reaches what its member reaches, so
  * only acting for that member.
  */
-export function botReaches(
+function botReaches(
 	place: BotPlace | undefined,
 	project: ProjectFacts,
 	asker: MemberPlace | undefined,
 ): boolean {
-	if (!place || place.workspace !== project.workspace) return false;
+	if (!place || place.deleting || place.workspace !== project.workspace) return false;
 	if (place.assistantOf !== null) {
 		return place.assistantOf === asker?.actor.memberId && memberReaches(asker, project);
 	}
@@ -288,8 +356,25 @@ export function administers(actor: Actor): boolean {
 }
 
 /** Whether `actor` may see and talk to the bot. Nobody reaches a system bot. */
-export function memberReachesBot(actor: Actor, bot: BotRecord): boolean {
+export function memberReachesBot(
+	actor: Actor,
+	bot: BotFacts & { readonly systemBot: boolean },
+): boolean {
 	return !bot.systemBot && reachesBot(actor, bot);
+}
+
+/**
+ * Whether `actor` may restrict the bot: delete it or switch off its
+ * automations and connectors, without reaching it, as an admin does another
+ * member's personal bot. Admins see every bot but another member's Personal
+ * Assistant, and a system bot can't be restricted.
+ */
+export function restrictsBot(
+	actor: Actor,
+	bot: BotFacts & { readonly systemBot: boolean },
+): boolean {
+	if (!administers(actor) || bot.systemBot) return false;
+	return bot.assistantOf === null || memberReachesBot(actor, bot);
 }
 
 /** The actor `memberId` is, with `role` in the workspace. */
@@ -323,7 +408,7 @@ export type ReachedAs =
 	| { readonly kind: "systemWork" };
 
 /** Whether a principal reaches a project or a chat in it, and as whom. */
-export type ReachDecision =
+type ReachDecision =
 	| { readonly kind: "reaches"; readonly as: ReachedAs }
 	| { readonly kind: "hidden" }
 	| { readonly kind: "botCannotReach" };
@@ -370,18 +455,13 @@ export function decideReach(
 			if (!botReaches(facts.bot, project, undefined)) return { kind: "botCannotReach" };
 			return { kind: "reaches", as: { kind: "run", bot: principal.bot, turn: principal.turn } };
 		case "WebhookCall":
-			return principal.workspace === project.workspace && principal.source.project === project.id
-				? { kind: "reaches", as: { kind: "webhook" } }
+			return hidden;
+		case "SystemWork":
+			return principal.workspace === project.workspace &&
+				principal.work.kind === "compaction" &&
+				principal.work.chat === chat
+				? { kind: "reaches", as: { kind: "systemWork" } }
 				: hidden;
-		case "SystemWork": {
-			if (principal.workspace !== project.workspace) return hidden;
-			const { work } = principal;
-			const names =
-				work.kind === "compaction"
-					? chat !== undefined && work.chat === chat
-					: work.project === project.id && chat === undefined;
-			return names ? { kind: "reaches", as: { kind: "systemWork" } } : hidden;
-		}
 		case "PageAddress":
 			return hidden;
 	}
@@ -409,3 +489,28 @@ export function whoActs(principal: Principal): { readonly member?: string; reado
 export function memberActing(as: ReachedAs): MemberPlace | undefined {
 	return as.kind === "member" || as.kind === "asker" ? as.place : undefined;
 }
+
+/** Bot removal starts by marking its default project for deletion. */
+export const botRemovalStarted = (botId: SQLWrapper) =>
+	sql<boolean>`exists (
+		select 1 from ${project} as removing_bot_project
+		where removing_bot_project.default_of_bot_id = ${outerColumn(botId)}
+			and removing_bot_project.deleting
+	)`;
+
+/** Whether the turn's bot and the member it acts for can still use its chat. */
+export const turnReachesChat = (db: Executor, facts: TurnFacts) =>
+	Effect.gen(function* () {
+		if (!facts.project) return false;
+		const asker = askerOf(facts);
+		if (asker === undefined && (facts.askedBy.kind !== "automation" || !facts.run)) return false;
+		const place = yield* reachFacts(db, facts.project, {
+			...(asker && { member: asker }),
+			bot: facts.bot,
+		});
+		return (
+			place !== undefined &&
+			(asker === undefined || memberReaches(place.member, place.project)) &&
+			botReaches(place.bot, place.project, place.member)
+		);
+	});

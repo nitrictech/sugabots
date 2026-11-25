@@ -23,13 +23,14 @@ import {
 	useChangeRole,
 	useHandOverOwnership,
 	useLeaveWorkspace,
+	useMembershipCleanupPending,
 	useMemberships,
 	useRemoveMembership,
 	useSendInvitation,
 	useWorkspaceInvitations,
 } from "@/lib/workspace.ts";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
-import { Alert } from "@/ui/alert.tsx";
+import { Alert, Success } from "@/ui/alert.tsx";
 import { MemberAvatar } from "@/ui/avatar.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -142,6 +143,7 @@ function Roster({
 }) {
 	const backToMembers = useBackToHere("Members");
 	const invitations = useWorkspaceInvitations(workspaceId);
+	const cleanupPending = useMembershipCleanupPending(workspaceId, memberships.dataUpdatedAt);
 	const [inviting, setInviting] = useState(false);
 
 	return (
@@ -154,6 +156,11 @@ function Roster({
 				)
 			}
 		>
+			{cleanupPending && (
+				<Success>
+					Member removed. Their Personal Assistant’s computer cleanup will finish in the background.
+				</Success>
+			)}
 			{memberships.isPending ? (
 				<p className="m-0 text-xs text-muted-foreground">Loading members…</p>
 			) : memberships.error ? (

@@ -647,7 +647,7 @@ describe("coming back from a connector sign-in", () => {
 	it("says what went wrong when the sign-in never reached a bot", async () => {
 		mount("/connectors/oauth/return?oauth_error=unknown_state");
 
-		expect(await screen.findByText("The sign-in does not match any connector.")).toBeDefined();
+		expect(await screen.findByText("The sign-in could not be found. Try again.")).toBeDefined();
 		expect(screen.getByRole("link", { name: "Return to workspace" })).toBeDefined();
 	});
 

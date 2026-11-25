@@ -193,6 +193,7 @@ lines in `.env` (see `.env.example`). For local development,
 | `packages/errors`    | `DomainError`, user text, and what of a failure may leave the system           |
 | `packages/contracts` | Portable API schemas and shared wire types                                     |
 | `packages/core`      | Domain services, database schema and migrations, and the durable workflows     |
+| `packages/bot-loop`  | The bot loop: the turn workflow and its steps, recording through operations     |
 | `packages/server`    | HTTP API, authentication, configuration, and process composition               |
 | `packages/workflow`  | The workflow engine (single-runner on Postgres) and activities                 |
 | `packages/sdk`       | Typed API, authentication, and reconnecting SSE client                         |

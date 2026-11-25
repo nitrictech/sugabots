@@ -26,7 +26,12 @@ import {
 } from "./chat.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { useBotRouteOwner } from "./owner.ts";
-import { type ChatSearch, validateChatSearch, validateFileSearch } from "./search.ts";
+import {
+	type ChatSearch,
+	decodeRouteId,
+	validateChatSearch,
+	validateFileSearch,
+} from "./search.ts";
 import { shellRoute } from "./workspace.tsx";
 
 const NewChatPage = lazyNamed(() => import("@/screens/NewChatPage.tsx"), "NewChatPage");
@@ -58,19 +63,20 @@ function BotRoute() {
 		matchRoute({ to: "/$workspace/bots/$bot/automations", fuzzy: true }),
 	);
 	const onConnectors = Boolean(matchRoute({ to: "/$workspace/bots/$bot/connectors", fuzzy: true }));
-	const onSettings = Boolean(
-		matchRoute({ to: "/$workspace/bots/$bot/settings" }) ||
-			matchRoute({ to: "/$workspace/bots/$bot/computer" }),
-	);
+	const onSettings = Boolean(matchRoute({ to: "/$workspace/bots/$bot/settings" }));
 	if (isPending) return <Panes>{null}</Panes>;
 	if (!bot) return <OwnerNotFound kind="bot" error={error} />;
-	// Someone else's personal bot, which an administrator sees listed: it exists, and its settings,
-	// connectors and automations are theirs to manage, though its chats and what its
-	// automations posted are not.
+	// Someone else's personal bot, which an administrator sees listed: it exists, and they may
+	// delete it from its settings and pause its automations, though its chats, what its
+	// automations posted and the rest of its settings are not theirs.
+	const { resources } = bot.permissions;
+	const seesAutomations = resources.manageAutomations || resources.pauseAutomations;
+	const seesConnectors =
+		resources.manageConnectors || (!bot.permissions.talk && resources.openSettings);
 	const managing =
-		(bot.permissions.resources.manageAutomations && onAutomations) ||
-		(bot.permissions.resources.manageConnectors && onConnectors) ||
-		(bot.permissions.resources.openSettings && onSettings);
+		(seesAutomations && onAutomations) ||
+		(seesConnectors && onConnectors) ||
+		(resources.openSettings && onSettings);
 	if (!bot.permissions.talk && !managing) {
 		return (
 			<Panes>
@@ -78,17 +84,17 @@ function BotRoute() {
 					title={bot.name}
 					actions={
 						<>
-							{bot.permissions.update && (
+							{resources.openSettings && (
 								<Link {...botSettingsLink(bot)} className="text-link underline">
 									Open its settings
 								</Link>
 							)}
-							{bot.permissions.resources.manageConnectors && (
+							{seesConnectors && (
 								<Link {...botConnectorsLink(bot)} className="text-link underline">
 									Open its connectors
 								</Link>
 							)}
-							{bot.permissions.resources.manageAutomations && (
+							{seesAutomations && (
 								<Link {...botAutomationsLink(bot)} className="text-link underline">
 									Open its automations
 								</Link>
@@ -144,6 +150,7 @@ function BotNewChat({ bot }: { bot: Bot }) {
 export const chatRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/chats/$chat",
+	params: { parse: ({ chat }) => ({ chat: decodeRouteId(chat) }) },
 	validateSearch: (search: Record<string, unknown>) => validateChatSearch(search),
 	preloadStaleTime: 0,
 	loader: ({ context, params }) => {
@@ -205,6 +212,7 @@ export const botFilesRoute = createRoute({
 export const botFileRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/files/$file",
+	params: { parse: ({ file }) => ({ file: decodeRouteId(file) }) },
 	validateSearch: (search: Record<string, unknown>) => validateFileSearch(search),
 	component: () => {
 		const owner = useBotRouteOwner();
@@ -218,6 +226,7 @@ export const botFileRoute = createRoute({
 export const chatByIdRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/chats/$chat",
+	params: { parse: ({ chat }) => ({ chat: decodeRouteId(chat) }) },
 	component: () => {
 		const { chat } = chatByIdRoute.useParams();
 		const search = useSearch({ strict: false });

@@ -1,11 +1,11 @@
-import type { ToolSet } from "ai";
-import { Effect, Exit, Layer, Scope } from "effect";
+import { Effect, Exit, Layer, Scope, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CurrentActor } from "../../../authorization/current-actor.ts";
 import { ComputerProviderStore } from "../../../computers/computer-provider-store.ts";
 import { ComputerSignIn } from "../../../computers/computer-sign-in.ts";
 import { ProjectComputers } from "../../../computers/project-computers.ts";
 import { recordingIds, removeWorkVolumes } from "../../../computers/testing.ts";
+import { EventBus } from "../../../database/events/bus.ts";
+import { EventStore } from "../../../database/events/store.ts";
 import {
 	bot as botTable,
 	chatParticipant,
@@ -14,11 +14,15 @@ import {
 	workspace,
 } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
+import { viewDesktop } from "../../../operations/computers/view-desktop.ts";
+import { authenticators, principals } from "../../../proofs/world.test-support.ts";
 import { Egress } from "../../../providers/network/egress.ts";
+import { Streams } from "../../../streams/streams.ts";
 import { unimplemented } from "../../../testing.ts";
 import { defaultProjectOf } from "../../../workspaces/projects/project-reads.ts";
 import { seedChat } from "../../seed.test-support.ts";
-import { ComputerTools } from "../computer.ts";
+import { stepOnComputer } from "../computer/testing.ts";
+import { TurnComputers } from "../computer/turn-computers.ts";
 import { DesktopViewer } from "./viewer.ts";
 import { answerChallenge } from "./vnc-authentication.ts";
 
@@ -33,8 +37,10 @@ const configured = env.DATABASE_URL && env.OPENSANDBOX_URL && env.OPENSANDBOX_AP
 const SLOW = 180_000;
 
 describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandbox", () => {
-	let tools: ToolSet;
+	let botCalls: Awaited<ReturnType<typeof stepOnComputer>>["call"];
 	let viewer: DesktopViewer.Interface;
+	let streams: Streams.Interface;
+	let signedIn: ReturnType<typeof principals>;
 	let projectComputers: ProjectComputers.Interface;
 	let workspaceId: string;
 	let ownerId: string;
@@ -48,21 +54,31 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	const idsHandedOut = new Set<string>();
 
 	beforeAll(async () => {
-		let computerTools: ComputerTools.Interface;
+		let turnComputers: TurnComputers.Interface;
 		let providers: ComputerProviderStore.Interface;
-		[computerTools, viewer, projectComputers, providers] = await runOnPostgres(
+		signedIn = principals(await authenticators());
+		[turnComputers, viewer, projectComputers, providers, streams] = await runOnPostgres(
 			Effect.all([
-				ComputerTools.Service,
+				TurnComputers.Service,
 				DesktopViewer.Service,
 				ProjectComputers.Service,
 				ComputerProviderStore.Service,
+				Streams.Service,
 			]).pipe(
 				Effect.provide(
 					Layer.mergeAll(
-						ComputerTools.layer,
+						TurnComputers.layer,
 						DesktopViewer.layer,
 						ProjectComputers.layer,
 						ComputerProviderStore.layer,
+						Streams.layer.pipe(
+							Layer.provide([
+								Layer.sync(EventBus.Service, () =>
+									EventBus.inProcess({ store: EventStore.inMemory() }),
+								),
+								EventStore.layer,
+							]),
+						),
 					),
 				),
 				Effect.provide(ComputerSignIn.none),
@@ -150,21 +166,22 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 				},
 			}),
 		);
-		tools = await runOnPostgres(
-			Scope.provide(scope)(
-				computerTools.forTurn({
-					workspaceId,
-					projectId: await runOnPostgres(defaultProjectOf(botId)),
-					usesComputer: true,
-					naturalBrowsing: false,
-					turnId: "turn-1",
-					chatId,
-					botId,
-					color: "orange",
-					acceptsImages: false,
-				}),
-			),
-		).then((offered) => offered.tools);
+		const botTurn = await signedIn.botFor(ownerId, botId, chatId);
+		({ call: botCalls } = await stepOnComputer(
+			turnComputers,
+			botTurn,
+			{
+				workspaceId,
+				projectId: await runOnPostgres(defaultProjectOf(botId)),
+				naturalBrowsing: false,
+				turnId: botTurn.turn,
+				chatId,
+				botId,
+				color: "orange",
+				acceptsImages: false,
+			},
+			scope,
+		));
 	}, SLOW);
 
 	afterAll(async () => {
@@ -178,14 +195,28 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		removeWorkVolumes(idsHandedOut);
 	}, SLOW);
 
-	const openAs = (memberId: string, of = botId) =>
-		runOnPostgres(
+	/** Opens the desktop viewer for `memberId`, as its entrypoint does, held open for the file. */
+	const openAs = async (memberId: string, of = botId) => {
+		const principal = await signedIn.member(memberId);
+		return runOnPostgres(
 			Effect.exit(
-				Scope.provide(scope)(viewer.open({ chatId, botId: of })).pipe(
-					CurrentActor.provide(CurrentActor.AuthenticatedMemberId.vouchedFor(memberId)),
+				Scope.provide(scope)(
+					viewDesktop
+						.run(principal, { chatId, botId: of }, { kind: "request", request: memberId })
+						.pipe(
+							Effect.flatMap(({ stream }) => Stream.runHead(stream)),
+							Effect.flatMap((first) =>
+								first._tag === "Some"
+									? Effect.succeed(first.value)
+									: Effect.die(new Error("The viewer ended before it opened")),
+							),
+							Effect.provideService(DesktopViewer.Service, viewer),
+							Effect.provideService(Streams.Service, streams),
+						),
 				),
 			),
 		);
+	};
 
 	let openedFirst: string | undefined;
 
@@ -204,11 +235,10 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	it(
 		"gives the bot's browser the desktop a member opened, and shows it to them",
 		async () => {
-			const navigate = tools.browser_navigate?.execute as (
-				input: object,
-				options: object,
-			) => Promise<unknown>;
-			await navigate({ url: "data:text/html,<h1>Watched</h1>" }, { toolCallId: "1", messages: [] });
+			await botCalls("computers.useBrowser", {
+				tool: "browser_navigate",
+				arguments: { url: "data:text/html,<h1>Watched</h1>" },
+			});
 
 			const exit = await openAs(ownerId);
 			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());

@@ -1,6 +1,7 @@
 export * as ServerSettings from "./server-settings.ts";
 
 import { Config, Context, Data, Effect, Layer, Option } from "effect";
+import { processLayer, Tier } from "../tiers.ts";
 
 /** How this server is reached, and whether it runs in production. */
 export interface Interface {
@@ -22,7 +23,9 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ServerSettings",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const environment = yield* Config.Literals(
@@ -65,7 +68,7 @@ export const make = Effect.gen(function* () {
 	return serverSettings;
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 export class InvalidConfig extends Data.TaggedError("InvalidServerSettings")<{
 	message: string;

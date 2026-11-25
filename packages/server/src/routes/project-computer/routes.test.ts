@@ -7,7 +7,7 @@ import {
 	UpgradeFailed,
 } from "@sugabots/contracts/errors/computers";
 import { BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import type { FailureOf, OperationName } from "@sugabots/contracts/operations";
+import type { FailureOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { Operations } from "@sugabots/core/operations/registry";
 import type { Principal } from "@sugabots/core/principal";
 import { unimplemented } from "@sugabots/core/testing";
@@ -52,7 +52,7 @@ const network: ProjectComputerNetwork = {
 
 /** What one request called: the operation, the member it was called for, and its input. */
 interface Called {
-	readonly name: OperationName;
+	readonly name: RequestOperationName;
 	readonly member: string | undefined;
 	readonly input: unknown;
 }
@@ -73,7 +73,7 @@ const app = (operations: Partial<Operations.Interface>) =>
  */
 function recordingApp(called: Called[]) {
 	const answering =
-		<const Output>(name: OperationName, output: Output) =>
+		<const Output>(name: RequestOperationName, output: Output) =>
 		(principal: Principal, input: unknown) =>
 			Effect.sync(() => {
 				called.push({ name, member: memberOf(principal), input });
@@ -101,7 +101,7 @@ describe("the project computer routes", () => {
 	it("call each endpoint's operation with its input, for the member signed in", async () => {
 		const cases: ReadonlyArray<{
 			readonly request: readonly [path: string, init: RequestInit];
-			readonly name: OperationName;
+			readonly name: RequestOperationName;
 			readonly input: unknown;
 		}> = [
 			{

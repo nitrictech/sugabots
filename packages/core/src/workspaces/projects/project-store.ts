@@ -15,6 +15,7 @@ import { query, queryCatching, serviceOperations, transaction } from "../../data
 import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
 import { bot, membership, project, projectBot, projectMember } from "../../database/schema.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { projectColorOf } from "./project.ts";
 import { type LeadsProjects, refuseWhileLeading } from "./project-leads.ts";
 
@@ -59,6 +60,7 @@ export interface Interface {
 		changes: ProjectUpdate,
 	) => Effect.Effect<schema.ProjectRow, ProjectGone | ProjectSlugTaken | BotNotPublic>;
 	/** Removes a project. One already gone counts as removed. */
+	readonly markDeleting: (workspaceId: string, projectId: string) => Effect.Effect<boolean>;
 	readonly remove: (workspaceId: string, projectId: string) => Effect.Effect<void>;
 	/**
 	 * Adds a member in the project's workspace, and says whether `memberId` is in
@@ -106,7 +108,9 @@ export interface Interface {
 	) => Effect.Effect<void, LeadsProjects>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ProjectStore") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ProjectStore") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ProjectStore");
@@ -163,6 +167,7 @@ export const make = Effect.gen(function* () {
 				inner join ${membership}
 					on ${membership.workspaceId} = ${project.workspaceId}
 					and ${membership.memberId} = ${memberId}
+					and not ${membership.leaving}
 				where ${project.id} = ${projectId}
 				and ${project.workspaceId} = ${workspaceId}
 				on conflict ("project_id", "member_id") do nothing
@@ -289,6 +294,24 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
+		markDeleting: (workspaceId, projectId) =>
+			operation(
+				"markDeleting",
+				query((db) =>
+					db
+						.update(project)
+						.set({ deleting: true })
+						.where(
+							and(
+								eq(project.id, projectId),
+								eq(project.workspaceId, workspaceId),
+								eq(project.deleting, false),
+							),
+						)
+						.returning({ id: project.id }),
+				).pipe(Effect.map(([started]) => started !== undefined)),
+			),
+
 		remove: (workspaceId, projectId) =>
 			operation(
 				"remove",
@@ -349,7 +372,11 @@ export const make = Effect.gen(function* () {
 								.select({ role: membership.role })
 								.from(membership)
 								.where(
-									and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId)),
+									and(
+										eq(membership.workspaceId, workspaceId),
+										eq(membership.memberId, memberId),
+										eq(membership.leaving, false),
+									),
 								)
 								.limit(1),
 						);
@@ -407,4 +434,4 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));

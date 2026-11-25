@@ -43,7 +43,7 @@ export class Service extends Context.Service<Service, Interface>()(
 }
 
 /** A delivery to a GitHub app, as it arrived. */
-export interface GitHubDelivery {
+interface GitHubDelivery {
 	/** By lower-case name. */
 	readonly headers: Readonly<Record<string, string | undefined>>;
 	/** The body exactly as sent, since its signature is over it. */
@@ -59,6 +59,7 @@ export const make = Effect.gen(function* () {
 		query((db) =>
 			db
 				.select({
+					trigger: automationTrigger.id,
 					workspace: automation.workspaceId,
 					project: automation.projectId,
 					automation: automation.id,
@@ -98,7 +99,7 @@ export const make = Effect.gen(function* () {
 						workspace: found.workspace,
 						source: {
 							kind: "trigger",
-							trigger: triggerId,
+							trigger: found.trigger,
 							automation: found.automation,
 							project: found.project,
 						},
@@ -114,12 +115,19 @@ export const make = Effect.gen(function* () {
 						? yield* query((db) =>
 								db
 									.select({
+										id: connector.id,
 										workspace: connector.workspaceId,
 										project: connector.projectId,
 										sealed: connector.appCredentialEncrypted,
 									})
 									.from(connector)
-									.where(and(eq(connector.id, connectorId), eq(connector.kind, "github")))
+									.where(
+										and(
+											eq(connector.id, connectorId),
+											eq(connector.kind, "github"),
+											eq(connector.enabled, true),
+										),
+									)
 									.limit(1),
 							)
 						: [];
@@ -133,7 +141,7 @@ export const make = Effect.gen(function* () {
 					}
 					return authenticated.webhookCall({
 						workspace: row.workspace,
-						source: { kind: "github", connector: connectorId, project: row.project },
+						source: { kind: "github", connector: row.id, project: row.project },
 					});
 				}),
 			),

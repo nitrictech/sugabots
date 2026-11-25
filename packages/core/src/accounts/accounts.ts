@@ -11,6 +11,7 @@ import { invitation, member } from "../database/schema.ts";
 import type { IsMember } from "../proofs/is-member.ts";
 import { ServerSettings } from "../server-settings/server-settings.ts";
 import { referralPath } from "../server-settings/web-app-paths.ts";
+import { processLayer, Tier } from "../tiers.ts";
 import type { UserFacing } from "../user-message.ts";
 
 /** Who may have an account here. */
@@ -30,7 +31,9 @@ export interface Interface {
 	readonly resetReferralLink: <P>(isMember: IsMember<P>) => Effect.Effect<string, ReferralsOff>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Accounts") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Accounts") {
+	declare readonly [Tier]: "process";
+}
 
 /**
  * Sign-up follows `SIGNUP_MODE`, closed unless set. Verification is
@@ -69,7 +72,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /**
  * `closed`: nobody signs themselves up. Members arrive by invitation to a workspace, except

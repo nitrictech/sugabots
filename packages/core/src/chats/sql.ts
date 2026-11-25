@@ -4,6 +4,8 @@ import type {
 	AutomationTriggerAuthor,
 	AutomationTriggerKind,
 	ChatKind,
+	FileWritten,
+	FloorTurnReason,
 	JsonValue,
 	MessageStatus,
 	RunState,
@@ -14,6 +16,7 @@ import type {
 	ToolCallStatus,
 	WrittenFileKind,
 } from "@sugabots/contracts";
+import type { TurnReason } from "@sugabots/contracts/turns";
 import type { UserText } from "@sugabots/errors";
 import { sql } from "drizzle-orm";
 import {
@@ -55,6 +58,9 @@ export const automation = pgTable(
 		 * somebody turns it on again or pauses it by hand.
 		 */
 		pausedAfterFailuresAt: timestamp("paused_after_failures_at", { withTimezone: true }),
+		pauseAfterFailuresPendingAt: timestamp("pause_after_failures_pending_at", {
+			withTimezone: true,
+		}),
 		createdById: uuid("created_by_id").references(() => member.id, { onDelete: "set null" }),
 		/** Set when a bot working in the project made it, at `createdById`'s request. */
 		createdByBotId: uuid("created_by_bot_id").references(() => bot.id, { onDelete: "set null" }),
@@ -76,6 +82,9 @@ export const automation = pgTable(
 		uniqueIndex("automation_project_name_idx")
 			.on(table.projectId, table.name)
 			.where(sql`${table.deletedAt} is null`),
+		index("automation_pending_pause_idx")
+			.on(table.id)
+			.where(sql`${table.pauseAfterFailuresPendingAt} is not null`),
 		uniqueIndex("automation_id_workspace_id_idx").on(table.id, table.workspaceId),
 	],
 );
@@ -209,6 +218,7 @@ export const projectChat = pgTable(
 		 * until something new is posted in it or it is reopened.
 		 */
 		resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+		startRetryKey: uuid("start_retry_key"),
 		/** The member who started it. */
 		startedById: uuid("started_by_id")
 			.notNull()
@@ -222,6 +232,9 @@ export const projectChat = pgTable(
 			name: "project_chat_project_workspace_fkey",
 		}).onDelete("cascade"),
 		index("project_chat_project_idx").on(table.projectId),
+		uniqueIndex("project_chat_start_retry_idx")
+			.on(table.projectId, table.startedById, table.startRetryKey)
+			.where(sql`${table.startRetryKey} is not null`),
 	],
 );
 
@@ -393,27 +406,18 @@ export const chatParticipant = pgTable(
 	],
 );
 
-/**
- * Why a bot was given a turn: a member mentioned it or replied to it, it was the default,
- * it leads a project whose chat got a message mentioning only members (`optional`: it
- * may stay silent), another bot's message mentioned it to ask for its help
- * (`collaboration`: it is that bot's helper), an automation ran, the bots it
- * asked for help have all answered (`hand_back`), it opened its setup
- * interview, or a bot started its chat for a member and briefed it.
- */
-export type TurnReason =
-	| "mention"
-	| "reply"
-	| "default"
-	| "optional"
-	| "collaboration"
-	// An automation ran, whatever started it: a routine, a trigger or somebody by hand.
-	| "automation"
-	| "hand_back"
-	| "interview"
-	| "brief";
+/** Why a bot was given a turn (see `turnReasonSchema`). */
+export type { TurnReason };
 
 export type TurnStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
+
+/**
+ * Why a turn was asked to end before it finished: a member interrupted it, the
+ * automation run it works for ended, its asker or bot lost its chat, or an
+ * approval it waited for expired.
+ */
+const TURN_END_REQUESTS = ["interrupted", "run_ended", "lost_reach", "approval_expired"] as const;
+export type TurnEndRequest = (typeof TURN_END_REQUESTS)[number];
 
 /** The statuses of a turn that has not ended. */
 export const ACTIVE_TURN_STATUSES = ["running", "waiting"] as const satisfies readonly TurnStatus[];
@@ -436,11 +440,39 @@ export const turn = pgTable(
 		 * suspended. A suspended turn resumes only in that execution.
 		 */
 		executionId: text("execution_id"),
+		/**
+		 * Which execution of the turn is the current one: its authenticator
+		 * raises it each time the turn starts or resumes, in whatever process,
+		 * and every write the bot loop makes for the turn checks the principal
+		 * it acts for still carries it.
+		 */
+		executionNumber: integer("execution_number").notNull().default(0),
 		status: text("status").$type<TurnStatus>().notNull(),
 		model: text("model").notNull(),
 		contextTokens: integer("context_tokens"),
 		contextCapacity: integer("context_capacity"),
-		interruptRequested: boolean("interrupt_requested").notNull().default(false),
+		/**
+		 * Why the turn was asked to end, once it was (see `TurnEndRequest`): it
+		 * runs no more tools, and ends telling members why.
+		 */
+		endRequested: text("end_requested").$type<TurnEndRequest>(),
+		/**
+		 * The member the turn acts for, worked out once, as it is made (see
+		 * `askerColumns`): who wrote the message it answers, or when a bot's turn
+		 * wrote it, that turn's asker; for a Personal Assistant's run, its member.
+		 * None for another run's turn, and for one whose message comes back to
+		 * nobody.
+		 */
+		askerId: uuid("asker_id").references((): AnyPgColumn => member.id, { onDelete: "restrict" }),
+		/** Whether the message the turn answers comes back to its automation's trigger, as a run's does. */
+		askedByAutomation: boolean("asked_by_automation").notNull().default(false),
+		/**
+		 * The steers that reached the turn, in the order they did: its asker's
+		 * messages the floor gave its bot while it worked, each with why the floor
+		 * gave it, which the turn reads before its next step rather than each
+		 * getting a turn of its own.
+		 */
+		steers: jsonb("steers").$type<TurnSteer[]>().notNull().default([]),
 		/**
 		 * Runs since the turn last got anywhere: started, retried or resumed, and
 		 * back to zero when it stops to wait for approvals. A turn that keeps
@@ -454,7 +486,16 @@ export const turn = pgTable(
 		 * waited. False for any other status, and once it starts again.
 		 */
 		retrying: boolean("retrying").notNull().default(false),
-		/** Server-owned AI SDK messages needed to continue after tool approval. */
+		/**
+		 * When a retrying turn may run again, as its model's provider asked; none
+		 * when the provider did not say, or the turn is not retrying. Kept with
+		 * the failure, so a workflow that resumes after recording it still waits.
+		 */
+		retryAt: timestamp("retry_at", { withTimezone: true }),
+		/**
+		 * What the turn keeps to carry on from its last step, after waiting for
+		 * approvals or a restart (see `TurnStore.TurnCheckpoint`). None once it ends.
+		 */
 		checkpoint: jsonb("checkpoint").$type<unknown>(),
 		// Why this bot got the turn, for reading the floor's decision back later.
 		reason: text("reason").$type<TurnReason>(),
@@ -467,12 +508,30 @@ export const turn = pgTable(
 	(table) => [
 		index("turn_chat_started_at_idx").on(table.chatId, table.startedAt),
 		uniqueIndex("turn_trigger_bot_idx").on(table.triggerMessageId, table.botId),
+		check(
+			"turn_end_requested_valid",
+			sql`${table.endRequested} in ('interrupted', 'run_ended', 'lost_reach', 'approval_expired')`,
+		),
 		index("turn_active_idx")
 			.on(table.status, table.startedAt)
 			.where(sql`${table.status} = 'running'`),
 		check("turn_failure_has_error", sql`${table.status} <> 'failed' or ${table.error} is not null`),
 	],
 );
+
+export type BriefTurnRule = "memberBounds" | "askBeforeAllTools";
+
+/** A turn a message joined: its bot, and the message it answers. */
+export interface JoinedTurn {
+	readonly botId: string;
+	readonly triggerMessageId: string;
+}
+
+/** A steer a turn took: the message, and why the floor gave it to the turn's bot. */
+export interface TurnSteer {
+	readonly messageId: string;
+	readonly reason: FloorTurnReason;
+}
 
 export const message = pgTable(
 	"message",
@@ -481,14 +540,23 @@ export const message = pgTable(
 		chatId: uuid("chat_id")
 			.notNull()
 			.references(() => chat.id, { onDelete: "cascade" }),
+		retryKey: uuid("retry_key"),
 		authorMemberId: uuid("author_member_id").references(() => member.id, { onDelete: "restrict" }),
 		authorBotId: uuid("author_bot_id").references(() => bot.id, { onDelete: "cascade" }),
 		automationTrigger: jsonb("automation_trigger").$type<AutomationTriggerAuthor>(),
+		briefTurnRule: text("brief_turn_rule").$type<BriefTurnRule>(),
 		status: text("status").$type<MessageStatus>().notNull(),
 		parts: jsonb("parts").$type<StoredMessagePart[]>().notNull(),
 		content: text("content").notNull(),
 		mentions: jsonb("mentions").$type<string[]>().notNull().default([]),
 		turnId: uuid("turn_id").references(() => turn.id, { onDelete: "set null" }),
+		/**
+		 * The turns this member's message joined rather than get one of its own,
+		 * each by its bot and the message it answers: one of theirs waiting to
+		 * start, or not yet opened, which reads up to the latest message that
+		 * joined it.
+		 */
+		joinedTurns: jsonb("joined_turns").$type<JoinedTurn[]>().notNull().default([]),
 		/** The automation run this message is the result of, posted in the automation's feed. */
 		runId: uuid("run_id").references(() => automationRun.id, {
 			onDelete: "set null",
@@ -505,6 +573,9 @@ export const message = pgTable(
 			sql`num_nonnulls(${table.authorMemberId}, ${table.authorBotId}, ${table.automationTrigger}) = 1`,
 		),
 		index("message_chat_created_at_idx").on(table.chatId, table.createdAt),
+		uniqueIndex("message_retry_idx")
+			.on(table.chatId, table.authorMemberId, table.retryKey)
+			.where(sql`${table.retryKey} is not null`),
 		// A run's result is posted once, in its automation's feed.
 		uniqueIndex("message_run_idx").on(table.runId).where(sql`${table.runId} is not null`),
 		// What a bot's search_history tool matches against. Stemmed so "hotels"
@@ -562,6 +633,7 @@ export const messageReaction = pgTable(
  */
 export type StoredMessagePart =
 	| { type: "text"; text: string }
+	| { type: "thinking"; step: number; text: string }
 	| { type: "tool_call"; toolCallId: string }
 	| { type: "written_file"; fileId: string; kind: WrittenFileKind; title: string; version: number };
 
@@ -589,11 +661,25 @@ export const toolCall = pgTable(
 			.notNull()
 			.references(() => turn.id, { onDelete: "cascade" }),
 		tool: text("tool").notNull(),
-		/** Stable AI SDK call identity across approval continuation. */
+		/**
+		 * The step of its turn that made the call, counted from 0; none for a
+		 * call made before turns took one model request a step.
+		 */
+		step: integer("step"),
+		/** The model's id for the call, which its step's tool result answers. */
 		sdkToolCallId: text("sdk_tool_call_id"),
+		/**
+		 * The execution of its turn that last sent the call (see
+		 * `turn.execution_number`): a call that changes nothing may be sent again
+		 * by a newer execution resuming the turn, once each.
+		 */
+		sentInExecution: integer("sent_in_execution"),
 		approvalId: text("approval_id"),
 		approvalStatus: text("approval_status").$type<ToolApprovalStatus>(),
 		approvalReason: text("approval_reason"),
+		approvalComputerProjectId: uuid("approval_computer_project_id"),
+		approvalConnectorAccess: text("approval_connector_access").$type<"allow" | "ask">(),
+		approvalAskedAt: timestamp("approval_asked_at", { withTimezone: true }),
 		decidedById: uuid("decided_by_id").references(() => member.id, { onDelete: "set null" }),
 		decidedAt: timestamp("decided_at", { withTimezone: true }),
 		connectorId: uuid("connector_id"),
@@ -603,6 +689,8 @@ export const toolCall = pgTable(
 		executionInput: jsonb("execution_input").$type<JsonValue>(),
 		input: jsonb("input").$type<JsonValue>().notNull(),
 		output: jsonb("output").$type<JsonValue>(),
+		/** A file write's receipt, committed with the file before the loop records its outcome. */
+		writtenFileReceipt: jsonb("written_file_receipt").$type<FileWritten>(),
 		status: text("status").$type<ToolCallStatus>().notNull().default("running"),
 		error: text("error").$type<UserText>(),
 		/** Whether the tool may have changed something at the other end. */
@@ -617,7 +705,17 @@ export const toolCall = pgTable(
 	(table) => [
 		index("tool_call_message_idx").on(table.messageId),
 		index("tool_call_turn_idx").on(table.turnId),
-		uniqueIndex("tool_call_sdk_call_idx").on(table.turnId, table.sdkToolCallId),
+		index("tool_call_pending_approval_age_idx")
+			.on(sql`coalesce(${table.approvalAskedAt}, ${table.startedAt})`)
+			.where(sql`${table.approvalStatus} = 'pending'`),
+		// A call is recorded as sent before it is sent, once: an execution that
+		// finds it recorded already doesn't send it again.
+		uniqueIndex("tool_call_step_call_idx").on(table.turnId, table.step, table.sdkToolCallId),
+		// A call made before steps were recorded keeps the key it had: its turn
+		// and the model's id for it.
+		uniqueIndex("tool_call_unstepped_call_idx")
+			.on(table.turnId, table.sdkToolCallId)
+			.where(sql`${table.step} is null`),
 		uniqueIndex("tool_call_approval_idx").on(table.approvalId),
 	],
 );
@@ -735,4 +833,3 @@ export type AutomationTriggerSettings = AutomationTrigger extends infer T
 	: never;
 export type RunRow = typeof automationRun.$inferSelect;
 export type MessageRow = typeof message.$inferSelect;
-export type TurnRow = typeof turn.$inferSelect;

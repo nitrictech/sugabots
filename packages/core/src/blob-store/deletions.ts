@@ -4,6 +4,7 @@ import { inArray } from "drizzle-orm";
 import { Duration, Effect, Layer, Schedule } from "effect";
 import { type Database, query, transaction } from "../database/database.ts";
 import { blobDeletion } from "../database/schema.ts";
+import { processLayer } from "../tiers.ts";
 import { BlobStore } from "./blob-store.ts";
 
 /** How long a queued deletion waits at most, which is how long an unreachable blob lingers. */
@@ -27,7 +28,7 @@ export const layer = Layer.effectDiscard(
 			),
 		);
 	}),
-);
+).pipe(processLayer);
 
 /**
  * Deletes the blobs under every queued prefix, then their queue rows, a batch

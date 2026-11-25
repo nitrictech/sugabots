@@ -33,6 +33,8 @@ interface StreamLedgerOptions {
 		ModelProviderStore.ProviderAccess,
 		"providerId" | "builtIn" | "baseUrl" | "apiFormat"
 	>;
+	/** The step the stream's first request is, counting on from there. */
+	step: number;
 }
 
 interface OpenRequest {
@@ -50,7 +52,7 @@ interface OpenRequest {
 export const streamLedger = (options: StreamLedgerOptions): Effect.Effect<StreamLedger> =>
 	Effect.gen(function* () {
 		const run = Effect.runPromiseWith(yield* Effect.context<never>());
-		let nextStep = 0;
+		let nextStep = options.step;
 		let open: OpenRequest | undefined;
 
 		const start = Effect.gen(function* () {

@@ -1,9 +1,21 @@
 import { MAX_ATTACHMENT_BYTES } from "@sugabots/contracts";
 import { ChatFileNotFound } from "@sugabots/contracts/errors/chat-reads";
+import {
+	seedBot,
+	seedMember,
+	seedProject,
+	seedProjectChat,
+	seedWorkspace,
+} from "@sugabots/core/authentication/seed.test-support";
+import { BlobStore } from "@sugabots/core/blob-store/blob-store";
+import { bot } from "@sugabots/core/database/schema";
+import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { Operations } from "@sugabots/core/operations/registry";
+import { operationsForTests } from "@sugabots/core/operations/testing";
 import { unimplemented } from "@sugabots/core/testing";
+import { eq } from "drizzle-orm";
 import { Effect, Layer, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
 	createTestApp,
 	identifiedBy,
@@ -19,12 +31,14 @@ import {
 const CHAT = "0199a3a0-0000-7000-8000-000000000401";
 const FILE = "0199a3a0-0000-7000-8000-000000000501";
 
-const resolveMember: MemberResolver = async () => ({
+const member = {
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Sam",
 	email: "sam@example.com",
 	image: null,
-});
+};
+
+const resolveMember: MemberResolver = async () => member;
 
 /** The app with `operations` as the only operations it has. */
 const app = (operations: Partial<Operations.Interface>) =>
@@ -48,6 +62,62 @@ const serving = (file: { name: string; contentType: string; bytes: Uint8Array })
 					})
 				: Effect.fail(new ChatFileNotFound({ fileId })),
 	});
+
+describe.skipIf(!process.env.DATABASE_URL)("chat file blob keys", () => {
+	afterAll(closeDatabase);
+
+	it("serves the same blob through a chat and file address written in uppercase", async () => {
+		const workspaceId = await seedWorkspace();
+		const memberId = await seedMember(workspaceId, "editor");
+		const lead = await seedBot(workspaceId);
+		await onDatabase((db) =>
+			db.update(bot).set({ model: "test-model" }).where(eq(bot.id, lead.id)),
+		);
+		const projectId = await seedProject(workspaceId, { leadBotId: lead.id, members: [memberId] });
+		const chatId = await seedProjectChat(workspaceId, projectId, memberId);
+		const operations = await operationsForTests();
+		const server = createTestApp(
+			Layer.merge(
+				identifiedBy(async () => ({ ...member, id: memberId })),
+				Layer.succeed(Operations.Service, operations),
+			),
+		);
+
+		const upload = await server.request(`/chats/${chatId.toUpperCase()}/files?name=notes.txt`, {
+			method: "POST",
+			headers: signedIn,
+			body: "hello",
+		});
+		expect(upload.status).toBe(201);
+		const { id: fileId } = (await upload.json()) as { id: string };
+		const blob = await runOnPostgres(
+			Effect.flatMap(BlobStore.Service, (store) =>
+				store.get(BlobStore.key("chats", chatId, "files", fileId)),
+			),
+		);
+		expect(blob.size).toBe(5);
+
+		const sent = await server.request(`/chats/${chatId}/messages`, {
+			method: "POST",
+			headers: { ...signedIn, "content-type": "application/json" },
+			body: JSON.stringify({
+				retryKey: crypto.randomUUID(),
+				message: "See attached",
+				attachments: [fileId.toUpperCase()],
+			}),
+		});
+		expect(sent.status, await sent.text()).toBe(201);
+
+		const served = await server.request(
+			`/chats/${chatId.toUpperCase()}/files/${fileId.toUpperCase()}`,
+			{
+				headers: signedIn,
+			},
+		);
+		expect(served.status).toBe(200);
+		expect(await served.text()).toBe("hello");
+	});
+});
 
 describe("uploading a chat file", () => {
 	it("keeps the body as the named file, with the type it names", async () => {

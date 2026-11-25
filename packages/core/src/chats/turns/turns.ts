@@ -1,14 +1,21 @@
 /**
  * A bot's turn: one bot answering one message, from being asked until
  * its reply is complete, failed or cancelled. Hidden behind this module are
- * the turn's durable workflow, its lifecycle, the reply streamed and saved as
- * it arrives, the tools it calls and the approvals members give them, and the
- * signals that reach a turn while it runs or waits.
+ * the turn's lifecycle, its records, the reply saved as it arrives, the tools
+ * it calls and the approvals members give them. The turn's durable workflow,
+ * which runs it step by step, is the bot loop's, in `@sugabots/bot-loop`.
  *
- * Two services. `Service` is for the rest of the system and acts for no one:
+ * Two services for the rest of the system. `Service` acts for no one:
  * asking for a turn, stopping the turns under an automation run, and recording a
  * system bot's work as a turn. `Controls` is for members, and demands proof
- * of what they may do: deciding a turn's tool approvals.
+ * of what they may do: deciding a turn's tool approvals, steering a turn and
+ * interrupting one.
+ *
+ * For the bot loop: what it records of a turn (`Records`, which the loop's
+ * own operations are built from), what its workflow does with no principal
+ * (`Runs`), the tools each step offers (`Tools`), and the services core
+ * declares and the loop provides, because the loop owns the workflow:
+ * starting a turn (`TurnRequests`) and signalling one (`TurnSignals`).
  *
  * This is the only file outside `turns/` may import.
  */
@@ -19,31 +26,28 @@ import type {
 	ToolApprovalConflict,
 	ToolApprovalNotFound,
 } from "@sugabots/contracts/errors/approvals";
+import type { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { inArray, type SQLWrapper } from "drizzle-orm";
 import { Context, type Effect, Layer } from "effect";
-import { ACTIVE_TURN_STATUSES, turn } from "../../database/schema.ts";
-import { ChatFileStore } from "../../files/chat-file-store.ts";
-import { Files } from "../../files/files.ts";
+import { ACTIVE_TURN_STATUSES, type TurnSteer, turn } from "../../database/schema.ts";
 import type { CanDecide } from "../../proofs/can-decide.ts";
 import type { IsMember } from "../../proofs/is-member.ts";
+import type { CanInterrupt, CanSteer } from "../../proofs/turn-control.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { laneBusy, waitingSince } from "../../workflows/lanes.ts";
-import { BotStore } from "../../workspaces/bots/bot-store.ts";
-import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import { makeControls } from "./controls.ts";
-import { TurnExecution } from "./execution.ts";
+import { TURN_WORKFLOW, type TurnRequest } from "./requests.ts";
 import { makeService } from "./service.ts";
-import { TurnSignals } from "./signals.ts";
 import { TurnStore } from "./store.ts";
 import { ToolCallStore } from "./tool-calls/store.ts";
-import { turnStepsLayer } from "./turn.steps.ts";
-import { Turn, type TurnRequest, turnWorkflow } from "./turn.workflow.ts";
 
 export {
 	ToolApprovalConflict,
 	ToolApprovalNotFound,
 } from "@sugabots/contracts/errors/approvals";
-export { botsAskedBefore, handBackOwed } from "./collaboration.ts";
+export { ApprovalWithdrawals, dueApprovals } from "./approval-withdrawals.ts";
+export { botsAskedBefore, earliestAnsweredByTurnToCome, handBackOwed } from "./collaboration.ts";
 export {
 	contextWindowTokens,
 	estimatedTokens,
@@ -51,11 +55,31 @@ export {
 	MAX_CONTEXT_WINDOW_TOKENS,
 	newestWithinLimit,
 } from "./context-window.ts";
-export type { Ended } from "./lifecycle.ts";
+export type { OpenedTurn, TurnRun } from "./execution.ts";
+export {
+	executionFence,
+	type FenceRefusal,
+	holdRunningTurn,
+	holdTurnForToolWrite,
+	holdTurnOf,
+} from "./fence.ts";
+export { type Ended, MAX_TURN_RUNS, TURN_CANCELLED } from "./lifecycle.ts";
+export { TurnRecords as Records } from "./records.ts";
+export { TurnRequests } from "./requests.ts";
+export { TurnRuns as Runs } from "./runs.ts";
+export { TurnSignals } from "./signals.ts";
+export { type NotRunnable, recordJoin } from "./store.ts";
+export {
+	ApprovalDecision,
+	DENIED_OUTPUT,
+	DecidedApproval,
+} from "./tool-calls/lifecycle.ts";
+export { commitWrittenFile, replayWrittenFile } from "./tool-calls/store.ts";
+export { TurnTools as Tools } from "./tools.ts";
 export { WorkAdmission } from "./work-admission.ts";
 
 /** A system bot's piece of work, recorded as its turn in its own chat. */
-export interface SystemTurn {
+interface SystemTurn {
 	readonly chatId: string;
 	readonly botId: string;
 	readonly triggerMessageId: string;
@@ -77,8 +101,10 @@ type SystemTurnOutcome<A> =
 export interface Interface {
 	/**
 	 * Asks for a bot's turn, in the caller's transaction; it starts once
-	 * that commits. A turn already asked for, for the same bot in the same
-	 * chat, is kept, because it will read every message posted since.
+	 * that commits. It joins a turn of the same bot in the same chat waiting
+	 * for the same member, which reads that member's messages posted before it
+	 * starts; otherwise it waits behind the turns there (see
+	 * `TurnRequests.admission`).
 	 */
 	readonly ask: (request: TurnRequest) => Effect.Effect<void>;
 	/**
@@ -100,71 +126,71 @@ export interface Interface {
 	) => Effect.Effect<SystemTurnOutcome<A>, never, R>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Turns") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Turns") {
+	declare readonly [Tier]: "process";
+}
 
 /** What members may do to a turn, once proved. */
 export interface ControlsInterface {
 	/**
 	 * Decides the tool call `canDecide` is about, for the member `isMember`
-	 * names, its approver. The decision is recorded, so the chat's watchers
-	 * see it at once, and sent to the turn's workflow, which runs what was
-	 * allowed. A call that waits for no decision, or whose turn no longer
-	 * waits, is not found; one somebody decided first is a conflict.
+	 * names, its approver. In one transaction, once the call's turn is locked,
+	 * it proves again that they may still decide it, records the decision, so
+	 * the chat's watchers see it at once, makes the change an allowed call
+	 * asks of its approver (`allowed`, given the fresh proof), and sends the
+	 * decision to the turn's workflow, which runs what was allowed. A call
+	 * that waits for no decision, or whose turn no longer waits, is not found;
+	 * one somebody decided first is a conflict.
 	 */
 	readonly decide: <P, X>(
 		isMember: IsMember<P>,
 		canDecide: CanDecide<P, X>,
 		decision: ToolApprovalDecision["decision"],
-	) => Effect.Effect<void, ToolApprovalNotFound | ToolApprovalConflict>;
+		allowed: (canDecide: CanDecide<P, X>) => Effect.Effect<void>,
+	) => Effect.Effect<
+		void,
+		ToolApprovalNotFound | ToolApprovalConflict | ResourceHidden | ActionForbidden
+	>;
+	/**
+	 * Makes `steer.messageId`, the message the turn's asker just posted, which
+	 * the floor gave its bot for `steer.reason`, a steer of the turn `canSteer`
+	 * is about, once the turn's row is locked: the turn
+	 * reads it before its next step, and a turn waiting for approvals has them
+	 * withdrawn and is told, so it reads the message next. `false` when the turn
+	 * has ended, or is ending, so the message needs a turn of its own.
+	 */
+	readonly steer: <P, T>(canSteer: CanSteer<P, T>, steer: TurnSteer) => Effect.Effect<boolean>;
+	/**
+	 * Interrupts the turn `canInterrupt` is about, once its row is locked: ends
+	 * the step under way, withdraws any approval it waits for, and ends the
+	 * turn. A turn that has ended already is left as it is.
+	 */
+	readonly interrupt: <P, T>(canInterrupt: CanInterrupt<P, T>) => Effect.Effect<void>;
 }
 
 export class Controls extends Context.Service<Controls, ControlsInterface>()(
 	"@sugabots/core/Turns/Controls",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 const internals = Layer.mergeAll(TurnStore.layer, ToolCallStore.layer);
 
 /**
- * `Service`. Needs the chat services a turn reports to, and
- * {@link signalsLayer} over the workflow engine.
+ * `Service`. Needs the chat services a turn reports to, and the services
+ * that start and signal turns, which the bot loop provides.
  */
-export const layer = Layer.effect(Service, makeService).pipe(Layer.provide(internals));
-
-/**
- * `Controls`, which the approvals operations are built from. Needs the chat
- * services a turn reports to, and {@link signalsLayer} over the workflow engine.
- */
-export const controlsLayer = Layer.effect(Controls, makeControls).pipe(Layer.provide(internals));
-
-/** The turn's durable workflow, for the engine to run over {@link stepsLayer}. */
-export const workflow = turnWorkflow;
-
-/**
- * What the turn workflow's steps do: the rest of a turn's machinery.
- * Suspended: the steps' module reaches this one through the bot chats and
- * the chats, so `turnStepsLayer` is read once the layer is built, not while
- * the modules load.
- */
-export const stepsLayer = Layer.suspend(() =>
-	turnStepsLayer.pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				TurnExecution.layer,
-				ApprovedToolCalls.layer,
-				BotStore.layer,
-				ChatFileStore.layer,
-				Files.authoringLayer,
-			),
-		),
-		Layer.provide(internals),
-	),
+export const layer = processLayer(Layer.effect(Service, makeService)).pipe(
+	Layer.provide(internals),
 );
 
 /**
- * How a turn hears members while it runs or waits, over the workflow engine.
- * Provided with the engine, so a test can stand in for it.
+ * `Controls`, which the approvals operations are built from. Needs the chat
+ * services a turn reports to, and the services that signal turns.
  */
-export const signalsLayer = TurnSignals.layer;
+export const controlsLayer = processLayer(Layer.effect(Controls, makeControls)).pipe(
+	Layer.provide(internals),
+);
 
 /** Re-sends cancels lost between their commit and their signal (see `resendLostCancels`). */
 export { cancelSweepLayer, resendLostCancels } from "./cancel-sweep.ts";
@@ -173,7 +199,7 @@ export { cancelSweepLayer, resendLostCancels } from "./cancel-sweep.ts";
  * busyIn reports, as a condition for a query, whether a bot's turn in the
  * chat `chatId` is running or waiting to start.
  */
-export const busyIn = (chatId: SQLWrapper) => laneBusy(chatId, [Turn._tag]);
+export const busyIn = (chatId: SQLWrapper) => laneBusy(chatId, [TURN_WORKFLOW]);
 
 /**
  * When a turn in the chat `chatId` started waiting to start, as a value
@@ -181,7 +207,7 @@ export const busyIn = (chatId: SQLWrapper) => laneBusy(chatId, [Turn._tag]);
  * posts the message asking, so that message has the same time, and the turn
  * reads it and everything posted after it once it starts.
  */
-export const queuedSince = (chatId: SQLWrapper) => waitingSince(chatId, Turn._tag);
+export const queuedSince = (chatId: SQLWrapper) => waitingSince(chatId, TURN_WORKFLOW);
 
 /** isActive reports, as a condition for a query, whether a turn is running or waiting on approvals. */
 export const isActive = inArray(turn.status, [...ACTIVE_TURN_STATUSES]);

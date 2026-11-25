@@ -14,7 +14,7 @@ import {
 } from "@sugabots/contracts";
 import { WebhookRefused } from "@sugabots/contracts/errors/automations";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { userText } from "@sugabots/errors";
 import { and, eq, inArray } from "drizzle-orm";
 import { Context, Effect, Layer, type Schema } from "effect";
@@ -55,31 +55,31 @@ import { Operations } from "../../operations/registry.ts";
 import { servedOperations } from "../../operations/testing.ts";
 import type { MemberSession } from "../../principal.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
+import { Models } from "../../providers/models/models.ts";
+import { unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { chatServicesForTests } from "../testing.ts";
 import {
-	type PreparedTurn,
-	prepareRunnable,
-	replyTurnOf,
+	type PreparedTurnForTests,
+	parkTurn,
+	prepareTurn,
 	runningTurns,
-	TurnExecution,
-	TurnStore,
+	runOver,
 } from "../turns/testing.ts";
-import { lockTriggers } from "./acceptance.ts";
-import type { InProject } from "./automation.ts";
 import {
 	AutomationTriggerConflict,
 	AutomationTriggerKindChanged,
-	AutomationTriggerNotFound,
+	lockTriggers,
 	TooManyAutomationTriggers,
 	WebhookDeliveryIdHeaderRejected,
 	WebhookSecretTooShort,
 } from "./automation.ts";
 import { AutomationRunner } from "./automation-runner.ts";
-import type { OnTrigger } from "./project-automations.ts";
 import { AutomationSettlement } from "./settlement.ts";
 import { anAutomationAdmin, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
 import type { Delivery } from "./webhook-auth.ts";
+
+type AutomationAddress = Pick<InputOf<"automations.update">, "projectId" | "automationId">;
 
 describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", async () => {
 	const bus = EventBus.inProcess({ store: EventStore.inMemory() });
@@ -97,8 +97,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 					Layer.mergeAll(
 						Layer.succeedContext(services),
 						Layer.succeed(EventBus.Service, bus),
+						EventStore.layer,
 						unimplemented(Accounts.Service),
 						unimplemented(Email.Service),
+						// No case here makes a turn's model request.
+						Layer.succeed(Models.Service, unusedModel()),
 					),
 				),
 			),
@@ -121,25 +124,29 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 	 */
 	const automationsAs = (memberId: string) => {
 		const as =
-			<Name extends OperationName>(name: Name) =>
+			<Name extends RequestOperationName>(name: Name) =>
 			async (input: InputOf<Name>) =>
 				runOnPostgres(operations[name](await signIn(memberId), input, aRequest()));
 		return {
 			list: as("automations.list"),
 			create: ({ projectId }: { projectId: string }, input: NewAutomation) =>
 				as("automations.create")({ projectId, ...input }),
-			update: (automation: InProject, changes: AutomationUpdate) =>
+			update: (automation: AutomationAddress, changes: AutomationUpdate) =>
 				as("automations.update")({ ...automation, changes }),
 			remove: as("automations.remove"),
 			run: as("automations.run"),
-			addTrigger: (automation: InProject, trigger: AutomationTriggerInput) =>
+			addTrigger: (automation: AutomationAddress, trigger: AutomationTriggerInput) =>
 				as("automations.addTrigger")({ ...automation, trigger }),
-			updateTrigger: (addressed: InProject & OnTrigger, trigger: AutomationTriggerInput) =>
-				as("automations.updateTrigger")({ ...addressed, trigger }),
+			updateTrigger: (
+				addressed: AutomationAddress & { triggerId: string },
+				trigger: AutomationTriggerInput,
+			) => as("automations.updateTrigger")({ ...addressed, trigger }),
 			removeTrigger: as("automations.removeTrigger"),
 			getSecret: as("automations.getSecret"),
-			rotateSecret: async (addressed: InProject & OnTrigger, secret?: string | null) =>
-				(await as("automations.rotateSecret")({ ...addressed, secret })).secret,
+			rotateSecret: async (
+				addressed: AutomationAddress & { triggerId: string },
+				secret?: string | null,
+			) => (await as("automations.rotateSecret")({ ...addressed, secret })).secret,
 			listProjectRuns: (
 				{ projectId }: { projectId: string },
 				page: RunPageQuery = { limit: DEFAULT_RUN_PAGE_LIMIT },
@@ -177,10 +184,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			return { kind: "challenge" as const, challenge: answer.challenge };
 		},
 	};
-	const turns = onPostgres({ suspend: Context.get(services, TurnStore.Service).suspend });
-	const execution = onPostgres({
-		prepare: Context.get(services, TurnExecution.Service).prepare,
-	});
+	const drive = runOver(services);
 	const runner = onPostgres(Context.get(services, AutomationRunner.Service));
 	const settlement = onPostgres({
 		settleRun: Context.get(services, AutomationSettlement.Service).settleRun,
@@ -224,16 +228,25 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		);
 	/** The automation's triggers, as its project's automations list them. */
 	const triggersOf = async (addressed: { projectId: string; automationId: string }) =>
-		(await automations.list({ projectId: addressed.projectId })).find(
-			(listed) => listed.id === addressed.automationId,
-		)?.triggers;
+		(await automations.list({ projectId: addressed.projectId }))
+			.filter((listed) => "triggers" in listed)
+			.find((listed) => listed.id === addressed.automationId)?.triggers;
 	/** Runs the scheduler once, as if it were `now`. */
 	const processDueAt = (now: Date) =>
 		runOnPostgres(
-			TestClock.setTime(now.getTime()).pipe(
-				Effect.andThen(Context.get(services, AutomationRunner.Service).processNextDue()),
-				Effect.provide(TestClock.layer()),
-			),
+			Effect.gen(function* () {
+				yield* TestClock.setTime(now.getTime());
+				const triggerId = yield* auth.systemWork.nextDueRoutineId();
+				if (!triggerId) return undefined;
+				const principal = yield* auth.systemWork.dueRoutine(triggerId);
+				const accepted = yield* operations["automations.runDueRoutine"](
+					principal,
+					{ triggerId },
+					aRequest(),
+				);
+				if (accepted === "skipped" || accepted === "retry") throw new Error("Routine did not run");
+				return accepted;
+			}).pipe(Effect.provide(TestClock.layer())),
 		);
 	/** Makes each of the automation's routines due at `at`. */
 	const makeDue = (automationId: string, at: Date) =>
@@ -1135,10 +1148,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			},
 		);
 		const addressed = { projectId: ownProjectId, automationId: created.automation.id };
-		const nextTimes = (defined: AutomationWriteResult) =>
-			defined.automation.triggers.flatMap((trigger) =>
+		const nextTimes = (defined: Awaited<ReturnType<typeof automations.update>>) => {
+			if (!("triggers" in defined.automation)) throw new Error("Expected automation settings");
+			return defined.automation.triggers.flatMap((trigger) =>
 				trigger.kind === "routine" ? [trigger.nextScheduledAt] : [],
 			);
+		};
 
 		const paused = await automations.update(addressed, { state: "paused" });
 		expect(nextTimes(paused)).toEqual([null, null]);
@@ -1222,7 +1237,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				delivery: bearerDelivery(secret ?? ""),
 			}),
 		).toBeUndefined();
-		await expect(automations.removeTrigger(addressed)).rejects.toThrow(AutomationTriggerNotFound);
+		await expect(automations.removeTrigger(addressed)).rejects.toThrow(ResourceHidden);
 	});
 
 	it("runs an automation without triggers only when someone runs it", async () => {
@@ -1389,7 +1404,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 					.where(eq(automationRun.automationId, automation.automationId)),
 			);
 			const statusOf = (listed: Awaited<ReturnType<typeof view.list>>, id: string) =>
-				listed.find((one) => one.id === id)?.status;
+				listed.filter((one) => "instructions" in one).find((one) => one.id === id)?.status;
 
 			const listed = await view.list({ projectId: ownProjectId });
 			expect(statusOf(listed, automation.automationId)).toEqual({
@@ -1440,7 +1455,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			if (!runChat) throw new Error("The run has no chat");
 			const [run] = await runOnPostgres(runningTurns(runChat.id));
 			if (!run) throw new Error("The run asked for no turn");
-			const prepared = await prepareRunnable(execution, run);
+			const prepared = await drive(prepareTurn(run));
 			const pending = await parkForApproval(prepared);
 			const decision = { toolCallId: pending.id, decision: "allow_once" as const };
 			const approvalsAs = (memberId: string) => asMember(call, memberId);
@@ -1482,7 +1497,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			if (!runChat) throw new Error("The run has no chat");
 			const [run] = await runOnPostgres(runningTurns(runChat.id));
 			if (!run) throw new Error("The run asked for no turn");
-			const pending = await parkForApproval(await prepareRunnable(execution, run));
+			const pending = await parkForApproval(await drive(prepareTurn(run)));
+			const [parked] = await onDatabase((db) =>
+				db.select({ reply: toolCall.messageId }).from(toolCall).where(eq(toolCall.id, pending.id)),
+			);
+			if (!parked) throw new Error("The call was not recorded");
 			const decision = { toolCallId: pending.id, decision: "allow_once" as const };
 			const approvalsAs = (id: string) => asMember(call, id);
 			const chatViewAs = (id: string) => asMember(call, id);
@@ -1494,7 +1513,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				return {
 					waiting: (await view.approvals(workspaceId)).waiting.map(({ call }) => call.id),
 					counted: (await view.attention(workspaceId)).waitingApprovals,
-					mayDecideInChat: details.permissions?.approveToolCalls,
+					mayDecideInChat: details.permissions?.approveToolCallsIn.includes(parked.reply),
 					projectNeedsApproval: marks.projects[projectId]?.needsApproval ?? false,
 				};
 			};
@@ -1540,7 +1559,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			expect(decided).toMatchObject({ approvalStatus: "allowed", decidedById: creator });
 		});
 
-		it("decides a run's approval without waiting on its turn, which settling locks first", async () => {
+		it("decides a run's approval once whoever holds its turn's row lets go, as settling does", async () => {
 			const automation = await anAutomationWithARun();
 			await startRunning(runner, automation.automationId);
 			const [runChat] = await onDatabase((db) =>
@@ -1552,26 +1571,32 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			if (!runChat) throw new Error("The run has no chat");
 			const [run] = await runOnPostgres(runningTurns(runChat.id));
 			if (!run) throw new Error("The run asked for no turn");
-			const prepared = await prepareRunnable(execution, run);
+			const prepared = await drive(prepareTurn(run));
 			const pending = await parkForApproval(prepared);
 			const holding = holdTransaction(
 				query((db) => db.select().from(turn).where(eq(turn.id, prepared.turnId)).for("update")),
 			);
 			await holding.held;
 
-			// Decides while the turn is still locked: a wait here would never end.
-			await expect(
-				asMember(call, memberId).decide({
-					toolCallId: pending.id,
-					decision: "allow_once",
-				}),
-			).resolves.toBeUndefined();
+			// A decision locks the turn's row first, as ending the turn does, so it
+			// waits rather than racing whatever holds it.
+			let decided = false;
+			const deciding = asMember(call, memberId)
+				.decide({ toolCallId: pending.id, decision: "allow_once" })
+				.then(() => {
+					decided = true;
+				});
+			await new Promise((resolve) => setTimeout(resolve, 200));
+			expect(decided).toBe(false);
+
 			await holding.release();
+			await deciding;
+			expect(decided).toBe(true);
 		});
 	});
 
-	/** Parks one call to a new connector of the bot's for approval, as the turn's reply. */
-	async function parkForApproval(prepared: PreparedTurn) {
+	/** Parks one call to a new connector of the bot's for approval, as the turn's step does. */
+	async function parkForApproval(prepared: PreparedTurnForTests) {
 		const [connected] = await onDatabase((db) =>
 			db
 				.insert(connector)
@@ -1587,39 +1612,28 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				.returning({ id: connector.id }),
 		);
 		if (!connected) throw new Error("Could not create the connector");
-		const pending = {
-			id: crypto.randomUUID(),
-			approvalId: `approval-${crypto.randomUUID()}`,
-			sdkToolCallId: "sdk-automation",
-			tool: "linear__create_issue",
-			input: { title: "From the automation" },
-			binding: {
-				kind: "connector" as const,
-				connectorId: connected.id,
-				connectorRevision: 1,
-				remoteToolName: "create_issue",
-			},
-			writeOrDelete: true,
-			atOffset: 0,
-		};
-		const parked = await turns.suspend(
-			replyTurnOf(prepared),
-			{
-				messages: [],
-				approvals: [
-					{
-						approvalId: pending.approvalId,
-						tool: pending.tool,
-						binding: pending.binding,
+		const parked = await drive(
+			parkTurn(prepared, [
+				{
+					toolCallId: "sdk-automation",
+					tool: "linear__create_issue",
+					input: { title: "From the automation" },
+					binding: {
+						kind: "connector",
+						connectorId: connected.id,
+						connectorRevision: 1,
+						remoteToolName: "create_issue",
 					},
-				],
-				modelInput: { model: "test", system: "test", messages: [] },
-				reply: { content: "", toolCalls: [{ id: pending.id, atOffset: 0 }] },
-				modelRequests: 1,
-			},
-			[pending],
+					writeOrDelete: true,
+				},
+			]),
 		);
-		if (!parked) throw new Error("The turn did not park");
+		const [approvalId] = parked._tag === "Waiting" ? parked.approvals : [];
+		if (!approvalId) throw new Error("The turn did not park");
+		const [pending] = await onDatabase((db) =>
+			db.select({ id: toolCall.id }).from(toolCall).where(eq(toolCall.approvalId, approvalId)),
+		);
+		if (!pending) throw new Error("The turn parked no call");
 		return pending;
 	}
 });

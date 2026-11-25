@@ -1,6 +1,7 @@
 export { ConnectorNameTaken, UnknownConnectorTool } from "@sugabots/contracts/errors/connectors";
 export * as ConnectorStore from "./connector-store.ts";
 
+import { createHash } from "node:crypto";
 import type { ConnectorTool, ConnectorUpdate, NewConnector } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
 import { ConnectorNameTaken, UnknownConnectorTool } from "@sugabots/contracts/errors/connectors";
@@ -16,7 +17,10 @@ import {
 	type GitHubConnectorSettings,
 	type ToolAccess,
 } from "../../database/schema.ts";
+import type { MemberSession } from "../../principal.ts";
 import { Secrets } from "../../secrets/secrets.ts";
+import { processLayer, Tier } from "../../tiers.ts";
+import { inWorkspaceUnderMembershipLock } from "../../workspaces/membership/member-reads.ts";
 import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import { type AugmentationTool, augmentConnectorTools } from "./augmentations.ts";
 import type { ConnectorTarget } from "./connector-target.ts";
@@ -24,6 +28,8 @@ import { GITHUB_CONNECTOR_TOOLS } from "./github/github-tools.ts";
 import { HTTP_CONNECTOR_TOOLS } from "./http-tools.ts";
 import type { OAuthRecord } from "./oauth.ts";
 import { toolAccessOf } from "./tool-access.ts";
+
+export const OAUTH_EXCHANGE_CLAIM_MS = 30_000;
 
 /**
  * The only writer of `connector`: the MCP servers, HTTP endpoints and GitHub
@@ -65,7 +71,10 @@ export interface Interface {
 	/**
 	 * Records the account the connector's app was installed on, or installed
 	 * on again, and `installedById`, the member who installed it there when the
-	 * account is their own; answers whether the connector is still there.
+	 * account is their own; answers whether it was recorded. An installation
+	 * that is a member's is recorded only while they are in the workspace, read
+	 * under its membership lock, so one that lands during their removal waits
+	 * for it and is refused, or is forgotten by it.
 	 */
 	readonly installed: (
 		workspaceId: string,
@@ -101,6 +110,11 @@ export interface Interface {
 		connectorId: string,
 		changes: ConnectorUpdate,
 	) => Effect.Effect<ConnectorRow | undefined, ConnectorNameTaken | UnknownConnectorTool>;
+	readonly switchOff: (
+		workspaceId: string,
+		projectId: string,
+		connectorId: string,
+	) => Effect.Effect<Pick<ConnectorRow, "id" | "name" | "enabled" | "kind"> | undefined>;
 	readonly remove: (
 		workspaceId: string,
 		projectId: string,
@@ -130,23 +144,48 @@ export interface Interface {
 		workspaceId: string,
 		projectId: string,
 	) => Effect.Effect<ProjectTargets>;
+	readonly claimOauthExchange: (
+		workspaceId: string,
+		connectorId: string,
+		serverUrl: string,
+	) => Effect.Effect<OAuthExchangeClaim | "busy" | undefined>;
+	readonly releaseOauthExchange: (
+		workspaceId: string,
+		connectorId: string,
+		claim: OAuthExchangeClaim,
+	) => Effect.Effect<void>;
 	/** What the OAuth client has learnt and been issued, unsealed. */
 	readonly oauthRecord: (
 		workspaceId: string,
 		connectorId: string,
 	) => Effect.Effect<OAuthRecord | undefined>;
 	/**
+	 * The connector's OAuth record, unsealed, and the version it was read at,
+	 * which a save built from it names; undefined for no such connector.
+	 */
+	readonly readOauthRecord: (
+		workspaceId: string,
+		connectorId: string,
+		serverUrl?: string,
+	) => Effect.Effect<{ record: OAuthRecord | undefined; version: OAuthVersion } | undefined>;
+	/**
 	 * Seals the record; its `state` is also kept in the clear so a callback can
-	 * find the row. `signedInById` comes with the tokens a sign-in has just been
-	 * issued, as the member who finished it; tokens without it are refreshed
-	 * ones of the sign-in already there, and a record without any is signed out.
+	 * find the row. A record without tokens is signed out. Answers the version
+	 * it saved, or undefined when it was refused:
+	 *
+	 * - a sign-in's tokens are saved only while the member who finished it is
+	 *   in the workspace, read under its membership lock, so one that finishes
+	 *   during their removal waits for it and is refused, or is signed out by it;
+	 * - anything else, such as refreshed tokens or the start of a sign-in, is
+	 *   saved only while the record is still the version it was built from, so
+	 *   nothing read before a sign-out writes the signed-out tokens back.
 	 */
 	readonly saveOauthRecord: (
 		workspaceId: string,
 		connectorId: string,
 		record: OAuthRecord,
-		signedInById?: string,
-	) => Effect.Effect<void>;
+		save: OAuthSave,
+	) => Effect.Effect<string | undefined>;
 	/**
 	 * Takes away the OAuth record of every connector in the workspace whose
 	 * tokens `memberId` signed in for, so each must be signed in again. A
@@ -157,12 +196,14 @@ export interface Interface {
 	 * The connector a sign-in callback belongs to, by the `state` it carries,
 	 * and who started that sign-in, if anybody did.
 	 */
-	readonly byOauthState: (state: string) => Effect.Effect<
+	readonly byOauthState: (
+		state: string,
+		session: MemberSession,
+	) => Effect.Effect<
 		| {
 				workspaceId: string;
 				projectId: string;
 				connectorId: string;
-				startedByMemberId: string | undefined;
 		  }
 		| undefined
 	>;
@@ -170,7 +211,9 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ConnectorStore",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ConnectorStore");
@@ -271,27 +314,20 @@ export const make = Effect.gen(function* () {
 		installed: (workspaceId, connectorId, { installationId, account, installedById }) =>
 			operation(
 				"installed",
-				Effect.map(
-					query((db) =>
-						db
-							.update(connector)
-							.set({
-								url: `https://github.com/${account}`,
-								// Merged in SQL, so the app's own settings are kept as they are.
-								settings: sql`${connector.settings} || ${JSON.stringify({ installationId, account })}::jsonb`,
-								installedById,
-								configurationRevision: sql`${connector.configurationRevision} + 1`,
-							})
-							.where(
-								and(
-									eq(connector.id, connectorId),
-									eq(connector.workspaceId, workspaceId),
-									eq(connector.kind, "github"),
-								),
-							)
-							.returning({ id: connector.id }),
-					),
-					(rows) => rows.length > 0,
+				transaction(
+					Effect.gen(function* () {
+						if (
+							installedById !== null &&
+							!(yield* inWorkspaceUnderMembershipLock(workspaceId, installedById))
+						) {
+							return false;
+						}
+						return yield* recordInstallation(workspaceId, connectorId, {
+							installationId,
+							account,
+							installedById,
+						});
+					}),
 				),
 			),
 
@@ -349,7 +385,8 @@ export const make = Effect.gen(function* () {
 							eq(connector.projectId, projectId),
 						);
 						const connectorChanged = changesReach(changes);
-						const configurationChanged = changes.name !== undefined || connectorChanged;
+						const configurationChanged =
+							changes.name !== undefined || changes.enabled !== undefined || connectorChanged;
 						const choosesAccess = changes.access !== undefined || changes.toolAccess !== undefined;
 						let chosen: ToolAccess | undefined;
 						let moved = false;
@@ -379,6 +416,7 @@ export const make = Effect.gen(function* () {
 									.update(connector)
 									.set({
 										name: changes.name,
+										enabled: changes.enabled,
 										handle: changes.name === undefined ? undefined : handleFromName(changes.name),
 										url: changes.url,
 										secretHeader: changes.secretHeader,
@@ -390,6 +428,8 @@ export const make = Effect.gen(function* () {
 										// The OAuth client was registered with, and its tokens issued
 										// by, the old address's authorization server.
 										oauthEncrypted: moved ? null : undefined,
+										oauthExchangeId: moved ? null : undefined,
+										oauthExchangeUntil: moved ? null : undefined,
 										oauthState: moved ? null : undefined,
 										signedInById: moved ? null : undefined,
 										toolAccess: chosen
@@ -408,6 +448,32 @@ export const make = Effect.gen(function* () {
 						return row;
 					}),
 				),
+			),
+
+		switchOff: (workspaceId, projectId, connectorId) =>
+			operation(
+				"switchOff",
+				query((db) =>
+					db
+						.update(connector)
+						.set({
+							enabled: false,
+							configurationRevision: sql`${connector.configurationRevision} + 1`,
+						})
+						.where(
+							and(
+								eq(connector.workspaceId, workspaceId),
+								eq(connector.projectId, projectId),
+								eq(connector.id, connectorId),
+							),
+						)
+						.returning({
+							id: connector.id,
+							name: connector.name,
+							enabled: connector.enabled,
+							kind: connector.kind,
+						}),
+				).pipe(Effect.map(([row]) => row)),
 			),
 
 		remove: (workspaceId, projectId, connectorId) =>
@@ -487,17 +553,72 @@ export const make = Effect.gen(function* () {
 						.orderBy(asc(connector.createdAt)),
 				).pipe(
 					Effect.map((rows) => {
-						const used = rows.filter((row) => !everyToolOff(row));
+						const used = rows.filter((row) => row.enabled && !everyToolOff(row));
 						return {
 							targets: used.filter((row) => isSignedIn(row, cipher)).map(toTarget),
 							signInExpired: used
 								.filter((row) => signInExpired(row, cipher))
-								.map((row) => ({ handle: row.handle, url: row.url })),
+								.map((row) => ({ handle: row.handle })),
+							installedUrls: rows.map(({ url }) => url),
 						};
 					}),
 				),
 			),
 
+		claimOauthExchange: (workspaceId, connectorId, serverUrl) =>
+			operation(
+				"claimOauthExchange",
+				Effect.gen(function* () {
+					const target = and(
+						eq(connector.id, connectorId),
+						eq(connector.workspaceId, workspaceId),
+						eq(connector.authKind, "oauth"),
+						eq(connector.url, serverUrl),
+					);
+					const [claimed] = yield* query((db) =>
+						db
+							.update(connector)
+							.set({
+								oauthExchangeId: sql`uuidv7()`,
+								oauthExchangeUntil: sql`clock_timestamp() + ${OAUTH_EXCHANGE_CLAIM_MS} * interval '1 millisecond'`,
+								updatedAt: sql`${connector.updatedAt}`,
+							})
+							.where(
+								and(
+									target,
+									sql`coalesce(${connector.oauthExchangeUntil}, '-infinity') <= clock_timestamp()`,
+								),
+							)
+							.returning({ id: connector.oauthExchangeId }),
+					);
+					if (claimed?.id) return { id: claimed.id };
+					const [found] = yield* query((db) =>
+						db.select({ id: connector.id }).from(connector).where(target),
+					);
+					return found ? "busy" : undefined;
+				}),
+			),
+
+		releaseOauthExchange: (workspaceId, connectorId, claim) =>
+			operation(
+				"releaseOauthExchange",
+				query((db) =>
+					db
+						.update(connector)
+						.set({
+							oauthExchangeId: null,
+							oauthExchangeUntil: null,
+							updatedAt: sql`${connector.updatedAt}`,
+						})
+						.where(
+							and(
+								eq(connector.id, connectorId),
+								eq(connector.workspaceId, workspaceId),
+								eq(connector.oauthExchangeId, claim.id),
+							),
+						),
+				).pipe(Effect.asVoid),
+			),
 		oauthRecord: (workspaceId, connectorId) =>
 			operation(
 				"oauthRecord",
@@ -510,21 +631,74 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.map(([row]) => row && decryptOauthRecord(row, cipher))),
 			),
 
-		saveOauthRecord: (workspaceId, connectorId, record, signedInById) =>
+		readOauthRecord: (workspaceId, connectorId, serverUrl) =>
 			operation(
-				"saveOauthRecord",
+				"readOauthRecord",
 				query((db) =>
 					db
-						.update(connector)
-						.set({
-							oauthEncrypted: cipher.encrypt(JSON.stringify(record)),
-							oauthState: record.state || null,
-							signedInById: record.tokens === undefined ? null : signedInById,
-							configurationRevision: record.state
-								? sql`${connector.configurationRevision} + 1`
-								: undefined,
-						})
-						.where(and(eq(connector.id, connectorId), eq(connector.workspaceId, workspaceId))),
+						.select({ oauthEncrypted: connector.oauthEncrypted })
+						.from(connector)
+						.where(
+							and(
+								eq(connector.id, connectorId),
+								eq(connector.workspaceId, workspaceId),
+								serverUrl === undefined ? undefined : eq(connector.url, serverUrl),
+							),
+						)
+						.limit(1),
+				).pipe(
+					Effect.map(
+						([row]) =>
+							row && {
+								record: decryptOauthRecord(row, cipher),
+								version: row.oauthEncrypted,
+							},
+					),
+				),
+			),
+
+		saveOauthRecord: (workspaceId, connectorId, record, save) =>
+			operation(
+				"saveOauthRecord",
+				transaction(
+					Effect.gen(function* () {
+						if (
+							save.kind === "signIn" &&
+							!(yield* inWorkspaceUnderMembershipLock(workspaceId, save.signedInById))
+						) {
+							return undefined;
+						}
+						const sealed = cipher.encrypt(JSON.stringify(record));
+						const signer = save.kind === "signIn" ? save.signedInById : undefined;
+						const [saved] = yield* query((db) =>
+							db
+								.update(connector)
+								.set({
+									oauthEncrypted: sealed,
+									oauthState:
+										record.state && record.startedBySessionId ? hashOAuthState(record.state) : null,
+									signedInById: record.tokens === undefined ? null : signer,
+									configurationRevision: record.state
+										? sql`${connector.configurationRevision} + 1`
+										: undefined,
+								})
+								.where(
+									and(
+										eq(connector.id, connectorId),
+										eq(connector.workspaceId, workspaceId),
+										sql`${connector.oauthEncrypted} is not distinct from ${save.version}`,
+										save.claim === undefined
+											? undefined
+											: and(
+													eq(connector.oauthExchangeId, save.claim.id),
+													sql`${connector.oauthExchangeUntil} > clock_timestamp()`,
+												),
+									),
+								)
+								.returning({ id: connector.id }),
+						);
+						return saved ? sealed : undefined;
+					}),
 				),
 			),
 
@@ -536,6 +710,8 @@ export const make = Effect.gen(function* () {
 						.update(connector)
 						.set({
 							oauthEncrypted: null,
+							oauthExchangeId: null,
+							oauthExchangeUntil: null,
 							oauthState: null,
 							signedInById: null,
 							configurationRevision: sql`${connector.configurationRevision} + 1`,
@@ -596,27 +772,35 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		byOauthState: (state) =>
+		byOauthState: (state, session) =>
 			operation(
 				"byOauthState",
 				query((db) =>
-					db.select().from(connector).where(eq(connector.oauthState, state)).limit(1),
+					db
+						.select()
+						.from(connector)
+						.where(eq(connector.oauthState, hashOAuthState(state)))
+						.limit(1),
 				).pipe(
-					Effect.map(
-						([row]) =>
-							row && {
-								workspaceId: row.workspaceId,
-								projectId: row.projectId,
-								connectorId: row.id,
-								startedByMemberId: decryptOauthRecord(row, cipher)?.startedByMemberId,
-							},
-					),
+					Effect.map(([row]) => {
+						if (!row) return undefined;
+						const record = decryptOauthRecord(row, cipher);
+						if (
+							record?.state !== state ||
+							record.startedByMemberId !== session.member ||
+							record.startedBySessionId !== session.session
+						)
+							return undefined;
+						return { workspaceId: row.workspaceId, projectId: row.projectId, connectorId: row.id };
+					}),
 				),
 			),
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
+
+const hashOAuthState = (state: string) => createHash("sha256").update(state).digest("hex");
 
 /**
  * A GitHub app's installation as it was when it was forgotten: enough to
@@ -632,11 +816,10 @@ export interface ForgottenInstallation {
 /** A project's connectors as a turn sees them. */
 interface ProjectTargets {
 	targets: ConnectorTarget[];
-	/**
-	 * Connectors that offer nothing until someone signs in again, by handle,
-	 * and by address so they still count as ones the project has.
-	 */
-	signInExpired: Pick<ConnectorTarget, "handle" | "url">[];
+	/** Connectors that offer nothing until someone signs in again. */
+	signInExpired: Pick<ConnectorTarget, "handle">[];
+	/** Addresses of all of the project's MCP and HTTP connectors, including those switched off. */
+	installedUrls: string[];
 }
 
 /**
@@ -718,6 +901,22 @@ export function signInExpired(
 	);
 }
 
+/**
+ * The version of a connector's OAuth record a save was built from: its sealed
+ * value as read, which sealing again never repeats, or null when it had none.
+ */
+export type OAuthVersion = string | null;
+
+export interface OAuthExchangeClaim {
+	readonly id: string;
+}
+
+/** How a save of a connector's OAuth record may land (see `saveOauthRecord`). */
+type OAuthSave = {
+	readonly version: OAuthVersion;
+	readonly claim?: OAuthExchangeClaim;
+} & ({ readonly kind: "signIn"; readonly signedInById: string } | { readonly kind: "since" });
+
 /** What the OAuth client has learnt and been issued for the connector, unsealed. */
 function decryptOauthRecord(
 	row: Pick<ConnectorRow, "oauthEncrypted">,
@@ -737,3 +936,33 @@ export function changesReach(changes: Pick<ConnectorUpdate, "url" | "secret" | "
 		changes.url !== undefined || changes.secret !== undefined || changes.secretHeader !== undefined
 	);
 }
+
+/** Records the installation on the GitHub connector, answering whether there was one to record it on. */
+const recordInstallation = (
+	workspaceId: string,
+	connectorId: string,
+	{
+		installationId,
+		account,
+		installedById,
+	}: { installationId: number; account: string; installedById: string | null },
+) =>
+	query((db) =>
+		db
+			.update(connector)
+			.set({
+				url: `https://github.com/${account}`,
+				// Merged in SQL, so the app's own settings are kept as they are.
+				settings: sql`${connector.settings} || ${JSON.stringify({ installationId, account })}::jsonb`,
+				installedById,
+				configurationRevision: sql`${connector.configurationRevision} + 1`,
+			})
+			.where(
+				and(
+					eq(connector.id, connectorId),
+					eq(connector.workspaceId, workspaceId),
+					eq(connector.kind, "github"),
+				),
+			)
+			.returning({ id: connector.id }),
+	).pipe(Effect.map((rows) => rows.length > 0));

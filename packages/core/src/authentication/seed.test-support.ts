@@ -38,6 +38,7 @@ import {
 	workspace,
 } from "../database/schema.ts";
 import { onDatabase, runOnPostgres } from "../database/testing.ts";
+import { askerColumns } from "./turn-facts.ts";
 
 /** A suffix no other fixture in this run has. */
 export const unique = () => randomUUID().slice(0, 8);
@@ -271,6 +272,7 @@ export async function seedTurn(
 					startedAt: new Date(),
 					...(ended && { finishedAt: new Date() }),
 					...(status === "failed" && { error: "It failed" as never }),
+					...askerColumns({ chatId: chatId, botId: botId, triggerMessageId: triggerMessageId }),
 				})
 				.returning({ id: turn.id }),
 		),

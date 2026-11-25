@@ -8,6 +8,7 @@ import type {
 	AutomationUpdate,
 	ListedAutomationDefinition,
 	NewAutomation,
+	RestrictableAutomation,
 	RunPage,
 	RunPageQuery,
 } from "@sugabots/contracts";
@@ -22,6 +23,7 @@ import type {
 	AutomationTriggerRejected,
 	InvalidRoutineSchedule,
 	TooManyAutomationTriggers,
+	TriggerSetInSettings,
 	WebhookDeliveryIdHeaderRejected,
 	WebhookRefused,
 	WebhookSecretTooShort,
@@ -29,14 +31,27 @@ import type {
 import type { InvalidCursor } from "@sugabots/contracts/errors/chat-reads";
 import { Context, Effect, Layer } from "effect";
 import { serviceOperations } from "../../database/database.ts";
+import type { Approved } from "../../proofs/approved.ts";
 import type { CallsWebhook } from "../../proofs/calls-webhook.ts";
 import type { CanRestrictBotsProject } from "../../proofs/can-restrict-bot.ts";
-import type { CanManageProject, CanRunAutomations } from "../../proofs/project-permissions.ts";
+import type { IsMember } from "../../proofs/is-member.ts";
+import type {
+	CanManageProject,
+	CanReadProjectRuns,
+	CanRunAutomations,
+} from "../../proofs/project-permissions.ts";
+import type { Named } from "../../proofs/proof.ts";
+import type { ReachesAutomationTrigger } from "../../proofs/reaches-automation-trigger.ts";
 import type { ReachesProject } from "../../proofs/reaches-project.ts";
+import type {
+	CanSwitchOffAutomation,
+	ReachesProjectAutomation,
+} from "../../proofs/reaches-project-automation.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { ChatStore } from "../store/store.ts";
-import type { Scope } from "./automation.ts";
-import { automationsOf, projectRunsPage } from "./automation-view.ts";
+import { type FenceRefusal, holdTurnOf } from "../turns/turns.ts";
+import type { RoutineInput, Scope } from "./automation.ts";
+import { automationsOf, projectRunsPage, restrictableAutomations } from "./automation-view.ts";
 import { makeAcceptWebhook, type WebhookAnswer } from "./automation-webhooks.ts";
 import { type Defined, makeAutomationWrites } from "./automation-writes.ts";
 import { AutomationStore } from "./store.ts";
@@ -55,15 +70,17 @@ import type { Delivery } from "./webhook-auth.ts";
  */
 export interface Interface {
 	/** The project's automations, by name, each with how it stands. */
-	readonly list: <P, J>(reach: ReachesProject<P, J>) => Effect.Effect<ListedAutomationDefinition[]>;
+	readonly list: <P, J, X>(
+		reach: ReachesProject<P, J>,
+		approved: Approved<P, X>,
+	) => Effect.Effect<ListedAutomationDefinition[]>;
 	/**
-	 * The automations of a bot's default project, by name, as they are set up
-	 * but not how they ran, for an admin who restricts the bot without
-	 * reaching it.
+	 * Names and states of the automations an admin may pause in a personal
+	 * bot's default project.
 	 */
 	readonly listSetUp: <P, J>(
 		canRestrict: CanRestrictBotsProject<P, J>,
-	) => Effect.Effect<ListedAutomationDefinition[]>;
+	) => Effect.Effect<RestrictableAutomation[]>;
 	/**
 	 * Defines an automation in the project, as made by the member who manages
 	 * it, and by the bot acting for them if one is, returning the secrets made
@@ -71,6 +88,7 @@ export interface Interface {
 	 */
 	readonly create: <P, J>(
 		canManage: CanManageProject<P, J>,
+		member: IsMember<P>,
 		input: NewAutomation,
 	) => Effect.Effect<
 		Defined,
@@ -80,28 +98,57 @@ export interface Interface {
 		| WebhookDeliveryIdHeaderRejected
 		| AutomationRepositoryNotConnected
 	>;
+	readonly createWithRoutine: <P, J, X>(
+		canManage: CanManageProject<P, J>,
+		approved: Approved<P, X>,
+		input: Pick<NewAutomation, "name" | "instructions">,
+		routine: RoutineInput,
+	) => Effect.Effect<Automation, AutomationNameTaken | InvalidRoutineSchedule | FenceRefusal>;
 	/**
 	 * Changes an automation's own settings. Pausing it stops its routines;
 	 * enabling it again sets when each runs next from now.
 	 */
-	readonly update: <P, J>(
+	readonly update: <P, J, A>(
 		canManage: CanManageProject<P, J>,
-		automationId: string,
+		automation: Named<A, string>,
+		target: ReachesProjectAutomation<P, J, A>,
+		member: IsMember<P>,
 		input: AutomationUpdate,
 	) => Effect.Effect<Defined, AutomationNotFound | AutomationNameTaken | InvalidRoutineSchedule>;
-	/** Pauses an automation of a bot's default project, for an admin who restricts the bot. */
-	readonly switchOff: <P, J>(
-		canRestrict: CanRestrictBotsProject<P, J>,
-		automationId: string,
-	) => Effect.Effect<Defined, AutomationNotFound | AutomationNameTaken | InvalidRoutineSchedule>;
-	readonly remove: <P, J>(
+	readonly updateInChat: <P, J, A, X>(
 		canManage: CanManageProject<P, J>,
-		automationId: string,
+		automation: Named<A, string>,
+		target: ReachesProjectAutomation<P, J, A>,
+		approved: Approved<P, X>,
+		input: AutomationUpdate,
+		routine: RoutineInput | undefined,
+	) => Effect.Effect<
+		Automation,
+		| AutomationNotFound
+		| AutomationNameTaken
+		| InvalidRoutineSchedule
+		| TriggerSetInSettings
+		| FenceRefusal
+	>;
+	/** Pauses an automation of a bot's default project, for an admin who restricts the bot. */
+	readonly switchOff: <P, J, A>(
+		canRestrict: CanRestrictBotsProject<P, J>,
+		automation: Named<A, string>,
+		target: CanSwitchOffAutomation<P, J, A>,
+	) => Effect.Effect<
+		{ automation: RestrictableAutomation; secrets: readonly [] },
+		AutomationNotFound | AutomationNameTaken | InvalidRoutineSchedule
+	>;
+	readonly remove: <P, J, A>(
+		canManage: CanManageProject<P, J>,
+		automation: Named<A, string>,
+		target: ReachesProjectAutomation<P, J, A>,
 	) => Effect.Effect<void, AutomationNotFound>;
 	/** Adds a trigger to an automation, returning a secret made for a webhook. */
-	readonly addTrigger: <P, J>(
+	readonly addTrigger: <P, J, A>(
 		canManage: CanManageProject<P, J>,
-		automationId: string,
+		automation: Named<A, string>,
+		target: ReachesProjectAutomation<P, J, A>,
 		input: AutomationTriggerInput,
 	) => Effect.Effect<
 		Defined,
@@ -116,9 +163,10 @@ export interface Interface {
 	 * Rewrites one of an automation's triggers, which keeps its kind. A webhook's
 	 * secret is kept unless one is brought; one made for it is returned.
 	 */
-	readonly updateTrigger: <P, J>(
+	readonly updateTrigger: <P, J, T>(
 		canManage: CanManageProject<P, J>,
-		trigger: OnTrigger,
+		trigger: Named<T, string>,
+		target: ReachesAutomationTrigger<P, J, T>,
 		input: AutomationTriggerInput,
 	) => Effect.Effect<
 		Defined,
@@ -130,14 +178,16 @@ export interface Interface {
 		| WebhookDeliveryIdHeaderRejected
 		| AutomationRepositoryNotConnected
 	>;
-	readonly removeTrigger: <P, J>(
+	readonly removeTrigger: <P, J, T>(
 		canManage: CanManageProject<P, J>,
-		trigger: OnTrigger,
+		trigger: Named<T, string>,
+		target: ReachesAutomationTrigger<P, J, T>,
 	) => Effect.Effect<Automation, AutomationNotFound | AutomationTriggerNotFound>;
 	/** A webhook trigger's current secret. */
-	readonly currentSecret: <P, J>(
+	readonly currentSecret: <P, J, T>(
 		canManage: CanManageProject<P, J>,
-		trigger: OnTrigger,
+		trigger: Named<T, string>,
+		target: ReachesAutomationTrigger<P, J, T>,
 	) => Effect.Effect<
 		AutomationCurrentSecret,
 		AutomationNotFound | AutomationTriggerNotFound | AutomationTriggerRejected
@@ -146,9 +196,10 @@ export interface Interface {
 	 * Replaces a webhook trigger's secret with `secret`, with a new one when
 	 * it is absent, or with none when it is null, and returns it.
 	 */
-	readonly replaceSecret: <P, J>(
+	readonly replaceSecret: <P, J, T>(
 		canManage: CanManageProject<P, J>,
-		trigger: OnTrigger,
+		trigger: Named<T, string>,
+		target: ReachesAutomationTrigger<P, J, T>,
 		secret: string | null | undefined,
 	) => Effect.Effect<
 		string | null,
@@ -162,9 +213,10 @@ export interface Interface {
 	 * the trigger, and queues the run. Asking again with the same `requestId`
 	 * returns that run again, as a duplicate.
 	 */
-	readonly run: <P, J>(
+	readonly run: <P, J, A>(
 		canRun: CanRunAutomations<P, J>,
-		automationId: string,
+		automation: Named<A, string>,
+		target: ReachesProjectAutomation<P, J, A>,
 		requestId: string,
 	) => Effect.Effect<
 		AcceptedRun,
@@ -175,7 +227,7 @@ export interface Interface {
 	 * removed automations' included.
 	 */
 	readonly projectRuns: <P, J>(
-		reach: ReachesProject<P, J>,
+		canReadRuns: CanReadProjectRuns<P, J>,
 		page: RunPageQuery | undefined,
 	) => Effect.Effect<RunPage, InvalidCursor>;
 	/**
@@ -200,12 +252,6 @@ export class Service extends Context.Service<Service, Interface>()(
 	declare readonly [Tier]: "process";
 }
 
-/** One of an automation's triggers, by the automation and its own id. */
-export interface OnTrigger {
-	readonly automationId: string;
-	readonly triggerId: string;
-}
-
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ProjectAutomations");
 	const writes = yield* makeAutomationWrites;
@@ -215,100 +261,112 @@ export const make = Effect.gen(function* () {
 		list: (reach) =>
 			operation(
 				"list",
-				automationsOf(
-					{ workspaceId: reach.workspace, projectId: reach.project.value },
-					{ withStatus: true },
-				),
+				automationsOf({ workspaceId: reach.workspace, projectId: reach.project.value }),
 			),
 
 		listSetUp: (canRestrict) =>
 			operation(
 				"listSetUp",
-				automationsOf(
-					{ workspaceId: canRestrict.workspace, projectId: canRestrict.project.value },
-					{ withStatus: false },
-				),
+				restrictableAutomations({
+					workspaceId: canRestrict.workspace,
+					projectId: canRestrict.project.value,
+				}),
 			),
 
-		create: (canManage, input) =>
+		create: (canManage, member, input) =>
 			operation(
 				"create",
 				writes.create(
-					{ id: canManage.reach.project.value, workspaceId: canManage.reach.workspace },
+					projectOf(canManage.reach),
+					{ createdById: member.member, createdByBotId: null },
+					input,
+					Effect.void,
+				),
+			),
+
+		createWithRoutine: (canManage, approved, input, routine) =>
+			operation(
+				"createWithRoutine",
+				writes.createWithRoutine(
+					projectOf(canManage.reach),
 					{
 						createdById: canManage.member.actor.memberId,
 						createdByBotId: canManage.reach.as.kind === "asker" ? canManage.reach.as.bot : null,
 					},
 					input,
+					routine,
+					holdApprovedTurn(approved),
 				),
 			),
 
-		update: (canManage, automationId, input) =>
-			operation("update", writes.update(scopeOf(canManage.reach, automationId), input)),
+		update: (_canManage, automation, target, _member, input) =>
+			operation("update", writes.update(scopeOf(target, automation.value), input, Effect.void)),
 
-		switchOff: (canRestrict, automationId) =>
+		updateInChat: (_canManage, automation, target, approved, input, routine) => {
+			const scope = scopeOf(target, automation.value);
+			const guard = holdApprovedTurn(approved);
+			const update = routine
+				? writes.updateWithSoleRoutine(scope, input, routine, guard)
+				: writes.update(scope, input, guard);
+			return operation(
+				"updateInChat",
+				Effect.map(update, ({ automation }) => automation),
+			);
+		},
+
+		switchOff: (_canRestrict, automation, target) =>
 			operation(
 				"switchOff",
-				writes.update(
-					{
-						workspaceId: canRestrict.workspace,
-						projectId: canRestrict.project.value,
-						automationId,
-					},
-					{ state: "paused" },
+				writes.update(scopeOf(target, automation.value), { state: "paused" }, Effect.void).pipe(
+					Effect.map(({ automation: { id, name, state } }) => ({
+						automation: { id, name, state, restricted: true as const },
+						secrets: [] as const,
+					})),
 				),
 			),
 
-		remove: (canManage, automationId) =>
-			operation("remove", writes.remove(scopeOf(canManage.reach, automationId))),
+		remove: (_canManage, automation, target) =>
+			operation("remove", writes.remove(scopeOf(target, automation.value))),
 
-		addTrigger: (canManage, automationId, input) =>
-			operation("addTrigger", writes.addTrigger(scopeOf(canManage.reach, automationId), input)),
+		addTrigger: (_canManage, automation, target, input) =>
+			operation("addTrigger", writes.addTrigger(scopeOf(target, automation.value), input)),
 
-		updateTrigger: (canManage, trigger, input) =>
+		updateTrigger: (_canManage, trigger, target, input) =>
 			operation(
 				"updateTrigger",
-				writes.updateTrigger(
-					scopeOf(canManage.reach, trigger.automationId),
-					trigger.triggerId,
-					input,
-				),
+				writes.updateTrigger(scopeOf(target, target.automation), trigger.value, input),
 			),
 
-		removeTrigger: (canManage, trigger) =>
+		removeTrigger: (_canManage, trigger, target) =>
 			operation(
 				"removeTrigger",
-				writes.removeTrigger(scopeOf(canManage.reach, trigger.automationId), trigger.triggerId),
+				writes.removeTrigger(scopeOf(target, target.automation), trigger.value),
 			),
 
-		currentSecret: (canManage, trigger) =>
+		currentSecret: (_canManage, trigger, target) =>
 			operation(
 				"currentSecret",
-				writes.currentSecret(scopeOf(canManage.reach, trigger.automationId), trigger.triggerId),
+				writes.currentSecret(scopeOf(target, target.automation), trigger.value),
 			),
 
-		replaceSecret: (canManage, trigger, secret) =>
+		replaceSecret: (_canManage, trigger, target, secret) =>
 			operation(
 				"replaceSecret",
-				writes.replaceSecret(
-					scopeOf(canManage.reach, trigger.automationId),
-					trigger.triggerId,
-					secret,
-				),
+				writes.replaceSecret(scopeOf(target, target.automation), trigger.value, secret),
 			),
 
-		run: (canRun, automationId, requestId) =>
+		run: (canRun, automation, target, requestId) =>
 			operation(
 				"run",
 				writes.startManualRun(
-					scopeOf(canRun.reach, automationId),
+					scopeOf(target, automation.value),
 					canRun.member.actor.memberId,
 					requestId,
 				),
 			),
 
-		projectRuns: (reach, page) =>
-			operation("projectRuns", projectRunsPage(reach.project.value, page)),
+		projectRuns: ({ reach }, page) =>
+			operation("projectRuns", projectRunsPage(reach.workspace, reach.project.value, page)),
 
 		acceptWebhook: (calls, delivery) =>
 			operation("acceptWebhook", acceptWebhook(calls.trigger.value, delivery)),
@@ -324,6 +382,17 @@ export const layerNoDeps = processLayer(Layer.effect(Service, make));
 export const layer = layerNoDeps.pipe(Layer.provide([AutomationStore.layer, ChatStore.layer]));
 
 /** The automation `automationId` of the project `reach` was proved for. */
-function scopeOf<P, J>(reach: ReachesProject<P, J>, automationId: string): Scope {
+function scopeOf<J>(
+	reach: { workspace: string; project: Named<J, string> },
+	automationId: string,
+): Scope {
 	return { workspaceId: reach.workspace, projectId: reach.project.value, automationId };
+}
+
+function projectOf<J>(reach: { workspace: string; project: Named<J, string> }) {
+	return { id: reach.project.value, workspaceId: reach.workspace };
+}
+
+function holdApprovedTurn<P, X>(approved: Approved<P, X>) {
+	return holdTurnOf(approved.principal.value);
 }

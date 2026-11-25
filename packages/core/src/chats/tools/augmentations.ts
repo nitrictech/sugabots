@@ -5,7 +5,7 @@ import {
 	type connectorAugmentations,
 } from "../../providers/connectors/augmentations.ts";
 import type { ConnectorTarget } from "../../providers/connectors/connector-target.ts";
-import { type OfferedTool, offeredTool } from "./connectors.ts";
+import { type OfferedTool, offeredTool } from "./connector-catalog.ts";
 import { linearAugmentationTools } from "./linear/tools.ts";
 import type { UploadSide } from "./signed-upload/tool.ts";
 

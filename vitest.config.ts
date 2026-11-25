@@ -20,6 +20,14 @@ export default defineConfig({
 		projects: [
 			{
 				test: {
+					name: "lint",
+					root: "lint",
+					environment: "node",
+					include: ["**/*.test.ts"],
+				},
+			},
+			{
+				test: {
 					name: "accounting",
 					root: "packages/accounting",
 					environment: "node",
@@ -71,7 +79,7 @@ export default defineConfig({
 					name: "backend",
 					root: ".",
 					environment: "node",
-					include: ["packages/{core,server,workflow}/src/**/*.test.ts"],
+					include: ["packages/{core,bot-loop,server,workflow}/src/**/*.test.ts"],
 					env: DATABASE_URL ? { DATABASE_URL } : {},
 					// Creates it, migrates it and empties it before the run, as the
 					// template each worker copies into a database of its own.

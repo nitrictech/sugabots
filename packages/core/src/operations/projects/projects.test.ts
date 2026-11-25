@@ -1,4 +1,4 @@
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -87,7 +87,7 @@ describe("the projects operations, for each kind of principal", () => {
 	});
 
 	/** What calling `name` with `input` for `principal` came to: "ok", or its error's tag. */
-	const tried = <Name extends OperationName>(
+	const tried = <Name extends RequestOperationName>(
 		principal: Principal,
 		name: Name,
 		input: InputOf<Name>,
@@ -198,8 +198,8 @@ describe("the projects operations, for each kind of principal", () => {
 						botInBounds: "ok",
 						botOutsideBounds: "ResourceHidden",
 						run: "ok",
-						webhook: "ok",
-						computerSleep: "ok",
+						webhook: "ResourceHidden",
+						computerSleep: "ResourceHidden",
 						compaction: "ResourceHidden",
 						page: "ResourceHidden",
 					},
@@ -272,8 +272,8 @@ describe("the projects operations, for each kind of principal", () => {
 				adminsAssistant: "ok",
 				editorsAssistant: "ActionForbidden",
 				run: "ActionForbidden",
-				webhook: "ActionForbidden",
-				computerSleep: "ActionForbidden",
+				webhook: "ResourceHidden",
+				computerSleep: "ResourceHidden",
 				compaction: "ResourceHidden",
 				page: "ResourceHidden",
 			});
@@ -326,8 +326,8 @@ describe("the projects operations, for each kind of principal", () => {
 				notInProject: "ResourceHidden",
 				adminsBotInChatBounds: "ActionForbidden",
 				run: "ActionForbidden",
-				webhook: "ActionForbidden",
-				computerSleep: "ActionForbidden",
+				webhook: "ResourceHidden",
+				computerSleep: "ResourceHidden",
 				compaction: "ResourceHidden",
 				page: "ResourceHidden",
 				owner: "ok",
@@ -373,8 +373,8 @@ describe("the projects operations, for each kind of principal", () => {
 				notInProject: "ResourceHidden",
 				botInChatBounds: "ActionForbidden",
 				run: "ActionForbidden",
-				webhook: "ActionForbidden",
-				computerSleep: "ActionForbidden",
+				webhook: "ResourceHidden",
+				computerSleep: "ResourceHidden",
 				page: "ResourceHidden",
 				editor: "ok, ok",
 				admin: "ok, ok",
@@ -428,7 +428,7 @@ describe("the projects operations, for each kind of principal", () => {
 	});
 
 	describe("projects.join", () => {
-		it("puts a member, or a bot's asker in member bounds, in a public project, and hides the rest", async () => {
+		it("puts a member, or once approved a bot's asker in member bounds, in a public project, and hides the rest", async () => {
 			const joined = await outcomes(
 				{ editor: who.erin, editorsAssistant: who.edsAssistant },
 				async (principal) => {
@@ -459,11 +459,12 @@ describe("the projects operations, for each kind of principal", () => {
 				defaultProject: await tried(who.ed, "projects.join", { projectId: a.pub.defaultProject }),
 			}).toEqual({
 				editor: "ok",
-				editorsAssistant: "ok",
+				// Its member approves the call in the bot loop first.
+				editorsAssistant: "ApprovalNeeded",
 				notInPrivateProject: "ResourceHidden",
 				botInChatBounds: "ActionForbidden",
 				run: "ActionForbidden",
-				webhook: "ActionForbidden",
+				webhook: "ResourceHidden",
 				page: "ResourceHidden",
 				outsider: "ResourceHidden",
 				botOutsideBounds: "ResourceHidden",
@@ -506,7 +507,7 @@ describe("the projects operations, for each kind of principal", () => {
 	});
 
 	describe("projects.create", () => {
-		it("makes a project for a member who may, and a bot only in member bounds", async () => {
+		it("makes a project for a member who may, and a bot only in member bounds once approved", async () => {
 			const create = (principal: Principal) =>
 				tried(principal, "projects.create", {
 					workspace: a.workspace,
@@ -533,7 +534,8 @@ describe("the projects operations, for each kind of principal", () => {
 				viewer: "ActionForbidden",
 				outsider: "ResourceHidden",
 				botInChatBounds: "ActionForbidden",
-				editorsAssistant: "ok",
+				// Its member approves the call in the bot loop first.
+				editorsAssistant: "ApprovalNeeded",
 				run: "ActionForbidden",
 				webhook: "ActionForbidden",
 				page: "ActionForbidden",

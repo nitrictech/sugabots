@@ -382,7 +382,11 @@ export const BotWithNoneAsAnEditor = meta.story({
 			...bot,
 			permissions: {
 				...bot.permissions,
-				resources: { ...bot.permissions.resources, manageAutomations: false },
+				resources: {
+					...bot.permissions.resources,
+					manageAutomations: false,
+					pauseAutomations: false,
+				},
 			},
 		}));
 		msw.use(...appHandlers({ role: "editor", bots: asEditor }));

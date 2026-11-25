@@ -2,6 +2,7 @@ export * as Files from "./files.ts";
 
 import {
 	type FileAuthor,
+	type FileWritten,
 	type ListedFile,
 	type ListedFileVersion,
 	type ListedMessageFile,
@@ -10,12 +11,29 @@ import {
 	type WrittenFile,
 	type WrittenFileKind,
 } from "@sugabots/contracts";
-import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import {
+	FileContentTooLarge,
+	FileEditTextUnmatched,
+	FileKindFixed,
+	FileStale,
+} from "@sugabots/contracts/errors/files";
+import {
+	ActionForbidden,
+	ApprovalRefused,
+	ResourceHidden,
+} from "@sugabots/contracts/errors/proofs";
 import { and, desc, eq, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { Context, Data, Effect, Layer, Stream } from "effect";
+import { Context, Effect, Layer, Stream } from "effect";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import {
+	commitWrittenFile,
+	executionFence,
+	type FenceRefusal,
+	replayWrittenFile,
+} from "../chats/turns/turns.ts";
+import {
+	type Database,
 	type Executor,
 	query,
 	serviceOperations,
@@ -24,7 +42,6 @@ import {
 } from "../database/database.ts";
 import {
 	type BotRow,
-	blobDeletion,
 	bot,
 	type FileRow,
 	type FileVersionRow,
@@ -36,7 +53,12 @@ import {
 	WRITTEN_FILE_KINDS,
 } from "../database/schema.ts";
 import { Ids, isUuid } from "../ids/ids.ts";
+import type { BotPrincipal } from "../principal.ts";
+import type { Approved } from "../proofs/approved.ts";
+import type { CanChangeFile } from "../proofs/can-change-file.ts";
 import type { CanManageChats } from "../proofs/chat-permissions.ts";
+import type { CanChangeChat } from "../proofs/project-permissions.ts";
+import type { ReachesChat } from "../proofs/reaches-chat.ts";
 import type { ReachesFile } from "../proofs/reaches-file.ts";
 import type { ReachesProject } from "../proofs/reaches-project.ts";
 import { processLayer, Tier } from "../tiers.ts";
@@ -76,87 +98,108 @@ export interface Interface {
 		reach: ReachesFile<P, F>,
 		canManage: CanManageChats<P, F>,
 	) => Effect.Effect<void, ResourceHidden>;
+	readonly listWritten: <P, C, X>(
+		reach: ReachesChat<P, C>,
+		approved: Approved<P, X>,
+	) => Effect.Effect<ListedWrittenFile[]>;
+	readonly readWritten: <P, F, X>(
+		reach: ReachesFile<P, F>,
+		approved: Approved<P, X>,
+	) => Effect.Effect<WrittenFile, ResourceHidden>;
+	readonly create: <P, C, X>(
+		canChange: CanChangeChat<P, C>,
+		approved: Approved<P, X>,
+		input: NewWrittenFile,
+	) => Effect.Effect<
+		FileWritten,
+		ActionForbidden | ApprovalRefused | FileContentTooLarge | FenceRefusal
+	>;
+	readonly replace: <P, F, X>(
+		canChange: CanChangeFile<P, F>,
+		approved: Approved<P, X>,
+		input: ReplaceWrittenFile,
+	) => Effect.Effect<
+		FileWritten,
+		| ActionForbidden
+		| ApprovalRefused
+		| ResourceHidden
+		| FileStale
+		| FileKindFixed
+		| FileContentTooLarge
+		| FenceRefusal
+	>;
+	readonly edit: <P, F, X>(
+		canChange: CanChangeFile<P, F>,
+		approved: Approved<P, X>,
+		input: EditWrittenFile,
+	) => Effect.Effect<
+		FileWritten,
+		| ActionForbidden
+		| ApprovalRefused
+		| ResourceHidden
+		| FileStale
+		| FileEditTextUnmatched
+		| FileContentTooLarge
+		| FenceRefusal
+	>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Files") {
 	declare readonly [Tier]: "process";
 }
 
-/**
- * Making and changing written files, for a bot's tools. A bot reaches the
- * files written in the chat it is working in, and what was opened
- * from it; in a project's chat, every file written in the project;
- * and in its own chat or automation feed, every file written in its own chats
- * and feeds, which whoever reaches the bot sees. Never the files it wrote
- * elsewhere, which those who reach the chat it is working in may not
- * see. Every change names the version it was based on and is refused with
- * `Stale` if another landed first, so one writer never silently overwrites
- * another.
- */
-export interface AuthoringInterface {
-	readonly list: (by: BotInChat) => Effect.Effect<ListedWrittenFile[]>;
-	readonly read: (by: BotInChat, fileId: string) => Effect.Effect<WrittenFile, NotFound>;
-	readonly create: (
-		by: BotInChat,
-		input: { kind: WrittenFileKind; title: string; content: string },
-	) => Effect.Effect<WrittenFile, TooLarge>;
-	readonly replace: (
-		by: BotInChat,
-		input: {
-			fileId: string;
-			baseVersion: number;
-			content: string;
-			title?: string;
-			/** Write over `baseVersion` instead of after it, as when the same reply wrote it. */
-			inPlace?: boolean;
-			/** What the writer takes the file to be; refused with `KindFixed` if it is another kind. */
-			kind?: WrittenFileKind;
-		},
-	) => Effect.Effect<WrittenFile, NotFound | Stale | KindFixed | TooLarge>;
-	/**
-	 * Replaces the one place `oldText` appears in the current content with
-	 * `newText`, as a new version, so a small change needn't resend the rest.
-	 */
-	readonly edit: (
-		by: BotInChat,
-		input: {
-			fileId: string;
-			baseVersion: number;
-			oldText: string;
-			newText: string;
-			/** Write over `baseVersion` instead of after it, as when the same reply wrote it. */
-			inPlace?: boolean;
-		},
-	) => Effect.Effect<WrittenFile, NotFound | Stale | EditTextUnmatched | TooLarge>;
-}
-
-export class Authoring extends Context.Service<Authoring, AuthoringInterface>()(
-	"@sugabots/core/Files/Authoring",
-) {}
-
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Files");
 	const blobs = yield* BlobStore.Service;
+	const ids = yield* Ids.Service;
 	const atVersion = atVersionIn(blobs);
 
 	/** The written file `reach` is about, in the chat it was found in; hidden when it isn't one a bot wrote. */
 	const writtenFileIn = <P, F>(reach: ReachesFile<P, F>) =>
-		Effect.flatMap(writtenFileWhere(reach.file.value, eq(file.chatId, reach.chat)), (found) =>
-			found ? Effect.succeed(found) : Effect.fail(new ResourceHidden({ resource: "file" })),
+		requireWrittenFile(reach.file.value, reach.chat);
+
+	const atCurrentVersion = <P, F>(reach: ReachesFile<P, F>) =>
+		Effect.flatMap(writtenFileIn(reach), (found) =>
+			shownOrHidden(atVersion(found, found.file.currentVersion)),
+		);
+
+	const appendVersion = (
+		before: WrittenFileRow,
+		writer: FileWriter,
+		change: { baseVersion: number; content: string; title?: string },
+	) =>
+		withContent(blobs, ids, before.id, before.kind, change.content, (stored) =>
+			recordFileWrite(
+				writer,
+				Effect.gen(function* () {
+					const found = yield* requireWrittenFile(before.id, before.chatId, true);
+					const number = yield* nextVersion(found, change.baseVersion);
+					yield* query((db) =>
+						db
+							.update(file)
+							.set({
+								currentVersion: number,
+								...(change.title !== undefined && { name: change.title }),
+							})
+							.where(eq(file.id, found.file.id)),
+					);
+					yield* insertVersion(found.file, number, stored, writer.principal.bot);
+					return {
+						status: "written" as const,
+						fileId: found.file.id,
+						kind: found.file.kind,
+						title: change.title ?? found.file.name,
+						version: number,
+					};
+				}),
+			),
 		);
 
 	return Service.of({
 		listInProject: (reach) =>
 			operation("listInProject", listedWhere(eq(madeInChat.projectId, reach.project.value))),
 
-		get: (reach) =>
-			operation(
-				"get",
-				Effect.gen(function* () {
-					const found = yield* writtenFileIn(reach);
-					return yield* shownOrHidden(atVersion(found, found.file.currentVersion));
-				}),
-			),
+		get: (reach) => operation("get", atCurrentVersion(reach)),
 
 		summary: (reach) =>
 			operation(
@@ -188,189 +231,66 @@ export const make = Effect.gen(function* () {
 					yield* query((db) => db.delete(file).where(eq(file.id, found.file.id)));
 				}),
 			),
-	});
-});
 
-const makeAuthoring = Effect.gen(function* () {
-	const operation = yield* serviceOperations<AuthoringInterface>("Files.Authoring");
-	const blobs = yield* BlobStore.Service;
-	const ids = yield* Ids.Service;
-	const atVersion = atVersionIn(blobs);
+		listWritten: (reach, _approved) =>
+			operation("listWritten", listedWrittenFilesWhere(eq(madeInChat.projectId, reach.project.id))),
 
-	/**
-	 * Puts `content` in the blob store as a new version of `fileId`, then
-	 * runs `record` to write its rows. The blob goes first so a row is never
-	 * without its blob; if `record` fails, the blob is removed, and if that
-	 * fails too, it goes with the file's folder.
-	 */
-	const withContent = <A, E, R>(
-		fileId: string,
-		kind: WrittenFileKind,
-		content: string,
-		record: (stored: StoredContent) => Effect.Effect<A, E, R>,
-	) =>
-		Effect.gen(function* () {
-			if (content.length > MAX_FILE_CONTENT_CHARACTERS) {
-				return yield* new TooLarge({ maxCharacters: MAX_FILE_CONTENT_CHARACTERS });
-			}
-			const versionId = yield* ids.next;
-			const key = versionKey(fileId, versionId);
-			const contentType = CONTENT_TYPES[kind];
-			// Content under the limit above is far under any store's, so its `TooLarge`
-			// can't happen. A store that can't be reached is an infrastructure fault:
-			// the bot's tool reports that its call failed.
-			const { size } = yield* blobs
-				.put(key, { stream: Stream.succeed(new TextEncoder().encode(content)), contentType })
-				.pipe(Effect.orDie);
-			return yield* record({ versionId, contentType, size }).pipe(
-				Effect.onError(() => blobs.delete(key).pipe(Effect.ignore)),
-			);
-		});
+		readWritten: (reach, _approved) => operation("readWritten", atCurrentVersion(reach)),
 
-	const requireFile = (by: BotInChat, fileId: string, { lock = true } = {}) =>
-		fileReachedBy(by, fileId, { lock }).pipe(
-			Effect.filterOrFail(
-				(found) => found !== undefined,
-				() => new NotFound({ fileId }),
-			),
-		);
-
-	/**
-	 * Writes `content` as the version after `baseVersion`, or `inPlace` of it,
-	 * if that is still the current one. A version written over keeps its
-	 * number; its old content's blob is queued for deletion.
-	 */
-	const writeVersion = (
-		by: BotInChat,
-		found: FoundFile,
-		baseVersion: number,
-		changes: { stored: StoredContent; title?: string; inPlace?: boolean },
-	) =>
-		Effect.gen(function* () {
-			const current = found.file.currentVersion;
-			if (baseVersion !== current) {
-				return yield* new Stale({ currentVersion: current });
-			}
-			if (changes.inPlace) yield* removeVersion(found.file.id, current);
-			const number = changes.inPlace ? current : current + 1;
-			const updated = yield* query((db) =>
-				db
-					.update(file)
-					.set({ currentVersion: number, ...(changes.title ? { name: changes.title } : {}) })
-					.where(eq(file.id, found.file.id))
-					.returning(),
-			).pipe(Effect.flatMap(writtenRow("file")));
-			const version = yield* insertVersion(found.file, number, changes.stored, by.botId);
-			return toWrittenFile(
-				{ file: asWritten(updated), creator: found.creator },
-				version,
-				yield* botNamed(by.botId),
-				"",
-			);
-		});
-
-	return Authoring.of({
-		list: (by) =>
+		create: (canChange, approved, input) =>
 			operation(
-				"list",
-				Effect.flatMap(chatOf(by.chatId), (working) =>
-					listedWrittenFilesWhere(reachedByBot(working)),
-				),
-			),
-
-		read: (by, fileId) =>
-			operation(
-				"read",
+				"create",
 				Effect.gen(function* () {
-					const found = yield* fileReachedBy(by, fileId);
-					const shown = found && (yield* atVersion(found, found.file.currentVersion));
-					if (!shown) return yield* new NotFound({ fileId });
-					return shown;
+					const writer = yield* fileWriter(approved);
+					const chatId = canChange.reach.chat.value;
+					if (writer.principal.chat !== chatId)
+						return yield* new ActionForbidden({ proof: "CanChangeChat" });
+					const replay = yield* replayFileWrite(writer);
+					if (replay) return replay;
+					return yield* createWrittenFile(
+						blobs,
+						ids,
+						{ botId: writer.principal.bot, chatId },
+						input,
+						writer,
+					);
 				}),
 			),
 
-		create: (by, input) =>
-			operation(
-				"create",
-				Effect.flatMap(ids.next, (fileId) =>
-					withContent(fileId, input.kind, input.content, (stored) =>
-						transaction(
-							Effect.gen(function* () {
-								const row = yield* query((db) =>
-									db
-										.insert(file)
-										.values({
-											id: fileId,
-											chatId: by.chatId,
-											kind: input.kind,
-											name: input.title,
-											currentVersion: 1,
-											createdByBotId: by.botId,
-										})
-										.returning(),
-								).pipe(Effect.flatMap(writtenRow("file")));
-								const written = asWritten(row);
-								const version = yield* insertVersion(written, 1, stored, by.botId);
-								const author = yield* botNamed(by.botId);
-								return toWrittenFile(
-									{ file: written, creator: author },
-									version,
-									author,
-									input.content,
-								);
-							}),
-						),
-					),
-				),
-			),
-
-		replace: (by, { fileId, baseVersion, content, title, inPlace, kind }) =>
+		replace: ({ reach }, approved, input) =>
 			operation(
 				"replace",
 				Effect.gen(function* () {
-					const before = yield* requireFile(by, fileId, { lock: false });
-					if (kind && kind !== before.file.kind) {
-						return yield* new KindFixed({ kind: before.file.kind });
+					const writer = yield* fileWriter(approved);
+					const found = yield* writtenFileIn(reach);
+					const replay = yield* replayFileWrite(writer);
+					if (replay) return replay;
+					if (input.kind !== undefined && input.kind !== found.file.kind) {
+						return yield* new FileKindFixed({ kind: found.file.kind });
 					}
-					const written = yield* withContent(before.file.id, before.file.kind, content, (stored) =>
-						transaction(
-							Effect.flatMap(requireFile(by, fileId), (found) =>
-								writeVersion(by, found, baseVersion, {
-									stored,
-									inPlace,
-									...(title ? { title } : {}),
-								}),
-							),
-						),
-					);
-					return { ...written, content };
+					yield* nextVersion(found, input.baseVersion);
+					return yield* appendVersion(found.file, writer, input);
 				}),
 			),
 
-		edit: (by, { fileId, baseVersion, oldText, newText, inPlace }) =>
+		edit: ({ reach }, approved, input) =>
 			operation(
 				"edit",
-				// The edit is made to the content as it is under the file's lock: an
-				// edit written in place keeps the version's number, so two edits to it
-				// would both pass the version check, and one made to content read
-				// before the lock would undo the other.
-				transaction(
-					Effect.gen(function* () {
-						const found = yield* requireFile(by, fileId);
-						if (baseVersion !== found.file.currentVersion) {
-							return yield* new Stale({ currentVersion: found.file.currentVersion });
-						}
-						const current = (yield* atVersion(found, found.file.currentVersion))?.content ?? "";
-						const matches = current.split(oldText).length - 1;
-						if (oldText === "" || matches !== 1) return yield* new EditTextUnmatched({ matches });
-						// A function, so `$` in the new text is never read as a replacement pattern.
-						const edited = current.replace(oldText, () => newText);
-						const written = yield* withContent(found.file.id, found.file.kind, edited, (stored) =>
-							writeVersion(by, found, baseVersion, { stored, inPlace }),
-						);
-						return { ...written, content: edited };
-					}),
-				),
+				Effect.gen(function* () {
+					const writer = yield* fileWriter(approved);
+					const found = yield* writtenFileIn(reach);
+					const replay = yield* replayFileWrite(writer);
+					if (replay) return replay;
+					yield* nextVersion(found, input.baseVersion);
+					const current = yield* shownOrHidden(atVersion(found, input.baseVersion));
+					const matches = current.content.split(input.oldText).length - 1;
+					if (input.oldText === "" || matches !== 1)
+						return yield* new FileEditTextUnmatched({ matches });
+					return yield* appendVersion(found.file, writer, {
+						baseVersion: input.baseVersion,
+						content: current.content.replace(input.oldText, () => input.newText),
+					});
+				}),
 			),
 	});
 });
@@ -379,7 +299,151 @@ export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 export const layer = layerNoDeps;
 
-export const authoringLayer = Layer.effect(Authoring, makeAuthoring);
+interface NewWrittenFile {
+	readonly kind: WrittenFileKind;
+	readonly title: string;
+	readonly content: string;
+}
+
+interface ReplaceWrittenFile {
+	readonly baseVersion: number;
+	readonly content: string;
+	readonly title?: string;
+	readonly kind?: WrittenFileKind;
+}
+
+interface EditWrittenFile {
+	readonly baseVersion: number;
+	readonly oldText: string;
+	readonly newText: string;
+}
+
+interface FileWriter {
+	readonly principal: BotPrincipal;
+	readonly toolCallId: string;
+}
+
+const fileWriter = <P, X>(
+	approved: Approved<P, X>,
+): Effect.Effect<FileWriter, ActionForbidden | ApprovalRefused> =>
+	Effect.gen(function* () {
+		const principal = approved.principal.value;
+		if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun") {
+			return yield* new ActionForbidden({ proof: "CanWriteFileInTurn" });
+		}
+		const call = approved.call.value;
+		if (call.kind !== "toolCall" || !isUuid(call.toolCall)) return yield* new ApprovalRefused();
+		return { principal, toolCallId: call.toolCall };
+	});
+
+const fileWriteFence = ({ principal }: FileWriter) =>
+	executionFence(principal.turn, principal.executionNumber);
+
+const replayFileWrite = (writer: FileWriter) =>
+	replayWrittenFile(fileWriteFence(writer), writer.toolCallId);
+
+const recordFileWrite = <E>(
+	writer: FileWriter | undefined,
+	write: Effect.Effect<FileWritten, E, Database>,
+) =>
+	writer
+		? commitWrittenFile(fileWriteFence(writer), writer.toolCallId, write)
+		: transaction(Effect.map(write, (receipt) => ({ receipt, usedContent: true })));
+
+const nextVersion = ({ file }: FoundFile, baseVersion: number) =>
+	file.currentVersion === baseVersion
+		? Effect.succeed(baseVersion + 1)
+		: Effect.fail(new FileStale({ currentVersion: file.currentVersion }));
+
+/** seedWrittenFile creates a file for a scripted showcase or test fixture. */
+export const seedWrittenFile = (by: { botId: string; chatId: string }, input: NewWrittenFile) =>
+	Effect.gen(function* () {
+		const { fileId, kind, title, version } = yield* createWrittenFile(
+			yield* BlobStore.Service,
+			yield* Ids.Service,
+			by,
+			input,
+		);
+		return { id: fileId, kind, title, version };
+	});
+
+const createWrittenFile = (
+	blobs: BlobStore.Interface,
+	ids: Ids.Interface,
+	by: { botId: string; chatId: string },
+	input: NewWrittenFile,
+	writer?: FileWriter,
+) =>
+	Effect.flatMap(ids.next, (fileId) =>
+		withContent(blobs, ids, fileId, input.kind, input.content, (stored) =>
+			recordFileWrite(
+				writer,
+				Effect.gen(function* () {
+					const row = yield* query((db) =>
+						db
+							.insert(file)
+							.values({
+								id: fileId,
+								chatId: by.chatId,
+								kind: input.kind,
+								name: input.title,
+								currentVersion: 1,
+								createdByBotId: by.botId,
+							})
+							.returning(),
+					).pipe(Effect.flatMap(writtenRow("file")));
+					const written = asWritten(row);
+					yield* insertVersion(written, 1, stored, by.botId);
+					return {
+						status: "written" as const,
+						fileId: written.id,
+						kind: written.kind,
+						title: written.name,
+						version: written.currentVersion,
+					};
+				}),
+			),
+		),
+	);
+
+/** withContent stages a unique blob and removes it if no version committed with it. */
+const withContent = <E, R>(
+	blobs: BlobStore.Interface,
+	ids: Ids.Interface,
+	fileId: string,
+	kind: WrittenFileKind,
+	content: string,
+	record: (
+		stored: StoredContent,
+	) => Effect.Effect<{ receipt: FileWritten; usedContent: boolean }, E, R>,
+) =>
+	Effect.gen(function* () {
+		if (content.length > MAX_FILE_CONTENT_CHARACTERS) {
+			return yield* new FileContentTooLarge({ maxCharacters: MAX_FILE_CONTENT_CHARACTERS });
+		}
+		const versionId = yield* ids.next;
+		const key = versionKey(fileId, versionId);
+		const contentType = CONTENT_TYPES[kind];
+		const discard = blobs.delete(key).pipe(Effect.ignore);
+		return yield* Effect.uninterruptibleMask((restore) =>
+			Effect.gen(function* () {
+				const { size } = yield* restore(
+					blobs.put(key, {
+						stream: Stream.succeed(new TextEncoder().encode(content)),
+						contentType,
+					}),
+				).pipe(
+					Effect.orDie,
+					Effect.onError(() => discard),
+				);
+				const { receipt, usedContent } = yield* record({ versionId, contentType, size }).pipe(
+					Effect.onError(() => discard),
+				);
+				if (!usedContent) yield* discard;
+				return receipt;
+			}),
+		);
+	});
 
 /**
  * Version `version` of a written file, read without asking who wants it:
@@ -412,36 +476,6 @@ const CONTENT_TYPES: Record<WrittenFileKind, string> = {
 function versionKey(fileId: string, versionId: string): BlobStore.Key {
 	return BlobStore.key("files", fileId, "versions", versionId);
 }
-
-/** The bot a tool acts for, in the chat it is working in, which a new file records it was made in. */
-export interface BotInChat {
-	botId: string;
-	chatId: string;
-}
-
-export class NotFound extends Data.TaggedError("FileNotFound")<{
-	readonly fileId: string;
-}> {}
-
-/** Another version landed after the one a change was based on. */
-export class Stale extends Data.TaggedError("FileStale")<{
-	readonly currentVersion: number;
-}> {}
-
-/** A write took the file for another kind than the one it is, which never changes. */
-export class KindFixed extends Data.TaggedError("FileKindFixed")<{
-	readonly kind: WrittenFileKind;
-}> {}
-
-/** Content would be over `maxCharacters`, the most a written file holds. */
-export class TooLarge extends Data.TaggedError("FileContentTooLarge")<{
-	readonly maxCharacters: number;
-}> {}
-
-/** An edit's text appears in the file `matches` times, not exactly once. */
-export class EditTextUnmatched extends Data.TaggedError("EditTextUnmatched")<{
-	readonly matches: number;
-}> {}
 
 /** A `file` row of a written kind, with the columns that kind sets. */
 type WrittenFileRow = FileRow & { kind: WrittenFileKind; name: string; currentVersion: number };
@@ -485,6 +519,14 @@ const writtenFileWhere = (
 		return row ? { file: asWritten(row.file), creator: authorOf(row.creator) } : undefined;
 	});
 
+const requireWrittenFile = (fileId: string, chatId: string, lock = false) =>
+	writtenFileWhere(fileId, eq(file.chatId, chatId), { lock }).pipe(
+		Effect.filterOrFail(
+			(found) => found !== undefined,
+			() => new ResourceHidden({ resource: "file" }),
+		),
+	);
+
 const writtenFileWithId = (fileId: string) => writtenFileWhere(fileId, undefined);
 
 /** Files with the chat each was made in and the bot that made it, for a scope to narrow. */
@@ -503,45 +545,6 @@ const writtenFilesWithCreator = (db: Executor) =>
  */
 const madeInChat = alias(placedChat, "made_in_chat");
 const chatOfMadeIn = eq(madeInChat.id, sql`coalesce(${placedChat.rootChatId}, ${placedChat.id})`);
-
-/** The chat a bot is working in, by the chat its turn is in. */
-interface WorkingChat {
-	id: string;
-	projectId: string | null;
-}
-
-/**
- * The files a bot working in `working` reaches: see `AuthoringInterface`. In
- * the bot's own chats and automation feeds, its default project's files.
- */
-const reachedByBot = (working: WorkingChat | undefined): SQL => {
-	if (!working) return sql`false`;
-	return (
-		or(
-			eq(madeInChat.id, working.id),
-			working.projectId === null ? undefined : eq(madeInChat.projectId, working.projectId),
-		) ?? sql`false`
-	);
-};
-
-/** The chat `chatId` is in: itself, or for a run, the automation's feed. */
-const chatOf = (chatId: string) =>
-	Effect.map(
-		query((db) =>
-			db
-				.select({ id: madeInChat.id, projectId: madeInChat.projectId })
-				.from(placedChat)
-				.innerJoin(madeInChat, chatOfMadeIn)
-				.where(eq(placedChat.id, chatId))
-				.limit(1),
-		),
-		([row]): WorkingChat | undefined => row,
-	);
-
-const fileReachedBy = (by: BotInChat, fileId: string, options: { lock?: boolean } = {}) =>
-	Effect.flatMap(chatOf(by.chatId), (working) =>
-		writtenFileWhere(fileId, reachedByBot(working), options),
-	);
 
 const listedWrittenFilesWhere = (scope: SQL | undefined) =>
 	Effect.map(
@@ -662,39 +665,15 @@ const insertVersion = (
 	botId: string,
 ) =>
 	query((db) =>
-		db
-			.insert(fileVersion)
-			.values({
-				id: versionId,
-				fileId: of.id,
-				fileKind: of.kind,
-				number,
-				contentType,
-				size,
-				authorBotId: botId,
-			})
-			.returning(),
-	).pipe(Effect.flatMap(writtenRow("file_version")));
-
-/** Deletes version `number` of the file, queueing its content's blob for deletion. */
-const removeVersion = (fileId: string, number: number) =>
-	Effect.gen(function* () {
-		const removed = yield* query((db) =>
-			db
-				.delete(fileVersion)
-				.where(and(eq(fileVersion.fileId, fileId), eq(fileVersion.number, number)))
-				.returning({ id: fileVersion.id }),
-		);
-		if (removed.length === 0) return;
-		yield* query((db) =>
-			db.insert(blobDeletion).values(removed.map(({ id }) => ({ prefix: versionKey(fileId, id) }))),
-		);
-	});
-
-const botNamed = (botId: string) =>
-	Effect.map(
-		query((db) => db.select({ id: bot.id, name: bot.name }).from(bot).where(eq(bot.id, botId))),
-		([row]) => authorOf(row ?? null),
+		db.insert(fileVersion).values({
+			id: versionId,
+			fileId: of.id,
+			fileKind: of.kind,
+			number,
+			contentType,
+			size,
+			authorBotId: botId,
+		}),
 	);
 
 const toListedWrittenFile = (row: WrittenFileRow, creator: FileAuthor): ListedWrittenFile => ({

@@ -6,7 +6,6 @@ import { Context, DateTime, Effect, ErrorReporter, Layer, Option, Schema } from 
 import { query, serviceOperations } from "../database/database.ts";
 import { chat, file } from "../database/schema.ts";
 import { FilePages } from "../files/pages.ts";
-import { isUuid } from "../ids/ids.ts";
 import { authenticated, type PageAddress } from "../principal.ts";
 import { Secrets } from "../secrets/secrets.ts";
 import { processLayer, Tier } from "../tiers.ts";
@@ -54,7 +53,7 @@ export const make = Effect.gen(function* () {
 					if (Option.isNone(address)) return yield* new PageAddressUnavailable();
 					const { fileId, version, expiresAt } = address.value;
 					const now = yield* DateTime.nowAsDate;
-					if (expiresAt <= now.getTime() || !isUuid(fileId)) {
+					if (expiresAt <= now.getTime()) {
 						return yield* new PageAddressUnavailable();
 					}
 					const [page] = yield* query((db) =>

@@ -2,6 +2,8 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { ProviderDialect } from "./dialect.ts";
 import { openaiCompatible } from "./openai-compatible.ts";
 
+export const geminiModelId = (modelId: string) => modelId.replace(/^models\//, "");
+
 /**
  * Lists models through Gemini's OpenAI-compatible API (the built-in provider's base URL),
  * but sends requests to the native API one level up. The compatible API's
@@ -25,5 +27,5 @@ export const gemini: ProviderDialect = {
 			baseURL: endpoint.baseUrl,
 			headers: endpoint.headers,
 			fetch,
-		})(modelId.replace(/^models\//, "")),
+		})(geminiModelId(modelId)),
 };

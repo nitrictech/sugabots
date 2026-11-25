@@ -7,6 +7,7 @@ import type {
 	NewModelProvider,
 	ProviderApiFormat,
 	ProviderModel,
+	ProviderModelCapability,
 	ProviderModelUpdate,
 } from "@sugabots/contracts";
 import { providerBuiltIn, providerLacksCredential, seededBuiltIns } from "@sugabots/contracts";
@@ -23,6 +24,7 @@ import {
 	workspaceDefaultModel,
 } from "../../database/schema.ts";
 import { Secrets } from "../../secrets/secrets.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { inWorkspaceUnderMembershipLock } from "../../workspaces/membership/member-reads.ts";
 import { changesAddress, stillConfiguredAs } from "../tested-configuration.ts";
 import type { DiscoveredModel } from "./dialects/index.ts";
@@ -114,12 +116,6 @@ export interface Interface {
 		providerId: string,
 		models: DiscoveredModel[],
 	) => Effect.Effect<{ added: number; updated: number }>;
-	readonly setModelEnabled: (
-		workspaceId: string,
-		providerId: string,
-		modelIds: string[],
-		enabled: boolean,
-	) => Effect.Effect<number>;
 	/**
 	 * One model's switch, the capabilities switched off for bots, or, for a
 	 * model added by hand, what it can do; a fetched model's capabilities are
@@ -172,7 +168,9 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ModelProviderStore",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ModelProviderStore");
@@ -543,26 +541,6 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		setModelEnabled: (workspaceId, providerId, modelIds, enabled) =>
-			operation(
-				"setModelEnabled",
-				modelIds.length === 0
-					? Effect.succeed(0)
-					: query((db) =>
-							db
-								.update(providerModel)
-								.set({ enabled })
-								.where(
-									and(
-										eq(providerModel.workspaceId, workspaceId),
-										eq(providerModel.providerId, providerId),
-										inArray(providerModel.id, modelIds),
-									),
-								)
-								.returning({ id: providerModel.id }),
-						).pipe(Effect.map((rows) => rows.length)),
-			),
-
 		updateModel: (workspaceId, providerId, modelId, changes) =>
 			operation(
 				"updateModel",
@@ -599,6 +577,8 @@ export const make = Effect.gen(function* () {
 								providerId: modelProvider.id,
 								providerName: modelProvider.name,
 								modelName: providerModel.displayName,
+								capabilities: providerModel.capabilities,
+								disabledCapabilities: providerModel.disabledCapabilities,
 							})
 							.from(providerModel)
 							.innerJoin(modelProvider, eq(modelProvider.id, providerModel.providerId))
@@ -609,6 +589,7 @@ export const make = Effect.gen(function* () {
 						access: yield* providerAccess(workspaceId, row.providerId),
 						providerName: DisplayName.fromRecord(row.providerName),
 						modelName: DisplayName.fromRecord(row.modelName ?? modelId),
+						capabilities: capabilitiesOn(row),
 					};
 				}),
 			),
@@ -661,7 +642,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /** The provider that offers a model, and the names members know both by. */
 export interface ResolvedModel {
@@ -669,6 +650,7 @@ export interface ResolvedModel {
 	access: ProviderAccess | undefined;
 	providerName: DisplayName;
 	modelName: DisplayName;
+	capabilities: readonly ProviderModelCapability[];
 }
 
 /** How to reach a provider: where, in which protocol, and with which credentials. */
@@ -798,4 +780,14 @@ function lacksCredential(
 
 function openOAuthTokens(sealed: string, cipher: Secrets.Interface): OAuthTokens {
 	return Schema.decodeUnknownSync(OAuthTokens)(JSON.parse(cipher.decrypt(sealed)));
+}
+
+/** The model's capabilities, less those someone switched off. */
+export function capabilitiesOn(model: {
+	capabilities: readonly ProviderModelCapability[];
+	disabledCapabilities: readonly ProviderModelCapability[];
+}) {
+	return model.capabilities.filter(
+		(capability) => !model.disabledCapabilities.includes(capability),
+	);
 }

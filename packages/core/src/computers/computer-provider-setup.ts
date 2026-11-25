@@ -23,6 +23,8 @@ import type { UrlNotAllowed } from "@sugabots/contracts/errors/providers";
 import { userText } from "@sugabots/errors";
 import { Context, Effect, Layer } from "effect";
 import { serviceOperations, transaction } from "../database/database.ts";
+import type { Named } from "../proofs/proof.ts";
+import type { ReachesComputerProvider } from "../proofs/reaches-computer-provider.ts";
 import type { CanManageWorkspace, CanReadWorkspace } from "../proofs/workspace-permissions.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { requireAllowedUrl, timedTest } from "../providers/tested-configuration.ts";
@@ -54,9 +56,10 @@ export interface Interface {
 		canManage: CanManageWorkspace<P, W>,
 		provider: NewComputerProvider,
 	) => Effect.Effect<ComputerProvider, UrlNotAllowed | ComputerProviderIncomplete>;
-	readonly update: <P, W>(
+	readonly update: <P, W, V>(
 		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+		provider: Named<V, string>,
+		target: ReachesComputerProvider<P, W, V>,
 		changes: ComputerProviderUpdate,
 	) => Effect.Effect<
 		ComputerProvider,
@@ -69,9 +72,10 @@ export interface Interface {
 	 * Destroys the provider's computers, then removes it. When one is made
 	 * meanwhile the provider is kept, to try again.
 	 */
-	readonly remove: <P, W>(
+	readonly remove: <P, W, V>(
 		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+		provider: Named<V, string>,
+		target: ReachesComputerProvider<P, W, V>,
 	) => Effect.Effect<
 		void,
 		ComputerProviderNotFound | ComputersNotDestroyed | ComputerMadeMeanwhile
@@ -80,22 +84,25 @@ export interface Interface {
 	 * How the provider's template stands, for a provider that builds its
 	 * computers' template (E2B); null for one that takes images as they are.
 	 */
-	readonly template: <P, W>(
+	readonly template: <P, W, V>(
 		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+		provider: Named<V, string>,
+		target: ReachesComputerProvider<P, W, V>,
 	) => Effect.Effect<ComputerTemplate, ComputerProviderNotFound | ComputerUnavailable>;
 	/** Starts building the provider's template from Sugabots' computer image, in the workspace's own account. */
-	readonly prepareTemplate: <P, W>(
+	readonly prepareTemplate: <P, W, V>(
 		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+		provider: Named<V, string>,
+		target: ReachesComputerProvider<P, W, V>,
 	) => Effect.Effect<
 		ComputerTemplate,
 		ComputerProviderNotFound | NoTemplates | ComputerUnavailable
 	>;
 	/** Asks the provider whether it answers and accepts the key, and records how that went. */
-	readonly test: <P, W>(
+	readonly test: <P, W, V>(
 		canManage: CanManageWorkspace<P, W>,
-		providerId: string,
+		provider: Named<V, string>,
+		target: ReachesComputerProvider<P, W, V>,
 	) => Effect.Effect<ProviderTestResult, ComputerProviderNotFound>;
 }
 
@@ -159,11 +166,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		update: (canManage, providerId, changes) =>
+		update: (_canManage, provider, target, changes) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
-					const workspaceId = workspaceOf(canManage);
+					const workspaceId = target.workspace.value;
+					const providerId = provider.value;
 					yield* requireAllowedUrls(changes.settings);
 					const before = yield* requireProvider(workspaceId, providerId);
 					const updated = yield* providers.update(workspaceId, providerId, changes);
@@ -176,11 +184,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		remove: (canManage, providerId) =>
+		remove: (_canManage, provider, target) =>
 			operation(
 				"remove",
 				Effect.gen(function* () {
-					const workspaceId = workspaceOf(canManage);
+					const workspaceId = target.workspace.value;
+					const providerId = provider.value;
 					yield* requireProvider(workspaceId, providerId);
 					if (yield* projectComputers.anyMadeBy(workspaceId, providerId)) {
 						const configured = yield* providers.access(workspaceId, providerId);
@@ -203,11 +212,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		template: (canManage, providerId) =>
+		template: (_canManage, provider, target) =>
 			operation(
 				"template",
 				Effect.gen(function* () {
-					const workspaceId = workspaceOf(canManage);
+					const workspaceId = target.workspace.value;
+					const providerId = provider.value;
 					const row = yield* requireProvider(workspaceId, providerId);
 					const configured = yield* providers.access(workspaceId, providerId);
 					const templates = configured && computers.forAccess(configured.access).templates;
@@ -220,11 +230,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		prepareTemplate: (canManage, providerId) =>
+		prepareTemplate: (_canManage, provider, target) =>
 			operation(
 				"prepareTemplate",
 				Effect.gen(function* () {
-					const workspaceId = workspaceOf(canManage);
+					const workspaceId = target.workspace.value;
+					const providerId = provider.value;
 					yield* requireProvider(workspaceId, providerId);
 					const configured = yield* providers.access(workspaceId, providerId);
 					const templates = configured && computers.forAccess(configured.access).templates;
@@ -239,11 +250,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		test: (canManage, providerId) =>
+		test: (_canManage, provider, target) =>
 			operation(
 				"test",
 				Effect.gen(function* () {
-					const workspaceId = workspaceOf(canManage);
+					const workspaceId = target.workspace.value;
+					const providerId = provider.value;
 					yield* requireProvider(workspaceId, providerId);
 					const configured = yield* providers.access(workspaceId, providerId);
 					if (!configured) {

@@ -1,6 +1,6 @@
 import { InvalidCursor } from "@sugabots/contracts/errors/chat-reads";
 import { BotHasNoModel } from "@sugabots/contracts/errors/chats";
-import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { Operations } from "@sugabots/core/operations/registry";
 import { unimplemented } from "@sugabots/core/testing";
@@ -42,7 +42,7 @@ const signedIn = (init: RequestInit = {}) => ({
 });
 
 const startChat = (body: object = {}) =>
-	signedIn({ method: "POST", body: JSON.stringify({ id: MESSAGE, message: "Hi", ...body }) });
+	signedIn({ method: "POST", body: JSON.stringify({ retryKey: MESSAGE, message: "Hi", ...body }) });
 
 describe("starting a chat in a project", () => {
 	it("hands on the project and the message, and no files, which can't be uploaded before it starts", async () => {
@@ -54,7 +54,7 @@ describe("starting a chat in a project", () => {
 			},
 		}).request(`/projects/${PROJECT}/chats`, startChat({ attachments: [UPLOAD] }));
 
-		expect(asked).toEqual({ projectId: PROJECT, id: MESSAGE, message: "Hi" });
+		expect(asked).toEqual({ projectId: PROJECT, retryKey: MESSAGE, message: "Hi" });
 	});
 
 	it("is a conflict when a bot given the floor has no model, and not found in a project the member cannot see", async () => {
@@ -108,5 +108,37 @@ describe("a page of a chat", () => {
 		}).request(`/chats/${CHAT}/messages?cursor=nonsense`, signedIn());
 
 		expect(response.status).toBe(400);
+	});
+});
+
+describe("interrupting a turn", () => {
+	const TURN = "0199a3a0-0000-7000-8000-000000000801";
+
+	it("interrupts the turn in the path, in the chat in the path, and answers once it is marked", async () => {
+		const asked: Array<InputOf<"chats.interruptTurn">> = [];
+		const routes = app({
+			"chats.interruptTurn": (_principal, input) => Effect.sync(() => void asked.push(input)),
+		});
+
+		const response = await routes.request(
+			`/chats/${CHAT}/turns/${TURN}/interrupt`,
+			signedIn({ method: "POST" }),
+		);
+
+		expect(response.status).toBe(202);
+		expect(asked).toEqual([{ chatId: CHAT, turnId: TURN }]);
+	});
+
+	it("is forbidden to a member who may not interrupt it", async () => {
+		const routes = app({
+			"chats.interruptTurn": () => Effect.fail(new ActionForbidden({ proof: "CanInterrupt" })),
+		});
+
+		const response = await routes.request(
+			`/chats/${CHAT}/turns/${TURN}/interrupt`,
+			signedIn({ method: "POST" }),
+		);
+
+		expect(response.status).toBe(403);
 	});
 });

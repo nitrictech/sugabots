@@ -24,7 +24,7 @@ export type { EventStream, EventsApi } from "./events.ts";
 
 export type Api = HttpApiClient.ForApi<typeof ApiDefinition>;
 
-export interface ClientOptions {
+interface ClientOptions {
 	/** Where the API is, path included, e.g. `https://example.com/api`. */
 	baseUrl: string;
 	/** Overridable for tests, and for runtimes with their own fetch. */
@@ -43,10 +43,11 @@ export interface Client {
 
 export function createClient({ baseUrl, fetch }: ClientOptions): Client {
 	const root = baseUrl.replace(/\/+$/, "");
+	const api = createApi({ baseUrl: root, fetch });
 	return {
 		baseUrl: root,
-		api: createApi({ baseUrl: root, fetch }),
-		auth: createAuthApi({ baseUrl: root, fetch }),
+		api,
+		auth: createAuthApi({ baseUrl: root, fetch, api }),
 		events: createEventsApi({ baseUrl: root, fetch }),
 	};
 }

@@ -1,0 +1,24 @@
+{
+	"name": "@sugabots/bot-loop",
+	"version": "0.0.0",
+	"private": true,
+	"license": "MIT",
+	"type": "module",
+	"exports": {
+		"./*": "./src/*.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@sugabots/contracts": "workspace:*",
+		"@sugabots/core": "workspace:*",
+		"@sugabots/errors": "workspace:*",
+		"@sugabots/workflow": "workspace:*",
+		"ai": "^7.0.173",
+		"effect": "catalog:"
+	},
+	"devDependencies": {
+		"drizzle-orm": "catalog:"
+	}
+}

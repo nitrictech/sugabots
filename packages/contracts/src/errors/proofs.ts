@@ -17,9 +17,11 @@ const Resource = Schema.Literals([
 	"message",
 	"file",
 	"automation",
+	"automation trigger",
 	"bot",
 	"connector",
 	"computer",
+	"computer provider",
 	"turn",
 	"approval",
 ]);
@@ -112,15 +114,21 @@ export class ApprovalNeeded
 
 /** The call was denied, its tool was switched off, or it isn't the call that was allowed. */
 export class ApprovalRefused
-	extends Schema.TaggedError<ApprovalRefused>()("ApprovalRefused", {})
+	extends Schema.TaggedError<ApprovalRefused>()("ApprovalRefused", {
+		reason: Schema.optional(Schema.Literal("automationsOff")),
+	})
 	implements DomainError
 {
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return "The call was denied, its tool is off, or its arguments differ from those allowed";
+		return this.reason === "automationsOff"
+			? "The bot's automations tool access is Off"
+			: "The call was denied, its tool is off, or its arguments differ from those allowed";
 	}
 	get userMessage() {
-		return userText`This wasn't allowed, so it didn't run`;
+		return this.reason === "automationsOff"
+			? userText`Automations are off for this bot. Someone who manages the bot can turn them on.`
+			: userText`This wasn't allowed, so it didn't run`;
 	}
 }

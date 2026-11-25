@@ -37,6 +37,7 @@ import {
 } from "./chat-layout.ts";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { FileCards } from "./FileCards.tsx";
+import { InterruptTurnButton } from "./InterruptTurnButton.tsx";
 import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
 import { MessageMarkdown, writerOf } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
@@ -247,6 +248,13 @@ export function ChatMessages({
 						{typing && message.author.kind === "bot" && isTyping(message) && (
 							<TypingIndicator key={`${message.id}-typing`} typers={[message.author]} />
 						)}
+						{message.status === "writing" && (
+							<InterruptTurnFor
+								chatId={message.chatId}
+								replyId={message.id}
+								permissions={approvalPermissions}
+							/>
+						)}
 					</Fragment>
 				);
 			})}
@@ -452,7 +460,7 @@ function ChatMessage({
 						call={call}
 						bot={bot}
 						chatId={message.chatId}
-						canApprove={mayAnswer(call, approvalPermissions)}
+						canApprove={mayAnswer(call, message.id, approvalPermissions)}
 						connector={markedConnectors.get(splitToolKey(call.tool).handle)}
 					/>
 				</div>
@@ -561,6 +569,18 @@ function ChatMessage({
 							className="mb-1.5"
 						/>
 						{parts}
+						{message.thinking && message.thinking.length > 0 && (
+							<details className="max-w-full text-sm text-subtle-foreground">
+								<summary className="cursor-pointer">Thinking</summary>
+								<div className="space-y-2 pt-1">
+									{message.thinking.map(({ step, text }) => (
+										<p key={step} className="whitespace-pre-wrap break-words">
+											{text}
+										</p>
+									))}
+								</div>
+							</details>
+						)}
 						{fileList}
 						{previews &&
 							onOpenDesktop &&
@@ -918,4 +938,19 @@ function speakersIn(messages: readonly Message[]): string[] {
 			messages.flatMap((message) => (message.author.kind === "bot" ? [message.author.id] : [])),
 		),
 	];
+}
+
+/** The interrupt control under the reply `replyId` being written, when the member may interrupt its turn. */
+function InterruptTurnFor({
+	chatId,
+	replyId,
+	permissions,
+}: {
+	chatId: string;
+	replyId: string;
+	permissions: ApprovalPermissions | undefined;
+}) {
+	const interruptible = permissions?.interruptTurns.find((turn) => turn.replyId === replyId);
+	if (!interruptible) return null;
+	return <InterruptTurnButton chatId={chatId} turnId={interruptible.turnId} />;
 }

@@ -390,7 +390,7 @@ describe("a bot's chat", () => {
 		await waitFor(() =>
 			expect(client.api.chats.send).toHaveBeenCalledWith({
 				params: { chatId: chat.id },
-				payload: { id: expect.any(String), message: "Send the update" },
+				payload: { retryKey: expect.any(String), message: "Send the update" },
 			}),
 		);
 		await waitFor(() => expect(messages.scrollTop).toBe(1_200));
@@ -528,19 +528,39 @@ describe("a bot's chat", () => {
 		await waitFor(() => expect(client.api.chats.send).toHaveBeenCalled());
 	});
 
-	it("clears the composer while the message is still in flight", async () => {
+	it("replaces the optimistic message when the server assigns its ID", async () => {
 		const posting = pendingAnswer();
 		client.api.chats.send.mockReturnValue(posting.effect);
-		mount(chatPage);
-		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		const updates = controlledEventStream();
+		client.events.chat.mockReturnValue(updates.stream);
+		const queries = createQueryClient();
+		mount(chatPage, { queries });
+		const composer = await screen.findByLabelText(`Message ${linear.name}`, undefined, {
+			timeout: 10_000,
+		});
 		writeDraft(composer, "Send the update");
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
 		await waitFor(() => expect(composer.textContent).toBe(""));
-		posting.answer(Effect.succeed({ message: mainMessage, routing: { status: "routed" } }));
+		await screen.findByText("Send the update");
+		const [request] = client.api.chats.send.mock.calls[0] ?? [];
+		const { retryKey } = (request as { payload: { retryKey: string } }).payload;
+		const saved: Message = {
+			...mainMessage,
+			id: "0199a3a0-0000-7000-8000-0000000000fc",
+			retryKey,
+			content: "Send the update",
+			parts: [{ type: "text", text: "Send the update" }],
+		};
+		updates.emit(streamEvent("message.created", { chatId: chat.id, message: saved }));
+		await waitFor(() =>
+			expect(queries.getQueryData<ChatDetails>(["chat", chat.id])?.messages).toContainEqual(saved),
+		);
+		expect(screen.getAllByText("Send the update")).toHaveLength(1);
+		posting.answer(Effect.succeed(saved));
 	});
 
-	it("puts the draft back when the message could not be sent", async () => {
+	it("puts the draft back after a lost response and reuses the retry key", async () => {
 		client.api.chats.messages.mockImplementation(() =>
 			Effect.succeed({ items: [{ kind: "message", message: mainMessage }], nextCursor: null }),
 		);
@@ -551,12 +571,18 @@ describe("a bot's chat", () => {
 			Effect.fail(new InternalServerError({ message: userText`Nope` })),
 		);
 		mount(chatPage);
-		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		const composer = await screen.findByLabelText(`Message ${linear.name}`, undefined, {
+			timeout: 10_000,
+		});
 		writeDraft(composer, "Send the update");
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
 		await screen.findByText("Message not sent. Your draft is still here.");
 		expect(composer.textContent).toBe("Send the update");
+		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+		await waitFor(() => expect(client.api.chats.send).toHaveBeenCalledTimes(2));
+		const [first, retry] = client.api.chats.send.mock.calls.map(([request]) => request);
+		expect(retry).toEqual(first);
 	});
 
 	it("keeps an unsent draft while you are elsewhere, with the cursor at its end", async () => {
@@ -609,6 +635,21 @@ describe("a bot's chat", () => {
 		updates.emit(streamEvent("reset"));
 
 		await screen.findByText("Sent while the stream was behind");
+	});
+
+	it("fetches the chat again when who reaches what changes, so whose turns its members may interrupt keeps up", async () => {
+		const updates = controlledEventStream();
+		client.events.workspace.mockReturnValue(updates.stream);
+		mount(chatPage);
+		await screen.findByRole("log", { name: "Chat messages" });
+		await waitFor(() => expect(client.events.workspace).toHaveBeenCalled());
+		const fetched = client.api.chats.get.mock.calls.length;
+
+		updates.emit(
+			streamEvent("reach.changed", { about: { kind: "membership", memberId: member.id } }),
+		);
+
+		await waitFor(() => expect(client.api.chats.get.mock.calls.length).toBeGreaterThan(fetched));
 	});
 
 	it("keeps following the latest message while the bot works, and when it answers", async () => {
@@ -693,6 +734,7 @@ describe("a bot's chat", () => {
 				messageId: writing.id,
 				offset: writing.content.length,
 				text: ", with the totals.",
+				execution: 1,
 			}),
 		);
 		updates.emit(
@@ -706,6 +748,238 @@ describe("a bot's chat", () => {
 		);
 		await screen.findByText("Here it is, with the totals.");
 		expect(screen.getByRole("link", { name: "Download q3-report.csv" })).toBeDefined();
+	});
+
+	it("shows live thinking under the reply and drops deltas from a superseded execution", async () => {
+		const updates = controlledEventStream();
+		client.events.chat.mockReturnValue(updates.stream);
+		mount(chatPage);
+		await screen.findByRole("log", { name: "Chat messages" });
+		await waitFor(() => expect(client.events.chat).toHaveBeenCalledWith(chat.id));
+		const writing = {
+			...botMessage,
+			id: "0199a3a0-0000-7000-8000-0000000000fa",
+			status: "writing" as const,
+			content: "",
+			parts: [],
+		};
+		updates.emit(streamEvent("message.created", { chatId: chat.id, message: writing }));
+		const reply = { chatId: chat.id, messageId: writing.id };
+		const think = (execution: number, offset: number, text: string) =>
+			updates.emit(
+				streamEvent("message.thinking_delta", { ...reply, execution, step: 1, offset, text }),
+			);
+
+		think(1, 0, "Still checking.");
+		const disclosure = await screen.findByText("Thinking");
+		const details = disclosure.closest("details");
+		expect(details?.open).toBe(false);
+		expect(screen.getByText("Still checking.")).toBeDefined();
+		fireEvent.click(disclosure);
+		expect(details?.open).toBe(true);
+
+		updates.emit(
+			streamEvent("message.execution_started", {
+				...reply,
+				execution: 2,
+				content: "",
+				thinking: [{ step: 0, text: "Read the chat." }],
+			}),
+		);
+		think(1, "Still checking.".length, " Stale.");
+		think(2, 0, "Verified.");
+		think(2, 0, "Verified.");
+		updates.emit(
+			streamEvent("message.delta", { ...reply, execution: 2, offset: 0, text: "Done." }),
+		);
+
+		await screen.findByText("Done.");
+		expect(screen.getByText("Read the chat.")).toBeDefined();
+		expect(screen.getByText("Verified.")).toBeDefined();
+		expect(screen.queryByText(/Still checking|Stale/)).toBeNull();
+	});
+
+	it("keeps thinking already fetched ahead of the first execution event", async () => {
+		const updates = controlledEventStream();
+		client.events.chat.mockReturnValue(updates.stream);
+		const writing: Message = {
+			...botMessage,
+			status: "writing",
+			thinking: [{ step: 0, text: "Looked at the current record." }],
+		};
+		client.api.chats.get.mockReturnValue(
+			Effect.succeed(details(chat.id, "Chat", "project_chat", [mainMessage, writing])),
+		);
+		mount(chatPage);
+		expect(await screen.findByText(writing.content)).toBeDefined();
+		await waitFor(() => expect(client.events.chat).toHaveBeenCalledWith(chat.id));
+
+		updates.emit(
+			streamEvent("message.execution_started", {
+				chatId: chat.id,
+				messageId: writing.id,
+				execution: 1,
+				content: "",
+			}),
+		);
+		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "Execution started." }));
+
+		await screen.findByText("Execution started.");
+		expect(screen.getByText("Looked at the current record.")).toBeDefined();
+	});
+
+	it.each([true, false])(
+		"reconciles a finished or silent turn on refetch (answered %s)",
+		async (answered) => {
+			const updates = controlledEventStream();
+			client.events.chat.mockReturnValue(updates.stream);
+			const writing: Message = {
+				...botMessage,
+				id: "0199a3a0-0000-7000-8000-0000000000f8",
+				status: "writing",
+				content: "Draft reply.",
+				parts: [{ type: "text", text: "Draft reply." }],
+				thinking: [{ step: 0, text: "Check it once more." }],
+			};
+			client.api.chats.get.mockReturnValue(
+				Effect.succeed(details(chat.id, "Chat", "project_chat", [mainMessage, writing])),
+			);
+			mount(chatPage);
+			expect(await screen.findByText(writing.content)).toBeDefined();
+			await waitFor(() => expect(client.events.chat).toHaveBeenCalledWith(chat.id));
+
+			if (answered) {
+				updates.emit(
+					streamEvent("message.completed", {
+						chatId: chat.id,
+						messageId: writing.id,
+						content: "Final reply.",
+						status: "complete",
+						finishedAt: "2026-11-23T10:00:00.000Z",
+					}),
+				);
+				expect(await screen.findByText("Final reply.")).toBeDefined();
+			}
+			const marker: Message = {
+				...mainMessage,
+				content: "The fresh chat page has arrived.",
+				parts: [{ type: "text", text: "The fresh chat page has arrived." }],
+			};
+			client.api.chats.get.mockReturnValue(
+				Effect.succeed(
+					details(chat.id, "Chat", "project_chat", answered ? [marker, writing] : [marker]),
+				),
+			);
+			updates.emit(streamEvent("turn.completed", { chatId: chat.id }));
+			await screen.findByText(marker.content);
+
+			expect(screen.queryByText(writing.content)).toBeNull();
+			if (answered) {
+				expect(screen.getByText("Final reply.")).toBeDefined();
+			} else {
+				expect(screen.queryByText("Thinking")).toBeNull();
+			}
+		},
+	);
+
+	it("shows the newest execution's words when a turn resumed elsewhere writes its step again", async () => {
+		const updates = controlledEventStream();
+		client.events.chat.mockReturnValue(updates.stream);
+		mount(chatPage);
+		await screen.findByRole("log", { name: "Chat messages" });
+		await waitFor(() => expect(client.events.chat).toHaveBeenCalledWith(chat.id));
+		const writing = {
+			...botMessage,
+			id: "0199a3a0-0000-7000-8000-0000000000fe",
+			status: "writing" as const,
+			content: "",
+			parts: [],
+			createdAt: "2026-09-18T09:20:00.000Z",
+		};
+		updates.emit(streamEvent("message.created", { chatId: chat.id, message: writing }));
+		const delta = (execution: number, offset: number, text: string) =>
+			updates.emit(
+				streamEvent("message.delta", {
+					chatId: chat.id,
+					messageId: writing.id,
+					offset,
+					text,
+					execution,
+				}),
+			);
+		delta(1, 0, "The old process wrote this");
+		await screen.findByText("The old process wrote this");
+
+		// The turn resumed elsewhere, which writes the step again; the old
+		// process's late words are dropped.
+		delta(2, 0, "The resumed turn wrote this");
+		delta(1, 26, " and then this");
+
+		await screen.findByText("The resumed turn wrote this");
+		expect(screen.queryByText(/and then this/)).toBeNull();
+
+		const recovered = "The resumed turn";
+		updates.emit(
+			streamEvent("message.execution_started", {
+				chatId: chat.id,
+				messageId: writing.id,
+				execution: 3,
+				content: recovered,
+			}),
+		);
+		delta(2, recovered.length, " Stale text while writing.");
+		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "Execution resumed." }));
+
+		await screen.findByText("Execution resumed.");
+		expect(screen.getByText(recovered)).toBeDefined();
+		expect(screen.queryByText(/Stale text while writing/)).toBeNull();
+
+		updates.emit(
+			streamEvent("message.completed", {
+				chatId: chat.id,
+				messageId: writing.id,
+				content: recovered,
+				status: "complete",
+				finishedAt: "2026-11-23T10:00:00.000Z",
+			}),
+		);
+		delta(2, recovered.length, " Stale text after completion.");
+		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "Execution ended." }));
+
+		await screen.findByText("Execution ended.");
+		expect(screen.getByText(recovered)).toBeDefined();
+		expect(screen.queryByText(/Stale text after completion/)).toBeNull();
+	});
+
+	it("keeps the fetched reply when an execution event arrives with only its checkpoint text", async () => {
+		const updates = controlledEventStream();
+		client.events.chat.mockReturnValue(updates.stream);
+		const content = "The report is ready to download.";
+		const writing: Message = {
+			...botMessage,
+			id: crypto.randomUUID(),
+			status: "writing",
+			content,
+			parts: [{ type: "text", text: content }],
+		};
+		answerChatWith(() =>
+			Effect.succeed(details(chat.id, "Chat", "project_chat", [mainMessage, writing])),
+		);
+		mount(chatPage);
+		await screen.findByText(content);
+
+		updates.emit(
+			streamEvent("message.execution_started", {
+				chatId: chat.id,
+				messageId: writing.id,
+				execution: 2,
+				content: "The report",
+			}),
+		);
+		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "Execution resumed." }));
+
+		await screen.findByText("Execution resumed.");
+		expect(screen.getByText(content)).toBeDefined();
 	});
 
 	it("shows the reply that finished while you were elsewhere", async () => {

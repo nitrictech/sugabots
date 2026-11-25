@@ -10,15 +10,34 @@ export * as ProjectComputers from "./project-computers.ts";
 import { posix } from "node:path";
 import { COMPUTER_DISK_WARNING_SHARE, computerDiskShare } from "@sugabots/contracts";
 import {
+	ClaimLost,
 	ComputerInUse,
 	ComputerMadeMeanwhile,
 	NoComputer,
 	UpgradeFailed,
 } from "@sugabots/contracts/errors/computers";
 import { userText } from "@sugabots/errors";
-import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
-import { Clock, Context, DateTime, Duration, Effect, Layer, Semaphore } from "effect";
-import { Database, query, serviceOperations, type Transaction } from "../database/database.ts";
+import { and, eq, gt, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm";
+import {
+	Clock,
+	Context,
+	DateTime,
+	Duration,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	type Scope,
+	Semaphore,
+} from "effect";
+import {
+	Database,
+	query,
+	serviceOperations,
+	type Transaction,
+	transaction,
+} from "../database/database.ts";
+import { violatedUniqueConstraint } from "../database/errors.ts";
 import {
 	computerLease,
 	computerProvider as computerProviderTable,
@@ -27,10 +46,12 @@ import {
 	workspace as workspaceTable,
 } from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
+import type { DoesStoredWork } from "../proofs/does-stored-work.ts";
 import { Egress } from "../providers/network/egress.ts";
+import { processLayer, Tier } from "../tiers.ts";
 import { reachOf } from "./allowed-hosts.ts";
 import { type DiskUsage, measureDisk } from "./computer-disk.ts";
-import { freeDiskSpace, SET_ASIDE_DIRECTORY } from "./computer-disk-clearing.ts";
+import { prepareDiskClearing, SET_ASIDE_DIRECTORY } from "./computer-disk-clearing.ts";
 import { ComputerProviderStore } from "./computer-provider-store.ts";
 import { ComputerSignIn } from "./computer-sign-in.ts";
 import { Computers } from "./computers.ts";
@@ -39,6 +60,9 @@ import type { ComputerLeaseHolderKind } from "./sql.ts";
 
 /** How long a lease holds a computer awake unless it is renewed. */
 const LEASE = Duration.seconds(90);
+const INTENT_LIFETIME = Duration.seconds(60);
+const INTENT_RENEWAL = Duration.seconds(15);
+const INTENT_RETRY = Duration.seconds(1);
 /** How often a turn renews its lease, well inside {@link LEASE}. */
 export const LEASE_RENEWAL = Duration.seconds(30);
 /** How long a computer sits with no turn using it before it is asleep. */
@@ -83,17 +107,15 @@ export interface Interface {
 		holder: Holder,
 	) => Effect.Effect<Opened, Computers.Unavailable>;
 	/**
-	 * Extends `holder`'s leases, and signs their computers in afresh when their
+	 * Extends `holder`'s leases, and starts signing their computers in afresh when their
 	 * credentials are about to expire. Nothing happens if it has none.
 	 */
-	readonly renew: (holder: Holder) => Effect.Effect<void>;
+	readonly renew: (holder: Holder) => Effect.Effect<void, never, Scope.Scope>;
 	/** Ends `holder`'s leases, starting the idle time of the computers it held. */
 	readonly release: (holder: Holder) => Effect.Effect<void>;
-	/**
-	 * Puts to sleep every computer idle for {@link IDLE_BEFORE_SLEEP}, first clearing
-	 * any last measured close to full to below {@link CLEARED_BELOW_SHARE}.
-	 */
-	readonly sleepIdle: Effect.Effect<void>;
+	readonly sleepIfIdle: <P, I>(
+		work: DoesStoredWork<P, I, "computerSleep">,
+	) => Effect.Effect<void, ClaimLost | Computers.Unavailable>;
 	/**
 	 * Upgrades every computer nobody has used or watched for
 	 * {@link IDLE_BEFORE_SLEEP} whose image is behind what the workspace's
@@ -143,7 +165,9 @@ export interface Interface {
 		current: ComputerProviderStore.Configured | undefined,
 	) => Effect.Effect<Status>;
 	/** Destroys the project's computer and forgets it; its next use makes a new one. */
-	readonly reset: (project: Project) => Effect.Effect<void, ComputerInUse | Computers.Unavailable>;
+	readonly reset: (
+		project: Project,
+	) => Effect.Effect<void, ClaimLost | ComputerInUse | Computers.Unavailable>;
 	/**
 	 * Destroys the project's computer at its provider and forgets it, even while a
 	 * turn uses it, for a project about to be deleted, or a bot with its default
@@ -151,13 +175,15 @@ export interface Interface {
 	 * record, the only way anything finds the machine. When the provider can't
 	 * be reached it fails and keeps the record, so the project is kept to try again.
 	 */
-	readonly destroy: (project: Project) => Effect.Effect<void, Computers.Unavailable>;
+	readonly destroy: (project: Project) => Effect.Effect<void, ClaimLost | Computers.Unavailable>;
 	/**
 	 * Does {@link destroy} for every project in the workspace that has a
 	 * computer, for a workspace about to be deleted. Stops at the first
 	 * provider that can't be reached, keeping that record and those not yet reached.
 	 */
-	readonly destroyAllIn: (workspaceId: string) => Effect.Effect<void, Computers.Unavailable>;
+	readonly destroyAllIn: (
+		workspaceId: string,
+	) => Effect.Effect<void, ClaimLost | Computers.Unavailable>;
 	/**
 	 * Moves the project's work to a new computer made by `provider`, the
 	 * workspace's enabled one, from its image, then destroys the old computer.
@@ -169,12 +195,17 @@ export interface Interface {
 	readonly upgrade: (
 		project: Project,
 		provider: ComputerProviderStore.Configured,
-	) => Effect.Effect<void, ComputerInUse | NoComputer | UpgradeFailed | Computers.Unavailable>;
+	) => Effect.Effect<
+		void,
+		ClaimLost | ComputerInUse | NoComputer | UpgradeFailed | Computers.Unavailable
+	>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ProjectComputers",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const computers = yield* Computers.Service;
@@ -183,8 +214,7 @@ export const make = Effect.gen(function* () {
 	const signIns = yield* ComputerSignIn.Service;
 	const egress = yield* Egress.Service;
 	const operation = yield* serviceOperations<Interface>("ProjectComputers");
-	// One change to a project's computer at a time: two turns' first commands make
-	// one computer, and the sweep never puts to sleep one a turn is opening.
+	// Destruction calls in this process run one at a time per project.
 	const changes = new Map<string, Semaphore.Semaphore>();
 	const oneAtATime = (projectId: string) => {
 		let semaphore = changes.get(projectId);
@@ -266,46 +296,157 @@ export const make = Effect.gen(function* () {
 		});
 
 	/**
-	 * Brings a running computer's network up to date, as {@link applyNetwork}
-	 * does on open. Checked again under the project's lock, so a computer the sweep
-	 * asleep meanwhile isn't resumed for it.
+	 * Brings a running computer's network up to date. The intent protects the
+	 * running-state check and the provider open from a concurrent sleep.
 	 */
 	const applyNetworkWhileRunning = (row: ComputerRow) =>
-		oneAtATime(row.projectId)(
-			Effect.gen(function* () {
-				if (!(yield* isRecordedRunning(row))) return;
-				const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
-				if (!configured) return;
-				const at = computers.forAccess(configured.access);
-				const { computer } = yield* at.open(row.providerComputerId);
-				yield* applyNetwork(row, computer, at);
-			}),
+		withComputerIntent(
+			sameComputer(row),
+			() => isNull(computerTable.sleptAt),
+			() =>
+				Effect.gen(function* () {
+					const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
+					if (!configured) return;
+					const at = computers.forAccess(configured.access);
+					const { computer } = yield* at.open(row.providerComputerId);
+					yield* applyNetwork(row, computer, at);
+				}).pipe(Effect.uninterruptible),
 		).pipe(
+			Effect.asVoid,
 			Effect.catchTags({
+				ClaimLost: (error) => Effect.logWarning("Could not refresh the computer network", error),
 				ComputerMissing: () => Effect.void,
 				// Its replacement is made with the network allowed then.
 				ComputerStopped: () => Effect.void,
 				ComputerUnavailable: (failure) =>
-					Effect.logWarning(
-						"Could not bring a computer's network up to date; it is when next opened",
-						failure,
-					),
+					Effect.gen(function* () {
+						signInDue.delete(row.projectId);
+						yield* Effect.logWarning(
+							"Could not bring a computer's network up to date. The next lease renewal or open will retry.",
+							failure,
+						);
+					}),
 			}),
 		);
 
+	const refreshingSignIn = new Set<string>();
+	const refreshSignIn = (row: ComputerRow) =>
+		Effect.acquireUseRelease(
+			Effect.sync(() => {
+				if (refreshingSignIn.has(row.id)) return false;
+				refreshingSignIn.add(row.id);
+				return true;
+			}),
+			(started) => (started ? applyNetworkWhileRunning(row) : Effect.void),
+			(started) =>
+				Effect.sync(() => {
+					if (started) refreshingSignIn.delete(row.id);
+				}),
+		).pipe(
+			Effect.catchCause((cause) =>
+				Effect.logError("Refreshing a computer's sign-in failed", { computerId: row.id, cause }),
+			),
+		);
+
 	const recorded = (project: Project) =>
-		query((db) =>
-			db
-				.select()
-				.from(computerTable)
-				.where(
-					and(
-						eq(computerTable.projectId, project.projectId),
-						eq(computerTable.workspaceId, project.workspaceId),
+		query((db) => db.select().from(computerTable).where(inProject(project)).limit(1)).pipe(
+			Effect.map(([row]) => row),
+		);
+
+	const lockComputer = (matching: SQL | undefined) =>
+		query((db) => db.select().from(computerTable).where(matching).for("update")).pipe(
+			Effect.map(([row]) => row),
+		);
+
+	/**
+	 * withComputerIntent claims a matching row in a short transaction. It
+	 * renews the claim while work runs and clears only the claim it owns.
+	 */
+	const withComputerIntent = <A, E, R>(
+		matching: SQL | undefined,
+		eligible: (now: DateTime.Utc) => SQL | undefined,
+		work: (row: ComputerRow, intentId: string) => Effect.Effect<A, E, R>,
+	) =>
+		Effect.uninterruptibleMask((restore) =>
+			Effect.gen(function* () {
+				const intentId = yield* ids.random;
+				const attempt = transaction(
+					Effect.gen(function* () {
+						const row = yield* restore(lockComputer(matching));
+						if (!row) return undefined;
+						const now = yield* DateTime.now;
+						if (hasFreshIntent(row, now)) return "busy" as const;
+						const [claimed] = yield* query((db) =>
+							db
+								.update(computerTable)
+								.set({ intentId, intentExpiresAt: intentExpiry(now) })
+								.where(and(eq(computerTable.id, row.id), eligible(now)))
+								.returning(),
+						);
+						return { row, claimed };
+					}),
+				);
+
+				let intent = yield* attempt;
+				while (intent === "busy") {
+					yield* restore(Effect.sleep(INTENT_RETRY));
+					intent = yield* attempt;
+				}
+				if (!intent?.claimed) return { row: intent?.row, value: undefined };
+				const { claimed } = intent;
+				const ownsIntent = and(
+					eq(computerTable.id, claimed.id),
+					eq(computerTable.intentId, intentId),
+				);
+				const renewIntent = Effect.flatMap(DateTime.now, (now) =>
+					query((db) =>
+						db
+							.update(computerTable)
+							.set({ intentExpiresAt: intentExpiry(now) })
+							.where(and(ownsIntent, gt(computerTable.intentExpiresAt, DateTime.toDateUtc(now))))
+							.returning({ id: computerTable.id }),
+					).pipe(Effect.map((rows) => rows.length > 0)),
+				);
+				const clearIntent = query((db) =>
+					db.update(computerTable).set(CLEARED_INTENT).where(ownsIntent),
+				);
+
+				const monitor = Effect.sleep(INTENT_RENEWAL).pipe(
+					Effect.andThen(renewIntent),
+					Effect.catchCause((cause) =>
+						Effect.logError("Renewing a computer intent failed", cause).pipe(Effect.as(true)),
 					),
-				)
-				.limit(1),
-		).pipe(Effect.map(([row]) => row));
+					Effect.flatMap((renewed) => (renewed ? Effect.void : Effect.fail(new ClaimLost()))),
+					Effect.forever,
+					Effect.interruptible,
+				);
+				return yield* Effect.scoped(
+					Effect.gen(function* () {
+						const worker = yield* Effect.forkScoped(restore(work(claimed, intentId)));
+						const renewer = yield* Effect.forkScoped(monitor);
+						const value = yield* restore(
+							Effect.raceFirst(Fiber.join(worker), Fiber.join(renewer)),
+						).pipe(
+							// Keep renewing until the worker has finished any uninterruptible provider call.
+							Effect.ensuring(Fiber.interrupt(worker)),
+						);
+						return { row: claimed, value };
+					}),
+				).pipe(Effect.ensuring(clearIntent));
+			}),
+		);
+
+	const requireIntent = (row: ComputerRow, intentId: string) =>
+		Effect.gen(function* () {
+			const now = yield* DateTime.nowAsDate;
+			const [claimed] = yield* query((db) =>
+				db
+					.select({ id: computerTable.id })
+					.from(computerTable)
+					.where(claimedComputer(row, intentId, now)),
+			);
+			if (!claimed) return yield* new ClaimLost();
+		});
 
 	/**
 	 * Deletes `row`'s record, while it still records the same computer: one
@@ -314,61 +455,60 @@ export const make = Effect.gen(function* () {
 	const forget = (row: ComputerRow) =>
 		query((db) => db.delete(computerTable).where(sameComputer(row)));
 
-	/**
-	 * Destroys `row`'s computer at the provider that made it, then forgets it.
-	 * With that provider's settings gone there is nobody to ask, so it is only
-	 * forgotten. The caller holds the project's lock.
-	 */
-	const destroyRecordedComputer = (row: ComputerRow) =>
+	const destroyAtProvider = <E, R>(row: ComputerRow, beforeDestroy: Effect.Effect<void, E, R>) =>
 		Effect.gen(function* () {
 			const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
+			yield* beforeDestroy;
 			if (configured) {
 				yield* computers.forAccess(configured.access).destroy(row.providerComputerId);
 			}
-			yield* forget(row);
 		});
 
-	/** What {@link Interface.destroy} does. */
-	const destroyProjectComputer = (project: Project) =>
-		oneAtATime(project.projectId)(
-			Effect.uninterruptible(
-				Effect.gen(function* () {
-					const row = yield* recorded(project);
-					if (row) yield* destroyRecordedComputer(row);
-				}),
-			),
+	const destroyClaimedComputer = (row: ComputerRow, intentId: string) =>
+		Effect.gen(function* () {
+			yield* destroyAtProvider(row, requireIntent(row, intentId));
+			const now = yield* DateTime.nowAsDate;
+			const [removed] = yield* query((db) =>
+				db
+					.delete(computerTable)
+					.where(claimedComputer(row, intentId, now))
+					.returning({ id: computerTable.id }),
+			);
+			if (!removed) return yield* new ClaimLost();
+		});
+
+	const resetClaimedComputer = (row: ComputerRow, intentId: string) =>
+		Effect.andThen(requireIdle(row.id), destroyClaimedComputer(row, intentId)).pipe(
+			Effect.uninterruptible,
 		);
 
-	/** Whether the project's record still points at `row`'s computer, and says it is running. */
-	const isRecordedRunning = (row: ComputerRow) =>
-		query((db) =>
-			db
-				.select({ id: computerTable.id })
-				.from(computerTable)
-				.where(and(sameComputer(row), isNull(computerTable.sleptAt))),
-		).pipe(Effect.map((rows) => rows.length > 0));
+	const destroyProjectComputer = (project: Project) =>
+		withComputerIntent(inProject(project), () => undefined, destroyClaimedComputer).pipe(
+			Effect.asVoid,
+		);
 
 	/**
 	 * Opens `row`'s computer, resuming it if it is asleep, and records it
 	 * running, as one step that isn't stopped part-way when whoever asked goes
 	 * away: the provider finishes a resume it has started regardless, and a
 	 * computer recorded asleep is one the idle sweep never puts to sleep again. It is
-	 * recorded as just used too: another process's sweep doesn't wait for the
-	 * project's lock, and would otherwise find it idle before a lease holds it.
+	 * recorded as just used so the sweep leaves it running until a lease holds it.
 	 */
-	const openedAndRecorded = (at: Computers.Provider, row: ComputerRow) =>
-		Effect.uninterruptible(
-			Effect.tap(at.open(row.providerComputerId), () =>
-				Effect.flatMap(DateTime.nowAsDate, (now) =>
-					query((db) =>
-						db
-							.update(computerTable)
-							.set({ sleptAt: null, lastUsedAt: now })
-							.where(sameComputer(row)),
-					),
-				),
-			),
-		);
+	const openedAndRecorded = (at: Computers.Provider, row: ComputerRow, intentId: string) =>
+		Effect.gen(function* () {
+			yield* requireIntent(row, intentId);
+			const opened = yield* at.open(row.providerComputerId);
+			const now = yield* DateTime.nowAsDate;
+			const [recorded] = yield* query((db) =>
+				db
+					.update(computerTable)
+					.set({ sleptAt: null, lastUsedAt: now })
+					.where(computerWithIntent(row, intentId))
+					.returning({ id: computerTable.id }),
+			);
+			if (!recorded) return yield* new ClaimLost();
+			return opened;
+		}).pipe(Effect.uninterruptible);
 
 	/**
 	 * What the project's computer is made from. Its work is named by the computer's
@@ -411,6 +551,45 @@ export const make = Effect.gen(function* () {
 			);
 		});
 
+	// A computer created while deletion starts is destroyed by madeAndRecorded
+	// when the recording transaction finds the committed intent.
+	const requireProjectOpen = (project: Project) =>
+		Effect.gen(function* () {
+			const [open] = yield* query((db) =>
+				db
+					.select({ id: projectTable.id })
+					.from(workspaceTable)
+					.innerJoin(projectTable, eq(projectTable.workspaceId, workspaceTable.id))
+					.where(
+						and(
+							eq(workspaceTable.id, project.workspaceId),
+							eq(projectTable.id, project.projectId),
+							eq(workspaceTable.deleting, false),
+							eq(projectTable.deleting, false),
+						),
+					),
+			);
+			if (!open) {
+				return yield* new Computers.Unavailable({
+					provider: "project",
+					reason: userText`This project is being deleted.`,
+					cause: undefined,
+				});
+			}
+		});
+	// Read again after taking the workspace lock so a project intent that
+	// committed while waiting for the lock is visible to the recording.
+	const recordWhileOpen = <A, E, R>(project: Project, record: Effect.Effect<A, E, R>) =>
+		transaction(
+			query((db) =>
+				db
+					.select({ id: workspaceTable.id })
+					.from(workspaceTable)
+					.where(eq(workspaceTable.id, project.workspaceId))
+					.for("share"),
+			).pipe(Effect.andThen(requireProjectOpen(project)), Effect.andThen(record)),
+		);
+
 	const made = (project: Project, provider: ComputerProviderStore.Configured) =>
 		Effect.gen(function* () {
 			const id = yield* ids.next;
@@ -419,15 +598,18 @@ export const make = Effect.gen(function* () {
 				provider.access,
 				yield* specFor(project, id, at),
 				(computer, image) =>
-					query((db) =>
-						db.insert(computerTable).values({
-							id,
-							workspaceId: project.workspaceId,
-							projectId: project.projectId,
-							computerProviderId: provider.id,
-							providerComputerId: computer.id,
-							image,
-						}),
+					recordWhileOpen(
+						project,
+						query((db) =>
+							db.insert(computerTable).values({
+								id,
+								workspaceId: project.workspaceId,
+								projectId: project.projectId,
+								computerProviderId: provider.id,
+								providerComputerId: computer.id,
+								image,
+							}),
+						),
 					),
 			);
 		});
@@ -456,58 +638,63 @@ export const make = Effect.gen(function* () {
 
 	const opened = (project: Project, provider: ComputerProviderStore.Configured) =>
 		Effect.gen(function* () {
-			const row = yield* recorded(project);
+			const at = computers.forAccess(provider.access);
 			const replaced = (computer: Computers.Computer): Opened => ({
 				computer,
 				arrival: "replaced",
 			});
+			const { row, value: existing } = yield* withComputerIntent(
+				inProject(project),
+				() => eq(computerTable.computerProviderId, provider.id),
+				(row, intentId) =>
+					openedAndRecorded(at, row, intentId).pipe(
+						Effect.map(
+							({ computer, resumed }): Opened => ({
+								computer,
+								arrival: !resumed
+									? "running"
+									: at.capabilities.sleepKeeps === "disk"
+										? "rebooted"
+										: "resumed",
+							}),
+						),
+						Effect.catchTag("ComputerMissing", () =>
+							Effect.map(restarted(project, row, provider.access, intentId), replaced),
+						),
+						Effect.catchTag("ComputerStopped", () =>
+							Effect.map(
+								restarted(project, row, provider.access, intentId),
+								(computer): Opened => ({ computer, arrival: "rebooted" }),
+							),
+						),
+					),
+			);
+			if (existing) return existing;
 			if (!row)
 				return { computer: yield* made(project, provider), arrival: "made" } satisfies Opened;
-			if (row.computerProviderId !== provider.id) {
-				yield* leaveOldProvider(
-					project.workspaceId,
-					row.computerProviderId,
-					row.providerComputerId,
-				);
-				yield* forget(row);
-				return replaced(yield* made(project, provider));
-			}
-			const at = computers.forAccess(provider.access);
-			return yield* openedAndRecorded(at, row).pipe(
-				Effect.map(
-					({ computer, resumed }): Opened => ({
-						computer,
-						arrival: !resumed
-							? "running"
-							: at.capabilities.sleepKeeps === "disk"
-								? "rebooted"
-								: "resumed",
-					}),
-				),
-				Effect.catchTag("ComputerMissing", () =>
-					Effect.map(restarted(project, row, provider.access), replaced),
-				),
-				Effect.catchTag("ComputerStopped", () =>
-					Effect.map(
-						restarted(project, row, provider.access),
-						(computer): Opened => ({ computer, arrival: "rebooted" }),
-					),
-				),
-			);
+			yield* leaveOldProvider(project.workspaceId, row.computerProviderId, row.providerComputerId);
+			yield* forget(row);
+			return replaced(yield* made(project, provider));
 		});
 
 	/**
 	 * A new computer in place of one that is gone or stopped for good, made
 	 * with its work name, so it carries on with any work kept apart from it.
 	 */
-	const restarted = (project: Project, row: ComputerRow, access: Computers.ProviderAccess) =>
+	const restarted = (
+		project: Project,
+		row: ComputerRow,
+		access: Computers.ProviderAccess,
+		intentId: string,
+	) =>
 		Effect.gen(function* () {
 			const at = computers.forAccess(access);
-			const fresh = yield* madeAndRecorded(
-				access,
-				yield* specFor(project, row.id, at),
-				(computer, image) => moveRecord(row, row.computerProviderId, computer.id, image),
+			const spec = yield* specFor(project, row.id, at);
+			yield* requireIntent(row, intentId);
+			const fresh = yield* madeAndRecorded(access, spec, (computer, image) =>
+				moveRecord(row, intentId, row.computerProviderId, computer.id, image),
 			);
+
 			yield* at
 				.destroy(row.providerComputerId)
 				.pipe(
@@ -520,83 +707,123 @@ export const make = Effect.gen(function* () {
 
 	/**
 	 * Points the project's record, `row`, at its new computer, made from
-	 * `image`, which is running and unused. Dies when the record no longer
-	 * records `row`'s computer, as when its project was deleted meanwhile by
-	 * another process, or another process replaced the computer first, so
-	 * `madeAndRecorded` destroys the new computer rather than leaving it
-	 * recorded nowhere.
+	 * `image`, which is running and unused. Losing the claim interrupts the write so
+	 * `madeAndRecorded` destroys the unrecorded replacement.
 	 */
 	const moveRecord = (
 		row: ComputerRow,
+		intentId: string,
 		providerId: string,
 		computerId: Computers.ComputerId,
 		image: string,
 	) =>
-		Effect.gen(function* () {
-			const now = yield* DateTime.nowAsDate;
-			const [moved] = yield* query((db) =>
-				db
-					.update(computerTable)
-					.set({
-						computerProviderId: providerId,
-						providerComputerId: computerId,
-						image,
-						sleptAt: null,
-						lastUsedAt: now,
-						diskUsage: null,
-						diskMeasuredAt: null,
-					})
-					.where(sameComputer(row))
-					.returning({ id: computerTable.id }),
-			);
-			if (!moved) {
-				return yield* Effect.die(new Error("The computer's record was deleted or moved meanwhile"));
-			}
-		});
+		recordWhileOpen(
+			row,
+			Effect.gen(function* () {
+				const now = yield* DateTime.nowAsDate;
+				const [moved] = yield* query((db) =>
+					db
+						.update(computerTable)
+						.set({
+							computerProviderId: providerId,
+							providerComputerId: computerId,
+							image,
+							sleptAt: null,
+							lastUsedAt: now,
+							diskUsage: null,
+							diskMeasuredAt: null,
+						})
+						.where(claimedComputer(row, intentId, now))
+						.returning({ id: computerTable.id }),
+				);
+				if (!moved) return yield* new ClaimLost();
+			}),
+		);
 
-	/** Takes or extends `holder`'s lease on the project's computer. */
-	const lease = (project: Project, holder: Holder) =>
+	const lease = (project: Project, holder: Holder, providerComputerId: Computers.ComputerId) =>
 		Effect.gen(function* () {
-			const row = yield* recorded(project);
-			if (!row) return;
-			const now = yield* DateTime.now;
-			const expiresAt = DateTime.toDateUtc(DateTime.addDuration(now, LEASE));
-			yield* query((db) =>
-				db
-					.insert(computerLease)
-					.values({ computerId: row.id, holderKind: holder.kind, holderId: holder.id, expiresAt })
-					.onConflictDoUpdate({
-						target: [computerLease.computerId, computerLease.holderKind, computerLease.holderId],
-						set: { expiresAt },
-					}),
+			const attempt = recordWhileOpen(
+				project,
+				Effect.gen(function* () {
+					const row = yield* lockComputer(inProject(project));
+					if (!row || row.providerComputerId !== providerComputerId || row.sleptAt) return false;
+					const now = yield* DateTime.now;
+					if (hasFreshIntent(row, now)) return "busy" as const;
+					const expiresAt = DateTime.toDateUtc(DateTime.addDuration(now, LEASE));
+					yield* query((db) =>
+						db
+							.insert(computerLease)
+							.values({
+								computerId: row.id,
+								providerComputerId,
+								holderKind: holder.kind,
+								holderId: holder.id,
+								expiresAt,
+							})
+							.onConflictDoUpdate({
+								target: [
+									computerLease.computerId,
+									computerLease.holderKind,
+									computerLease.holderId,
+								],
+								set: { providerComputerId, expiresAt },
+							}),
+					);
+					return true;
+				}),
 			);
+			let leased = yield* attempt;
+			while (leased === "busy") {
+				yield* Effect.sleep(INTENT_RETRY);
+				leased = yield* attempt;
+			}
+			return leased;
 		});
 
 	/** Records `usage` as the computer's disk now, unless the project has moved to another computer since. */
-	const recordMeasurement = (row: ComputerRow, usage: DiskUsage) =>
+	const recordMeasurement = (row: ComputerRow, usage: DiskUsage, intentId?: string) =>
 		Effect.gen(function* () {
 			const now = yield* DateTime.nowAsDate;
 			yield* query((db) =>
 				db
 					.update(computerTable)
 					.set({ diskUsage: usage, diskMeasuredAt: now })
-					.where(sameComputer(row)),
+					.where(
+						and(sameComputer(row), intentId ? eq(computerTable.intentId, intentId) : undefined),
+					),
 			);
 		});
 
 	/**
-	 * Re-measures after clearing, since a sleeping computer keeps its last
-	 * measurement. Runs under the project's lock, so a turn arriving meanwhile
-	 * waits instead of finding its folder half gone.
+	 * clearDiskIfFilling finishes deletion and invalidates stale disk usage
+	 * before releasing the sleep intent. Opening, listing and re-measuring
+	 * can be interrupted.
 	 */
-	const clearDiskIfFilling = (row: ComputerRow, at: Computers.Provider) =>
+	const clearDiskIfFilling = (row: ComputerRow, at: Computers.Provider, intentId: string) =>
 		Effect.gen(function* () {
 			if (!row.diskUsage || computerDiskShare(row.diskUsage) < COMPUTER_DISK_WARNING_SHARE) return;
 			const { computer } = yield* at.open(row.providerComputerId);
-			const { cleared, stoppedAtTimeout } = yield* freeDiskSpace(
-				computer,
-				row.workspaceId,
-				CLEARED_BELOW_SHARE,
+			const clear = yield* prepareDiskClearing(computer, row.workspaceId, CLEARED_BELOW_SHARE);
+			yield* requireIntent(row, intentId);
+			const { cleared, stoppedAtTimeout } = yield* clear.pipe(
+				Effect.onExit((exit) => {
+					if (
+						Exit.isSuccess(exit) &&
+						exit.value.cleared.length === 0 &&
+						!exit.value.stoppedAtTimeout
+					) {
+						return Effect.void;
+					}
+					return Effect.flatMap(DateTime.nowAsDate, (now) =>
+						query((db) =>
+							db
+								.update(computerTable)
+								.set({ diskUsage: null, diskMeasuredAt: null })
+								.where(claimedComputer(row, intentId, now)),
+						),
+					);
+				}),
+				Effect.uninterruptible,
 			);
 			if (cleared.length === 0 && !stoppedAtTimeout) return;
 			const clearedByReason = Object.fromEntries(
@@ -609,7 +836,7 @@ export const make = Effect.gen(function* () {
 				cleared: clearedByReason,
 				stoppedAtTimeout,
 			});
-			yield* recordMeasurement(row, yield* measureDisk(computer));
+			yield* recordMeasurement(row, yield* measureDisk(computer), intentId);
 		}).pipe(
 			Effect.catchTags({
 				// Putting it to sleep finds the same, and deals with it.
@@ -626,7 +853,7 @@ export const make = Effect.gen(function* () {
 						stderr: failure.stderr,
 					}),
 			}),
-			Effect.catchCause((cause) => Effect.logError("Clearing a computer's disk failed", cause)),
+			Effect.catchDefect((defect) => Effect.logError("Clearing a computer's disk failed", defect)),
 			Effect.annotateLogs({ computerId: row.id }),
 		);
 
@@ -634,63 +861,60 @@ export const make = Effect.gen(function* () {
 	 * Puts one idle computer to sleep, unless a turn took it since it was found idle,
 	 * clearing space on its disk first if it is filling.
 	 */
-	const sleepIfStillIdle = (row: ComputerRow, idleSince: Date, now: Date) =>
-		oneAtATime(row.projectId)(
+	const sleepIfStillIdle = (row: ComputerRow) =>
+		withComputerIntent(sameComputer(row), idleAt, (current, intentId) =>
 			Effect.gen(function* () {
-				const [still] = yield* query((db) =>
+				const configured = yield* providers.access(current.workspaceId, current.computerProviderId);
+				if (!configured) return;
+				const at = computers.forAccess(configured.access);
+				yield* clearDiskIfFilling(current, at, intentId);
+				const claimed = computerWithIntent(current, intentId);
+				const now = yield* DateTime.nowAsDate;
+				const [stillClaimed] = yield* query((db) =>
 					db
 						.select({ id: computerTable.id })
 						.from(computerTable)
-						.where(
-							and(
-								sameComputer(row),
-								isNull(computerTable.sleptAt),
-								lt(computerTable.lastUsedAt, idleSince),
-								noLiveLease(now),
+						.where(and(claimed, gt(computerTable.intentExpiresAt, now))),
+				);
+				if (!stillClaimed) return yield* new ClaimLost();
+				yield* at.sleep(current.providerComputerId).pipe(
+					Effect.andThen(
+						Effect.flatMap(DateTime.nowAsDate, (sleptAt) =>
+							query((db) =>
+								db
+									.update(computerTable)
+									.set({ sleptAt, ...CLEARED_INTENT })
+									.where(claimed),
 							),
 						),
-				);
-				if (!still) return;
-				const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
-				if (!configured) return;
-				const at = computers.forAccess(configured.access);
-				yield* clearDiskIfFilling(row, at);
-				yield* at.sleep(row.providerComputerId).pipe(
-					Effect.andThen(
-						query((db) => db.update(computerTable).set({ sleptAt: now }).where(sameComputer(row))),
 					),
-					Effect.catchTags({
-						// Gone at the provider: the next use makes a new one.
-						ComputerMissing: () => forget(row),
-						ComputerUnavailable: (failure) =>
-							Effect.logWarning(
-								"Could not put an idle computer to sleep; trying again later",
-								failure,
-							),
-					}),
+					Effect.catchTag("ComputerMissing", () =>
+						query((db) => db.delete(computerTable).where(claimed)),
+					),
+					Effect.uninterruptible,
 				);
 			}),
-		);
+		).pipe(Effect.asVoid);
 
 	/**
-	 * Measures one computer's disk if it is running. It is opened under the
-	 * project's lock, which the sleep sweep works under, so a computer put to sleep
-	 * meanwhile is never resumed to be measured. The measuring itself runs
-	 * outside the lock, so as not to hold up turns; a computer put to sleep while
-	 * it runs fails it, and keeps its last measurement.
+	 * Measures one computer's disk if it is running. An intent protects the
+	 * running-state check and open from a concurrent sleep. The measurement
+	 * may fail if the computer sleeps after the intent is cleared.
 	 */
 	const measureDiskIfRunning = (row: ComputerRow) =>
 		Effect.gen(function* () {
 			const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
 			if (!configured) return;
 			const at = computers.forAccess(configured.access);
-			const running = yield* oneAtATime(row.projectId)(
-				Effect.gen(function* () {
-					if (!(yield* isRecordedRunning(row))) return undefined;
-					const { state } = yield* at.info(row.providerComputerId);
-					if (state !== "running") return undefined;
-					return (yield* at.open(row.providerComputerId)).computer;
-				}),
+			const { value: running } = yield* withComputerIntent(
+				sameComputer(row),
+				() => isNull(computerTable.sleptAt),
+				() =>
+					Effect.gen(function* () {
+						const { state } = yield* at.info(row.providerComputerId);
+						if (state !== "running") return undefined;
+						return (yield* at.open(row.providerComputerId)).computer;
+					}).pipe(Effect.uninterruptible),
 			);
 			if (!running) return;
 			yield* recordMeasurement(row, yield* measureDisk(running));
@@ -729,6 +953,7 @@ export const make = Effect.gen(function* () {
 				db
 					.select({ holderKind: computerLease.holderKind })
 					.from(computerLease)
+					.innerJoin(computerTable, leaseMatchesComputer())
 					.where(and(eq(computerLease.computerId, computerId), gt(computerLease.expiresAt, now))),
 			);
 			const turns = leases.filter(({ holderKind }) => holderKind === "turn").length;
@@ -744,9 +969,13 @@ export const make = Effect.gen(function* () {
 	/**
 	 * Moves the work of the project's computer, `row`, to a new one `provider`
 	 * makes, as {@link Interface.upgrade} describes, and destroys the old one.
-	 * The caller holds the project's lock and has checked nobody is using it.
+	 * The caller holds an intent and has checked nobody is using it.
 	 */
-	const movedToNewComputer = (row: ComputerRow, provider: ComputerProviderStore.Configured) =>
+	const movedToNewComputer = (
+		row: ComputerRow,
+		provider: ComputerProviderStore.Configured,
+		intentId: string,
+	) =>
 		Effect.gen(function* () {
 			const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
 			if (!configured) {
@@ -763,19 +992,20 @@ export const make = Effect.gen(function* () {
 						Effect.logWarning("Could not destroy a computer after upgrading its project", failure),
 					),
 				);
+			yield* requireIntent(row, intentId);
 			const { workKeptApart } = yield* from
 				.info(row.providerComputerId)
 				.pipe(Effect.catchTag("ComputerMissing", () => Effect.fail(new NoComputer())));
 			if (workKeptApart && provider.id === row.computerProviderId) {
-				const fresh = yield* madeAndRecorded(
-					provider.access,
-					yield* specFor(row, row.id, to),
-					(computer, image) => moveRecord(row, provider.id, computer.id, image),
+				const spec = yield* specFor(row, row.id, to);
+				yield* requireIntent(row, intentId);
+				const fresh = yield* madeAndRecorded(provider.access, spec, (computer, image) =>
+					moveRecord(row, intentId, provider.id, computer.id, image),
 				);
 				yield* destroyOld;
 				return fresh;
 			}
-			const old = yield* openedAndRecorded(from, row).pipe(
+			const old = yield* openedAndRecorded(from, row, intentId).pipe(
 				Effect.map(({ computer }) => computer),
 				Effect.catchTags({
 					ComputerMissing: () => Effect.fail(new NoComputer()),
@@ -806,29 +1036,29 @@ export const make = Effect.gen(function* () {
 					),
 				),
 			);
-			const fresh = yield* madeAndRecorded(
-				provider.access,
-				yield* specFor(row, row.id, to),
-				(computer, image) =>
-					computer.uploadFile(archivePath, archive).pipe(
-						Effect.andThen(
-							computer.exec(
-								`tar -xzf ${archivePath} -C ${Computers.WORK_DIRECTORY} && rm ${archivePath}`,
-								COPY_STEP,
-							),
-						),
-						Effect.map((execution) => execution.exitCode === 0),
-						Effect.catchTag("ComputerFileFailed", () => Effect.succeed(false)),
-						Effect.flatMap((unpacked) =>
-							unpacked
-								? moveRecord(row, provider.id, computer.id, image)
-								: Effect.fail(
-										new UpgradeFailed({
-											reason: userText`The work couldn't be unpacked in the new computer. The old one is untouched.`,
-										}),
-									),
+			const spec = yield* specFor(row, row.id, to);
+			yield* requireIntent(row, intentId);
+			const fresh = yield* madeAndRecorded(provider.access, spec, (computer, image) =>
+				computer.uploadFile(archivePath, archive).pipe(
+					Effect.andThen(
+						computer.exec(
+							`tar -xzf ${archivePath} -C ${Computers.WORK_DIRECTORY} && rm ${archivePath}`,
+							COPY_STEP,
 						),
 					),
+					Effect.map((execution) => execution.exitCode === 0),
+					Effect.catchTag("ComputerFileFailed", () => Effect.succeed(false)),
+					Effect.flatMap((unpacked) =>
+						Effect.gen(function* () {
+							if (!unpacked) {
+								return yield* new UpgradeFailed({
+									reason: userText`The work couldn't be unpacked in the new computer. The old one is untouched.`,
+								});
+							}
+							yield* moveRecord(row, intentId, provider.id, computer.id, image);
+						}),
+					),
+				),
 			);
 			yield* destroyOld;
 			return fresh;
@@ -870,23 +1100,17 @@ export const make = Effect.gen(function* () {
 		idleSince: Date,
 		now: Date,
 	) =>
-		oneAtATime(row.projectId)(
-			Effect.uninterruptible(
+		withComputerIntent(
+			sameComputer(row),
+			(current) =>
+				and(lt(computerTable.lastUsedAt, idleSince), noLiveLease(DateTime.toDateUtc(current))),
+			(current, intentId) =>
 				Effect.gen(function* () {
-					const [still] = yield* query((db) =>
-						db
-							.select({ id: computerTable.id })
-							.from(computerTable)
-							.where(
-								and(sameComputer(row), lt(computerTable.lastUsedAt, idleSince), noLiveLease(now)),
-							),
-					);
-					if (!still) return;
-					const fresh = yield* movedToNewComputer(row, provider);
-					yield* sleepUnused(row, fresh.id, at);
-				}),
-			),
+					const fresh = yield* movedToNewComputer(current, provider, intentId);
+					yield* sleepUnused({ ...current, providerComputerId: fresh.id }, intentId, at);
+				}).pipe(Effect.uninterruptible),
 		).pipe(
+			Effect.asVoid,
 			Effect.catchTags({
 				// Gone at the provider: the next use makes a new one.
 				NoComputer: () => Effect.void,
@@ -900,24 +1124,23 @@ export const make = Effect.gen(function* () {
 	 * has used the computer it was upgraded to, then puts that computer to sleep. One
 	 * that can't be put to sleep now is put to sleep by the idle sweep, as idle as before.
 	 */
-	const sleepUnused = (row: ComputerRow, freshId: Computers.ComputerId, at: Computers.Provider) =>
-		query((db) =>
-			db
-				.update(computerTable)
-				.set({ lastUsedAt: row.lastUsedAt })
-				.where(sameComputer({ ...row, providerComputerId: freshId })),
-		).pipe(
-			Effect.andThen(at.sleep(freshId)),
-			Effect.andThen(
-				Effect.flatMap(DateTime.nowAsDate, (now) =>
-					query((db) =>
-						db
-							.update(computerTable)
-							.set({ sleptAt: now })
-							.where(sameComputer({ ...row, providerComputerId: freshId })),
-					),
-				),
-			),
+	const sleepUnused = (row: ComputerRow, intentId: string, at: Computers.Provider) =>
+		Effect.gen(function* () {
+			const now = yield* DateTime.nowAsDate;
+			const [claimed] = yield* query((db) =>
+				db
+					.update(computerTable)
+					.set({ lastUsedAt: row.lastUsedAt })
+					.where(claimedComputer(row, intentId, now))
+					.returning({ id: computerTable.id }),
+			);
+			if (!claimed) return yield* new ClaimLost();
+			yield* at.sleep(row.providerComputerId);
+			const sleptAt = yield* DateTime.nowAsDate;
+			yield* query((db) =>
+				db.update(computerTable).set({ sleptAt }).where(computerWithIntent(row, intentId)),
+			);
+		}).pipe(
 			Effect.catchTags({
 				ComputerMissing: () => Effect.void,
 				ComputerUnavailable: (failure) =>
@@ -940,48 +1163,76 @@ export const make = Effect.gen(function* () {
 		open: (project, provider, holder) =>
 			operation(
 				"open",
-				oneAtATime(project.projectId)(
-					opened(project, provider).pipe(
-						// What the workspace allows, and what the project signs in to, may
-						// have changed since the computer last ran.
-						Effect.tap(({ computer }) =>
-							applyNetwork(project, computer, computers.forAccess(provider.access)),
-						),
-						Effect.tap(() => lease(project, holder)),
-					),
-				),
+				Effect.gen(function* () {
+					while (true) {
+						const result = yield* requireProjectOpen(project).pipe(
+							Effect.andThen(opened(project, provider)),
+							Effect.catchTag("ClaimLost", () => Effect.succeed(undefined)),
+							Effect.catchCause((cause) =>
+								violatedUniqueConstraint(cause) === "computer_project_id_idx"
+									? Effect.succeed(undefined)
+									: Effect.failCause(cause),
+							),
+						);
+						if (!result) continue;
+						if (!(yield* lease(project, holder, result.computer.id))) continue;
+						yield* applyNetwork(project, result.computer, computers.forAccess(provider.access));
+						return result;
+					}
+				}),
 			),
 
 		renew: (holder) =>
 			operation(
 				"renew",
 				Effect.gen(function* () {
-					const now = yield* DateTime.now;
-					const expiresAt = DateTime.toDateUtc(DateTime.addDuration(now, LEASE));
-					const renewed = yield* query((db) =>
-						db
-							.update(computerLease)
-							.set({ expiresAt })
-							.where(heldBy(holder))
-							.returning({ computerId: computerLease.computerId }),
-					);
-					if (renewed.length === 0) return;
-					const rows = yield* query((db) =>
-						db
-							.select()
-							.from(computerTable)
-							.where(
-								inArray(
-									computerTable.id,
-									renewed.map(({ computerId }) => computerId),
+					const { now, rows } = yield* transaction(
+						Effect.gen(function* () {
+							const rows = yield* query((db) =>
+								db
+									.select({ computer: computerTable, expiresAt: computerLease.expiresAt })
+									.from(computerTable)
+									.innerJoin(computerLease, leaseMatchesComputer())
+									.where(heldBy(holder))
+									.orderBy(computerTable.id)
+									.for("update", { of: computerTable }),
+							);
+							const now = yield* DateTime.now;
+							const renewable = rows.filter(
+								({ computer, expiresAt }) =>
+									expiresAt > DateTime.toDateUtc(now) ||
+									(computer.sleptAt === null && !hasFreshIntent(computer, now)),
+							);
+							if (renewable.length === 0) return { now, rows: [] };
+							const renewed = yield* query((db) =>
+								db
+									.update(computerLease)
+									.set({ expiresAt: DateTime.toDateUtc(DateTime.addDuration(now, LEASE)) })
+									.where(
+										and(
+											heldBy(holder),
+											inArray(
+												computerLease.computerId,
+												renewable.map(({ computer }) => computer.id),
+											),
+										),
+									)
+									.returning({ computerId: computerLease.computerId }),
+							);
+							const renewedIds = new Set(renewed.map(({ computerId }) => computerId));
+							return {
+								now,
+								rows: renewable.flatMap(({ computer }) =>
+									renewedIds.has(computer.id) ? [computer] : [],
 								),
-							),
+							};
+						}),
 					);
 					const nowMillis = DateTime.toEpochMillis(now);
 					for (const row of rows) {
 						const due = signInDue.get(row.projectId);
 						if (due !== undefined && due > nowMillis) continue;
-						yield* applyNetworkWhileRunning(row);
+						yield* Effect.forkScoped(refreshSignIn(row));
 					}
 				}),
 			),
@@ -992,44 +1243,48 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const now = yield* DateTime.nowAsDate;
 					const released = yield* query((db) =>
-						db
-							.delete(computerLease)
-							.where(heldBy(holder))
-							.returning({ computerId: computerLease.computerId }),
+						db.delete(computerLease).where(heldBy(holder)).returning({
+							computerId: computerLease.computerId,
+							providerComputerId: computerLease.providerComputerId,
+						}),
 					);
-					for (const { computerId } of released) {
+					for (const { computerId, providerComputerId } of released) {
 						yield* query((db) =>
 							db
 								.update(computerTable)
 								.set({ lastUsedAt: now })
-								.where(eq(computerTable.id, computerId)),
+								.where(
+									and(
+										eq(computerTable.id, computerId),
+										eq(computerTable.providerComputerId, providerComputerId),
+									),
+								),
 						);
 					}
 				}),
 			),
 
-		sleepIdle: operation(
-			"sleepIdle",
-			Effect.gen(function* () {
-				const now = yield* DateTime.now;
-				const idleSince = DateTime.toDateUtc(DateTime.subtractDuration(now, IDLE_BEFORE_SLEEP));
-				const idle = yield* query((db) =>
-					db
-						.select()
-						.from(computerTable)
-						.where(
-							and(
-								isNull(computerTable.sleptAt),
-								lt(computerTable.lastUsedAt, idleSince),
-								noLiveLease(DateTime.toDateUtc(now)),
+		sleepIfIdle: (proof) =>
+			operation(
+				"sleepIfIdle",
+				Effect.gen(function* () {
+					const now = yield* DateTime.now;
+					const [row] = yield* query((db) =>
+						db
+							.select()
+							.from(computerTable)
+							.where(
+								and(
+									eq(computerTable.id, proof.id.value),
+									eq(computerTable.workspaceId, proof.workspace),
+									eq(computerTable.projectId, proof.work.project),
+									idleAt(now),
+								),
 							),
-						),
-				);
-				for (const row of idle) {
-					yield* sleepIfStillIdle(row, idleSince, DateTime.toDateUtc(now));
-				}
-			}),
-		),
+					);
+					if (row) yield* sleepIfStillIdle(row);
+				}),
+			),
 
 		measureDisks: operation(
 			"measureDisks",
@@ -1203,17 +1458,8 @@ export const make = Effect.gen(function* () {
 		reset: (project) =>
 			operation(
 				"reset",
-				oneAtATime(project.projectId)(
-					// Stopped between destroying and forgetting, the next use would
-					// bring back the work the reset was asked to throw away.
-					Effect.uninterruptible(
-						Effect.gen(function* () {
-							const row = yield* recorded(project);
-							if (!row) return;
-							yield* requireIdle(row.id);
-							yield* destroyRecordedComputer(row);
-						}),
-					),
+				withComputerIntent(inProject(project), () => undefined, resetClaimedComputer).pipe(
+					Effect.asVoid,
 				),
 			),
 
@@ -1238,16 +1484,14 @@ export const make = Effect.gen(function* () {
 		upgrade: (project, provider) =>
 			operation(
 				"upgrade",
-				oneAtATime(project.projectId)(
-					Effect.uninterruptible(
-						Effect.gen(function* () {
-							const row = yield* recorded(project);
-							if (!row) return yield* new NoComputer();
-							yield* requireIdle(row.id);
-							yield* movedToNewComputer(row, provider);
-						}),
-					),
-				),
+				withComputerIntent(
+					inProject(project),
+					() => undefined,
+					(row, intentId) =>
+						Effect.andThen(requireIdle(row.id), movedToNewComputer(row, provider, intentId)).pipe(
+							Effect.uninterruptible,
+						),
+				).pipe(Effect.flatMap(({ row }) => (row ? Effect.void : Effect.fail(new NoComputer())))),
 			),
 
 		upgradeIdle: operation(
@@ -1278,16 +1522,14 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 export const layer = layerNoDeps.pipe(
 	Layer.provide([Computers.layer, ComputerProviderStore.layer]),
 );
 
 /**
- * Runs `sleepIdle`, `measureDisks` and `upgradeIdle` every minute, each on its
- * own so a slow measurement or upgrade never holds up sleep, for as long as
- * the layer's scope is open.
+ * Runs `measureDisks` and `upgradeIdle` every minute on separate fibers.
  */
 export const sweepLayer = Layer.effectDiscard(
 	Effect.gen(function* () {
@@ -1303,11 +1545,10 @@ export const sweepLayer = Layer.effectDiscard(
 					Effect.withTracerEnabled(false),
 				),
 			);
-		yield* repeatedly(projectComputers.sleepIdle, "Putting idle computers to sleep failed");
 		yield* repeatedly(projectComputers.measureDisks, "Measuring computers' disks failed");
 		yield* repeatedly(projectComputers.upgradeIdle, "Upgrading idle computers failed");
 	}),
-).pipe(Layer.provide(layer));
+).pipe(processLayer, Layer.provide(layer));
 
 /** The columns that record a computer's last disk measurement. */
 const MEASUREMENT_COLUMNS = {
@@ -1335,9 +1576,48 @@ function sameComputer(row: Pick<ComputerRow, "id" | "computerProviderId" | "prov
 	);
 }
 
+const computerWithIntent = (row: ComputerRow, intentId: string) =>
+	and(sameComputer(row), eq(computerTable.intentId, intentId));
+
+const claimedComputer = (row: ComputerRow, intentId: string, now: Date) =>
+	and(computerWithIntent(row, intentId), gt(computerTable.intentExpiresAt, now));
+
+const inProject = (project: Project) =>
+	and(
+		eq(computerTable.projectId, project.projectId),
+		eq(computerTable.workspaceId, project.workspaceId),
+	);
+
+const CLEARED_INTENT = { intentId: null, intentExpiresAt: null };
+
+const intentExpiry = (now: DateTime.Utc) =>
+	DateTime.toDateUtc(DateTime.addDuration(now, INTENT_LIFETIME));
+
+const hasFreshIntent = (row: ComputerRow, now: DateTime.Utc) =>
+	row.intentExpiresAt !== null && row.intentExpiresAt > DateTime.toDateUtc(now);
+
+const idleAt = (now: DateTime.Utc) =>
+	and(
+		isNull(computerTable.sleptAt),
+		lt(
+			computerTable.lastUsedAt,
+			DateTime.toDateUtc(DateTime.subtractDuration(now, IDLE_BEFORE_SLEEP)),
+		),
+		noLiveLease(DateTime.toDateUtc(now)),
+	);
+
+export const idleComputerIds = (now: DateTime.Utc) =>
+	query((db) => db.select({ id: computerTable.id }).from(computerTable).where(idleAt(now)));
+
+const leaseMatchesComputer = () =>
+	and(
+		eq(computerLease.computerId, computerTable.id),
+		eq(computerLease.providerComputerId, computerTable.providerComputerId),
+	);
+
 /** A lease on the computer that is still in force at `now`. */
 function liveLease(now: Date) {
-	return sql`exists (select 1 from ${computerLease} where ${computerLease.computerId} = ${computerTable.id} and ${computerLease.expiresAt} > ${now})`;
+	return sql`exists (select 1 from ${computerLease} where ${leaseMatchesComputer()} and ${computerLease.expiresAt} > ${now})`;
 }
 
 /** No lease on the computer that is still in force at `now`. */

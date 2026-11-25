@@ -1,4 +1,5 @@
 import {
+	FILE_READ_TOOL,
 	type FilePart,
 	type Message,
 	type MessageReplyTo,
@@ -6,14 +7,15 @@ import {
 	type ToolCallPart,
 	type WrittenFilePart,
 } from "@sugabots/contracts";
+import {
+	READ_CHAT_FILE_TOOL,
+	SEARCH_HISTORY_TOOL,
+} from "@sugabots/contracts/operations/chat-reads";
 import { Option, Schema } from "effect";
 import { COPY_FILE_TO_COMPUTER_TOOL } from "../tools/computer/tools.ts";
-import { FILE_READ_TOOL } from "../tools/files/tool.ts";
-import { READ_CHAT_FILE_TOOL } from "../tools/read-chat-file/tool.ts";
 import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 
 /** The tool a bot searches its chat's older history with. */
-export const SEARCH_HISTORY_TOOL = "search_history";
 
 /** How much of a tool call's input and output the bot's history keeps. */
 const DESCRIBED_INPUT_CHARACTERS = 200;

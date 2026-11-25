@@ -1,3 +1,4 @@
+import { ProviderSignInAttemptInvalid } from "@sugabots/contracts/errors/providers";
 import { providersContracts } from "@sugabots/contracts/operations/providers";
 import { Effect } from "effect";
 import { proveInWorkspace } from "../../../proofs/in-workspace.ts";
@@ -12,13 +13,23 @@ export const completeSignIn = defineOperation(
 	(principal, input) =>
 		Effect.gen(function* () {
 			const modelProviders = yield* ModelProviders.Service;
-			const workspaceId = yield* workspaceIdOf(input.workspace);
+			const workspaceId = yield* workspaceIdOf(input.workspace).pipe(
+				Effect.mapError(() => new ProviderSignInAttemptInvalid()),
+			);
 			return yield* named(principal, workspaceId, (principal, workspace) =>
 				Effect.gen(function* () {
-					const canManage = yield* proveCanManageWorkspace(
-						yield* proveInWorkspace(principal, workspace),
+					const canManage = yield* proveInWorkspace(principal, workspace).pipe(
+						Effect.flatMap(proveCanManageWorkspace),
+						Effect.mapError(() => new ProviderSignInAttemptInvalid()),
 					);
-					return yield* modelProviders.completeSignIn(canManage, input.providerId, input.attempt);
+					return yield* modelProviders
+						.completeSignIn(canManage, input.providerId, input.attempt)
+						.pipe(
+							Effect.catchTags({
+								ModelProviderNotFound: () => Effect.fail(new ProviderSignInAttemptInvalid()),
+								ResourceHidden: () => Effect.fail(new ProviderSignInAttemptInvalid()),
+							}),
+						);
 				}),
 			);
 		}),

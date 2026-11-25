@@ -9,7 +9,7 @@ import {
 	type GitHubToolName,
 } from "../../../providers/connectors/github/github-tools.ts";
 import type { ComputerAtPlace } from "../computer/tools.ts";
-import { type OfferedTool, offeredTool } from "../connectors.ts";
+import { type OfferedTool, offeredTool } from "../connector-catalog.ts";
 import { issueTools } from "./issue-tools.ts";
 import { pullRequestTools } from "./pull-request-tools.ts";
 import { pushTool } from "./push-tool.ts";

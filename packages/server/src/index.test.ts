@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 // a fresh Node process, as `node src/index.ts` starts one.
 const serverDirectory = fileURLToPath(new URL("..", import.meta.url));
 const coreSource = new URL("../../core/src/", import.meta.url);
+const botLoopSource = new URL("../../bot-loop/src/", import.meta.url);
 
 const CHILD_TIMEOUT_MS = 60_000;
 
@@ -55,8 +56,14 @@ describe("loading the server in a fresh process", () => {
 	);
 
 	it(
-		"imports the turn steps first",
-		() => expectCleanExit(importFirst(new URL("chats/turns/turn.steps.ts", coreSource))),
+		"imports the bot loop's steps first",
+		() => expectCleanExit(importFirst(new URL("steps.ts", botLoopSource))),
+		CHILD_TIMEOUT_MS,
+	);
+
+	it(
+		"imports the tools a turn's steps offer first",
+		() => expectCleanExit(importFirst(new URL("chats/turns/tools.ts", coreSource))),
 		CHILD_TIMEOUT_MS,
 	);
 });

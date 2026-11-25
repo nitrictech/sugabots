@@ -195,7 +195,7 @@ export const uninstall = (http: EgressHttpClient, app: AppIdentity, installation
 
 const AccessToken = Schema.Struct({ token: Schema.String, expires_at: Schema.String });
 
-export interface AccessToken {
+interface AccessToken {
 	readonly token: string;
 	readonly expiresAt: DateTime.Utc;
 }

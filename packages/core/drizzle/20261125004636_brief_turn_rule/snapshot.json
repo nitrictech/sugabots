@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "48dbdbbc-a04a-4545-ada3-26409880dcf8",
+  "prevIds": [
+    "3588820b-f58c-4a3b-9285-54c7b87e4052"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "message",
+        "brief_turn_rule"
+      ],
+      "writes": [
+        "s|col|public.message.brief_turn_rule",
+        "n|col|public.message.brief_turn_rule",
+        "e|col|public.message.brief_turn_rule"
+      ],
+      "reads": [
+        "n|tbl|public.message",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message",
+        "name": "brief_turn_rule",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

@@ -1,31 +1,39 @@
 export * as Chats from "./chats.ts";
 
-import type { AutomationFeed, Message, ProjectChat, StartedChat } from "@sugabots/contracts";
+import type {
+	AutomationFeed,
+	BotStartedChat,
+	Message,
+	ProjectChat,
+	StartedChat,
+} from "@sugabots/contracts";
 import {
-	type BotHasNoModel,
-	MessageIdConflict,
+	BotHasNoModel,
+	type MessageRetryKeyConflict,
 	type ReplyTargetNotFound,
 	type UnsentAttachmentsNotFound,
 } from "@sugabots/contracts/errors/chats";
-import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { and, eq, getColumns, isNotNull, isNull, notExists } from "drizzle-orm";
+import { ApprovalRefused, ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { and, eq, isNotNull, isNull, notExists } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import {
 	automation,
 	bot,
-	message,
 	OPENABLE_CHAT_KINDS,
 	type PlacedChatRow,
 	placedChat,
 	project,
 } from "../../database/schema.ts";
-import { Ids, isUuid } from "../../ids/ids.ts";
+import { Ids } from "../../ids/ids.ts";
+import type { Approved } from "../../proofs/approved.ts";
 import type { CanManageBot } from "../../proofs/can-manage-bot.ts";
 import type { CanManageChats } from "../../proofs/chat-permissions.ts";
 import type { IsMember } from "../../proofs/is-member.ts";
+import type { MayBrief } from "../../proofs/may-brief.ts";
 import type { CanChangeChat, CanTakePart } from "../../proofs/project-permissions.ts";
-import type { ReachSet } from "../../proofs/reach-set.ts";
+import type { Named } from "../../proofs/proof.ts";
+import type { ReachesAutomation } from "../../proofs/reaches-automation.ts";
 import type { ReachesChat } from "../../proofs/reaches-chat.ts";
 import type { ReachesProject } from "../../proofs/reaches-project.ts";
 import { processLayer, Tier } from "../../tiers.ts";
@@ -33,8 +41,8 @@ import { INTERVIEW_PROMPT } from "../../workspaces/bots/interview-prompt.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { FloorControl } from "../floor/floor-control.ts";
 import { memberColumns } from "../store/participants.ts";
-import { ChatStore, lockMessageId } from "../store/store.ts";
-import { Turns } from "../turns/turns.ts";
+import { ChatStore } from "../store/store.ts";
+import { type FenceRefusal, holdTurnOf, Turns } from "../turns/turns.ts";
 import { toAutomationFeed, toProjectChat } from "./chat.ts";
 import { chatTitleFrom } from "./chat-title.ts";
 import { reachedChatOfKind } from "./reached-chat.ts";
@@ -69,8 +77,8 @@ export interface Interface {
 	readonly startProjectChat: <P, J>(
 		isMember: IsMember<P>,
 		reach: ReachesProject<P, J>,
-		first: { messageId: string; content: string },
-	) => Effect.Effect<StartedChat, BotHasNoModel | MessageIdConflict>;
+		first: { retryKey: string; content: string },
+	) => Effect.Effect<StartedChat, BotHasNoModel | MessageRetryKeyConflict>;
 	/** Renames the project's chat `reach` is about to `name`. Any other chat is hidden from this. */
 	readonly renameChat: <P, C>(
 		reach: ReachesChat<P, C>,
@@ -78,13 +86,12 @@ export interface Interface {
 		canManage: CanManageChats<P, C>,
 	) => Effect.Effect<void, ResourceHidden>;
 	/**
-	 * The automation `automationId`'s feed, where its runs post, opened on
-	 * first use. Hidden unless it is an automation of the workspace in a
-	 * project `reach` reaches.
+	 * The automation's feed, where its runs post, opened on
+	 * first use. `reach` identifies the automation and its workspace.
 	 */
-	readonly openAutomationFeed: <P, W>(
-		reach: ReachSet<P, W>,
-		automationId: string,
+	readonly openAutomationFeed: <P, A>(
+		automationId: Named<A, string>,
+		reach: ReachesAutomation<P, A>,
 	) => Effect.Effect<AutomationFeed, ResourceHidden>;
 	/**
 	 * Posts the member's message in the chat `canTakePart` is about, with the
@@ -96,7 +103,7 @@ export interface Interface {
 		isMember: IsMember<P>,
 		canTakePart: CanTakePart<P, C>,
 		posted: {
-			messageId: string;
+			retryKey: string;
 			/** May be empty when the message carries files. */
 			content: string;
 			/** Ids of the member's uploads to the chat, not yet sent. None unless set. */
@@ -107,7 +114,7 @@ export interface Interface {
 	) => Effect.Effect<
 		Message,
 		| ResourceHidden
-		| MessageIdConflict
+		| MessageRetryKeyConflict
 		| ReplyTargetNotFound
 		| UnsentAttachmentsNotFound
 		| BotHasNoModel
@@ -116,11 +123,20 @@ export interface Interface {
 	 * Marks the project's chat `reach` is about resolved, or reopens it. An
 	 * automation's feed is never resolved, so it is hidden from this.
 	 */
-	readonly setResolved: <P, C>(
+	readonly setResolved: <P, C, X>(
 		reach: ReachesChat<P, C>,
 		resolved: boolean,
 		canChange: CanChangeChat<P, C>,
-	) => Effect.Effect<void, ResourceHidden>;
+		approved: Approved<P, X>,
+	) => Effect.Effect<void, ResourceHidden | FenceRefusal>;
+	readonly startBriefedChat: <P, B, X>(
+		mayBrief: MayBrief<P, B>,
+		input: { title: string; brief: string },
+		approved: Approved<P, X>,
+	) => Effect.Effect<
+		BotStartedChat,
+		ApprovalRefused | BotHasNoModel | ResourceHidden | FenceRefusal
+	>;
 	/**
 	 * Records that the member has read the chat `reach` is about up to its
 	 * newest finished message. Only a chat members open; any other is hidden.
@@ -183,11 +199,12 @@ export const make = Effect.gen(function* () {
 	 * reach, and gives the floor. Posting the same message again returns it
 	 * unchanged.
 	 */
-	const postIn = (
+	const postIn = <P, C>(
 		chat: PlacedChatRow,
 		memberId: string,
+		poster: ReachesChat<P, C> | undefined,
 		input: {
-			messageId: string;
+			retryKey: string;
 			content: string;
 			attachments?: readonly string[];
 			replyTo?: string;
@@ -195,7 +212,7 @@ export const make = Effect.gen(function* () {
 	) =>
 		Effect.gen(function* () {
 			const posted = yield* chats.post({
-				id: input.messageId,
+				retryKey: input.retryKey,
 				chatId: chat.id,
 				author: yield* authorOf(memberId),
 				content: input.content,
@@ -207,48 +224,31 @@ export const make = Effect.gen(function* () {
 			yield* chats.setResolved(chat, false);
 			// Given once the message is known to be new, so sending it again
 			// still returns it; a refusal rolls the post back.
-			yield* floor.giveFloor({
-				id: posted.message.id,
-				chatId: chat.id,
-				content: posted.message.content,
-			});
+			yield* floor.giveFloor(
+				{ id: posted.message.id, chatId: chat.id, content: posted.message.content },
+				poster,
+			);
 			return posted.message;
 		});
 
 	/**
 	 * Starts a chat for `memberId` in the project `place.projectId`, titled
 	 * from its first message, and posts it, giving the floor. Sent again with the same message, it
-	 * returns the chat that message started instead, unless that is elsewhere.
+	 * returns the chat that key started in the project for that member.
 	 */
 	const startWithMessage = Effect.fnUntraced(function* (
 		place: { workspaceId: string; projectId: string },
 		memberId: string,
-		input: { messageId: string; content: string },
+		input: { retryKey: string; content: string },
 	) {
-		// A retry waits for the first send, and then finds the chat it started.
-		yield* lockMessageId(input.messageId);
-		const [sent] = isUuid(input.messageId)
-			? yield* query((db) =>
-					db
-						.select({ chat: getColumns(placedChat) })
-						.from(message)
-						.innerJoin(placedChat, eq(placedChat.id, message.chatId))
-						.where(and(eq(message.id, input.messageId), eq(message.authorMemberId, memberId)))
-						.limit(1),
-				)
-			: [];
-		if (sent && (sent.chat.kind !== "project_chat" || sent.chat.projectId !== place.projectId)) {
-			return yield* new MessageIdConflict();
-		}
-		const chat =
-			sent?.chat ??
-			(yield* chats.startChat({
-				workspaceId: place.workspaceId,
-				projectId: place.projectId,
-				startedById: memberId,
-				title: chatTitleFrom(input.content),
-			}));
-		const posted = yield* postIn(chat, memberId, input).pipe(
+		const chat = yield* chats.startChat({
+			...place,
+			startedById: memberId,
+			startRetryKey: input.retryKey,
+			title: chatTitleFrom(input.content),
+		});
+		// A chat just started has no turn for its first message to steer.
+		const posted = yield* postIn(chat, memberId, undefined, input).pipe(
 			// It neither quotes a message nor carries files, so neither can be missing.
 			Effect.catchTags({ ReplyTargetNotFound: Effect.die, UnsentAttachmentsNotFound: Effect.die }),
 		);
@@ -300,28 +300,25 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		openAutomationFeed: (reach, automationId) =>
+		openAutomationFeed: (automationId, reach) =>
 			operation(
 				"openAutomationFeed",
 				transaction(
 					Effect.gen(function* () {
-						const [owned] = isUuid(automationId)
-							? yield* query((db) =>
-									db
-										.select({ automation, leadBotId: project.leadBotId })
-										.from(automation)
-										.innerJoin(project, eq(project.id, automation.projectId))
-										.where(
-											and(
-												eq(automation.id, automationId),
-												eq(automation.workspaceId, reach.workspace.value),
-												isNull(automation.deletedAt),
-												reach.reachesProject(automation.projectId),
-											),
-										)
-										.limit(1),
+						const [owned] = yield* query((db) =>
+							db
+								.select({ automation, leadBotId: project.leadBotId })
+								.from(automation)
+								.innerJoin(project, eq(project.id, automation.projectId))
+								.where(
+									and(
+										eq(automation.id, automationId.value),
+										eq(automation.workspaceId, reach.workspace),
+										isNull(automation.deletedAt),
+									),
 								)
-							: [];
+								.limit(1),
+						);
 						if (!owned) return yield* new ResourceHidden({ resource: "automation" });
 						return toAutomationFeed(
 							yield* chats.openAutomationFeed(owned.automation, owned.leadBotId),
@@ -335,19 +332,65 @@ export const make = Effect.gen(function* () {
 				"post",
 				transaction(
 					Effect.flatMap(reachedChatOfKind(canTakePart.reach, OPENABLE_CHAT_KINDS), (chat) =>
-						postIn(chat, isMember.member, posted),
+						postIn(chat, isMember.member, canTakePart.reach, posted),
 					),
 				),
 			),
 
-		setResolved: (reach, resolved, _canChange) =>
+		startBriefedChat: (mayBrief, input, approved) =>
+			operation(
+				"startBriefedChat",
+				transaction(
+					Effect.gen(function* () {
+						const principal = approved.principal.value;
+						const call = approved.call.value;
+						if (
+							principal._tag !== "BotForAsker" ||
+							call.kind !== "toolCall" ||
+							approved.decidedBy !== mayBrief.asker
+						) {
+							return yield* new ApprovalRefused();
+						}
+						yield* holdTurnOf(principal);
+						const botId = mayBrief.bot.value;
+						const [recipient] = yield* query((db) =>
+							db
+								.select({ name: bot.name, model: bot.model })
+								.from(bot)
+								.where(and(eq(bot.id, botId), eq(bot.workspaceId, mayBrief.workspace)))
+								.limit(1),
+						);
+						if (!recipient) return yield* new ResourceHidden({ resource: "bot" });
+						if (recipient.model === null) return yield* new BotHasNoModel();
+						const started = yield* chats.startBriefedChat({
+							...input,
+							workspaceId: mayBrief.workspace,
+							projectId: mayBrief.project,
+							recipientBotId: botId,
+							startedById: mayBrief.asker,
+							briefingBotId: mayBrief.briefingBot,
+							briefTurnRule: mayBrief.turnRule,
+							startRetryKey: call.toolCall,
+						});
+						return {
+							id: started.id,
+							title: started.title,
+							...(botId !== principal.bot && { with: recipient.name, withBotId: botId }),
+						};
+					}),
+				),
+			),
+
+		setResolved: (reach, resolved, _canChange, approved) =>
 			operation(
 				"setResolved",
 				transaction(
-					// Only a project's chat is ever resolved, not an automation's feed.
-					Effect.flatMap(reachedChatOfKind(reach, ["project_chat"]), (chat) =>
-						chats.setResolved(chat, resolved),
-					),
+					Effect.gen(function* () {
+						const principal = approved.principal.value;
+						yield* holdTurnOf(principal);
+						const chat = yield* reachedChatOfKind(reach, ["project_chat"]);
+						yield* chats.setResolved(chat, resolved);
+					}),
 				),
 			),
 

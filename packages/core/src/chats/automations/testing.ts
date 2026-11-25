@@ -1,11 +1,16 @@
-import { type AcceptedRun, handleFromName } from "@sugabots/contracts";
+import { type AcceptedRun, handleFromName, type NewAutomation } from "@sugabots/contracts";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { and, eq, ne } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { query } from "../../database/database.ts";
 import { automationRun, bot, member, membership, workspace } from "../../database/schema.ts";
 import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
-import { type ChatServicesForTests, servedOperations } from "../../operations/testing.ts";
+import { signedIn } from "../../operations/chats/testing.ts";
+import {
+	type CallOperation,
+	type ChatServicesForTests,
+	servedOperations,
+} from "../../operations/testing.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { lane } from "../../workflows/sql.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
@@ -14,6 +19,16 @@ import { lanesForTests } from "../testing.ts";
 import { releaseTurn, runningTurns } from "../turns/testing.ts";
 import { Automation, AutomationRun, automationLane } from "./automation.workflow.ts";
 import type { AutomationRunner } from "./automation-runner.ts";
+
+export function automationsAs(call: CallOperation, memberId: string) {
+	const principal = signedIn(memberId);
+	return {
+		create: async ({ projectId }: { projectId: string }, input: NewAutomation) =>
+			call(await principal, "automations.create", { projectId, ...input }),
+		list: async (input: InputOf<"automations.list">) =>
+			call(await principal, "automations.list", input),
+	};
+}
 
 /** Starts an automation's run by hand, as the web app's Run button does, returning it. */
 export type StartRun = (input: InputOf<"automations.run">) => Promise<AcceptedRun>;

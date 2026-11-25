@@ -12,19 +12,21 @@ import {
 	type SystemBotImmutable,
 	SystemBotMissing,
 } from "@sugabots/contracts/errors/bots";
-import {
-	type ComputerMadeMeanwhile,
-	ComputerUnavailable,
-} from "@sugabots/contracts/errors/computers";
+import type { ComputerMadeMeanwhile } from "@sugabots/contracts/errors/computers";
 import type { LeadsProjects } from "@sugabots/contracts/errors/projects";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { ModelNotEnabled } from "@sugabots/contracts/errors/providers";
 import { Context, Effect, Layer } from "effect";
 import type { Actor } from "../../authorization/permissions.ts";
+import { type FenceRefusal, holdTurnOf } from "../../chats/turns/turns.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
-import { serviceOperations } from "../../database/database.ts";
-import type { CanDeleteBot } from "../../proofs/bot-permissions.ts";
+import { serviceOperations, Transaction, transaction } from "../../database/database.ts";
+import { EventOutbox } from "../../database/events/outbox.ts";
+import type { ActsForMember } from "../../proofs/acts-for-member.ts";
+import type { Approved } from "../../proofs/approved.ts";
+import type { CanChangeBotReach, CanDeleteBot } from "../../proofs/bot-permissions.ts";
 import type { CanManageBot } from "../../proofs/can-manage-bot.ts";
+import type { ProjectDeletionStarted } from "../../proofs/deletion-started.ts";
 import type { IsMember } from "../../proofs/is-member.ts";
 import type { ReachesBot } from "../../proofs/reaches-bot.ts";
 import type {
@@ -34,8 +36,10 @@ import type {
 } from "../../proofs/workspace-permissions.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
+import { reachChanged } from "../../streams/reach-changes.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
+import { ProjectStore } from "../projects/project-store.ts";
 import { memberFacingBot, systemBots, visibleMemberFacingBots } from "./bot-reads.ts";
 import { BotStore } from "./bot-store.ts";
 import { PersonalAssistants } from "./personal-assistants.ts";
@@ -58,11 +62,13 @@ export interface Interface {
 	/**
 	 * Changes the bot. A Personal Assistant's member changes only its name and
 	 * avatar; a bot managing itself in its own chats, only its instructions and
-	 * description, which its interview writes.
+	 * description, which its interview writes. Changes to visibility and
+	 * computer use require `canChangeReach`, proved under its workspace's lock.
 	 */
 	readonly update: <P, B>(
 		canManage: CanManageBot<P, B>,
 		changes: BotUpdate,
+		canChangeReach?: CanChangeBotReach<P, B>,
 	) => Effect.Effect<
 		Bot,
 		| ActionForbidden
@@ -79,23 +85,29 @@ export interface Interface {
 		| ResourceHidden
 	>;
 	/**
-	 * Deletes the bot, with its default project. Its computer is destroyed at
-	 * its provider first, once the bot is free to delete: when the provider
-	 * can't be reached, or a computer is made meanwhile, the bot is kept, to
-	 * try again.
+	 * Replaces the instructions and description of the bot `canManage` is
+	 * about, which is all a bot changes of itself, in its own chats and once
+	 * its asker approves. A Personal Assistant's instructions are Sugabots'.
 	 */
-	readonly remove: <P, B>(
+	readonly saveInstructions: <P, B, X>(
+		canManage: CanManageBot<P, B>,
+		written: { readonly instructions: string; readonly description: string },
+		approved: Approved<P, X>,
+	) => Effect.Effect<Bot, AssistantInstructionsManaged | BotGone | ResourceHidden | FenceRefusal>;
+	/** Records a deletion after ensuring the bot is free to delete. */
+	readonly beginRemoval: <P, B>(
 		canDelete: CanDeleteBot<P, B>,
-	) => Effect.Effect<
-		void,
-		SystemBotImmutable | LeadsProjects | ComputerUnavailable | ComputerMadeMeanwhile
-	>;
-	/** Pins the bot to the member's sidebar, or takes it off. */
-	readonly setPinned: <P, B>(
-		isMember: IsMember<P>,
+	) => Effect.Effect<string, SystemBotImmutable | LeadsProjects, Transaction>;
+	readonly remove: <W>(
+		started: ProjectDeletionStarted<W, "bot">,
+	) => Effect.Effect<void, ComputerMadeMeanwhile, Transaction>;
+	/** Pins the bot to the sidebar of the member `forMember` names, or takes it off. */
+	readonly setPinned: <P, B, X>(
+		forMember: ActsForMember<P>,
 		reach: ReachesBot<P, B>,
 		pinned: boolean,
-	) => Effect.Effect<Bot, ResourceHidden>;
+		approved: Approved<P, X>,
+	) => Effect.Effect<Bot, ResourceHidden | FenceRefusal>;
 	/**
 	 * The member's Personal Assistant, made on `model` when they have none. An
 	 * existing one moves onto `model` when it has no model or runs on one the
@@ -125,8 +137,9 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Bots");
 	const store = yield* BotStore.Service;
 	const modelProviders = yield* ModelProviderStore.Service;
-	const projectComputers = yield* ProjectComputers.Service;
+	const projects = yield* ProjectStore.Service;
 	const personalAssistants = yield* PersonalAssistants.Service;
+	const outbox = yield* EventOutbox.Service;
 
 	/** The bot `botId` as `actor` is shown it, with whether they pinned it. */
 	const shown = (botId: string, actor: Actor) =>
@@ -155,13 +168,18 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		update: (canManage, changes) =>
+		update: (canManage, changes, canChangeReach) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
 					const { workspace, facts, actor } = canManage;
 					const changed = changedFields(changes);
 					if (changed.length === 0) return yield* new EmptyBotUpdate();
+					const changesReach =
+						changes.visibility !== undefined || changes.usesComputer !== undefined;
+					if (changesReach && canChangeReach === undefined) {
+						return yield* Effect.die(new Error("Bot reach changes require the workspace lock"));
+					}
 					if (
 						canManage.inOwnChats &&
 						changed.some((field) => !INTERVIEW_WRITTEN_FIELDS.has(field))
@@ -173,52 +191,91 @@ export const make = Effect.gen(function* () {
 					if (changes.model != null) {
 						yield* modelProviders.requireEnabled(workspace, changes.model);
 					}
-					const updated = yield* store.update(workspace, facts.id, changes, actor.memberId);
+					const updated = yield* transaction(
+						Effect.gen(function* () {
+							const row = yield* store.update(workspace, facts.id, changes, actor.memberId);
+							// Who reaches a bot, and whether its desktop may stay open, follow its
+							// visibility and computer use, so streams and desktop viewers prove again.
+							if (changesReach) {
+								yield* outbox.publish([reachChanged(workspace, { kind: "bot", botId: row.id })]);
+							}
+							return row;
+						}),
+					);
 					return yield* shown(updated.id, actor);
 				}),
 			),
 
-		remove: (canDelete) =>
+		beginRemoval: ({ workspace, bot, actor }) =>
 			operation(
-				"remove",
+				"beginRemoval",
 				Effect.gen(function* () {
-					const { workspace, actor } = canDelete;
-					const botId = canDelete.bot.value;
-					// Deleting the bot deletes its default project and so its computer's
-					// record, so its machine goes first, once the bot is free to delete; a
-					// computer recorded meanwhile still keeps the bot, to try again.
-					const destroyComputer = Effect.flatMap(defaultProjectOf(botId), (projectId) => {
-						const defaultProject = { workspaceId: workspace, projectId };
-						return Effect.andThen(
-							projectComputers.destroy(defaultProject).pipe(
-								Effect.catchTag("ComputerUnavailable", (failure) =>
-									Effect.fail(
-										new ComputerUnavailable({
-											provider: failure.provider,
-											reason: failure.reason,
-											cause: failure.cause,
-										}),
-									),
-								),
-							),
-							ProjectComputers.lockWithoutComputer(defaultProject),
-						);
-					});
-					yield* store.remove(workspace, botId, actor.memberId, destroyComputer);
+					yield* Transaction;
+					yield* BotStore.lockForRemoval(workspace, bot.value, actor.memberId);
+					const projectId = yield* defaultProjectOf(bot.value);
+					if (yield* projects.markDeleting(workspace, projectId)) {
+						yield* outbox.publish([reachChanged(workspace, { kind: "bot", botId: bot.value })]);
+					}
+					return projectId;
 				}),
 			),
 
-		setPinned: (isMember, reach, pinned) =>
+		remove: ({ workspaceId, projectId, targetId: botId }) =>
+			operation(
+				"remove",
+				Effect.gen(function* () {
+					yield* Transaction;
+					yield* ProjectComputers.lockWithoutComputer({ workspaceId, projectId });
+					yield* store.remove(workspaceId, botId).pipe(Effect.orDie);
+					yield* outbox.publish([reachChanged(workspaceId, { kind: "bot", botId })]);
+				}),
+			),
+
+		saveInstructions: (canManage, written, approved) =>
+			operation(
+				"saveInstructions",
+				Effect.gen(function* () {
+					const { workspace, facts, actor } = canManage;
+					if (facts.assistantOf !== null) return yield* new AssistantInstructionsManaged();
+					const saved = yield* transaction(
+						Effect.gen(function* () {
+							yield* holdTurnOf(approved.principal.value);
+							return yield* store.update(
+								workspace,
+								facts.id,
+								{ instructions: written.instructions, description: written.description },
+								actor.memberId,
+							);
+						}),
+					).pipe(
+						// Only a change of name, handle or visibility refuses these.
+						Effect.catchTags({
+							BotNameTaken: Effect.die,
+							BotHandleReserved: Effect.die,
+							SystemBotImmutable: Effect.die,
+							LeadsProjects: Effect.die,
+						}),
+					);
+					return yield* shown(saved.id, actor);
+				}),
+			),
+
+		setPinned: (forMember, reach, pinned, approved) =>
 			operation(
 				"setPinned",
 				Effect.gen(function* () {
 					const botId = reach.bot.value;
-					yield* store.setPinned({
-						workspaceId: reach.workspace,
-						memberId: isMember.member,
-						botId,
-						pinned,
-					});
+					yield* transaction(
+						Effect.gen(function* () {
+							yield* holdTurnOf(approved.principal.value);
+							yield* store.setPinned({
+								workspaceId: reach.workspace,
+								memberId: forMember.member,
+								botId,
+								pinned,
+							});
+						}),
+					);
 					return yield* shown(botId, viewerOf(reach));
 				}),
 			),
@@ -264,7 +321,7 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		BotStore.layer,
 		ModelProviderStore.layer,
-		ProjectComputers.layer,
+		ProjectStore.layer,
 		PersonalAssistants.layer,
 	]),
 );
@@ -294,7 +351,7 @@ function changedFields(changes: BotUpdate): (keyof BotUpdate)[] {
  * Refuses `changes` to a Personal Assistant that change more than its name and avatar:
  * Sugabots manages the rest of it. Its connectors are changed apart.
  */
-export const requireAssistantAvatarOnly = (changes: BotUpdate) =>
+const requireAssistantAvatarOnly = (changes: BotUpdate) =>
 	Effect.gen(function* () {
 		const changed = changedFields(changes);
 		// A Personal Assistant is always its member's alone.

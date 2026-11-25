@@ -10,7 +10,7 @@ export const fileVersion = defineOperation(
 	(principal, input) =>
 		Effect.gen(function* () {
 			const files = yield* Files.Service;
-			return yield* named(principal, input.fileId, (principal, file) =>
+			return yield* named(principal, input.fileId.toLowerCase(), (principal, file) =>
 				Effect.flatMap(proveReachesFile(principal, file), (reach) =>
 					files.getVersion(reach, input.version),
 				),

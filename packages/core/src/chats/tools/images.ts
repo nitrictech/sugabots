@@ -12,9 +12,6 @@ export interface Image {
 	mediaType: string;
 }
 
-/** The formats shown, as the tools' descriptions name them. */
-export const SHOWN_IMAGE_FORMATS = "PNG, JPEG, GIF or WebP";
-
 /**
  * The largest image shown, in bytes: 5 MiB once base 64 encoded, which is how
  * model providers measure the images they accept.

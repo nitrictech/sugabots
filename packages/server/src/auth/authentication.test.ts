@@ -5,12 +5,15 @@ import { SessionAuthentication } from "@sugabots/core/authentication/session";
 import { chatServicesLayerForTests } from "@sugabots/core/chats/testing";
 import { noComputers } from "@sugabots/core/computers/testing";
 import { EventBus } from "@sugabots/core/database/events/bus";
+import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { member } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
 import { layer as operationsLayer } from "@sugabots/core/operations/layer";
 import { Operations } from "@sugabots/core/operations/registry";
+import { Models } from "@sugabots/core/providers/models/models";
+import { unusedModel } from "@sugabots/core/providers/models/testing";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";
@@ -59,7 +62,11 @@ async function appWith(
 		Layer.mergeAll(
 			Authentication.layer,
 			SessionAuthentication.layer,
-			operationsLayer.pipe(Layer.provide(chatServicesLayerForTests(bus))),
+			operationsLayer.pipe(
+				Layer.provide(chatServicesLayerForTests(bus)),
+				// Nothing here makes a turn's model request.
+				Layer.provide(Layer.succeed(Models.Service, unusedModel())),
+			),
 		).pipe(
 			Layer.provideMerge(Accounts.layer),
 			Layer.provide([
@@ -75,6 +82,10 @@ async function appWith(
 			]),
 			Layer.provide(ServerSettings.layer),
 			Layer.provide(noComputers),
+			// Where a session's end is recorded.
+			Layer.provide(EventOutbox.layer),
+			// What streams read their events from.
+			Layer.provide(EventStore.layer),
 			Layer.provide(Layer.succeed(EventBus.Service, bus)),
 			Layer.provide(testInfrastructure),
 			Layer.provide(
@@ -331,18 +342,34 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		expect(sent.length).toBe(sentBefore);
 	});
 
-	it("changes your name, trimmed, and refuses a blank one", async () => {
+	it("changes your name, trimmed, through its operation and refuses a blank one", async () => {
 		const token = await signUp("Ada", `rename-${crypto.randomUUID().slice(0, 8)}@example.com`);
 		const name = async () =>
 			Schema.decodeUnknownSync(meSchema)(await (await me(token)).json()).member.name;
+		const rename = (to: string) =>
+			app.request(`${API_BASE_PATH}/me`, {
+				method: "PATCH",
+				headers: { "content-type": "application/json", origin: ORIGIN, cookie: token },
+				body: JSON.stringify({ name: to }),
+			});
 
-		expect((await post(app, "/auth/update-user", { name: "  Ada Lovelace " }, token)).status).toBe(
-			200,
+		const renamed = await rename("  Ada Lovelace ");
+		expect(renamed.status).toBe(200);
+		expect(await name()).toBe("Ada Lovelace");
+
+		expect((await rename("   ")).status).toBe(400);
+		expect(await name()).toBe("Ada Lovelace");
+	});
+
+	it("leaves better-auth no way to change a name behind the operation's back", async () => {
+		const token = await signUp("Ada", `bypass-${crypto.randomUUID().slice(0, 8)}@example.com`);
+
+		expect((await post(app, "/auth/update-user", { name: "Someone Else" }, token)).status).toBe(
+			404,
 		);
-		expect(await name()).toBe("Ada Lovelace");
-
-		expect((await post(app, "/auth/update-user", { name: "   " }, token)).status).toBe(400);
-		expect(await name()).toBe("Ada Lovelace");
+		expect(Schema.decodeUnknownSync(meSchema)(await (await me(token)).json()).member.name).toBe(
+			"Ada",
+		);
 	});
 
 	it("refuses a blank name at sign-up", async () => {

@@ -587,6 +587,9 @@ function parsedBody(body: string | undefined): unknown {
 /** The error object: `error` if that's an object, otherwise the body itself. */
 function errorIn(reported: unknown): Record<string, unknown> | undefined {
 	if (typeof reported !== "object" || reported === null) return undefined;
+	if ("type" in reported && reported.type === "response.failed" && "response" in reported) {
+		return errorIn(reported.response);
+	}
 	const nested = (reported as { error?: unknown }).error;
 	return typeof nested === "object" && nested !== null
 		? (nested as Record<string, unknown>)

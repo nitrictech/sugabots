@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "tool_call_unstepped_call_idx" ON "tool_call" ("turn_id","sdk_tool_call_id") WHERE "step" is null;

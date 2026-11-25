@@ -31,12 +31,10 @@ const hidden = new ResourceHidden({ resource: "bot" });
 export const proveReachesBot = <P, B>(principal: Named<P, Principal>, botId: Named<B, string>) =>
 	Effect.gen(function* () {
 		const record = yield* query((db) => botRecord(db, botId.value));
-		if (!record || record.systemBot) return yield* Effect.fail(hidden);
+		if (!record || record.systemBot || record.deleting) return yield* Effect.fail(hidden);
 		const met = yield* meetBot(principal.value, record);
 		const reaches =
-			met.kind === "run"
-				? met.withinBounds
-				: met.kind === "member" && met.withinBounds && memberReachesBot(met.actor, record);
+			met.kind === "run" || (met.kind === "member" && memberReachesBot(met.actor, record));
 		if (!reaches) return yield* Effect.fail(hidden);
 		const proof: ReachesBot<P, B> = ReachesBotProof.prove([principal, botId], {
 			principal,

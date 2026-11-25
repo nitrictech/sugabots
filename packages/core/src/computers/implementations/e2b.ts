@@ -153,7 +153,7 @@ export const fromE2b = (access: Computers.E2bAccess, ids: Ids.Interface): Comput
 		destroy: (id) =>
 			Effect.tryPromise({
 				// False when E2B no longer had it, which is what destroying asks for.
-				try: () => E2bSandbox.kill(id, options()),
+				try: (signal) => E2bSandbox.kill(id, { ...options(), signal }),
 				catch: unavailable,
 			}).pipe(Effect.asVoid),
 	};

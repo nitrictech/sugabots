@@ -17,7 +17,12 @@ import { lastMovedAt, needsViewer, useProjectChats, useSetResolved } from "@/lib
 import { formatListTime } from "@/lib/list-time.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useNow } from "@/lib/now.ts";
-import { OwnerLink, type ResourceOwner, resourceProjectId } from "@/lib/resource-owner.tsx";
+import {
+	OwnerLink,
+	type ResourceOwner,
+	resourcePermissions,
+	resourceProjectId,
+} from "@/lib/resource-owner.tsx";
 import { useSession } from "@/lib/session.ts";
 import { useHideSidebar } from "@/lib/sidebar-hidden.tsx";
 import { outcomeOf, RunStatus } from "@/screens/AutomationRun.tsx";
@@ -315,7 +320,8 @@ function NeedsYouRow({
  * One of the open chats, on three lines: how many messages it holds, with
  * when it last moved at the end; its title; then the faces of who is talking
  * in it, with what its bots are doing at the end, left out when there is
- * neither. Pointed at, Resolve takes the time's place.
+ * neither. Pointed at, Resolve takes the time's place, for a member who may
+ * resolve it.
  */
 function ChatEntry({
 	row,
@@ -330,6 +336,7 @@ function ChatEntry({
 }) {
 	const hideSidebar = useHideSidebar();
 	const setResolved = useSetResolved(row.chat.id);
+	const mayResolve = resourcePermissions(owner).resolveChats;
 	const { chat } = row;
 	const members = row.participants.filter((participant) => participant.kind === "member");
 	const talking =
@@ -365,7 +372,11 @@ function ChatEntry({
 					{/* Its place goes to Resolve while the row is pointed at, so it is held as wide as Resolve. */}
 					<time
 						dateTime={movedAt.toISOString()}
-						className="flex h-5 min-w-17 shrink-0 items-center justify-end text-subtle-foreground text-xs tabular-nums group-has-focus-visible/chat:invisible group-hover/chat:invisible [@media(hover:none)]:invisible"
+						className={cn(
+							"flex h-5 min-w-17 shrink-0 items-center justify-end text-subtle-foreground text-xs tabular-nums",
+							mayResolve &&
+								"group-has-focus-visible/chat:invisible group-hover/chat:invisible [@media(hover:none)]:invisible",
+						)}
 					>
 						{formatListTime(movedAt, new Date())}
 					</time>
@@ -392,17 +403,19 @@ function ChatEntry({
 					</span>
 				)}
 			</OwnerLink>
-			<Button
-				variant="ghost"
-				size="sm"
-				disabled={setResolved.isPending}
-				onClick={() => setResolved.mutate(true)}
-				aria-label={`Resolve: ${chat.title}`}
-				className="absolute top-1.5 right-0.5 h-6 gap-1 px-1.5 font-normal text-subtle-foreground text-xs tabular-nums opacity-0 transition-opacity group-has-focus-visible/chat:opacity-100 group-hover/chat:opacity-100 [@media(hover:none)]:opacity-100"
-			>
-				Resolve
-				<Check aria-hidden strokeWidth={2.25} className="size-3" />
-			</Button>
+			{mayResolve && (
+				<Button
+					variant="ghost"
+					size="sm"
+					disabled={setResolved.isPending}
+					onClick={() => setResolved.mutate(true)}
+					aria-label={`Resolve: ${chat.title}`}
+					className="absolute top-1.5 right-0.5 h-6 gap-1 px-1.5 font-normal text-subtle-foreground text-xs tabular-nums opacity-0 transition-opacity group-has-focus-visible/chat:opacity-100 group-hover/chat:opacity-100 [@media(hover:none)]:opacity-100"
+				>
+					Resolve
+					<Check aria-hidden strokeWidth={2.25} className="size-3" />
+				</Button>
+			)}
 		</div>
 	);
 }
@@ -410,7 +423,7 @@ function ChatEntry({
 /**
  * A resolved chat, kept quiet: who is in it, its title and when it last moved, on
  * one line, the rest said when it is pointed at. Pointed at, Reopen takes
- * the time's place.
+ * the time's place, for a member who may reopen it.
  */
 function ResolvedEntry({
 	row,
@@ -425,6 +438,7 @@ function ResolvedEntry({
 }) {
 	const hideSidebar = useHideSidebar();
 	const setResolved = useSetResolved(row.chat.id);
+	const mayReopen = resourcePermissions(owner).resolveChats;
 	const members = row.participants.filter((participant) => participant.kind === "member");
 	const talking = members
 		.map((member) => (member.id === memberId ? "You" : member.name))
@@ -459,20 +473,26 @@ function ResolvedEntry({
 					{/* Its place goes to Reopen while the row is pointed at. */}
 					<time
 						dateTime={movedAt.toISOString()}
-						className="shrink-0 text-xs tabular-nums group-has-focus-visible/chat:invisible group-hover/chat:invisible [@media(hover:none)]:invisible"
+						className={cn(
+							"shrink-0 text-xs tabular-nums",
+							mayReopen &&
+								"group-has-focus-visible/chat:invisible group-hover/chat:invisible [@media(hover:none)]:invisible",
+						)}
 					>
 						{formatListTime(movedAt, new Date())}
 					</time>
 				</OwnerLink>
 			</Tooltip>
-			<IconButton
-				label={`Reopen: ${row.chat.title}`}
-				disabled={setResolved.isPending}
-				onClick={() => setResolved.mutate(false)}
-				className="absolute top-1 right-1 rounded-md text-subtle-foreground opacity-0 transition-opacity group-has-focus-visible/chat:opacity-100 group-hover/chat:opacity-100 [@media(hover:none)]:opacity-100"
-			>
-				<RotateCcw aria-hidden strokeWidth={2} />
-			</IconButton>
+			{mayReopen && (
+				<IconButton
+					label={`Reopen: ${row.chat.title}`}
+					disabled={setResolved.isPending}
+					onClick={() => setResolved.mutate(false)}
+					className="absolute top-1 right-1 rounded-md text-subtle-foreground opacity-0 transition-opacity group-has-focus-visible/chat:opacity-100 group-hover/chat:opacity-100 [@media(hover:none)]:opacity-100"
+				>
+					<RotateCcw aria-hidden strokeWidth={2} />
+				</IconButton>
+			)}
 		</div>
 	);
 }

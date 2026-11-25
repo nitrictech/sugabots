@@ -1,17 +1,12 @@
 import { NodeRuntime } from "@effect/platform-node";
+import { BotLoop } from "@sugabots/bot-loop/bot-loop";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { SessionAuthentication } from "@sugabots/core/authentication/session";
 import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
 import { BlobDeletions } from "@sugabots/core/blob-store/deletions";
-import { Automations } from "@sugabots/core/chats/automations/automations";
 import { AutomationRuns } from "@sugabots/core/chats/automations/runs";
 import { ChatServices } from "@sugabots/core/chats/chat-services";
-import { DesktopViewer } from "@sugabots/core/chats/tools/browser/viewer";
-import { BuiltInTools } from "@sugabots/core/chats/tools/built-in";
-import { ComputerTools } from "@sugabots/core/chats/tools/computer";
-import { ConnectorTools } from "@sugabots/core/chats/tools/connectors";
-import { Turns } from "@sugabots/core/chats/turns/turns";
 import { ChatWorkflows } from "@sugabots/core/chats/workflows";
 import { ProjectComputers } from "@sugabots/core/computers/project-computers";
 import { layer as databaseLayer, directClientLayer } from "@sugabots/core/database/database";
@@ -30,6 +25,7 @@ import { Models } from "@sugabots/core/providers/models/models";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { Secrets } from "@sugabots/core/secrets/secrets";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { Lanes } from "@sugabots/core/workflows/lanes";
 import { WorkflowEngines } from "@sugabots/workflow/engine";
 import { Duration, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
@@ -39,7 +35,7 @@ import { webAppLayer } from "./http/mount.ts";
 import { listeningLayer, nodeServerLayer } from "./http/serve.ts";
 import { requestSpanNames } from "./http/tracing.ts";
 import { observabilityLayer } from "./observability.ts";
-import { StreamAccess } from "./routes/events/access.ts";
+import { layer as schedulerLayer } from "./scheduler/scheduler.ts";
 
 /**
  * What the process owns once and every service above builds on: the pools,
@@ -58,12 +54,15 @@ const workflowEngine = WorkflowEngines.singleRunnerWith({
 	sessions: directClientLayer,
 });
 
+/** The lanes of every workflow that may wait in one: core's, and the bot loop's turns. */
+const lanes = Lanes.layerFor([...ChatWorkflows.definitions, ...BotLoop.definitions]);
+
 const Infrastructure = Layer.mergeAll(
 	BlobStore.layer,
 	Secrets.layer,
 	Egress.layer,
 	EventOutbox.layer,
-	ChatWorkflows.lanes,
+	lanes,
 ).pipe(
 	Layer.provideMerge(
 		Layer.mergeAll(
@@ -77,14 +76,7 @@ const Infrastructure = Layer.mergeAll(
 );
 
 /** The outside systems: email, the workspaces' models, and the tools turns are offered. */
-const OutsideSystems = Layer.mergeAll(
-	Email.layer,
-	Models.layer,
-	BuiltInTools.layer,
-	ComputerTools.layer,
-	DesktopViewer.layer,
-	ConnectorTools.layer,
-);
+const OutsideSystems = Layer.mergeAll(Email.layer, Models.layer);
 
 /**
  * Accounts, the pages of the files bots make, and notifying members.
@@ -94,21 +86,21 @@ const WorkspacesAndProviders = Layer.mergeAll(Notifications.layer, FilePages.lay
 );
 
 /**
- * The chats, over how they start and signal their workflows. Their
- * events go through the outbox.
+ * The chats, over how they start and signal their workflows: a turn's from
+ * the bot loop, which owns its workflow. Their events go through the outbox.
  */
 const ChatServiceLayers = ChatServices.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(Turns.signalsLayer, AutomationRuns.layer)),
+	Layer.provideMerge(Layer.mergeAll(BotLoop.edgeLayer, AutomationRuns.layer)),
 );
 
 /**
- * What runs without a request: the workflows, the automation scheduler, the
- * nightly event prune, deleting queued blobs, putting idle computers to
- * sleep, and measuring running ones' disks.
+ * Background runs the core and bot loop workflows, the scheduler, event
+ * pruning, blob deletion, and computer measurement and upgrades.
  */
 const Background = Layer.mergeAll(
 	ChatWorkflows.layer,
-	Automations.schedulerLayer,
+	BotLoop.layer,
+	schedulerLayer,
 	EventPruning.layer,
 	BlobDeletions.layer,
 	UnsentAttachments.layer,
@@ -124,7 +116,6 @@ const Http = listeningLayer.pipe(
 		Authentication.layer,
 		SessionAuthentication.layer,
 		WebhookAuthentication.layer,
-		StreamAccess.layer,
 		requestSpanNames,
 	]),
 	Layer.provide(nodeServerLayer),

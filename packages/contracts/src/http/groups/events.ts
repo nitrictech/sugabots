@@ -1,7 +1,8 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
+import { uuidOrStringSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
-import { NotFound } from "../errors.ts";
+import { Forbidden, NotFound, Unauthorized } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 /**
@@ -10,7 +11,10 @@ import { Session } from "../middleware.ts";
  * `Last-Event-ID` and misses nothing.
  *
  * The body is a stream, not a value, so the SDK reads it with its own event
- * source rather than through the generated client.
+ * source rather than through the generated client. A stream reads its
+ * session afresh as it opens, so one revoked since its cookie was cached is
+ * refused as `Unauthorized`; it ends when its session ends or expires, or the
+ * member stops reaching what it follows, and the client reconnects.
  */
 const eventStream = Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/event-stream" }));
 
@@ -19,20 +23,20 @@ export class EventsApi extends HttpApiGroup.make("events")
 		HttpApiEndpoint.get("workspace", "/workspaces/:workspace/events", {
 			params: { workspace: workspaceIdOrSlugSchema },
 			success: eventStream,
-			error: NotFound,
+			error: [NotFound, Unauthorized],
 		}),
 		HttpApiEndpoint.get("chat", "/chats/:chatId/events", {
-			params: { chatId: Schema.String },
+			params: { chatId: uuidOrStringSchema },
 			success: eventStream,
-			error: NotFound,
+			error: [NotFound, Unauthorized],
 		}),
 		/** What is for the current user alone, such as their notifications. */
-		HttpApiEndpoint.get("me", "/me/events", { success: eventStream, error: NotFound }),
+		HttpApiEndpoint.get("me", "/me/events", { success: eventStream, error: Unauthorized }),
 		/** Tells the chat's other watchers the caller is typing in it, as `member.typing`. */
 		HttpApiEndpoint.post("typing", "/chats/:chatId/typing", {
-			params: { chatId: Schema.String },
+			params: { chatId: uuidOrStringSchema },
 			success: HttpApiSchema.Empty(204),
-			error: NotFound,
+			error: [NotFound, Forbidden],
 		}),
 	)
 	.middleware(Session) {}

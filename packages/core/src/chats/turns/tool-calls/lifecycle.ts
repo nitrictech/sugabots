@@ -1,6 +1,10 @@
 import type { JsonValue, ToolApprovalStatus, ToolCallStatus } from "@sugabots/contracts";
-import type { UserText } from "@sugabots/errors";
+import { type UserText, userText } from "@sugabots/errors";
 import { Data, Schema } from "effect";
+
+export const APPROVAL_NO_LONGER_APPLIES = userText`The tool was not run: its approval no longer applies.`;
+
+export const INTERRUPTED_CALL = userText`This call was cut short before it finished, so it may or may not have made its change. Check what it did before asking for it again.`;
 
 /**
  * A tool call's lifecycle, as a pure transition function.

@@ -9,9 +9,17 @@ import { unimplemented } from "../testing.ts";
 import { Lanes } from "../workflows/lanes.ts";
 import { AutomationRuns } from "./automations/runs.ts";
 import { ChatServices } from "./chat-services.ts";
-import { TurnSignals, turnInternalsForTests } from "./turns/testing.ts";
+import {
+	turnRequestsForTests,
+	turnSignalsForTests,
+	turnWorkflowForTests,
+} from "./turn-workflow.test-support.ts";
+import { turnInternalsForTests } from "./turns/testing.ts";
 import { Turns } from "./turns/turns.ts";
 import { ChatWorkflows } from "./workflows.ts";
+
+/** Every workflow the cases' lanes hold: core's, and the stand-in for the bot loop's turns. */
+const definitions = [...ChatWorkflows.definitions, turnWorkflowForTests];
 
 /**
  * A workflow engine for the Postgres cases. The workflows it starts only hold
@@ -21,14 +29,13 @@ import { ChatWorkflows } from "./workflows.ts";
 const held = () => DurableDeferred.await(DurableDeferred.make("released"));
 
 const engineForTests = ManagedRuntime.make(
-	Layer.mergeAll(
-		Layer.empty,
-		...ChatWorkflows.definitions.map((definition) => definition.toLayer(held)),
-	).pipe(Layer.provideMerge(WorkflowEngine.layerMemory)),
+	Layer.mergeAll(Layer.empty, ...definitions.map((definition) => definition.toLayer(held))).pipe(
+		Layer.provideMerge(WorkflowEngine.layerMemory),
+	),
 ).runSync(Effect.service(WorkflowEngine.WorkflowEngine));
 
 /** Lanes over the test engine, in the caller's database. */
-export const lanesForTests = Lanes.make(ChatWorkflows.definitions).pipe(
+export const lanesForTests = Lanes.make(definitions).pipe(
 	Effect.provideService(WorkflowEngine.WorkflowEngine, engineForTests),
 );
 
@@ -47,10 +54,11 @@ const workflowsForTests = Layer.merge(
  */
 export const chatServicesLayerForTests = (
 	bus: Pick<EventBus.Interface, "publishCommitted">,
-	signals?: TurnSignals.Interface,
+	signals?: Turns.TurnSignals.Interface,
 ) => {
 	const composedFrom = Layer.mergeAll(
-		signals ? Layer.succeed(TurnSignals.Service, signals) : Turns.signalsLayer,
+		signals ? Layer.succeed(Turns.TurnSignals.Service, signals) : turnSignalsForTests,
+		turnRequestsForTests,
 		AutomationRuns.layer,
 	).pipe(
 		Layer.provide(workflowsForTests),
@@ -73,7 +81,7 @@ export const chatServicesLayerForTests = (
  */
 export const chatServicesForTests = (
 	bus: Pick<EventBus.Interface, "publishCommitted">,
-	signals?: TurnSignals.Interface,
+	signals?: Turns.TurnSignals.Interface,
 ) => {
 	const services = chatServicesLayerForTests(bus, signals);
 	return runOnPostgres(

@@ -2,13 +2,22 @@ import { ToolApprovalConflict } from "@sugabots/contracts/errors/approvals";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
-import { WorkflowEngine } from "effect/unstable/workflow";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { Context, Duration, Effect } from "effect";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { query } from "../../../database/database.ts";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
-import { bot, connector, member, membership, toolCall, turn } from "../../../database/schema.ts";
+import {
+	bot,
+	connector,
+	member,
+	membership,
+	toolCall,
+	turn,
+	workspace,
+} from "../../../database/schema.ts";
 import {
 	closeDatabase,
+	holdTransaction,
 	onDatabase,
 	onPostgres,
 	type Promised,
@@ -17,26 +26,29 @@ import {
 import { asMember } from "../../../operations/chats/testing.ts";
 import { type CallOperation, servedOperations } from "../../../operations/testing.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
-import { chatServicesForTests } from "../../testing.ts";
-import { ApprovedToolCalls } from "../approvals/approved-calls.ts";
-import { type PreparedTurn, replyTurnOf, TurnExecution } from "../execution.ts";
+import { chatServicesForTests, lanesForTests } from "../../testing.ts";
+import { releaseParkedLanes } from "../cancel-sweep.ts";
+import { TurnRecords } from "../records.ts";
 import { TurnSignals } from "../signals.ts";
-import { type TurnCheckpoint, TurnStore } from "../store.ts";
-import { aChatAwaitingReply, prepareRunnable, runningTurns } from "../testing.ts";
 import {
-	type SegmentOutcome,
-	Turn,
-	type TurnRequest,
-	TurnSteps,
-	turnWorkflow,
-} from "../turn.workflow.ts";
+	aChatAwaitingReply,
+	asTheLoop,
+	endTurn,
+	type OpenedTurnForTests,
+	openTurn,
+	parkTurn,
+	recordToolCall,
+	runningTurns,
+	runOver,
+	writeReply,
+} from "../testing.ts";
 import { Turns } from "../turns.ts";
-import { type ApprovalBinding, type PendingToolApproval, ToolCallStore } from "./store.ts";
+import { type ApprovalBinding, ToolCallStore } from "./store.ts";
 
 /**
- * Tool calls against Postgres: what `open` and `close` write, how the reply
- * reads them back where they were made, how an approval is parked, decided and
- * run, and what a turn ending early does to calls still running.
+ * Tool calls against Postgres: what recording and finishing a call write, how
+ * the reply reads them back where they were made, how an approval is parked,
+ * decided and run, and what a turn ending early does to calls still running.
  */
 describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async () => {
 	let delivered: CommittedEvent[] = [];
@@ -46,38 +58,24 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		},
 	};
 	const services = await chatServicesForTests(bus);
+	const run = runOver(services);
 	const calls: Promised<ToolCallStore.Interface> = onPostgres(
 		Context.get(services, ToolCallStore.Service),
 	);
-	const turns = onPostgres(Context.get(services, TurnStore.Service));
 	const call = await servedOperations({ chats: services });
 	/** `memberId`, signed in, deciding through the chat services `over`. */
 	const approvalsAs = (memberId: string, over: CallOperation = call) => asMember(over, memberId);
 	/** The operations over chat services whose turns' workflows hear decisions through `signals`. */
 	const signalledBy = async (signals: TurnSignals.Interface) =>
 		servedOperations({ chats: await chatServicesForTests(bus, signals) });
-	const approvals = onPostgres({
-		beginExecution: Context.get(services, ApprovedToolCalls.Service).beginExecution,
-	});
 	const detailsAs = (memberId: string) => asMember(call, memberId);
 	const chatsAs = (memberId: string) => asMember(call, memberId);
-	const execution = onPostgres({
-		prepare: Context.get(services, TurnExecution.Service).prepare,
-	});
 	let workspaceId: string;
 	let botId: string;
 	let adminId: string;
 	let chatId: string;
 	let connectorId: string;
-	let prepared: PreparedTurn;
-
-	/** Records a member allowing the call, as the turn's workflow does once told. */
-	const allow = (pending: PendingToolApproval) =>
-		calls.recordDecision({
-			chatId,
-			approvalId: pending.approvalId,
-			decision: { decision: "allow_once", memberId: adminId },
-		});
+	let opened: OpenedTurnForTests;
 
 	afterAll(async () => {
 		await closeDatabase();
@@ -85,40 +83,53 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 	beforeEach(async () => {
 		({ workspaceId, botId, adminId, chatId, connectorId } = await aChatAwaitingReply(chatsAs));
-		const [run] = await runOnPostgres(runningTurns(chatId));
-		if (!run) throw new Error("no turn running");
-		prepared = await prepareRunnable(execution, run);
+		const [running] = await runOnPostgres(runningTurns(chatId));
+		if (!running) throw new Error("no turn running");
+		opened = await run(openTurn(running));
 		delivered = [];
 	});
 
-	const from = (atOffset: number) => ({
-		chatId,
-		messageId: prepared.responseMessage.id,
-		turnId: prepared.turnId,
-		tool: "web_fetch",
-		input: { url: "https://example.com" },
-		atOffset,
-		writeOrDelete: false,
-	});
+	/** Records the turn sending a call to `web_fetch`, after the reply's text so far. */
+	const fetchCall = () =>
+		run(
+			recordToolCall(opened, {
+				toolCallId: `sdk-${crypto.randomUUID()}`,
+				tool: "web_fetch",
+				input: { url: "https://example.com" },
+			}),
+		);
 
-	const checkpoint = (overrides: Partial<TurnCheckpoint> = {}): TurnCheckpoint => ({
-		messages: [],
-		approvals: [],
-		modelInput: { model: "test", system: "test", messages: [] },
-		reply: { content: "Waiting.", toolCalls: [] },
-		modelRequests: 1,
-		...overrides,
-	});
+	/** Finishes the recorded call `callId` as the turn's loop does. */
+	const close = (
+		callId: string,
+		outcome: { output: unknown } | { error: ReturnType<typeof userText> },
+	) =>
+		run(
+			asTheLoop(opened, (runsTurn) =>
+				Effect.flatMap(ToolCallStore.Service, (store) => store.close(runsTurn, callId, outcome)),
+			),
+		);
 
-	const pendingCall = (overrides: Partial<PendingToolApproval> = {}): PendingToolApproval => ({
-		id: crypto.randomUUID(),
-		approvalId: `approval-${crypto.randomUUID()}`,
-		sdkToolCallId: "sdk-create-1",
+	const storedCall = async (id: string) => {
+		const [row] = await onDatabase((db) => db.select().from(toolCall).where(eq(toolCall.id, id)));
+		return row;
+	};
+
+	/** A call of the turn's step waiting for its approver, as the loop asks for one. */
+	interface AskedCall {
+		readonly toolCallId: string;
+		readonly tool: string;
+		readonly input: unknown;
+		readonly binding: ApprovalBinding;
+		readonly writeOrDelete: boolean;
+	}
+
+	const askedCall = (overrides: Partial<AskedCall> = {}): AskedCall => ({
+		toolCallId: "sdk-create-1",
 		tool: "linear__create_issue",
 		input: { title: "Fix mobile navigation" },
 		binding: connectorBinding("create_issue"),
 		writeOrDelete: true,
-		atOffset: 0,
 		...overrides,
 	});
 
@@ -129,44 +140,67 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		remoteToolName,
 	});
 
-	/** Parks `pending` as the turn's one approval. */
-	const park = (pending: PendingToolApproval) =>
-		turns.suspend(
-			replyTurnOf(prepared),
-			checkpoint({
-				approvals: [
-					{ approvalId: pending.approvalId, tool: pending.tool, binding: pending.binding },
-				],
-				reply: {
-					content: "",
-					toolCalls: [{ id: pending.id, atOffset: pending.atOffset }],
-				},
-			}),
-			[pending],
+	/** Parks `asked` as the turn's one approval; returns its recorded call and approval. */
+	async function park(asked: AskedCall) {
+		const parked = await run(parkTurn(opened, [asked]));
+		if (parked._tag !== "Waiting") throw new Error("the turn may not wait");
+		const [approvalId] = parked.approvals;
+		const [row] = await onDatabase((db) =>
+			db
+				.select()
+				.from(toolCall)
+				.where(eq(toolCall.approvalId, approvalId ?? "")),
 		);
-
-	/** Parks `pending`, allows it, and resumes the turn; returns the call as it would run. */
-	async function allowAndResume(pending: PendingToolApproval) {
-		await park(pending);
-		await allow(pending);
-		prepared = await prepareRunnable(execution, prepared.run);
-		return {
-			chatId,
-			messageId: prepared.responseMessage.id,
-			turnId: prepared.turnId,
-			sdkToolCallId: pending.sdkToolCallId,
-			tool: pending.tool,
-			input: pending.input,
-			atOffset: pending.atOffset,
-			binding: pending.binding,
-		};
+		if (!approvalId || !row) throw new Error("no approval parked");
+		return { id: row.id, approvalId };
 	}
 
-	it("opens a running call and closes it with its output", async () => {
-		const opened = await calls.open(from(4));
-		expect(opened).toMatchObject({
-			type: "tool_call",
+	/** Records a member allowing the parked call, as deciding it does. */
+	const allow = (approvalId: string) =>
+		calls.recordDecision({
+			chatId,
+			approvalId,
+			decision: { decision: "allow_once", memberId: adminId },
+		});
+
+	/** Starts the allowed call `asked` as the turn's next step does. */
+	const start = (asked: AskedCall) =>
+		run(
+			asTheLoop(opened, (runsTurn) =>
+				Effect.flatMap(TurnRecords.Service, (records) =>
+					records.startApprovedToolCall(runsTurn, asked),
+				),
+			),
+		);
+
+	/** Parks `asked`, allows it, and begins the turn's next step, which runs on. */
+	async function allowAndResume(asked: AskedCall) {
+		const { approvalId } = await park(asked);
+		await allow(approvalId);
+		const loaded = await run(
+			asTheLoop(opened, (runsTurn) =>
+				Effect.flatMap(TurnRecords.Service, (records) => records.load(runsTurn, 1)),
+			),
+		);
+		expect(loaded).toMatchObject({
+			_tag: "Begun",
+			approvals: [expect.objectContaining({ toolCallId: asked.toolCallId, decision: "allowed" })],
+		});
+	}
+
+	it("records a call as sent before it runs, and finishes it with its output", async () => {
+		await run(writeReply(opened, "Look"));
+		const id = await run(
+			recordToolCall(opened, {
+				toolCallId: "sdk-fetch",
+				tool: "web_fetch",
+				input: { url: "https://example.com" },
+			}),
+		);
+		expect(await storedCall(id)).toMatchObject({
 			tool: "web_fetch",
+			step: 0,
+			sdkToolCallId: "sdk-fetch",
 			input: { url: "https://example.com" },
 			output: null,
 			status: "running",
@@ -175,10 +209,10 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			finishedAt: null,
 		});
 
-		const closed = await calls.close(opened.id, { output: { title: "Example Domain" } });
+		const closed = await close(id, { output: { title: "Example Domain" } });
 
 		expect(closed).toMatchObject({
-			id: opened.id,
+			id,
 			status: "completed",
 			output: { title: "Example Domain" },
 			error: null,
@@ -187,9 +221,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	});
 
 	it("keeps the images a call showed the model counted, not their data", async () => {
-		const opened = await calls.open(from(0));
+		const id = await fetchCall();
 
-		const closed = await calls.close(opened.id, {
+		const closed = await close(id, {
 			output: {
 				text: "The image chart.png.",
 				images: [{ data: "iVBORw0KGgo".repeat(10_000), mediaType: "image/png" }],
@@ -200,58 +234,64 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	});
 
 	it("closes a failed call with the error and no output", async () => {
-		const opened = await calls.open(from(0));
+		const id = await fetchCall();
 
-		const closed = await calls.close(opened.id, { error: userText`Host did not resolve` });
+		const closed = await close(id, { error: userText`Host did not resolve` });
 
 		expect(closed).toMatchObject({ status: "failed", output: null, error: "Host did not resolve" });
 	});
 
 	it("composes the call into the reply's parts where it was made", async () => {
-		const opened = await calls.open(from(7));
-		await calls.close(opened.id, { output: { title: "Example Domain" } });
-		await turns.saveReply(replyTurnOf(prepared), {
-			content: "Looking now. Found it.",
-			toolCalls: [{ id: opened.id, atOffset: 7 }],
-		});
+		await run(writeReply(opened, "Looking"));
+		const id = await fetchCall();
+		await close(id, { output: { title: "Example Domain" } });
+		await run(
+			writeReply(opened, {
+				content: "Looking now. Found it.",
+				toolCalls: [{ id, atOffset: 7 }],
+			}),
+		);
 
 		const details = await detailsAs(adminId).get(chatId);
-		const reply = details?.messages.find((message) => message.id === prepared.responseMessage.id);
+		const reply = details?.messages.find((message) => message.id === opened.replyMessageId);
 
 		expect(reply?.parts).toEqual([
 			{ type: "text", text: "Looking" },
-			expect.objectContaining({ type: "tool_call", id: opened.id, status: "completed" }),
+			expect.objectContaining({ type: "tool_call", id, status: "completed" }),
 			{ type: "text", text: " now. Found it." },
 		]);
 	});
 
 	it("parks an approval and, once it is allowed, starts it once, as it was approved", async () => {
-		const execution = await allowAndResume(pendingCall({ atOffset: 7 }));
+		const asked = askedCall();
+		await allowAndResume(asked);
 		const [allowed] = await onDatabase((db) =>
 			db.select().from(toolCall).where(eq(toolCall.sdkToolCallId, "sdk-create-1")),
 		);
-		expect(allowed).toMatchObject({ approvalStatus: "allowed", decidedById: adminId });
+		expect(allowed).toMatchObject({ approvalStatus: "allowed", decidedById: adminId, step: 0 });
 
-		await expect(
-			approvals.beginExecution({ ...execution, input: { title: "A different issue" } }),
-		).rejects.toThrow("already claimed");
-		const running = await approvals.beginExecution(execution);
-		expect(running.status).toBe("running");
-		await expect(approvals.beginExecution(execution)).rejects.toThrow("not approved for execution");
-		await expect(
-			approvals.beginExecution({ ...execution, sdkToolCallId: "sdk-create-never-parked" }),
-		).rejects.toThrow("no approval record");
+		expect(await start({ ...asked, input: { title: "A different issue" } })).toMatchObject({
+			_tag: "Refused",
+			reason: expect.stringContaining("already claimed"),
+		});
+		expect(await start(asked)).toEqual({ _tag: "Send", id: allowed?.id });
+		// Started already, so starting it again, as an execution resuming the
+		// turn would, doesn't send it again: it may have made its change.
+		expect(await start(asked)).toMatchObject({ _tag: "Interrupted", id: allowed?.id });
+		expect(await start({ ...asked, toolCallId: "sdk-create-never-parked" })).toMatchObject({
+			_tag: "Refused",
+			reason: expect.stringContaining("no approval record"),
+		});
 	});
 
 	it("starts an allowed call to a built-in tool, which no connector's settings bind", async () => {
-		const execution = await allowAndResume(
-			pendingCall({
-				sdkToolCallId: "sdk-built-in",
-				tool: "request_host",
-				input: { host: "api.example.com" },
-				binding: { kind: "built-in" },
-			}),
-		);
+		const asked = askedCall({
+			toolCallId: "sdk-built-in",
+			tool: "web_fetch",
+			input: { url: "https://example.com" },
+			binding: { kind: "built-in" },
+		});
+		await allowAndResume(asked);
 		await onDatabase((db) =>
 			db
 				.update(connector)
@@ -259,22 +299,58 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 				.where(eq(connector.id, connectorId)),
 		);
 
-		const running = await approvals.beginExecution(execution);
+		expect(await start(asked)).toMatchObject({ _tag: "Send" });
+	});
 
-		expect(running.status).toBe("running");
+	it("refuses an approved resend when deletion starts before the execution fence is checked", async () => {
+		const asked = askedCall({ toolCallId: "sdk-read-before-deletion", writeOrDelete: false });
+		await allowAndResume(asked);
+		const started = await start(asked);
+		if (started._tag !== "Send") throw new Error("the approved call did not start");
+
+		const resend = await run(
+			asTheLoop(opened, (runsTurn) =>
+				Effect.gen(function* () {
+					yield* Effect.promise(async () => {
+						await onDatabase((db) =>
+							db.update(workspace).set({ deleting: true }).where(eq(workspace.id, workspaceId)),
+						);
+						await onDatabase((db) =>
+							db
+								.update(turn)
+								.set({ executionNumber: runsTurn.execution + 1 })
+								.where(eq(turn.id, runsTurn.turn.value)),
+						);
+					});
+					const records = yield* TurnRecords.Service;
+					return yield* records.startApprovedToolCall(runsTurn, asked);
+				}),
+			),
+		);
+
+		expect(resend).toEqual({ _tag: "Refused", reason: "The chat is unavailable" });
+		expect(await storedCall(started.id)).toMatchObject({
+			status: "running",
+			sentInExecution: opened.principal.executionNumber,
+		});
 	});
 
 	it("refuses an allowed call after the reviewed connector configuration changes", async () => {
-		const execution = await allowAndResume(pendingCall({ sdkToolCallId: "sdk-revision" }));
+		const asked = askedCall({ toolCallId: "sdk-revision" });
+		await allowAndResume(asked);
 		await onDatabase((db) =>
 			db.update(connector).set({ configurationRevision: 2 }).where(eq(connector.id, connectorId)),
 		);
 
-		await expect(approvals.beginExecution(execution)).rejects.toThrow("configuration changed");
+		expect(await start(asked)).toMatchObject({
+			_tag: "Refused",
+			reason: expect.stringContaining("configuration changed"),
+		});
 	});
 
 	it("refuses an allowed call to a tool somebody turned off after it was allowed", async () => {
-		const execution = await allowAndResume(pendingCall({ sdkToolCallId: "sdk-turned-off" }));
+		const asked = askedCall({ toolCallId: "sdk-turned-off" });
+		await allowAndResume(asked);
 		await onDatabase((db) =>
 			db
 				.update(connector)
@@ -282,12 +358,14 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 				.where(eq(connector.id, connectorId)),
 		);
 
-		await expect(approvals.beginExecution(execution)).rejects.toThrow("turned off");
+		expect(await start(asked)).toMatchObject({
+			_tag: "Refused",
+			reason: expect.stringContaining("turned off"),
+		});
 	});
 
 	it("conceals a pending approval from somebody who cannot reach the bot", async () => {
-		const pending = pendingCall({ sdkToolCallId: "sdk-stranger" });
-		await park(pending);
+		const pending = await park(askedCall({ toolCallId: "sdk-stranger" }));
 		// A personal bot, which only its creator reaches.
 		await onDatabase((db) =>
 			db.update(bot).set({ visibility: "personal" }).where(eq(bot.id, botId)),
@@ -309,8 +387,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	});
 
 	it("refuses a decision to somebody who reaches the bot but may not decide", async () => {
-		const pending = pendingCall({ sdkToolCallId: "sdk-viewer" });
-		await park(pending);
+		const pending = await park(askedCall({ toolCallId: "sdk-viewer" }));
 		const [viewer] = await onDatabase((db) =>
 			db
 				.insert(member)
@@ -331,117 +408,101 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		expect(undecided).toMatchObject({ approvalStatus: "pending", decidedById: null });
 	});
 
-	it("fails calls still running when their turn is cancelled, and keeps them failed", async () => {
-		const opened = await calls.open(from(0));
+	it("fails calls still running when their turn is cancelled, and records nothing more of them", async () => {
+		const id = await fetchCall();
 
-		await turns.cancel(replyTurnOf(prepared), { content: "", toolCalls: [] });
+		await run(endTurn(opened, { kind: "cancelled" }));
 
-		const [row] = await onDatabase((db) =>
-			db.select().from(toolCall).where(eq(toolCall.id, opened.id)),
-		);
-		expect(row).toMatchObject({ status: "failed", error: "Turn cancelled" });
+		const row = await storedCall(id);
+		expect(row).toMatchObject({ status: "failed", error: "The turn ended before this finished" });
 		expect(row?.finishedAt).not.toBeNull();
 		expect(delivered.map(({ event }) => event)).toContainEqual(
 			expect.objectContaining({
 				type: "tool_call.completed",
-				toolCall: expect.objectContaining({ id: opened.id, status: "failed" }),
+				toolCall: expect.objectContaining({ id, status: "failed" }),
 			}),
 		);
-		expect(await calls.close(opened.id, { output: { late: true } })).toBeUndefined();
-		const [stillFailed] = await onDatabase((db) =>
-			db.select().from(toolCall).where(eq(toolCall.id, opened.id)),
-		);
-		expect(stillFailed).toMatchObject({ status: "failed", error: "Turn cancelled" });
+		await expect(close(id, { output: { late: true } })).rejects.toMatchObject({
+			_tag: "TurnEnded",
+		});
+		expect(await storedCall(id)).toMatchObject({
+			status: "failed",
+			error: "The turn ended before this finished",
+		});
 	});
 
 	it("forgets the last run's calls when a turn runs again", async () => {
-		const opened = await calls.open(from(0));
-		await turns.fail(
-			replyTurnOf(prepared),
-			{ content: "", toolCalls: [] },
-			{ userMessage: userText`provider down`, mayRunAgain: true },
+		const id = await fetchCall();
+		await run(
+			endTurn(opened, { kind: "failed", userMessage: userText`provider down`, mayRunAgain: true }),
 		);
 
-		await prepareRunnable(execution, prepared.run);
+		await run(openTurn(opened.run));
 
-		const rows = await onDatabase((db) =>
-			db.select().from(toolCall).where(eq(toolCall.id, opened.id)),
-		);
-		expect(rows).toEqual([]);
+		expect(await storedCall(id)).toBeUndefined();
 	});
 
-	describe("when a workflow owns the turn", () => {
-		const segment = vi.fn((_turn: TurnRequest) =>
-			Effect.succeed<SegmentOutcome>({ _tag: "Finished" }),
-		);
-		const cancelWaiting = vi.fn((stored: TurnRequest) =>
-			Effect.promise(() => turns.cancelWaiting(stored)),
-		);
-		// Recording cancellations is real; the segments are not.
-		const steps = TurnSteps.of({
-			segment,
-			cancelWaiting,
-			abandon: () => Effect.void,
-			announceReleased: () => Effect.void,
+	describe("while its workflow waits for decisions", () => {
+		/** What the turn's workflow was told, in order. */
+		let heard: Array<
+			| { readonly decided: Parameters<TurnSignals.Interface["decide"]>[0] }
+			| { readonly cancelled: string }
+		>;
+		const listening = TurnSignals.Service.of({
+			decide: (signal) => Effect.sync(() => void heard.push({ decided: signal })),
+			withdraw: () => Effect.void,
+			cancel: (executionId) => Effect.sync(() => void heard.push({ cancelled: executionId })),
 		});
-		const workflows = ManagedRuntime.make(
-			turnWorkflow.layer.pipe(
-				Layer.provideMerge(Layer.succeed(TurnSteps, steps)),
-				Layer.provideMerge(
-					Layer.succeed(
-						Lanes.Service,
-						Lanes.Service.of({
-							admit: () => Effect.die("unused"),
-							release: () => Effect.void,
-							dropWaiting: () => Effect.die("unused"),
-							reconcile: Effect.void,
-						}),
-					),
-				),
-				Layer.provideMerge(WorkflowEngine.layerMemory),
-			),
-		);
-		afterAll(() => workflows.dispose());
 
-		/** Runs the turn's workflow to its first segment, which parks `pending` for approval. */
-		async function parkInWorkflow(pending: PendingToolApproval) {
-			segment.mockClear();
-			segment.mockReturnValueOnce(
-				Effect.succeed({ _tag: "Suspended", approvals: [pending.approvalId] }),
-			);
-			const executionId = await workflows.runPromise(
-				Turn.execute(prepared.run.request, { discard: true }),
-			);
-			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(1));
-			await onDatabase((db) =>
-				db.update(turn).set({ executionId }).where(eq(turn.id, prepared.turnId)),
-			);
-			await park(pending);
-			return workflows.runPromise(TurnSignals.make);
-		}
+		beforeEach(() => {
+			heard = [];
+		});
 
 		const workflowCall = () =>
-			pendingCall({ sdkToolCallId: "sdk-workflow", input: { title: "Workflow" } });
+			askedCall({ toolCallId: "sdk-workflow", input: { title: "Workflow" } });
 
-		it("records a decision and sends it to the workflow, which runs on", async () => {
-			const pending = workflowCall();
-			const signals = await parkInWorkflow(pending);
+		it("parks and decides while another approval writer shares the workspace lock", async () => {
+			const held = holdTransaction(
+				query((db) =>
+					db
+						.select({ id: workspace.id })
+						.from(workspace)
+						.where(eq(workspace.id, workspaceId))
+						.for("share"),
+				),
+			);
+			await held.held;
+			const pending = await park(workflowCall());
+			await approvalsAs(adminId).decide({ toolCallId: pending.id, decision: "allow_once" });
+			expect(await storedCall(pending.id)).toMatchObject({ approvalStatus: "allowed" });
+			await held.release();
+		});
 
-			await approvalsAs(adminId, await signalledBy(signals)).decide({
+		it("records a decision and sends it to the workflow", async () => {
+			const pending = await park(workflowCall());
+
+			await approvalsAs(adminId, await signalledBy(listening)).decide({
 				toolCallId: pending.id,
 				decision: "allow_once",
 			});
 
-			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(2));
-			const [decided] = await onDatabase((db) =>
-				db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
-			);
-			expect(decided).toMatchObject({ approvalStatus: "allowed", decidedById: adminId });
+			expect(await storedCall(pending.id)).toMatchObject({
+				approvalStatus: "allowed",
+				decidedById: adminId,
+			});
+			expect(heard).toEqual([
+				{
+					decided: {
+						executionId: opened.run.executionId,
+						approvalId: pending.approvalId,
+						decision: { decision: "allow_once", memberId: adminId },
+					},
+				},
+			]);
 		});
 
 		it("leaves a call to the member its turn acts for, not another administrator", async () => {
-			const pending = workflowCall();
-			const signals = await parkInWorkflow(pending);
+			const pending = await park(workflowCall());
 			const [administrator] = await onDatabase((db) =>
 				db
 					.insert(member)
@@ -454,21 +515,21 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			);
 
 			await expect(
-				approvalsAs(administrator.id, await signalledBy(signals)).decide({
+				approvalsAs(administrator.id, await signalledBy(listening)).decide({
 					toolCallId: pending.id,
 					decision: "allow_once",
 				}),
 			).rejects.toBeInstanceOf(ActionForbidden);
-			const [undecided] = await onDatabase((db) =>
-				db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
-			);
-			expect(undecided).toMatchObject({ approvalStatus: "pending", decidedById: null });
+			expect(await storedCall(pending.id)).toMatchObject({
+				approvalStatus: "pending",
+				decidedById: null,
+			});
+			expect(heard).toEqual([]);
 		});
 
 		it("tells a second member the approval is already decided", async () => {
-			const pending = workflowCall();
-			const signals = await parkInWorkflow(pending);
-			const deciding = approvalsAs(adminId, await signalledBy(signals));
+			const pending = await park(workflowCall());
+			const deciding = approvalsAs(adminId, await signalledBy(listening));
 			const decide = (decision: "allow_once" | "deny") =>
 				deciding.decide({ toolCallId: pending.id, decision });
 
@@ -477,10 +538,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			await expect(decide("deny")).rejects.toBeInstanceOf(ToolApprovalConflict);
 		});
 
-		it("tells the chat's watchers of a decision before the workflow hears it", async () => {
-			const pending = workflowCall();
-			const signals = await parkInWorkflow(pending);
-			const unheard = TurnSignals.Service.of({ ...signals, decide: () => Effect.void });
+		it("tells the chat's watchers of a decision even when the workflow never hears it", async () => {
+			const pending = await park(workflowCall());
+			const unheard = TurnSignals.Service.of({ ...listening, decide: () => Effect.void });
 			delivered = [];
 
 			await approvalsAs(adminId, await signalledBy(unheard)).decide({
@@ -497,28 +557,67 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 					}),
 				}),
 			);
-			expect(segment).toHaveBeenCalledTimes(1);
 		});
 
-		it("sends a cancel again when the first never reached the workflow", async () => {
-			const signals = await parkInWorkflow(workflowCall());
-			cancelWaiting.mockClear();
-			// Cancelled as its automation run ended and committed, but the process
-			// stopped before the signal left.
+		it("frees the lane of a parked turn whose workflow has not released it", async () => {
+			const pending = await park(workflowCall());
+			expect(await runOnPostgres(runningTurns(chatId))).toHaveLength(1);
+
+			await runOnPostgres(
+				releaseParkedLanes.pipe(Effect.provideServiceEffect(Lanes.Service, lanesForTests)),
+			);
+
+			expect(await runOnPostgres(runningTurns(chatId))).toHaveLength(0);
+			expect(await storedCall(pending.id)).toMatchObject({ approvalStatus: "pending" });
+		});
+
+		it.each(["waiting", "cancelled"] as const)(
+			"resends a missed cancel to a %s turn without a lane",
+			async (status) => {
+				await park(workflowCall());
+				await runOnPostgres(
+					releaseParkedLanes.pipe(Effect.provideServiceEffect(Lanes.Service, lanesForTests)),
+				);
+				expect(await runOnPostgres(runningTurns(chatId))).toHaveLength(0);
+				// Cancelled as its automation run ended and committed, but the process
+				// stopped before the signal left.
+				await onDatabase((db) =>
+					db
+						.update(turn)
+						.set({
+							status,
+							endRequested: "run_ended",
+							finishedAt: status === "cancelled" ? new Date() : null,
+						})
+						.where(eq(turn.id, opened.turnId)),
+				);
+
+				await runOnPostgres(
+					Turns.resendLostCancels.pipe(Effect.provideService(TurnSignals.Service, listening)),
+				);
+
+				expect(heard).toContainEqual({ cancelled: opened.run.executionId });
+			},
+		);
+
+		it("stops resending the cancel of a turn cancelled over a day ago", async () => {
+			await park(workflowCall());
 			await onDatabase((db) =>
 				db
 					.update(turn)
-					.set({ status: "cancelled", interruptRequested: true })
-					.where(eq(turn.id, prepared.turnId)),
+					.set({
+						status: "cancelled",
+						endRequested: "run_ended",
+						finishedAt: new Date(Date.now() - Duration.toMillis(Duration.hours(25))),
+					})
+					.where(eq(turn.id, opened.turnId)),
 			);
 
 			await runOnPostgres(
-				Turns.resendLostCancels.pipe(Effect.provideService(TurnSignals.Service, signals)),
+				Turns.resendLostCancels.pipe(Effect.provideService(TurnSignals.Service, listening)),
 			);
 
-			// The workflow heard it and stopped waiting.
-			await vi.waitFor(() => expect(cancelWaiting).toHaveBeenCalledTimes(1));
-			expect(segment).toHaveBeenCalledTimes(1);
+			expect(heard).not.toContainEqual({ cancelled: opened.run.executionId });
 		});
 	});
 });

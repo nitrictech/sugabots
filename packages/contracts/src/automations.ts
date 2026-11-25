@@ -198,7 +198,7 @@ const everySchema = (maximum: number) =>
  * weeks, or on `dayOfMonth` of those months. A `cron` timetable is a cron
  * expression kept as it was written: a bot writes its routines that way.
  */
-const routineScheduleSchema = Schema.Union([
+export const routineScheduleSchema = Schema.Union([
 	Schema.Struct({
 		repeat: Schema.Literal("daily"),
 		every: everySchema(MAX_EVERY_DAYS),
@@ -478,12 +478,25 @@ export const automationListStatusSchema = Schema.Struct({
 export type AutomationListStatus = typeof automationListStatusSchema.Type;
 
 /** One of a project's automations as its list shows it: how it is set up, and how it stands. */
-export const listedAutomationDefinitionSchema = Schema.Struct({
+const listedAutomationDefinitionSchema = Schema.Struct({
 	...automationSchema.fields,
 	status: Schema.optionalKey(automationListStatusSchema),
 });
 
 export type ListedAutomationDefinition = typeof listedAutomationDefinitionSchema.Type;
+
+const restrictableAutomationSchema = Schema.Struct({
+	id: uuidSchema,
+	name: automationNameSchema,
+	state: automationStateSchema,
+	restricted: Schema.Literal(true),
+});
+export type RestrictableAutomation = typeof restrictableAutomationSchema.Type;
+
+export const automationListItemSchema = Schema.Union([
+	listedAutomationDefinitionSchema,
+	restrictableAutomationSchema,
+]);
 
 export const listedRunSchema = Schema.Struct({
 	runId: uuidSchema,
@@ -578,3 +591,8 @@ export const automationWriteResultSchema = Schema.Struct({
 	secrets: Schema.Array(Schema.Struct({ triggerId: uuidSchema, secret: Schema.String })),
 }).annotate({ identifier: "AutomationWriteResult" });
 export type AutomationWriteResult = typeof automationWriteResultSchema.Type;
+
+export const automationUpdateResultSchema = Schema.Union([
+	automationWriteResultSchema,
+	Schema.Struct({ automation: restrictableAutomationSchema, secrets: Schema.Tuple([]) }),
+]);

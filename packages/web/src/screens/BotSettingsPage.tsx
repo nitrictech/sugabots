@@ -19,7 +19,7 @@ import { characterCount } from "@/lib/character-count.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnectors } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { botComputerLink, botConnectorsLink, botsLink } from "@/lib/links.ts";
+import { botAutomationsLink, botComputerLink, botConnectorsLink, botsLink } from "@/lib/links.ts";
 import { formatDate } from "@/lib/list-time.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { modelLogoOf } from "@/lib/model-logo.ts";
@@ -119,47 +119,81 @@ function BotSettings({ bot }: { bot: Bot }) {
 			description={bot.description || undefined}
 		>
 			{update.error && <Alert>{failureMessage(update.error)}</Alert>}
-			<SettingsGroup label="Profile">
-				<ProfileField
-					label="Name"
-					value={bot.name}
-					maxLength={BOT_NAME_MAX_LENGTH}
-					required
-					editable={may.update}
-					savePending={savePending}
-					onCommit={(name) => save({ name })}
-				/>
-				{!fixed && (
-					<>
+			{may.talk && (
+				<>
+					<SettingsGroup label="Profile">
 						<ProfileField
-							label="Description"
-							value={bot.description ?? ""}
-							placeholder="One line on what it's for"
-							maxLength={DESCRIPTION_MAX_LENGTH}
+							label="Name"
+							value={bot.name}
+							maxLength={BOT_NAME_MAX_LENGTH}
+							required
 							editable={may.update}
 							savePending={savePending}
-							onCommit={(description) => save({ description })}
+							onCommit={(name) => save({ name })}
 						/>
-						<VisibilityRow bot={bot} editable={may.update} savePending={savePending} save={save} />
-						<ModelRow
-							model={bot.model}
-							canChoose={may.update}
-							onChoose={(model) => {
-								void save({ model }).catch(() => {});
-							}}
+						{!fixed && (
+							<>
+								<ProfileField
+									label="Description"
+									value={bot.description ?? ""}
+									placeholder="One line on what it's for"
+									maxLength={DESCRIPTION_MAX_LENGTH}
+									editable={may.update}
+									savePending={savePending}
+									onCommit={(description) => save({ description })}
+								/>
+								<VisibilityRow
+									bot={bot}
+									editable={may.update}
+									savePending={savePending}
+									save={save}
+								/>
+								<ModelRow
+									model={bot.model ?? null}
+									canChoose={may.update}
+									onChoose={(model) => {
+										void save({ model }).catch(() => {});
+									}}
+								/>
+								<AddedByRow bot={bot} />
+							</>
+						)}
+					</SettingsGroup>
+					{!fixed && (
+						<Instructions bot={bot} editable={may.update} save={save} savePending={savePending} />
+					)}
+					{!fixed && (
+						<BuiltInTools
+							bot={bot}
+							workspaceName={workspaceName}
+							canChange={may.update}
+							save={save}
 						/>
-						<AddedByRow bot={bot} />
-					</>
-				)}
-			</SettingsGroup>
-			{!fixed && (
-				<Instructions bot={bot} editable={may.update} save={save} savePending={savePending} />
+					)}
+					<BotConnectors bot={bot} />
+					<BotAutomations bot={bot} />
+				</>
 			)}
-			{!fixed && (
-				<BuiltInTools bot={bot} workspaceName={workspaceName} canChange={may.update} save={save} />
+			{!may.talk && (
+				<SettingsGroup label="Access">
+					<SettingsRow
+						label="Connectors"
+						trailing={
+							<Link {...botConnectorsLink(bot)} className="text-link underline">
+								Open connectors
+							</Link>
+						}
+					/>
+					<SettingsRow
+						label="Automations"
+						trailing={
+							<Link {...botAutomationsLink(bot)} className="text-link underline">
+								Open automations
+							</Link>
+						}
+					/>
+				</SettingsGroup>
 			)}
-			<BotConnectors bot={bot} />
-			<BotAutomations bot={bot} />
 			{may.delete && !fixed && (
 				<SettingsDanger
 					label="Delete bot"
@@ -355,7 +389,7 @@ function LookEditor({
  */
 function AddedByRow({ bot }: { bot: Bot }) {
 	const adder = bot.createdBy;
-	const when = formatDate(new Date(bot.createdAt));
+	const when = bot.createdAt && formatDate(new Date(bot.createdAt));
 	return (
 		<SettingsRow
 			label="Added by"
@@ -436,7 +470,7 @@ function Instructions({
 	savePending: boolean;
 }) {
 	const { draft, fieldProps } = useCommittedDraft(
-		bot.instructions,
+		bot.instructions ?? "",
 		(instructions) => save({ instructions }),
 		{
 			allowEmpty: true,
@@ -601,13 +635,14 @@ function BuiltInTools({
 }) {
 	const webOff = useWebAccess().data?.enabled === false;
 	const computersOff = useComputerAccess().data?.enabled === false;
+	const disabledTools = bot.disabledTools ?? [];
 	const isOn = (keys: readonly BuiltInToolKey[]) =>
-		keys.some((key) => !bot.disabledTools.includes(key));
+		keys.some((key) => !disabledTools.includes(key));
 	const setTools = (keys: readonly BuiltInToolKey[], on: boolean) =>
 		save({
 			disabledTools: on
-				? bot.disabledTools.filter((key) => !(keys as readonly string[]).includes(key))
-				: [...new Set([...bot.disabledTools, ...keys])],
+				? disabledTools.filter((key) => !(keys as readonly string[]).includes(key))
+				: [...new Set([...disabledTools, ...keys])],
 		}).catch(() => {});
 
 	return (
@@ -629,7 +664,7 @@ function BuiltInTools({
 						? `Computers are off for ${workspaceName}`
 						: "Run commands, browse and edit files on a computer of its own"
 				}
-				on={bot.usesComputer && !computersOff}
+				on={bot.usesComputer === true && !computersOff}
 				canChange={bot.permissions.resources.manageComputer}
 				offReason={computersOff ? `Computers are off for ${workspaceName}` : undefined}
 				onChange={(next) => save({ usesComputer: next }).catch(() => {})}
@@ -639,7 +674,7 @@ function BuiltInTools({
 				<ToolRow
 					label="Natural browsing"
 					sub="Show a cursor, scroll smoothly and type at a typing pace, so members watching can follow along. Slower."
-					on={bot.naturalBrowsing}
+					on={bot.naturalBrowsing === true}
 					canChange={canChange}
 					onChange={(next) => save({ naturalBrowsing: next }).catch(() => {})}
 				/>

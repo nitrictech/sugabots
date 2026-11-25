@@ -17,7 +17,7 @@ export const startProjectChat = defineOperation(
 					// A member who reaches a project takes part in its chats.
 					const reach = yield* proveReachesProject(principal, project);
 					return yield* chats.startProjectChat(isMember, reach, {
-						messageId: input.id,
+						retryKey: input.retryKey,
 						content: input.message,
 					});
 				}),

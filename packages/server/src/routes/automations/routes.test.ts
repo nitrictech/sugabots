@@ -130,7 +130,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Automation webhooks", () => {
 		// Spacing a signature covers, which re-encoding the JSON would lose.
 		const body = '{ "orderId":  42 }';
 
-		const response = await deliver(app, { authorization: GOOD_AUTHORIZATION, body });
+		const response = await deliver(app, {
+			authorization: GOOD_AUTHORIZATION,
+			body,
+			path: `/webhooks/triggers/${triggerId.toUpperCase()}`,
+		});
 
 		expect(response.status).toBe(202);
 		expect(await response.json()).toEqual({ runId: RUN_ID, duplicate: false });

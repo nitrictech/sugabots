@@ -8,6 +8,7 @@ import { Layer } from "effect";
 import { Connectors } from "../../providers/connectors/connectors.ts";
 import { GitHubApps } from "../../providers/connectors/github/github-app.ts";
 import { GitHubConnectors } from "../../providers/connectors/github/github-connectors.ts";
+import { callTool } from "./call-tool.ts";
 import { connectBuiltIn } from "./connect-built-in.ts";
 import { create } from "./create.ts";
 import { get } from "./get.ts";
@@ -23,12 +24,15 @@ import { start } from "./github/start.ts";
 import { list } from "./list.ts";
 import { oauthCallback } from "./oauth-callback.ts";
 import { remove } from "./remove.ts";
+import { searchTools } from "./search-tools.ts";
 import { startOAuth } from "./start-oauth.ts";
 import { test } from "./test.ts";
 import { testUnsaved } from "./test-unsaved.ts";
 import { update } from "./update.ts";
 
 export const connectorsOperations = {
+	"connectors.callTool": callTool,
+	"connectors.searchTools": searchTools,
 	"connectors.list": list,
 	"connectors.create": create,
 	"connectors.testUnsaved": testUnsaved,

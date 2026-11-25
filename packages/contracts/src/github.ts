@@ -114,7 +114,7 @@ export type RepositoryEvent = typeof repositoryEventSchema.Type;
  * automation's run is told of it: the fields of a GitHub run trigger besides
  * which connector and delivery it came from, and when.
  */
-export const repositoryActivitySchema = Schema.Struct({
+const repositoryActivitySchema = Schema.Struct({
 	event: repositoryEventSchema,
 	repository: Schema.String,
 	/** Who did it, by their name at GitHub. */

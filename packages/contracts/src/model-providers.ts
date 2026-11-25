@@ -278,7 +278,7 @@ export const providerSignInStartedSchema = Schema.Struct({
 export type ProviderSignInStarted = typeof providerSignInStartedSchema.Type;
 
 export const providerSignInCompletionSchema = Schema.Struct({
-	attempt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
+	attempt: Schema.optional(Schema.String.check(Schema.isMaxLength(4096))),
 });
 
 const builtInNames = new Set(builtInProviders.map(({ name }) => name.toLowerCase()));

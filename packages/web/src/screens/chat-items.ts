@@ -22,11 +22,17 @@ export function mergeChatItems(
 	liveMessages: readonly Message[],
 ): ChatMessageItem[] {
 	const items = new Map<string, ChatMessageItem>();
-	for (const item of [...pageItems, ...optimistic]) {
+	for (const item of pageItems) {
 		items.set(chatItemId(item), item);
 	}
 	for (const message of liveMessages)
 		items.set(`message:${message.id}`, { kind: "message", message });
+	const saved = new Set(messagesIn([...items.values()]).map(messageKey));
+	for (const item of optimistic) {
+		if (item.kind === "message" && !saved.has(messageKey(item.message))) {
+			items.set(chatItemId(item), item);
+		}
+	}
 	return [...items.values()].sort((left, right) =>
 		chatItemCreatedAt(left).localeCompare(chatItemCreatedAt(right)),
 	);
@@ -39,14 +45,20 @@ export function sendingIds(
 	liveMessages: readonly Message[],
 ): ReadonlySet<string> {
 	const saved = new Set([
-		...pageItems.flatMap((item) => (item.kind === "message" ? [item.message.id] : [])),
-		...liveMessages.map(({ id }) => id),
+		...messagesIn(pageItems).map(messageKey),
+		...liveMessages.map(messageKey),
 	]);
 	return new Set(
 		optimistic.flatMap((item) =>
-			item.kind === "message" && !saved.has(item.message.id) ? [item.message.id] : [],
+			item.kind === "message" && !saved.has(messageKey(item.message)) ? [item.message.id] : [],
 		),
 	);
+}
+
+function messageKey(message: Message): string {
+	return message.retryKey && message.author.kind === "member"
+		? `retry:${message.author.id}:${message.retryKey}`
+		: message.id;
 }
 
 /** The messages among `items`, leaving out automation runs and pauses. */

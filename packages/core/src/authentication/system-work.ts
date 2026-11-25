@@ -1,20 +1,16 @@
 export * as SystemWorkAuthentication from "./system-work.ts";
 
 import { type DomainError, userText } from "@sugabots/errors";
-import { and, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
-import { Context, Effect, ErrorReporter, Layer, Schema } from "effect";
+import { and, eq } from "drizzle-orm";
+import { Context, DateTime, Effect, ErrorReporter, Layer, Schema } from "effect";
 import { AutomationStore } from "../chats/automations/store.ts";
+import { Turns } from "../chats/turns/turns.ts";
+import { idleComputerIds } from "../computers/project-computers.ts";
 import { query, serviceOperations } from "../database/database.ts";
-import {
-	automation,
-	automationRun,
-	automationTrigger,
-	computer,
-	message,
-	placedChat,
-} from "../database/schema.ts";
+import { computer, message, placedChat, project, toolCall, workspace } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
-import { authenticated, type SystemWork } from "../principal.ts";
+import { authenticated, type DeletionTarget, type SystemWork } from "../principal.ts";
+import { GitHubUninstalls } from "../providers/connectors/github/uninstalls.ts";
 import { processLayer, Tier } from "../tiers.ts";
 
 /**
@@ -26,6 +22,15 @@ import { processLayer, Tier } from "../tiers.ts";
  * but stored ids.
  */
 export interface Interface {
+	readonly pendingDeletions: Effect.Effect<readonly DeletionTarget[]>;
+	readonly deletion: (target: DeletionTarget) => Effect.Effect<SystemWork, StoredWorkGone>;
+	readonly nextDueRoutineId: (excluded?: readonly string[]) => Effect.Effect<string | undefined>;
+	readonly expiredApprovalIds: Effect.Effect<readonly string[]>;
+	readonly approvalExpiry: (id: string) => Effect.Effect<SystemWork, StoredWorkGone>;
+	readonly idleComputerIds: Effect.Effect<readonly string[]>;
+	readonly pendingPauseIds: Effect.Effect<readonly string[]>;
+	readonly dueGitHubUninstallIds: Effect.Effect<readonly string[]>;
+	readonly gitHubUninstall: (id: string) => Effect.Effect<SystemWork, StoredWorkGone>;
 	/** Compacting a chat, as the stored compaction request asks. */
 	readonly compaction: (request: CompactionRequest) => Effect.Effect<SystemWork, StoredWorkGone>;
 	/** Putting the computer `computerId` to sleep. */
@@ -55,6 +60,109 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("SystemWorkAuthentication");
 
 	return Service.of({
+		pendingDeletions: operation(
+			"pendingDeletions",
+			Effect.gen(function* () {
+				const workspaces = yield* query((db) =>
+					db.select({ id: workspace.id }).from(workspace).where(eq(workspace.deleting, true)),
+				);
+				const projects = yield* query((db) =>
+					db
+						.select({ id: project.id })
+						.from(project)
+						.innerJoin(workspace, eq(workspace.id, project.workspaceId))
+						.where(and(eq(project.deleting, true), eq(workspace.deleting, false))),
+				);
+				return [
+					...workspaces.map(({ id }) => ({ kind: "workspace" as const, id })),
+					...projects.map(({ id }) => ({ kind: "project" as const, id })),
+				];
+			}),
+		),
+		deletion: (target) =>
+			operation(
+				"deletion",
+				Effect.gen(function* () {
+					if (!isUuid(target.id)) return yield* new StoredWorkGone({ work: "deletion" });
+					const [row] =
+						target.kind === "workspace"
+							? yield* query((db) =>
+									db
+										.select({ id: workspace.id, workspace: workspace.id })
+										.from(workspace)
+										.where(and(eq(workspace.id, target.id), eq(workspace.deleting, true))),
+								)
+							: yield* query((db) =>
+									db
+										.select({ id: project.id, workspace: project.workspaceId })
+										.from(project)
+										.where(and(eq(project.id, target.id), eq(project.deleting, true))),
+								);
+					if (!row) return yield* new StoredWorkGone({ work: "deletion" });
+					return authenticated.systemWork({
+						workspace: row.workspace,
+						work: { kind: "deletion", targetKind: target.kind, id: row.id },
+					});
+				}),
+			),
+
+		nextDueRoutineId: (excluded = []) =>
+			operation(
+				"nextDueRoutineId",
+				DateTime.nowAsDate.pipe(
+					Effect.flatMap((now) => AutomationStore.nextDueRoutine(now, excluded)),
+					Effect.map(([row]) => row?.id),
+				),
+			),
+		expiredApprovalIds: operation(
+			"expiredApprovalIds",
+			Turns.dueApprovals().pipe(Effect.map((rows) => rows.flatMap(({ id }) => (id ? [id] : [])))),
+		),
+		approvalExpiry: (id) =>
+			operation(
+				"approvalExpiry",
+				Effect.gen(function* () {
+					const [due] = yield* Turns.dueApprovals(eq(toolCall.approvalId, id));
+					if (!due) return yield* new StoredWorkGone({ work: "approvalExpiry" });
+					return authenticated.systemWork({
+						workspace: due.workspace,
+						work: { kind: "approvalExpiry", approval: id },
+					});
+				}),
+			),
+		idleComputerIds: operation(
+			"idleComputerIds",
+			DateTime.now.pipe(
+				Effect.flatMap(idleComputerIds),
+				Effect.map((rows) => rows.map(({ id }) => id)),
+			),
+		),
+		pendingPauseIds: operation(
+			"pendingPauseIds",
+			AutomationStore.pendingPauseIds.pipe(Effect.map((rows) => rows.map(({ id }) => id))),
+		),
+		dueGitHubUninstallIds: operation(
+			"dueGitHubUninstallIds",
+			DateTime.nowAsDate.pipe(
+				Effect.flatMap(GitHubUninstalls.dueIds),
+				Effect.map((rows) => rows.map(({ id }) => id)),
+			),
+		),
+		gitHubUninstall: (id) =>
+			operation(
+				"gitHubUninstall",
+				Effect.gen(function* () {
+					const [row] = isUuid(id)
+						? yield* GitHubUninstalls.dueUninstall(yield* DateTime.nowAsDate, id)
+						: [];
+					if (!row) return yield* new StoredWorkGone({ work: "gitHubUninstall" });
+					return authenticated.systemWork({
+						workspace: row.workspace,
+						work: { kind: "gitHubUninstall", uninstall: id },
+					});
+				}),
+			),
+
 		compaction: (request) =>
 			operation(
 				"compaction",
@@ -110,27 +218,7 @@ export const make = Effect.gen(function* () {
 				"dueRoutine",
 				Effect.gen(function* () {
 					const [row] = isUuid(triggerId)
-						? yield* query((db) =>
-								db
-									.select({
-										workspace: automation.workspaceId,
-										project: automation.projectId,
-										automation: automation.id,
-									})
-									.from(automationTrigger)
-									.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
-									.where(
-										and(
-											eq(automationTrigger.id, triggerId),
-											eq(automationTrigger.kind, "routine"),
-											isNotNull(automationTrigger.nextScheduledAt),
-											lte(automationTrigger.nextScheduledAt, sql`now()`),
-											eq(automation.state, "enabled"),
-											isNull(automation.deletedAt),
-										),
-									)
-									.limit(1),
-							)
+						? yield* AutomationStore.dueRoutine(yield* DateTime.nowAsDate, triggerId)
 						: [];
 					if (!row) return yield* new StoredWorkGone({ work: "dueRoutine" });
 					return authenticated.systemWork({
@@ -149,31 +237,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"pauseAfterFailures",
 				Effect.gen(function* () {
-					const [row] = isUuid(automationId)
-						? yield* query((db) =>
-								db
-									.select({ workspace: automation.workspaceId, project: automation.projectId })
-									.from(automation)
-									.where(
-										and(
-											eq(automation.id, automationId),
-											eq(automation.state, "enabled"),
-											isNull(automation.deletedAt),
-											sql`(
-												select count(*) from (
-													select ${automationRun.state} as state from ${automationRun}
-													where ${automationRun.automationId} = ${automationId}
-														and ${automationRun.finishedAt} is not null
-													order by ${automationRun.acceptedAt} desc, ${automationRun.id} desc
-													limit ${AutomationStore.FAILURES_THAT_PAUSE}
-												) as latest
-												where latest.state = 'failed'
-											) = ${AutomationStore.FAILURES_THAT_PAUSE}`,
-										),
-									)
-									.limit(1),
-							)
-						: [];
+					const [row] = isUuid(automationId) ? yield* AutomationStore.pauseDue(automationId) : [];
 					if (!row) return yield* new StoredWorkGone({ work: "pauseAfterFailures" });
 					return authenticated.systemWork({
 						workspace: row.workspace,
@@ -191,7 +255,15 @@ export const layer = layerNoDeps;
 /** The stored work is no longer there to do: its rows are gone, or it no longer falls due. */
 export class StoredWorkGone
 	extends Schema.TaggedError<StoredWorkGone>()("StoredWorkGone", {
-		work: Schema.Literals(["compaction", "computerSleep", "dueRoutine", "pauseAfterFailures"]),
+		work: Schema.Literals([
+			"compaction",
+			"computerSleep",
+			"approvalExpiry",
+			"dueRoutine",
+			"pauseAfterFailures",
+			"gitHubUninstall",
+			"deletion",
+		]),
 	})
 	implements DomainError
 {

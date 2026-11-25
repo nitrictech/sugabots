@@ -241,6 +241,40 @@ describe("a viewer", () => {
 });
 
 describe("an admin", () => {
+	it("opens another member's personal bot settings from the directory and offers Delete", async () => {
+		apiAnswers({ role: "admin" });
+		rosterAnswers({
+			visibility: "personal",
+			permissions: {
+				update: false,
+				delete: true,
+				talk: false,
+				resources: {
+					openSettings: true,
+					readHistory: false,
+					resolveChats: false,
+					deleteFiles: false,
+					manageConnectors: false,
+					manageComputer: false,
+					useDesktop: false,
+					manageAutomations: false,
+					pauseAutomations: true,
+					runAutomations: false,
+				},
+			},
+		});
+		mount("/suga/bots");
+
+		const directory = await screen.findByRole("region", { name: "In this workspace" });
+		const settings = within(directory).getByRole("link", { name: linear.name });
+		expect(settings.getAttribute("href")).toBe(page);
+		fireEvent.click(settings);
+
+		expect(await screen.findByRole("button", { name: "Delete bot" })).toBeDefined();
+		expect(screen.queryByRole("region", { name: "Connectors" })).toBeNull();
+		expect(client.api.connectors.list).not.toHaveBeenCalled();
+	});
+
 	it("leads to its Automations page to set them up, saying how many it has", async () => {
 		onWideScreen();
 		client.api.automations.list.mockReturnValue(

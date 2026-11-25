@@ -180,9 +180,9 @@ export const fromOpenSandbox = (
 			}),
 		destroy: (id) =>
 			Effect.tryPromise({
-				try: () =>
+				try: (signal) =>
 					manager()
-						.killSandbox(id)
+						.killSandbox(id, signal)
 						.catch((cause: unknown) => {
 							// Already gone, which is what destroying asks for.
 							if (!isNotFound(cause)) throw cause;

@@ -3,18 +3,20 @@
  * What the step does lives behind `CompactionSteps`, implemented in
  * `compaction.steps.ts`.
  */
+import { uuidSchema } from "@sugabots/contracts/uuid";
 import { Activities } from "@sugabots/workflow/activities";
 import { Context, Effect, Schema } from "effect";
 import { Workflow } from "effect/unstable/workflow";
+import { Tier } from "../../tiers.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 
 /** A compaction request, as its workflow's payload. */
 export const CompactionRequest = Schema.Struct({
-	chatId: Schema.String,
+	chatId: uuidSchema,
 	/** The bot whose turn filled the chat past the compaction line. */
-	botId: Schema.String,
+	botId: uuidSchema,
 	/** That turn's reply: the newest message the compaction considers. */
-	sourceMessageId: Schema.String,
+	sourceMessageId: uuidSchema,
 	/**
 	 * Where the compaction that turn read kept messages from, as an ISO time, or
 	 * null if it read none. A turn measured on an older compaction than the
@@ -53,7 +55,9 @@ export class CompactionSteps extends Context.Service<
 		/** Prepares, generates and records the compaction, or does nothing if it is not needed. */
 		readonly compact: (compaction: CompactionRequest) => Effect.Effect<void>;
 	}
->()("@sugabots/core/CompactionSteps") {}
+>()("@sugabots/core/CompactionSteps") {
+	declare readonly [Tier]: "process";
+}
 
 const compactionActivities = Activities.fromService<CompactionRequest>()(CompactionSteps, {
 	compact: {},

@@ -3,7 +3,7 @@ import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { useSession } from "@/lib/session.ts";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { rootRoute } from "./root.tsx";
-import { optionalString } from "./search.ts";
+import { decodeRouteId, optionalRouteId, optionalString } from "./search.ts";
 
 const Invitation = lazyNamed(() => import("@/screens/Invitation.tsx"), "Invitation");
 const SignIn = lazyNamed(() => import("@/screens/SignIn.tsx"), "SignIn");
@@ -25,7 +25,7 @@ export const signInRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/sign-in",
 	validateSearch: (search: Record<string, unknown>): SignInSearch => ({
-		invitation: optionalString(search.invitation),
+		invitation: optionalRouteId(search.invitation),
 		passwordChanged: search.passwordChanged === true ? true : undefined,
 		returnTo: isAppPath(search.returnTo) ? search.returnTo : undefined,
 	}),
@@ -133,6 +133,7 @@ function ResetPasswordRoute() {
 export const invitationRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/invitations/$id",
+	params: { parse: ({ id }) => ({ id: decodeRouteId(id) }) },
 	beforeLoad: ({ context, params }) => {
 		// An invitation is accepted as somebody. Sign in first, and come back:
 		// the id rides along so the link is not lost on the way.

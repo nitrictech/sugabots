@@ -8,9 +8,12 @@ import {
 } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { recordEnded } from "@sugabots/core/authentication/session";
 import { type Database, effectRunner } from "@sugabots/core/database/database";
+import type { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { Email } from "@sugabots/core/email/email";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { processLayer, Tier } from "@sugabots/core/tiers";
 import { account, member, session, verification } from "@sugabots/core/workspaces/sql";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -33,6 +36,13 @@ export interface Interface {
 	/** Whose session the cookie in `headers` holds, or `undefined` when nobody's does. */
 	readonly identify: (headers: Headers) => Effect.Effect<Identified | undefined>;
 	/**
+	 * The cookies that renew the session cache of the cookie in `headers` from
+	 * the database, for a response to a change of who the member is, such as
+	 * their name, which the cache would otherwise show as it was for minutes.
+	 * None for a request with no session cookie.
+	 */
+	readonly refreshedCookies: (headers: Headers) => Effect.Effect<Cookies.Cookies>;
+	/**
 	 * The member `memberId` as the API names them, for a request whose session
 	 * came as a bearer token, with no cookie to read them from; `undefined` when
 	 * there is no such member.
@@ -54,20 +64,12 @@ interface Identified {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/server/Authentication",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
-/**
- * The most connections better-auth's pool opens. Each is one fewer of the
- * database's `max_connections` for the main pool, and the session cookie cache
- * keeps most requests off it.
- */
+/** Bounds the connections better-auth uses alongside the main pool. */
 const AUTH_POOL_SIZE = 2;
-
-/**
- * How long a browser's session is taken from its signed cookie before the
- * database is asked again. Signing out elsewhere or a revoked session takes
- * this long to reach requests that carry the cookie.
- */
 const SESSION_COOKIE_CACHE_SECONDS = 5 * 60;
 
 /** Sign-up attempts one address may make per window, which an office sharing an address still fits in. */
@@ -82,7 +84,7 @@ const RESET_PASSWORD_LINK_SECONDS = 60 * 60;
 export const make = Effect.gen(function* () {
 	const serverSettings = yield* ServerSettings.Service;
 	const email = yield* Email.Service;
-	const database = yield* Effect.context<Database>();
+	const database = yield* Effect.context<Database | EventOutbox.Service>();
 	const secret = yield* signingSecret;
 	const accounts = yield* Accounts.Service;
 	const sender = yield* Email.transactionalSender;
@@ -122,8 +124,20 @@ export const make = Effect.gen(function* () {
 			},
 		},
 
+		// A member's name, which others see, changes through an operation that tells them.
+		disabledPaths: ["/update-user"],
+
 		// better-auth stores whatever name it is sent, at sign-up and after.
 		databaseHooks: {
+			// Signing out, revoking a session or resetting a password ends sessions
+			// here, and their streams and desktop viewers end with them.
+			session: {
+				delete: {
+					after: async (ended) => {
+						await run(recordEnded({ session: ended.id, member: ended.userId }));
+					},
+				},
+			},
 			user: {
 				create: {
 					before: async (creating, context) => {
@@ -220,6 +234,17 @@ export const make = Effect.gen(function* () {
 							}
 						: undefined,
 			).pipe(Effect.withSpan("Authentication.identify")),
+		refreshedCookies: (headers) =>
+			Effect.map(
+				Effect.promise(() =>
+					auth.api.getSession({
+						headers,
+						query: { disableCookieCache: true },
+						returnHeaders: true,
+					}),
+				),
+				({ headers: responseHeaders }) => Cookies.fromSetCookie(responseHeaders.getSetCookie()),
+			).pipe(Effect.withSpan("Authentication.refreshedCookies")),
 		member: (memberId) =>
 			Effect.promise(async () => {
 				const context = await auth.$context;
@@ -229,7 +254,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /** better-auth's user, which it keeps in `member`, as the API names a member. */
 function currentUserOf(user: {

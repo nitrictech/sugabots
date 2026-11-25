@@ -7,6 +7,7 @@ import type { ComputerUnavailable as Unavailable } from "@sugabots/contracts/err
 import { type UserText, userText } from "@sugabots/errors";
 import { type Brand, Context, Data, type Duration, Effect, Layer, type Redacted } from "effect";
 import { Ids } from "../ids/ids.ts";
+import { processLayer, Tier } from "../tiers.ts";
 import { fromE2b } from "./implementations/e2b.ts";
 import { fromOpenSandbox } from "./implementations/opensandbox.ts";
 
@@ -15,7 +16,9 @@ export interface Interface {
 	readonly forAccess: (access: ProviderAccess) => Provider;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Computers") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Computers") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const ids = yield* Ids.Service;
@@ -31,7 +34,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /**
  * Makes and reaches the machines of one provider account.

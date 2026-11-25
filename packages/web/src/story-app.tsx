@@ -170,7 +170,11 @@ export function storyChatDetails(bot: Bot, messages: Message[] = []): ChatDetail
 			createdAt: chat.createdAt,
 			updatedAt: chat.updatedAt,
 		},
-		permissions: { approveToolCalls: true, approveComputerRequests: true },
+		permissions: {
+			approveToolCallsIn: messages.map((message) => message.id),
+			approveComputerRequests: true,
+			interruptTurns: [],
+		},
 		automationRun: null,
 		participants: [member, participant],
 		projectBots: [participant],
@@ -220,7 +224,11 @@ export function storyProjectChatDetails(
 			working: false,
 			resolvedAt: null,
 		},
-		permissions: { approveToolCalls: true, approveComputerRequests: true },
+		permissions: {
+			approveToolCallsIn: messages.map((message) => message.id),
+			approveComputerRequests: true,
+			interruptTurns: [],
+		},
 		automationRun: null,
 		participants: [member],
 		projectBots: bots

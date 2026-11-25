@@ -31,7 +31,7 @@ export function needsCompaction(contextTokens: number | undefined, windowTokens:
 	return contextTokens !== undefined && contextTokens >= compactionLineTokens(windowTokens);
 }
 
-interface CompactionPlan<Message> {
+export interface CompactionPlan<Message> {
 	/** The messages the Compaction bot condenses, oldest first. */
 	toCondense: Message[];
 	/** When the first condensed message was written: history before it is left out. */

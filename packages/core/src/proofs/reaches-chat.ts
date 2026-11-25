@@ -1,5 +1,5 @@
 import { BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { sql } from "drizzle-orm";
+import { type SQL, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../database/database.ts";
 import { placedChat } from "../database/schema.ts";
@@ -7,11 +7,11 @@ import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
 import { decideReach, type ProjectFacts, type ReachedAs, reachFacts, whoActs } from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
+import { webhookReachesChat } from "./webhook-chats.ts";
 
 /**
- * The chat C is in a project P reaches, as `ReachesProject` decides it. System
- * work reaches only the chat its stored compaction request names; a chat in no
- * project, such as a system chat, is reached by no principal.
+ * P reaches the chat C through its project, its own webhook automation, or
+ * the stored compaction request for C.
  */
 export interface ReachesChat<P, C> extends Proof<"ReachesChat", [P, C]> {
 	readonly principal: Named<P, Principal>;
@@ -25,15 +25,24 @@ export interface ReachesChat<P, C> extends Proof<"ReachesChat", [P, C]> {
 
 const ReachesChatProof = defineProof("ReachesChat");
 
-export const proveReachesChat = <P, C>(principal: Named<P, Principal>, chatId: Named<C, string>) =>
+export const proveReachesChat = <P, C>(
+	principal: Named<P, Principal>,
+	chatId: Named<C, string>,
+	contains: SQL = sql`true`,
+) =>
 	Effect.gen(function* () {
 		const acting = principal.value;
 		const id = chatId.value;
 		if (!isUuid(id)) return yield* Effect.fail(new ResourceHidden({ resource: "chat" }));
-		const chatsProject = sql`(select ${placedChat.projectId} from ${placedChat} where ${placedChat.id} = ${id}::uuid)`;
+		const webhook = acting._tag === "WebhookCall";
+		const reachesTarget = webhook ? webhookReachesChat(acting, placedChat.id) : sql`true`;
+		const chatsProject = sql`(select ${placedChat.projectId} from ${placedChat}
+			where ${placedChat.id} = ${id}::uuid and ${reachesTarget} and ${contains})`;
 		const facts = yield* query((db) => reachFacts(db, chatsProject, whoActs(acting)));
 		if (!facts) return yield* Effect.fail(new ResourceHidden({ resource: "chat" }));
-		const decision = decideReach(acting, facts, id);
+		const decision = webhook
+			? ({ kind: "reaches", as: { kind: "webhook" } } as const)
+			: decideReach(acting, facts, id);
 		if (decision.kind === "hidden")
 			return yield* Effect.fail(new ResourceHidden({ resource: "chat" }));
 		if (decision.kind === "botCannotReach") {

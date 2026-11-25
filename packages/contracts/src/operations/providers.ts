@@ -167,16 +167,10 @@ export const providersContracts = {
 	}),
 	"modelProviders.completeSignIn": OperationContract.make("modelProviders.completeSignIn", {
 		description:
-			"Ask whether the code of a sign-in you started has been entered. Once it has, the provider is signed in as you and its models are listed.",
+			"Ask whether the code of a sign-in started in this session has been entered. Once it has, the provider is signed in as you and its models are listed.",
 		input: Schema.Struct({ ...aProvider, ...providerSignInCompletionSchema.fields }),
 		output: providerSignInOutcomeSchema,
-		errors: [
-			...workspaceRefusals,
-			ModelProviderNotFound,
-			ProviderSignInNotOffered,
-			ProviderSignInAttemptInvalid,
-			ProviderSignInFailed,
-		],
+		errors: [ProviderSignInNotOffered, ProviderSignInAttemptInvalid, ProviderSignInFailed],
 		changes: true,
 	}),
 	"modelProviders.signOut": OperationContract.make("modelProviders.signOut", {

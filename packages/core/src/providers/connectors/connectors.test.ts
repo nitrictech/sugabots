@@ -6,6 +6,8 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { seedBot, seedMember, seedWorkspace } from "../../authentication/seed.test-support.ts";
+import { ProjectComputers } from "../../computers/project-computers.ts";
+import type { Database } from "../../database/database.ts";
 import { connector } from "../../database/schema.ts";
 import {
 	closeDatabase,
@@ -14,7 +16,7 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import type { Principal } from "../../principal.ts";
+import type { MemberSession } from "../../principal.ts";
 import {
 	type CanManageProject,
 	type CanReadConnectors,
@@ -22,13 +24,14 @@ import {
 	proveCanReadConnectors,
 } from "../../proofs/project-permissions.ts";
 import { named } from "../../proofs/proof.ts";
+import { proveReachesConnector } from "../../proofs/reaches-connector.ts";
 import { proveReachesProject } from "../../proofs/reaches-project.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
+import { unimplemented } from "../../testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
 import { ConnectorSignIn } from "./connector-sign-in.ts";
 import { ConnectorStore } from "./connector-store.ts";
 import { Connectors } from "./connectors.ts";
-import { storedOAuthProvider } from "./oauth.ts";
 
 /**
  * The connectors service over the real store and Postgres, talking to a real
@@ -71,7 +74,8 @@ afterAll(async () => {
 
 describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgres", () => {
 	let connectors: Promised<ConnectorStore.Interface>;
-	let member: (memberId: string) => Promise<Principal>;
+	let member: (memberId: string) => Promise<MemberSession>;
+	let administrator: MemberSession;
 	let workspaceId: string;
 	let adminId: string;
 	let editorId: string;
@@ -87,13 +91,13 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 		use: <P, J>(
 			service: Connectors.Interface,
 			proofs: { canManage: CanManageProject<P, J>; canRead: CanReadConnectors<P, J> },
-		) => Effect.Effect<A, E>,
+		) => Effect.Effect<A, E, Database>,
 		options: {
 			allowPrivateNetwork?: boolean;
 			signIn?: Partial<ConnectorSignIn.Interface>;
 		} = {},
 	): Promise<A> => {
-		const principal = await member(adminId);
+		const principal = administrator;
 		const service = await runOnPostgres(
 			Effect.provide(Connectors.Service, connectorsLayer(options)),
 		);
@@ -116,17 +120,10 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 		Connectors.layerNoDeps.pipe(
 			Layer.provide([
 				ConnectorStore.layer,
+				unimplemented(ProjectComputers.Service, {}),
 				Layer.succeed(ConnectorSignIn.Service, {
 					clients: Effect.succeed({
-						for: () =>
-							storedOAuthProvider(
-								{
-									load: async () => undefined,
-									save: async () => {},
-									now: async () => new Date("2026-10-05T21:00:08.000Z"),
-								},
-								{ redirectUrl: "http://localhost:3000/callback", clientName: "Test" },
-							),
+						for: () => ({ sentTokens: () => new Set<string>(), fetch }),
 					}),
 					begin: () => Effect.succeed({ authorizationUrl: "https://auth.example/authorize" }),
 					finish: () => Effect.void,
@@ -155,7 +152,17 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 			url,
 			auth: "oauth",
 		});
-		await connectors.saveOauthRecord(workspaceId, made.id, { state, startedByMemberId });
+		const session = startedByMemberId === adminId ? administrator : await member(startedByMemberId);
+		await connectors.saveOauthRecord(
+			workspaceId,
+			made.id,
+			{
+				state,
+				startedByMemberId,
+				startedBySessionId: session.session,
+			},
+			{ kind: "since", version: null },
+		);
 		return made;
 	};
 
@@ -164,13 +171,28 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 		state: string,
 		callback: { code?: string; error?: string; errorDescription?: string },
 		signIn?: Partial<ConnectorSignIn.Interface>,
+		wrongSessionConnectorId?: string,
 	) =>
 		managing(
 			(service, { canManage }) =>
 				Effect.gen(function* () {
-					const waiting = yield* service.signInWaitingOn(state);
-					if (!waiting) throw new Error(`No sign-in waits on ${state}`);
-					return yield* service.finishSignIn(canManage, waiting, { ...callback, state });
+					const record = yield* service.signInWaitingOn(state, administrator);
+					const connectorId = record?.connectorId ?? wrongSessionConnectorId;
+					if (!connectorId) throw new Error("Expected a connector");
+					return yield* named(connectorId, (connector) =>
+						Effect.gen(function* () {
+							const { reach } = canManage;
+							const { target } = yield* proveReachesConnector(
+								reach.principal,
+								reach.project,
+								connector,
+							);
+							return yield* service.finishSignIn(canManage, connector, target, {
+								...callback,
+								state,
+							});
+						}),
+					);
 				}),
 			{ signIn },
 		);
@@ -187,6 +209,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 	beforeEach(async () => {
 		workspaceId = await seedWorkspace();
 		adminId = await seedMember(workspaceId, "admin");
+		administrator = await member(adminId);
 		editorId = await seedMember(workspaceId, "editor");
 		projectId = (await seedBot(workspaceId)).defaultProject;
 	});
@@ -195,7 +218,38 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 
 	/** The connector `connectorId` of the project, with its tools. */
 	const shown = (connectorId: string, options?: { allowPrivateNetwork?: boolean }) =>
-		managing((service, { canRead }) => service.get(canRead, connectorId), options);
+		managing(
+			(service, { canRead }) =>
+				named(connectorId, (connector) =>
+					Effect.gen(function* () {
+						const { reach } = canRead;
+						const { target } = yield* proveReachesConnector(
+							reach.principal,
+							reach.project,
+							connector,
+						);
+						return yield* service.get(canRead, connector, target);
+					}),
+				),
+			options,
+		);
+
+	const testing = (connectorId: string, options?: { allowPrivateNetwork?: boolean }) =>
+		managing(
+			(service, { canManage }) =>
+				named(connectorId, (connector) =>
+					Effect.gen(function* () {
+						const { reach } = canManage;
+						const { target } = yield* proveReachesConnector(
+							reach.principal,
+							reach.project,
+							connector,
+						);
+						return yield* service.test(canManage, connector, target);
+					}),
+				),
+			options,
+		);
 
 	it("learns a server's tools as soon as it is added", async () => {
 		const made = await managing((service, { canManage }) =>
@@ -241,7 +295,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 			service.create(canManage, { name: "Gone", url: "http://127.0.0.1:9/mcp" }),
 		);
 
-		const tested = await managing((service, { canManage }) => service.test(canManage, made.id));
+		const tested = await testing(made.id);
 
 		expect(tested).toMatchObject({ reachable: false, error: unreachable });
 		const [stored] = await onDatabase((db) =>
@@ -282,7 +336,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 			service.create(canManage, { kind: "http", name: "Local", url: `${serverUrl}/v2` }),
 		);
 
-		const tested = await managing((service, { canManage }) => service.test(canManage, made.id), {
+		const tested = await testing(made.id, {
 			allowPrivateNetwork: false,
 		});
 
@@ -346,9 +400,9 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 		it("does not finish for anybody but the member who started it", async () => {
 			const made = await waitingOnSignIn(`${serverUrl}/open`, "state-other", editorId);
 
-			expect(await finishing("state-other", { code: "the-code" })).toEqual({
+			expect(await finishing("state-other", { code: "the-code" }, undefined, made.id)).toEqual({
 				kind: "failed",
-				failure: "not_allowed",
+				failure: "unknown_state",
 				at: undefined,
 			});
 			expect(await shown(made.id)).toMatchObject({ signedIn: false, tools: [] });

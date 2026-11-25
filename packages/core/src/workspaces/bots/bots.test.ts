@@ -6,12 +6,14 @@ import {
 } from "@sugabots/contracts/errors/bots";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { ModelNotEnabled } from "@sugabots/contracts/errors/providers";
-import type { InputOf, OperationName } from "@sugabots/contracts/operations";
+import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { and, eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { type Context, Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { Turns } from "../../chats/turns/turns.ts";
 import { Computers } from "../../computers/computers.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
+import { EventOutbox } from "../../database/events/outbox.ts";
 import {
 	bot,
 	member,
@@ -32,17 +34,16 @@ import {
 	servedOnPostgres,
 	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
+import { remove } from "../../operations/bots/remove.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
 import type { MemberSession } from "../../principal.ts";
-import { proveCanDeleteBot } from "../../proofs/bot-permissions.ts";
-import { proveCanManageBot } from "../../proofs/can-manage-bot.ts";
-import { named } from "../../proofs/proof.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
-import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
 import { unimplemented } from "../../testing.ts";
+import { Membership } from "../membership/membership.ts";
 import { LeadsProjects } from "../projects/project-leads.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
 import { ProjectStore } from "../projects/project-store.ts";
+import { Projects } from "../projects/projects.ts";
 import { seedProject } from "../projects/seed.test-support.ts";
 import { BotStore } from "./bot-store.ts";
 import { Bots } from "./bots.ts";
@@ -64,7 +65,13 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 	let callOperation: CallOperation;
 	let signIn: (memberId: string) => Promise<MemberSession>;
 	/** The `Bots` service over a computer provider these cases control. */
-	let botsWithComputers: Bots.Interface;
+	let deletionServices: Context.Context<
+		| Bots.Service
+		| Membership.Service
+		| Projects.Service
+		| ProjectComputers.Service
+		| Turns.ApprovalWithdrawals.Service
+	>;
 	/** The bots operations as the workspace's administrator. */
 	let administration: ReturnType<typeof botsAs>;
 	let workspaceId: string;
@@ -79,26 +86,32 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		callOperation = await servedOperations();
 		const signedIn = principals(await authenticators());
 		signIn = (memberId) => signedIn.member(memberId);
-		botsWithComputers = await runOnPostgres(
-			Effect.provide(
-				Bots.Service,
-				Bots.layerNoDeps.pipe(
-					Layer.provide([
-						BotStore.layer,
-						ModelProviderStore.layer,
-						PersonalAssistants.layer,
-						unimplemented(ProjectComputers.Service, {
-							destroy: ({ projectId }) =>
-								providerReachable
-									? Effect.sync(() => {
-											destroyedComputers.push(projectId);
-										})
-									: Effect.fail(
-											new Computers.Unavailable({ provider: "opensandbox", cause: "unreachable" }),
-										),
-						}),
-					]),
-				),
+		deletionServices = await runOnPostgres(
+			Effect.context<
+				| Bots.Service
+				| Membership.Service
+				| Projects.Service
+				| ProjectComputers.Service
+				| Turns.ApprovalWithdrawals.Service
+			>().pipe(
+				Effect.provide([
+					Bots.layer.pipe(
+						Layer.provide(Layer.succeed(EventOutbox.Service, { publish: () => Effect.void })),
+					),
+					unimplemented(Membership.Service),
+					unimplemented(Turns.ApprovalWithdrawals.Service, { afterReachChange: () => Effect.void }),
+					unimplemented(Projects.Service),
+					unimplemented(ProjectComputers.Service, {
+						destroy: ({ projectId }) =>
+							providerReachable
+								? Effect.sync(() => {
+										destroyedComputers.push(projectId);
+									})
+								: Effect.fail(
+										new Computers.Unavailable({ provider: "opensandbox", cause: "unreachable" }),
+									),
+					}),
+				]),
 			),
 		);
 	});
@@ -106,7 +119,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 	/** The bots operations, each called for `memberId` signed in, by the names these cases use. */
 	const botsAs = (memberId: string) => {
 		const as =
-			<Name extends OperationName>(name: Name) =>
+			<Name extends RequestOperationName>(name: Name) =>
 			async (input: InputOf<Name>) =>
 				callOperation(await signIn(memberId), name, input);
 		return {
@@ -131,18 +144,14 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 	};
 
 	/**
-	 * Deletes the bot `botId` for `memberId`, its manager, through
-	 * `botsWithComputers`, as `bots.remove` would, so a case sees what happens
-	 * to its computer.
+	 * Deletes the bot `botId` for `memberId`, its manager, with a computer provider the test controls.
 	 */
 	const removeWithComputer = async (memberId: string, botId: string) => {
 		const principal = await signIn(memberId);
 		return runOnPostgres(
-			named(principal, botId, (principal, bot) =>
-				Effect.flatMap(proveCanManageBot(principal, bot), (canManage) =>
-					Effect.flatMap(proveCanDeleteBot(canManage), botsWithComputers.remove),
-				),
-			),
+			remove
+				.run(principal, { botId }, { kind: "request", request: crypto.randomUUID() })
+				.pipe(Effect.provideContext(deletionServices)),
 		);
 	};
 

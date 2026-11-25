@@ -60,6 +60,7 @@ describe("envelope", () => {
 
 	it.each([
 		"message.created",
+		"message.execution_started",
 		"message.delta",
 		"message.completed",
 		"message.failed",
@@ -77,7 +78,8 @@ describe("envelope", () => {
 		};
 		const payloads: Record<string, Record<string, unknown>> = {
 			"message.created": { ...ids, message: message() },
-			"message.delta": { ...ids, messageId: "m1", offset: 0, text: "hi" },
+			"message.execution_started": { ...ids, messageId: "m1", content: "hi", execution: 2 },
+			"message.delta": { ...ids, messageId: "m1", offset: 0, text: "hi", execution: 1 },
 			"message.completed": {
 				...ids,
 				messageId: "m1",
@@ -121,6 +123,7 @@ describe("envelope", () => {
 			messageId: "m1",
 			offset: 0,
 			text: "hi",
+			execution: 1,
 			extra: { future: true },
 		};
 		const parsed = Schema.decodeUnknownSync(chatUpdateEventSchema)(event);

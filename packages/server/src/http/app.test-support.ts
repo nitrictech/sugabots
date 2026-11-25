@@ -1,9 +1,9 @@
 import type { CurrentUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
-import { SessionAuthentication } from "@sugabots/core/authentication/session";
+import type { SessionAuthentication } from "@sugabots/core/authentication/session";
+import { sessionsFromCookies } from "@sugabots/core/authentication/testing";
 import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import { Automations } from "@sugabots/core/chats/automations/automations";
-import { DesktopViewer } from "@sugabots/core/chats/tools/browser/viewer";
 import type { Database } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";
@@ -16,8 +16,6 @@ import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { Cookies, HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "../auth/authentication.ts";
-import { closedStreamAccess } from "../routes/events/access.test-support.ts";
-import { StreamAccess } from "../routes/events/access.ts";
 import { apiLayer } from "./app.ts";
 import type { HttpServices } from "./services.ts";
 
@@ -100,6 +98,7 @@ export function identifiedBy(resolveMember: MemberResolver): Layer.Layer<Authent
 	return Layer.succeed(Authentication.Service, {
 		handler: () => Effect.succeed(new Response(null, { status: 404 })),
 		identify: identifyFromResolver(resolveMember),
+		refreshedCookies: () => Effect.succeed(Cookies.empty),
 		member: () => Effect.succeed(undefined),
 	});
 }
@@ -116,17 +115,18 @@ export function serverSettingsWithWebAppAt(webAppUrl: string): Layer.Layer<Serve
  * Services whose every method dies naming itself, nobody signed in, no
  * event stream open to listen on, and a bus in memory, so a case supplies exactly
  * what it is about. Sessions are authenticated by core's own authenticator,
- * from what `identifiedBy`'s resolver says the cookie holds.
+ * from what `identifiedBy`'s resolver says the cookie holds, a long-running
+ * operation's included, as there is no session row to read.
  */
 const fakes: Layer.Layer<TestServices, never, Database> = Layer.mergeAll(
 	// `/me` answers with the workspaces beside the current user; a case about them supplies its own.
 	unimplemented(Operations.Service, { "workspaces.list": () => Effect.succeed([]) }),
+	// A stream's case supplies the operation it follows.
+	unimplemented(Operations.LongRunning),
 	unimplemented(FilePages.Service),
-	unimplemented(DesktopViewer.Service),
 	unimplemented(Automations.ConnectorEvents),
-	Layer.succeed(StreamAccess.Service, closedStreamAccess),
 	identifiedBy(async () => null),
-	SessionAuthentication.layer,
+	sessionsFromCookies,
 	// A webhook route's case supplies who its calls authenticate as.
 	unimplemented(WebhookAuthentication.Service),
 	Ids.layer,

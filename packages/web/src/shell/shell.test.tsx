@@ -793,12 +793,11 @@ describe("a project's chats", () => {
 	it("starts the first chat of a project with none from its first message, as a bot's page does", async () => {
 		onWideScreen();
 		const started = chatIn("0199a3a0-0000-7000-8000-0000000000f3", "Plan the kickoff");
-		client.api.chats.startProjectChat.mockImplementation(
-			({ payload }: { payload: { id: string; message: string } }) =>
-				Effect.succeed({
-					chat: started.chat,
-					message: { id: payload.id, chatId: started.chat.id },
-				}),
+		client.api.chats.startProjectChat.mockImplementation(() =>
+			Effect.succeed({
+				chat: started.chat,
+				message: { id: "0199a3a0-0000-7000-8000-0000000000f4", chatId: started.chat.id },
+			}),
 		);
 		const { router } = mount(`/suga/projects/${sales.slug}`);
 
@@ -811,7 +810,7 @@ describe("a project's chats", () => {
 		await waitFor(() =>
 			expect(client.api.chats.startProjectChat).toHaveBeenCalledWith({
 				params: { projectId: sales.id },
-				payload: { id: expect.any(String), message: "Plan the kickoff" },
+				payload: { retryKey: expect.any(String), message: "Plan the kickoff" },
 			}),
 		);
 		await waitFor(() =>
@@ -826,10 +825,10 @@ describe("a project's chats", () => {
 		const started = chatIn("0199a3a0-0000-7000-8000-0000000000f3", "Plan the kickoff");
 		client.api.chats.startProjectChat
 			.mockReturnValueOnce(Effect.fail(new InternalServerError({ message: userText`Lost` })))
-			.mockImplementation(({ payload }: { payload: { id: string; message: string } }) =>
+			.mockImplementation(() =>
 				Effect.succeed({
 					chat: started.chat,
-					message: { id: payload.id, chatId: started.chat.id },
+					message: { id: "0199a3a0-0000-7000-8000-0000000000f4", chatId: started.chat.id },
 				}),
 			);
 		mount(`/suga/projects/${sales.slug}`);
@@ -848,7 +847,7 @@ describe("a project's chats", () => {
 
 		await waitFor(() => expect(client.api.chats.startProjectChat).toHaveBeenCalledTimes(2));
 		const [first, second] = client.api.chats.startProjectChat.mock.calls.map(
-			([request]) => (request as { payload: { id: string } }).payload.id,
+			([request]) => (request as { payload: { retryKey: string } }).payload.retryKey,
 		);
 		expect(second).toBe(first);
 	});
@@ -2139,7 +2138,12 @@ describe("workspace settings", () => {
 		);
 	});
 
-	it("asks before removing somebody, says what goes with them, and returns to the list", async () => {
+	it("confirms removal and clears the cleanup banner when the roster next refreshes", async () => {
+		const updates = controlledEventStream();
+		client.events.workspace.mockReturnValue(updates.stream);
+		client.api.workspaces.removeMembership.mockReturnValueOnce(
+			Effect.succeed({ cleanupPending: true }),
+		);
 		const { router } = mount(junoPage);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Remove from workspace" }));
@@ -2156,6 +2160,13 @@ describe("workspace settings", () => {
 			});
 		});
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/members"));
+		const banner = /computer cleanup will finish in the background/;
+		expect(await screen.findByText(banner)).toBeDefined();
+
+		updates.emit(
+			streamEvent("reach.changed", { about: { kind: "membership", memberId: juno.id } }),
+		);
+		await waitFor(() => expect(screen.queryByText(banner)).toBeNull());
 	});
 
 	it("offers leaving on your own page, and no way to change your own role", async () => {
@@ -2732,7 +2743,7 @@ describe("the app's badge", () => {
 		clearAppBadge.mockClear();
 
 		approvalsWaiting(0);
-		updates.emit(streamEvent("chat.changed", { chatId: waitingApproval.chatId }));
+		updates.emit(streamEvent("chat.changed", { chatId: waitingApproval.chatId ?? "" }));
 
 		await waitFor(() => expect(document.title).toBe("Sugabots | Suga Workspace"));
 		expect(clearAppBadge).toHaveBeenCalled();

@@ -50,6 +50,7 @@ export const projectComputerRoutes = HttpApiBuilder.group(
 /** What each way a project computer operation can fail means over HTTP. */
 const projectComputerErrors = {
 	...refusals,
+	ClaimLost: Conflict,
 	ComputerInUse: Conflict,
 	NoComputer: NotFound,
 	UpgradeFailed: Conflict,

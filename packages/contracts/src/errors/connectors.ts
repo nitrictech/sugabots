@@ -58,7 +58,7 @@ export class UnknownConnectorTool
  * client registration, which is the only way Sugabots registers; no server
  * answered; or something else, which the logs say.
  */
-export const signInStartFailureSchema = Schema.Literals([
+const signInStartFailureSchema = Schema.Literals([
 	"registration_unsupported",
 	"unreachable",
 	"unknown",

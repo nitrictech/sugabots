@@ -84,6 +84,7 @@ type Segment =
 export function showsNothingYet(message: Message): boolean {
 	if (message.status !== "writing") return false;
 	const shows =
+		Boolean(message.thinking?.length) ||
 		message.parts.some((part) => part.type === "tool_call" || part.type === "file") ||
 		segmentsOf(message).some((segment) => segment.type !== "text" || segment.text);
 	return !shows;

@@ -1,11 +1,4 @@
-import {
-	type BotPermissions as BotPermissionsView,
-	type ProjectPermissions as ProjectPermissionsView,
-	type ResourcePermissions as ResourcePermissionsView,
-	WORKSPACE_ROLES,
-	type WorkspacePermissions as WorkspacePermissionsView,
-	type WorkspaceRole,
-} from "@sugabots/contracts";
+import { WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
 
 /**
  * What a member may do, as named actions rather than role comparisons.
@@ -36,7 +29,10 @@ import {
  * permission added below reaches a role only when that role's table names it.
  *
  * This module is pure. Loading the facts it takes is `access.ts`, and asking it
- * is `Authorization` and `Visibility`. Its grant tables are the specification.
+ * is `Authorization` and `Visibility`, and the provers' rules in
+ * `proofs/facts.ts`. Who decides an approval is not here: it is the approver
+ * rule in `proofs/approvers.ts`. What the API tells a member they may do is
+ * decided by the provers' rules (`proofs/shown-permissions.ts`).
  */
 
 /** An action addressed at a workspace. */
@@ -58,10 +54,6 @@ export type WorkspacePermission =
 	| "workspace.ownership.handOver"
 	/** Delete the workspace and everything in it. */
 	| "workspace.delete"
-	/** Choose the models the system bots run on. */
-	| "workspace.systemModel.choose"
-	/** See what the workspace's models cost, every bot's included, and limit it. */
-	| "workspace.usage.manage"
 	/** Make a project. */
 	| "project.create"
 	/** Make a bot. */
@@ -93,9 +85,7 @@ export type ProjectPermission =
 	/** Add and remove bots. */
 	| "project.bots.manage"
 	/** Take yourself out. Administrators stay in every project members made. */
-	| "project.leave"
-	/** Decide a tool call a bot raised in the project. */
-	| "approval.decide";
+	| "project.leave";
 
 /**
  * An action on what a project holds besides its chats: its connectors,
@@ -105,8 +95,6 @@ export type ProjectPermission =
 type ProjectResourcePermission =
 	/** See the connectors and their settings. */
 	| "connector.read"
-	/** Add, change, sign in and remove connectors, the GitHub app among them. */
-	| "connector.manage"
 	/** See the automations as defined, without what their runs said. */
 	| "automation.read"
 	| "automation.manage"
@@ -117,8 +105,6 @@ type ProjectResourcePermission =
 	| "computer.read"
 	/** Decide what the computer may reach, reset and upgrade it. */
 	| "computer.manage"
-	/** Allow or refuse a bot's request to reach more from the computer. */
-	| "computer.request.decide"
 	/** Click and type on the computer's desktop, rather than only watch it. */
 	| "computer.desktop.use";
 
@@ -136,17 +122,7 @@ export type BotPermission =
 	| "bot.use"
 	/** See the bot's settings and the state of its computer. */
 	| "bot.settings.read"
-	| "bot.update"
-	| "bot.delete"
-	/** Decide a tool call the bot raised in one of its chats. */
-	| "approval.decide"
-	/**
-	 * Decide a tool call raised in a run the bot does, whichever project its
-	 * automation is in: the bot's own default project, or a project members
-	 * made that it leads. Taken with `approval.decide` in the chat's
-	 * project, never instead of it (see `mayDecideToolCall`).
-	 */
-	| "approval.automation.decide";
+	| "bot.update";
 
 /**
  * The caller.
@@ -181,8 +157,6 @@ const ADMINISTRATOR_WORKSPACE_GRANTS: readonly WorkspacePermission[] = [
 	"workspace.update",
 	"workspace.providers.manage",
 	"workspace.members.manage",
-	"workspace.systemModel.choose",
-	"workspace.usage.manage",
 	"project.create",
 	"bot.create",
 ];
@@ -217,16 +191,13 @@ const ADMINISTRATOR_PROJECT_GRANTS = new Set<ProjectPermission>([
 	"project.chats.manage",
 	"project.members.manage",
 	"project.bots.manage",
-	"approval.decide",
 	"connector.read",
-	"connector.manage",
 	"automation.read",
 	"automation.manage",
 	"automation.run",
 	"automation.history.read",
 	"computer.read",
 	"computer.manage",
-	"computer.request.decide",
 	"computer.desktop.use",
 ]);
 
@@ -251,7 +222,6 @@ const PROJECT_GRANTS: Record<WorkspaceRole, ReadonlySet<ProjectPermission>> = {
 		"project.leave",
 		"project.members.manage",
 		"project.bots.manage",
-		"approval.decide",
 		...PROJECT_RESOURCE_READS,
 		"automation.run",
 		"computer.desktop.use",
@@ -263,8 +233,7 @@ const PROJECT_GRANTS: Record<WorkspaceRole, ReadonlySet<ProjectPermission>> = {
 /**
  * What may be done in a bot's default project, as what it takes on the bot.
  * Its chats are the bot's own, so whoever reaches the bot reads them and
- * takes part, and who decides the bot's tool calls decides there; the bot's
- * managers tidy them. Its connectors, automations and computer are the
+ * takes part; the bot's managers tidy them. Its connectors, automations and computer are the
  * bot's, decided as the bot's own (see `RESOURCES_OF_DEFAULT_PROJECTS`).
  * Nothing else: nobody joins or leaves a default project, adds members or bots
  * to it, or changes or deletes it, which is made and deleted with its bot.
@@ -272,17 +241,14 @@ const PROJECT_GRANTS: Record<WorkspaceRole, ReadonlySet<ProjectPermission>> = {
 const DEFAULT_PROJECT_GRANTS: Partial<Record<ProjectPermission, BotPermission>> = {
 	"project.read": "bot.read",
 	"project.change": "bot.use",
-	"approval.decide": "approval.decide",
 	"project.chats.manage": "bot.update",
 	"connector.read": "connector.read",
-	"connector.manage": "connector.manage",
 	"automation.read": "automation.read",
 	"automation.manage": "automation.manage",
 	"automation.run": "automation.run",
 	"automation.history.read": "automation.history.read",
 	"computer.read": "bot.settings.read",
 	"computer.manage": "computer.manage",
-	"computer.request.decide": "computer.request.decide",
 	"computer.desktop.use": "computer.desktop.use",
 };
 
@@ -293,12 +259,10 @@ const DEFAULT_PROJECT_GRANTS: Partial<Record<ProjectPermission, BotPermission>> 
  */
 const RESOURCES_OF_DEFAULT_PROJECTS: ReadonlySet<ProjectPermission> = new Set<ProjectPermission>([
 	"connector.read",
-	"connector.manage",
 	"automation.read",
 	"automation.manage",
 	"computer.read",
 	"computer.manage",
-	"computer.request.decide",
 ]);
 
 /** What anyone who reaches a bot may do with it. */
@@ -310,7 +274,6 @@ const BOT_TALKER_GRANTS = new Set<BotPermission>([
 	"automation.read",
 	"automation.history.read",
 	"automation.run",
-	"approval.decide",
 	"computer.desktop.use",
 ]);
 
@@ -329,37 +292,28 @@ const botTalkerGrants = (role: WorkspaceRole) =>
 /**
  * What a bot's creator, or an administrator, may do with it besides use it:
  * change it, and read the configuration they change, whether or not they
- * reach it; and decide what its runs ask, in a run's chat they reach.
+ * reach it.
  */
 const BOT_MANAGER_GRANTS = new Set<BotPermission>([
 	"bot.settings.read",
 	"connector.read",
 	"automation.read",
 	"bot.update",
-	"bot.delete",
-	"connector.manage",
 	"automation.manage",
-	"approval.automation.decide",
 	"computer.manage",
-	"computer.request.decide",
 ]);
 
 /**
  * What a member may do with their own Personal Assistant besides use it,
- * whatever their role: change its name, avatar and connectors, manage and run its
- * automations and decide what their runs ask, decide what it asks to reach from
- * its computer, and decide what it asks to do for them. An action they allow
- * still runs with their own permissions, so a viewer's assistant can't make a
- * project for them. Sugabots manages the rest of it.
+ * whatever their role: change its name, avatar and connectors, and manage and
+ * run its automations. An action it takes for them still runs with their own
+ * permissions, so a viewer's assistant can't make a project for them.
+ * Sugabots manages the rest of it.
  */
 const ASSISTANT_OWNER_GRANTS = new Set<BotPermission>([
 	"bot.update",
-	"connector.manage",
 	"automation.manage",
 	"automation.run",
-	"approval.automation.decide",
-	"computer.request.decide",
-	"approval.decide",
 ]);
 
 function isAdministrator(role: WorkspaceRole | undefined): boolean {
@@ -452,77 +406,4 @@ export function rolesGrantedInWorkspace(permission: WorkspacePermission): Worksp
  */
 export function rolesGrantedInProject(permission: ProjectPermission): WorkspaceRole[] {
 	return WORKSPACE_ROLES.filter((role) => PROJECT_GRANTS[role].has(permission));
-}
-
-/**
- * The project permissions a client needs resolved, as the API returns them.
- * `isPublic` says whether somebody not in it may join it.
- */
-export function projectPermissions(
-	actor: Actor,
-	project: ProjectFacts & { isPublic: boolean },
-): ProjectPermissionsView {
-	const may = (permission: ProjectPermission) => mayInProject(actor, permission, project);
-	return {
-		rename: may("project.update"),
-		manageMembers: may("project.members.manage"),
-		manageBots: may("project.bots.manage"),
-		leave: may("project.leave"),
-		join:
-			project.defaultOf === null &&
-			!project.isMember &&
-			project.isPublic &&
-			mayInWorkspace(actor, "workspace.read"),
-		delete: may("project.delete"),
-		resources: resourcePermissions(actor, project),
-	};
-}
-
-/**
- * What the caller may do with what the project holds, as the API returns it
- * on a project and, from its default project, on a bot, so the two agree.
- */
-export function resourcePermissions(actor: Actor, project: ProjectFacts): ResourcePermissionsView {
-	const may = (permission: ProjectPermission) => mayInProject(actor, permission, project);
-	return {
-		readHistory: may("project.read"),
-		// A bot's settings are for whoever may change it; a project's for anyone in it.
-		openSettings: project.defaultOf
-			? mayOnBot(actor, "bot.update", project.defaultOf)
-			: may("project.read"),
-		deleteFiles: may("project.chats.manage"),
-		manageConnectors: may("connector.manage"),
-		manageComputer: may("computer.manage"),
-		useDesktop: may("computer.desktop.use"),
-		manageAutomations: may("automation.manage"),
-		runAutomations: may("automation.run"),
-	};
-}
-
-/** The bot permissions a client needs resolved, as the API returns them. */
-export function botPermissions(actor: Actor, bot: BotFacts): BotPermissionsView {
-	const may = (permission: BotPermission) => mayOnBot(actor, permission, bot);
-	return {
-		update: may("bot.update"),
-		delete: may("bot.delete"),
-		talk: reachesBot(actor, bot),
-		// Its default project is nobody's to be in; it follows the bot.
-		resources: resourcePermissions(actor, { isMember: false, defaultOf: bot }),
-	};
-}
-
-/** The workspace permissions a client needs resolved, as the API returns them. */
-export function workspacePermissions(actor: Actor): WorkspacePermissionsView {
-	return {
-		createProjects: mayInWorkspace(actor, "project.create"),
-		createBots: mayInWorkspace(actor, "bot.create"),
-		updateWorkspace: mayInWorkspace(actor, "workspace.update"),
-		manageProviders: mayInWorkspace(actor, "workspace.providers.manage"),
-		manageMembers: mayInWorkspace(actor, "workspace.members.manage"),
-		chooseSystemModel: mayInWorkspace(actor, "workspace.systemModel.choose"),
-		manageUsage: mayInWorkspace(actor, "workspace.usage.manage"),
-		manageAdmins: mayInWorkspace(actor, "workspace.admins.manage"),
-		handOverOwnership: mayInWorkspace(actor, "workspace.ownership.handOver"),
-		deleteWorkspace: mayInWorkspace(actor, "workspace.delete"),
-	};
 }

@@ -6,7 +6,7 @@ import { type Database, query } from "../database/database.ts";
 import { project } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
-import { administers, type BotRecord, botRecord, memberReachesBot } from "./facts.ts";
+import { administers, type BotRecord, botRecord, memberReachesBot, restrictsBot } from "./facts.ts";
 import { meetBot } from "./meet-bot.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
@@ -60,13 +60,13 @@ const restrictingAdmin = (
 		const forbidden = new ActionForbidden({ proof: refused });
 		const met = yield* meetBot(principal, record);
 		if (met.kind === "none") return yield* Effect.fail(hidden);
-		if (met.kind === "run") return yield* Effect.fail(met.withinBounds ? forbidden : hidden);
+		if (met.kind === "run") return yield* Effect.fail(forbidden);
 		const { actor } = met;
-		const admin = administers(actor);
 		// Admins see every bot but another member's Personal Assistant, without reaching it.
-		const seen = memberReachesBot(actor, record) || (admin && record.assistantOf === null);
-		if (!met.withinBounds || !seen) return yield* Effect.fail(hidden);
-		if (!admin || record.systemBot || met.mayManage !== "always") {
+		const seen =
+			memberReachesBot(actor, record) || (administers(actor) && record.assistantOf === null);
+		if (!seen) return yield* Effect.fail(hidden);
+		if (!restrictsBot(actor, record) || met.mayManage !== "always") {
 			return yield* Effect.fail(forbidden);
 		}
 		return actor;

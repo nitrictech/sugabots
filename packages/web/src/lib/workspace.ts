@@ -10,11 +10,12 @@ import {
 	queryOptions,
 	skipToken,
 	useMutation,
+	useMutationState,
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { useSyncExternalStore } from "react";
 import { client } from "@/api.ts";
 import { failureMessage, NotReadyError } from "@/lib/failure.ts";
@@ -45,9 +46,15 @@ export function useWorkspaces() {
 }
 
 /** The members in a workspace. Asks for nobody's roster until there is a workspace. */
+const membershipsKey = (workspaceId: string | undefined) => [
+	"workspaces",
+	workspaceId,
+	"memberships",
+];
+
 export function useMemberships(workspaceId: string | undefined) {
 	return useQuery({
-		queryKey: ["workspaces", workspaceId, "memberships"],
+		queryKey: membershipsKey(workspaceId),
 		queryFn: workspaceId
 			? ({ signal }) =>
 					Effect.runPromise(
@@ -244,6 +251,19 @@ export function useLeaveWorkspace(workspaceId: string) {
  * change rather than working out whether it was you keeps that correct for one
  * refetch nobody will notice.
  */
+function invalidateMembershipChange(
+	queries: ReturnType<typeof useQueryClient>,
+	workspaceId: string,
+) {
+	return Promise.all([
+		queries.invalidateQueries({ queryKey: membershipsKey(workspaceId) }),
+		queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
+		queries.invalidateQueries({ queryKey: ["projects"] }),
+		queries.invalidateQueries({ queryKey: ["project-members"] }),
+		queries.invalidateQueries({ queryKey: ["bots"] }),
+	]);
+}
+
 function useMembershipChange<Input>(
 	workspaceId: string,
 	change: (input: Input) => Promise<unknown>,
@@ -251,18 +271,7 @@ function useMembershipChange<Input>(
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: change,
-		onSuccess: () =>
-			Promise.all([
-				queries.invalidateQueries({ queryKey: ["workspaces", workspaceId, "memberships"] }),
-				queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
-				queries.invalidateQueries({ queryKey: ["projects"] }),
-				// Making somebody an administrator or the owner puts them in every project members
-				// made. A personal bot's default project, and someone else's Personal Assistant's,
-				// are still reached only as their bot is.
-				queries.invalidateQueries({ queryKey: ["project-members"] }),
-				queries.invalidateQueries({ queryKey: ["project-members"] }),
-				queries.invalidateQueries({ queryKey: ["bots"] }),
-			]),
+		onSuccess: () => invalidateMembershipChange(queries, workspaceId),
 	});
 }
 
@@ -291,11 +300,45 @@ export function useHandOverOwnership(workspaceId: string) {
 	);
 }
 
+const removeMembershipKey = (workspaceId: string) => ["remove-membership", workspaceId];
+
 export function useRemoveMembership(workspaceId: string) {
-	return useMembershipChange(workspaceId, (membershipId: string) =>
-		Effect.runPromise(
-			client.api.workspaces.removeMembership({ params: { workspace: workspaceId, membershipId } }),
-		),
+	const queries = useQueryClient();
+	return useMutation({
+		mutationKey: removeMembershipKey(workspaceId),
+		mutationFn: async (membershipId: string) => {
+			const departure = await Effect.runPromise(
+				client.api.workspaces.removeMembership({
+					params: { workspace: workspaceId, membershipId },
+				}),
+			);
+			await invalidateMembershipChange(queries, workspaceId);
+			return {
+				cleanupPending: departure.cleanupPending,
+				membershipsUpdatedAt:
+					queries.getQueryState(membershipsKey(workspaceId))?.dataUpdatedAt ?? 0,
+			};
+		},
+	});
+}
+
+const removalOutcome = Schema.Struct({
+	cleanupPending: Schema.Boolean,
+	membershipsUpdatedAt: Schema.Number,
+});
+
+export function useMembershipCleanupPending(workspaceId: string, membershipsUpdatedAt: number) {
+	const outcomes = useMutationState({
+		filters: { mutationKey: removeMembershipKey(workspaceId), status: "success" },
+		select: ({ state }) => Schema.decodeUnknownOption(removalOutcome)(state.data),
+	});
+	const latest = outcomes.at(-1);
+	return (
+		latest !== undefined &&
+		Option.exists(
+			latest,
+			(outcome) => outcome.cleanupPending && membershipsUpdatedAt <= outcome.membershipsUpdatedAt,
+		)
 	);
 }
 

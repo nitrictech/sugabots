@@ -1,28 +1,25 @@
+import type { CallRecord } from "@sugabots/contracts/turns";
 import { userText } from "@sugabots/errors";
 import { jsonSchema, tool } from "ai";
-import { Effect, ManagedRuntime, Schema, Stream } from "effect";
+import { Effect, Logger, ManagedRuntime, Schema, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { BlobStore } from "../../../blob-store/blob-store.ts";
 import { effectRunner } from "../../../database/database.ts";
 import { noDatabase } from "../../../database/testing.ts";
 import { ChatFileStore } from "../../../files/chat-file-store.ts";
-import { ToolExecutionRefused } from "../approvals/approved-calls.ts";
+import { recordedCallOf } from "../../tools/recorded-call.ts";
+import type { ToolCallRecorder } from "../tools.ts";
 import { type LongResult, MAX_RESULT_CHARACTERS } from "./long-results.ts";
 import { recorded, refused } from "./recorded.ts";
-import type { ToolCallStore } from "./store.ts";
 
 /**
- * The wrapper against a fake repository: what it writes before and after the tool
- * runs, and what the model is told when the tool throws or may not run.
+ * The wrapper against a fake recorder: what it records before and after the
+ * tool runs, and what the model is told when the tool throws or may not run.
  */
 
 const run = effectRunner(ManagedRuntime.make(noDatabase));
 const callId = "0199a3a0-0000-7000-8000-0000000000aa";
-const from = {
-	chatId: "0199a3a0-0000-7000-8000-000000000001",
-	messageId: "0199a3a0-0000-7000-8000-000000000012",
-	turnId: "0199a3a0-0000-7000-8000-000000000011",
-};
+const chatId = "0199a3a0-0000-7000-8000-000000000001";
 const callOptions = { toolCallId: "sdk-1", messages: [] } as never;
 
 /** For the cases whose results are short enough that nothing is kept as a file. */
@@ -30,52 +27,83 @@ const noFiles: Pick<ChatFileStore.Interface, "write"> = {
 	write: () => Effect.die(new Error("No result here is long enough to keep as a file")),
 };
 
-function fakeCalls(): Pick<ToolCallStore.Interface, "open" | "close"> {
+/** A recorder that records every call as `callId`, and starts every approved one. */
+function fakeRecorder(): ToolCallRecorder & {
+	readonly open: ReturnType<typeof vi.fn>;
+	readonly close: ReturnType<typeof vi.fn>;
+	readonly startApproved: ReturnType<typeof vi.fn>;
+} {
 	return {
-		open: vi.fn(({ atOffset, tool, input }) =>
-			Effect.succeed({
-				type: "tool_call" as const,
-				id: callId,
-				tool,
-				input: input as never,
-				output: null,
-				status: "running" as const,
-				approval: null,
-				error: null,
-				atOffset,
-				startedAt: "2026-09-14T00:00:00.000Z",
-				finishedAt: null,
-			}),
+		open: vi.fn(() => Effect.succeed<CallRecord>({ _tag: "Send", id: callId })),
+		close: vi.fn(() => Effect.void),
+		startApproved: vi.fn(() =>
+			Effect.succeed<CallRecord | undefined>({ _tag: "Send", id: callId }),
 		),
-		close: vi.fn(() => Effect.undefined),
 	};
 }
 
 describe("a refused tool", () => {
 	it("refuses every call, recording why without running it", async () => {
-		const calls = fakeCalls();
+		const recorder = fakeRecorder();
 		const execute = vi.fn(async () => "ran");
 		const refusal = userText`This tool is turned off for this bot.`;
 		const off = refused("wiki__wipe", tool({ inputSchema: jsonSchema({}), execute }), refusal, {
-			calls,
+			recorder,
 			run,
-			from,
-			replyLength: () => 3,
-			noteToolCall: () => Effect.void,
+			files: noFiles,
+			chatId,
 		});
 
 		const output = await off.execute?.({}, callOptions);
 
 		expect(output).toEqual({ status: "failed", error: refusal });
 		expect(execute).not.toHaveBeenCalled();
-		expect(calls.close).toHaveBeenCalledWith(callId, { error: refusal });
+		expect(recorder.open).toHaveBeenCalledWith({
+			toolCallId: "sdk-1",
+			tool: "wiki__wipe",
+			input: {},
+			writeOrDelete: false,
+			binding: { kind: "built-in" },
+		});
+		expect(recorder.close).toHaveBeenCalledWith(callId, { error: refusal });
 	});
+
+	it.each<{ record: CallRecord; result: unknown }>([
+		{
+			record: { _tag: "Finished", id: callId, outcome: { output: { removed: true } } },
+			result: { removed: true },
+		},
+		{
+			record: { _tag: "Finished", id: callId, outcome: { error: userText`The call failed.` } },
+			result: { status: "failed", error: "The call failed." },
+		},
+		{
+			record: { _tag: "Interrupted", id: callId, error: userText`The call was interrupted.` },
+			result: { status: "failed", error: "The call was interrupted." },
+		},
+	])(
+		"returns the recorded outcome of a $record._tag call to a tool that is off",
+		async ({ record, result }) => {
+			const recorder = fakeRecorder();
+			recorder.open.mockReturnValue(Effect.succeed(record));
+			const execute = vi.fn(async () => "ran");
+			const off = refused(
+				"wiki__wipe",
+				tool({ inputSchema: jsonSchema({}), execute }),
+				userText`This tool is turned off for this bot.`,
+				{ recorder, files: noFiles, run, chatId },
+			);
+
+			expect(await off.execute?.({}, callOptions)).toEqual(result);
+			expect(execute).not.toHaveBeenCalled();
+			expect(recorder.close).not.toHaveBeenCalled();
+		},
+	);
 });
 
 describe("a recorded tool", () => {
-	it("opens the call with its input where the reply stands, then closes it with the output", async () => {
-		const calls = fakeCalls();
-		const noted: Array<{ id: string; atOffset: number; writeOrDelete: boolean }> = [];
+	it("records the call as sent with its input before it runs, then finishes it with the output", async () => {
+		const recorder = fakeRecorder();
 		const probe = recorded(
 			"probe",
 			tool({
@@ -85,34 +113,44 @@ describe("a recorded tool", () => {
 				),
 				execute: async ({ q }) => ({ answer: q.toUpperCase() }),
 			}),
-			{
-				calls,
-				files: noFiles,
-				run,
-				from,
-				replyLength: () => 9,
-				noteToolCall: (call) => Effect.sync(() => void noted.push(call)),
-				markActed: () => Effect.void,
-			},
+			{ recorder, files: noFiles, run, chatId },
 		);
 
 		const output = await probe.execute?.({ q: "hi" }, callOptions);
 
 		expect(output).toEqual({ answer: "HI" });
-		expect(calls.open).toHaveBeenCalledWith({
-			...from,
+		expect(recorder.open).toHaveBeenCalledWith({
+			toolCallId: "sdk-1",
 			tool: "probe",
 			input: { q: "hi" },
-			atOffset: 9,
 			writeOrDelete: false,
+			binding: { kind: "built-in" },
 		});
-		expect(noted).toEqual([{ id: callId, atOffset: 9, writeOrDelete: false }]);
-		expect(calls.close).toHaveBeenCalledWith(callId, { output: { answer: "HI" } });
+		expect(recorder.close).toHaveBeenCalledWith(callId, { output: { answer: "HI" } });
 	});
 
-	it("marks a call as acting when the tool changes things, in the row and in the reply", async () => {
-		const calls = fakeCalls();
-		const noted: Array<{ writeOrDelete: boolean }> = [];
+	it("gives the tool the id its call was recorded as, for a destination that takes an idempotency key", async () => {
+		const recorder = fakeRecorder();
+		const execute = vi.fn(async (_input: object, { context }: { context?: unknown }) =>
+			recordedCallOf(context),
+		);
+		const probe = recorded(
+			"wiki__post",
+			tool({
+				inputSchema: Schema.Struct({}).pipe(
+					Schema.toStandardSchemaV1,
+					Schema.toStandardJSONSchemaV1,
+				),
+				execute,
+			}),
+			{ recorder, files: noFiles, run, chatId, writeOrDelete: true },
+		);
+
+		expect(await probe.execute?.({}, callOptions)).toBe(callId);
+	});
+
+	it("records a call to a tool that changes things as one that may", async () => {
+		const recorder = fakeRecorder();
 		const probe = recorded(
 			"wiki__wipe",
 			tool({
@@ -122,26 +160,16 @@ describe("a recorded tool", () => {
 				),
 				execute: async () => "gone",
 			}),
-			{
-				calls,
-				files: noFiles,
-				run,
-				from,
-				replyLength: () => 0,
-				noteToolCall: (call) => Effect.sync(() => void noted.push(call)),
-				markActed: () => Effect.void,
-				writeOrDelete: true,
-			},
+			{ recorder, files: noFiles, run, chatId, writeOrDelete: true },
 		);
 
 		await probe.execute?.({}, callOptions);
 
-		expect(calls.open).toHaveBeenCalledWith(expect.objectContaining({ writeOrDelete: true }));
-		expect(noted).toEqual([expect.objectContaining({ writeOrDelete: true })]);
+		expect(recorder.open).toHaveBeenCalledWith(expect.objectContaining({ writeOrDelete: true }));
 	});
 
 	it("records that a tool threw, but not what it threw", async () => {
-		const calls = fakeCalls();
+		const recorder = fakeRecorder();
 		const probe = recorded(
 			"probe",
 			tool({
@@ -153,28 +181,90 @@ describe("a recorded tool", () => {
 					throw new Error("upstream said no");
 				},
 			}),
-			{
-				calls,
-				files: noFiles,
-				run,
-				from,
-				replyLength: () => 0,
-				noteToolCall: () => Effect.void,
-				markActed: () => Effect.void,
-			},
+			{ recorder, files: noFiles, run, chatId },
 		);
 
 		const output = await probe.execute?.({}, callOptions);
 
 		// What was thrown goes to the logs, not to members or the model.
 		expect(output).toEqual({ status: "failed", error: "The tool failed before it finished." });
-		expect(calls.close).toHaveBeenCalledWith(callId, {
+		expect(recorder.close).toHaveBeenCalledWith(callId, {
 			error: "The tool failed before it finished.",
 		});
 	});
 
+	it.each([
+		{ writeOrDelete: true, error: expect.stringContaining("Check what it did") },
+		{ writeOrDelete: false, error: "The tool stopped before it finished." },
+	])(
+		"records an interruption for a call that throws after its signal is aborted (write/delete: $writeOrDelete)",
+		async ({ writeOrDelete, error }) => {
+			const recorder = fakeRecorder();
+			const controller = new AbortController();
+			const failure = new Error("connector disconnected");
+			const logged = vi.fn();
+			const logger = Logger.layer([Logger.make(({ message }) => logged(message))]);
+			const wipe = recorded(
+				"wiki__wipe",
+				tool({
+					inputSchema: jsonSchema({}),
+					execute: async (): Promise<{ ok: boolean }> => {
+						controller.abort();
+						throw failure;
+					},
+				}),
+				{
+					recorder,
+					files: noFiles,
+					run: (effect) => run(effect.pipe(Effect.provide(logger))),
+					chatId,
+					writeOrDelete,
+				},
+			);
+
+			const result = await wipe.execute?.(
+				{},
+				{
+					toolCallId: "sdk-1",
+					messages: [],
+					abortSignal: controller.signal,
+					context: undefined,
+				},
+			);
+
+			expect(result).toEqual({ status: "failed", error });
+			expect(recorder.close).toHaveBeenCalledExactlyOnceWith(callId, { error });
+			expect(logged).toHaveBeenCalledWith(["Tool wiki__wipe threw", failure]);
+		},
+	);
+
+	it("keeps the output a read-only call returns as its signal is aborted", async () => {
+		const recorder = fakeRecorder();
+		const controller = new AbortController();
+		const probe = recorded(
+			"probe",
+			tool({
+				inputSchema: jsonSchema({}),
+				execute: async () => {
+					controller.abort();
+					return { answer: "found" };
+				},
+			}),
+			{ recorder, files: noFiles, run, chatId },
+		);
+
+		const output = await probe.execute?.(
+			{},
+			{ toolCallId: "sdk-1", messages: [], abortSignal: controller.signal, context: undefined },
+		);
+
+		expect(output).toEqual({ answer: "found" });
+		expect(recorder.close).toHaveBeenCalledExactlyOnceWith(callId, { output });
+	});
+
 	it("does not run an approved call its approval no longer covers, nor tell the model why", async () => {
-		const calls = fakeCalls();
+		const recorder = fakeRecorder();
+		recorder.startApproved.mockReturnValue(Effect.succeed(undefined));
 		const execute = vi.fn(async () => ({ ok: true }));
 		const probe = recorded(
 			"probe",
@@ -186,22 +276,11 @@ describe("a recorded tool", () => {
 				execute,
 			}),
 			{
-				calls,
+				recorder,
 				files: noFiles,
 				run,
-				from,
-				replyLength: () => 0,
-				noteToolCall: () => Effect.void,
-				markActed: () => Effect.void,
+				chatId,
 				approval: {
-					approvals: {
-						beginExecution: () =>
-							Effect.fail(
-								new ToolExecutionRefused({
-									message: "Connector configuration changed after approval",
-								}),
-							),
-					},
 					binding: {
 						kind: "connector",
 						connectorId: "0199a3a0-0000-7000-8000-000000000021",
@@ -219,6 +298,7 @@ describe("a recorded tool", () => {
 			error: "The tool was not run: its approval no longer applies.",
 		});
 		expect(execute).not.toHaveBeenCalled();
+		expect(recorder.open).not.toHaveBeenCalled();
 	});
 });
 
@@ -243,22 +323,14 @@ describe("a recorded tool with a long result", () => {
 
 	/** Runs `probe` returning `output`, with its files written to `files`. */
 	async function callWith(output: unknown, files: Pick<ChatFileStore.Interface, "write">) {
-		const calls = fakeCalls();
+		const recorder = fakeRecorder();
 		const probe = recorded(
 			"probe",
 			tool({ inputSchema: jsonSchema({}), execute: async () => output }),
-			{
-				calls,
-				files,
-				run,
-				from,
-				replyLength: () => 0,
-				noteToolCall: () => Effect.void,
-				markActed: () => Effect.void,
-			},
+			{ recorder, files, run, chatId },
 		);
 		const given = (await probe.execute?.({}, callOptions)) as LongResult;
-		return { given, calls };
+		return { given, calls: recorder };
 	}
 
 	it("keeps the whole result on the call, and gives the model its start and a file to read on", async () => {

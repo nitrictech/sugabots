@@ -1,8 +1,10 @@
 export * as TurnAuthentication from "./turn.ts";
 
 import { type DomainError, userText } from "@sugabots/errors";
+import { eq, sql } from "drizzle-orm";
 import { Context, Effect, ErrorReporter, Layer, Schema } from "effect";
 import { query, serviceOperations } from "../database/database.ts";
+import { turn } from "../database/schema.ts";
 import {
 	type AutomationRun,
 	authenticated,
@@ -18,13 +20,18 @@ import { askerOf, type TurnFacts, turnFacts } from "./turn-facts.ts";
  * acts for. It checks no permission; each operation the turn calls proves
  * access for the principal this builds.
  *
+ * Each principal it builds is a new execution of the turn: it raises the
+ * turn's execution number, which the principal carries, so the writes of an
+ * execution that was resumed elsewhere since are refused.
+ *
  * Only the bot loop and the scheduler may import this, as it takes nothing
  * but a stored id.
  */
 export interface Interface {
 	/**
 	 * The principal of the turn `turnId`: its bot acting for its asker, with
-	 * the turn's bounds, or a bot in an automation's run.
+	 * the turn's bounds, or a bot in an automation's run, as the turn's newest
+	 * execution.
 	 */
 	readonly authenticate: (
 		turnId: string,
@@ -57,8 +64,10 @@ export const make = Effect.gen(function* () {
 							workspace: facts.workspace,
 							bot: facts.bot,
 							asker,
+							askedByAutomation: facts.askedBy.kind === "automation",
 							chat: facts.chat,
 							turn: facts.turn,
+							executionNumber: yield* newExecution(facts.turn),
 							bounds: boundsOf(facts, asker, project),
 						});
 					}
@@ -70,6 +79,7 @@ export const make = Effect.gen(function* () {
 							run: facts.run.run,
 							chat: facts.chat,
 							turn: facts.turn,
+							executionNumber: yield* newExecution(facts.turn),
 							bounds: { kind: "chat", project },
 						});
 					}
@@ -81,20 +91,37 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
+/**
+ * Raises the turn `turnId`'s execution number and returns it: the number of
+ * the execution being authenticated, which every older one no longer is.
+ */
+const newExecution = (turnId: string) =>
+	Effect.flatMap(
+		query((db) =>
+			db
+				.update(turn)
+				.set({ executionNumber: sql`${turn.executionNumber} + 1` })
+				.where(eq(turn.id, turnId))
+				.returning({ executionNumber: turn.executionNumber }),
+		),
+		([raised]) =>
+			raised ? Effect.succeed(raised.executionNumber) : Effect.die(new Error("A turn is gone")),
+	);
+
 export const layer = layerNoDeps;
 
 /**
  * A turn's bounds: member bounds for a Personal Assistant's own turns, and
- * those of its routine and manual runs; chat bounds for every other turn. A
- * brief's first turn gets chat bounds, as nothing stored says whether the
- * turn that wrote the brief had member bounds; and so does every turn in a run
- * a webhook or GitHub event started, whose input comes from outside.
+ * those of its routine and manual runs. A brief can grant member bounds only
+ * if the turn writing it had them.
  */
 function boundsOf(facts: TurnFacts, asker: string, project: string): TurnBounds {
 	const assistantsOwn = facts.assistantOf === asker && facts.inOwnChats;
 	const startedFromOutside =
 		facts.run?.startedBy === "webhook" || facts.run?.startedBy === "github";
-	return assistantsOwn && facts.reason !== "brief" && !startedFromOutside
+	return assistantsOwn &&
+		(facts.reason !== "brief" || facts.briefTurnRule === "memberBounds") &&
+		!startedFromOutside
 		? { kind: "member" }
 		: { kind: "chat", project };
 }

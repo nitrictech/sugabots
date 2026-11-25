@@ -1,11 +1,19 @@
 import { asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { seedInvitation, seedMember, seedWorkspace } from "../authentication/seed.test-support.ts";
-import { query, transaction } from "../database/database.ts";
-import { member, placedChat, project } from "../database/schema.ts";
+import {
+	seedBot,
+	seedInvitation,
+	seedMember,
+	seedProject,
+	seedProjectChat,
+	seedWorkspace,
+} from "../authentication/seed.test-support.ts";
+import { query } from "../database/database.ts";
+import { bot, member, placedChat, project } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { Principal } from "../principal.ts";
+import { workspaceOfInvitation } from "../workspaces/workspace-reference.ts";
 import { proveHoldsInvitation } from "./holds-invitation.ts";
 import { proveInWorkspace } from "./in-workspace.ts";
 import {
@@ -15,6 +23,7 @@ import {
 } from "./membership-changes.ts";
 import { named } from "./proof.ts";
 import { proveReachSet } from "./reach-set.ts";
+import { underWorkspaceLock } from "./workspace-lock.ts";
 import {
 	proveCanCreateBots,
 	proveCanCreateProjects,
@@ -148,10 +157,8 @@ describe("the workspace and who is in it", () => {
 			change: MembershipChange,
 		) =>
 			outcome(
-				transaction(
-					named(principal, workspaceId, memberId, (p, w, u) =>
-						proveCanChangeMembership(p, w, u, change).pipe(Effect.asVoid),
-					),
+				underWorkspaceLock(principal, workspaceId, (lock) =>
+					named(memberId, (u) => proveCanChangeMembership(lock, u, change).pipe(Effect.asVoid)),
 				),
 			);
 		const invites = (
@@ -160,8 +167,8 @@ describe("the workspace and who is in it", () => {
 			role: "admin" | "editor" | "viewer",
 		) =>
 			outcome(
-				transaction(
-					named(principal, workspaceId, (p, w) => proveCanInvite(p, w, role).pipe(Effect.asVoid)),
+				underWorkspaceLock(principal, workspaceId, (lock) =>
+					proveCanInvite(lock, role).pipe(Effect.asVoid),
 				),
 			);
 
@@ -235,9 +242,9 @@ describe("the workspace and who is in it", () => {
 		it("carries the member's current role and the change, for the write to take", async () => {
 			const staff = await staffed();
 			const carried = await runOnPostgres(
-				transaction(
-					named(await as.member(staff.owner), staff.workspaceId, staff.editor, (p, w, u) =>
-						proveCanChangeMembership(p, w, u, { kind: "role", role: "admin" }).pipe(
+				underWorkspaceLock(await as.member(staff.owner), staff.workspaceId, (lock) =>
+					named(staff.editor, (u) =>
+						proveCanChangeMembership(lock, u, { kind: "role", role: "admin" }).pipe(
 							Effect.map((proof) => ({ currentRole: proof.currentRole, change: proof.change })),
 						),
 					),
@@ -252,12 +259,12 @@ describe("the workspace and who is in it", () => {
 		const verifying = { requireEmailVerification: true };
 		const notVerifying = { requireEmailVerification: false };
 
-		/** Whether `principal` holds the invitation, under `accounts`' rules. */
+		/** Whether `principal` holds the invitation, under `accounts`' rules, read under its workspace's lock. */
 		const holds = (principal: Principal, invitationId: string, accounts = notVerifying) =>
 			outcome(
-				transaction(
-					named(principal, invitationId, (p, i) =>
-						proveHoldsInvitation(p, i, accounts).pipe(Effect.asVoid),
+				Effect.flatMap(workspaceOfInvitation(invitationId), (workspaceId) =>
+					underWorkspaceLock(principal, workspaceId ?? invitationId, (lock) =>
+						named(invitationId, (i) => proveHoldsInvitation(lock, i, accounts).pipe(Effect.asVoid)),
 					),
 				),
 			);
@@ -341,6 +348,18 @@ describe("the workspace and who is in it", () => {
 					}),
 				),
 			);
+		const botsReached = (principal: Principal) =>
+			runOnPostgres(
+				named(principal, world.a.workspace, (p, w) =>
+					Effect.gen(function* () {
+						const reach = proveReachSet(yield* proveInWorkspace(p, w));
+						const rows = yield* query((db) =>
+							db.select({ id: bot.id }).from(bot).where(reach.reachesBot(bot.id)),
+						);
+						return rows.map((row) => row.id);
+					}),
+				),
+			);
 
 		it("holds what a member reaches in the workspace, and nothing of another", async () => {
 			const { a, b } = world;
@@ -369,7 +388,7 @@ describe("the workspace and who is in it", () => {
 			expect(assistantReach).toEqual(await projectsReached(await as.member(a.ed)));
 			const { principal: run } = await as.run(a.workspace, a.project, a.pub.id);
 			expect(await projectsReached(run)).toEqual([a.project]);
-			expect(await projectsReached(await as.webhook(a.workspace, a.project))).toEqual([a.project]);
+			expect(await projectsReached(await as.webhook(a.workspace, a.project))).toEqual([]);
 			const compaction = await as.compaction(a.chat, a.pub.id);
 			expect(await projectsReached(compaction)).toEqual([]);
 			expect(await chatsReached(compaction)).toEqual([a.chat]);
@@ -382,6 +401,30 @@ describe("the workspace and who is in it", () => {
 			expect(chats).toContain(a.chat);
 			expect(chats).not.toContain(a.otherChat);
 			expect(chats).not.toContain(a.pubChat);
+		});
+
+		it("hides bots being deleted and hides the run's reach set once its project is being deleted", async () => {
+			const { a } = world;
+			const helper = await seedBot(a.workspace);
+			const projectId = await seedProject(a.workspace, { leadBotId: a.pub.id, bots: [helper.id] });
+			const chatId = await seedProjectChat(a.workspace, projectId, a.admin);
+			const { principal: run } = await as.run(a.workspace, projectId, a.pub.id);
+			expect(await projectsReached(run)).toEqual([projectId]);
+			expect(await chatsReached(run)).toContain(chatId);
+			expect(await botsReached(run)).toEqual(expect.arrayContaining([a.pub.id, helper.id]));
+
+			await onDatabase((db) =>
+				db.update(project).set({ deleting: true }).where(eq(project.id, helper.defaultProject)),
+			);
+			expect(await botsReached(run)).toEqual([a.pub.id]);
+
+			await onDatabase((db) =>
+				db.update(project).set({ deleting: true }).where(eq(project.id, projectId)),
+			);
+
+			expect(await projectsReached(run)).toEqual([]);
+			expect(await chatsReached(run)).toEqual([]);
+			expect(await botsReached(run)).toEqual([]);
 		});
 	});
 });

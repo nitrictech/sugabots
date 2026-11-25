@@ -1,0 +1,76 @@
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { and, eq, sql } from "drizzle-orm";
+import { Effect } from "effect";
+import { query } from "../database/database.ts";
+import { connector, project } from "../database/schema.ts";
+import { isUuid } from "../ids/ids.ts";
+import type { Principal } from "../principal.ts";
+import type { CanRestrictBotsProject } from "./can-restrict-bot.ts";
+import { defineProof, type Named, type Proof } from "./proof.ts";
+import { proveReachesProject } from "./reaches-project.ts";
+
+export interface ReachesConnector<P, J, K> extends Proof<"ReachesConnector", [P, J, K]> {
+	readonly workspace: string;
+	readonly project: Named<J, string>;
+	readonly connector: Named<K, string>;
+}
+
+export interface CanSwitchOffConnector<P, J, K> extends Proof<"CanSwitchOffConnector", [P, J, K]> {
+	readonly workspace: string;
+	readonly project: Named<J, string>;
+	readonly connector: Named<K, string>;
+}
+
+const ReachesConnectorProof = defineProof("ReachesConnector");
+const CanSwitchOffConnectorProof = defineProof("CanSwitchOffConnector");
+const hidden = new ResourceHidden({ resource: "connector" });
+
+export const proveReachesConnector = <P, J, K>(
+	principal: Named<P, Principal>,
+	projectId: Named<J, string>,
+	connectorId: Named<K, string>,
+) =>
+	Effect.gen(function* () {
+		const id = connectorId.value;
+		if (!isUuid(id)) return yield* hidden;
+		const reach = yield* proveReachesProject(
+			principal,
+			projectId,
+			false,
+			sql`exists (select 1 from ${connector}
+				where ${connector.id} = ${id}::uuid and ${connector.projectId} = ${project.id}
+				and ${connector.workspaceId} = ${project.workspaceId})`,
+		).pipe(Effect.mapError(() => hidden));
+		const target: ReachesConnector<P, J, K> = ReachesConnectorProof.prove(
+			[principal, projectId, connectorId],
+			{ workspace: reach.workspace, project: projectId, connector: connectorId },
+		);
+		return { reach, target };
+	});
+
+export const proveRestrictableConnector = <P, J, K>(
+	canRestrict: CanRestrictBotsProject<P, J>,
+	connectorId: Named<K, string>,
+) =>
+	Effect.gen(function* () {
+		const id = connectorId.value;
+		if (!isUuid(id)) return yield* hidden;
+		const [found] = yield* query((db) =>
+			db
+				.select({ id: connector.id })
+				.from(connector)
+				.where(
+					and(
+						eq(connector.id, id),
+						eq(connector.projectId, canRestrict.project.value),
+						eq(connector.workspaceId, canRestrict.workspace),
+					),
+				),
+		);
+		if (!found) return yield* hidden;
+		const target: CanSwitchOffConnector<P, J, K> = CanSwitchOffConnectorProof.prove(
+			[canRestrict.principal, canRestrict.project, connectorId],
+			{ workspace: canRestrict.workspace, project: canRestrict.project, connector: connectorId },
+		);
+		return target;
+	});

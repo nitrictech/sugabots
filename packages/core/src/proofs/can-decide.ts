@@ -1,12 +1,13 @@
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { turnFacts } from "../authentication/turn-facts.ts";
+import { approversOf } from "../chats/tools/approvers.ts";
 import { query } from "../database/database.ts";
-import { toolCall } from "../database/schema.ts";
+import { chat, membership, toolCall } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
-import { type ApproverRule, approverFacts, approverRuleOf } from "./approvers.ts";
+import { type ApproverRule, approverFacts } from "./approvers.ts";
 import type { IsMember } from "./is-member.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
@@ -21,6 +22,7 @@ export interface CanDecide<P, X> extends Proof<"CanDecide", [P, X]> {
 	readonly principal: Named<P, Principal>;
 	readonly call: Named<X, string>;
 	readonly rule: ApproverRule;
+	readonly computerProjectId: string | undefined;
 	/** Whether P reaches X's chat, and so may read what the model wrote there. */
 	readonly reachesChat: boolean;
 }
@@ -34,16 +36,35 @@ export const proveCanDecide = <P, X>(isMember: IsMember<P>, callId: Named<X, str
 		const [call] = isUuid(id)
 			? yield* query((db) =>
 					db
-						.select({ turn: toolCall.turnId, tool: toolCall.tool })
+						.select({
+							turn: toolCall.turnId,
+							tool: toolCall.tool,
+							computerProjectId: toolCall.approvalComputerProjectId,
+						})
 						.from(toolCall)
+						.innerJoin(chat, eq(chat.id, toolCall.chatId))
+						.innerJoin(
+							membership,
+							and(
+								eq(membership.workspaceId, chat.workspaceId),
+								eq(membership.memberId, isMember.member),
+								eq(membership.leaving, false),
+							),
+						)
 						.where(eq(toolCall.id, id))
 						.limit(1),
 				)
 			: [];
 		const facts = call && (yield* query((db) => turnFacts(db, call.turn)));
 		if (!call || !facts) return yield* Effect.fail(hidden);
-		const rule = approverRuleOf(facts, call.tool);
-		const { approver, reachesChat } = yield* approverFacts(isMember.member, facts, rule);
+		const computerRequest = approversOf(call.tool) === "computer-managers";
+		const computerProjectId = computerRequest ? (call.computerProjectId ?? undefined) : undefined;
+		if (computerRequest && !computerProjectId) return yield* hidden;
+		const { rule, approver, reachesChat } = yield* approverFacts(
+			isMember.member,
+			facts,
+			computerProjectId,
+		);
 		if (!approver) {
 			return yield* Effect.fail(reachesChat ? new ActionForbidden({ proof: "CanDecide" }) : hidden);
 		}
@@ -51,7 +72,28 @@ export const proveCanDecide = <P, X>(isMember: IsMember<P>, callId: Named<X, str
 			principal: isMember.principal,
 			call: callId,
 			rule,
+			computerProjectId,
 			reachesChat,
 		});
 		return proof;
 	});
+
+export const workspaceOfApproval = <P>(isMember: IsMember<P>, id: string) =>
+	isUuid(id)
+		? query((db) =>
+				db
+					.select({ workspace: chat.workspaceId })
+					.from(toolCall)
+					.innerJoin(chat, eq(chat.id, toolCall.chatId))
+					.innerJoin(
+						membership,
+						and(
+							eq(membership.workspaceId, chat.workspaceId),
+							eq(membership.memberId, isMember.member),
+							eq(membership.leaving, false),
+						),
+					)
+					.where(eq(toolCall.id, id))
+					.limit(1),
+			).pipe(Effect.map(([row]) => row?.workspace))
+		: Effect.succeed(undefined);

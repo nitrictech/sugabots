@@ -19,7 +19,6 @@ export const usageQuerySchema = Schema.Struct({
 	/** In the workspace's time zone. */
 	month: usageMonthSchema,
 });
-export type UsageQuery = typeof usageQuerySchema.Type;
 
 const usdSchema = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 const countSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));

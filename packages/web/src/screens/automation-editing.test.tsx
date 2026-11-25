@@ -960,48 +960,6 @@ describe("a bot's automations", () => {
 		);
 	});
 
-	it("lets an administrator manage the automations of another member's personal bot, without its runs", async () => {
-		const theirs = {
-			...linear,
-			visibility: "personal" as const,
-			permissions: {
-				...linear.permissions,
-				talk: false,
-				resources: { ...linear.permissions.resources, readHistory: false, runAutomations: false },
-			},
-		};
-		client.api.bots.list.mockReturnValue(
-			Effect.succeed(bots.map((bot) => (bot.id === linear.id ? theirs : bot))),
-		);
-		serveAutomation({ ...morningBrief, bot: theirs });
-		client.api.automations.update.mockReturnValue(
-			Effect.succeed({ automation: { ...morningBrief.automation, state: "paused" }, secrets: [] }),
-		);
-		mount(`/suga/bots/${theirs.handle}/automations`);
-
-		const list = await screen.findByRole("region", { name: "Automations" });
-		fireEvent.click(await within(list).findByRole("link", { name: /Morning brief/ }));
-		expect(await screen.findByRole("heading", { name: "Morning brief" })).toBeDefined();
-		expect(screen.getByLabelText("Instructions")).toHaveProperty(
-			"value",
-			morningBrief.automation.instructions,
-		);
-		expect(screen.getByLabelText("Instructions")).toHaveProperty("readOnly", false);
-		fireEvent.click(screen.getByRole("switch", { name: "Automation on" }));
-		await waitFor(() =>
-			expect(client.api.automations.update).toHaveBeenCalledWith({
-				params: { projectId: linear.defaultProjectId, automationId: morningBrief.automation.id },
-				payload: { state: "paused" },
-			}),
-		);
-
-		// Its chats, its feed and how it ran are not theirs to read.
-		expect(screen.queryByRole("button", { name: "Start a run" })).toBeNull();
-		expect(client.api.chats.projectChats).not.toHaveBeenCalled();
-		expect(client.api.chats.get).not.toHaveBeenCalled();
-		expect(client.api.automations.projectRuns).not.toHaveBeenCalled();
-	});
-
 	it("shows an automation its viewer may not manage without a way to change it", async () => {
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed(
@@ -1012,6 +970,7 @@ describe("a bot's automations", () => {
 						resources: {
 							...bot.permissions.resources,
 							manageAutomations: false,
+							pauseAutomations: false,
 							runAutomations: false,
 						},
 					},
@@ -1033,5 +992,50 @@ describe("a bot's automations", () => {
 		expect(within(panel).queryByRole("button", { name: "Add routine" })).toBeNull();
 		expect(within(panel).queryByRole("button", { name: "Add trigger" })).toBeNull();
 		expect(within(panel).getByLabelText("Instructions")).toHaveProperty("readOnly", true);
+	});
+
+	it("shows another member's personal bot automation with only an off switch", async () => {
+		client.api.bots.list.mockReturnValue(
+			Effect.succeed(
+				bots.map((bot) => ({
+					...bot,
+					permissions: {
+						...bot.permissions,
+						talk: false,
+						resources: {
+							...bot.permissions.resources,
+							manageAutomations: false,
+							pauseAutomations: true,
+							runAutomations: false,
+						},
+					},
+				})),
+			),
+		);
+		const { id, name, state } = morningBrief.automation;
+		client.api.automations.list.mockReturnValue(
+			Effect.succeed([{ id, name, state, restricted: true }]),
+		);
+		client.api.automations.update.mockReturnValue(
+			Effect.succeed({
+				automation: { id, name, state: "paused", restricted: true },
+				secrets: [],
+			}),
+		);
+		mount(nestedChatPage(morningBrief));
+		const off = await screen.findByRole("switch", { name: `Pause ${name}` });
+		expect(off).toHaveProperty("disabled", false);
+		expect(screen.queryByLabelText("Instructions")).toBeNull();
+		expect(screen.queryByRole("button", { name: "Start a run" })).toBeNull();
+		expect(client.api.chats.projectChats).not.toHaveBeenCalled();
+		expect(client.api.chats.get).not.toHaveBeenCalled();
+		expect(client.api.automations.projectRuns).not.toHaveBeenCalled();
+		fireEvent.click(off);
+		await waitFor(() =>
+			expect(client.api.automations.update).toHaveBeenCalledWith({
+				params: { projectId: morningBrief.automation.projectId, automationId: id },
+				payload: { state: "paused" },
+			}),
+		);
 	});
 });

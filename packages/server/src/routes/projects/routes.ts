@@ -16,6 +16,7 @@ export const projectRoutes = HttpApiBuilder.group(ServerApi, "projects", (handle
 			)
 			.handle("create", ({ params, payload }) =>
 				callOperation("projects.create", { workspace: params.workspace, ...payload }).pipe(
+					Effect.catchTags(botCallRefusals),
 					asHttpError(projectErrors),
 				),
 			)
@@ -58,6 +59,7 @@ export const projectRoutes = HttpApiBuilder.group(ServerApi, "projects", (handle
 			)
 			.handle("join", ({ params }) =>
 				callOperation("projects.join", { projectId: params.projectId }).pipe(
+					Effect.catchTags(botCallRefusals),
 					asHttpError(projectErrors),
 				),
 			)
@@ -70,7 +72,7 @@ export const projectRoutes = HttpApiBuilder.group(ServerApi, "projects", (handle
 				callOperation("projects.addBot", {
 					projectId: params.projectId,
 					botId: payload.botId,
-				}).pipe(asHttpError(projectErrors)),
+				}).pipe(Effect.catchTags(botCallRefusals), asHttpError(projectErrors)),
 			)
 			.handle("removeBot", ({ params }) =>
 				callOperation("projects.removeBot", {
@@ -96,4 +98,16 @@ const projectErrors = {
 	LeadsProjects: Conflict,
 	ComputerUnavailable: Conflict,
 	ComputerMadeMeanwhile: Conflict,
+	ClaimLost: Conflict,
+};
+
+/**
+ * How the operation refuses a bot's call, waiting for approval or outside
+ * its turn, which a member signed in never meets.
+ */
+const botCallRefusals = {
+	ApprovalNeeded: Effect.die,
+	ApprovalRefused: Effect.die,
+	TurnEnded: Effect.die,
+	TurnExecutionSuperseded: Effect.die,
 };

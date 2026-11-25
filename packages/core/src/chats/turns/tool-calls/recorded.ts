@@ -1,42 +1,30 @@
+import type { ApprovalAsked, CallRecord } from "@sugabots/contracts/turns";
 import { type UserText, userText } from "@sugabots/errors";
 import type { Tool } from "ai";
 import { Effect } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
-import type { ChatFileStore } from "../../../files/chat-file-store.ts";
-import type { ApprovedToolCalls } from "../approvals/approved-calls.ts";
-import { forModel } from "./long-results.ts";
+import { ToolCallError } from "../../tools/failed.ts";
+import { withRecordedCall } from "../../tools/recorded-call.ts";
+import type { ToolCallRecorder } from "../tools.ts";
+import { APPROVAL_NO_LONGER_APPLIES, INTERRUPTED_CALL } from "./lifecycle.ts";
+import { forModel, type ResultFiles } from "./long-results.ts";
 import type { ToolCallStore } from "./store.ts";
 
-/** The turn a recorded tool runs in: where its rows point. */
-interface RecordingTurn {
-	chatId: string;
-	messageId: string;
-	turnId: string;
-}
-
 export interface RecordingOptions {
-	calls: Pick<ToolCallStore.Interface, "open" | "close">;
+	/** Where the turn's calls are written down: the bot loop's own records of them. */
+	recorder: ToolCallRecorder;
 	/** Where a result too long to give the model whole is kept, for it to read on. */
-	files: Pick<ChatFileStore.Interface, "write">;
+	files: ResultFiles;
 	/** Runs a service's Effect from the tool's promise. */
 	run: RunEffect;
-	from: RecordingTurn;
-	/** How much of the reply has been written so far, which is where the call sits. */
-	replyLength: () => number;
-	/** Tells the running turn a call was made, so the reply's parts include it from now on. */
-	noteToolCall: (call: {
-		id: string;
-		atOffset: number;
-		writeOrDelete: boolean;
-	}) => Effect.Effect<void>;
-	/** Marks the write/delete boundary, after approval and before dispatch. */
-	markActed: () => Effect.Effect<void>;
+	/** The chat the turn is in, where a long result is kept. */
+	chatId: string;
 	/** Whether the tool may change something at the other end. Built-in tools do not. */
 	writeOrDelete?: boolean;
-	approval?: {
-		approvals: Pick<ApprovedToolCalls.Interface, "beginExecution">;
-		binding: ToolCallStore.ApprovalBinding;
-	};
+	/** The tool the call is bound to: a connector's, as configured now; a built-in one when unset. */
+	binding?: ToolCallStore.ApprovalBinding;
+	/** For a call that waited for approval: what it must still match to run. */
+	approval?: { binding: ToolCallStore.ApprovalBinding };
 }
 
 /** What the model is told when a tool did not give a result, in place of the result. */
@@ -47,18 +35,32 @@ interface ToolFailedResult {
 
 /** What members, and the model, are told of a tool that threw. */
 const TOOL_THREW = userText`The tool failed before it finished.`;
+const READ_INTERRUPTED = userText`The tool stopped before it finished.`;
 
 const RESULT_NOT_GIVEN = userText`The tool finished, but its result could not be given to you.`;
 
-/**
- * What the model is told of an approved call that may no longer run, such as
- * one whose connector changed after it was approved.
- */
-const APPROVAL_NO_LONGER_APPLIES = userText`The tool was not run: its approval no longer applies.`;
+async function recordedResult(
+	call: Exclude<CallRecord, { _tag: "Send" }>,
+	{ files, run, chatId }: Pick<RecordingOptions, "files" | "run" | "chatId">,
+): Promise<unknown> {
+	if (call._tag !== "Finished") return { status: "failed", error: call.error };
+	if ("error" in call.outcome) return { status: "failed", error: call.outcome.error };
+	return run(forModel(call.outcome.output, { files, chatId, toolCallId: call.id }));
+}
+
+export class ToolApprovalRequired extends Error {
+	readonly asked: ApprovalAsked & { readonly reopenCallId: string };
+
+	constructor(asked: ApprovalAsked & { readonly reopenCallId: string }) {
+		super("The tool requires a new approval");
+		this.asked = asked;
+	}
+}
 
 /**
- * A tool whose every call is written down: opened with its input before it
- * runs, closed with its output or error after.
+ * A tool whose every call is written down: recorded as sent with its input
+ * before it runs, which marks the turn as having acted when the tool may
+ * change something, and finished with its output or error after.
  *
  * The call's row keeps the whole output. The model is given it whole too,
  * unless it is longer than `MAX_RESULT_CHARACTERS`: then it is kept as a
@@ -76,60 +78,69 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 		return tool;
 	}
 	const {
-		calls,
+		recorder,
 		files,
 		run,
-		from,
-		replyLength,
-		noteToolCall,
-		markActed,
+		chatId,
 		writeOrDelete = false,
+		binding = { kind: "built-in" },
 		approval,
 	} = options;
 	return {
 		...tool,
 		execute: async (input, callOptions) => {
-			const atOffset = replyLength();
 			const opening = approval
-				? approval.approvals
-						.beginExecution({
-							...from,
-							sdkToolCallId: callOptions.toolCallId,
-							tool: key,
-							input,
-							binding: approval.binding,
-						})
-						.pipe(
-							Effect.catchTag("ToolExecutionRefused", (refused) =>
-								Effect.as(
-									Effect.logWarning(`Approved tool ${key} was not run: ${refused.message}`),
-									undefined,
-								),
-							),
-						)
-				: calls.open({ ...from, tool: key, input, atOffset, writeOrDelete });
-			const opened = await run(opening);
-			if (!opened) {
+				? recorder.startApproved({
+						toolCallId: callOptions.toolCallId,
+						tool: key,
+						input,
+						binding: approval.binding,
+						writeOrDelete,
+					})
+				: recorder.open({
+						toolCallId: callOptions.toolCallId,
+						tool: key,
+						input,
+						writeOrDelete,
+						binding,
+					});
+			const recorded = await run(opening);
+			if (!recorded) {
+				await run(
+					Effect.logWarning(`Approved tool ${key} was not run: its approval no longer holds`),
+				);
 				return { status: "failed", error: APPROVAL_NO_LONGER_APPLIES } satisfies ToolFailedResult;
 			}
-			await run(noteToolCall({ id: opened.id, atOffset, writeOrDelete }));
+			if (recorded._tag !== "Send") return recordedResult(recorded, options);
+			const opened = recorded.id;
 			let output: unknown;
 			try {
-				if (writeOrDelete) await run(markActed());
-				output = await execute(input, callOptions);
-				await run(calls.close(opened.id, { output }));
+				// The record's id stays the call's when it is sent again, so a destination
+				// that takes an idempotency key can be given it.
+				output = await execute(input, {
+					...callOptions,
+					context: withRecordedCall(callOptions.context, opened),
+				});
+				if (writeOrDelete) callOptions.abortSignal?.throwIfAborted();
+				await run(recorder.close(opened, { output }));
 			} catch (cause) {
-				// A tool with a failure worth explaining returns it as its result. A
-				// throw is a fault in the tool or its connector: what was thrown
-				// goes to the logs, and members are told only that the call failed.
-				await run(Effect.logError(`Tool ${key} threw`, cause));
-				await run(calls.close(opened.id, { error: TOOL_THREW }));
-				return { status: "failed", error: TOOL_THREW } satisfies ToolFailedResult;
+				if (cause instanceof ToolApprovalRequired) return cause;
+				const interrupted = callOptions.abortSignal?.aborted;
+				if (interrupted || !(cause instanceof ToolCallError))
+					await run(Effect.logError(`Tool ${key} threw`, cause));
+				const interruptedMessage = writeOrDelete ? INTERRUPTED_CALL : READ_INTERRUPTED;
+				const error = interrupted
+					? interruptedMessage
+					: cause instanceof ToolCallError
+						? cause.userMessage
+						: TOOL_THREW;
+				await run(recorder.close(opened, { error }));
+				return { status: "failed", error } satisfies ToolFailedResult;
 			}
 			try {
-				return await run(forModel(output, { files, chatId: from.chatId, toolCallId: opened.id }));
+				return await run(forModel(output, { files, chatId, toolCallId: opened }));
 			} catch (cause) {
-				// The call is already closed with its output, which stays: only
+				// The call is already finished with its output, which stays: only
 				// the model goes without it.
 				await run(Effect.logError(`Giving tool ${key}'s result to the model failed`, cause));
 				return { status: "failed", error: RESULT_NOT_GIVEN } satisfies ToolFailedResult;
@@ -139,25 +150,32 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 }
 
 /**
- * A tool that is offered but never runs: each call is recorded as failed with
- * `reason`, which the model is told as the call's result.
+ * refused returns a tool that records new calls as failed with `reason`.
+ * Calls that already finished or were interrupted return their recorded result.
  */
 export function refused(
 	key: string,
 	tool: Tool,
 	reason: UserText,
-	options: Pick<RecordingOptions, "calls" | "run" | "from" | "replyLength" | "noteToolCall">,
+	options: Pick<RecordingOptions, "recorder" | "run" | "files" | "chatId">,
 ): Tool {
-	const { calls, run, from, replyLength, noteToolCall } = options;
+	const { recorder, run } = options;
 	return {
 		...tool,
-		execute: async (input) => {
-			const atOffset = replyLength();
-			const opened = await run(
-				calls.open({ ...from, tool: key, input, atOffset, writeOrDelete: false }),
+		execute: async (input, callOptions) => {
+			const recorded = await run(
+				recorder.open({
+					toolCallId: callOptions.toolCallId,
+					tool: key,
+					input,
+					writeOrDelete: false,
+					binding: { kind: "built-in" },
+				}),
 			);
-			await run(noteToolCall({ id: opened.id, atOffset, writeOrDelete: false }));
-			await run(calls.close(opened.id, { error: reason }));
+			if (recorded._tag === "Finished" || recorded._tag === "Interrupted") {
+				return recordedResult(recorded, options);
+			}
+			if (recorded._tag === "Send") await run(recorder.close(recorded.id, { error: reason }));
 			return { status: "failed", error: reason } satisfies ToolFailedResult;
 		},
 	};

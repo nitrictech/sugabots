@@ -53,7 +53,7 @@ describe("PageAuthentication", () => {
 		const pageId = await seedPage(chatId, 2);
 
 		const principal = await runOnPostgres(
-			auth.open(tokenFor({ fileId: pageId, version: 1, expiresAt: inTenMinutes() })),
+			auth.open(tokenFor({ fileId: pageId.toUpperCase(), version: 1, expiresAt: inTenMinutes() })),
 		);
 
 		expect(principal._tag).toBe("PageAddress");
@@ -81,7 +81,7 @@ describe("PageAuthentication", () => {
 		const good = tokenFor({ fileId: pageId, version: 1, expiresAt: inTenMinutes() });
 
 		for (const token of [
-			`${good.slice(0, -2)}xx`,
+			tamperedWith(good),
 			"not a token",
 			tokenFor({ fileId: pageId, version: 1, expiresAt: inTenMinutes() }, "webhook-secret"),
 			secrets.encrypt("not json", FilePages.SECRET_PURPOSE),
@@ -107,3 +107,15 @@ describe("PageAuthentication", () => {
 		}
 	});
 });
+
+/**
+ * `token` with one character in its middle changed. The last characters of
+ * base64url text can carry only padding bits, so changing them may leave the
+ * decoded bytes as they were; a character in the middle always changes them.
+ */
+function tamperedWith(token: string): string {
+	const middle = Math.floor(token.length / 2);
+	const at = /[A-Za-z0-9_-]/.test(token.charAt(middle)) ? middle : middle + 1;
+	const replacement = token.charAt(at) === "A" ? "B" : "A";
+	return `${token.slice(0, at)}${replacement}${token.slice(at + 1)}`;
+}

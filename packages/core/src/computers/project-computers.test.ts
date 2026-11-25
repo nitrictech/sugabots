@@ -4,9 +4,11 @@ import { COMPUTER_OPENSANDBOX_DEFAULT_SIZE } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { DateTime, type Duration, Effect, Fiber, Layer, Redacted } from "effect";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { SystemWorkAuthentication } from "../authentication/system-work.ts";
 import { computer, computerLease, member, membership, workspace } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
+import { scheduledWorkOperations } from "../operations/scheduled-work.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { unimplemented } from "../testing.ts";
 import { seedProject } from "../workspaces/projects/seed.test-support.ts";
@@ -41,6 +43,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 	// What the project's computer is signed in with, and how often it was asked.
 	let signedIn: ComputerSignIn.SignedIn = ComputerSignIn.NOT_SIGNED_IN;
 	let signIns = 0;
+	let onSignIn: (() => void) | undefined;
 	let registryAnswers = true;
 	let providers: ComputerProviderStore.Interface;
 	let direct: Computers.Provider;
@@ -57,6 +60,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 						forProject: () =>
 							Effect.sync(() => {
 								signIns += 1;
+								onSignIn?.();
 								return signedIn;
 							}),
 					}),
@@ -193,13 +197,25 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 
 			await open();
 			const asked = signIns;
-			await runOnPostgres(projectComputers.renew(HOLDER));
+			await runOnPostgres(Effect.scoped(projectComputers.renew(HOLDER)));
 			const notYetDue = signIns - asked;
 			signedIn = signedInUntil("5 minutes");
 			await open();
 			const beforeDue = signIns;
 			signedIn = signedInUntil("2 hours");
-			await runOnPostgres(projectComputers.renew(HOLDER));
+			const refreshed = Promise.withResolvers<void>();
+			onSignIn = refreshed.resolve;
+			try {
+				await runOnPostgres(
+					Effect.scoped(
+						projectComputers
+							.renew(HOLDER)
+							.pipe(Effect.andThen(Effect.promise(() => refreshed.promise))),
+					),
+				);
+			} finally {
+				onSignIn = undefined;
+			}
 
 			expect(notYetDue).toBe(0);
 			expect(signIns - beforeDue).toBe(1);
@@ -320,6 +336,16 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 		SLOW,
 	);
 
+	const sleepIdle = Effect.gen(function* () {
+		const auth = yield* SystemWorkAuthentication.Service;
+		for (const computerId of yield* auth.idleComputerIds) {
+			const principal = yield* auth.computerSleep(computerId);
+			yield* scheduledWorkOperations["projectComputer.sleepIfIdle"]
+				.run(principal, { computerId }, { kind: "request", request: crypto.randomUUID() })
+				.pipe(Effect.provideService(ProjectComputers.Service, projectComputers));
+		}
+	}).pipe(Effect.provide(SystemWorkAuthentication.layer));
+
 	/** Makes the project's computer look unused for longer than the idle window. */
 	const idleForAnHour = () =>
 		onDatabase((db) =>
@@ -344,7 +370,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			await open();
 			await idleForAnHour();
 
-			await runOnPostgres(projectComputers.sleepIdle);
+			await runOnPostgres(sleepIdle);
 
 			expect(await sleptAt()).toBeNull();
 		},
@@ -358,7 +384,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			await runOnPostgres(projectComputers.release(HOLDER));
 			await idleForAnHour();
 
-			await runOnPostgres(projectComputers.sleepIdle);
+			await runOnPostgres(sleepIdle);
 
 			expect(await sleptAt()).toBeInstanceOf(Date);
 			const reopened = await open();
@@ -438,7 +464,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			const before = await measuredDisk();
 			await runOnPostgres(projectComputers.release(HOLDER));
 			await idleForAnHour();
-			await runOnPostgres(projectComputers.sleepIdle);
+			await runOnPostgres(sleepIdle);
 			await onDatabase((db) =>
 				db
 					.update(computer)
@@ -463,7 +489,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			);
 			await idleForAnHour();
 
-			await runOnPostgres(projectComputers.sleepIdle);
+			await runOnPostgres(sleepIdle);
 
 			expect(await sleptAt()).toBeInstanceOf(Date);
 		},

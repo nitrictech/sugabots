@@ -3,6 +3,8 @@ import { type UserText, userText } from "@sugabots/errors";
 import { eq, sql } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { SystemWorkAuthentication } from "../../authentication/system-work.ts";
+import { askerColumns } from "../../authentication/turn-facts.ts";
 import { beforeCommit, type Database, query, transaction } from "../../database/database.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
 import {
@@ -21,35 +23,38 @@ import {
 	holdTransaction,
 	onDatabase,
 	onPostgres,
-	type Promised,
 	runOnPostgres,
 } from "../../database/testing.ts";
 import { asMember } from "../../operations/chats/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
-import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
 import { seedChat } from "../seed.test-support.ts";
 import { chatServicesForTests } from "../testing.ts";
 import {
-	prepareRunnable,
+	asTheLoop,
+	completeTurn,
+	endTurn,
+	parkTurn,
+	prepareTurn,
 	queueTurnForTests,
+	recordToolCall,
 	releaseTurn,
-	replyTurnOf,
 	runningTurns,
+	runOver,
 	ToolCallStore,
-	type TurnCheckpoint,
-	TurnExecution,
 	type TurnRun,
+	TurnRuns,
 	TurnStore,
 	turnLane,
+	writeReply,
 } from "../turns/testing.ts";
 import type { Turns } from "../turns/turns.ts";
 import { AutomationRunner } from "./automation-runner.ts";
-import { Automations } from "./automations.ts";
 import { AutomationSettlement } from "./settlement.ts";
 import {
 	anAutomationAdmin,
+	automationsAs,
 	finishTurnsIn,
 	manualRunsOver,
 	releaseRun,
@@ -73,17 +78,14 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	const { emit } = Context.get(services, ChatEvents.Service);
 	const manualRunsAs = await manualRunsOver(services);
 	/** As an admin of the automations' workspace. */
-	let automations: Promised<Automations.Interface>;
+	let automations: ReturnType<typeof automationsAs>;
 	/** Starting runs by hand, as that admin. */
 	let runByHand: StartRun;
 	const { settleRun, failRun } = Context.get(services, AutomationSettlement.Service);
 	const settlement = onPostgres({ settleRun, failRun });
 	const runner = onPostgres(Context.get(services, AutomationRunner.Service));
-	const turns = onPostgres(Context.get(services, TurnStore.Service));
-	const toolCalls = onPostgres(Context.get(services, ToolCallStore.Service));
-	const execution = onPostgres({
-		prepare: Context.get(services, TurnExecution.Service).prepare,
-	});
+	const drive = runOver(services);
+	const runs = onPostgres(Context.get(services, TurnRuns.Service));
 	/** Emits `events` in a transaction of their own, as a service would. */
 	const announce = (...events: ChatEvent[]) => runOnPostgres(transaction(emit(events)));
 	/** An event ending the run's own bot's turn in `chatId` early, as `outcome`. */
@@ -116,7 +118,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	beforeEach(async () => {
 		delivered = [];
 		({ workspaceId, botId, memberId, ownProjectId, projectId } = await anAutomationAdmin());
-		automations = onPostgresAs(memberId)(Context.get(services, Automations.Service));
+		automations = automationsAs(call, memberId);
 		runByHand = manualRunsAs(memberId);
 	});
 
@@ -193,6 +195,11 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 					model: "test/model",
 					startedAt: now,
 					finishedAt: now,
+					...askerColumns({
+						chatId: accepted.chatId,
+						botId: botId,
+						triggerMessageId: triggerMessage.id,
+					}),
 				})
 				.returning(),
 		);
@@ -251,12 +258,8 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 	/** The helper's or hand-back's running turn `run` replies `content` and ends, with its lane still held. */
 	async function replyIn(run: TurnRun, content: string) {
-		const prepared = await prepareRunnable(execution, run);
-		await turns.complete(
-			replyTurnOf(prepared),
-			{ content, toolCalls: [] },
-			{ contextCapacity: 128_000, readKeptFrom: null },
-		);
+		const prepared = await drive(prepareTurn(run));
+		await drive(completeTurn(prepared, content));
 		return prepared;
 	}
 
@@ -271,27 +274,39 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	) {
 		const [turnRun] = await runOnPostgres(runningTurns(chatId));
 		if (!turnRun) throw new Error("The run asked for no turn");
-		const prepared = await prepareRunnable(execution, turnRun);
-		const calls = [];
+		const prepared = await drive(prepareTurn(turnRun));
 		for (const written of writes) {
-			const opened = await toolCalls.open({
-				chatId,
-				messageId: prepared.responseMessage.id,
-				turnId: prepared.turnId,
-				tool: "file_write",
-				input: {},
-				atOffset: 0,
-				writeOrDelete: true,
-			});
-			await toolCalls.close(opened.id, { output: { status: "written", ...written } });
-			calls.push({ id: opened.id, atOffset: 0 });
+			const id = await drive(
+				recordToolCall(prepared, {
+					toolCallId: `sdk-${crypto.randomUUID()}`,
+					tool: "file_write",
+					input: {},
+					writeOrDelete: true,
+				}),
+			);
+			await drive(
+				asTheLoop(prepared, (runsTurn) =>
+					Effect.flatMap(ToolCallStore.Service, (calls) =>
+						calls.close(runsTurn, id, { output: { status: "written", ...written } }),
+					),
+				),
+			);
 		}
 		// Freed first, so completing the turn finishes the run's work.
 		await runOnPostgres(releaseTurn(turnRun));
-		await turns.complete(
-			replyTurnOf(prepared),
-			{ content, toolCalls: calls },
-			{ contextCapacity: 128_000, readKeptFrom: null },
+		// Completed as it stands, text or none: what settlement makes of a reply is the case here.
+		await drive(
+			asTheLoop(prepared, (runsTurn) =>
+				Effect.gen(function* () {
+					const turns = yield* TurnStore.Service;
+					const { checkpoint } = yield* turns.current(runsTurn);
+					yield* turns.keepReply(runsTurn, {
+						content,
+						toolCalls: checkpoint?.reply.toolCalls ?? [],
+					});
+					yield* turns.complete(runsTurn, { contextCapacity: 128_000, readKeptFrom: null });
+				}),
+			),
 		);
 	}
 
@@ -331,6 +346,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 					model: "test/model",
 					startedAt: finishedAt,
 					finishedAt,
+					...askerColumns({ chatId: chatId, botId: botId, triggerMessageId: trigger.id }),
 				})
 				.returning(),
 		);
@@ -479,7 +495,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			});
 			expect(waitingTurns).toEqual([]);
 			// The helper's turn is refused once its workflow starts it.
-			expect(await execution.prepare(fixture.helperTurn)).toMatchObject({
+			expect(await runs.open(fixture.helperTurn)).toMatchObject({
 				_tag: "NotRunnable",
 				reason: "The automation run has ended",
 			});
@@ -511,6 +527,11 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 				status: "running",
 				model: "test/model",
 				startedAt: new Date(),
+				...askerColumns({
+					chatId: compactionChat.id,
+					botId: botId,
+					triggerMessageId: triggerMessage.id,
+				}),
 			}),
 		);
 
@@ -556,11 +577,9 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const [failing, answering] = fixture.helperTurns;
 		if (!failing || !answering) throw new Error("fixture");
 
-		const failed = await prepareRunnable(execution, failing);
-		await turns.fail(
-			replyTurnOf(failed),
-			{ content: "", toolCalls: [] },
-			{ userMessage: userText`Model failed`, mayRunAgain: false },
+		const failed = await drive(prepareTurn(failing));
+		await drive(
+			endTurn(failed, { kind: "failed", userMessage: userText`Model failed`, mayRunAgain: false }),
 		);
 		await runOnPostgres(releaseTurn(failing));
 		expect(await executionOf(fixture.accepted.runId)).toMatchObject({
@@ -572,7 +591,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 		const [handBack] = await runOnPostgres(runningTurns(fixture.accepted.chatId));
 		if (!handBack) throw new Error("No hand-back was asked for");
-		const prepared = await prepareRunnable(execution, handBack);
+		const prepared = await drive(prepareTurn(handBack));
 		expect(prepared.context.helpersWithoutReply).toEqual([
 			{
 				name: "Helper Bot 1",
@@ -581,11 +600,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			},
 		]);
 		await runOnPostgres(releaseTurn(handBack));
-		await turns.complete(
-			replyTurnOf(prepared),
-			{ content: "All done, bar one part.", toolCalls: [] },
-			{ contextCapacity: 128_000, readKeptFrom: null },
-		);
+		await drive(completeTurn(prepared, "All done, bar one part."));
 		expect(await executionOf(fixture.accepted.runId)).toMatchObject({ state: "completed" });
 	});
 
@@ -611,7 +626,11 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		);
 		const sentBeforeCommit: number[] = [];
 		const cancel = vi.fn((_owner: string) => Effect.void);
-		const ending = await chatServicesForTests(bus, { decide: () => Effect.void, cancel });
+		const ending = await chatServicesForTests(bus, {
+			decide: () => Effect.void,
+			withdraw: () => Effect.void,
+			cancel,
+		});
 
 		await runOnPostgres(
 			transaction(
@@ -648,7 +667,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			pendingTerminalError: "Helper's model failed",
 			finishedAt: null,
 		});
-		expect(stopping?.interruptRequested).toBe(true);
+		expect(stopping?.endRequested).toBe("run_ended");
 		// The workflow running it hears at once, rather than on its next poll.
 		expect(delivered).toContainEqual(
 			expect.objectContaining({
@@ -682,7 +701,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 		await announce(ended(fixture.accepted.chatId, failed(userText`Helper's model failed`)));
 
-		expect(await execution.prepare(fixture.helperTurn)).toMatchObject({
+		expect(await runs.open(fixture.helperTurn)).toMatchObject({
 			_tag: "NotRunnable",
 			reason: "The automation run has ended",
 		});
@@ -692,7 +711,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const { accepted, run } = await aRunningRun();
 		const [turnRun] = await runOnPostgres(runningTurns(accepted.chatId));
 		if (!turnRun) throw new Error("The run asked for no turn");
-		const prepared = await prepareRunnable(execution, turnRun);
+		const prepared = await drive(prepareTurn(turnRun));
 		const holder = holdTransaction(
 			query((db) =>
 				db.select({ id: turn.id }).from(turn).where(eq(turn.id, prepared.turnId)).for("update"),
@@ -707,16 +726,15 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const [skipped] = await onDatabase((db) =>
 			db.select().from(turn).where(eq(turn.id, prepared.turnId)),
 		);
-		expect(skipped).toMatchObject({ status: "running", interruptRequested: false });
+		expect(skipped).toMatchObject({ status: "running", endRequested: null });
 		expect(await executionOf(run.runId)).toMatchObject({
 			state: "running",
 			pendingTerminalState: "failed",
 		});
-		const draft = { content: "Half a reply", toolCalls: [] };
-		const replyTurn = replyTurnOf(prepared);
-		expect(await turns.suspend(replyTurn, checkpointFor(draft), [])).toBe(false);
+		await drive(writeReply(prepared, "Half a reply"));
+		expect(await drive(parkTurn(prepared, []))).toEqual({ _tag: "NotWaiting" });
 
-		await turns.cancel(replyTurn, draft);
+		await drive(endTurn(prepared, { kind: "cancelled" }));
 
 		expect(await executionOf(run.runId)).toMatchObject({
 			state: "failed",
@@ -771,16 +789,12 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const { accepted, run } = await aRunningRun();
 		const [turnRun] = await runOnPostgres(runningTurns(accepted.chatId));
 		if (!turnRun) throw new Error("The run asked for no turn");
-		const prepared = await prepareRunnable(execution, turnRun);
+		const prepared = await drive(prepareTurn(turnRun));
 		// Freed first, so completing the turn finishes the run's work.
 		await runOnPostgres(releaseTurn(turnRun));
 		delivered = [];
 
-		await turns.complete(
-			replyTurnOf(prepared),
-			{ content: "Done.", toolCalls: [] },
-			{ contextCapacity: 128_000, readKeptFrom: null },
-		);
+		await drive(completeTurn(prepared, "Done."));
 
 		const types = delivered.map(({ event }) => event.type);
 		const completed = types.indexOf("turn.completed");
@@ -792,6 +806,20 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		);
 		expect(completed).toBeGreaterThanOrEqual(0);
 		expect(settled).toBeGreaterThan(completed);
+		expect(await executionOf(run.runId)).toMatchObject({ state: "completed" });
+	});
+
+	it("settles a run as its completed turn ended, though a workflow taking an older journal's steps opens the turn again", async () => {
+		const { accepted, run } = await aRunningRun();
+		const [turnRun] = await runOnPostgres(runningTurns(accepted.chatId));
+		if (!turnRun) throw new Error("The run asked for no turn");
+		const prepared = await drive(prepareTurn(turnRun));
+		await drive(completeTurn(prepared, "Done."));
+
+		expect(await runs.open(turnRun)).toMatchObject({ _tag: "NotRunnable", endedBefore: true });
+		await runOnPostgres(releaseTurn(turnRun));
+		await announce(ChatEvent.LaneReleased(turnRun.request));
+
 		expect(await executionOf(run.runId)).toMatchObject({ state: "completed" });
 	});
 
@@ -940,6 +968,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 					.select({
 						state: automation.state,
 						pausedAfterFailuresAt: automation.pausedAfterFailuresAt,
+						pausePending: automation.pauseAfterFailuresPendingAt,
 					})
 					.from(automation)
 					.where(eq(automation.id, automationId)),
@@ -948,16 +977,39 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		};
 
 		await failOnce();
-		expect(await standing()).toEqual({ state: "enabled", pausedAfterFailuresAt: null });
+		expect(await standing()).toEqual({
+			state: "enabled",
+			pausedAfterFailuresAt: null,
+			pausePending: null,
+		});
 		await failOnce();
-		expect(await standing()).toEqual({ state: "paused", pausedAfterFailuresAt: expect.any(Date) });
+		expect(await standing()).toEqual({
+			state: "enabled",
+			pausedAfterFailuresAt: null,
+			pausePending: expect.any(Date),
+		});
+		const work = await runOnPostgres(
+			Effect.flatMap(SystemWorkAuthentication.Service, (auth) =>
+				auth.pauseAfterFailures(automationId),
+			).pipe(Effect.provide(SystemWorkAuthentication.layer)),
+		);
+		await call(work, "automations.pauseAfterFailures", { automationId });
+		expect(await standing()).toEqual({
+			state: "paused",
+			pausedAfterFailuresAt: expect.any(Date),
+			pausePending: null,
+		});
 
 		await runByHand({
 			projectId: ownProjectId,
 			automationId,
 			requestId: crypto.randomUUID(),
 		});
-		expect(await standing()).toEqual({ state: "enabled", pausedAfterFailuresAt: null });
+		expect(await standing()).toEqual({
+			state: "enabled",
+			pausedAfterFailuresAt: null,
+			pausePending: null,
+		});
 	});
 
 	it("posts nothing for a run that failed", async () => {
@@ -1000,6 +1052,11 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 							status: "running",
 							model: "test/model",
 							startedAt: new Date(),
+							...askerColumns({
+								chatId: accepted.chatId,
+								botId: botId,
+								triggerMessageId: trigger.id,
+							}),
 						})
 						.returning(),
 				);
@@ -1050,14 +1107,3 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		expect(settledAnnouncements).toHaveLength(1);
 	});
 });
-
-/** A parked transcript with nothing in it but `reply`, for a turn asking to wait. */
-function checkpointFor(reply: TurnCheckpoint["reply"]): TurnCheckpoint {
-	return {
-		messages: [],
-		approvals: [],
-		modelInput: { model: "test/model", system: "", messages: [] },
-		reply,
-		modelRequests: 1,
-	};
-}

@@ -8,6 +8,7 @@ import { ProjectAutomations } from "../../chats/automations/project-automations.
 import { addTrigger } from "./add-trigger.ts";
 import { create } from "./create.ts";
 import { getSecret } from "./get-secret.ts";
+import { createWithRoutine, listInChat, updateInChat } from "./in-chat.ts";
 import { list } from "./list.ts";
 import { projectRuns } from "./project-runs.ts";
 import { remove } from "./remove.ts";
@@ -22,6 +23,9 @@ export const automationsOperations = {
 	"automations.list": list,
 	"automations.create": create,
 	"automations.update": update,
+	"automations.listInChat": listInChat,
+	"automations.createWithRoutine": createWithRoutine,
+	"automations.updateInChat": updateInChat,
 	"automations.remove": remove,
 	"automations.run": run,
 	"automations.addTrigger": addTrigger,

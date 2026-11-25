@@ -11,9 +11,11 @@ import type { ReachesChat } from "./reaches-chat.ts";
 
 /**
  * Who may steer or interrupt a turn, decided from the turn once its chat is
- * proven reachable. Only its asker steers it. Its asker may interrupt it, and
- * so may anyone who may manage its project and reaches its chat, and, for a
- * run's turn, anyone who may approve its calls; interrupting takes a member.
+ * proven reachable. Only its asker steers it, so nobody steers a run's turns,
+ * but a Personal Assistant's member steers those of its runs. Its asker may
+ * interrupt it, and so may anyone who may manage its project and reaches its
+ * chat, and, for a run's turn, anyone who may approve its calls; interrupting
+ * takes a member.
  */
 
 /** P is the turn T's asker, so a message P writes there steers it. */
@@ -45,6 +47,8 @@ export const proveCanSteer = <P, C, T>(reach: ReachesChat<P, C>, turnId: Named<T
 	Effect.gen(function* () {
 		const facts = yield* turnInChat(reach, turnId.value);
 		const acting = reach.principal.value;
+		// A run's turns act for no member, so nobody steers them; a Personal
+		// Assistant's runs act for its member, who may.
 		if (acting._tag !== "MemberSession" || acting.member !== askerOf(facts)) {
 			return yield* Effect.fail(new ActionForbidden({ proof: "CanSteer" }));
 		}
@@ -66,11 +70,10 @@ export const proveCanInterrupt = <P, C, T>(
 		const place = memberActing(reach.as);
 		const asksIt = member === askerOf(facts);
 		const managesIt = place !== undefined && managesProject(place, reach.project);
-		const runsRule = facts.assistantOf !== null ? "assistant" : "run";
 		const approvesIt =
 			facts.askedBy.kind === "automation" &&
 			facts.run !== null &&
-			(yield* approverFacts(member, facts, runsRule)).approver;
+			(yield* approverFacts(member, facts)).approver;
 		if (!asksIt && !managesIt && !approvesIt) {
 			return yield* Effect.fail(new ActionForbidden({ proof: "CanInterrupt" }));
 		}

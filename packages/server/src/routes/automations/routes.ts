@@ -1,4 +1,4 @@
-import { BadRequest, Conflict, NotFound, Unauthorized } from "@sugabots/contracts/http";
+import { BadRequest, Conflict, Forbidden, NotFound, Unauthorized } from "@sugabots/contracts/http";
 import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import { Ids } from "@sugabots/core/ids/ids";
 import type { Call } from "@sugabots/core/operations/operation";
@@ -110,6 +110,8 @@ export const automationRoutes = HttpApiBuilder.group(ServerApi, "automations", (
 /** What each way an automations operation can fail means over HTTP. */
 const automationErrors = {
 	...refusals,
+	ApprovalNeeded: Forbidden,
+	ApprovalRefused: Forbidden,
 	InvalidCursor: BadRequest,
 	InvalidRoutineSchedule: BadRequest,
 	AutomationNameTaken: Conflict,

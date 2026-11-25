@@ -1,6 +1,7 @@
 import { COMPUTER_OPENSANDBOX_DEFAULT_SIZE, type RunState } from "@sugabots/contracts";
 import { Effect, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { askerColumns } from "../authentication/turn-facts.ts";
 import { anAutomationAdmin } from "../chats/automations/testing.ts";
 import { seedChat } from "../chats/seed.test-support.ts";
 import { automation, message, type TurnStatus, turn } from "../database/schema.ts";
@@ -100,6 +101,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 					model: "test/model",
 					startedAt,
 					finishedAt: status === "done" ? startedAt : null,
+					...askerColumns({ chatId: chatId, botId: botId, triggerMessageId: trigger.id }),
 				})
 				.returning(),
 		);

@@ -36,3 +36,17 @@ export function violatedUniqueConstraint(failure: unknown): string | undefined {
 	const error = postgresError(failure);
 	return error?.code === "23505" ? error.constraint : undefined;
 }
+
+/** Whether Postgres refused this transaction and it can be tried again. */
+export function isRetryableTransactionError(failure: unknown): boolean {
+	const code = postgresError(failure)?.code;
+	return (
+		code === "40P01" ||
+		code === "40001" ||
+		code === "55P03" ||
+		code === "57014" ||
+		code === "57P01" ||
+		code === "53300" ||
+		code?.startsWith("08") === true
+	);
+}

@@ -1,4 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { Effect, Schema, SchemaGetter } from "effect";
 import type { RecognizeFailure } from "../../models/request-failures.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
@@ -46,7 +47,17 @@ export const openaiCompatible: ProviderDialect = {
 	listingUrl: (root) => `${root}/models`,
 	authorization: (apiKey): Record<string, string> =>
 		apiKey ? { authorization: `Bearer ${apiKey}` } : {},
-	languageModel: (endpoint, modelId, fetch) => openaiClient(endpoint, fetch).chat(modelId),
+	languageModel: (endpoint, modelId, fetch, thinkingOptions) =>
+		thinkingOptions?.openai
+			? createOpenAICompatible({
+					name: "openai",
+					apiKey: endpoint.apiKey ?? "no-key",
+					baseURL: endpoint.baseUrl,
+					headers: endpoint.headers,
+					fetch,
+					includeUsage: true,
+				}).chatModel(modelId)
+			: openaiClient(endpoint, fetch).chat(modelId),
 	recognizeFailure: recognizeOpenAIFailure,
 	listing: dataListing,
 	model: Schema.Struct({

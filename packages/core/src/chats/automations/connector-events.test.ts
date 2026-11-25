@@ -5,19 +5,13 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { automationRun, bot as botTable, connector } from "../../database/schema.ts";
-import {
-	closeDatabase,
-	onDatabase,
-	onPostgres,
-	type Promised,
-	runOnPostgres,
-} from "../../database/testing.ts";
+import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { servedOperations } from "../../operations/testing.ts";
 import type { RepositoryActivity } from "../../providers/connectors/github/github-events.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
-import { onPostgresAs } from "../../workspaces/testing.ts";
 import { chatServicesForTests } from "../testing.ts";
 import { Automations } from "./automations.ts";
-import { anAutomationAdmin } from "./testing.ts";
+import { anAutomationAdmin, automationsAs } from "./testing.ts";
 
 const opened: RepositoryActivity = {
 	event: "pull_request_opened",
@@ -33,8 +27,9 @@ const opened: RepositoryActivity = {
 /** Automations run by what happens at their bot's GitHub app's repositories, against Postgres. */
 describe.skipIf(!process.env.DATABASE_URL)("connector automations, against Postgres", async () => {
 	const services = await chatServicesForTests(EventBus.inProcess({ store: EventStore.inMemory() }));
+	const call = await servedOperations({ chats: services });
 	const events = onPostgres(Context.get(services, Automations.ConnectorEvents));
-	let automations: Promised<Automations.Interface>;
+	let automations: ReturnType<typeof automationsAs>;
 	let admin: Awaited<ReturnType<typeof anAutomationAdmin>>;
 	let connectorId: string;
 
@@ -42,7 +37,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connector automations, against Postg
 
 	beforeEach(async () => {
 		admin = await anAutomationAdmin();
-		automations = onPostgresAs(admin.memberId)(Context.get(services, Automations.Service));
+		automations = automationsAs(call, admin.memberId);
 		connectorId = await gitHubConnectorWith(admin.workspaceId, admin.ownProjectId, "acme/web");
 	});
 

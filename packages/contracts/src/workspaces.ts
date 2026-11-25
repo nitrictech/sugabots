@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { uuidOrStringSchema } from "./uuid.ts";
 
 /**
  * What a member may do in a workspace.
@@ -50,7 +51,7 @@ export function administersWorkspace(role: WorkspaceRole | undefined): boolean {
 	);
 }
 
-export const workspaceIdOrSlugSchema = Schema.String.check(Schema.isMinLength(1));
+export const workspaceIdOrSlugSchema = uuidOrStringSchema.check(Schema.isMinLength(1));
 
 export type WorkspaceRole = typeof workspaceRoleSchema.Type;
 
@@ -108,7 +109,7 @@ export function workspaceRoleDescription(role: WorkspaceRole): string {
  * belong to neither. As there, the client draws from these and
  * the API still decides.
  */
-export const workspacePermissionsSchema = Schema.Struct({
+const workspacePermissionsSchema = Schema.Struct({
 	createProjects: Schema.Boolean,
 	createBots: Schema.Boolean,
 	/** Rename the workspace, change its address, and move it to another time zone. */

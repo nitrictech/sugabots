@@ -21,7 +21,12 @@ import {
 } from "./chat.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { useProjectRouteOwner } from "./owner.ts";
-import { type ChatSearch, validateChatSearch, validateFileSearch } from "./search.ts";
+import {
+	type ChatSearch,
+	decodeRouteId,
+	validateChatSearch,
+	validateFileSearch,
+} from "./search.ts";
 import { shellRoute } from "./workspace.tsx";
 
 const NewChatPage = lazyNamed(() => import("@/screens/NewChatPage.tsx"), "NewChatPage");
@@ -145,6 +150,7 @@ export const projectFilesRoute = createRoute({
 export const projectFileRoute = createRoute({
 	getParentRoute: () => projectRoute,
 	path: "/files/$file",
+	params: { parse: ({ file }) => ({ file: decodeRouteId(file) }) },
 	validateSearch: (search: Record<string, unknown>) => validateFileSearch(search),
 	component: () => {
 		const owner = useProjectRouteOwner();
@@ -158,6 +164,7 @@ export const projectFileRoute = createRoute({
 export const projectChatRoute = createRoute({
 	getParentRoute: () => projectRoute,
 	path: "/$chat",
+	params: { parse: ({ chat }) => ({ chat: decodeRouteId(chat) }) },
 	validateSearch: (search: Record<string, unknown>) => validateChatSearch(search),
 	// On every hover, not once per 30 s: the query cache, not the router,
 	// decides what of the chat is still fresh.

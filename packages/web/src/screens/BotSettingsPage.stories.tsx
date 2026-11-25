@@ -1,4 +1,4 @@
-import type { Automation, ConnectorTool } from "@sugabots/contracts";
+import type { Automation, Bot, ConnectorTool } from "@sugabots/contracts";
 import type { TestConnector } from "@sugabots/contracts/testing";
 import { automationTriggers, type TestAutomationTrigger } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
@@ -217,6 +217,7 @@ function editorHandlers() {
 				resources: {
 					...bot.permissions.resources,
 					manageAutomations: false,
+					pauseAutomations: false,
 					manageConnectors: false,
 					manageComputer: false,
 				},
@@ -280,6 +281,47 @@ export const Editor = meta.story({
 		await expect(canvas.queryByRole("button", { name: "Delete bot" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "Change avatar" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "New bot" })).toBeNull();
+	},
+});
+
+const personalBot: Bot = {
+	...growthDesk,
+	id: "0199a3a0-0000-7000-8000-000000000181",
+	defaultProjectId: "0199a3a0-0000-7000-8000-000000000281",
+	name: "Drafting Desk",
+	handle: "drafting-desk",
+	visibility: "personal",
+	pinned: false,
+	permissions: {
+		update: false,
+		delete: true,
+		talk: false,
+		resources: {
+			openSettings: true,
+			readHistory: false,
+			resolveChats: false,
+			deleteFiles: false,
+			manageConnectors: false,
+			manageComputer: false,
+			useDesktop: false,
+			manageAutomations: false,
+			pauseAutomations: true,
+			runAutomations: false,
+		},
+	},
+};
+
+/** An admin opens another member's personal bot from the directory to reach Delete. */
+export const AdminOnPersonalBot = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...appHandlers({ models, bots: [...bots, personalBot], role: "admin" }));
+	},
+	render: () => <StoryApp path="/nitric/bots" />,
+	play: async ({ canvas }) => {
+		const directory = await canvas.findByRole("region", { name: "In this workspace" });
+		await userEvent.click(within(directory).getByRole("link", { name: personalBot.name }));
+		await expect(await canvas.findByRole("button", { name: "Delete bot" })).toBeEnabled();
+		await expect(canvas.queryByRole("region", { name: "Connectors" })).toBeNull();
 	},
 });
 

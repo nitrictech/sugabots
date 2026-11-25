@@ -103,7 +103,7 @@ export function ChatHeader({
 	onOpenDesktop: () => void;
 }) {
 	const name = title ?? bot.name;
-	const modelName = useModelName(bot.model);
+	const modelName = useModelName(bot.model ?? null);
 	const openDetails = details && (() => details.onChange(!details.open));
 	// A phone shows the computer in a sheet first, from which it opens full screen.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
@@ -170,17 +170,22 @@ export function ChatHeader({
 			 * are in the bot's sidebar; a phone has room for one control beside a
 			 * chat's title, which holds the computer and Resolve.
 			 */}
-			{resolved ? (
-				<ChatMenu resolved={resolved} back={back} onOpenDesktop={openComputer} />
+			{resolved?.onChange ? (
+				<ChatMenu
+					isResolved={resolved.isResolved}
+					onChange={resolved.onChange}
+					back={back}
+					onOpenDesktop={openComputer}
+				/>
 			) : (
 				<span className="contents md:hidden">
 					<ChatComputer bot={bot} chatId={chatId} onOpen={openComputer} />
 				</span>
 			)}
 			{members.length > 1 && <MembersInChat members={members} />}
-			{resolved && (
+			{resolved?.onChange && (
 				<span className="contents max-md:hidden">
-					<ResolveButton {...resolved} />
+					<ResolveButton isResolved={resolved.isResolved} onChange={resolved.onChange} />
 				</span>
 			)}
 			{details && <DetailsButton {...details} cards />}
@@ -202,11 +207,11 @@ export function ChatHeader({
 
 /** On a phone, the ⋯ beside a chat's title: its bot's computer, and marking it resolved or reopening it. */
 function ChatMenu({
-	resolved,
+	isResolved,
+	onChange,
 	back,
 	onOpenDesktop,
-}: {
-	resolved: ResolvedToggle;
+}: Required<ResolvedToggle> & {
 	/** Where the chat is left for once it is resolved. */
 	back: BackTo;
 	onOpenDesktop: () => void;
@@ -215,7 +220,7 @@ function ChatMenu({
 	// Resolved, it is left as Back leaves it, rather than stayed in; once saved, so a failure
 	// is seen on the chat it was for.
 	const markResolved = async () => {
-		if (await resolved.onChange(true)) place.leave();
+		if (await onChange(true)) place.leave();
 	};
 	return (
 		<MoreMenu label="More for this chat" variant="bar" className="md:hidden">
@@ -224,16 +229,10 @@ function ChatMenu({
 				Computer
 			</DropdownMenuItem>
 			<DropdownMenuItem
-				onClick={
-					resolved.isResolved ? () => void resolved.onChange(false) : () => void markResolved()
-				}
+				onClick={isResolved ? () => void onChange(false) : () => void markResolved()}
 			>
-				{resolved.isResolved ? (
-					<RotateCcw aria-hidden size={16} />
-				) : (
-					<CircleCheck aria-hidden size={16} />
-				)}
-				{resolved.isResolved ? "Reopen" : "Resolve"}
+				{isResolved ? <RotateCcw aria-hidden size={16} /> : <CircleCheck aria-hidden size={16} />}
+				{isResolved ? "Reopen" : "Resolve"}
 			</DropdownMenuItem>
 		</MoreMenu>
 	);
@@ -493,7 +492,9 @@ export function PlainChatHeader({
 					<h1 className="m-0 min-w-0 truncate font-medium text-foreground text-sm">{title}</h1>
 				</div>
 			</div>
-			{resolved && <ResolveButton {...resolved} />}
+			{resolved?.onChange && (
+				<ResolveButton isResolved={resolved.isResolved} onChange={resolved.onChange} />
+			)}
 			{details && <DetailsButton {...details} cards={cards} />}
 			{menu}
 			{trailing}
@@ -504,15 +505,19 @@ export function PlainChatHeader({
 /** Whether a chat is resolved, and what marks it resolved or reopens it. */
 export interface ResolvedToggle {
 	isResolved: boolean;
-	/** Saves the change, settling on whether it saved; a failure is shown where the chat is. */
-	onChange: (resolved: boolean) => Promise<boolean>;
+	/**
+	 * Saves the change, settling on whether it saved; a failure is shown where
+	 * the chat is. Absent for a member who may not resolve or reopen it, such
+	 * as a viewer.
+	 */
+	onChange?: (resolved: boolean) => Promise<boolean>;
 }
 
 /**
  * Marks the chat resolved, which takes it off the sidebar once it is left, or
  * reopens it; its name, and tooltip, say which it will do.
  */
-function ResolveButton({ isResolved, onChange }: ResolvedToggle) {
+function ResolveButton({ isResolved, onChange }: Required<ResolvedToggle>) {
 	return (
 		<IconButton
 			label={isResolved ? "Reopen" : "Resolve"}

@@ -1,7 +1,7 @@
 import { generateText } from "ai";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { anthropic, dialectFor, ollama, openaiCompatible, openrouter } from "./index.ts";
+import { anthropic, dialectFor, ollama, openai, openaiCompatible, openrouter } from "./index.ts";
 
 describe("dialectFor", () => {
 	it("reads a built-in provider in the dialect it names", () => {
@@ -17,7 +17,7 @@ describe("dialectFor", () => {
 		).toBe(anthropic);
 		expect(
 			dialectFor({ builtIn: "openai", baseUrl: "https://api.openai.com/v1", apiFormat: "openai" }),
-		).toBe(openaiCompatible);
+		).toBe(openai);
 	});
 
 	it("reads a custom provider by its wire format, and by its host where that says more", () => {

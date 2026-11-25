@@ -3,12 +3,13 @@ export * as AutomationStore from "./store.ts";
 
 import { AutomationNameTaken } from "@sugabots/contracts/errors/automations";
 import { type UserText, userText } from "@sugabots/errors";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import {
 	query,
 	queryCatching,
 	serviceOperations,
+	Transaction,
 	transaction,
 	writtenRow,
 } from "../../database/database.ts";
@@ -19,11 +20,15 @@ import {
 	automationFeed,
 	automationRun,
 	automationTrigger,
+	bot,
+	project,
 } from "../../database/schema.ts";
+import type { DoesStoredWork } from "../../proofs/does-stored-work.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
 import type { Turns } from "../turns/turns.ts";
-import { inScope, type Scope } from "./automation.ts";
+import { inScope, lockTriggers, type Scope } from "./automation.ts";
 import { AutomationRuns } from "./runs.ts";
 
 /**
@@ -78,16 +83,14 @@ export interface Interface {
 		triggerId: string,
 		encrypted: string | null,
 	) => Effect.Effect<boolean>;
-	/**
-	 * The routine due soonest at `now`, of an enabled automation, with its
-	 * automation, locked until the transaction ends. One another transaction
-	 * holds is skipped.
-	 */
-	readonly lockNextDue: (
+	readonly lockDueRoutine: (
 		now: Date,
-	) => Effect.Effect<
-		{ trigger: schema.AutomationTriggerRow; automation: schema.AutomationRow } | undefined
-	>;
+		scope: Scope,
+		triggerId: string,
+	) => Effect.Effect<schema.AutomationTriggerRow | undefined>;
+	readonly pauseAfterFailures: <P, I>(
+		work: DoesStoredWork<P, I, "pauseAfterFailures">,
+	) => Effect.Effect<void>;
 	/** Sets when each routine next runs its automation; null while the automation is paused. */
 	readonly scheduleNext: (
 		next: ReadonlyArray<{ triggerId: string; at: Date | null }>,
@@ -125,13 +128,13 @@ export interface Interface {
 	readonly recordEnding: (runId: string, ending: Turns.Ended) => Effect.Effect<boolean>;
 	/**
 	 * Records how a running run ended, and announces it. `false` when the run
-	 * was not running. A failure pauses its automation when it is the
+	 * was not running. A failure queues a pause for its automation when it is the
 	 * `FAILURES_THAT_PAUSE`th in a row.
 	 */
 	readonly settle: (runId: string, settled: Settled) => Effect.Effect<boolean>;
 	/**
 	 * Records a run that has not ended as failed, telling members
-	 * `userMessage`, and announces it, pausing its automation as `settle` does.
+	 * `userMessage`, and announces it, queuing a pause as `settle` does.
 	 * Does nothing once the run has ended.
 	 */
 	readonly fail: (runId: string, userMessage: UserText) => Effect.Effect<void>;
@@ -144,7 +147,9 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/AutomationStore",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("AutomationStore");
@@ -167,45 +172,20 @@ export const make = Effect.gen(function* () {
 			return { rootChatId: feed.rootChatId };
 		});
 
-	/**
-	 * Pauses the automation `automationId` when its last `FAILURES_THAT_PAUSE`
-	 * finished runs all failed and it is still on, recording that it paused
-	 * itself, and clears when its routines next run.
-	 */
-	const pauseAfterFailures = (automationId: string) =>
-		Effect.gen(function* () {
-			const paused = yield* query((db) =>
-				db
-					.update(automation)
-					.set({ state: "paused", pausedAfterFailuresAt: sql`now()` })
-					.where(
-						and(
-							eq(automation.id, automationId),
-							eq(automation.state, "enabled"),
-							isNull(automation.deletedAt),
-							sql`(
-							select count(*) from (
-								select ${automationRun.state} as state from ${automationRun}
-								where ${automationRun.automationId} = ${automationId}
-									and ${automationRun.finishedAt} is not null
-								order by ${automationRun.acceptedAt} desc, ${automationRun.id} desc
-								limit ${FAILURES_THAT_PAUSE}
-							) as latest
-							where latest.state = 'failed'
-						) = ${FAILURES_THAT_PAUSE}`,
-						),
-					)
-					.returning({ id: automation.id }),
-			);
-			if (paused.length === 0) return;
-			// A paused automation's routines have no next time.
-			yield* query((db) =>
-				db
-					.update(automationTrigger)
-					.set({ nextScheduledAt: null })
-					.where(eq(automationTrigger.automationId, automationId)),
-			);
-		});
+	const queuePauseAfterFailures = (automationId: string) =>
+		query((db) =>
+			db
+				.update(automation)
+				.set({ pauseAfterFailuresPendingAt: sql`now()` })
+				.where(
+					and(
+						eq(automation.id, automationId),
+						enabledAutomation,
+						isNull(automation.pauseAfterFailuresPendingAt),
+						latestRunsFailed(automationId),
+					),
+				),
+		);
 
 	/** Tells the workspace that a run's chat changed because the run ended. */
 	const announceEnded = (run: schema.RunRow) =>
@@ -227,11 +207,18 @@ export const make = Effect.gen(function* () {
 					query((db) =>
 						db
 							.update(automation)
-							.set({ state: "enabled", pausedAfterFailuresAt: null })
+							.set({
+								state: "enabled",
+								pausedAfterFailuresAt: null,
+								pauseAfterFailuresPendingAt: null,
+							})
 							.where(
 								and(
 									eq(automation.id, automationId),
-									sql`${automation.pausedAfterFailuresAt} is not null`,
+									or(
+										isNotNull(automation.pausedAfterFailuresAt),
+										isNotNull(automation.pauseAfterFailuresPendingAt),
+									),
 									isNull(automation.deletedAt),
 								),
 							)
@@ -255,7 +242,17 @@ export const make = Effect.gen(function* () {
 				"update",
 				Effect.map(
 					queryCatching(
-						(db) => db.update(automation).set(definition).where(inScope(scope)).returning(),
+						(db) =>
+							db
+								.update(automation)
+								.set({
+									...definition,
+									...(definition.pausedAfterFailuresAt === null && {
+										pauseAfterFailuresPendingAt: null,
+									}),
+								})
+								.where(inScope(scope))
+								.returning(),
 						(rejection) => (isUniqueViolation(rejection) ? new AutomationNameTaken() : undefined),
 					),
 					([row]) => row,
@@ -271,7 +268,7 @@ export const make = Effect.gen(function* () {
 						const [removed] = yield* query((db) =>
 							db
 								.update(automation)
-								.set({ deletedAt: now, state: "paused" })
+								.set({ deletedAt: now, state: "paused", pauseAfterFailuresPendingAt: null })
 								.where(inScope(scope))
 								.returning({ id: automation.id }),
 						);
@@ -366,27 +363,55 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		lockNextDue: (now) =>
+		lockDueRoutine: (now, scope, triggerId) =>
 			operation(
-				"lockNextDue",
+				"lockDueRoutine",
 				Effect.map(
 					query((db) =>
 						db
-							.select({ trigger: automationTrigger, automation })
+							.select({ trigger: automationTrigger })
 							.from(automationTrigger)
 							.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
-							.where(
-								and(
-									eq(automation.state, "enabled"),
-									isNull(automation.deletedAt),
-									sql`${automationTrigger.nextScheduledAt} <= ${now}`,
-								),
-							)
-							.orderBy(asc(automationTrigger.nextScheduledAt), asc(automationTrigger.id))
-							.limit(1)
-							.for("update", { of: automationTrigger, skipLocked: true }),
+							.where(and(inScope(scope), eq(automationTrigger.id, triggerId), routineDueAt(now)))
+							.for("update", { of: [automation, automationTrigger] }),
 					),
-					([due]) => due,
+					([due]) => due?.trigger,
+				),
+			),
+
+		pauseAfterFailures: (proof) =>
+			operation(
+				"pauseAfterFailures",
+				transaction(
+					Effect.gen(function* () {
+						const automationId = proof.id.value;
+						yield* lockTriggers(automationId);
+						const [paused] = yield* query((db) =>
+							db
+								.update(automation)
+								.set({
+									state: "paused",
+									pausedAfterFailuresAt: sql`${automation.pauseAfterFailuresPendingAt}`,
+									pauseAfterFailuresPendingAt: null,
+								})
+								.where(
+									and(
+										eq(automation.id, automationId),
+										eq(automation.workspaceId, proof.workspace),
+										eq(automation.projectId, proof.work.project),
+										pendingPause,
+									),
+								)
+								.returning({ id: automation.id }),
+						);
+						if (!paused) return;
+						yield* query((db) =>
+							db
+								.update(automationTrigger)
+								.set({ nextScheduledAt: null })
+								.where(eq(automationTrigger.automationId, automationId)),
+						);
+					}),
 				),
 			),
 
@@ -499,7 +524,7 @@ export const make = Effect.gen(function* () {
 						);
 						if (!recorded) return false;
 						yield* announceEnded(recorded);
-						if (recorded.state === "failed") yield* pauseAfterFailures(recorded.automationId);
+						if (recorded.state === "failed") yield* queuePauseAfterFailures(recorded.automationId);
 						return true;
 					}),
 				),
@@ -531,14 +556,14 @@ export const make = Effect.gen(function* () {
 						);
 						if (!failed) return;
 						yield* announceEnded(failed);
-						yield* pauseAfterFailures(failed.automationId);
+						yield* queuePauseAfterFailures(failed.automationId);
 					}),
 				),
 			),
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /** What an automation is: its name, what it tells the bot, and whether it runs. */
 export type Definition = Pick<schema.AutomationRow, "name" | "instructions" | "state">;
@@ -558,8 +583,71 @@ const ofAutomation = (scope: Scope, triggerId: string) =>
 		sql`exists (select 1 from ${automation} where ${inScope(scope)})`,
 	);
 
+const enabledAutomation = and(eq(automation.state, "enabled"), isNull(automation.deletedAt));
+const pendingPause = and(enabledAutomation, isNotNull(automation.pauseAfterFailuresPendingAt));
+
+const latestRunsFailed = (automationId: string) => sql`(
+	select count(*) from (
+		select ${automationRun.state} as state from ${automationRun}
+		where ${automationRun.automationId} = ${automationId}
+			and ${automationRun.finishedAt} is not null
+		order by ${automationRun.acceptedAt} desc, ${automationRun.id} desc
+		limit ${FAILURES_THAT_PAUSE}
+	) as latest
+	where latest.state = 'failed'
+) = ${FAILURES_THAT_PAUSE}`;
+
+const routineDueAt = (now: Date) =>
+	and(
+		enabledAutomation,
+		isNull(automation.pauseAfterFailuresPendingAt),
+		eq(automationTrigger.kind, "routine"),
+		lte(automationTrigger.nextScheduledAt, now),
+	);
+
+export const nextDueRoutine = (now: Date, excluded: readonly string[]) =>
+	query((db) =>
+		db
+			.select({ id: automationTrigger.id })
+			.from(automationTrigger)
+			.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
+			.where(
+				and(
+					routineDueAt(now),
+					excluded.length ? notInArray(automationTrigger.id, [...excluded]) : undefined,
+				),
+			)
+			.orderBy(asc(automationTrigger.nextScheduledAt), asc(automationTrigger.id))
+			.limit(1),
+	);
+
+export const dueRoutine = (now: Date, id: string) =>
+	query((db) =>
+		db
+			.select({
+				workspace: automation.workspaceId,
+				project: automation.projectId,
+				automation: automation.id,
+			})
+			.from(automationTrigger)
+			.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
+			.where(and(eq(automationTrigger.id, id), routineDueAt(now))),
+	);
+
+export const pendingPauseIds = query((db) =>
+	db.select({ id: automation.id }).from(automation).where(pendingPause),
+);
+
+export const pauseDue = (id: string) =>
+	query((db) =>
+		db
+			.select({ workspace: automation.workspaceId, project: automation.projectId })
+			.from(automation)
+			.where(and(eq(automation.id, id), pendingPause)),
+	);
+
 /** Failed runs in a row after which an automation pauses itself. */
-export const FAILURES_THAT_PAUSE = 2;
+const FAILURES_THAT_PAUSE = 2;
 
 /** How a run's work ended. */
 export type Settled = Turns.Ended | { readonly state: "completed" };
@@ -588,3 +676,80 @@ export function endingOf(run: schema.RunRow): Turns.Ended | undefined {
 
 /** What members are told about a run whose workflow failed; the cause goes only to the logs. */
 export const RUN_STOPPED_UNEXPECTEDLY = userText`The automation run stopped unexpectedly`;
+
+/**
+ * Pauses the departing member's personal bots' and Personal Assistant's
+ * automations, clearing their failure pauses and routine times.
+ */
+export const pauseDepartingMembersAutomations = (departing: {
+	workspaceId: string;
+	memberId: string;
+}) =>
+	Effect.gen(function* () {
+		yield* Transaction;
+		const affected = yield* query((db) =>
+			db
+				.select({ id: automation.id })
+				.from(automation)
+				.innerJoin(
+					project,
+					and(
+						eq(project.id, automation.projectId),
+						eq(project.workspaceId, automation.workspaceId),
+					),
+				)
+				.innerJoin(
+					bot,
+					and(eq(bot.id, project.defaultOfBotId), eq(bot.workspaceId, project.workspaceId)),
+				)
+				.where(
+					and(
+						eq(automation.workspaceId, departing.workspaceId),
+						or(
+							eq(bot.assistantOf, departing.memberId),
+							and(
+								eq(bot.createdById, departing.memberId),
+								eq(bot.visibility, "personal"),
+								isNull(bot.assistantOf),
+							),
+						),
+						isNull(automation.deletedAt),
+					),
+				)
+				.orderBy(asc(automation.id)),
+		);
+		if (affected.length === 0) return;
+		const automationIds = affected.map(({ id }) => id);
+		// The scheduler takes the automation's trigger lock before locking its rows.
+		yield* Effect.forEach(automationIds, lockTriggers, { discard: true });
+		const paused = yield* query((db) =>
+			db
+				.update(automation)
+				.set({ state: "paused", pausedAfterFailuresAt: null, pauseAfterFailuresPendingAt: null })
+				.where(
+					and(
+						eq(automation.workspaceId, departing.workspaceId),
+						inArray(automation.id, automationIds),
+						isNull(automation.deletedAt),
+						or(
+							eq(automation.state, "enabled"),
+							isNotNull(automation.pausedAfterFailuresAt),
+							isNotNull(automation.pauseAfterFailuresPendingAt),
+						),
+					),
+				)
+				.returning({ id: automation.id }),
+		);
+		if (paused.length === 0) return;
+		yield* query((db) =>
+			db
+				.update(automationTrigger)
+				.set({ nextScheduledAt: null })
+				.where(
+					inArray(
+						automationTrigger.automationId,
+						paused.map(({ id }) => id),
+					),
+				),
+		);
+	});

@@ -4,6 +4,7 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { asc, eq } from "drizzle-orm";
 import { Config, Context, Data, Effect, Layer, Stream } from "effect";
 import { query } from "../database/database.ts";
+import { processLayer, Tier } from "../tiers.ts";
 import { fromFileSystem, moveFolderOnDisk } from "./implementations/filesystem.ts";
 import { fromPostgres, moveFolderInPostgres } from "./implementations/postgres.ts";
 import { blobFolderMove } from "./sql.ts";
@@ -50,7 +51,9 @@ export interface Interface {
 	readonly deletePrefix: (prefix: Key) => Effect.Effect<void, Failure>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/BlobStore") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/BlobStore") {
+	declare readonly [Tier]: "process";
+}
 
 /**
  * Select the implementation using `BLOB_STORE_PROVIDER`, defaults to the
@@ -75,7 +78,7 @@ export const make = Effect.gen(function* () {
 	}
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 /** The database and `Ids` are infrastructure the server provides. */
 export const layer = layerNoDeps.pipe(Layer.provide(NodeFileSystem.layer));

@@ -19,7 +19,7 @@ export function encodeCursor(point: CursorPoint): string {
 }
 
 /** The point `cursor` names, or `undefined` when it is not a token `encodeCursor` made. */
-export function decodeCursor(cursor: string): CursorPoint | undefined {
+function decodeCursor(cursor: string): CursorPoint | undefined {
 	const decoded = Buffer.from(cursor, "base64url").toString();
 	const [timestamp, id, extra] = decoded.split("\n");
 	const at = timestamp ? new Date(timestamp) : new Date(Number.NaN);
@@ -31,7 +31,7 @@ export function decodeCursor(cursor: string): CursorPoint | undefined {
 		!Number.isNaN(at.getTime()) &&
 		at.toISOString() === timestamp &&
 		Buffer.from(decoded).toString("base64url") === cursor;
-	return wellFormed ? { at, id } : undefined;
+	return wellFormed ? { at, id: id.toLowerCase() } : undefined;
 }
 
 /** The point `cursor` names, or `InvalidCursor` when it is not a token `encodeCursor` made. */

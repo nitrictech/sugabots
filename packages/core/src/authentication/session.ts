@@ -1,9 +1,11 @@
 export * as SessionAuthentication from "./session.ts";
 
+import { memberStream, streamEvent } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
 import { and, eq, gt, type SQL, sql } from "drizzle-orm";
 import { Context, Effect, ErrorReporter, Layer, Schema } from "effect";
-import { query, serviceOperations } from "../database/database.ts";
+import { query, serviceOperations, transaction } from "../database/database.ts";
+import { EventOutbox } from "../database/events/outbox.ts";
 import { session } from "../database/schema.ts";
 import { authenticated, type MemberSession } from "../principal.ts";
 import { processLayer, Tier } from "../tiers.ts";
@@ -13,10 +15,9 @@ import { processLayer, Tier } from "../tiers.ts";
  * stream's and the desktop viewer's way in. A request carries better-auth's
  * session cookie, or the session's token as a bearer.
  *
- * An ordinary request may trust better-auth's cookie cache for the few minutes
- * it lasts. A long-running operation, a stream or the desktop viewer, reads the
- * session's row instead, so a revoked session can't open one. A bearer token is
- * always read from its row, as no cache comes with it.
+ * Ordinary cookie requests use the entrypoint's session lookup. A long-running
+ * operation reads the session's row again before it opens. A bearer token is
+ * always authenticated from its session's row.
  *
  * Each call takes better-auth's reading of the request's cookie as
  * {@link Cookies}, which the entrypoint provides for that request.
@@ -120,6 +121,42 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 export const layer = layerNoDeps;
+
+/**
+ * When `principal`'s session expires, read again from its row, for a
+ * long-running operation proving again; `undefined` once it has ended or
+ * expired, which ends the operation.
+ */
+export const expiryOf = (principal: MemberSession) =>
+	query((db) =>
+		db
+			.select({ expiresAt: session.expiresAt })
+			.from(session)
+			.where(
+				and(
+					eq(session.id, principal.session),
+					eq(session.memberId, principal.member),
+					gt(session.expiresAt, sql`now()`),
+				),
+			)
+			.limit(1),
+	).pipe(Effect.map(([row]) => row?.expiresAt));
+
+/**
+ * Records that the session `ended.session` of `ended.member` ended, as
+ * better-auth signs a member out or revokes a session, on the member's own
+ * stream, where every stream and desktop viewer opened with that session
+ * hears it and ends.
+ */
+export const recordEnded = (ended: { readonly session: string; readonly member: string }) =>
+	Effect.flatMap(EventOutbox.Service, (outbox) =>
+		transaction(outbox.publish([sessionEnded(ended)])),
+	);
+
+const sessionEnded = (ended: { readonly session: string; readonly member: string }) => ({
+	stream: memberStream(ended.member),
+	event: streamEvent("session.ended", { sessionId: ended.session }),
+});
 
 /**
  * The token of an `Authorization: Bearer` header: the session's token, as

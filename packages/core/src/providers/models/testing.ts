@@ -14,13 +14,15 @@ export const emptyRegistry: ModelRegistry = {
 /** `access` as the provider offering the model, under test names. */
 export const resolvedModel = (
 	access: ModelProviderStore.ProviderAccess,
+	capabilities: ModelProviderStore.ResolvedModel["capabilities"] = [],
 ): ModelProviderStore.ResolvedModel => ({
 	access,
 	providerName: DisplayName.fromRecord("Test provider"),
 	modelName: DisplayName.fromRecord("test-model"),
+	capabilities,
 });
 
-/** A model client that streams `text` from every request, with no tool calls waiting. */
+/** A model client that streams `text` from every request, calling no tools. */
 export const scriptedModel = (...text: string[]): Models.Interface =>
 	Models.fromStream(() => Effect.succeed(streamed(chunks(...text))));
 
@@ -30,15 +32,18 @@ export const unusedModel = (): Models.Interface =>
 		Effect.fail(new Models.ModelNotOffered({ model: DisplayName.fromRecord("unused model") })),
 	);
 
-/** A response with this text that ended as `finished` says: by default after one model request, with no tool calls waiting. */
+/** A response with this text that ended as `finished` says: by default with no tool calls. */
 export const streamed = (
 	text: AsyncIterable<string>,
 	finished: Partial<Models.Finished> = {},
+	thinking: readonly string[] = [],
 ): Models.Streamed => ({
-	text,
+	deltas: (async function* (): AsyncGenerator<Models.Delta> {
+		for (const delta of thinking) yield { kind: "thinking", text: delta };
+		for await (const delta of text) yield { kind: "text", text: delta };
+	})(),
 	finished: Effect.succeed({
-		modelRequests: 1,
-		approvalRequests: [],
+		toolCalls: [],
 		responseMessages: [],
 		...finished,
 	}),

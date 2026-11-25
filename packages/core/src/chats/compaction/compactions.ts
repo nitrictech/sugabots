@@ -12,6 +12,7 @@ import {
 } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import { chatCompaction } from "../../database/schema.ts";
+import { processLayer, Tier } from "../../tiers.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import { COMPACT_SYSTEM_BOT, findSystemBot } from "../../workspaces/bots/system-bots.ts";
 import type { ChatEvent } from "../events.ts";
@@ -24,7 +25,7 @@ import {
 import { Turns } from "../turns/turns.ts";
 import { admitCompaction, type CompactionRequest } from "./compaction.workflow.ts";
 import { makeCompactionStore } from "./store.ts";
-import { needsCompaction, planCompaction } from "./window.ts";
+import { type CompactionPlan, needsCompaction, planCompaction } from "./window.ts";
 
 /**
  * Compaction, done by the `compact` system bot, Compaction.
@@ -58,7 +59,9 @@ export interface Interface {
 	readonly handler: DomainEvents.Handler<ChatEvent>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Compactions") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Compactions") {
+	declare readonly [Tier]: "process";
+}
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Compactions");
@@ -106,9 +109,9 @@ export const make = Effect.gen(function* () {
 						const sourceIndex = transcript.findIndex((row) => row.id === request.sourceMessageId);
 						const history = transcript
 							.slice(0, sourceIndex + 1)
-							.flatMap(({ createdAt, entry }) =>
+							.flatMap(({ id, createdAt, entry }) =>
 								entry
-									? [{ ...entry, createdAt, tokens: Turns.estimatedTokens(entry.content) }]
+									? [{ ...entry, id, createdAt, tokens: Turns.estimatedTokens(entry.content) }]
 									: [],
 							);
 						// Sized to the bot that reads the chat next, and capped to what
@@ -122,10 +125,17 @@ export const make = Effect.gen(function* () {
 							model === readerModel
 								? readerTokens
 								: yield* query((db) => Turns.loadContextWindow(db, scope.workspaceId, model));
-						const plan = planCompaction(history, previous?.keptFrom, {
+						const planned = planCompaction(history, previous?.keptFrom, {
 							readerTokens,
 							compactorTokens,
 						});
+						// Nothing a turn still to come answers, or anything after it, is
+						// condensed, so no turn reads later messages condensed, and each
+						// keeps the message it answers word for word.
+						const toCome = yield* query((db) =>
+							Turns.earliestAnsweredByTurnToCome(db, scope.chatId),
+						);
+						const plan = planned && toCome ? condensedBefore(planned, transcript, toCome) : planned;
 						if (!plan) return skipped("There is nothing new to condense");
 
 						const systemChatId = yield* chats.openSystemChat({
@@ -193,7 +203,7 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 export const layer = layerNoDeps.pipe(Layer.provide(ChatStore.layer));
 
@@ -244,3 +254,27 @@ const loadCompaction = Effect.fn("Compactions.loadCompaction")(function* (
 		.limit(1);
 	return row;
 });
+
+/**
+ * `plan`, condensing only what comes before `toCome`, the earliest message a
+ * turn still to come answers, and keeping it and everything after it word for
+ * word; undefined when that leaves nothing to condense. `toCome` may be missing
+ * from `transcript`, as one already condensed or still being written: what
+ * comes after its time is kept.
+ */
+function condensedBefore<Message extends { id: string; createdAt: Date }>(
+	plan: CompactionPlan<Message>,
+	transcript: ReadonlyArray<{ id: string; createdAt: Date }>,
+	toCome: { id: string; createdAt: Date },
+): CompactionPlan<Message> | undefined {
+	const toComeIndex = transcript.findIndex(
+		(row) => row.id === toCome.id || row.createdAt.getTime() > toCome.createdAt.getTime(),
+	);
+	const firstKept = toComeIndex === -1 ? undefined : transcript[toComeIndex];
+	if (!firstKept || plan.keptFrom.getTime() <= firstKept.createdAt.getTime()) return plan;
+	const before = new Set(transcript.slice(0, toComeIndex).map(({ id }) => id));
+	const toCondense = plan.toCondense.filter(({ id }) => before.has(id));
+	const [firstCondensed] = toCondense;
+	if (!firstCondensed) return undefined;
+	return { toCondense, historyStartsAt: firstCondensed.createdAt, keptFrom: firstKept.createdAt };
+}

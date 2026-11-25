@@ -4,7 +4,7 @@ import type { RequestUsage } from "./usage.ts";
 import { Usd } from "./usd.ts";
 
 /** What a model charges for one token of each kind, in US dollars. */
-export interface TokenPrices {
+interface TokenPrices {
 	readonly input: number;
 	readonly output: number;
 	/** Absent when the provider publishes no separate price, and the input price applies. */
@@ -20,7 +20,7 @@ export interface TokenPrices {
  * tier's prices. Only {@link ratesFromModelsDev} makes one, so the tiers are
  * always in order.
  */
-export type Rates = Brand.Branded<
+type Rates = Brand.Branded<
 	{
 		readonly base: TokenPrices;
 		/** Ordered by `overInputTokens`, lowest first. */
@@ -31,7 +31,7 @@ export type Rates = Brand.Branded<
 
 const Rates = Brand.nominal<Rates>();
 
-export interface LongContextTier {
+interface LongContextTier {
 	readonly overInputTokens: number;
 	readonly prices: TokenPrices;
 }
@@ -41,7 +41,7 @@ export type CostEstimate =
 	| { readonly _tag: "Priced"; readonly usd: Usd }
 	| { readonly _tag: "UnknownCost"; readonly reason: UnknownCostReason };
 
-export type UnknownCostReason =
+type UnknownCostReason =
 	/** The provider did not report the input or output token count. */
 	| "usage-not-reported"
 	/** The provider's counts contradict each other, such as more cached tokens than input tokens. */

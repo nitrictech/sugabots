@@ -5,6 +5,9 @@
  */
 
 import { Layer } from "effect";
+import { TurnComputers } from "../chats/tools/computer/turn-computers.ts";
+import { ConnectorCalls } from "../providers/connectors/connector-calls.ts";
+import { processLayer } from "../tiers.ts";
 import { approvalsLayer } from "./approvals/index.ts";
 import { automationsLayer } from "./automations/index.ts";
 import { botsLayer } from "./bots/index.ts";
@@ -17,10 +20,12 @@ import { notificationsLayer } from "./notifications/index.ts";
 import { projectsLayer } from "./projects/index.ts";
 import { providersLayer } from "./providers/index.ts";
 import { Operations } from "./registry.ts";
+import { scheduledWorkLayer } from "./scheduled-work.ts";
 import { turnsLayer } from "./turns/index.ts";
+import { webLayer } from "./web/index.ts";
 import { workspaceLayer } from "./workspace/index.ts";
 
-export const layer = Operations.layerNoDeps.pipe(
+const domainOperations = Operations.layerNoDeps.pipe(
 	Layer.provide(
 		Layer.mergeAll(
 			workspaceLayer,
@@ -32,10 +37,21 @@ export const layer = Operations.layerNoDeps.pipe(
 			computersLayer,
 			connectorsLayer,
 			providersLayer,
+			webLayer,
 			approvalsLayer,
 			eventsLayer,
 			turnsLayer,
 			notificationsLayer,
+			scheduledWorkLayer,
 		),
 	),
+	// Computer operations and the bot loop share the service that owns each step's computer.
+	Layer.provideMerge(TurnComputers.layer),
 );
+
+export const layer = domainOperations.pipe(Layer.provideMerge(ConnectorCalls.layer));
+
+export const layerWithConnectorCalls = (calls: ConnectorCalls.Interface) =>
+	domainOperations.pipe(
+		Layer.provideMerge(processLayer(Layer.succeed(ConnectorCalls.Service, calls))),
+	);

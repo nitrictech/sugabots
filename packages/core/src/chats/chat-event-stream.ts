@@ -1,11 +1,13 @@
 export * as ChatEventStream from "./chat-event-stream.ts";
 
-import { chatStream, streamEvent, workspaceStream } from "@sugabots/contracts";
+import { chatStream, memberStream, streamEvent, workspaceStream } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { Effect } from "effect";
+import { query } from "../database/database.ts";
 import { Audience } from "../database/events/audience.ts";
 import type { DomainEvents } from "../database/events/domain-events.ts";
 import type { EventOutbox, PendingEvent } from "../database/events/outbox.ts";
+import { approvalAudience } from "../proofs/approvers.ts";
 import { ChatEvent, type ToolCallChange } from "./events.ts";
 
 /** Publishes, on the emitting transaction, the stream events that show watching clients what happened. */
@@ -15,6 +17,32 @@ export const handler =
 		const pending = events.flatMap(streamEventsFor);
 		return pending.length === 0 ? Effect.void : outbox.publish(pending);
 	};
+
+export const approvalHandler =
+	(outbox: EventOutbox.Interface): DomainEvents.Handler<ChatEvent> =>
+	(events) =>
+		Effect.gen(function* () {
+			const pending: PendingEvent[] = [];
+			for (const event of events) {
+				const approval =
+					event._tag === "TurnSuspended"
+						? event.approvalCallIds
+						: event._tag === "ToolCallDecided" ||
+								(event._tag === "ToolCallFinished" && event.toolCall.approval?.status === "denied")
+							? [event.toolCall.id]
+							: undefined;
+				if (!approval) continue;
+				for (const recipient of yield* query((db) => approvalAudience(db, approval))) {
+					for (const call of recipient.calls) {
+						pending.push({
+							stream: memberStream(recipient.memberId),
+							event: streamEvent("approvals.changed", { toolCallId: call.id }),
+						});
+					}
+				}
+			}
+			if (pending.length > 0) yield* outbox.publish(pending);
+		});
 
 /**
  * The one place stream events are built: which streams an event goes on,
@@ -54,6 +82,18 @@ function streamEventsFor(event: ChatEvent): PendingEvent[] {
 			// A list shows a bot working in the chat.
 			listedChatChanged(workspaceId, chatId),
 		],
+		ReplyExecutionStarted: ({ chatId, messageId, execution, content, thinking }) => [
+			onChat(
+				chatId,
+				streamEvent("message.execution_started", {
+					chatId,
+					messageId,
+					execution,
+					content,
+					thinking,
+				}),
+			),
+		],
 		TurnCompleted: ({ chatId, workspaceId, messageId, content, finishedAt }) => [
 			onChat(
 				chatId,
@@ -68,7 +108,7 @@ function streamEventsFor(event: ChatEvent): PendingEvent[] {
 			onChat(chatId, streamEvent("turn.completed", { chatId })),
 			listedChatChanged(workspaceId, chatId),
 		],
-		// Its empty reply is gone, so the chat is fetched again without it.
+		// Refresh the chat after the empty reply is removed.
 		TurnStayedSilent: ({ chatId, workspaceId }) => [
 			onChat(chatId, streamEvent("turn.completed", { chatId })),
 			...chatChanged(workspaceId, chatId),

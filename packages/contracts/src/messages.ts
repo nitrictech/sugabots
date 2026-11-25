@@ -238,10 +238,11 @@ const toolApprovalStatusSchema = Schema.Literals(["pending", "allowed", "denied"
 export type ToolApprovalStatus = typeof toolApprovalStatusSchema.Type;
 
 /**
- * Who may decide a tool call's approval: `chat`, those who decide
- * approvals in the chat it was raised in; `computer-managers`, for a
- * bot's request to change the computer its turn works on, such as what it may
- * reach, those who manage that computer's project, the chat's project.
+ * Who may decide a tool call's approval: `chat`, the approvers of the turn
+ * that made it (see `chatDetailsSchema`'s `approveToolCallsIn`);
+ * `computer-managers`, for a bot's request to change the computer its turn
+ * works on, such as what it may reach, those who manage that computer's
+ * project, the chat's project.
  */
 const toolApproversSchema = Schema.Literals(["chat", "computer-managers"]);
 
@@ -550,12 +551,21 @@ export type MessageReaction = typeof messageReactionSchema.Type;
 
 export const messageReactionsSchema = Schema.mutable(Schema.Array(messageReactionSchema));
 
+export const stepThinkingSchema = Schema.Struct({
+	step: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	text: Schema.String,
+});
+
+export type StepThinking = typeof stepThinkingSchema.Type;
+
 export const messageSchema = Schema.Struct({
 	id: uuidSchema,
+	retryKey: Schema.optional(uuidSchema),
 	chatId: uuidSchema,
 	author: messageAuthorSchema,
 	status: messageStatusSchema,
 	parts: Schema.mutable(Schema.Array(messagePartSchema)),
+	thinking: Schema.optional(Schema.Array(stepThinkingSchema)),
 	content: Schema.String,
 	/** Why a `failed` reply failed, in the provider's words where it had any. */
 	error: Schema.optional(Schema.String),
@@ -596,16 +606,31 @@ export type ChatRead = typeof chatReadSchema.Type;
 /** A chat as it is read: where it is, a page of its messages, and who is in it. */
 export const chatDetailsSchema = Schema.Struct({
 	chat: placedChatSchema,
-	/** What this member may decide of the approvals the chat raises. */
+	/** What this member may decide of the approvals the chat raises, and which turns they may interrupt. */
 	permissions: Schema.optional(
 		Schema.Struct({
-			approveToolCalls: Schema.Boolean,
+			/**
+			 * The replies of the chat's turns not yet ended, or still waiting on
+			 * an approval, whose tool calls this member approves: a Personal
+			 * Assistant's for its member, a run's for admins and its bot's
+			 * managers, and any other turn's for its asker alone. A request to
+			 * change the computer is `approveComputerRequests`'s instead.
+			 */
+			approveToolCallsIn: Schema.mutable(Schema.Array(uuidSchema)),
 			/**
 			 * Whether this member may decide the bots' requests to change the
 			 * computer their turns work on: those who manage that computer's
 			 * project, the chat's.
 			 */
 			approveComputerRequests: Schema.Boolean,
+			/**
+			 * The replies being written whose turns this member may interrupt, each
+			 * with its turn: those they asked for, every one in a project they may
+			 * manage, and in a run, those whose calls they approve.
+			 */
+			interruptTurns: Schema.mutable(
+				Schema.Array(Schema.Struct({ replyId: uuidSchema, turnId: uuidSchema })),
+			),
 		}),
 	),
 	automationRun: Schema.NullOr(runSchema),
@@ -666,7 +691,7 @@ export type ChatContext = typeof chatContextSchema.Type;
 export const MESSAGE_MAX_LENGTH = 20_000;
 
 export const newMessageSchema = Schema.Struct({
-	id: uuidSchema,
+	retryKey: uuidSchema,
 	/** May be empty when the message carries files. */
 	message: Schema.Trim.check(Schema.isMaxLength(MESSAGE_MAX_LENGTH)),
 	/** Files the author uploaded to the chat and has not sent yet. They show in the order listed. */

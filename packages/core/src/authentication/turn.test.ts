@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { query, transaction } from "../database/database.ts";
-import { chat, message, systemChat } from "../database/schema.ts";
+import { chat, message, systemChat, turn } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { BotForAsker } from "../principal.ts";
 import {
@@ -26,6 +26,7 @@ describe("TurnAuthentication", () => {
 	let samId: string;
 	let lead: { id: string; defaultProject: string };
 	let helper: { id: string; defaultProject: string };
+	let handBackHelpers: readonly { id: string }[];
 	let projectId: string;
 	let chatId: string;
 
@@ -37,9 +38,10 @@ describe("TurnAuthentication", () => {
 		samId = await seedMember(workspaceId, "editor");
 		lead = await seedBot(workspaceId);
 		helper = await seedBot(workspaceId);
+		handBackHelpers = await Promise.all(Array.from({ length: 9 }, () => seedBot(workspaceId)));
 		projectId = await seedProject(workspaceId, {
 			leadBotId: lead.id,
-			bots: [helper.id],
+			bots: [helper.id, ...handBackHelpers.map(({ id }) => id)],
 			members: [samId],
 		});
 		chatId = await seedProjectChat(workspaceId, projectId, samId);
@@ -50,6 +52,19 @@ describe("TurnAuthentication", () => {
 	});
 
 	const authenticate = (turnId: string) => runOnPostgres(auth.authenticate(turnId));
+
+	const seedHandBacks = async (inChat: string, firstTurn: string) => {
+		let asking = firstTurn;
+		for (const [index, { id }] of handBackHelpers.entries()) {
+			const mention = await seedMessage(inChat, { bot: lead.id, turn: asking });
+			await seedTurn(inChat, id, mention, { reason: "collaboration", status: "done" });
+			asking = await seedTurn(inChat, lead.id, mention, {
+				reason: "hand_back",
+				status: index === handBackHelpers.length - 1 ? "running" : "done",
+			});
+		}
+		return asking;
+	};
 
 	const asBotForAsker = async (turnId: string): Promise<BotForAsker> => {
 		const principal = await authenticate(turnId);
@@ -74,6 +89,19 @@ describe("TurnAuthentication", () => {
 			});
 		});
 
+		it("makes each principal it builds a new execution of the turn", async () => {
+			const turnId = await seedTurnAnswering(chatId, lead.id, { member: samId });
+
+			const first = await asBotForAsker(turnId);
+			const resumed = await asBotForAsker(turnId);
+
+			expect(resumed.executionNumber).toBe(first.executionNumber + 1);
+			const [stored] = await onDatabase((db) =>
+				db.select({ executionNumber: turn.executionNumber }).from(turn).where(eq(turn.id, turnId)),
+			);
+			expect(stored?.executionNumber).toBe(resumed.executionNumber);
+		});
+
 		it("gives a helper, and the asking bot's hand-back, the asking turn's asker", async () => {
 			const asking = await seedTurnAnswering(chatId, lead.id, { member: samId });
 			const helperTurn = await seedTurnAnswering(
@@ -95,6 +123,18 @@ describe("TurnAuthentication", () => {
 				asker: samId,
 				bounds: { kind: "chat", project: projectId },
 			});
+			expect(await asBotForAsker(handBack)).toMatchObject({ bot: lead.id, asker: samId });
+		});
+
+		it("keeps the original asker after nine successive hand-backs", async () => {
+			const firstTurn = await seedTurnAnswering(
+				chatId,
+				lead.id,
+				{ member: samId },
+				{ status: "done" },
+			);
+			const handBack = await seedHandBacks(chatId, firstTurn);
+
 			expect(await asBotForAsker(handBack)).toMatchObject({ bot: lead.id, asker: samId });
 		});
 
@@ -129,7 +169,7 @@ describe("TurnAuthentication", () => {
 			});
 		});
 
-		it("gives a Personal Assistant's own turns member bounds, but not a brief's first turn", async () => {
+		it("gives a Personal Assistant member bounds on its own turns and on briefs written in member bounds", async () => {
 			const assistant = await seedBot(workspaceId, { assistantOf: samId, visibility: "personal" });
 			const own = await seedProjectChat(workspaceId, assistant.defaultProject, samId);
 			const turnId = await seedTurnAnswering(own, assistant.id, { member: samId });
@@ -140,6 +180,17 @@ describe("TurnAuthentication", () => {
 				{ reason: "brief" },
 			);
 
+			const memberBrief = await seedMessage(own, { bot: assistant.id });
+			await onDatabase((db) =>
+				db
+					.update(message)
+					.set({ briefTurnRule: "memberBounds" })
+					.where(eq(message.id, memberBrief)),
+			);
+			const briefedWithMemberBounds = await seedTurn(own, assistant.id, memberBrief, {
+				reason: "brief",
+			});
+
 			expect(await asBotForAsker(turnId)).toMatchObject({
 				bot: assistant.id,
 				asker: samId,
@@ -147,6 +198,9 @@ describe("TurnAuthentication", () => {
 			});
 			expect(await asBotForAsker(briefed)).toMatchObject({
 				bounds: { kind: "chat", project: assistant.defaultProject },
+			});
+			expect(await asBotForAsker(briefedWithMemberBounds)).toMatchObject({
+				bounds: { kind: "member" },
 			});
 		});
 	});
@@ -198,6 +252,23 @@ describe("TurnAuthentication", () => {
 			});
 		});
 
+		it("keeps the automation's run after nine successive hand-backs", async () => {
+			const automationId = await seedAutomation(workspaceId, projectId);
+			const run = await seedRun(workspaceId, automationId, lead.id, "webhook");
+			const firstTurn = await seedTurn(run.chat, lead.id, run.triggerMessage, {
+				reason: "automation",
+				status: "done",
+			});
+			const handBack = await seedHandBacks(run.chat, firstTurn);
+
+			expect(await authenticate(handBack)).toMatchObject({
+				_tag: "AutomationRun",
+				bot: lead.id,
+				automation: automationId,
+				run: run.run,
+			});
+		});
+
 		it("acts for a Personal Assistant's member, in member bounds unless started from outside", async () => {
 			const patId = await seedMember(workspaceId, "viewer");
 			const assistant = await seedBot(workspaceId, { assistantOf: patId, visibility: "personal" });
@@ -223,6 +294,22 @@ describe("TurnAuthentication", () => {
 	});
 
 	describe("a turn with nobody to act for", () => {
+		it("keeps the asker it was made with, though the turns behind its message change later", async () => {
+			const reply = await seedMessage(chatId, { bot: helper.id });
+			const asking = await seedTurn(chatId, lead.id, reply);
+			const helperTurn = await seedTurnAnswering(chatId, helper.id, { bot: lead.id, turn: asking });
+			const before = await authenticate(asking);
+			// Rewritten into a cycle of turns, which no longer changes who the turn acts for.
+			await onDatabase((db) =>
+				db.update(message).set({ turnId: helperTurn }).where(eq(message.id, reply)),
+			);
+
+			expect(await authenticate(asking)).toMatchObject({
+				_tag: "BotForAsker",
+				asker: before._tag === "BotForAsker" ? before.asker : "an asker",
+			});
+		});
+
 		it("refuses a turn that doesn't exist", async () => {
 			for (const turnId of [randomUUID(), "not-an-id"]) {
 				await expect(authenticate(turnId)).rejects.toMatchObject({

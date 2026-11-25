@@ -13,20 +13,18 @@ import { actorOf, type BotRecord, projectHasBot, roleIn } from "./facts.ts";
 /**
  * The bot as `principal` meets it.
  *
- * - `member`: the member whose role decides, a member signed in or a bot's
- *   asker, and whether a bot principal's bounds hold the bot.
- * - `run`: a run, and whether its bounds hold the bot.
- * - `none`: a principal that reaches no bot, or one outside its workspace.
+ * - `member`: the member whose role decides, a member signed in or a bot's asker.
+ * - `run`: a run whose bounds hold the bot.
+ * - `none`: the principal cannot reach the bot, including outside its bounds.
  */
-export type BotAsMet =
+type BotAsMet =
 	| {
 			readonly kind: "member";
 			readonly actor: Actor;
-			readonly withinBounds: boolean;
 			/** Whether a bot principal is in member bounds, or in the bot's own chats. */
 			readonly mayManage: "always" | "ownChats" | "never";
 	  }
-	| { readonly kind: "run"; readonly withinBounds: boolean }
+	| { readonly kind: "run" }
 	| { readonly kind: "none" };
 
 export const meetBot = (principal: Principal, bot: BotRecord) =>
@@ -37,25 +35,29 @@ export const meetBot = (principal: Principal, bot: BotRecord) =>
 				return {
 					kind: "member",
 					actor: actorOf(principal.member, role),
-					withinBounds: true,
 					mayManage: "always",
 				};
 			}
 			case "BotForAsker": {
 				if (principal.workspace !== bot.workspace) return { kind: "none" };
+				const { bounds } = principal;
+				const own = bot.id === principal.bot;
+				if (
+					bounds.kind === "chat" &&
+					!own &&
+					!(yield* query((db) => projectHasBot(db, bounds.project, bot.id)))
+				) {
+					return { kind: "none" };
+				}
 				const role = yield* query((db) => roleIn(db, bot.workspace, principal.asker));
 				const actor = actorOf(principal.asker, role);
-				if (principal.bounds.kind === "member") {
-					return { kind: "member", actor, withinBounds: true, mayManage: "always" };
+				if (bounds.kind === "member") {
+					return { kind: "member", actor, mayManage: "always" };
 				}
-				const { project } = principal.bounds;
-				const own = bot.id === principal.bot;
-				const withinBounds = own || (yield* query((db) => projectHasBot(db, project, bot.id)));
-				const inOwnChats = own && bot.defaultProject === project;
+				const inOwnChats = own && bot.defaultProject === bounds.project;
 				return {
 					kind: "member",
 					actor,
-					withinBounds,
 					mayManage: inOwnChats ? "ownChats" : "never",
 				};
 			}
@@ -64,7 +66,7 @@ export const meetBot = (principal: Principal, bot: BotRecord) =>
 				const { project } = principal.bounds;
 				const withinBounds =
 					bot.id === principal.bot || (yield* query((db) => projectHasBot(db, project, bot.id)));
-				return { kind: "run", withinBounds };
+				return withinBounds ? { kind: "run" } : { kind: "none" };
 			}
 			default:
 				return { kind: "none" };

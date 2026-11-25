@@ -7,6 +7,7 @@ import {
 	type OAuthTokens,
 	UnauthorizedError,
 } from "@ai-sdk/mcp";
+import { extractWWWAuthenticateParams } from "@modelcontextprotocol/sdk/client/auth.js";
 import { causesOf } from "../causes.ts";
 import type { EgressHttpClient } from "../network/egress.ts";
 
@@ -31,6 +32,7 @@ export interface OAuthRecord {
 	state?: string;
 	/** Who started the sign-in under way, the only member who may finish it. */
 	startedByMemberId?: string;
+	startedBySessionId?: string;
 	/**
 	 * When the authorization server last refused the tokens and no one was
 	 * there to sign in again, as an ISO timestamp. Cleared by the next tokens.
@@ -42,11 +44,14 @@ export interface OAuthRecord {
 interface OAuthStorage {
 	load(): Promise<OAuthRecord | undefined>;
 	/**
-	 * `signedInById` comes with the tokens a sign-in has just been issued, as
-	 * the member who finished it. Tokens saved without it are refreshed ones of
-	 * the sign-in already there.
+	 * Answers whether `record` was saved. `signedInById` comes with the tokens
+	 * a sign-in has just been issued, as the member who finished it, and is
+	 * refused once they are no longer in the workspace. Anything saved without
+	 * it, such as refreshed tokens, is refused once the record has changed
+	 * since it was loaded or last saved, so nothing read before a sign-out
+	 * writes its tokens back.
 	 */
-	save(record: OAuthRecord, signedInById?: string): Promise<void>;
+	save(record: OAuthRecord, signedInById?: string): Promise<boolean>;
 	now(): Promise<Date>;
 }
 
@@ -57,10 +62,10 @@ interface OAuthProviderOptions {
 	/**
 	 * Who is starting a sign-in, recorded with its `state`. Left out by a
 	 * provider that only uses or refreshes tokens, which refuses to start a
-	 * sign-in, since nobody could finish it: it drops the tokens, records
-	 * the rejection, and throws {@link SignInRequired}.
+	 * sign-in, since nobody could finish it, and throws {@link SignInRequired}.
 	 */
 	startedByMemberId?: string;
+	startedBySessionId?: string;
 	/** Who is finishing a sign-in, as whom the tokens it is issued sign in. */
 	finishedByMemberId?: string;
 }
@@ -68,21 +73,40 @@ interface OAuthProviderOptions {
 /** The SDK's provider, plus the authorization URL it was asked to send the browser to. */
 interface StoredOAuthProvider extends OAuthClientProvider {
 	authorizationUrl(): URL | undefined;
+	assertExchange(): void;
+	rejectTokens(): Promise<never>;
 }
 
 export function storedOAuthProvider(
 	storage: OAuthStorage,
-	{ redirectUrl, clientName, startedByMemberId, finishedByMemberId }: OAuthProviderOptions,
+	{
+		redirectUrl,
+		clientName,
+		startedByMemberId,
+		startedBySessionId,
+		finishedByMemberId,
+	}: OAuthProviderOptions,
 ): StoredOAuthProvider {
-	let cached: OAuthRecord | undefined;
+	let cached: Promise<OAuthRecord> | undefined;
 	let authorizationUrl: URL | undefined;
-	const record = async () => {
-		cached ??= (await storage.load()) ?? {};
+	let conflicted = false;
+	const assertExchange = () => {
+		if (conflicted) throw new SignInRequired();
+	};
+	const record = () => {
+		assertExchange();
+		cached ??= storage.load().then((loaded) => loaded ?? {});
 		return cached;
 	};
 	const change = async (patch: Partial<OAuthRecord>, signedInById?: string) => {
-		cached = { ...(await record()), ...patch };
-		await storage.save(cached, signedInById);
+		const changed = { ...(await record()), ...patch };
+		assertExchange();
+		if (await storage.save(changed, signedInById)) {
+			cached = Promise.resolve(changed);
+			return;
+		}
+		conflicted = true;
+		throw new SignInRequired();
 	};
 
 	return {
@@ -99,31 +123,45 @@ export function storedOAuthProvider(
 			};
 		},
 		authorizationUrl: () => authorizationUrl,
+		assertExchange,
+		rejectTokens: async () => {
+			const rejectedAt = await storage.now();
+			await change({ tokens: undefined, signInRejectedAt: rejectedAt.toISOString() });
+			throw new SignInRequired();
+		},
 		clientInformation: async () => (await record()).clientInformation,
 		saveClientInformation: (clientInformation) => change({ clientInformation }),
 		authorizationServerInformation: async () => (await record()).authorizationServer,
 		saveAuthorizationServerInformation: (authorizationServer) => change({ authorizationServer }),
 		tokens: async () => (await record()).tokens,
-		// Only an authorization code is exchanged while a sign-in finishes, so these are its tokens.
-		saveTokens: (tokens) => change({ tokens, signInRejectedAt: undefined }, finishedByMemberId),
+		// Only an authorization code is exchanged while a sign-in finishes, so these are
+		// its tokens, saved with its state and verifier cleared, all under the lock that
+		// orders them with a removal of the member finishing it.
+		saveTokens: (tokens) =>
+			change(
+				finishedByMemberId === undefined
+					? { tokens, signInRejectedAt: undefined }
+					: {
+							tokens,
+							signInRejectedAt: undefined,
+							state: "",
+							startedByMemberId: undefined,
+							startedBySessionId: undefined,
+							codeVerifier: undefined,
+						},
+				finishedByMemberId,
+			),
 		codeVerifier: async () => {
 			const verifier = (await record()).codeVerifier;
 			if (!verifier) throw new Error("No sign-in is under way for this connector");
 			return verifier;
 		},
 		saveCodeVerifier: (codeVerifier) => change({ codeVerifier }),
-		// The SDK asks for a state only once the tokens it holds, refreshed or not,
-		// won't do. Refusing here, before anything is saved, leaves a sign-in a
-		// member has under way alone.
 		state: async () => {
-			if (startedByMemberId === undefined) {
-				const rejectedAt = await storage.now();
-				await change({ tokens: undefined, signInRejectedAt: rejectedAt.toISOString() });
-				throw new SignInRequired();
-			}
+			if (startedBySessionId === undefined) throw new SignInRequired();
 			return randomBytes(24).toString("base64url");
 		},
-		saveState: (state) => change({ state, startedByMemberId }),
+		saveState: (state) => change({ state, startedByMemberId, startedBySessionId }),
 		storedState: async () => (await record()).state,
 		redirectToAuthorization: (url) => {
 			authorizationUrl = url;
@@ -153,13 +191,17 @@ export async function beginAuthorization(
 	fetch: EgressHttpClient,
 ): Promise<OAuthSignIn> {
 	const result = await auth(provider, { serverUrl, fetchFn: fetch });
+	provider.assertExchange();
 	if (result === "AUTHORIZED") return { authorized: true };
 	const url = provider.authorizationUrl();
 	if (!url) throw new Error("The authorization server gave no address to sign in at");
 	return { authorizationUrl: url.toString() };
 }
 
-/** Finishes a sign-in with the code the browser brought back, leaving tokens on the record. */
+/**
+ * Finishes a sign-in with the code the browser brought back, leaving tokens on
+ * the record and its state cleared, in one save.
+ */
 export async function finishAuthorization(
 	provider: StoredOAuthProvider,
 	serverUrl: string,
@@ -173,10 +215,123 @@ export async function finishAuthorization(
 		callbackState: state,
 		fetchFn: fetch,
 	});
+	provider.assertExchange();
 	if (result !== "AUTHORIZED") {
 		throw new Error("The authorization server did not accept the sign-in");
 	}
-	await provider.saveState?.("");
+}
+
+/** Handles the MCP challenge here so the OAuth exchange can hold one connector claim. */
+export function oauthClient(
+	fetch: EgressHttpClient,
+	serverUrl: string,
+	tokens: () => Promise<OAuthTokens | undefined>,
+	refresh: (
+		signal: AbortSignal,
+		challenge: Response,
+		rejected: string | undefined,
+	) => Promise<OAuthTokens | undefined>,
+): OAuthClient {
+	const endpoint = new URL(serverUrl).href;
+	const sentTokens = new Set<string>();
+	return {
+		sentTokens: () => sentTokens,
+		fetch: async (input, init) => {
+			const request = new Request(input, init);
+			if (request.url !== endpoint) throw new SignInRequired();
+			const send = (accessToken: string | undefined) => {
+				request.signal.throwIfAborted();
+				const headers = new Headers(request.headers);
+				if (accessToken) {
+					headers.set("authorization", `Bearer ${accessToken}`);
+					sentTokens.add(accessToken);
+				}
+				return fetch(input, { ...init, headers });
+			};
+			const accessToken = (await tokens())?.access_token;
+			const response = await send(accessToken);
+			if (response.status !== 401 || request.method === "DELETE") return response;
+			await response.body?.cancel();
+			const refreshed = await refresh(request.signal, response, accessToken);
+			if (!refreshed) throw new SignInRequired();
+			return send(refreshed.access_token);
+		},
+	};
+}
+
+export async function refreshAuthorization(
+	provider: StoredOAuthProvider,
+	serverUrl: string,
+	challenge: Response,
+	fetch: EgressHttpClient,
+): Promise<OAuthTokens | undefined> {
+	let refreshError: { cause: unknown } | undefined;
+	let refreshSent = false;
+	let refreshRefused = false;
+	let refreshClientRefused = false;
+	const fetchForRefresh: EgressHttpClient = async (input, init) => {
+		if (
+			!(init?.body instanceof URLSearchParams) ||
+			init.body.get("grant_type") !== "refresh_token"
+		) {
+			return fetch(input, init);
+		}
+		refreshSent = true;
+		try {
+			const response = await fetch(input, init);
+			refreshRefused = response.status >= 400 && response.status < 500;
+			if (refreshRefused) {
+				const refusal: unknown = await response
+					.clone()
+					.json()
+					.catch(() => undefined);
+				refreshClientRefused =
+					typeof refusal === "object" &&
+					refusal !== null &&
+					"error" in refusal &&
+					(refusal.error === "invalid_client" || refusal.error === "unauthorized_client");
+			}
+			if (!response.ok) {
+				const cause = new Error(`The OAuth token endpoint returned HTTP ${response.status}`);
+				if (response.status >= 500) {
+					await response.body?.cancel();
+					throw cause;
+				}
+				refreshError = { cause };
+			}
+			return response;
+		} catch (cause) {
+			refreshError = { cause };
+			throw cause;
+		}
+	};
+	const result = await auth(
+		{
+			...provider,
+			state: async () => {
+				// The SDK falls through to interactive sign-in after a transport error.
+				if (!refreshSent) return provider.rejectTokens();
+				if (refreshError) throw refreshError.cause;
+				throw new SignInRequired();
+			},
+			invalidateCredentials: async (scope) => {
+				// The SDK also invalidates unbound credentials before the exchange.
+				// The SDK asks to invalidate tokens after a refused refresh with invalid_grant.
+				if (scope === "tokens" && (!refreshSent || refreshRefused)) return provider.rejectTokens();
+				throw new SignInRequired();
+			},
+		},
+		{
+			serverUrl,
+			...extractWWWAuthenticateParams(challenge),
+			fetchFn: fetchForRefresh,
+		},
+	).catch((cause) => {
+		if (refreshClientRefused) return provider.rejectTokens();
+		throw cause;
+	});
+	provider.assertExchange();
+	return result === "AUTHORIZED" ? provider.tokens() : undefined;
 }
 
 /** Why a sign-in could not start: see {@link signInStartFailure}. */
@@ -220,6 +375,11 @@ export function needsSignIn(cause: unknown): boolean {
 }
 
 /** Providers backed by the connector table, one per connector asked for. */
+export interface OAuthClient {
+	readonly fetch: EgressHttpClient;
+	readonly sentTokens: () => ReadonlySet<string>;
+}
+
 export interface OAuthProviders {
-	for(workspaceId: string, connectorId: string): StoredOAuthProvider;
+	for(workspaceId: string, connectorId: string, serverUrl: string): OAuthClient;
 }
