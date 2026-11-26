@@ -49,11 +49,7 @@ export function useProviderActions() {
 				const workspaceId = requiredWorkspaceId();
 				const { create } = client.api.modelProviders;
 				return Effect.runPromise(
-					// The generated client splits a union payload into one request type
-					// per member, which a request holding the whole union does not satisfy.
-					create({ params: { workspace: workspaceId }, payload: json } as Parameters<
-						typeof create
-					>[0]),
+					create({ params: { workspace: workspaceId }, payload: { provider: json } }),
 				);
 			},
 			onSuccess: refresh,
@@ -64,7 +60,7 @@ export function useProviderActions() {
 				return Effect.runPromise(
 					client.api.modelProviders.update({
 						params: { workspace: workspaceId, providerId },
-						payload: json,
+						payload: { changes: json },
 					}),
 				);
 			},
@@ -138,7 +134,7 @@ export function useProviderActions() {
 				return Effect.runPromise(
 					client.api.modelProviders.addModel({
 						params: { workspace: workspaceId, providerId },
-						payload: { modelId, capabilities: [] },
+						payload: { model: { modelId, capabilities: [] } },
 					}),
 				);
 			},
@@ -158,7 +154,7 @@ export function useProviderActions() {
 				return Effect.runPromise(
 					client.api.modelProviders.updateModel({
 						params: { workspace: workspaceId, providerId, modelId },
-						payload: { enabled },
+						payload: { changes: { enabled } },
 					}),
 				);
 			},
@@ -206,7 +202,7 @@ export function useProviderActions() {
 				return Effect.runPromise(
 					client.api.modelProviders.updateModel({
 						params: { workspace: workspaceId, providerId, modelId },
-						payload: json,
+						payload: { changes: json },
 					}),
 				);
 			},

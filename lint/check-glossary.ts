@@ -92,7 +92,7 @@ const RETIRED_WORDS: readonly CheckedWord[] = [
 			// The browser's: an iframe's `sandbox` and Content-Security-Policy's.
 			/^packages\/web\/src\/screens\/HtmlFrame\.tsx$/,
 			/^packages\/server\/src\/http\/content-pages(\.test)?\.ts$/,
-			/^packages\/server\/src\/routes\/chats\/(file-response|files\.test)\.ts$/,
+			/^packages\/server\/src\/routes\/chat-files\/(file-response|routes\.test)\.ts$/,
 		],
 	},
 	{

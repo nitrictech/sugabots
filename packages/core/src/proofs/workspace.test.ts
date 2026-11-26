@@ -22,7 +22,6 @@ import {
 	proveCanChangeMembership,
 	proveCanDeleteWorkspace,
 	proveCanHandOverOwnership,
-	proveCanInvite,
 } from "./membership-changes.ts";
 import { named } from "./proof.ts";
 import { proveReachSet } from "./reach-set.ts";
@@ -157,17 +156,6 @@ describe("the workspace and who is in it", () => {
 					named(memberId, (u) => proveCanChangeMembership(lock, u, change).pipe(Effect.asVoid)),
 				),
 			);
-		const invites = (
-			principal: Principal,
-			workspaceId: string,
-			role: "admin" | "editor" | "viewer",
-		) =>
-			outcome(
-				underWorkspaceLock(principal, workspaceId, (lock) =>
-					proveCanInvite(lock, role).pipe(Effect.asVoid),
-				),
-			);
-
 		it("lets admins manage members but not admins, and only the owner make or remove admins", async () => {
 			const staff = await staffed();
 			const toViewer: MembershipChange = { kind: "role", role: "viewer" };
@@ -221,20 +209,6 @@ describe("the workspace and who is in it", () => {
 			expect(await changes(run, a.workspace, a.vi, removal)).toBe("ActionForbidden");
 		});
 
-		it("lets an invitation's role be only one the inviter may give", async () => {
-			const staff = await staffed();
-			const admin = await as.member(staff.admin);
-			expect(await invites(admin, staff.workspaceId, "editor")).toBe("ok");
-			expect(await invites(admin, staff.workspaceId, "admin")).toBe("ActionForbidden");
-			expect(await invites(await as.member(staff.owner), staff.workspaceId, "admin")).toBe("ok");
-			expect(await invites(await as.member(staff.editor), staff.workspaceId, "viewer")).toBe(
-				"ActionForbidden",
-			);
-			expect(await invites(await as.member(world.a.erin), staff.workspaceId, "viewer")).toBe(
-				"ResourceHidden",
-			);
-		});
-
 		it("carries the member's current role and the change, for the write to take", async () => {
 			const staff = await staffed();
 			const carried = await runOnPostgres(
@@ -280,40 +254,22 @@ describe("the workspace and who is in it", () => {
 		});
 	});
 
-	it("lets an admin cancel an editor's invitation and leaves an admin's invitation to the owner", async () => {
+	it("hides an invitation that was already cancelled", async () => {
 		const { a } = world;
-		const adminInvitation = await seedInvitation(a.workspace, a.owner, {
-			email: "admin@example.com",
-			role: "admin",
-		});
-		const editorInvitation = await seedInvitation(a.workspace, a.owner, {
-			email: "editor@example.com",
-			role: "editor",
-		});
-		const cancelledInvitation = await seedInvitation(a.workspace, a.owner, {
+		const invitationId = await seedInvitation(a.workspace, a.owner, {
 			email: "cancelled@example.com",
 			role: "editor",
 			status: "canceled",
 		});
-		const cancels = (principal: Principal, invitationId: string) =>
-			outcome(
-				underWorkspaceLock(principal, a.workspace, (lock) =>
+		const owner = await as.member(a.owner);
+
+		expect(
+			await outcome(
+				underWorkspaceLock(owner, a.workspace, (lock) =>
 					named(invitationId, (invitation) =>
 						proveCanCancelInvitation(lock, invitation).pipe(Effect.asVoid),
 					),
 				),
-			);
-		const admin = await as.member(a.admin);
-		const owner = await as.member(a.owner);
-		expect(await cancels(admin, editorInvitation)).toBe("ok");
-		expect(await cancels(admin, adminInvitation)).toBe("ActionForbidden");
-		expect(await cancels(owner, adminInvitation)).toBe("ok");
-		expect(await cancels(owner, cancelledInvitation)).toBe("ResourceHidden");
-		expect(await cancels(owner, crypto.randomUUID())).toBe("ResourceHidden");
-		expect(
-			await cancels(
-				await as.member(await seedMember(world.b.workspace, "editor")),
-				adminInvitation,
 			),
 		).toBe("ResourceHidden");
 	});

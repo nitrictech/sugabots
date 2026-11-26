@@ -699,6 +699,23 @@ export type ChatContext = typeof chatContextSchema.Type;
 /** How long a message may be. */
 export const MESSAGE_MAX_LENGTH = 20_000;
 
+/**
+ * A new message has text or a file. Checked on the whole message, wherever
+ * its fields are put with others, such as the chat it is sent in.
+ */
+export const messageHasTextOrFile = Schema.makeFilter(
+	({
+		message,
+		attachments,
+	}: {
+		readonly message: string;
+		readonly attachments?: ReadonlyArray<string>;
+	}) =>
+		message !== "" || (attachments?.length ?? 0) > 0
+			? undefined
+			: { issue: "A message needs text or a file", path: ["message"] },
+);
+
 export const newMessageSchema = Schema.Struct({
 	retryKey: uuidSchema,
 	/** May be empty when the message carries files. */
@@ -709,12 +726,6 @@ export const newMessageSchema = Schema.Struct({
 	),
 	/** The id of the message in the same chat that this one quotes and answers. */
 	replyTo: Schema.optional(uuidSchema),
-}).check(
-	Schema.makeFilter(({ message, attachments }) =>
-		message !== "" || (attachments?.length ?? 0) > 0
-			? undefined
-			: { issue: "A message needs text or a file", path: ["message"] },
-	),
-);
+}).check(messageHasTextOrFile);
 
 export type NewMessage = typeof newMessageSchema.Type;

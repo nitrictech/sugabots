@@ -3,7 +3,6 @@ import { Effect, Schema } from "effect";
 import { ApprovalNeeded, ApprovalRefused, ResourceHidden } from "../errors/proofs.ts";
 import { WebToolOff } from "../errors/web.ts";
 import { MAX_URL_CHARACTERS } from "../urls.ts";
-import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
 
 export const WEB_FETCH_TOOL = "web_fetch";
@@ -39,6 +38,13 @@ export const webContracts = {
 		]),
 		errors: refusals,
 		changes: false,
+		http: { kind: "heldBack", reason: "Only offered to bots in turns." },
+		botLoop: {
+			kind: "offered",
+			tool: WEB_FETCH_TOOL,
+			offeredIn: "everywhere",
+			approval: { kind: "outsideRunsOrMemberBounds" },
+		},
 	}),
 	"web.search": OperationContract.make("web.search", {
 		description:
@@ -83,20 +89,6 @@ export const webContracts = {
 		]),
 		errors: refusals,
 		changes: false,
-	}),
-};
-
-export const webExposure = {
-	"web.fetch": {
-		http: { kind: "heldBack", reason: "Only offered to bots in turns." },
-		botLoop: {
-			kind: "offered",
-			tool: WEB_FETCH_TOOL,
-			offeredIn: "everywhere",
-			approval: { kind: "outsideRunsOrMemberBounds" },
-		},
-	},
-	"web.search": {
 		http: { kind: "heldBack", reason: "Only offered to bots in turns." },
 		botLoop: {
 			kind: "offered",
@@ -104,5 +96,5 @@ export const webExposure = {
 			offeredIn: "everywhere",
 			approval: { kind: "never" },
 		},
-	},
-} as const satisfies DomainExposure<typeof webContracts>;
+	}),
+};

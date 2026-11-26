@@ -4,7 +4,6 @@ import {
 	type Approval,
 	type BotLoopOperationName,
 	type InputOf,
-	manifest,
 	operationContracts,
 } from "@sugabots/contracts/operations";
 import { and, eq } from "drizzle-orm";
@@ -27,7 +26,9 @@ import type { CanUseChatComputer } from "./can-use-computer.ts";
 import type { CanUseConnector } from "./can-use-connector.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
-export type ApprovedOperation = BotLoopOperationName<typeof manifest> | "automations.list";
+export type ApprovedOperation =
+	| BotLoopOperationName<typeof operationContracts>
+	| "automations.list";
 
 export interface ApprovalRule<
 	A extends Approval = Approval,
@@ -39,18 +40,18 @@ export interface ApprovalRule<
 	readonly changes: boolean;
 }
 
-export function approvalRule<N extends BotLoopOperationName<typeof manifest>>(
+export function approvalRule<N extends BotLoopOperationName<typeof operationContracts>>(
 	name: N,
-): ApprovalRule<(typeof manifest)[N]["botLoop"]["approval"], N>;
+): ApprovalRule<(typeof operationContracts)[N]["botLoop"]["approval"], N>;
 export function approvalRule(
 	name: "automations.list",
 ): ApprovalRule<
-	(typeof manifest)["automations.listInChat"]["botLoop"]["approval"],
+	(typeof operationContracts)["automations.listInChat"]["botLoop"]["approval"],
 	"automations.list"
 >;
 export function approvalRule(name: ApprovedOperation): ApprovalRule {
 	const policy = name === "automations.list" ? "automations.listInChat" : name;
-	const { tool, approval } = manifest[policy].botLoop;
+	const { tool, approval } = operationContracts[policy].botLoop;
 	return { operation: name, tool, approval, changes: operationContracts[name].changes };
 }
 

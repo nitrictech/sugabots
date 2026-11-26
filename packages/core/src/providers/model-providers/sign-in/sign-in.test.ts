@@ -1,6 +1,7 @@
 import type { InputOf, OutputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { setRole } from "../../../authentication/seed.test-support.ts";
 import {
 	closeDatabase,
 	type Promised,
@@ -152,12 +153,14 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					_tag: "ProviderSignInAttemptInvalid",
 				});
 			}
-			expect(await view()).toMatchObject({ status: "signed_out" });
-			const outcome = await signIn.completeSignIn({
-				workspace: workspaceId,
-				providerId,
-				attempt: started.attempt,
+			await setRole(workspaceId, memberId, "editor");
+			await expect(signIn.completeSignIn(completion)).rejects.toMatchObject({
+				_tag: "ProviderSignInAttemptInvalid",
 			});
+			expect(await view()).toMatchObject({ status: "signed_out" });
+
+			await setRole(workspaceId, memberId, "admin");
+			const outcome = await signIn.completeSignIn(completion);
 
 			expectSignedInWithModel(outcome, "gpt-5.5");
 			expect(openai.listingHeaders).toMatchObject({

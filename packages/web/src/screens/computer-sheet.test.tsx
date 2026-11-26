@@ -1,6 +1,6 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Effect } from "effect";
-import { beforeEach, describe, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	apiAnswers,
 	chatWith,
@@ -34,5 +34,19 @@ describe("a bot's computer sheet, while the bot has no computer", () => {
 		await openComputerSheet(bot);
 
 		screen.getByRole("button", { name: "Turn on computer" });
+	});
+});
+
+describe("a bot's computer sheet, while the workspace has no computers", () => {
+	it("closes as it opens Computers over the chat", async () => {
+		client.api.computerProviders.access.mockReturnValue(Effect.succeed({ enabled: false }));
+		mount(`/suga/bots/${linear.handle}/chats/${chatWith(linear).id}`);
+		open(await screen.findByRole("button", { name: "More for this chat" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Computer" }));
+
+		fireEvent.click(await screen.findByRole("link", { name: "Set up computers" }));
+
+		await screen.findByRole("heading", { name: "Computers", level: 2 });
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 });

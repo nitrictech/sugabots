@@ -1,0 +1,2842 @@
+{
+	"operations": {
+		"approvals.decide": {
+			"route": "POST /tool-calls/:toolCallId/approval",
+			"answers": [
+				202
+			],
+			"params": {
+				"toolCallId": "string"
+			},
+			"query": {},
+			"body": {
+				"decision": "\"allow_once\" | \"deny\""
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404,
+				"ToolApprovalConflict": 409,
+				"ToolApprovalNotFound": 404
+			}
+		},
+		"automations.addTrigger": {
+			"route": "POST /projects/:projectId/automations/:automationId/triggers",
+			"answers": [
+				201
+			],
+			"params": {
+				"projectId": "uuid",
+				"automationId": "string"
+			},
+			"query": {},
+			"body": {
+				"trigger": "{ kind: \"routine\"; schedule: { repeat: \"daily\"; every: integer; times: Array<integer>; startsOn: string } | { repeat: \"weekly\"; every: integer; days: Array<\"mon\" | \"tue\" | \"wed\" | \"thu\" | \"fri\" | \"sat\" | \"sun\">; times: Array<integer>; startsOn: string } | { repeat: \"monthly\"; every: integer; dayOfMonth: integer | \"last\"; times: Array<integer>; startsOn: string } | { repeat: \"cron\"; expression: string }; timezone: string } | { kind: \"webhook\"; auth?: { kind: \"github\" | \"stripe\" | \"slack\" | \"linear\" } | { kind: \"hmac\"; header: string; algorithm: \"sha1\" | \"sha256\" | \"sha512\"; encoding: \"hex\" | \"base64\" } | { kind: \"api_key\"; header: string } | { kind: \"bearer\" } | { kind: \"basic\"; username: string } | null; deliveryIdHeader?: string | null; filter?: Array<{ path: string; oneOf: Array<string> }> | null; secret?: string | null; schedule?: unknown | null; timezone?: unknown | null } | { kind: \"github\"; connectorId: uuid; repository: string; events: Array<\"pull_request_opened\" | \"pull_request_review\" | \"pull_request_comment\" | \"issue_opened\" | \"issue_comment\" | \"checks_failed\" | \"push\"> }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"AutomationNotFound": 404,
+				"AutomationRepositoryNotConnected": 400,
+				"BotCannotReach": 403,
+				"InvalidRoutineSchedule": 400,
+				"ResourceHidden": 404,
+				"TooManyAutomationTriggers": 409,
+				"WebhookDeliveryIdHeaderRejected": 400,
+				"WebhookSecretTooShort": 400
+			}
+		},
+		"automations.create": {
+			"route": "POST /projects/:projectId/automations",
+			"answers": [
+				201
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"name": "string",
+				"instructions": "string",
+				"state": "optional \"enabled\" | \"paused\" | null",
+				"triggers": "Array<{ kind: \"routine\"; schedule: { repeat: \"daily\"; every: integer; times: Array<integer>; startsOn: string } | { repeat: \"weekly\"; every: integer; days: Array<\"mon\" | \"tue\" | \"wed\" | \"thu\" | \"fri\" | \"sat\" | \"sun\">; times: Array<integer>; startsOn: string } | { repeat: \"monthly\"; every: integer; dayOfMonth: integer | \"last\"; times: Array<integer>; startsOn: string } | { repeat: \"cron\"; expression: string }; timezone: string } | { kind: \"webhook\"; auth?: { kind: \"github\" | \"stripe\" | \"slack\" | \"linear\" } | { kind: \"hmac\"; header: string; algorithm: \"sha1\" | \"sha256\" | \"sha512\"; encoding: \"hex\" | \"base64\" } | { kind: \"api_key\"; header: string } | { kind: \"bearer\" } | { kind: \"basic\"; username: string } | null; deliveryIdHeader?: string | null; filter?: Array<{ path: string; oneOf: Array<string> }> | null; secret?: string | null; schedule?: unknown | null; timezone?: unknown | null } | { kind: \"github\"; connectorId: uuid; repository: string; events: Array<\"pull_request_opened\" | \"pull_request_review\" | \"pull_request_comment\" | \"issue_opened\" | \"issue_comment\" | \"checks_failed\" | \"push\"> }>"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"AutomationNameTaken": 409,
+				"AutomationRepositoryNotConnected": 400,
+				"BotCannotReach": 403,
+				"InvalidRoutineSchedule": 400,
+				"ResourceHidden": 404,
+				"WebhookDeliveryIdHeaderRejected": 400,
+				"WebhookSecretTooShort": 400
+			}
+		},
+		"automations.getSecret": {
+			"route": "GET /projects/:projectId/automations/:automationId/triggers/:triggerId/secret",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"automationId": "string",
+				"triggerId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"AutomationNotFound": 404,
+				"AutomationTriggerNotFound": 404,
+				"AutomationTriggerRejected": 400,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"automations.list": {
+			"route": "GET /projects/:projectId/automations",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ApprovalNeeded": 403,
+				"ApprovalRefused": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"automations.projectRuns": {
+			"route": "GET /projects/:projectId/runs",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {
+				"cursor": "optional string | null",
+				"limit": "optional string | null"
+			},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"InvalidCursor": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"automations.remove": {
+			"route": "DELETE /projects/:projectId/automations/:automationId",
+			"answers": [
+				204
+			],
+			"params": {
+				"projectId": "uuid",
+				"automationId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"AutomationNotFound": 404,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"automations.removeTrigger": {
+			"route": "DELETE /projects/:projectId/automations/:automationId/triggers/:triggerId",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"automationId": "string",
+				"triggerId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"AutomationNotFound": 404,
+				"AutomationTriggerNotFound": 404,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"automations.rotateSecret": {
+			"route": "POST /projects/:projectId/automations/:automationId/triggers/:triggerId/secret",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"automationId": "string",
+				"triggerId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"secret": "optional string | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"AutomationNotFound": 404,
+				"AutomationTriggerNotFound": 404,
+				"AutomationTriggerRejected": 400,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404,
+				"WebhookSecretTooShort": 400
+			}
+		},
+		"automations.run": {
+			"route": "POST /projects/:projectId/automations/:automationId/run",
+			"answers": [
+				202
+			],
+			"params": {
+				"projectId": "uuid",
+				"automationId": "string"
+			},
+			"query": {},
+			"body": {
+				"requestId": "uuid"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"AutomationNotFound": 404,
+				"AutomationTriggerConflict": 409,
+				"AutomationTriggerRejected": 400,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"automations.update": {
+			"route": "PATCH /projects/:projectId/automations/:automationId",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"automationId": "string"
+			},
+			"query": {},
+			"body": {
+				"changes": "{ name?: string | null; instructions?: string | null; state?: \"enabled\" | \"paused\" | null }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"AutomationNameTaken": 409,
+				"AutomationNotFound": 404,
+				"BotCannotReach": 403,
+				"InvalidRoutineSchedule": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"automations.updateTrigger": {
+			"route": "PUT /projects/:projectId/automations/:automationId/triggers/:triggerId",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"automationId": "string",
+				"triggerId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"trigger": "{ kind: \"routine\"; schedule: { repeat: \"daily\"; every: integer; times: Array<integer>; startsOn: string } | { repeat: \"weekly\"; every: integer; days: Array<\"mon\" | \"tue\" | \"wed\" | \"thu\" | \"fri\" | \"sat\" | \"sun\">; times: Array<integer>; startsOn: string } | { repeat: \"monthly\"; every: integer; dayOfMonth: integer | \"last\"; times: Array<integer>; startsOn: string } | { repeat: \"cron\"; expression: string }; timezone: string } | { kind: \"webhook\"; auth?: { kind: \"github\" | \"stripe\" | \"slack\" | \"linear\" } | { kind: \"hmac\"; header: string; algorithm: \"sha1\" | \"sha256\" | \"sha512\"; encoding: \"hex\" | \"base64\" } | { kind: \"api_key\"; header: string } | { kind: \"bearer\" } | { kind: \"basic\"; username: string } | null; deliveryIdHeader?: string | null; filter?: Array<{ path: string; oneOf: Array<string> }> | null; secret?: string | null; schedule?: unknown | null; timezone?: unknown | null } | { kind: \"github\"; connectorId: uuid; repository: string; events: Array<\"pull_request_opened\" | \"pull_request_review\" | \"pull_request_comment\" | \"issue_opened\" | \"issue_comment\" | \"checks_failed\" | \"push\"> }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"AutomationNotFound": 404,
+				"AutomationRepositoryNotConnected": 400,
+				"AutomationTriggerKindChanged": 400,
+				"AutomationTriggerNotFound": 404,
+				"BotCannotReach": 403,
+				"InvalidRoutineSchedule": 400,
+				"ResourceHidden": 404,
+				"WebhookDeliveryIdHeaderRejected": 400,
+				"WebhookSecretTooShort": 400
+			}
+		},
+		"bots.create": {
+			"route": "POST /workspaces/:workspace/bots",
+			"answers": [
+				201
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"name": "string",
+				"handle": "optional string | null",
+				"description": "optional string | null",
+				"color": "optional \"red\" | \"orange\" | \"amber\" | \"yellow\" | \"lime\" | \"green\" | \"emerald\" | \"teal\" | \"sky\" | \"ice\" | \"indigo\" | \"violet\" | \"purple\" | \"fuchsia\" | \"pink\" | \"rose\" | null",
+				"eyes": "optional \"pill\" | \"dot\" | \"arc\" | \"square\" | \"wink\" | null",
+				"shape": "optional \"circle\" | \"squircle\" | \"pebble\" | \"blob\" | \"wobble\" | \"drop\" | \"leaf\" | \"dome\" | \"bowl\" | \"hexagon\" | \"octagon\" | \"triangle\" | \"pentagon\" | \"diamond\" | \"shield\" | \"star\" | \"flower\" | \"scallop\" | \"ghost\" | \"bear\" | \"antenna\" | null",
+				"model": "string",
+				"instructions": "optional string | null",
+				"disabledTools": "optional Array<string> | null",
+				"usesComputer": "optional boolean | null",
+				"naturalBrowsing": "optional boolean | null",
+				"visibility": "optional \"public\" | \"personal\" | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotHandleReserved": 400,
+				"BotNameTaken": 409,
+				"ModelNotEnabled": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"bots.createAssistant": {
+			"route": "POST /workspaces/:workspace/assistants",
+			"answers": [
+				201
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"bots.list": {
+			"route": "GET /workspaces/:workspace/bots",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"bots.pin": {
+			"route": "PUT /bots/:botId/pin",
+			"answers": [
+				200
+			],
+			"params": {
+				"botId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ApprovalNeeded": 403,
+				"ApprovalRefused": 403,
+				"ResourceHidden": 404,
+				"TurnEnded": 409,
+				"TurnExecutionSuperseded": 409
+			}
+		},
+		"bots.remove": {
+			"route": "DELETE /bots/:botId",
+			"answers": [
+				204
+			],
+			"params": {
+				"botId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ClaimLost": 409,
+				"ComputerMadeMeanwhile": 409,
+				"ComputerUnavailable": 409,
+				"LeadsProjects": 409,
+				"ResourceHidden": 404,
+				"SystemBotImmutable": 400
+			}
+		},
+		"bots.unpin": {
+			"route": "DELETE /bots/:botId/pin",
+			"answers": [
+				200
+			],
+			"params": {
+				"botId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ApprovalNeeded": 403,
+				"ApprovalRefused": 403,
+				"ResourceHidden": 404,
+				"TurnEnded": 409,
+				"TurnExecutionSuperseded": 409
+			}
+		},
+		"bots.update": {
+			"route": "PATCH /bots/:botId",
+			"answers": [
+				200
+			],
+			"params": {
+				"botId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"changes": "{ name?: string | null; handle?: string | null; description?: string | null; color?: \"red\" | \"orange\" | \"amber\" | \"yellow\" | \"lime\" | \"green\" | \"emerald\" | \"teal\" | \"sky\" | \"ice\" | \"indigo\" | \"violet\" | \"purple\" | \"fuchsia\" | \"pink\" | \"rose\" | null; eyes?: \"pill\" | \"dot\" | \"arc\" | \"square\" | \"wink\" | null; shape?: \"circle\" | \"squircle\" | \"pebble\" | \"blob\" | \"wobble\" | \"drop\" | \"leaf\" | \"dome\" | \"bowl\" | \"hexagon\" | \"octagon\" | \"triangle\" | \"pentagon\" | \"diamond\" | \"shield\" | \"star\" | \"flower\" | \"scallop\" | \"ghost\" | \"bear\" | \"antenna\" | null; model?: string | null; instructions?: string | null; disabledTools?: Array<string> | null; usesComputer?: boolean | null; naturalBrowsing?: boolean | null; visibility?: \"public\" | \"personal\" | null }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"AssistantHandleFixed": 400,
+				"AssistantInstructionsManaged": 400,
+				"BotGone": 404,
+				"BotHandleReserved": 400,
+				"BotNameTaken": 409,
+				"EmptyBotUpdate": 400,
+				"ModelNotEnabled": 400,
+				"PersonalVisibilityFixed": 400,
+				"ResourceHidden": 404,
+				"SystemBotImmutable": 400
+			}
+		},
+		"chats.approvals": {
+			"route": "GET /workspaces/:workspace/chats/approvals",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.attention": {
+			"route": "GET /workspaces/:workspace/chats/attention",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.attentionMarks": {
+			"route": "GET /workspaces/:workspace/chats/attention-marks",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.context": {
+			"route": "GET /chats/:chatId/context",
+			"answers": [
+				200
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.get": {
+			"route": "GET /chats/:chatId",
+			"answers": [
+				200
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {
+				"cursor": "optional string | null",
+				"limit": "optional string | null"
+			},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"InvalidCursor": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.history": {
+			"route": "GET /chats/:chatId/history",
+			"answers": [
+				200
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {
+				"cursor": "optional string | null",
+				"limit": "optional string | null"
+			},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"InvalidCursor": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.interruptTurn": {
+			"route": "POST /chats/:chatId/turns/:turnId/interrupt",
+			"answers": [
+				202
+			],
+			"params": {
+				"chatId": "uuid",
+				"turnId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.markNestedChatRead": {
+			"route": "POST /nested-chats/:chatId/read",
+			"answers": [
+				204
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.markRead": {
+			"route": "POST /chats/:chatId/read",
+			"answers": [
+				204
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.messages": {
+			"route": "GET /chats/:chatId/messages",
+			"answers": [
+				200
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {
+				"cursor": "optional string | null",
+				"limit": "optional string | null"
+			},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"InvalidCursor": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.openAutomationFeed": {
+			"route": "POST /workspaces/:workspace/automations/:automationId/feed",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"automationId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ResourceHidden": 404
+			}
+		},
+		"chats.projectChats": {
+			"route": "GET /projects/:projectId/chats",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.react": {
+			"route": "PUT /messages/:messageId/reactions/:emoji",
+			"answers": [
+				200
+			],
+			"params": {
+				"messageId": "string",
+				"emoji": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"MessageNotFinished": 409,
+				"ResourceHidden": 404,
+				"TooManyReactionEmoji": 409
+			}
+		},
+		"chats.removeFile": {
+			"route": "DELETE /chats/:chatId/files/:fileId",
+			"answers": [
+				204
+			],
+			"params": {
+				"chatId": "string",
+				"fileId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.renameChat": {
+			"route": "PUT /chats/:chatId/name",
+			"answers": [
+				204
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {},
+			"body": {
+				"name": "string"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.send": {
+			"route": "POST /chats/:chatId/messages",
+			"answers": [
+				201
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {},
+			"body": {
+				"retryKey": "uuid",
+				"message": "string",
+				"attachments": "optional Array<uuid> | null",
+				"replyTo": "optional uuid | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"BotHasNoModel": 409,
+				"MessageRetryKeyConflict": 409,
+				"ReplyTargetNotFound": 400,
+				"ResourceHidden": 404,
+				"UnsentAttachmentsNotFound": 400
+			}
+		},
+		"chats.setResolved": {
+			"route": "PUT /chats/:chatId/resolved",
+			"answers": [
+				204
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {},
+			"body": {
+				"resolved": "boolean"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ApprovalNeeded": 403,
+				"ApprovalRefused": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404,
+				"TurnEnded": 409,
+				"TurnExecutionSuperseded": 409
+			}
+		},
+		"chats.startInterview": {
+			"route": "POST /bots/:botId/interview",
+			"answers": [
+				200
+			],
+			"params": {
+				"botId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.startProjectChat": {
+			"route": "POST /projects/:projectId/chats",
+			"answers": [
+				201
+			],
+			"params": {
+				"projectId": "string"
+			},
+			"query": {},
+			"body": {
+				"retryKey": "uuid",
+				"message": "string"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"BotHasNoModel": 409,
+				"MessageRetryKeyConflict": 409,
+				"ResourceHidden": 404
+			}
+		},
+		"chats.unreact": {
+			"route": "DELETE /messages/:messageId/reactions/:emoji",
+			"answers": [
+				200
+			],
+			"params": {
+				"messageId": "string",
+				"emoji": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.access": {
+			"route": "GET /workspaces/:workspace/computer-providers/access",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.addHost": {
+			"route": "POST /workspaces/:workspace/computer-network/hosts",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"host": "unknown"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.blockHost": {
+			"route": "POST /workspaces/:workspace/computer-network/blocked-hosts",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"host": "unknown"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.create": {
+			"route": "POST /workspaces/:workspace/computer-providers",
+			"answers": [
+				201
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"settings": "ComputerProviderSettings",
+				"enabled": "optional boolean | null",
+				"apiKey": "optional string | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ComputerProviderIncomplete": 400,
+				"ResourceHidden": 404,
+				"UrlNotAllowed": 400
+			}
+		},
+		"computerProviders.disks": {
+			"route": "GET /workspaces/:workspace/computer-disks",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.list": {
+			"route": "GET /workspaces/:workspace/computer-providers",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.network": {
+			"route": "GET /workspaces/:workspace/computer-network",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.prepareTemplate": {
+			"route": "POST /workspaces/:workspace/computer-providers/:providerId/template",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ComputerProviderNotFound": 404,
+				"ComputerUnavailable": 409,
+				"NoTemplates": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.remove": {
+			"route": "DELETE /workspaces/:workspace/computer-providers/:providerId",
+			"answers": [
+				204
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ComputerMadeMeanwhile": 409,
+				"ComputerProviderNotFound": 404,
+				"ComputersNotDestroyed": 409,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.removeHost": {
+			"route": "DELETE /workspaces/:workspace/computer-network/hosts/:host",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"host": "unknown"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.template": {
+			"route": "GET /workspaces/:workspace/computer-providers/:providerId/template",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ComputerProviderNotFound": 404,
+				"ComputerUnavailable": 409,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.test": {
+			"route": "POST /workspaces/:workspace/computer-providers/:providerId/test",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ComputerProviderNotFound": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.unblockHost": {
+			"route": "DELETE /workspaces/:workspace/computer-network/blocked-hosts/:host",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"host": "unknown"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"computerProviders.update": {
+			"route": "PATCH /workspaces/:workspace/computer-providers/:providerId",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"changes": "{ enabled?: boolean | null; apiKey?: string | null; settings?: ComputerProviderSettings | null }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ComputerProviderBuiltInFixed": 400,
+				"ComputerProviderHasComputers": 409,
+				"ComputerProviderIncomplete": 400,
+				"ComputerProviderNotFound": 404,
+				"ResourceHidden": 404,
+				"UrlNotAllowed": 400
+			}
+		},
+		"connectors.connectBuiltIn": {
+			"route": "POST /projects/:projectId/connectors/connect",
+			"answers": [
+				201
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"name": "string",
+				"url": "string"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ConnectorNameTaken": 409,
+				"ConnectorNeededNoSignIn": 400,
+				"ConnectorOAuthStartFailed": 400,
+				"ResourceHidden": 404,
+				"UrlNotAllowed": 400
+			}
+		},
+		"connectors.create": {
+			"route": "POST /projects/:projectId/connectors",
+			"answers": [
+				201
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"connector": "{ kind?: \"mcp\" | null; name: string; url: string; auth?: \"header\" | \"oauth\" | null; secretHeader?: string | null; secret?: string | null } | { kind: \"http\"; name: string; url: string; secretHeader?: string | null; secret?: string | null }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ConnectorNameTaken": 409,
+				"ConnectorNotFound": 404,
+				"ResourceHidden": 404,
+				"UrlNotAllowed": 400
+			}
+		},
+		"connectors.get": {
+			"route": "GET /projects/:projectId/connectors/:connectorId",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ConnectorNotFound": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"connectors.list": {
+			"route": "GET /projects/:projectId/connectors",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"connectors.remove": {
+			"route": "DELETE /projects/:projectId/connectors/:connectorId",
+			"answers": [
+				204
+			],
+			"params": {
+				"projectId": "uuid",
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ConnectorNotFound": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"connectors.startOAuth": {
+			"route": "POST /projects/:projectId/connectors/:connectorId/oauth/start",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ConnectorDoesNotUseOAuth": 400,
+				"ConnectorNotFound": 404,
+				"ConnectorOAuthStartFailed": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"connectors.test": {
+			"route": "POST /projects/:projectId/connectors/:connectorId/test",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ConnectorNotFound": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"connectors.testUnsaved": {
+			"route": "POST /projects/:projectId/connectors/test",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"url": "string",
+				"secretHeader": "optional string | null",
+				"secret": "optional string | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404,
+				"UrlNotAllowed": 400
+			}
+		},
+		"connectors.update": {
+			"route": "PATCH /projects/:projectId/connectors/:connectorId",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"changes": "{ enabled?: boolean | null; name?: string | null; url?: string | null; secretHeader?: string | null; secret?: string | null; access?: \"off\" | \"ask\" | \"allow\" | null; toolAccess?: object | null }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ConnectorNameTaken": 409,
+				"ConnectorNotFound": 404,
+				"ResourceHidden": 404,
+				"UnknownConnectorTool": 400,
+				"UrlNotAllowed": 400
+			}
+		},
+		"events.reportTyping": {
+			"route": "POST /chats/:chatId/typing",
+			"answers": [
+				204
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"files.get": {
+			"route": "GET /files/:fileId",
+			"answers": [
+				200
+			],
+			"params": {
+				"fileId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"files.getVersion": {
+			"route": "GET /files/:fileId/versions/:version",
+			"answers": [
+				200
+			],
+			"params": {
+				"fileId": "uuid",
+				"version": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"files.listInProject": {
+			"route": "GET /projects/:projectId/files",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"files.pageAddress": {
+			"route": "GET /files/:fileId/versions/:version/page",
+			"answers": [
+				200
+			],
+			"params": {
+				"fileId": "uuid",
+				"version": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"files.remove": {
+			"route": "DELETE /files/:fileId",
+			"answers": [
+				204
+			],
+			"params": {
+				"fileId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"files.versions": {
+			"route": "GET /files/:fileId/versions",
+			"answers": [
+				200
+			],
+			"params": {
+				"fileId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"gitHubConnectors.addRepository": {
+			"route": "POST /projects/:projectId/connectors/:connectorId/repositories",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"repository": "string"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"GitHubAppNotInstalled": 400,
+				"GitHubRequestFailed": 400,
+				"NotGitHubConnector": 404,
+				"RepositoryUnreachable": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"gitHubConnectors.installUrl": {
+			"route": "POST /projects/:projectId/connectors/:connectorId/github/install",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"NotGitHubConnector": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"gitHubConnectors.reachableRepositories": {
+			"route": "GET /projects/:projectId/connectors/:connectorId/github/reachable",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"GitHubAppNotInstalled": 400,
+				"GitHubRequestFailed": 400,
+				"NotGitHubConnector": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"gitHubConnectors.removeRepository": {
+			"route": "POST /projects/:projectId/connectors/:connectorId/repositories/remove",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"repository": "string"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"NotGitHubConnector": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"gitHubConnectors.repositories": {
+			"route": "GET /projects/:projectId/connectors/:connectorId/repositories",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"NotGitHubConnector": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"gitHubConnectors.start": {
+			"route": "POST /projects/:projectId/github",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"organization": "optional string | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ProjectHasGitHubConnector": 409,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.addModel": {
+			"route": "POST /workspaces/:workspace/model-providers/:providerId/models",
+			"answers": [
+				201
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"model": "{ modelId: string; displayName?: string | null; capabilities?: Array<\"tools\" | \"vision\" | \"images\" | \"audio\" | \"embeddings\" | \"thinking\"> | null; contextLength?: integer | null }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ModelProviderNotFound": 404,
+				"ProviderModelAlreadyConfigured": 409,
+				"ProviderModelsRequireCredential": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.completeSignIn": {
+			"route": "POST /workspaces/:workspace/model-providers/:providerId/sign-in/complete",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"attempt": "optional string | null"
+			},
+			"errors": {
+				"ProviderSignInAttemptInvalid": 400,
+				"ProviderSignInFailed": 400,
+				"ProviderSignInNotOffered": 400
+			}
+		},
+		"modelProviders.create": {
+			"route": "POST /workspaces/:workspace/model-providers",
+			"answers": [
+				201
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"provider": "{ builtIn: \"anthropic\" | \"openai\" | \"chatgpt\" | \"openrouter\" | \"gemini\" | \"groq\" | \"xai\" | \"supergrok\" | \"mistral\" | \"deepseek\" | \"together\" | \"fireworks\" | \"cerebras\" | \"ollama\" | \"lmstudio\" | \"llamacpp\" | \"vllm\"; apiKey?: string | null; baseUrl?: string | null } | { name: string; baseUrl: string; apiFormat: \"openai\" | \"anthropic\"; apiKey?: string | null; customHeaders?: Array<{ name: string; value: string }> | null }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ModelProviderNameConflict": 409,
+				"ModelProviderNotFound": 404,
+				"ResourceHidden": 404,
+				"UrlNotAllowed": 400
+			}
+		},
+		"modelProviders.discoverModels": {
+			"route": "POST /workspaces/:workspace/model-providers/:providerId/discover-models",
+			"answers": [
+				204
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"DiscoveryAddressRefused": 400,
+				"DiscoveryCredentialsMissing": 400,
+				"DiscoveryCredentialsRejected": 400,
+				"DiscoverySignInLapsed": 400,
+				"DiscoveryUnavailable": 400,
+				"DiscoveryUnreachable": 400,
+				"ModelListTooLarge": 400,
+				"ModelListUnreadable": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.list": {
+			"route": "GET /workspaces/:workspace/model-providers",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.listEnabledModels": {
+			"route": "GET /workspaces/:workspace/model-providers/models",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.remove": {
+			"route": "DELETE /workspaces/:workspace/model-providers/:providerId",
+			"answers": [
+				204
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ModelInUse": 409,
+				"ModelProviderRemovalNotAllowed": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.setDefaultModel": {
+			"route": "PUT /workspaces/:workspace/model-providers/models/default",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"model": "string"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ModelNotEnabled": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.signOut": {
+			"route": "DELETE /workspaces/:workspace/model-providers/:providerId/sign-in",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ModelInUse": 409,
+				"ModelProviderNotFound": 404,
+				"ProviderSignInNotOffered": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.startSignIn": {
+			"route": "POST /workspaces/:workspace/model-providers/:providerId/sign-in",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ModelProviderNotFound": 404,
+				"ProviderSignInFailed": 400,
+				"ProviderSignInNotOffered": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.switchOff": {
+			"route": "POST /workspaces/:workspace/model-providers/:providerId/switch-off",
+			"answers": [
+				204
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"moveBots": "Array<{ from: string; to: string }>",
+				"newBotsTo": "optional string | null",
+				"systemBotsTo": "optional string | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ModelInUse": 409,
+				"ModelNotEnabled": 400,
+				"ModelProviderNotFound": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.switchOffModel": {
+			"route": "POST /workspaces/:workspace/model-providers/:providerId/models/:modelId/switch-off",
+			"answers": [
+				204
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid",
+				"modelId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"moveBotsTo": "optional string | null",
+				"newBotsTo": "optional string | null",
+				"systemBotsTo": "optional string | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ModelInUse": 409,
+				"ModelNotEnabled": 400,
+				"ModelProviderNotFound": 404,
+				"ProviderModelNotFound": 404,
+				"ProviderModelsRequireCredential": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.test": {
+			"route": "POST /workspaces/:workspace/model-providers/:providerId/test",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ModelProviderNotFound": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"modelProviders.update": {
+			"route": "PATCH /workspaces/:workspace/model-providers/:providerId",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"changes": "{ active?: boolean | null; baseUrl?: string | null; apiFormat?: \"openai\" | \"anthropic\" | null; apiKey?: string | null; customHeaders?: Array<{ name: string; value: string }> | null }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"DiscoveryAddressRefused": 400,
+				"DiscoveryCredentialsMissing": 400,
+				"DiscoveryCredentialsRejected": 400,
+				"DiscoverySignInLapsed": 400,
+				"DiscoveryUnavailable": 400,
+				"DiscoveryUnreachable": 400,
+				"ModelInUse": 409,
+				"ModelListTooLarge": 400,
+				"ModelListUnreadable": 400,
+				"ModelProviderNotFound": 404,
+				"ProviderActivationRequiresCredential": 400,
+				"ResourceHidden": 404,
+				"UrlNotAllowed": 400
+			}
+		},
+		"modelProviders.updateModel": {
+			"route": "PATCH /workspaces/:workspace/model-providers/:providerId/models/:modelId",
+			"answers": [
+				204
+			],
+			"params": {
+				"workspace": "string",
+				"providerId": "uuid",
+				"modelId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"changes": "{ enabled?: boolean | null; disabledCapabilities?: Array<\"tools\" | \"vision\" | \"images\" | \"audio\" | \"embeddings\" | \"thinking\"> | null; capabilities?: Array<\"tools\" | \"vision\" | \"images\" | \"audio\" | \"embeddings\" | \"thinking\"> | null }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"FetchedModelCapabilitiesImmutable": 400,
+				"ModelInUse": 409,
+				"ModelProviderNotFound": 404,
+				"ProviderModelNotFound": 404,
+				"ProviderModelsRequireCredential": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"notifications.mute": {
+			"route": "PUT /notifications/:kind/:id/mute",
+			"answers": [
+				204
+			],
+			"params": {
+				"kind": "\"project\" | \"bot\"",
+				"id": "uuid"
+			},
+			"query": {},
+			"body": {
+				"until": "date-time | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"notifications.reportPresence": {
+			"route": "PUT /notifications/presence",
+			"answers": [
+				204
+			],
+			"params": {},
+			"query": {},
+			"body": {
+				"clientId": "uuid",
+				"chatId": "uuid | null",
+				"sequence": "integer"
+			},
+			"errors": {
+				"ActionForbidden": 403
+			}
+		},
+		"notifications.sendTest": {
+			"route": "POST /notifications/test",
+			"answers": [
+				204
+			],
+			"params": {},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403
+			}
+		},
+		"notifications.setLevel": {
+			"route": "PUT /notifications/:kind/:id/level",
+			"answers": [
+				204
+			],
+			"params": {
+				"kind": "\"project\" | \"bot\"",
+				"id": "uuid"
+			},
+			"query": {},
+			"body": {
+				"level": "\"all\" | \"mentions\" | \"nothing\" | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"notifications.settings": {
+			"route": "GET /notifications",
+			"answers": [
+				200
+			],
+			"params": {},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403
+			}
+		},
+		"notifications.updatePreferences": {
+			"route": "PUT /notifications",
+			"answers": [
+				200
+			],
+			"params": {},
+			"query": {},
+			"body": {
+				"level": "\"all\" | \"mentions\" | \"nothing\"",
+				"pausedUntil": "date-time | null",
+				"quietHours": "{ from: string; to: string; timeZone: string } | null",
+				"turnFailures": "boolean",
+				"automationRuns": "\"failures\" | \"all\" | \"none\""
+			},
+			"errors": {
+				"ActionForbidden": 403
+			}
+		},
+		"projectComputer.addHost": {
+			"route": "POST /projects/:projectId/computer/network/hosts",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"host": "unknown"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ComputerHostBlocked": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"projectComputer.get": {
+			"route": "GET /projects/:projectId/computer",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"projectComputer.network": {
+			"route": "GET /projects/:projectId/computer/network",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"projectComputer.removeHost": {
+			"route": "DELETE /projects/:projectId/computer/network/hosts/:host",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"host": "unknown"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"projectComputer.reset": {
+			"route": "POST /projects/:projectId/computer/reset",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ClaimLost": 409,
+				"ComputerInUse": 409,
+				"ComputerUnavailable": 409,
+				"ResourceHidden": 404
+			}
+		},
+		"projectComputer.upgrade": {
+			"route": "POST /projects/:projectId/computer/upgrade",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ClaimLost": 409,
+				"ComputerInUse": 409,
+				"ComputerUnavailable": 409,
+				"NoComputer": 404,
+				"NoComputerProvider": 400,
+				"ResourceHidden": 404,
+				"UpgradeFailed": 409
+			}
+		},
+		"projects.addBot": {
+			"route": "POST /projects/:projectId/bots",
+			"answers": [
+				204
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"botId": "uuid"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ApprovalNeeded": 403,
+				"ApprovalRefused": 403,
+				"BotCannotReach": 403,
+				"BotNotPublic": 400,
+				"ResourceHidden": 404,
+				"TurnEnded": 409,
+				"TurnExecutionSuperseded": 409
+			}
+		},
+		"projects.addMember": {
+			"route": "POST /projects/:projectId/members",
+			"answers": [
+				204
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"memberId": "uuid"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"NotInWorkspace": 400,
+				"ResourceHidden": 404
+			}
+		},
+		"projects.create": {
+			"route": "POST /workspaces/:workspace/projects",
+			"answers": [
+				201
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"name": "string",
+				"slug": "optional string | null",
+				"color": "optional \"green\" | \"blue\" | \"plum\" | \"amber\" | \"teal\" | \"purple\" | \"rose\" | \"orange\" | null",
+				"description": "optional string | null",
+				"visibility": "optional \"public\" | \"private\" | null",
+				"leadBotId": "uuid"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ApprovalNeeded": 403,
+				"ApprovalRefused": 403,
+				"BotNotPublic": 400,
+				"InvalidProjectDetails": 400,
+				"ProjectSlugTaken": 409,
+				"ResourceHidden": 404,
+				"TurnEnded": 409,
+				"TurnExecutionSuperseded": 409,
+				"UnusableProjectName": 400
+			}
+		},
+		"projects.join": {
+			"route": "PUT /projects/:projectId/membership",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ApprovalNeeded": 403,
+				"ApprovalRefused": 403,
+				"ResourceHidden": 404,
+				"TurnEnded": 409,
+				"TurnExecutionSuperseded": 409
+			}
+		},
+		"projects.leave": {
+			"route": "DELETE /projects/:projectId/membership",
+			"answers": [
+				204
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"AdministratorInEveryProject": 400,
+				"BotCannotReach": 403,
+				"NotInProject": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"projects.list": {
+			"route": "GET /workspaces/:workspace/projects",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"projects.listBots": {
+			"route": "GET /projects/:projectId/bots",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"projects.listMembers": {
+			"route": "GET /projects/:projectId/members",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"projects.listMembersReaching": {
+			"route": "GET /projects/:projectId/members-reaching",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"projects.remove": {
+			"route": "DELETE /projects/:projectId",
+			"answers": [
+				204
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ClaimLost": 409,
+				"ComputerMadeMeanwhile": 409,
+				"ComputerUnavailable": 409,
+				"ResourceHidden": 404
+			}
+		},
+		"projects.removeBot": {
+			"route": "DELETE /projects/:projectId/bots/:botId",
+			"answers": [
+				204
+			],
+			"params": {
+				"projectId": "uuid",
+				"botId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"LeadsProjects": 409,
+				"ResourceHidden": 404
+			}
+		},
+		"projects.removeMember": {
+			"route": "DELETE /projects/:projectId/members/:memberId",
+			"answers": [
+				204
+			],
+			"params": {
+				"projectId": "uuid",
+				"memberId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"AdministratorInEveryProject": 400,
+				"BotCannotReach": 403,
+				"NotInProject": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"projects.update": {
+			"route": "PATCH /projects/:projectId",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"changes": "{ name?: string | null; slug?: string | null; color?: \"green\" | \"blue\" | \"plum\" | \"amber\" | \"teal\" | \"purple\" | \"rose\" | \"orange\" | null; description?: string | null; visibility?: \"public\" | \"private\" | null; leadBotId?: uuid | null }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"BotNotPublic": 400,
+				"EmptyProjectUpdate": 400,
+				"ProjectGone": 404,
+				"ProjectSlugTaken": 409,
+				"ResourceHidden": 404
+			}
+		},
+		"referrals.link": {
+			"route": "GET /referral-link",
+			"answers": [
+				200
+			],
+			"params": {},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403
+			}
+		},
+		"referrals.resetLink": {
+			"route": "POST /referral-link/reset",
+			"answers": [
+				200
+			],
+			"params": {},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ReferralsOff": 404
+			}
+		},
+		"searchProviders.get": {
+			"route": "GET /workspaces/:workspace/search-provider",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"searchProviders.remove": {
+			"route": "DELETE /workspaces/:workspace/search-provider",
+			"answers": [
+				204
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404,
+				"SearchProviderNotFound": 404
+			}
+		},
+		"searchProviders.replace": {
+			"route": "PUT /workspaces/:workspace/search-provider",
+			"answers": [
+				201
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"builtIn": "\"brave\" | \"exa\" | \"tavily\" | \"searxng\"",
+				"enabled": "optional boolean | null",
+				"apiKey": "optional string | null",
+				"baseUrl": "optional string | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404,
+				"SearchProviderApiKeyRequired": 400,
+				"UrlNotAllowed": 400
+			}
+		},
+		"searchProviders.test": {
+			"route": "POST /workspaces/:workspace/search-provider/test",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404,
+				"SearchProviderNotFound": 404
+			}
+		},
+		"searchProviders.update": {
+			"route": "PATCH /workspaces/:workspace/search-provider",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"changes": "{ enabled?: boolean | null; baseUrl?: string | null; apiKey?: string | null }"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404,
+				"SearchProviderApiKeyRequired": 400,
+				"SearchProviderNotFound": 404,
+				"UrlNotAllowed": 400
+			}
+		},
+		"searchProviders.webAccess": {
+			"route": "GET /workspaces/:workspace/search-provider/web-access",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"system.workspaceAccess": {
+			"route": "GET /workspaces/:workspace/me",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"systemBots.list": {
+			"route": "GET /workspaces/:workspace/system-bots",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"systemBots.update": {
+			"route": "PATCH /workspaces/:workspace/system-bots/:key",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"key": "\"compact\""
+			},
+			"query": {},
+			"body": {
+				"model": "string"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ModelNotEnabled": 400,
+				"ResourceHidden": 404,
+				"SystemBotMissing": 404
+			}
+		},
+		"usage.month": {
+			"route": "GET /workspaces/:workspace/usage",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {
+				"month": "string"
+			},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"workspaces.acceptInvitation": {
+			"route": "POST /invitations/:invitationId/accept",
+			"answers": [
+				200
+			],
+			"params": {
+				"invitationId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"EmailUnverified": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"workspaces.cancelInvitation": {
+			"route": "DELETE /invitations/:invitationId",
+			"answers": [
+				204
+			],
+			"params": {
+				"invitationId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"workspaces.changeRole": {
+			"route": "PATCH /workspaces/:workspace/memberships/:membershipId",
+			"answers": [
+				204
+			],
+			"params": {
+				"workspace": "string",
+				"membershipId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"role": "\"admin\" | \"editor\" | \"viewer\""
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"workspaces.changeTimeZone": {
+			"route": "PUT /workspaces/:workspace/time-zone",
+			"answers": [
+				204
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"timeZone": "string"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404,
+				"TimeZoneUnknown": 400
+			}
+		},
+		"workspaces.create": {
+			"route": "POST /workspaces",
+			"answers": [
+				201
+			],
+			"params": {},
+			"query": {},
+			"body": {
+				"name": "string",
+				"slug": "string",
+				"timeZone": "optional string | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"SlugShapedLikeUuid": 400,
+				"SlugTaken": 409,
+				"TimeZoneUnknown": 400
+			}
+		},
+		"workspaces.delete": {
+			"route": "DELETE /workspaces/:workspace",
+			"answers": [
+				204
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ClaimLost": 409,
+				"ComputerMadeMeanwhile": 409,
+				"ComputerUnavailable": 409,
+				"ResourceHidden": 404
+			}
+		},
+		"workspaces.handOverOwnership": {
+			"route": "PUT /workspaces/:workspace/owner",
+			"answers": [
+				204
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"membershipId": "uuid"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"workspaces.invitation": {
+			"route": "GET /invitations/:invitationId",
+			"answers": [
+				200
+			],
+			"params": {
+				"invitationId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"EmailUnverified": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"workspaces.invitations": {
+			"route": "GET /workspaces/:workspace/invitations",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"workspaces.invite": {
+			"route": "POST /workspaces/:workspace/invitations",
+			"answers": [
+				201
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"email": "email",
+				"role": "\"admin\" | \"editor\" | \"viewer\"",
+				"resend": "optional boolean | null"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"AlreadyInWorkspace": 409,
+				"AlreadyInvited": 409,
+				"MembershipRemovalPending": 409,
+				"ResourceHidden": 404
+			}
+		},
+		"workspaces.leave": {
+			"route": "POST /workspaces/:workspace/leave",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"OwnerStays": 400,
+				"ResourceHidden": 404,
+				"SubscriptionInUse": 409
+			}
+		},
+		"workspaces.list": {
+			"route": "GET /workspaces",
+			"answers": [
+				200
+			],
+			"params": {},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403
+			}
+		},
+		"workspaces.memberships": {
+			"route": "GET /workspaces/:workspace/memberships",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"workspaces.removeMembership": {
+			"route": "DELETE /workspaces/:workspace/memberships/:membershipId",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string",
+				"membershipId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404,
+				"SubscriptionInUse": 409
+			}
+		},
+		"workspaces.timeZone": {
+			"route": "GET /workspaces/:workspace/time-zone",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"workspaces.update": {
+			"route": "PATCH /workspaces/:workspace",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {
+				"name": "string",
+				"slug": "string"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404,
+				"SlugShapedLikeUuid": 400,
+				"SlugTaken": 409
+			}
+		},
+		"workspaceSetup.complete": {
+			"route": "POST /workspace-setup/complete",
+			"answers": [
+				204
+			],
+			"params": {},
+			"query": {},
+			"body": {
+				"workspaceId": "uuid",
+				"botId": "uuid"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"NoModelChosen": 400,
+				"NotReadyToFinish": 400,
+				"ResourceHidden": 404
+			}
+		}
+	},
+	"ownEndpoints": {
+		"chatFiles.file": {
+			"route": "GET /chats/:chatId/files/:fileId",
+			"answers": [
+				200
+			],
+			"params": {
+				"chatId": "string",
+				"fileId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"Forbidden": 403,
+				"NotFound": 404
+			}
+		},
+		"chatFiles.uploadFile": {
+			"route": "POST /chats/:chatId/files",
+			"answers": [
+				201
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {
+				"name": "string",
+				"type": "optional string | null"
+			},
+			"body": "byte",
+			"errors": {
+				"BadRequest": 400,
+				"Conflict": 409,
+				"Forbidden": 403,
+				"NotFound": 404,
+				"PayloadTooLarge": 413
+			}
+		},
+		"eventStreams.chat": {
+			"route": "GET /chats/:chatId/events",
+			"answers": [
+				200
+			],
+			"params": {
+				"chatId": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"NotFound": 404,
+				"Unauthorized": 401
+			}
+		},
+		"eventStreams.me": {
+			"route": "GET /me/events",
+			"answers": [
+				200
+			],
+			"params": {},
+			"query": {},
+			"body": {},
+			"errors": {
+				"Unauthorized": 401
+			}
+		},
+		"eventStreams.workspace": {
+			"route": "GET /workspaces/:workspace/events",
+			"answers": [
+				200
+			],
+			"params": {
+				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"NotFound": 404,
+				"Unauthorized": 401
+			}
+		},
+		"session.health": {
+			"route": "GET /health",
+			"answers": [
+				200
+			],
+			"params": {},
+			"query": {},
+			"body": {},
+			"errors": {}
+		},
+		"session.me": {
+			"route": "GET /me",
+			"answers": [
+				200
+			],
+			"params": {},
+			"query": {},
+			"body": {},
+			"errors": {
+				"Unauthorized": 401
+			}
+		},
+		"session.rename": {
+			"route": "PATCH /me",
+			"answers": [
+				200
+			],
+			"params": {},
+			"query": {},
+			"body": {
+				"name": "string"
+			},
+			"errors": {}
+		},
+		"signInCallbacks.gitHubAppInstalled": {
+			"route": "GET /connectors/github/installed",
+			"answers": [
+				302
+			],
+			"params": {},
+			"query": {
+				"installation_id": "optional string | null",
+				"state": "optional string | null"
+			},
+			"body": {},
+			"errors": {}
+		},
+		"signInCallbacks.gitHubAppMade": {
+			"route": "GET /connectors/github/made",
+			"answers": [
+				302
+			],
+			"params": {},
+			"query": {
+				"code": "optional string | null",
+				"state": "optional string | null"
+			},
+			"body": {},
+			"errors": {}
+		},
+		"signInCallbacks.oauthCallback": {
+			"route": "GET /connectors/oauth/callback",
+			"answers": [
+				302
+			],
+			"params": {},
+			"query": {
+				"code": "optional string | null",
+				"state": "optional string | null",
+				"error": "optional string | null",
+				"error_description": "optional string | null"
+			},
+			"body": {},
+			"errors": {
+				"NotFound": 404
+			}
+		},
+		"webhooks.gitHubDelivery": {
+			"route": "POST /webhooks/connectors/:connectorId",
+			"answers": [
+				204
+			],
+			"params": {
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": "unknown",
+			"errors": {
+				"BadRequest": 400,
+				"Unauthorized": 401
+			}
+		},
+		"webhooks.trigger": {
+			"route": "POST /webhooks/triggers/:triggerId",
+			"answers": [
+				200,
+				200,
+				202
+			],
+			"params": {
+				"triggerId": "string"
+			},
+			"query": {},
+			"body": "unknown",
+			"errors": {
+				"BadRequest": 400,
+				"Conflict": 409,
+				"Unauthorized": 401
+			}
+		}
+	},
+	"definitions": {
+		"ComputerProviderSettings": "{ builtIn: \"opensandbox\"; serverUrl?: string | null; image?: string | null; cpuCount?: integer | null; memoryGiB?: integer | null; networkMode?: \"allowed-hosts-only\" | \"open\" | null } | { builtIn: \"e2b\"; apiUrl?: string | null; sandboxUrl?: string | null; template?: string | null; cpuCount?: integer | null; memoryGiB?: integer | null; networkMode?: \"allowed-hosts-only\" | \"open\" | null }"
+	}
+}

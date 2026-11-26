@@ -2,6 +2,7 @@ export * as OperationContract from "./operation.ts";
 
 import type { DomainError } from "@sugabots/errors";
 import type { Schema } from "effect";
+import type { BotLoopDecision, HttpDecision } from "./exposure.ts";
 
 /**
  * How an operation runs.
@@ -26,6 +27,9 @@ export interface Contract<
 	OutputSchema extends Schema.Top = Schema.Top,
 	ErrorSchemas extends ReadonlyArray<ErrorSchema> = ReadonlyArray<ErrorSchema>,
 	RunsAs extends Kind = Kind,
+	Http extends HttpDecision = HttpDecision,
+	BotLoop extends BotLoopDecision = BotLoopDecision,
+	Changes extends boolean = boolean,
 > {
 	/** `<domain>.<verb>`, such as `chats.setResolved`. */
 	readonly name: Name;
@@ -42,9 +46,14 @@ export interface Contract<
 	readonly errors: ErrorSchemas;
 	/**
 	 * Whether it changes anything. A personal bot asks its creator before any
-	 * operation that does.
+	 * operation that does. Kept as written, so `checkExposure` can refuse a
+	 * `GET` for an operation that changes something.
 	 */
-	readonly changes: boolean;
+	readonly changes: Changes;
+	/** Whether the HTTP API offers it, and where. */
+	readonly http: Http;
+	/** Whether the bot loop offers it as a tool, in which bounds, and with what approval. */
+	readonly botLoop: BotLoop;
 }
 
 /** An error schema whose values are `DomainError`s, such as a `Schema.TaggedError` class. */
@@ -56,10 +65,16 @@ export const make = <
 	InputSchema extends Schema.Top,
 	OutputSchema extends Schema.Top,
 	const ErrorSchemas extends ReadonlyArray<ErrorSchema>,
+	const Http extends HttpDecision,
+	const BotLoop extends BotLoopDecision,
+	const Changes extends boolean,
 >(
 	name: Name,
-	fields: Omit<Contract<Name, InputSchema, OutputSchema, ErrorSchemas>, "name" | "kind">,
-): Contract<Name, InputSchema, OutputSchema, ErrorSchemas, "request"> => ({
+	fields: Omit<
+		Contract<Name, InputSchema, OutputSchema, ErrorSchemas, "request", Http, BotLoop, Changes>,
+		"name" | "kind"
+	>,
+): Contract<Name, InputSchema, OutputSchema, ErrorSchemas, "request", Http, BotLoop, Changes> => ({
 	name,
 	kind: "request",
 	...fields,
@@ -74,13 +89,24 @@ export const makeLongRunning = <
 	InputSchema extends Schema.Top,
 	OutputSchema extends Schema.Top,
 	const ErrorSchemas extends ReadonlyArray<ErrorSchema>,
+	const Http extends HttpDecision,
+	const BotLoop extends BotLoopDecision,
 >(
 	name: Name,
 	fields: Omit<
-		Contract<Name, InputSchema, OutputSchema, ErrorSchemas>,
+		Contract<Name, InputSchema, OutputSchema, ErrorSchemas, "longRunning", Http, BotLoop, false>,
 		"name" | "kind" | "changes"
 	>,
-): Contract<Name, InputSchema, OutputSchema, ErrorSchemas, "longRunning"> => ({
+): Contract<
+	Name,
+	InputSchema,
+	OutputSchema,
+	ErrorSchemas,
+	"longRunning",
+	Http,
+	BotLoop,
+	false
+> => ({
 	name,
 	kind: "longRunning",
 	changes: false,

@@ -181,6 +181,12 @@ bun run db:studio       # inspect the database with Drizzle Studio
 bun run build:computer  # build the computer image, as sugabots-computer:dev
 ```
 
+`packages/contracts/src/http/http-api.json` records the public HTTP API: each
+endpoint's route, statuses, fields and the status of each error. A test fails
+while it disagrees with the API. After changing the API on purpose, such as
+adding or moving an operation's endpoint, write it again with
+`bun run test --project contracts -u` and review its diff.
+
 `bun run db:compare-migrations <revision>` checks that the migrations after
 `main`'s newest upgrade a database the same way as the ones at a git revision.
 It runs both sets on copies of a database at `main`'s schema, one holding an

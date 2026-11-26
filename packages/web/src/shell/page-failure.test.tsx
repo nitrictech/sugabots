@@ -1,5 +1,5 @@
 import { cleanup, screen } from "@testing-library/react";
-import { afterEach, beforeEach, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { apiAnswers, mount, onWideScreen } from "@/api.test-support.tsx";
 
 vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
@@ -25,5 +25,6 @@ it("keeps the sidebar and offers a reload when a page's code fails to download",
 
 	await screen.findByText("This page could not load");
 	screen.getByRole("button", { name: "Reload" });
-	screen.getByRole("navigation", { name: "Sidebar" });
+	const sidebar = screen.getByRole("navigation", { name: "Sidebar", hidden: true });
+	expect(sidebar.closest("[inert]")).not.toBeNull();
 });

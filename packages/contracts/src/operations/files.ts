@@ -28,7 +28,6 @@ import {
 } from "../files.ts";
 import { isoTimestampSchema } from "../timestamps.ts";
 import { uuidSchema } from "../uuid.ts";
-import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
 
 const fileId = uuidSchema.annotate({
@@ -58,6 +57,22 @@ const writeErrors = [
 	FileContentTooLarge,
 ] as const;
 
+const modelOnly = {
+	kind: "heldBack",
+	reason: "This tool acts in the bot's turn. Members use the project and chat file endpoints.",
+} as const;
+/**
+ * inTurn sets the file tools' approval to `never`. `approvalNeed` still asks for
+ * changes by a personal bot or a turn that inherits its rule through a brief.
+ * It asks for every call in a personal bot's webhook or GitHub run.
+ */
+const inTurn = { kind: "offered", offeredIn: "everywhere", approval: { kind: "never" } } as const;
+
+const contentOriginOnly = {
+	kind: "heldBack",
+	reason: "Only the content origin serves pages from their secret addresses.",
+} as const;
+
 export const filesContracts = {
 	"files.servePage": OperationContract.make("files.servePage", {
 		description: "Serve the version of an HTML page that its content-origin address opens.",
@@ -65,6 +80,8 @@ export const filesContracts = {
 		output: Schema.Struct({ title: Schema.String, html: Schema.String }),
 		errors: [ResourceHidden],
 		changes: false,
+		http: contentOriginOnly,
+		botLoop: contentOriginOnly,
 	}),
 	"files.listWritten": OperationContract.make("files.listWritten", {
 		description:
@@ -73,6 +90,8 @@ export const filesContracts = {
 		output: Schema.Struct({ files: Schema.Array(fileListing) }),
 		errors: readErrors,
 		changes: false,
+		http: modelOnly,
+		botLoop: { ...inTurn, tool: FILE_LIST_TOOL },
 	}),
 	"files.readWritten": OperationContract.make("files.readWritten", {
 		description:
@@ -85,6 +104,8 @@ export const filesContracts = {
 		}),
 		errors: readErrors,
 		changes: false,
+		http: modelOnly,
+		botLoop: { ...inTurn, tool: FILE_READ_TOOL },
 	}),
 	"files.write": OperationContract.make("files.write", {
 		description: `Write a file for work members will come back to, such as a plan, report, notes or page. To create one, provide \`kind\` and \`title\`. To replace the content of an existing file as a new version, provide its \`fileId\` and \`baseVersion\`. Use file_edit for a small change. ${KIND_RULES}`,
@@ -102,6 +123,8 @@ export const filesContracts = {
 		output: fileWrittenSchema,
 		errors: [...writeErrors, FileKindFixed, InvalidFileWrite],
 		changes: true,
+		http: modelOnly,
+		botLoop: { ...inTurn, tool: FILE_WRITE_TOOL },
 	}),
 	"files.edit": OperationContract.make("files.edit", {
 		description:
@@ -118,29 +141,7 @@ export const filesContracts = {
 		output: fileWrittenSchema,
 		errors: [...writeErrors, FileEditTextUnmatched],
 		changes: true,
+		http: modelOnly,
+		botLoop: { ...inTurn, tool: FILE_EDIT_TOOL },
 	}),
 } as const;
-
-const modelOnly = {
-	kind: "heldBack",
-	reason: "This tool acts in the bot's turn. Members use the project and chat file endpoints.",
-} as const;
-/**
- * inTurn sets the file tools' approval to `never`. `approvalNeed` still asks for
- * changes by a personal bot or a turn that inherits its rule through a brief.
- * It asks for every call in a personal bot's webhook or GitHub run.
- */
-const inTurn = { kind: "offered", offeredIn: "everywhere", approval: { kind: "never" } } as const;
-
-const contentOriginOnly = {
-	kind: "heldBack",
-	reason: "Only the content origin serves pages from their secret addresses.",
-} as const;
-
-export const filesExposure = {
-	"files.servePage": { http: contentOriginOnly, botLoop: contentOriginOnly },
-	"files.listWritten": { http: modelOnly, botLoop: { ...inTurn, tool: FILE_LIST_TOOL } },
-	"files.readWritten": { http: modelOnly, botLoop: { ...inTurn, tool: FILE_READ_TOOL } },
-	"files.write": { http: modelOnly, botLoop: { ...inTurn, tool: FILE_WRITE_TOOL } },
-	"files.edit": { http: modelOnly, botLoop: { ...inTurn, tool: FILE_EDIT_TOOL } },
-} as const satisfies DomainExposure<typeof filesContracts>;

@@ -72,7 +72,7 @@ describe("quick changes to bots", () => {
 			result.current.triager.mutate({ name: "Second" });
 		});
 		expect(client.api.bots.update.mock.calls).toEqual([
-			[{ params: { botId: triager.id }, payload: { name: "First" } }],
+			[{ params: { botId: triager.id }, payload: { changes: { name: "First" } } }],
 		]);
 
 		first.answer(Effect.succeed({ ...triager, name: "First" }));
@@ -80,7 +80,7 @@ describe("quick changes to bots", () => {
 		await waitFor(() => expect(client.api.bots.update).toHaveBeenCalledTimes(2));
 		expect(client.api.bots.update).toHaveBeenLastCalledWith({
 			params: { botId: triager.id },
-			payload: { name: "Second" },
+			payload: { changes: { name: "Second" } },
 		});
 	});
 

@@ -1,14 +1,15 @@
-import { useRender } from "@base-ui/react/use-render";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { CatchBoundary, Link, Navigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronRight, X } from "lucide-react";
 import {
 	cloneElement,
 	Fragment,
+	type MouseEventHandler,
 	type ReactElement,
 	type ReactNode,
+	type RefObject,
 	Suspense,
-	useEffect,
 	useId,
 	useRef,
 } from "react";
@@ -20,7 +21,6 @@ import {
 	settingsLink,
 	settingsSectionLink,
 } from "@/lib/links.ts";
-import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useModelProviders } from "@/lib/model-providers.ts";
 import {
 	type ModelChoice,
@@ -44,7 +44,8 @@ import { BotAvatar } from "@/shell/Bot.tsx";
 import { PageFailure } from "@/shell/PageFailure.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { MemberAvatar } from "@/ui/avatar.tsx";
-import { isPlainClick } from "@/ui/back-button.tsx";
+import { isPlainClick, useBackToLinkedPage } from "@/ui/back-button.tsx";
+import { Dialog } from "@/ui/dialog.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import {
@@ -68,85 +69,88 @@ const WorkspaceSettings = lazyNamed(
  * A bot's and a project's settings are its own pages, beside its chats.
  * Below a laptop's width there is no room for both, so settings drill down
  * as a phone's do: the sections as one list, and each opening with a way
- * back to it. On a phone they are pages in the page's place.
+ * back to it. On a phone they are pages over the page, which stays as it was
+ * beneath them, as it does beneath the dialog.
  *
  * The frame is deliberately NOT part of the settings bundle. The sections
  * behind it are a chunk of their own, and while it is on its way the click has
  * to land on something: the navigation is there to choose from, and the
  * section fills in beside it.
  */
-export function SettingsLayout({ page }: { page: SettingsLocation }) {
-	const phone = !useMediaQuery(SIDE_BY_SIDE);
+export function SettingsLayout({
+	page,
+	dialog,
+}: {
+	page: SettingsLocation;
+	dialog?: {
+		container: RefObject<HTMLDivElement | null>;
+		finalFocus: RefObject<HTMLElement | null>;
+	};
+}) {
+	const close = useCloseSettings();
+	const popup = useRef<HTMLDivElement>(null);
 	const index = page.kind === "sections";
-	// A phone lists settings in its You tab.
-	if (index && phone) return <Navigate from="/$workspace" to="./you" replace />;
-	return (
-		// From a tablet up, a dialog over the dimmed page, which closes back to it.
-		<div className="contents md:fixed md:inset-0 md:z-50 md:flex md:items-center md:justify-center md:p-10">
-			<SettingsClose backdrop />
-			{/* A group, so the frame's Back can stand aside for one the page draws itself. */}
-			<div
-				{...(phone ? {} : { role: "dialog", "aria-modal": true, "aria-label": "Settings" })}
-				className="group/settings flex min-h-0 min-w-0 flex-1 md:relative md:h-full md:w-full md:overflow-hidden md:rounded-xl md:border md:border-border-strong md:bg-background md:shadow-dialog"
-			>
-				<SettingsClose />
-				<SettingsNavigation page={page} />
-				{index && <CompactSettingsList />}
-				<div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", index && "max-lg:hidden")}>
-					<SettingsTrail page={page} />
+	if (index && !dialog) return <Navigate from="/$workspace" to="./you" replace />;
+	const frame = (
+		<div className="group/settings flex min-h-0 min-w-0 flex-1 outline-none md:relative md:h-full md:w-full md:overflow-hidden md:rounded-xl md:border md:border-border-strong md:bg-background md:shadow-dialog">
+			{dialog && <SettingsClose close={close} />}
+			<SettingsNavigation page={page} />
+			{index && <CompactSettingsList />}
+			<div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", index && "max-lg:hidden")}>
+				<SettingsTrail page={page} />
+				{/*
+				 * The scrollbar's room is kept whether or not the page is long enough
+				 * to need one, so a long page, such as Usage, centres its column where
+				 * a short one does.
+				 */}
+				<main
+					data-scroll-restoration-id="settings"
+					className="tab-bar-clearance relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background scrollbar-gutter-stable max-md:scrollbar-gutter-auto"
+				>
+					{!index && <CompactPageBackBar page={page} phone={!dialog} />}
 					{/*
-					 * The scrollbar's room is kept whether or not the page is long enough
-					 * to need one, so a long page, such as Usage, centres its column where
-					 * a short one does.
+					 * A page that fails to load fails inside the dialog, which still
+					 * closes, rather than taking the page beneath with it.
 					 */}
-					<main
-						data-scroll-restoration-id="settings"
-						className="tab-bar-clearance relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background scrollbar-gutter-stable max-md:scrollbar-gutter-auto"
-					>
-						{!index && (
-							<CompactPageBackBar parent={phone ? phoneParentPage(page) : parentPage(page)} />
-						)}
+					<CatchBoundary getResetKey={() => settingsSearchValue(page)} errorComponent={PageFailure}>
 						{/*
-						 * A page that fails to load fails inside the dialog, which still
-						 * closes, rather than taking the page beneath with it.
+						 * Nothing rather than a skeleton: the navigation has already answered
+						 * the click, and a shape that flashes beside it reads as a fault.
 						 */}
-						<CatchBoundary
-							getResetKey={() => settingsSearchValue(page)}
-							errorComponent={PageFailure}
-						>
-							{/*
-							 * Nothing rather than a skeleton: the navigation has already answered
-							 * the click, and a shape that flashes beside it reads as a fault.
-							 */}
-							<Suspense fallback={null}>
-								<WorkspaceSettings page={index ? { kind: "section", section: "general" } : page} />
-							</Suspense>
-						</CatchBoundary>
-					</main>
-				</div>
+						<Suspense fallback={null}>
+							<WorkspaceSettings page={index ? { kind: "section", section: "general" } : page} />
+						</Suspense>
+					</CatchBoundary>
+				</main>
 			</div>
 		</div>
 	);
+	// The shell's column holds the page beneath, so this covers it there, and the tabs stay over it.
+	if (!dialog) return <div className="absolute inset-0 z-10 flex bg-background">{frame}</div>;
+	return (
+		<Dialog
+			open
+			onOpenChange={(open) => {
+				if (!open) close();
+			}}
+		>
+			<DialogPrimitive.Portal container={dialog.container}>
+				<div className="fixed inset-0 z-50 flex items-center justify-center p-10">
+					<DialogPrimitive.Backdrop className="absolute inset-0 bg-scrim" />
+					<DialogPrimitive.Popup
+						aria-label="Settings"
+						ref={popup}
+						initialFocus={popup}
+						finalFocus={dialog.finalFocus}
+						render={frame}
+					/>
+				</div>
+			</DialogPrimitive.Portal>
+		</Dialog>
+	);
 }
 
-/**
- * Closes the settings dialog onto the page beneath it: the × in its corner,
- * or as `backdrop`, the dimmed page around it. A phone, whose settings are
- * pages, has neither.
- */
-function SettingsClose({ backdrop = false }: { backdrop?: boolean }) {
-	const close = useCloseSettings();
-	// Escape closes it wherever the focus is, unless something inside used the key, as a menu does.
-	useEffect(() => {
-		if (backdrop) return;
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key === "Escape" && !event.defaultPrevented && matchesMedia(SIDE_BY_SIDE)) {
-				close();
-			}
-		};
-		document.addEventListener("keydown", onKey);
-		return () => document.removeEventListener("keydown", onKey);
-	}, [backdrop, close]);
+function SettingsClose({ close }: { close: () => void }) {
 	const to = (
 		<Link
 			{...closeSettingsLink()}
@@ -158,7 +162,6 @@ function SettingsClose({ backdrop = false }: { backdrop?: boolean }) {
 			}}
 		/>
 	);
-	if (backdrop) return <SettingsBackdrop render={to} />;
 	return (
 		<IconButton
 			label="Close settings"
@@ -170,23 +173,14 @@ function SettingsClose({ backdrop = false }: { backdrop?: boolean }) {
 	);
 }
 
-/** The dimmed page around the settings dialog, which closes it when clicked, as the × does. */
-function SettingsBackdrop({ render }: { render: useRender.RenderProp }) {
-	return useRender({
-		render,
-		props: {
-			"aria-label": "Close settings",
-			tabIndex: -1,
-			className: "absolute inset-0 hidden cursor-default bg-scrim md:block",
-		},
-	});
-}
-
-/**
- * On a phone or tablet, where there is no trail, the bar above a page with
- * its Back to `parent`. A page that draws a Back of its own is left to it.
- */
-function CompactPageBackBar({ parent }: { parent: BackTarget }) {
+function CompactPageBackBar({ page, phone }: { page: SettingsLocation; phone: boolean }) {
+	const goToParent = useBackToLinkedPage();
+	const parent = phone
+		? phoneParentPage(page)
+		: (parentSection(page, goToParent) ?? {
+				label: "Settings",
+				render: <Link {...settingsLink()} onClick={goToParent} />,
+			});
 	return (
 		<CompactBackBar
 			{...parent}
@@ -195,20 +189,22 @@ function CompactPageBackBar({ parent }: { parent: BackTarget }) {
 	);
 }
 
-const settingsList: BackTarget = {
-	label: "Settings",
-	render: <Link {...settingsLink()} />,
-};
-
-/** The page `page` sits under, for its Back. */
-function parentPage(page: SettingsLocation): BackTarget {
-	if (page.kind === "sections" || page.kind === "section") return settingsList;
+function parentSection(
+	page: SettingsLocation,
+	onClick?: MouseEventHandler<HTMLAnchorElement>,
+): BackTarget | undefined {
+	if (page.kind === "sections" || page.kind === "section") return undefined;
 	const section = workspaceSettingSection(page.kind === "member" ? "members" : "providers");
-	if (!section) return settingsList;
+	if (!section) return undefined;
 	return {
 		label: section.label,
-		// Named for where it goes, which a phone's Back says plainly when it goes back instead.
-		render: <Link {...settingsSectionLink(section.id)} aria-label={`Back to ${section.label}`} />,
+		render: (
+			<Link
+				{...settingsSectionLink(section.id)}
+				aria-label={`Back to ${section.label}`}
+				onClick={onClick}
+			/>
+		),
 	};
 }
 
@@ -222,9 +218,7 @@ function phoneParentPage(page: SettingsLocation): BackTarget {
 	if (page.kind === "section" && page.section === "notifications") {
 		return { label: "You", render: <Link {...settingsSectionLink("account")} /> };
 	}
-	const parent = parentPage(page);
-	if (parent !== settingsList) return parent;
-	return { label: "Back", render: <Link {...closeSettingsLink()} /> };
+	return parentSection(page) ?? { label: "Back", render: <Link {...closeSettingsLink()} /> };
 }
 
 /** The workspace's sections the viewer may open, with what each holds. */

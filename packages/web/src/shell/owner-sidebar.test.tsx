@@ -35,7 +35,7 @@ describe("a project's own sidebar", () => {
 		client.api.chats.projectChats.mockImplementation(() =>
 			Effect.succeed({ chats: [listedChat({ ...chat, resolvedAt })], automations: [] }),
 		);
-		client.api.chats.markResolved.mockImplementation(() => {
+		client.api.chats.setResolved.mockImplementation(() => {
 			resolvedAt = "2026-09-19T08:00:00.000Z";
 			return Effect.succeed(undefined);
 		});

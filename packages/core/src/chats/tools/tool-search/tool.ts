@@ -1,5 +1,5 @@
 import { type BuiltInConnector, CONNECTOR_TOOL_SEPARATOR } from "@sugabots/contracts";
-import { manifest } from "@sugabots/contracts/operations";
+import { operationContracts } from "@sugabots/contracts/operations";
 import { READ_DOCS_TOOL } from "@sugabots/contracts/operations/chat-reads";
 import { TOOL_SEARCH } from "@sugabots/contracts/operations/connectors";
 import { type JSONSchema7, type Tool, tool } from "ai";
@@ -8,7 +8,7 @@ import type { ConnectorToolSet } from "../connector-catalog.ts";
 import { type CatalogEntry, catalogListing, searchCatalog } from "./catalog.ts";
 
 export { TOOL_SEARCH };
-export const CALL_TOOL = manifest["connectors.callTool"].botLoop.tool;
+export const CALL_TOOL = operationContracts["connectors.callTool"].botLoop.tool;
 
 /** Small models often send the arguments object as a JSON string, so that is read too. */
 const ArgumentsObject = Schema.Record(Schema.String, Schema.Unknown);

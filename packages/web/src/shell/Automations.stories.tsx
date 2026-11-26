@@ -307,7 +307,7 @@ export const EditingInstructions = meta.story({
 		let saved = outboundAutomation;
 		msw.use(
 			http.patch(`${API}/projects/:projectId/automations/${outbound.id}`, async ({ request }) => {
-				const update = (await request.json()) as AutomationUpdate;
+				const { changes: update } = (await request.json()) as { changes: AutomationUpdate };
 				saved = { ...saved, ...update };
 				return HttpResponse.json({ automation: saved, secrets: [] });
 			}),

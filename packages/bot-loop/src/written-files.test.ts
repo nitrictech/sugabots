@@ -18,15 +18,7 @@ import {
 } from "@sugabots/core/authentication/seed.test-support";
 import { aChatAwaitingReply } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
-import {
-	bot,
-	file,
-	membership,
-	placedChat,
-	project,
-	projectBot,
-	toolCall,
-} from "@sugabots/core/database/schema";
+import { bot, file, membership, project, projectBot } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { Files } from "@sugabots/core/files/files";
 import { asMember } from "@sugabots/core/operations/chats/testing";
@@ -34,7 +26,7 @@ import { operationsForTests } from "@sugabots/core/operations/testing";
 import { and, eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { botLoopOnPostgres, scriptedSteps } from "./testing.ts";
+import { botLoopOnPostgres, callsOf, scriptedSteps } from "./testing.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("written file tools, against Postgres", async () => {
 	const loop = await botLoopOnPostgres([]);
@@ -43,29 +35,22 @@ describe.skipIf(!process.env.DATABASE_URL)("written file tools, against Postgres
 	let workspaceId: string;
 	let botId: string;
 	let adminId: string;
+	let defaultProject: string;
 
 	beforeEach(async () => {
-		({ chatId, workspaceId, botId, adminId } = await aChatAwaitingReply(chatsAs));
+		({
+			chatId,
+			workspaceId,
+			botId,
+			adminId,
+			projectId: defaultProject,
+		} = await aChatAwaitingReply(chatsAs));
 	});
 
 	afterAll(closeDatabase);
 
-	const callsOf = (turnId: string) =>
-		onDatabase((db) => db.select().from(toolCall).where(eq(toolCall.turnId, turnId)));
-
 	const filesIn = (source: string) =>
 		onDatabase((db) => db.select().from(file).where(eq(file.chatId, source)));
-
-	const defaultProject = async () => {
-		const [chat] = await onDatabase((db) =>
-			db
-				.select({ projectId: placedChat.projectId })
-				.from(placedChat)
-				.where(eq(placedChat.id, chatId)),
-		);
-		if (!chat?.projectId) throw new Error("The test chat has no project");
-		return chat.projectId;
-	};
 
 	const makePersonalAssistant = () =>
 		onDatabase((db) =>
@@ -184,7 +169,7 @@ describe.skipIf(!process.env.DATABASE_URL)("written file tools, against Postgres
 	it.each(["github", "webhook"] as const)(
 		"identifies a page written in a %s run",
 		async (outsideRun) => {
-			const runChat = await queueRun(await defaultProject(), outsideRun);
+			const runChat = await queueRun(defaultProject, outsideRun);
 			const input = { kind: "html", title: "Report", content: "<p>Weekly report</p>" };
 			const { model } = scriptedSteps(
 				{ calls: [{ toolCallId: "write-page", toolName: FILE_WRITE_TOOL, input }] },
@@ -202,7 +187,7 @@ describe.skipIf(!process.env.DATABASE_URL)("written file tools, against Postgres
 	);
 
 	it("edits a routine run's own report without approval", async () => {
-		const runChat = await queueRun(await defaultProject(), "routine");
+		const runChat = await queueRun(defaultProject, "routine");
 		const report = await runOnPostgres(
 			Files.seedWrittenFile(
 				{ chatId: runChat, botId },
@@ -239,7 +224,7 @@ describe.skipIf(!process.env.DATABASE_URL)("written file tools, against Postgres
 		"refuses a GitHub run's cross-chat file changes for a %s",
 		async (botKind) => {
 			if (botKind === "Personal Assistant") await makePersonalAssistant();
-			const projectId = await defaultProject();
+			const projectId = defaultProject;
 			const otherChat = await seedProjectChat(workspaceId, projectId, adminId);
 			const report = await runOnPostgres(
 				Files.seedWrittenFile(
@@ -298,7 +283,7 @@ describe.skipIf(!process.env.DATABASE_URL)("written file tools, against Postgres
 
 	it("asks a Personal Assistant's member before its webhook run writes a file", async () => {
 		await makePersonalAssistant();
-		const runChat = await queueRun(await defaultProject(), "webhook");
+		const runChat = await queueRun(defaultProject, "webhook");
 		const input = { kind: "markdown", title: "Report", content: "# Report" };
 		const { model, requests } = scriptedSteps(
 			{ calls: [{ toolCallId: "write-report", toolName: FILE_WRITE_TOOL, input }] },
@@ -369,7 +354,7 @@ describe.skipIf(!process.env.DATABASE_URL)("written file tools, against Postgres
 	});
 
 	it("replaces and edits a file in another chat of the same project without approval", async () => {
-		const otherChat = await seedProjectChat(workspaceId, await defaultProject(), adminId);
+		const otherChat = await seedProjectChat(workspaceId, defaultProject, adminId);
 		const made = await runOnPostgres(
 			Files.seedWrittenFile(
 				{ chatId: otherChat, botId },

@@ -1,32 +1,32 @@
 /**
- * Every operation's contract, and the exposure manifest: one entry per
- * operation deciding whether the HTTP API and the bot loop offer it. Each
- * domain keeps its own in `<domain>.ts`; this file only spreads them.
+ * Every operation's contract, each carrying its decisions in the exposure
+ * manifest: whether the HTTP API and the bot loop offer it. Each domain keeps
+ * its own in `<domain>.ts`; this file only spreads them.
  */
 
-import { approvalsContracts, approvalsExposure } from "./approvals.ts";
-import { automationsContracts, automationsExposure } from "./automations.ts";
-import { botsContracts, botsExposure } from "./bots.ts";
-import { chatReadsContracts, chatReadsExposure } from "./chat-reads.ts";
-import { chatsContracts, chatsExposure } from "./chats.ts";
-import { computersContracts, computersExposure } from "./computers.ts";
-import { connectorsContracts, connectorsExposure } from "./connectors.ts";
-import { eventsContracts, eventsExposure } from "./events.ts";
-import { defineManifest } from "./exposure.ts";
-import { filesContracts, filesExposure } from "./files.ts";
-import { notificationsContracts, notificationsExposure } from "./notifications.ts";
+import { approvalsContracts } from "./approvals.ts";
+import { automationsContracts } from "./automations.ts";
+import { botsContracts } from "./bots.ts";
+import { chatReadsContracts } from "./chat-reads.ts";
+import { chatsContracts } from "./chats.ts";
+import { computersContracts } from "./computers.ts";
+import { connectorsContracts } from "./connectors.ts";
+import { eventsContracts } from "./events.ts";
+import { checkExposure } from "./exposure.ts";
+import { filesContracts } from "./files.ts";
+import { notificationsContracts } from "./notifications.ts";
 import type { OperationContract } from "./operation.ts";
-import { projectsContracts, projectsExposure } from "./projects.ts";
-import { providersContracts, providersExposure } from "./providers.ts";
-import { scheduledWorkContracts, scheduledWorkExposure } from "./scheduled-work.ts";
-import { turnsContracts, turnsExposure } from "./turns.ts";
-import { webContracts, webExposure } from "./web.ts";
-import { workspaceContracts, workspaceExposure } from "./workspace.ts";
+import { projectsContracts } from "./projects.ts";
+import { providersContracts } from "./providers.ts";
+import { scheduledWorkContracts } from "./scheduled-work.ts";
+import { turnsContracts } from "./turns.ts";
+import { webContracts } from "./web.ts";
+import { workspaceContracts } from "./workspace.ts";
 
 export * from "./exposure.ts";
 export { OperationContract } from "./operation.ts";
 
-export const operationContracts = {
+export const operationContracts = checkExposure({
 	...workspaceContracts,
 	...projectsContracts,
 	...botsContracts,
@@ -43,7 +43,7 @@ export const operationContracts = {
 	...turnsContracts,
 	...notificationsContracts,
 	...scheduledWorkContracts,
-};
+});
 
 export type OperationContracts = typeof operationContracts;
 
@@ -59,27 +59,6 @@ export type LongRunningOperationName = {
 
 /** The operations that run once per call. */
 export type RequestOperationName = Exclude<OperationName, LongRunningOperationName>;
-
-export const manifest = defineManifest<OperationContracts>()({
-	...workspaceExposure,
-	...projectsExposure,
-	...botsExposure,
-	...chatsExposure,
-	...chatReadsExposure,
-	...filesExposure,
-	...automationsExposure,
-	...computersExposure,
-	...connectorsExposure,
-	...providersExposure,
-	...webExposure,
-	...approvalsExposure,
-	...eventsExposure,
-	...turnsExposure,
-	...notificationsExposure,
-	...scheduledWorkExposure,
-});
-
-export type Manifest = typeof manifest;
 
 /** The decoded input the operation `Name` takes. */
 export type InputOf<Name extends OperationName> = OperationContract.Input<OperationContracts[Name]>;

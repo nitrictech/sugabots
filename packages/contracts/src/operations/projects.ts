@@ -1,6 +1,6 @@
 /**
- * The projects operations' contracts, and their entries in the exposure manifest.
- * `index.ts` spreads both, so adding an operation here touches no other file.
+ * The projects operations' contracts, each with its decisions in the exposure manifest.
+ * `index.ts` spreads them, so adding an operation here touches no other file.
  */
 
 import { Schema } from "effect";
@@ -37,7 +37,6 @@ import {
 } from "../projects.ts";
 import { uuidOrStringSchema, uuidSchema } from "../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../workspaces.ts";
-import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
 
 /** How an operation that proves it reaches a project refuses. */
@@ -62,6 +61,25 @@ const projectIdSchema = uuidSchema.annotate({ description: "The project's id." }
 /** A project, by its id. */
 const aProject = Schema.Struct({ projectId: projectIdSchema });
 
+/**
+ * Offered as `tool` only in member bounds, a personal bot's own turns,
+ * where each call asks its creator: it changes who reaches what.
+ */
+const changesReachForMember = <const Tool extends string>(tool: Tool) =>
+	({
+		kind: "offered",
+		tool,
+		offeredIn: "memberBounds",
+		approval: { kind: "always", approvers: "turn" },
+	}) as const;
+
+/** Held back: it changes who reaches the project, which a bot may only in member bounds. */
+const changesWhoReaches = {
+	kind: "heldBack",
+	reason:
+		"It changes who reaches the project, which a bot may do only in member bounds, and no tool does it yet.",
+} as const;
+
 export const projectsContracts = {
 	"projects.list": OperationContract.make("projects.list", {
 		description:
@@ -70,6 +88,12 @@ export const projectsContracts = {
 		output: Schema.Array(projectSchema),
 		errors: workspaceRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/workspaces/:workspace/projects" },
+		botLoop: {
+			kind: "coveredBy",
+			operation: "workspaces.guide",
+			reason: "A Personal Assistant's workspace guide lists the projects its member sees.",
+		},
 	}),
 	"projects.create": OperationContract.make("projects.create", {
 		description:
@@ -90,6 +114,8 @@ export const projectsContracts = {
 			...approvalAndFenceRefusals,
 		],
 		changes: true,
+		http: { kind: "offered", method: "POST", path: "/workspaces/:workspace/projects", status: 201 },
+		botLoop: changesReachForMember("create_project"),
 	}),
 	"projects.update": OperationContract.make("projects.update", {
 		description:
@@ -98,6 +124,12 @@ export const projectsContracts = {
 		output: projectSchema,
 		errors: [...refusals, EmptyProjectUpdate, ProjectGone, ProjectSlugTaken, BotNotPublic],
 		changes: true,
+		http: { kind: "offered", method: "PATCH", path: "/projects/:projectId" },
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"No tool changes a project's settings, and its visibility and lead change who reaches it, which a bot may change only in member bounds.",
+		},
 	}),
 	"projects.remove": OperationContract.make("projects.remove", {
 		description:
@@ -106,6 +138,12 @@ export const projectsContracts = {
 		output: Schema.Void,
 		errors: [...refusals, ComputerUnavailable, ComputerMadeMeanwhile, ClaimLost],
 		changes: true,
+		http: { kind: "offered", method: "DELETE", path: "/projects/:projectId" },
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"Deleting a project deletes its chats, files and computer; members do it in the web app.",
+		},
 	}),
 	"projects.listMembers": OperationContract.make("projects.listMembers", {
 		description: "List the members in a project, by name.",
@@ -113,6 +151,12 @@ export const projectsContracts = {
 		output: Schema.Array(projectMemberSchema),
 		errors: reachRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/projects/:projectId/members" },
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"No tool lists a project's members; offering one waits for tools to become operations.",
+		},
 	}),
 	"projects.listMembersReaching": OperationContract.make("projects.listMembersReaching", {
 		description:
@@ -121,6 +165,12 @@ export const projectsContracts = {
 		output: Schema.Array(memberParticipantSchema),
 		errors: reachRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/projects/:projectId/members-reaching" },
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"It is who the web app's composer suggests for a mention before a chat has details; a bot mentions those it sees in the chat.",
+		},
 	}),
 	"projects.addMember": OperationContract.make("projects.addMember", {
 		description: "Add a member of the workspace to a project.",
@@ -128,6 +178,8 @@ export const projectsContracts = {
 		output: Schema.Void,
 		errors: [...refusals, NotInWorkspace],
 		changes: true,
+		http: { kind: "offered", method: "POST", path: "/projects/:projectId/members" },
+		botLoop: changesWhoReaches,
 	}),
 	"projects.removeMember": OperationContract.make("projects.removeMember", {
 		description:
@@ -136,6 +188,8 @@ export const projectsContracts = {
 		output: Schema.Void,
 		errors: [...refusals, AdministratorInEveryProject, NotInProject],
 		changes: true,
+		http: { kind: "offered", method: "DELETE", path: "/projects/:projectId/members/:memberId" },
+		botLoop: changesWhoReaches,
 	}),
 	"projects.leave": OperationContract.make("projects.leave", {
 		description:
@@ -144,6 +198,8 @@ export const projectsContracts = {
 		output: Schema.Void,
 		errors: [...refusals, AdministratorInEveryProject, NotInProject],
 		changes: true,
+		http: { kind: "offered", method: "DELETE", path: "/projects/:projectId/membership" },
+		botLoop: changesWhoReaches,
 	}),
 	"projects.join": OperationContract.make("projects.join", {
 		description: "Put yourself in a public project, or for a bot, the member it acts for.",
@@ -151,6 +207,8 @@ export const projectsContracts = {
 		output: projectSchema,
 		errors: [...workspaceRefusals, ...approvalAndFenceRefusals],
 		changes: true,
+		http: { kind: "offered", method: "PUT", path: "/projects/:projectId/membership" },
+		botLoop: changesReachForMember("join_project"),
 	}),
 	"projects.listBots": OperationContract.make("projects.listBots", {
 		description: "List a project's bots, by name.",
@@ -158,6 +216,11 @@ export const projectsContracts = {
 		output: Schema.Array(botSchema),
 		errors: reachRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/projects/:projectId/bots" },
+		botLoop: {
+			kind: "heldBack",
+			reason: "No tool lists a project's bots; offering one waits for tools to become operations.",
+		},
 	}),
 	"projects.addBot": OperationContract.make("projects.addBot", {
 		description: "Add a public bot to a project, so members there can mention it.",
@@ -168,6 +231,8 @@ export const projectsContracts = {
 		output: Schema.Void,
 		errors: [...refusals, BotNotPublic, ...approvalAndFenceRefusals],
 		changes: true,
+		http: { kind: "offered", method: "POST", path: "/projects/:projectId/bots" },
+		botLoop: changesReachForMember("add_bot_to_project"),
 	}),
 	"projects.removeBot": OperationContract.make("projects.removeBot", {
 		description: "Take a bot out of a project. Its lead bot stays until another is chosen.",
@@ -175,102 +240,7 @@ export const projectsContracts = {
 		output: Schema.Void,
 		errors: [...refusals, LeadsProjects],
 		changes: true,
+		http: { kind: "offered", method: "DELETE", path: "/projects/:projectId/bots/:botId" },
+		botLoop: changesWhoReaches,
 	}),
 } as const;
-
-/**
- * Offered as `tool` only in member bounds, a personal bot's own turns,
- * where each call asks its creator: it changes who reaches what.
- */
-const changesReachForMember = <const Tool extends string>(tool: Tool) =>
-	({
-		kind: "offered",
-		tool,
-		offeredIn: "memberBounds",
-		approval: { kind: "always", approvers: "turn" },
-	}) as const;
-
-/** Held back: it changes who reaches the project, which a bot may only in member bounds. */
-const changesWhoReaches = {
-	kind: "heldBack",
-	reason:
-		"It changes who reaches the project, which a bot may do only in member bounds, and no tool does it yet.",
-} as const;
-
-export const projectsExposure = {
-	"projects.list": {
-		http: { kind: "offered", endpoint: "projects.list" },
-		botLoop: {
-			kind: "coveredBy",
-			operation: "workspaces.guide",
-			reason: "A Personal Assistant's workspace guide lists the projects its member sees.",
-		},
-	},
-	"projects.create": {
-		http: { kind: "offered", endpoint: "projects.create" },
-		botLoop: changesReachForMember("create_project"),
-	},
-	"projects.update": {
-		http: { kind: "offered", endpoint: "projects.update" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"No tool changes a project's settings, and its visibility and lead change who reaches it, which a bot may change only in member bounds.",
-		},
-	},
-	"projects.remove": {
-		http: { kind: "offered", endpoint: "projects.remove" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"Deleting a project deletes its chats, files and computer; members do it in the web app.",
-		},
-	},
-	"projects.listMembers": {
-		http: { kind: "offered", endpoint: "projects.listMembers" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"No tool lists a project's members; offering one waits for tools to become operations.",
-		},
-	},
-	"projects.listMembersReaching": {
-		http: { kind: "offered", endpoint: "projects.listMembersReaching" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"It is who the web app's composer suggests for a mention before a chat has details; a bot mentions those it sees in the chat.",
-		},
-	},
-	"projects.addMember": {
-		http: { kind: "offered", endpoint: "projects.addMember" },
-		botLoop: changesWhoReaches,
-	},
-	"projects.removeMember": {
-		http: { kind: "offered", endpoint: "projects.removeMember" },
-		botLoop: changesWhoReaches,
-	},
-	"projects.leave": {
-		http: { kind: "offered", endpoint: "projects.leave" },
-		botLoop: changesWhoReaches,
-	},
-	"projects.join": {
-		http: { kind: "offered", endpoint: "projects.join" },
-		botLoop: changesReachForMember("join_project"),
-	},
-	"projects.listBots": {
-		http: { kind: "offered", endpoint: "projects.listBots" },
-		botLoop: {
-			kind: "heldBack",
-			reason: "No tool lists a project's bots; offering one waits for tools to become operations.",
-		},
-	},
-	"projects.addBot": {
-		http: { kind: "offered", endpoint: "projects.addBot" },
-		botLoop: changesReachForMember("add_bot_to_project"),
-	},
-	"projects.removeBot": {
-		http: { kind: "offered", endpoint: "projects.removeBot" },
-		botLoop: changesWhoReaches,
-	},
-} as const satisfies DomainExposure<typeof projectsContracts>;

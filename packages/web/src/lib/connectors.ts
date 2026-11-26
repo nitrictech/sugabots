@@ -155,11 +155,7 @@ export function useConnectorActions(projectId: string) {
 		create: useMutation({
 			mutationFn: (json: NewConnector) =>
 				Effect.runPromise(
-					// The generated client splits a union payload into one request type
-					// per member, which a request holding the whole union does not satisfy.
-					connectors.create({ params: { projectId }, payload: json } as Parameters<
-						typeof connectors.create
-					>[0]),
+					connectors.create({ params: { projectId }, payload: { connector: json } }),
 				),
 			onSuccess: refresh,
 		}),
@@ -175,7 +171,9 @@ export function useConnectorActions(projectId: string) {
 			mutationKey: updateKey,
 			scope: { id: `connector-update:${projectId}` },
 			mutationFn: ({ connectorId, json }: { connectorId: string; json: ConnectorUpdate }) =>
-				Effect.runPromise(connectors.update({ params: { projectId, connectorId }, payload: json })),
+				Effect.runPromise(
+					connectors.update({ params: { projectId, connectorId }, payload: { changes: json } }),
+				),
 			onMutate: async ({ connectorId, json }) => {
 				const chosen = choiceFor(json);
 				if (!chosen) return undefined;

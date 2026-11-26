@@ -101,7 +101,7 @@ export function useComputerProviderActions() {
 				Effect.runPromise(
 					client.api.computerProviders.update({
 						params: { workspace: requiredWorkspace(), providerId },
-						payload: changes,
+						payload: { changes },
 					}),
 				),
 			onSuccess: refresh,

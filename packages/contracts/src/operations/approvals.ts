@@ -1,6 +1,6 @@
 /**
- * The approvals operations' contracts, and their entries in the exposure manifest.
- * `index.ts` spreads both, so adding an operation here touches no other file.
+ * The approvals operations' contracts, each with its decisions in the exposure manifest.
+ * `index.ts` spreads them, so adding an operation here touches no other file.
  */
 
 import { Schema } from "effect";
@@ -8,7 +8,6 @@ import { toolApprovalDecisionSchema } from "../approvals.ts";
 import { ToolApprovalConflict, ToolApprovalNotFound } from "../errors/approvals.ts";
 import { ActionForbidden, ResourceHidden } from "../errors/proofs.ts";
 import { uuidOrStringSchema } from "../uuid.ts";
-import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
 
 export const approvalsContracts = {
@@ -19,15 +18,15 @@ export const approvalsContracts = {
 		output: Schema.Void,
 		errors: [ResourceHidden, ActionForbidden, ToolApprovalNotFound, ToolApprovalConflict],
 		changes: true,
-	}),
-} as const;
-
-export const approvalsExposure = {
-	"approvals.decide": {
-		http: { kind: "offered", endpoint: "approvals.decide" },
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/tool-calls/:toolCallId/approval",
+			status: 202,
+		},
 		botLoop: {
 			kind: "heldBack",
 			reason: "Only a member decides an approval; a bot never decides one, its own or another's.",
 		},
-	},
-} as const satisfies DomainExposure<typeof approvalsContracts>;
+	}),
+} as const;

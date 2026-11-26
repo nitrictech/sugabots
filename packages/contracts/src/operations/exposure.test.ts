@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { botLoopTools, type Decisions, httpOperations } from "./exposure.ts";
+import { type BotLoopDecision, botLoopTools } from "./exposure.ts";
 
-const manifest = {
+const contracts = {
 	"chats.setResolved": {
-		http: { kind: "offered", endpoint: "chats.markResolved" },
 		botLoop: {
 			kind: "offered",
 			tool: "resolve_chat",
@@ -12,7 +11,6 @@ const manifest = {
 		},
 	},
 	"chats.rename": {
-		http: { kind: "offered", endpoint: "chats.renameChat" },
 		botLoop: {
 			kind: "coveredBy",
 			operation: "chats.setResolved",
@@ -20,7 +18,6 @@ const manifest = {
 		},
 	},
 	"computers.requestHost": {
-		http: { kind: "heldBack", reason: "Stand-in: only bots ask for hosts." },
 		botLoop: {
 			kind: "offered",
 			tool: "request_host",
@@ -29,7 +26,6 @@ const manifest = {
 		},
 	},
 	"automations.create": {
-		http: { kind: "offered", endpoint: "automations.create" },
 		botLoop: {
 			kind: "offered",
 			tool: "create_automation",
@@ -38,28 +34,16 @@ const manifest = {
 		},
 	},
 	"turns.recordStep": {
-		http: { kind: "heldBack", reason: "Stand-in: the bot loop records its own steps." },
 		botLoop: { kind: "calledByLoop" },
 	},
 	"events.followChat": {
-		http: { kind: "heldBack", reason: "Stand-in: the event stream serves it." },
 		botLoop: { kind: "heldBack", reason: "Stand-in: a bot reads events in its turn." },
 	},
-} as const satisfies Record<string, Decisions>;
-
-describe("httpOperations", () => {
-	it("lists the offered operations with their endpoints, leaving out those held back", () => {
-		expect(httpOperations(manifest)).toEqual([
-			{ operation: "automations.create", endpoint: "automations.create" },
-			{ operation: "chats.rename", endpoint: "chats.renameChat" },
-			{ operation: "chats.setResolved", endpoint: "chats.markResolved" },
-		]);
-	});
-});
+} as const satisfies Record<string, { botLoop: BotLoopDecision }>;
 
 describe("botLoopTools", () => {
 	it("lists the tools offered, in tool name order, with their bounds and approval", () => {
-		expect(botLoopTools(manifest)).toEqual([
+		expect(botLoopTools(contracts)).toEqual([
 			{
 				operation: "automations.create",
 				tool: "create_automation",

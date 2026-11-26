@@ -15,19 +15,17 @@ import {
 	authenticators,
 	buildWorld,
 	everyKindOfPrincipal,
-	outcomesFor,
 	principals,
 	type World,
 } from "../../proofs/world.test-support.ts";
 import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
- * The computers operations, each called for every kind of principal through
- * the registry, as an entrypoint calls them. What each comes to is "ok", the
- * tag of its refusal, or the tag of the error its service answers with once
- * proved: hidden where the principal doesn't reach the workspace or project,
- * forbidden where it does but may not act. Who may do what in detail is the
- * provers' tests'.
+ * What the computers operations do beyond the rule `permissions.test.ts`
+ * states for each: the hosts and providers a manager changes, that a provider
+ * they name is their workspace's, and whose computers' disks each principal is
+ * shown. What each comes to is "ok", the tag of its refusal, or the tag of the
+ * error its service answers with.
  *
  * The world is `buildWorld`'s: in workspace A, Ed (an editor) made the public
  * bot Pub, which leads the private project J with Helper in it; Ed, Vi (a
@@ -35,7 +33,7 @@ import { type CallOperation, operationOutcome, servedOperations } from "../testi
  * provider of A is enabled, and the one J's computer was made by has no key,
  * so nothing here reaches a provider.
  */
-describe("the computers operations, for each kind of principal", () => {
+describe("the computers operations, beyond who may call them", () => {
 	let world: World;
 	let call: CallOperation;
 	let as: ReturnType<typeof principals>;
@@ -64,72 +62,11 @@ describe("the computers operations, for each kind of principal", () => {
 		});
 
 	describe("a workspace's computers", () => {
-		it("are managed by its owner and admins, and a bot only in member bounds", async () => {
-			const reads = ["computerProviders.list", "computerProviders.network"] as const;
-			for (const name of reads) {
-				expect({
-					name,
-					outcomes: await outcomesFor(
-						{
-							admin: who.admin,
-							outsider: who.outsider,
-							adminsBotInChatBounds: who.pubForAdmin,
-						},
-						(principal) => operationOutcome(call, principal, name, { workspace: a.workspace }),
-					),
-				}).toEqual({
-					name,
-					outcomes: {
-						admin: "ok",
-						outsider: "ResourceHidden",
-						adminsBotInChatBounds: "ActionForbidden",
-					},
-				});
-			}
-		});
-
-		it("say whether computers can be given to anyone in the workspace, and a bot only in member bounds", async () => {
-			expect(
-				await outcomesFor(
-					{
-						viewer: who.vi,
-						outsider: who.outsider,
-						botInChatBounds: who.pubForEd,
-					},
-					(principal) =>
-						operationOutcome(call, principal, "computerProviders.access", {
-							workspace: a.workspace,
-						}),
-				),
-			).toEqual({
-				viewer: "ok",
-				outsider: "ResourceHidden",
-				botInChatBounds: "ActionForbidden",
-			});
-			expect(await call(who.vi, "computerProviders.access", { workspace: a.workspace })).toEqual({
-				enabled: false,
-			});
-		});
-
-		it("adds, removes, blocks and unblocks hosts for those who manage the workspace", async () => {
+		it("adds, removes, blocks and unblocks the workspace's hosts", async () => {
 			const input = { workspace: a.workspace, host: "packages.example.com" };
 			const network = () =>
 				call(who.admin, "computerProviders.network", { workspace: a.workspace });
 			const entry = expect.objectContaining({ host: input.host });
-
-			for (const name of [
-				"computerProviders.addHost",
-				"computerProviders.removeHost",
-				"computerProviders.blockHost",
-				"computerProviders.unblockHost",
-			] as const) {
-				expect(await operationOutcome(call, who.pubForAdmin, name, input), name).toBe(
-					"ActionForbidden",
-				);
-				expect(await operationOutcome(call, who.outsider, name, input), name).toBe(
-					"ResourceHidden",
-				);
-			}
 
 			await call(who.admin, "computerProviders.addHost", input);
 			expect((await network()).addedHosts).toContainEqual(entry);
@@ -144,12 +81,11 @@ describe("the computers operations, for each kind of principal", () => {
 		const providerFixture = async () => {
 			const workspace = await seedWorkspace();
 			const admin = await as.member(await seedMember(workspace, "admin"));
-			const editor = await as.member(await seedMember(workspace, "editor"));
 			const made = await call(admin, "computerProviders.create", {
 				workspace,
 				settings: { builtIn: "e2b" },
 			});
-			return { workspace, admin, editor, providerId: made.id };
+			return { workspace, admin, providerId: made.id };
 		};
 
 		it("lists the provider settings an admin changes", async () => {
@@ -197,32 +133,26 @@ describe("the computers operations, for each kind of principal", () => {
 			).rejects.toMatchObject({ _tag: "ComputerProviderIncomplete" });
 		});
 
-		it("checks workspace management and hides foreign and missing provider ids", async () => {
-			const { workspace, admin, editor, providerId } = await providerFixture();
+		it("hides another workspace's providers and missing ones from its manager", async () => {
+			const { workspace, admin } = await providerFixture();
 			const elsewhere = await providerFixture();
 
-			const missing = crypto.randomUUID();
-			for (const { principal, ids, refusal } of [
-				{ principal: editor, ids: [providerId, missing], refusal: "ActionForbidden" },
-				{ principal: admin, ids: [elsewhere.providerId, missing], refusal: "ResourceHidden" },
-			]) {
-				for (const providerId of ids) {
-					const address = { workspace, providerId };
-					for (const name of [
-						"computerProviders.test",
-						"computerProviders.template",
-						"computerProviders.prepareTemplate",
-						"computerProviders.remove",
-					] as const) {
-						expect(await operationOutcome(call, principal, name, address), name).toBe(refusal);
-					}
-					expect(
-						await operationOutcome(call, principal, "computerProviders.update", {
-							...address,
-							changes: { enabled: false },
-						}),
-					).toBe(refusal);
+			for (const providerId of [elsewhere.providerId, crypto.randomUUID()]) {
+				const address = { workspace, providerId };
+				for (const name of [
+					"computerProviders.test",
+					"computerProviders.template",
+					"computerProviders.prepareTemplate",
+					"computerProviders.remove",
+				] as const) {
+					expect(await operationOutcome(call, admin, name, address), name).toBe("ResourceHidden");
 				}
+				expect(
+					await operationOutcome(call, admin, "computerProviders.update", {
+						...address,
+						changes: { enabled: false },
+					}),
+				).toBe("ResourceHidden");
 			}
 		});
 
@@ -231,6 +161,9 @@ describe("the computers operations, for each kind of principal", () => {
 			await call(admin, "computerProviders.remove", { workspace, providerId });
 			const providers = await call(admin, "computerProviders.list", { workspace });
 			expect(providers.map(({ id }) => id)).not.toContain(providerId);
+			expect(await call(admin, "computerProviders.access", { workspace })).toEqual({
+				enabled: false,
+			});
 		});
 	});
 
@@ -310,70 +243,21 @@ describe("the computers operations, for each kind of principal", () => {
 	});
 
 	describe("a project's computer", () => {
-		it("is seen by whoever reaches the project, within a turn's bounds", async () => {
-			for (const name of ["projectComputer.get", "projectComputer.network"] as const) {
-				expect({
-					name,
-					outcomes: await outcomesFor(
-						{
-							viewer: who.vi,
-							notInProject: who.erin,
-							botOutsideBounds: who.helperInK,
-						},
-						(principal) => operationOutcome(call, principal, name, { projectId: a.project }),
-					),
-				}).toEqual({
-					name,
-					outcomes: {
-						viewer: "ok",
-						notInProject: "ResourceHidden",
-						botOutsideBounds: "ResourceHidden",
-					},
-				});
-			}
-		});
-
-		it("requires project management to reset or upgrade its computer", async () => {
-			const projectId = await projectLikeJ();
-			for (const [name, allowed] of [
-				["projectComputer.reset", "ok"],
-				["projectComputer.upgrade", "NoComputerProvider"],
-			] as const) {
-				const manage = (principal: Principal) =>
-					operationOutcome(call, principal, name, { projectId });
-				expect(await manage(who.admin), name).toBe(allowed);
-				expect(await manage(who.ed), name).toBe("ActionForbidden");
-				expect(await manage(who.erin), name).toBe("ResourceHidden");
-			}
-		});
-
-		it("is a bot's default project's, managed by the bot's managers, and hidden from an admin with a personal bot", async () => {
-			const resetOf = (principal: Principal, projectId: string) =>
+		it("resets a bot's computer for its manager and hides a personal bot's computer from an admin", async () => {
+			const reset = (principal: Principal, projectId: string) =>
 				operationOutcome(call, principal, "projectComputer.reset", { projectId });
 
-			expect({
-				creatorOfPublicBot: await resetOf(who.ed, a.pub.defaultProject),
-				editorTalkingToPublicBot: await resetOf(who.erin, a.pub.defaultProject),
-				adminOfPersonalBot: await resetOf(who.admin, a.personal.defaultProject),
-			}).toEqual({
-				creatorOfPublicBot: "ok",
-				editorTalkingToPublicBot: "ActionForbidden",
-				adminOfPersonalBot: "ResourceHidden",
-			});
+			expect(await reset(who.ed, a.pub.defaultProject)).toBe("ok");
+			expect(await reset(who.erin, a.pub.defaultProject)).toBe("ActionForbidden");
+			expect(await reset(who.admin, a.personal.defaultProject)).toBe("ResourceHidden");
 		});
 
-		it("changes a project's allowed hosts only with authority to change its reach", async () => {
+		it("adds and removes a project's allowed hosts", async () => {
 			const projectId = a.project;
 			const input = { projectId, host: "project-packages.example.org" };
 			const network = () => call(who.admin, "projectComputer.network", { projectId });
 			const entry = expect.objectContaining({ host: input.host });
 
-			for (const name of ["projectComputer.addHost", "projectComputer.removeHost"] as const) {
-				expect(await operationOutcome(call, who.pubForAdmin, name, input), name).toBe(
-					"ActionForbidden",
-				);
-				expect(await operationOutcome(call, who.erin, name, input), name).toBe("ResourceHidden");
-			}
 			await call(who.admin, "projectComputer.addHost", input);
 			expect((await network()).addedHosts).toContainEqual(entry);
 			await call(who.admin, "projectComputer.removeHost", input);

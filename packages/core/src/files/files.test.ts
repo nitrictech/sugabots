@@ -193,9 +193,9 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 				address: async (at: { fileId: string; version: number }) =>
 					(await asMember(served, memberId).files.pageAddress(at.fileId, at.version)).url ??
 					undefined,
-				open: async (token: string) => {
+				open: async (token: string, fileId?: string) => {
 					const principal = await runOnPostgres(pages.open(token));
-					return served(principal, "files.servePage", { fileId: principal.file });
+					return served(principal, "files.servePage", { fileId: fileId ?? principal.file });
 				},
 			});
 		};
@@ -210,6 +210,11 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			expect(address).toMatch(/^https:\/\/pages\.example-content\.com\/pages\/.+/);
 			const token = address?.split("/pages/")[1] ?? "";
 			expect(await pages.open(token)).toEqual({ title: "Chart", html: "<p>chart</p>" });
+			const another = await seed({ kind: "html", title: "Notes", content: "<p>notes</p>" });
+			await expect(pages.open(token, another.id)).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+				resource: "file",
+			});
 		});
 
 		it("gives no address without a content origin, nor for a document", async () => {

@@ -182,7 +182,7 @@ export function useUpdateBot(botId: string) {
 		mutationKey,
 		scope: { id: `bot-update:${botId}` },
 		mutationFn: (input: BotUpdate) =>
-			Effect.runPromise(client.api.bots.update({ params: { botId }, payload: input })),
+			Effect.runPromise(client.api.bots.update({ params: { botId }, payload: { changes: input } })),
 		onMutate: async (input) => {
 			await queries.cancelQueries({ queryKey: rosterKey });
 			const before = queries.getQueryData<Bot[]>(rosterKey)?.find((bot) => bot.id === botId);

@@ -9,7 +9,6 @@ import {
 	seedProject,
 	seedProjectChat,
 	seedWebhookTrigger,
-	unique,
 } from "../../authentication/seed.test-support.ts";
 import { projectBot } from "../../database/schema.ts";
 import { closeDatabase, onDatabase } from "../../database/testing.ts";
@@ -18,26 +17,24 @@ import {
 	authenticators,
 	buildWorld,
 	everyKindOfPrincipal,
-	outcomesFor,
 	principals,
 	type World,
 } from "../../proofs/world.test-support.ts";
 import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
- * The automations operations, each called for every kind of principal
- * through the registry, as an entrypoint calls them. What each comes to is
- * "ok" or the tag of its refusal: hidden where the principal doesn't reach
- * the project, forbidden where it does but may not act. Who may do what in
- * detail is the provers' tests'; the automations' own rules are
- * `chats/automations/`'.
+ * What the automations operations prove beyond the rule `permissions.test.ts`
+ * states for each: that an automation or trigger they name is their
+ * project's, what an admin may do to a personal bot's automations without
+ * reaching them, what a webhook call reaches, and a viewer's own Personal
+ * Assistant. What each comes to is "ok" or the tag of its refusal.
  *
  * The world is `buildWorld`'s: in workspace A, Ed (an editor) made the public
  * bot Pub, which leads the private project J with Helper in it, and his
  * personal bot Personal; Ed, Vi (a viewer) and Quinn are in J, and Erin (an
  * editor) isn't.
  */
-describe("the automations operations, for each kind of principal", () => {
+describe("the automations operations, beyond who may call them", () => {
 	let world: World;
 	let call: CallOperation;
 	let as: ReturnType<typeof principals>;
@@ -63,56 +60,6 @@ describe("the automations operations, for each kind of principal", () => {
 	});
 
 	describe("reading a project's automations", () => {
-		it("lists them to whoever reaches the project, within a turn's bounds", async () => {
-			const list = (principal: Principal) =>
-				operationOutcome(call, principal, "automations.list", { projectId: a.project });
-
-			expect(
-				await outcomesFor(
-					{
-						viewer: who.vi,
-						notInProject: who.erin,
-						botOutsideBounds: who.helperInK,
-					},
-					list,
-				),
-			).toEqual({
-				viewer: "ok",
-				notInProject: "ResourceHidden",
-				botOutsideBounds: "ResourceHidden",
-			});
-		});
-
-		it("lists project runs for a viewer and hides them from a non-member and computer sleep", async () => {
-			const projectId = await seedProject(a.workspace, {
-				leadBotId: a.pub.id,
-				members: [a.ed, a.vi],
-			});
-			const runs = (principal: Principal) =>
-				operationOutcome(call, principal, "automations.projectRuns", { projectId, limit: 20 });
-			const { principal: run } = await as.run(a.workspace, projectId, a.pub.id);
-			if (run._tag !== "AutomationRun") throw new Error("Expected an automation run");
-			await call(who.admin, "chats.openAutomationFeed", {
-				workspace: a.workspace,
-				automationId: run.automation,
-			});
-
-			expect(
-				await outcomesFor(
-					{
-						viewer: who.vi,
-						notInProject: who.erin,
-						computerSleep: (await as.computerSleep(a.workspace, projectId)).principal,
-					},
-					runs,
-				),
-			).toEqual({
-				viewer: "ok",
-				notInProject: "ResourceHidden",
-				computerSleep: "ResourceHidden",
-			});
-		});
-
 		it("shows an admin only a personal bot’s automation names and states", async () => {
 			const { defaultProject: own } = await seedBot(a.workspace, {
 				createdById: a.ed,
@@ -144,30 +91,6 @@ describe("the automations operations, for each kind of principal", () => {
 	});
 
 	describe("managing a project's automations", () => {
-		it("lists the automation created by a signed-in project manager", async () => {
-			const input = {
-				projectId: a.project,
-				name: `Automation ${unique()}`,
-				instructions: "Summarize open issues.",
-				triggers: [],
-			};
-			await expect(call(who.adminsAssistant, "automations.create", input)).rejects.toMatchObject({
-				_tag: "ActionForbidden",
-			});
-			await expect(call(who.erin, "automations.create", input)).rejects.toMatchObject({
-				_tag: "ResourceHidden",
-			});
-
-			const created = await call(who.admin, "automations.create", input);
-
-			expect(
-				await call(who.admin, "automations.list", { projectId: input.projectId }),
-			).toContainEqual(
-				expect.objectContaining({ name: input.name, instructions: input.instructions }),
-			);
-			expect(created).toMatchObject({ automation: { name: input.name } });
-		});
-
 		it("lets an admin only switch off a personal bot's automations, which they can't otherwise reach", async () => {
 			const automation = await anAutomation(a.personal.defaultProject);
 
@@ -236,9 +159,12 @@ describe("the automations operations, for each kind of principal", () => {
 				.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, a.helper.id))),
 		);
 
-		expect(await operationOutcome(call, acting, "automations.list", { projectId })).toBe(
-			"BotCannotReach",
-		);
+		for (const name of ["automations.list", "projects.listMembers"] as const) {
+			await expect(call(acting, name, { projectId }), name).rejects.toMatchObject({
+				_tag: "BotCannotReach",
+				resource: "project",
+			});
+		}
 		const missing = crypto.randomUUID();
 		for (const id of [connectorId, missing]) {
 			await expect(
@@ -345,46 +271,6 @@ describe("the automations operations, for each kind of principal", () => {
 				"chats.openAutomationFeed",
 			).toBe("ResourceHidden");
 		}
-	});
-
-	describe("automations.run", () => {
-		it("lists the accepted manual run in its project", async () => {
-			const projectId = await seedProject(a.workspace, { leadBotId: a.pub.id, members: [a.ed] });
-			const target = await anAutomation(projectId);
-			await call(who.ed, "chats.openAutomationFeed", {
-				workspace: a.workspace,
-				automationId: target.automationId,
-			});
-			const accepted = await call(who.ed, "automations.run", {
-				...target,
-				requestId: crypto.randomUUID(),
-			});
-
-			const { items } = await call(who.ed, "automations.projectRuns", {
-				projectId: target.projectId,
-				limit: 20,
-			});
-			expect(items).toContainEqual(
-				expect.objectContaining({
-					id: accepted.runId,
-					chatId: accepted.chatId,
-					automationId: target.automationId,
-					trigger: expect.objectContaining({ kind: "manual" }),
-				}),
-			);
-		});
-
-		it("refuses a viewer who reaches the automation and hides it from a non-member of the project", async () => {
-			const automation = await anAutomation(a.project);
-			const run = (principal: Principal) =>
-				operationOutcome(call, principal, "automations.run", {
-					...automation,
-					requestId: crypto.randomUUID(),
-				});
-
-			expect(await run(who.vi)).toBe("ActionForbidden");
-			expect(await run(who.erin)).toBe("ResourceHidden");
-		});
 	});
 
 	describe("automations.webhook", () => {

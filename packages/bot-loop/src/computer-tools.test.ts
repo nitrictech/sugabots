@@ -37,7 +37,7 @@ import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-rea
 import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { botLoopOnPostgres, parkedCallOf, scriptedSteps } from "./testing.ts";
+import { botLoopOnPostgres, callsOf, parkedCallOf, scriptedSteps } from "./testing.ts";
 
 /**
  * A bot's computer tools, and its host requests, through the bot loop over
@@ -76,9 +76,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
 		const setComputerUse = (usesComputer: boolean) =>
 			onDatabase((db) => db.update(bot).set({ usesComputer }).where(eq(bot.id, botId)));
-
-		const callsOf = (turnId: string) =>
-			onDatabase((db) => db.select().from(toolCall).where(eq(toolCall.turnId, turnId)));
 
 		const projectHosts = () =>
 			onDatabase((db) =>

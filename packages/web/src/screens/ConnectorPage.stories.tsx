@@ -193,7 +193,7 @@ const meta = preview.meta({
 		];
 		msw.use(
 			http.patch(`${API}/projects/:projectId/connectors/:connectorId`, async ({ request }) => {
-				const change = (await request.json()) as ConnectorUpdate;
+				const { changes: change } = (await request.json()) as { changes: ConnectorUpdate };
 				current = {
 					...current,
 					tools: current.tools.map((tool) => ({

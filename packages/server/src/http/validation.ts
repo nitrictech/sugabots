@@ -58,12 +58,15 @@ export const validateRequestLayer = processLayer(
 function schemaErrorAsBadRequest(error: HttpApiError.HttpApiSchemaError) {
 	return error.kind === "Body" || error.kind === "ResponseHeaders"
 		? Effect.die(error)
-		: Effect.fail(
-				new BadRequest({
-					message: userText`That is not a valid request`,
-					details: issues(error.cause.issue).issues,
-				}),
-			);
+		: Effect.fail(invalidRequest(error.cause.issue));
+}
+
+/** The refusal of a request that its endpoint's schemas, or its operation's input, don't admit. */
+export function invalidRequest(issue: SchemaIssue.Issue): BadRequest {
+	return new BadRequest({
+		message: userText`That is not a valid request`,
+		details: issues(issue).issues,
+	});
 }
 
 /**

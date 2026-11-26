@@ -53,7 +53,7 @@ import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import { useSystemBots } from "@/lib/system-bots.ts";
 import { BotAvatar, TurnTakingAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { useLeave } from "@/ui/back-button.tsx";
+import { useBackToLinkedPage, useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog, DialogDescription } from "@/ui/dialog.tsx";
@@ -87,6 +87,7 @@ import {
 	SettingsRowIcon,
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
+import { TitleTag } from "@/ui/title-tag.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ModelChoiceList } from "./ModelChoiceList.tsx";
@@ -518,10 +519,17 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 }
 
 export function BackToModels() {
+	const backToModels = useBackToLinkedPage();
 	return (
 		<PageBackLink
 			label="Models"
-			render={<Link {...settingsSectionLink("providers")} aria-label="Back to Models" />}
+			render={
+				<Link
+					{...settingsSectionLink("providers")}
+					aria-label="Back to Models"
+					onClick={backToModels}
+				/>
+			}
 		/>
 	);
 }
@@ -1268,10 +1276,17 @@ function Models({ provider }: { provider: ModelProvider }) {
 					return (
 						<SettingsRow
 							key={model.id}
-							label={modelName(model)}
+							label={
+								// Beside its name, what the workspace's defaults hold it for.
+								<span className="flex min-w-0 items-center gap-1.5">
+									<span className="truncate">{modelName(model)}</span>
+									{held?.newBots && <TitleTag>Default</TitleTag>}
+									{held?.systemBots && <TitleTag>System bots</TitleTag>}
+								</span>
+							}
 							sub={
 								<span className="flex items-center gap-1.5">
-									{held ? `${held.newBots ? "Default" : "System bots"} · ${who}` : who}
+									{who}
 									<CapabilityIcons model={model} />
 								</span>
 							}

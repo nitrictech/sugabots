@@ -65,7 +65,7 @@ export function useSearchProviderActions() {
 				Effect.runPromise(
 					client.api.searchProviders.update({
 						params: { workspace: requiredWorkspaceId() },
-						payload: json,
+						payload: { changes: json },
 					}),
 				),
 			onSuccess: refresh,

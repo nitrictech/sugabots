@@ -1,8 +1,8 @@
 /**
- * The chat-reads operations' contracts, and their entries in the exposure
- * manifest: what members read of chats and the files in them, written files
+ * The chat-reads operations' contracts, each with its decisions in the
+ * exposure manifest: what members read of chats and the files in them, written files
  * among them, and how much across a workspace waits for them.
- * `index.ts` spreads both, so adding an operation here touches no other file.
+ * `index.ts` spreads them, so adding an operation here touches no other file.
  */
 
 import { Schema, Stream } from "effect";
@@ -28,7 +28,6 @@ import { chatContextSchema, chatDetailsSchema, chatHistoryQuerySchema } from "..
 import { isoTimestampSchema } from "../timestamps.ts";
 import { uuidOrStringSchema, uuidSchema } from "../uuid.ts";
 import { workspaceIdOrSlugSchema, workspaceRoleSchema } from "../workspaces.ts";
-import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
 
 /** How an operation that proves it reaches a chat, project or file refuses. */
@@ -84,6 +83,32 @@ const memberRole = Schema.Struct({
 	role: Schema.Union([workspaceRoleSchema, Schema.Literal("none")]),
 });
 
+/** Held back: a bot reads the chat it works in from its turn, and others wait for tools to become operations. */
+const readInTurn = {
+	kind: "heldBack",
+	reason:
+		"A bot reads the chat it works in as its turn's context; reading other chats waits for tools to become operations.",
+} as const;
+
+/** Covered: what waits for a member, which a Personal Assistant's workspace guide tells them. */
+const whatWaitsForYou = {
+	kind: "coveredBy",
+	operation: "workspaces.guide",
+	reason: "It is what waits for a member, which a Personal Assistant's workspace guide tells them.",
+} as const;
+
+const readByFileTools = {
+	kind: "heldBack",
+	reason:
+		"Members use this to browse files and versions. The file tools read written files at their current versions.",
+} as const;
+
+const turnReadTool = (tool: string) =>
+	({
+		http: { kind: "heldBack", reason: "Formats a read for the bot in a turn." },
+		botLoop: { kind: "offered", tool, offeredIn: "everywhere", approval: { kind: "never" } },
+	}) as const;
+
 export const chatReadsContracts = {
 	"chats.searchHistory": OperationContract.make("chats.searchHistory", {
 		description: `Search chat messages by words, time range, or both. Leave out chat to search here, give a chat id to search there, or pass "all" to search chats you can reach. In this chat, the search covers earlier messages from before the part you read word for word. Returns up to ${HISTORY_SEARCH_MAX_MATCHES} messages, best first with words or oldest first with only a time range. When searching across chats, each result includes its chat id.`,
@@ -126,6 +151,7 @@ export const chatReadsContracts = {
 		]),
 		errors: turnReadErrors,
 		changes: false,
+		...turnReadTool(SEARCH_HISTORY_TOOL),
 	}),
 	"chats.readChatFile": OperationContract.make("chats.readChatFile", {
 		description: `Read a file in a chat you can reach, such as an attachment or a kept tool result. Returns up to ${CHAT_FILE_READ_DEFAULT_LINES} numbered lines with the file's total lines and, when there is more, where to continue. Give pattern to find lines containing it. A supported image is shown if your model can see images.`,
@@ -172,6 +198,7 @@ export const chatReadsContracts = {
 		]),
 		errors: turnReadErrors,
 		changes: false,
+		...turnReadTool(READ_CHAT_FILE_TOOL),
 	}),
 	"chats.readDocs": OperationContract.make("chats.readDocs", {
 		description:
@@ -191,6 +218,7 @@ export const chatReadsContracts = {
 		output: Schema.Union([Schema.Struct({ markdown: Schema.String }), refused]),
 		errors: turnReadErrors,
 		changes: false,
+		...turnReadTool(READ_DOCS_TOOL),
 	}),
 	"chats.workspaceRole": OperationContract.make("chats.workspaceRole", {
 		description:
@@ -210,6 +238,7 @@ export const chatReadsContracts = {
 		]),
 		errors: turnReadErrors,
 		changes: false,
+		...turnReadTool(WORKSPACE_ROLE_TOOL),
 	}),
 	"chats.projectChats": OperationContract.make("chats.projectChats", {
 		description:
@@ -218,6 +247,8 @@ export const chatReadsContracts = {
 		output: projectChatListSchema,
 		errors: reachRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/projects/:projectId/chats" },
+		botLoop: readInTurn,
 	}),
 	"chats.attention": OperationContract.make("chats.attention", {
 		description:
@@ -226,6 +257,8 @@ export const chatReadsContracts = {
 		output: attentionCountsSchema,
 		errors: workspaceRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/workspaces/:workspace/chats/attention" },
+		botLoop: whatWaitsForYou,
 	}),
 	"chats.attentionMarks": OperationContract.make("chats.attentionMarks", {
 		description:
@@ -234,6 +267,8 @@ export const chatReadsContracts = {
 		output: attentionMarksSchema,
 		errors: workspaceRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/workspaces/:workspace/chats/attention-marks" },
+		botLoop: whatWaitsForYou,
 	}),
 	"chats.approvals": OperationContract.make("chats.approvals", {
 		description:
@@ -242,6 +277,8 @@ export const chatReadsContracts = {
 		output: workspaceApprovalsSchema,
 		errors: workspaceRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/workspaces/:workspace/chats/approvals" },
+		botLoop: whatWaitsForYou,
 	}),
 	"chats.messages": OperationContract.make("chats.messages", {
 		description:
@@ -250,6 +287,8 @@ export const chatReadsContracts = {
 		output: chatMessagesPageSchema,
 		errors: [...reachRefusals, InvalidCursor],
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/chats/:chatId/messages" },
+		botLoop: readInTurn,
 	}),
 	"chats.history": OperationContract.make("chats.history", {
 		description:
@@ -258,6 +297,8 @@ export const chatReadsContracts = {
 		output: chatHistoryPageSchema,
 		errors: [...reachRefusals, InvalidCursor],
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/chats/:chatId/history" },
+		botLoop: readInTurn,
 	}),
 	"chats.file": OperationContract.make("chats.file", {
 		description: "A file attached to a message in a chat, with its own media type.",
@@ -265,6 +306,15 @@ export const chatReadsContracts = {
 		output: chatFileSchema,
 		errors: [...reachRefusals, ChatFileNotFound],
 		changes: false,
+		http: {
+			kind: "ownEndpoint",
+			reason: "It answers with the file's bytes, under the file's own media type and name.",
+		},
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"It is a file's bytes, for a browser; a bot reads the files in its chat with its own tools.",
+		},
 	}),
 	"chats.get": OperationContract.make("chats.get", {
 		description:
@@ -273,6 +323,8 @@ export const chatReadsContracts = {
 		output: chatDetailsSchema,
 		errors: [...reachRefusals, InvalidCursor],
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/chats/:chatId" },
+		botLoop: readInTurn,
 	}),
 	"chats.context": OperationContract.make("chats.context", {
 		description:
@@ -281,6 +333,11 @@ export const chatReadsContracts = {
 		output: Schema.NullOr(chatContextSchema),
 		errors: reachRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/chats/:chatId/context" },
+		botLoop: {
+			kind: "heldBack",
+			reason: "It is the meter the web app shows; the bot loop measures a turn's context itself.",
+		},
 	}),
 	"files.listInProject": OperationContract.make("files.listInProject", {
 		description:
@@ -289,6 +346,8 @@ export const chatReadsContracts = {
 		output: Schema.Array(listedFileSchema),
 		errors: reachRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/projects/:projectId/files" },
+		botLoop: readByFileTools,
 	}),
 	"files.get": OperationContract.make("files.get", {
 		description: "A file a bot wrote, at its current version.",
@@ -296,6 +355,8 @@ export const chatReadsContracts = {
 		output: writtenFileSchema,
 		errors: reachRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/files/:fileId" },
+		botLoop: readByFileTools,
 	}),
 	"files.versions": OperationContract.make("files.versions", {
 		description: "The versions of a file a bot wrote, newest first.",
@@ -303,6 +364,8 @@ export const chatReadsContracts = {
 		output: Schema.Array(listedFileVersionSchema),
 		errors: reachRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/files/:fileId/versions" },
+		botLoop: readByFileTools,
 	}),
 	"files.getVersion": OperationContract.make("files.getVersion", {
 		description: "One version of a file a bot wrote.",
@@ -310,6 +373,8 @@ export const chatReadsContracts = {
 		output: writtenFileSchema,
 		errors: reachRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/files/:fileId/versions/:version" },
+		botLoop: readByFileTools,
 	}),
 	"files.pageAddress": OperationContract.make("files.pageAddress", {
 		description:
@@ -318,92 +383,10 @@ export const chatReadsContracts = {
 		output: Schema.Struct({ url: Schema.NullOr(Schema.String) }),
 		errors: reachRefusals,
 		changes: false,
-	}),
-} as const;
-
-/** Held back: a bot reads the chat it works in from its turn, and others wait for tools to become operations. */
-const readInTurn = {
-	kind: "heldBack",
-	reason:
-		"A bot reads the chat it works in as its turn's context; reading other chats waits for tools to become operations.",
-} as const;
-
-/** Covered: what waits for a member, which a Personal Assistant's workspace guide tells them. */
-const whatWaitsForYou = {
-	kind: "coveredBy",
-	operation: "workspaces.guide",
-	reason: "It is what waits for a member, which a Personal Assistant's workspace guide tells them.",
-} as const;
-
-const readByFileTools = {
-	kind: "heldBack",
-	reason:
-		"Members use this to browse files and versions. The file tools read written files at their current versions.",
-} as const;
-
-const turnReadTool = (tool: string) =>
-	({
-		http: { kind: "heldBack", reason: "Formats a read for the bot in a turn." },
-		botLoop: { kind: "offered", tool, offeredIn: "everywhere", approval: { kind: "never" } },
-	}) as const;
-
-export const chatReadsExposure = {
-	"chats.searchHistory": turnReadTool(SEARCH_HISTORY_TOOL),
-	"chats.readChatFile": turnReadTool(READ_CHAT_FILE_TOOL),
-	"chats.readDocs": turnReadTool(READ_DOCS_TOOL),
-	"chats.workspaceRole": turnReadTool(WORKSPACE_ROLE_TOOL),
-	"chats.projectChats": {
-		http: { kind: "offered", endpoint: "chats.projectChats" },
-		botLoop: readInTurn,
-	},
-	"chats.attention": {
-		http: { kind: "offered", endpoint: "chats.attention" },
-		botLoop: whatWaitsForYou,
-	},
-	"chats.attentionMarks": {
-		http: { kind: "offered", endpoint: "chats.attentionMarks" },
-		botLoop: whatWaitsForYou,
-	},
-	"chats.approvals": {
-		http: { kind: "offered", endpoint: "chats.approvals" },
-		botLoop: whatWaitsForYou,
-	},
-	"chats.messages": { http: { kind: "offered", endpoint: "chats.messages" }, botLoop: readInTurn },
-	"chats.history": { http: { kind: "offered", endpoint: "chats.history" }, botLoop: readInTurn },
-	"chats.file": {
-		http: { kind: "offered", endpoint: "chats.file" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"It is a file's bytes, for a browser; a bot reads the files in its chat with its own tools.",
-		},
-	},
-	"chats.get": { http: { kind: "offered", endpoint: "chats.get" }, botLoop: readInTurn },
-	"chats.context": {
-		http: { kind: "offered", endpoint: "chats.context" },
-		botLoop: {
-			kind: "heldBack",
-			reason: "It is the meter the web app shows; the bot loop measures a turn's context itself.",
-		},
-	},
-	"files.listInProject": {
-		http: { kind: "offered", endpoint: "files.listInProject" },
-		botLoop: readByFileTools,
-	},
-	"files.get": { http: { kind: "offered", endpoint: "files.get" }, botLoop: readByFileTools },
-	"files.versions": {
-		http: { kind: "offered", endpoint: "files.versions" },
-		botLoop: readByFileTools,
-	},
-	"files.getVersion": {
-		http: { kind: "offered", endpoint: "files.getVersion" },
-		botLoop: readByFileTools,
-	},
-	"files.pageAddress": {
-		http: { kind: "offered", endpoint: "files.pageAddress" },
+		http: { kind: "offered", method: "GET", path: "/files/:fileId/versions/:version/page" },
 		botLoop: {
 			kind: "heldBack",
 			reason: "A page's address is for a member's browser to open; a bot reads the file itself.",
 		},
-	},
-} as const satisfies DomainExposure<typeof chatReadsContracts>;
+	}),
+} as const;

@@ -283,6 +283,19 @@ describe("a project's chat", () => {
 
 		await screen.findByRole("region", { name: `${project.name}'s computer` });
 	});
+
+	it("keeps its desktop beneath the settings it opens on a phone, and goes back to it as it was", async () => {
+		const { router } = mount(`/suga/projects/${project.slug}/${chatId}?desktop=true`);
+		const desktop = await screen.findByRole("region", { name: `${project.name}'s computer` });
+
+		fireEvent.click(await within(desktop).findByRole("link", { name: "Set up computers" }));
+		await screen.findByRole("heading", { name: "Computers", level: 2 });
+		expect(desktop.isConnected).toBe(true);
+		fireEvent.click(screen.getByRole("link", { name: "Back" }));
+
+		await waitFor(() => expect(router.state.location.search).toEqual({ desktop: true }));
+		expect(screen.getByRole("region", { name: `${project.name}'s computer` })).toBe(desktop);
+	});
 });
 
 describe("a project's new chat", () => {

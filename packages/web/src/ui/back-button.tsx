@@ -92,6 +92,21 @@ export function useLeave() {
 }
 
 /**
+ * The click of a Back link to the page this one sits under: back through
+ * history when that page is the one behind, so the browser's Back afterwards
+ * does not reopen this one, and otherwise to it in this page's place. A click
+ * that opens a new tab, or that a phone's Back has already taken, is left alone.
+ */
+export function useBackToLinkedPage(): (event: MouseEvent<HTMLAnchorElement>) => void {
+	const { leaveForPage } = useLeave();
+	return (event) => {
+		if (event.defaultPrevented || !isPlainClick(event)) return;
+		event.preventDefault();
+		leaveForPage(event.currentTarget.href);
+	};
+}
+
+/**
  * Whether `event` is a plain click, to follow in this tab: a modified or
  * middle click on a Back link is left to the browser, which opens the link's
  * page in a new tab.

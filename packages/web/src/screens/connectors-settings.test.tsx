@@ -207,10 +207,12 @@ describe("a bot's Connectors page", () => {
 		await waitFor(() => expect(route.create).toHaveBeenCalledOnce());
 		expect(route.create.mock.calls[0]?.[0]).toMatchObject({
 			payload: {
-				name: "Wiki",
-				url: "https://wiki.example.com/mcp",
-				secretHeader: "Authorization",
-				secret: "Bearer abc123",
+				connector: {
+					name: "Wiki",
+					url: "https://wiki.example.com/mcp",
+					secretHeader: "Authorization",
+					secret: "Bearer abc123",
+				},
 			},
 		});
 		await screen.findByRole("article", { name: "Wiki" });
@@ -235,9 +237,11 @@ describe("a bot's Connectors page", () => {
 
 		await waitFor(() => expect(route.create).toHaveBeenCalledOnce());
 		expect(route.create.mock.calls[0]?.[0]).toMatchObject({
-			payload: { kind: "http", name: "Alerts", url: "https://alerts.example.com/v2" },
+			payload: {
+				connector: { kind: "http", name: "Alerts", url: "https://alerts.example.com/v2" },
+			},
 		});
-		expect(route.create.mock.calls[0]?.[0].payload).not.toHaveProperty("secret");
+		expect(route.create.mock.calls[0]?.[0].payload.connector).not.toHaveProperty("secret");
 	});
 
 	it("tests a server by address before adding it", async () => {
@@ -371,7 +375,7 @@ describe("a bot's Connectors page", () => {
 		await waitFor(() =>
 			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
 				params: { projectId: linear.defaultProjectId, connectorId: wiki.id },
-				payload: { toolAccess: { wipe: "off" } },
+				payload: { changes: { toolAccess: { wipe: "off" } } },
 			}),
 		);
 		await waitFor(() =>
@@ -432,10 +436,12 @@ describe("a bot's Connectors page", () => {
 
 		await waitFor(() =>
 			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
-				payload: { toolAccess: { wipe: "allow", wipe_more: "allow" } },
+				payload: { changes: { toolAccess: { wipe: "allow", wipe_more: "allow" } } },
 			}),
 		);
-		expect(route.update.mock.calls[0]?.[0].payload.toolAccess).not.toHaveProperty("wipe_all");
+		expect(route.update.mock.calls[0]?.[0].payload.changes.toolAccess).not.toHaveProperty(
+			"wipe_all",
+		);
 	});
 
 	it("lists the tools set apart first, saying their kind's setting, and puts them all back", async () => {
@@ -473,7 +479,7 @@ describe("a bot's Connectors page", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Reset all" }));
 		await waitFor(() =>
 			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
-				payload: { toolAccess: { wipe_all: "ask" } },
+				payload: { changes: { toolAccess: { wipe_all: "ask" } } },
 			}),
 		);
 	});
@@ -542,7 +548,7 @@ describe("a bot's Connectors page", () => {
 
 		await waitFor(() =>
 			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
-				payload: { secretHeader: "Authorization", secret: "Bearer abc123" },
+				payload: { changes: { secretHeader: "Authorization", secret: "Bearer abc123" } },
 			}),
 		);
 	});
@@ -567,7 +573,7 @@ describe("a bot's Connectors page", () => {
 		await waitFor(() =>
 			expect(route.update).toHaveBeenCalledWith({
 				params: { projectId: linear.defaultProjectId, connectorId: wiki.id },
-				payload: { secret: "new-secret" },
+				payload: { changes: { secret: "new-secret" } },
 			}),
 		);
 

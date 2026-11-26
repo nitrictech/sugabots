@@ -1,6 +1,6 @@
 /**
- * The automations operations' contracts, and their entries in the exposure manifest.
- * `index.ts` spreads both, so adding an operation here touches no other file.
+ * The automations operations' contracts, each with its decisions in the exposure manifest.
+ * `index.ts` spreads them, so adding an operation here touches no other file.
  */
 
 import { Schema } from "effect";
@@ -53,7 +53,6 @@ import {
 import { TurnExecutionSuperseded } from "../errors/turns.ts";
 import { repositoryEventSchema } from "../github.ts";
 import { uuidOrStringSchema, uuidSchema } from "../uuid.ts";
-import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
 
 /** How an operation that proves it reaches a project refuses. */
@@ -117,6 +116,13 @@ const routineExpression = Schema.Trim.check(
 		'A five-field cron expression in the workspace timezone. For example, "0 9 * * 1-5" means 9am on weekdays.',
 });
 
+/** Held back: triggers are set up in settings, as a webhook's secret is shown once. */
+const setUpInSettings = {
+	kind: "heldBack",
+	reason:
+		"Triggers and their secrets are set up in the web app: a webhook's secret is shown once, so one shown in a chat would be read by everyone there.",
+} as const;
+
 export const automationsContracts = {
 	"automations.list": OperationContract.make("automations.list", {
 		description:
@@ -125,6 +131,12 @@ export const automationsContracts = {
 		output: Schema.Array(automationListItemSchema),
 		errors: [...reachRefusals, ...approvalRefusals],
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/projects/:projectId/automations" },
+		botLoop: {
+			kind: "coveredBy",
+			operation: "automations.listInChat",
+			reason: "The tool lists the current project's automations with a summary of their triggers.",
+		},
 	}),
 	"automations.create": OperationContract.make("automations.create", {
 		description:
@@ -133,6 +145,18 @@ export const automationsContracts = {
 		output: automationWriteResultSchema,
 		errors: [...refusals, AutomationNameTaken, ...webhookSettingRefusals],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/projects/:projectId/automations",
+			status: 201,
+		},
+		botLoop: {
+			kind: "coveredBy",
+			operation: "automations.createWithRoutine",
+			reason:
+				"The tool creates an automation with a routine. The web app sets up webhook and GitHub triggers.",
+		},
 	}),
 	"automations.update": OperationContract.make("automations.update", {
 		description:
@@ -141,6 +165,16 @@ export const automationsContracts = {
 		output: automationUpdateResultSchema,
 		errors: [...refusals, AutomationNotFound, AutomationNameTaken, InvalidRoutineSchedule],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "PATCH",
+			path: "/projects/:projectId/automations/:automationId",
+		},
+		botLoop: {
+			kind: "coveredBy",
+			operation: "automations.updateInChat",
+			reason: "The tool updates automation settings and can also change its sole routine.",
+		},
 	}),
 	"automations.listInChat": OperationContract.make("automations.listInChat", {
 		description:
@@ -149,6 +183,13 @@ export const automationsContracts = {
 		output: Schema.Struct({ automations: Schema.Array(automationInChatSchema) }),
 		errors: [...reachRefusals, ...approvalRefusals],
 		changes: false,
+		http: { kind: "heldBack", reason: "The HTTP API lists automations by project id." },
+		botLoop: {
+			kind: "offered",
+			tool: "list_automations",
+			offeredIn: "everywhere",
+			approval: { kind: "never" },
+		},
 	}),
 	"automations.createWithRoutine": OperationContract.make("automations.createWithRoutine", {
 		description:
@@ -161,6 +202,16 @@ export const automationsContracts = {
 		output: Schema.Struct({ automation: automationInChatSchema }),
 		errors: [...chatWriteRefusals, AutomationNameTaken, InvalidRoutineSchedule],
 		changes: true,
+		http: {
+			kind: "heldBack",
+			reason: "The HTTP API creates automations with an explicit project and triggers.",
+		},
+		botLoop: {
+			kind: "offered",
+			tool: "create_automation",
+			offeredIn: "chatBounds",
+			approval: { kind: "always", approvers: "turn" },
+		},
 	}),
 	"automations.updateInChat": OperationContract.make("automations.updateInChat", {
 		description:
@@ -181,6 +232,16 @@ export const automationsContracts = {
 			TriggerSetInSettings,
 		],
 		changes: true,
+		http: {
+			kind: "heldBack",
+			reason: "The HTTP API addresses the automation and its triggers explicitly.",
+		},
+		botLoop: {
+			kind: "offered",
+			tool: "update_automation",
+			offeredIn: "chatBounds",
+			approval: { kind: "always", approvers: "turn" },
+		},
 	}),
 	"automations.remove": OperationContract.make("automations.remove", {
 		description: "Delete an automation. Its runs and their chats are kept.",
@@ -188,6 +249,15 @@ export const automationsContracts = {
 		output: Schema.Void,
 		errors: [...refusals, AutomationNotFound],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "DELETE",
+			path: "/projects/:projectId/automations/:automationId",
+		},
+		botLoop: {
+			kind: "heldBack",
+			reason: "No tool deletes an automation; offering one waits for tools to become operations.",
+		},
 	}),
 	"automations.run": OperationContract.make("automations.run", {
 		description:
@@ -196,6 +266,17 @@ export const automationsContracts = {
 		output: acceptedRunSchema,
 		errors: [...refusals, AutomationNotFound, AutomationTriggerConflict, AutomationTriggerRejected],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/projects/:projectId/automations/:automationId/run",
+			status: 202,
+		},
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"No tool starts a manual run, and a run may start none; offering one waits for tools to become operations.",
+		},
 	}),
 	"automations.addTrigger": OperationContract.make("automations.addTrigger", {
 		description:
@@ -204,6 +285,13 @@ export const automationsContracts = {
 		output: automationWriteResultSchema,
 		errors: [...refusals, AutomationNotFound, TooManyAutomationTriggers, ...webhookSettingRefusals],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/projects/:projectId/automations/:automationId/triggers",
+			status: 201,
+		},
+		botLoop: setUpInSettings,
 	}),
 	"automations.updateTrigger": OperationContract.make("automations.updateTrigger", {
 		description:
@@ -218,6 +306,12 @@ export const automationsContracts = {
 			...webhookSettingRefusals,
 		],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "PUT",
+			path: "/projects/:projectId/automations/:automationId/triggers/:triggerId",
+		},
+		botLoop: setUpInSettings,
 	}),
 	"automations.removeTrigger": OperationContract.make("automations.removeTrigger", {
 		description: "Remove one of an automation's routines or triggers.",
@@ -225,6 +319,12 @@ export const automationsContracts = {
 		output: automationSchema,
 		errors: [...refusals, AutomationNotFound, AutomationTriggerNotFound],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "DELETE",
+			path: "/projects/:projectId/automations/:automationId/triggers/:triggerId",
+		},
+		botLoop: setUpInSettings,
 	}),
 	"automations.getSecret": OperationContract.make("automations.getSecret", {
 		description: "A webhook trigger's current secret, or that it has none.",
@@ -232,6 +332,12 @@ export const automationsContracts = {
 		output: automationCurrentSecretSchema,
 		errors: [...refusals, AutomationNotFound, AutomationTriggerNotFound, AutomationTriggerRejected],
 		changes: false,
+		http: {
+			kind: "offered",
+			method: "GET",
+			path: "/projects/:projectId/automations/:automationId/triggers/:triggerId/secret",
+		},
+		botLoop: setUpInSettings,
 	}),
 	"automations.rotateSecret": OperationContract.make("automations.rotateSecret", {
 		description:
@@ -246,6 +352,12 @@ export const automationsContracts = {
 			WebhookSecretTooShort,
 		],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/projects/:projectId/automations/:automationId/triggers/:triggerId/secret",
+		},
+		botLoop: setUpInSettings,
 	}),
 	"automations.projectRuns": OperationContract.make("automations.projectRuns", {
 		description:
@@ -254,6 +366,12 @@ export const automationsContracts = {
 		output: runPageSchema,
 		errors: [...reachRefusals, InvalidCursor],
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/projects/:projectId/runs" },
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"It is the web app's list of a project's runs; each run's own chat shows what it did.",
+		},
 	}),
 	"automations.webhook": OperationContract.make("automations.webhook", {
 		description:
@@ -276,121 +394,6 @@ export const automationsContracts = {
 			AutomationDeliveryIdTooLong,
 		],
 		changes: true,
-	}),
-} as const;
-
-/** Held back: triggers are set up in settings, as a webhook's secret is shown once. */
-const setUpInSettings = {
-	kind: "heldBack",
-	reason:
-		"Triggers and their secrets are set up in the web app: a webhook's secret is shown once, so one shown in a chat would be read by everyone there.",
-} as const;
-
-export const automationsExposure = {
-	"automations.list": {
-		http: { kind: "offered", endpoint: "automations.list" },
-		botLoop: {
-			kind: "coveredBy",
-			operation: "automations.listInChat",
-			reason: "The tool lists the current project's automations with a summary of their triggers.",
-		},
-	},
-	"automations.create": {
-		http: { kind: "offered", endpoint: "automations.create" },
-		botLoop: {
-			kind: "coveredBy",
-			operation: "automations.createWithRoutine",
-			reason:
-				"The tool creates an automation with a routine. The web app sets up webhook and GitHub triggers.",
-		},
-	},
-	"automations.update": {
-		http: { kind: "offered", endpoint: "automations.update" },
-		botLoop: {
-			kind: "coveredBy",
-			operation: "automations.updateInChat",
-			reason: "The tool updates automation settings and can also change its sole routine.",
-		},
-	},
-	"automations.listInChat": {
-		http: { kind: "heldBack", reason: "The HTTP API lists automations by project id." },
-		botLoop: {
-			kind: "offered",
-			tool: "list_automations",
-			offeredIn: "everywhere",
-			approval: { kind: "never" },
-		},
-	},
-	/** automations.createWithRoutine covers a bot's own chats and project management in chat bounds. */
-	"automations.createWithRoutine": {
-		http: {
-			kind: "heldBack",
-			reason: "The HTTP API creates automations with an explicit project and triggers.",
-		},
-		botLoop: {
-			kind: "offered",
-			tool: "create_automation",
-			offeredIn: "chatBounds",
-			approval: { kind: "always", approvers: "turn" },
-		},
-	},
-	/** automations.updateInChat covers a bot's own chats and project management in chat bounds. */
-	"automations.updateInChat": {
-		http: {
-			kind: "heldBack",
-			reason: "The HTTP API addresses the automation and its triggers explicitly.",
-		},
-		botLoop: {
-			kind: "offered",
-			tool: "update_automation",
-			offeredIn: "chatBounds",
-			approval: { kind: "always", approvers: "turn" },
-		},
-	},
-	"automations.remove": {
-		http: { kind: "offered", endpoint: "automations.remove" },
-		botLoop: {
-			kind: "heldBack",
-			reason: "No tool deletes an automation; offering one waits for tools to become operations.",
-		},
-	},
-	"automations.run": {
-		http: { kind: "offered", endpoint: "automations.run" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"No tool starts a manual run, and a run may start none; offering one waits for tools to become operations.",
-		},
-	},
-	"automations.addTrigger": {
-		http: { kind: "offered", endpoint: "automations.addTrigger" },
-		botLoop: setUpInSettings,
-	},
-	"automations.updateTrigger": {
-		http: { kind: "offered", endpoint: "automations.updateTrigger" },
-		botLoop: setUpInSettings,
-	},
-	"automations.removeTrigger": {
-		http: { kind: "offered", endpoint: "automations.removeTrigger" },
-		botLoop: setUpInSettings,
-	},
-	"automations.getSecret": {
-		http: { kind: "offered", endpoint: "automations.getSecret" },
-		botLoop: setUpInSettings,
-	},
-	"automations.rotateSecret": {
-		http: { kind: "offered", endpoint: "automations.rotateSecret" },
-		botLoop: setUpInSettings,
-	},
-	"automations.projectRuns": {
-		http: { kind: "offered", endpoint: "automations.projectRuns" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"It is the web app's list of a project's runs; each run's own chat shows what it did.",
-		},
-	},
-	"automations.webhook": {
 		http: {
 			kind: "heldBack",
 			reason:
@@ -400,5 +403,5 @@ export const automationsExposure = {
 			kind: "heldBack",
 			reason: "Only a call to the webhook starts a run from its trigger.",
 		},
-	},
-} as const satisfies DomainExposure<typeof automationsContracts>;
+	}),
+} as const;

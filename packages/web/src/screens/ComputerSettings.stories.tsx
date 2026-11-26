@@ -160,7 +160,7 @@ export const OpenNetwork = meta.story({
 			answers([provider]),
 			http.get(networkUrl, () => HttpResponse.json({ ...network, mode: "open" })),
 			http.patch(`${providersUrl}/:providerId`, async ({ request }) => {
-				const changes = (await request.json()) as ComputerProviderUpdate;
+				const { changes } = (await request.json()) as { changes: ComputerProviderUpdate };
 				savedChanges(changes);
 				return HttpResponse.json({ ...provider, settings: changes.settings });
 			}),

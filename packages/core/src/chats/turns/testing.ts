@@ -17,7 +17,6 @@ import { Models } from "../../providers/models/models.ts";
 import { unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
-import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { startBotChat } from "../chats/testing.ts";
 import { lanesForTests } from "../testing.ts";
 import { turnWorkflowForTests } from "../turn-workflow.test-support.ts";
@@ -339,11 +338,13 @@ export async function aChatAwaitingReply(
 		content: "What does example.com say?",
 	});
 	const opened = started.chat;
+	if (!opened.projectId) throw new Error("The fixture chat needs a project");
 	return {
 		workspaceId,
 		adminId,
 		botId: chatBot.id,
 		chatId: opened.id,
+		projectId: opened.projectId,
 	};
 }
 
@@ -351,16 +352,14 @@ export async function aChatWithConnectorAwaitingReply(
 	chatsAs: Parameters<typeof aChatAwaitingReply>[0],
 ) {
 	const chat = await aChatAwaitingReply(chatsAs);
-	const { workspaceId, botId, adminId } = chat;
+	const { workspaceId, botId, adminId, projectId } = chat;
 	const suffix = botId;
-	// The bot's own connector, which its default project holds.
-	const ownProjectId = await runOnPostgres(defaultProjectOf(botId));
 	const [connected] = await onDatabase((db) =>
 		db
 			.insert(connector)
 			.values({
 				workspaceId,
-				projectId: ownProjectId,
+				projectId,
 				name: `Linear ${suffix}`,
 				handle: `linear-${suffix}`,
 				url: "https://linear.example.com/mcp",

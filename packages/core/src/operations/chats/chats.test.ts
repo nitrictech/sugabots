@@ -3,13 +3,11 @@ import { eq } from "drizzle-orm";
 import { Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-	seedMember,
 	seedMessage,
-	seedPage,
 	seedProjectChat,
 	seedTurnAnswering,
 } from "../../authentication/seed.test-support.ts";
-import { bot, file, toolCall } from "../../database/schema.ts";
+import { file, toolCall } from "../../database/schema.ts";
 import { closeDatabase, onDatabase } from "../../database/testing.ts";
 import type { Principal } from "../../principal.ts";
 import {
@@ -22,62 +20,32 @@ import {
 import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
- * The chats, chat-reads and approvals operations, each called for every kind
- * of principal through the registry, as an entrypoint calls them. What each
- * comes to is "ok" or the tag of its refusal: hidden where the principal
- * doesn't reach the chat, message or file, forbidden where it does but may
- * not act. Who may do what in detail is the provers' tests'; what each
- * service does is `chats/`' and `files/`'.
+ * The chat operations whose rules the table in `permissions.test.ts` can't
+ * state: an attachment, which is its chat's and, until sent, its uploader's
+ * alone, and deciding an approval, which only the call's approvers may. What
+ * each comes to is "ok" or the tag of its refusal.
  *
  * The world is `buildWorld`'s: in workspace A, Ed (an editor) made the public
  * bot Pub, which leads the private project J with Helper in it; Ed, Vi (a
  * viewer) and Quinn are in J, and Erin (an editor) isn't. Ed started a chat in
- * J and one with Pub.
+ * J and one in K.
  */
-describe("the chat operations, for each kind of principal", () => {
-	let world: World;
+describe("attachments and approvals in a chat", () => {
 	let call: CallOperation;
-	let as: ReturnType<typeof principals>;
 	let a: World["a"];
-	/** Every principal the cases call for, in J's chat unless its name says otherwise. */
-	let who: Awaited<ReturnType<typeof principalsInJ>>;
-
-	const principalsInJ = async () => {
-		const outsider = await seedMember(world.b.workspace, "editor");
-		return {
-			owner: await as.member(a.owner),
-			admin: await as.member(a.admin),
-			ed: await as.member(a.ed),
-			vi: await as.member(a.vi),
-			quinn: await as.member(a.quinn),
-			erin: await as.member(a.erin),
-			outsider: await as.member(outsider),
-			/** Pub answering Ed in J's chat: chat bounds, J. */
-			pubForEd: await as.botFor(a.ed, a.pub.id, a.chat),
-			/** Pub answering an admin in J's chat: chat bounds, J. */
-			pubForAdmin: await as.botFor(a.admin, a.pub.id, a.chat),
-			/** Helper answering Ed in K's chat: chat bounds, K, though both reach J. */
-			helperInK: await as.botFor(a.ed, a.helper.id, a.otherChat),
-			/** Ed's Personal Assistant in its own chat: member bounds. */
-			edsAssistant: await as.botFor(a.ed, a.assistant.id, a.assistantChat),
-			run: (await as.run(a.workspace, a.project, a.pub.id)).principal,
-			webhook: await as.webhook(a.workspace, a.project),
-			computerSleep: (await as.computerSleep(a.workspace, a.project)).principal,
-			compaction: await as.compaction(a.chat, a.pub.id),
-			page: await as.page(a.chat),
-		};
-	};
+	/** The members the cases call for. */
+	let who: { admin: Principal; ed: Principal; erin: Principal };
 
 	beforeAll(async () => {
-		world = await buildWorld();
+		const world = await buildWorld();
 		a = world.a;
-		// Pub answers what members post in its chats.
-		await onDatabase((db) =>
-			db.update(bot).set({ model: "test/model" }).where(eq(bot.id, a.pub.id)),
-		);
 		call = await servedOperations();
-		as = principals(await authenticators());
-		who = await principalsInJ();
+		const as = principals(await authenticators());
+		who = {
+			admin: await as.member(a.admin),
+			ed: await as.member(a.ed),
+			erin: await as.member(a.erin),
+		};
 	});
 
 	afterAll(async () => {
@@ -153,176 +121,6 @@ describe("the chat operations, for each kind of principal", () => {
 		expect(await operationOutcome(call, who.ed, "chats.removeFile", address)).toBe(
 			"ResourceHidden",
 		);
-	});
-
-	describe("chats.setResolved", () => {
-		it("shows a chat resolved and then reopened in its project", async () => {
-			const chatId = await seedProjectChat(a.workspace, a.project, a.ed);
-			const listed = async () =>
-				(await call(who.ed, "chats.projectChats", { projectId: a.project })).chats.find(
-					({ chat }) => chat.id === chatId,
-				)?.chat;
-
-			const input = { chatId, resolved: true };
-			await expect(call(who.vi, "chats.setResolved", input)).rejects.toMatchObject({
-				_tag: "ActionForbidden",
-			});
-			await expect(call(who.erin, "chats.setResolved", input)).rejects.toMatchObject({
-				_tag: "ResourceHidden",
-			});
-
-			await call(who.ed, "chats.setResolved", { chatId, resolved: true });
-			expect(await listed()).toMatchObject({ resolvedAt: expect.any(String) });
-			await call(who.ed, "chats.setResolved", { chatId, resolved: false });
-			expect(await listed()).toMatchObject({ resolvedAt: null });
-		});
-	});
-
-	describe("chats.renameChat", () => {
-		it("lists the chat under the name set by its project admin", async () => {
-			const chatId = await seedProjectChat(a.workspace, a.project, a.ed);
-			const input = { chatId, name: "Launch notes" };
-			await expect(call(who.ed, "chats.renameChat", input)).rejects.toMatchObject({
-				_tag: "ActionForbidden",
-			});
-			await expect(call(who.erin, "chats.renameChat", input)).rejects.toMatchObject({
-				_tag: "ResourceHidden",
-			});
-
-			await call(who.admin, "chats.renameChat", input);
-
-			const { chats } = await call(who.ed, "chats.projectChats", { projectId: a.project });
-			expect(chats.find(({ chat }) => chat.id === chatId)?.chat).toMatchObject({
-				title: input.name,
-			});
-		});
-	});
-
-	describe("posting and reading in a chat", () => {
-		it("lets the members who reach a chat post in it, a viewer among them, and no other principal", async () => {
-			expect(
-				await outcomesFor(
-					{
-						viewer: who.vi,
-						notInProject: who.erin,
-						botInBounds: who.pubForEd,
-					},
-					(principal) =>
-						operationOutcome(call, principal, "chats.send", {
-							chatId: a.chat,
-							retryKey: crypto.randomUUID(),
-							message: "Ship it?",
-						}),
-				),
-			).toEqual({
-				viewer: "ok",
-				notInProject: "ResourceHidden",
-				botInBounds: "ActionForbidden",
-			});
-		});
-
-		it("shows a chat's pages to whoever reaches it, within a turn's bounds", async () => {
-			expect(
-				await outcomesFor(
-					{
-						viewer: who.vi,
-						notInProject: who.erin,
-						botOutsideBounds: who.helperInK,
-					},
-					(principal) =>
-						operationOutcome(call, principal, "chats.messages", { chatId: a.chat, limit: 10 }),
-				),
-			).toEqual({
-				viewer: "ok",
-				notInProject: "ResourceHidden",
-				botOutsideBounds: "ResourceHidden",
-			});
-		});
-
-		it("lets a member react to a message in a chat they reach, and hides one in a chat they don't", async () => {
-			const asked = await seedMessage(a.chat, { member: a.ed });
-			const react = (principal: Principal) =>
-				operationOutcome(call, principal, "chats.react", { messageId: asked, emoji: "👍" });
-
-			expect(
-				await outcomesFor(
-					{ viewer: who.vi, notInProject: who.erin, botInBounds: who.pubForEd },
-					react,
-				),
-			).toEqual({ viewer: "ok", notInProject: "ResourceHidden", botInBounds: "ActionForbidden" });
-			expect(
-				await operationOutcome(call, who.ed, "chats.react", {
-					messageId: "not-a-message",
-					emoji: "👍",
-				}),
-			).toBe("ResourceHidden");
-		});
-	});
-
-	describe("what waits for a member across a workspace", () => {
-		it("counts it for a member, and for a bot only in member bounds", async () => {
-			expect(
-				await outcomesFor(
-					{
-						viewer: who.vi,
-						outsider: who.outsider,
-						botInChatBounds: who.pubForEd,
-						botInMemberBounds: who.edsAssistant,
-						run: who.run,
-						webhook: who.webhook,
-						page: who.page,
-					},
-					(principal) =>
-						operationOutcome(call, principal, "chats.attention", { workspace: a.workspace }),
-				),
-			).toEqual({
-				viewer: "ok",
-				outsider: "ResourceHidden",
-				botInChatBounds: "ActionForbidden",
-				botInMemberBounds: "ok",
-				run: "ActionForbidden",
-				webhook: "ActionForbidden",
-				page: "ActionForbidden",
-			});
-		});
-	});
-
-	describe("files bots wrote", () => {
-		it("shows a file to whoever reaches its chat, and lets only those who manage the chats delete it", async () => {
-			const shown = await seedPage(a.chat);
-
-			expect(
-				await outcomesFor(
-					{
-						viewer: who.vi,
-						notInProject: who.erin,
-						botInBounds: who.pubForEd,
-						botOutsideBounds: who.helperInK,
-						page: who.page,
-					},
-					(principal) => operationOutcome(call, principal, "files.versions", { fileId: shown }),
-				),
-			).toEqual({
-				viewer: "ok",
-				notInProject: "ResourceHidden",
-				botInBounds: "ok",
-				botOutsideBounds: "ResourceHidden",
-				page: "ResourceHidden",
-			});
-			expect(
-				await outcomesFor(
-					{ editor: who.ed, viewer: who.vi, notInProject: who.erin, botInBounds: who.pubForEd },
-					async (principal) =>
-						operationOutcome(call, principal, "files.remove", { fileId: await seedPage(a.chat) }),
-				),
-			).toEqual({
-				editor: "ActionForbidden",
-				viewer: "ActionForbidden",
-				notInProject: "ResourceHidden",
-				botInBounds: "ActionForbidden",
-			});
-			expect(await operationOutcome(call, who.admin, "files.remove", { fileId: shown })).toBe("ok");
-		});
 	});
 
 	describe("approvals.decide", () => {

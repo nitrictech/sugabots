@@ -1,6 +1,6 @@
 /**
- * The connectors operations' contracts, and their entries in the exposure manifest.
- * `index.ts` spreads both, so adding an operation here touches no other file.
+ * The connectors operations' contracts, each with its decisions in the exposure manifest.
+ * `index.ts` spreads them, so adding an operation here touches no other file.
  */
 
 import { Schema } from "effect";
@@ -52,7 +52,6 @@ import {
 	newGitHubAppSchema,
 } from "../github.ts";
 import { uuidSchema } from "../uuid.ts";
-import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
 
 /**
@@ -69,6 +68,20 @@ const aConnector = Schema.Struct({ projectId: uuidSchema, connectorId: uuidSchem
 
 export const TOOL_SEARCH = "tool_search";
 
+/** Held back: no tool manages a project's connectors yet. */
+const managedInTheWebApp = {
+	kind: "heldBack",
+	reason:
+		"No tool manages a project's connectors; members do it in the web app until tools become operations.",
+} as const;
+
+/** Held back: the step goes through the member's browser, on another site. */
+const throughTheBrowser = <const Site extends string>(site: Site) =>
+	({
+		kind: "heldBack",
+		reason: `It is where ${site} sends a member's browser back, so it is no bot's to call.`,
+	}) as const;
+
 export const connectorsContracts = {
 	"connectors.searchTools": OperationContract.make("connectors.searchTools", {
 		description:
@@ -81,6 +94,13 @@ export const connectorsContracts = {
 		output: Schema.Unknown,
 		errors: [...refusals, ApprovalNeeded, ApprovalRefused, TurnEnded],
 		changes: false,
+		http: { kind: "heldBack", reason: "Searches the connector tools offered to the current turn." },
+		botLoop: {
+			kind: "offered",
+			tool: TOOL_SEARCH,
+			offeredIn: "everywhere",
+			approval: { kind: "never" },
+		},
 	}),
 	"connectors.callTool": OperationContract.make("connectors.callTool", {
 		description: "Call a connector tool found by tool_search, with the arguments its schema takes.",
@@ -92,6 +112,13 @@ export const connectorsContracts = {
 		output: Schema.Unknown,
 		errors: [...refusals, ApprovalNeeded, ApprovalRefused, TurnEnded, TurnExecutionSuperseded],
 		changes: true,
+		http: { kind: "heldBack", reason: "Connector tool calls belong to a turn." },
+		botLoop: {
+			kind: "offered",
+			tool: "call_tool",
+			offeredIn: "everywhere",
+			approval: { kind: "byToolAccess" },
+		},
 	}),
 	"connectors.list": OperationContract.make("connectors.list", {
 		description:
@@ -100,6 +127,12 @@ export const connectorsContracts = {
 		output: Schema.Array(connectorListItemSchema),
 		errors: refusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/projects/:projectId/connectors" },
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"A bot is offered a connector's tools, not its settings; offering the list waits for tools to become operations.",
+		},
 	}),
 	"connectors.create": OperationContract.make("connectors.create", {
 		description:
@@ -108,6 +141,8 @@ export const connectorsContracts = {
 		output: connectorSchema,
 		errors: [...refusals, UrlNotAllowed, ConnectorNameTaken, ConnectorNotFound],
 		changes: true,
+		http: { kind: "offered", method: "POST", path: "/projects/:projectId/connectors", status: 201 },
+		botLoop: managedInTheWebApp,
 	}),
 	"connectors.testUnsaved": OperationContract.make("connectors.testUnsaved", {
 		description:
@@ -116,6 +151,8 @@ export const connectorsContracts = {
 		output: connectorTestResultSchema,
 		errors: [...refusals, UrlNotAllowed],
 		changes: false,
+		http: { kind: "offered", method: "POST", path: "/projects/:projectId/connectors/test" },
+		botLoop: managedInTheWebApp,
 	}),
 	"connectors.get": OperationContract.make("connectors.get", {
 		description: "Show one of a project's connectors, with each of its tools' access.",
@@ -123,6 +160,12 @@ export const connectorsContracts = {
 		output: connectorWithToolsSchema,
 		errors: [...refusals, ConnectorNotFound],
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/projects/:projectId/connectors/:connectorId" },
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"A bot is offered a connector's tools, not its settings; offering them waits for tools to become operations.",
+		},
 	}),
 	"connectors.update": OperationContract.make("connectors.update", {
 		description:
@@ -141,6 +184,16 @@ export const connectorsContracts = {
 			UnknownConnectorTool,
 		],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "PATCH",
+			path: "/projects/:projectId/connectors/:connectorId",
+		},
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"It changes tool access, which a bot may change only in member bounds, and no tool does it yet.",
+		},
 	}),
 	"connectors.remove": OperationContract.make("connectors.remove", {
 		description: "Remove a connector from a project, with its key or sign-in.",
@@ -148,6 +201,12 @@ export const connectorsContracts = {
 		output: Schema.Void,
 		errors: [...refusals, ConnectorNotFound],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "DELETE",
+			path: "/projects/:projectId/connectors/:connectorId",
+		},
+		botLoop: managedInTheWebApp,
 	}),
 	"connectors.test": OperationContract.make("connectors.test", {
 		description:
@@ -156,6 +215,12 @@ export const connectorsContracts = {
 		output: connectorTestResultSchema,
 		errors: [...refusals, ConnectorNotFound],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/projects/:projectId/connectors/:connectorId/test",
+		},
+		botLoop: managedInTheWebApp,
 	}),
 	"connectors.connectBuiltIn": OperationContract.make("connectors.connectBuiltIn", {
 		description:
@@ -170,6 +235,17 @@ export const connectorsContracts = {
 			ConnectorNeededNoSignIn,
 		],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/projects/:projectId/connectors/connect",
+			status: 201,
+		},
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"Its sign-in goes through the member's browser, at the server's authorization server, so no bot can finish it.",
+		},
 	}),
 	"connectors.startOAuth": OperationContract.make("connectors.startOAuth", {
 		description:
@@ -178,6 +254,16 @@ export const connectorsContracts = {
 		output: connectorOauthStartSchema,
 		errors: [...refusals, ConnectorNotFound, ConnectorDoesNotUseOAuth, ConnectorOAuthStartFailed],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/projects/:projectId/connectors/:connectorId/oauth/start",
+		},
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"A sign-in goes through the member's browser, at the server's authorization server, so no bot can finish it.",
+		},
 	}),
 	"connectors.oauthCallback": OperationContract.make("connectors.oauthCallback", {
 		description:
@@ -191,6 +277,12 @@ export const connectorsContracts = {
 		output: connectorSignInOutcomeSchema,
 		errors: [],
 		changes: true,
+		http: {
+			kind: "ownEndpoint",
+			reason:
+				"The authorization server sends the browser back to it, so it answers with a redirect to the web app.",
+		},
+		botLoop: throughTheBrowser("an authorization server"),
 	}),
 	"gitHubConnectors.start": OperationContract.make("gitHubConnectors.start", {
 		description:
@@ -199,6 +291,12 @@ export const connectorsContracts = {
 		output: gitHubAppFormSchema,
 		errors: [...refusals, ProjectHasGitHubConnector],
 		changes: false,
+		http: { kind: "offered", method: "POST", path: "/projects/:projectId/github" },
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"Making a GitHub app goes through the member's browser, on GitHub's pages, so no bot can finish it.",
+		},
 	}),
 	"gitHubConnectors.installUrl": OperationContract.make("gitHubConnectors.installUrl", {
 		description:
@@ -207,6 +305,16 @@ export const connectorsContracts = {
 		output: gitHubAppInstallSchema,
 		errors: [...refusals, NotGitHubConnector],
 		changes: false,
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/projects/:projectId/connectors/:connectorId/github/install",
+		},
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"Installing a GitHub app goes through the member's browser, on GitHub's pages, so no bot can finish it.",
+		},
 	}),
 	"gitHubConnectors.reachableRepositories": OperationContract.make(
 		"gitHubConnectors.reachableRepositories",
@@ -217,6 +325,16 @@ export const connectorsContracts = {
 			output: Schema.Array(accountRepositorySchema),
 			errors: [...refusals, NotGitHubConnector, GitHubAppNotInstalled, GitHubRequestFailed],
 			changes: false,
+			http: {
+				kind: "offered",
+				method: "GET",
+				path: "/projects/:projectId/connectors/:connectorId/github/reachable",
+			},
+			botLoop: {
+				kind: "heldBack",
+				reason:
+					"It is what members choose the project's repositories from; a bot works on those chosen, through the GitHub app's tools.",
+			},
 		},
 	),
 	"gitHubConnectors.repositories": OperationContract.make("gitHubConnectors.repositories", {
@@ -226,6 +344,16 @@ export const connectorsContracts = {
 		output: connectorRepositoriesSchema,
 		errors: [...refusals, NotGitHubConnector],
 		changes: false,
+		http: {
+			kind: "offered",
+			method: "GET",
+			path: "/projects/:projectId/connectors/:connectorId/repositories",
+		},
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"A bot is offered the GitHub app's tools, which work on these; offering the list waits for tools to become operations.",
+		},
 	}),
 	"gitHubConnectors.addRepository": OperationContract.make("gitHubConnectors.addRepository", {
 		description: "Add a repository the project's GitHub app reaches to those its bots work on.",
@@ -243,6 +371,16 @@ export const connectorsContracts = {
 			GitHubRequestFailed,
 		],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/projects/:projectId/connectors/:connectorId/repositories",
+		},
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"It changes what the project's bots and computer reach at GitHub, which members choose in the web app, and no tool does it yet.",
+		},
 	}),
 	"gitHubConnectors.removeRepository": OperationContract.make("gitHubConnectors.removeRepository", {
 		description: "Take a repository out of those the project's bots work on.",
@@ -254,6 +392,16 @@ export const connectorsContracts = {
 		output: connectorRepositoriesSchema,
 		errors: [...refusals, NotGitHubConnector],
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/projects/:projectId/connectors/:connectorId/repositories/remove",
+		},
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"It changes what the project's bots and computer reach at GitHub, which members choose in the web app, and no tool does it yet.",
+		},
 	}),
 	"gitHubConnectors.gitHubAppMade": OperationContract.make("gitHubConnectors.gitHubAppMade", {
 		description:
@@ -265,6 +413,11 @@ export const connectorsContracts = {
 		output: gitHubSetupOutcomeSchema,
 		errors: [],
 		changes: true,
+		http: {
+			kind: "ownEndpoint",
+			reason: "GitHub sends the browser back to it, so it answers with a redirect.",
+		},
+		botLoop: throughTheBrowser("GitHub"),
 	}),
 	"gitHubConnectors.gitHubAppInstalled": OperationContract.make(
 		"gitHubConnectors.gitHubAppInstalled",
@@ -278,6 +431,11 @@ export const connectorsContracts = {
 			output: gitHubSetupOutcomeSchema,
 			errors: [],
 			changes: true,
+			http: {
+				kind: "ownEndpoint",
+				reason: "GitHub sends the browser back to it, so it answers with a redirect.",
+			},
+			botLoop: throughTheBrowser("GitHub"),
 		},
 	),
 	"gitHubWebhooks.delivery": OperationContract.make("gitHubWebhooks.delivery", {
@@ -294,159 +452,6 @@ export const connectorsContracts = {
 		output: deliveredActivitySchema,
 		errors: [ResourceHidden, GitHubDeliveryIdInvalid],
 		changes: true,
-	}),
-} as const;
-
-/** Held back: no tool manages a project's connectors yet. */
-const managedInTheWebApp = {
-	kind: "heldBack",
-	reason:
-		"No tool manages a project's connectors; members do it in the web app until tools become operations.",
-} as const;
-
-/** Held back: the step goes through the member's browser, on another site. */
-const throughTheBrowser = <const Site extends string>(site: Site) =>
-	({
-		kind: "heldBack",
-		reason: `It is where ${site} sends a member's browser back, so it is no bot's to call.`,
-	}) as const;
-
-export const connectorsExposure = {
-	"connectors.searchTools": {
-		http: { kind: "heldBack", reason: "Searches the connector tools offered to the current turn." },
-		botLoop: {
-			kind: "offered",
-			tool: TOOL_SEARCH,
-			offeredIn: "everywhere",
-			approval: { kind: "never" },
-		},
-	},
-	"connectors.callTool": {
-		http: { kind: "heldBack", reason: "Connector tool calls belong to a turn." },
-		botLoop: {
-			kind: "offered",
-			tool: "call_tool",
-			offeredIn: "everywhere",
-			approval: { kind: "byToolAccess" },
-		},
-	},
-	"connectors.list": {
-		http: { kind: "offered", endpoint: "connectors.list" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"A bot is offered a connector's tools, not its settings; offering the list waits for tools to become operations.",
-		},
-	},
-	"connectors.create": {
-		http: { kind: "offered", endpoint: "connectors.create" },
-		botLoop: managedInTheWebApp,
-	},
-	"connectors.testUnsaved": {
-		http: { kind: "offered", endpoint: "connectors.testUnsaved" },
-		botLoop: managedInTheWebApp,
-	},
-	"connectors.get": {
-		http: { kind: "offered", endpoint: "connectors.get" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"A bot is offered a connector's tools, not its settings; offering them waits for tools to become operations.",
-		},
-	},
-	"connectors.update": {
-		http: { kind: "offered", endpoint: "connectors.update" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"It changes tool access, which a bot may change only in member bounds, and no tool does it yet.",
-		},
-	},
-	"connectors.remove": {
-		http: { kind: "offered", endpoint: "connectors.remove" },
-		botLoop: managedInTheWebApp,
-	},
-	"connectors.test": {
-		http: { kind: "offered", endpoint: "connectors.test" },
-		botLoop: managedInTheWebApp,
-	},
-	"connectors.connectBuiltIn": {
-		http: { kind: "offered", endpoint: "connectors.connectBuiltIn" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"Its sign-in goes through the member's browser, at the server's authorization server, so no bot can finish it.",
-		},
-	},
-	"connectors.startOAuth": {
-		http: { kind: "offered", endpoint: "connectors.startOAuth" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"A sign-in goes through the member's browser, at the server's authorization server, so no bot can finish it.",
-		},
-	},
-	"connectors.oauthCallback": {
-		http: { kind: "offered", endpoint: "connectors.oauthCallback" },
-		botLoop: throughTheBrowser("an authorization server"),
-	},
-	"gitHubConnectors.start": {
-		http: { kind: "offered", endpoint: "gitHubConnectors.start" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"Making a GitHub app goes through the member's browser, on GitHub's pages, so no bot can finish it.",
-		},
-	},
-	"gitHubConnectors.installUrl": {
-		http: { kind: "offered", endpoint: "gitHubConnectors.installUrl" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"Installing a GitHub app goes through the member's browser, on GitHub's pages, so no bot can finish it.",
-		},
-	},
-	"gitHubConnectors.reachableRepositories": {
-		http: { kind: "offered", endpoint: "gitHubConnectors.reachableRepositories" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"It is what members choose the project's repositories from; a bot works on those chosen, through the GitHub app's tools.",
-		},
-	},
-	"gitHubConnectors.repositories": {
-		http: { kind: "offered", endpoint: "gitHubConnectors.repositories" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"A bot is offered the GitHub app's tools, which work on these; offering the list waits for tools to become operations.",
-		},
-	},
-	"gitHubConnectors.addRepository": {
-		http: { kind: "offered", endpoint: "gitHubConnectors.addRepository" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"It changes what the project's bots and computer reach at GitHub, which members choose in the web app, and no tool does it yet.",
-		},
-	},
-	"gitHubConnectors.removeRepository": {
-		http: { kind: "offered", endpoint: "gitHubConnectors.removeRepository" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"It changes what the project's bots and computer reach at GitHub, which members choose in the web app, and no tool does it yet.",
-		},
-	},
-	"gitHubConnectors.gitHubAppMade": {
-		http: { kind: "offered", endpoint: "gitHubConnectors.gitHubAppMade" },
-		botLoop: throughTheBrowser("GitHub"),
-	},
-	"gitHubConnectors.gitHubAppInstalled": {
-		http: { kind: "offered", endpoint: "gitHubConnectors.gitHubAppInstalled" },
-		botLoop: throughTheBrowser("GitHub"),
-	},
-	"gitHubWebhooks.delivery": {
 		http: {
 			kind: "heldBack",
 			reason:
@@ -456,5 +461,5 @@ export const connectorsExposure = {
 			kind: "heldBack",
 			reason: "Only a GitHub app's own signed deliveries call it.",
 		},
-	},
-} as const satisfies DomainExposure<typeof connectorsContracts>;
+	}),
+} as const;

@@ -1,7 +1,6 @@
 import {
 	botLoopTools,
 	type InputOf,
-	manifest,
 	type OfferedIn,
 	operationContracts,
 	type RequestOperationName,
@@ -24,7 +23,7 @@ import { checkApproval } from "./approval-check.ts";
 import { type RecordingOptions, recorded, ToolApprovalRequired } from "./tool-calls/recorded.ts";
 import type { ApprovalAsked, StepTurn } from "./tools.ts";
 
-const offeredOperations = botLoopTools(manifest) satisfies ReadonlyArray<{
+const offeredOperations = botLoopTools(operationContracts) satisfies ReadonlyArray<{
 	readonly operation: RequestOperationName;
 }>;
 

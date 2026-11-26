@@ -14,25 +14,23 @@ import {
 	authenticators,
 	buildWorld,
 	everyKindOfPrincipal,
-	outcomesFor,
 	principals,
 	type World,
 } from "../../proofs/world.test-support.ts";
 import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
- * The workspace and notifications operations, each called for every kind of
- * principal through the registry, as an entrypoint calls them. What each comes
- * to is "ok" or the tag of its refusal: hidden where the principal isn't in the
- * workspace or doesn't reach the project, forbidden where it is but may not
- * act. Who may do what in detail is the provers' tests'; what the writes do is
- * `workspaces/membership/`'s.
+ * The workspace and notifications operations whose rules the table in
+ * `permissions.test.ts` can't state: answering an invitation, which is for its
+ * address alone, leaving, handing over and deleting a workspace, which leave
+ * it changed for every later case, and clearing a level. What each comes to
+ * is "ok" or the tag of its refusal.
  *
  * The world is `buildWorld`'s: in workspace A, Ed (an editor) made the public
  * bot Pub, which leads the private project J; Ed and Vi (a viewer) are in J,
  * and Erin (an editor) isn't.
  */
-describe("the workspace operations, for each kind of principal", () => {
+describe("the workspace operations the permission table leaves out", () => {
 	let world: World;
 	let call: CallOperation;
 	let as: ReturnType<typeof principals>;
@@ -43,7 +41,7 @@ describe("the workspace operations, for each kind of principal", () => {
 	beforeAll(async () => {
 		world = await buildWorld();
 		a = world.a;
-		// Sign-up as the server's settings say, which is closed here, so nobody has a referral link.
+		// Accounts as a server's are when it isn't set to require verified email.
 		call = await servedOperations({ accounts: Layer.orDie(Accounts.layer) });
 		as = principals(await authenticators());
 		who = await everyKindOfPrincipal(world, as);
@@ -53,185 +51,50 @@ describe("the workspace operations, for each kind of principal", () => {
 		await closeDatabase();
 	});
 
-	/** The id of `memberId`'s membership of workspace A. */
-	const membershipIdOf = async (memberId: string) => {
-		const [found] = await onDatabase((db) =>
-			db
-				.select({ id: membership.id })
-				.from(membership)
-				.where(and(eq(membership.workspaceId, a.workspace), eq(membership.memberId, memberId))),
+	it("hides a missing or foreign workspace membership from role changes", async () => {
+		const foreign = await seedMember(world.b.workspace, "editor");
+		const [row] = await onDatabase((db) =>
+			db.select({ id: membership.id }).from(membership).where(eq(membership.memberId, foreign)),
 		);
-		if (!found) throw new Error("Not in workspace A");
-		return found.id;
-	};
+		if (!row) throw new Error("Expected the foreign membership");
 
-	it("does what only a member signed in does for that member alone", async () => {
-		const ownOnly = ["workspaces.list", "referrals.link", "notifications.settings"] as const;
-		for (const name of ownOnly) {
-			expect(
-				await outcomesFor(
-					{
-						member: who.vi,
-						botInMemberBounds: who.edsAssistant,
-						botInChatBounds: who.pubForEd,
-						run: who.run,
-						webhook: who.webhook,
-						systemWork: who.computerSleep,
-						page: who.page,
-					},
-					(principal) => operationOutcome(call, principal, name, {}),
-				),
-				name,
-			).toEqual({
-				member: "ok",
-				botInMemberBounds: "ActionForbidden",
-				botInChatBounds: "ActionForbidden",
-				run: "ActionForbidden",
-				webhook: "ActionForbidden",
-				systemWork: "ActionForbidden",
-				page: "ActionForbidden",
-			});
+		for (const membershipId of [row.id, crypto.randomUUID()]) {
+			await expect(
+				call(who.admin, "workspaces.changeRole", {
+					workspace: a.workspace,
+					membershipId,
+					role: "viewer",
+				}),
+			).rejects.toMatchObject({ _tag: "ResourceHidden", resource: "membership" });
 		}
 	});
 
-	it("shows a workspace's members, invitations and what one may do there to whoever is in it, and a bot only in member bounds", async () => {
-		const reads = [
-			"workspaces.memberships",
-			"workspaces.invitations",
-			"system.workspaceAccess",
-		] as const;
-		for (const name of reads) {
-			expect({
-				name,
-				outcomes: await outcomesFor(
-					{
-						viewer: who.vi,
-						outsider: who.outsider,
-						botInChatBounds: who.pubForEd,
-					},
-					(principal) => operationOutcome(call, principal, name, { workspace: a.workspace }),
-				),
-			}).toEqual({
-				name,
-				outcomes: {
-					viewer: "ok",
-					outsider: "ResourceHidden",
-					botInChatBounds: "ActionForbidden",
-				},
-			});
-		}
-	});
-
-	it("shows what the workspace's models cost to whoever may manage it, and a bot only in member bounds", async () => {
-		expect(
-			await outcomesFor(
-				{
-					admin: who.admin,
-					outsider: who.outsider,
-					adminsBotInChatBounds: who.pubForAdmin,
-				},
-				(principal) =>
-					operationOutcome(call, principal, "usage.month", {
-						workspace: a.workspace,
-						month: "2026-09",
-					}),
-			),
-		).toEqual({
-			admin: "ok",
-			outsider: "ResourceHidden",
-			adminsBotInChatBounds: "ActionForbidden",
-		});
-	});
-
-	it("shows the new membership role after an admin changes it", async () => {
-		const workspace = a.workspace;
-		const membershipId = await membershipIdOf(await seedMember(workspace, "editor"));
-		const input = { workspace, membershipId, role: "viewer" } as const;
-		await expect(call(who.ed, "workspaces.changeRole", input)).rejects.toMatchObject({
+	it("leaves inviting administrators to the owner", async () => {
+		const input = {
+			workspace: a.workspace,
+			email: `next-admin-${crypto.randomUUID()}@example.com`,
+			role: "admin",
+		} as const;
+		await expect(call(who.admin, "workspaces.invite", input)).rejects.toMatchObject({
 			_tag: "ActionForbidden",
 		});
-		await expect(call(who.outsider, "workspaces.changeRole", input)).rejects.toMatchObject({
-			_tag: "ResourceHidden",
+		expect(await call(who.owner, "workspaces.invite", input)).toMatchObject({
+			email: input.email,
+			role: "admin",
 		});
-
-		await call(who.admin, "workspaces.changeRole", input);
-
-		const members = await call(who.admin, "workspaces.memberships", { workspace });
-		expect(members.find(({ id }) => id === membershipId)).toMatchObject({ role: "viewer" });
 	});
 
-	it("removes another member while protecting the owner’s membership", async () => {
-		const workspace = a.workspace;
-		const membershipId = await membershipIdOf(await seedMember(workspace, "editor"));
-		await expect(
-			call(who.admin, "workspaces.removeMembership", {
-				workspace,
-				membershipId: await membershipIdOf(a.owner),
-			}),
-		).rejects.toMatchObject({ _tag: "ActionForbidden" });
-		await expect(
-			call(who.outsider, "workspaces.removeMembership", {
-				workspace,
-				membershipId,
-			}),
-		).rejects.toMatchObject({ _tag: "ResourceHidden" });
-
-		await call(who.admin, "workspaces.removeMembership", { workspace, membershipId });
-
-		const members = await call(who.admin, "workspaces.memberships", { workspace });
-		expect(members.map(({ id }) => id)).not.toContain(membershipId);
-	});
-
-	it("hides a membership the workspace doesn't have", async () => {
-		expect(
-			await operationOutcome(call, who.admin, "workspaces.changeRole", {
-				workspace: a.workspace,
-				membershipId: crypto.randomUUID(),
-				role: "viewer",
-			}),
-		).toBe("ResourceHidden");
-	});
-
-	it("lists a new invitation with the role the admin assigned", async () => {
-		const workspace = a.workspace;
-		const email = `invited-${crypto.randomUUID()}@example.com`;
-		await expect(
-			call(who.admin, "workspaces.invite", { workspace, email, role: "admin" }),
-		).rejects.toMatchObject({ _tag: "ActionForbidden" });
-		await expect(
-			call(who.outsider, "workspaces.invite", { workspace, email, role: "editor" }),
-		).rejects.toMatchObject({ _tag: "ResourceHidden" });
-
-		const invited = await call(who.admin, "workspaces.invite", {
-			workspace,
-			email,
-			role: "editor",
-		});
-
-		expect(await call(who.admin, "workspaces.invitations", { workspace })).toContainEqual(
-			expect.objectContaining({ id: invited.id, email, role: "editor" }),
-		);
-	});
-
-	it("takes an admin invitation out of the pending list when the owner cancels it", async () => {
-		const workspace = a.workspace;
-		const invitationId = await seedInvitation(workspace, a.owner, {
-			email: `invited-${crypto.randomUUID()}@example.com`,
+	it("leaves cancelling an administrator's invitation to the owner", async () => {
+		const invitationId = await seedInvitation(a.workspace, a.owner, {
+			email: `cancelled-admin-${crypto.randomUUID()}@example.com`,
 			role: "admin",
 		});
 		await expect(
 			call(who.admin, "workspaces.cancelInvitation", { invitationId }),
 		).rejects.toMatchObject({ _tag: "ActionForbidden" });
-		await expect(
-			call(who.outsider, "workspaces.cancelInvitation", { invitationId }),
-		).rejects.toMatchObject({ _tag: "ResourceHidden" });
-		await expect(
-			call(who.owner, "workspaces.cancelInvitation", { invitationId: crypto.randomUUID() }),
-		).rejects.toMatchObject({ _tag: "ResourceHidden" });
 
 		await call(who.owner, "workspaces.cancelInvitation", { invitationId });
-
-		const pending = await call(who.owner, "workspaces.invitations", { workspace });
+		const pending = await call(who.owner, "workspaces.invitations", { workspace: a.workspace });
 		expect(pending.map(({ id }) => id)).not.toContain(invitationId);
 	});
 
@@ -258,6 +121,9 @@ describe("the workspace operations, for each kind of principal", () => {
 				invitationId: toInvitee,
 			}),
 		).toBe("ActionForbidden");
+		await expect(
+			call(who.ed, "workspaces.acceptInvitation", { invitationId: toInvitee }),
+		).rejects.toMatchObject({ _tag: "ResourceHidden", resource: "invitation" });
 		// This server, like any not set to, doesn't require members to verify their email;
 		// the provers' tests and `workspaces/membership/`'s cover one that does.
 		expect(
@@ -328,34 +194,13 @@ describe("the workspace operations, for each kind of principal", () => {
 		);
 	});
 
-	it("sets a member's level in a project they reach, and clears it anywhere", async () => {
-		const setting = (principal: Principal, level: "all" | null) =>
-			operationOutcome(call, principal, "notifications.setLevel", {
+	it("clears a member's level in a project they don't reach", async () => {
+		expect(
+			await operationOutcome(call, who.erin, "notifications.setLevel", {
 				kind: "project",
 				id: a.project,
-				level,
-			});
-
-		expect(
-			await outcomesFor(
-				{
-					inProject: who.vi,
-					notInProject: who.erin,
-					outsider: who.outsider,
-					botInChatBounds: who.pubForEd,
-					botInMemberBounds: who.edsAssistant,
-					run: who.run,
-				},
-				(principal) => setting(principal, "all"),
-			),
-		).toEqual({
-			inProject: "ok",
-			notInProject: "ResourceHidden",
-			outsider: "ResourceHidden",
-			botInChatBounds: "ActionForbidden",
-			botInMemberBounds: "ActionForbidden",
-			run: "ActionForbidden",
-		});
-		expect(await setting(who.erin, null)).toBe("ok");
+				level: null,
+			}),
+		).toBe("ok");
 	});
 });

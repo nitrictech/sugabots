@@ -22,30 +22,16 @@ import {
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { Authentication } from "../auth/authentication.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
-import { approvalRoutes } from "../routes/approvals/routes.ts";
-import { automationRoutes } from "../routes/automations/routes.ts";
-import { botRoutes } from "../routes/bots/routes.ts";
-import { chatRoutes } from "../routes/chats/routes.ts";
-import { computerProviderRoutes } from "../routes/computer-providers/routes.ts";
-import { connectorRoutes } from "../routes/connectors/routes.ts";
-import { eventRoutes } from "../routes/events/routes.ts";
-import { fileRoutes } from "../routes/files/routes.ts";
-import { gitHubConnectorRoutes, gitHubWebhookRoutes } from "../routes/github/routes.ts";
-import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
-import { notificationRoutes } from "../routes/notifications/routes.ts";
-import { projectComputerRoutes } from "../routes/project-computer/routes.ts";
-import { projectRoutes } from "../routes/projects/routes.ts";
-import { referralRoutes } from "../routes/referrals/routes.ts";
-import { searchProviderRoutes } from "../routes/search-providers/routes.ts";
-import { systemRoutes } from "../routes/system/routes.ts";
-import { systemBotRoutes } from "../routes/system-bots/routes.ts";
-import { usageRoutes } from "../routes/usage/routes.ts";
-import { workspaceSetupRoutes } from "../routes/workspace-setup/routes.ts";
-import { workspaceRoutes } from "../routes/workspaces/routes.ts";
+import { chatFileRoutes } from "../routes/chat-files/routes.ts";
+import { eventStreamRoutes } from "../routes/event-streams/routes.ts";
+import { sessionRoutes } from "../routes/session/routes.ts";
+import { signInCallbackRoutes } from "../routes/sign-in-callbacks/routes.ts";
+import { webhookRoutes } from "../routes/webhooks/routes.ts";
 import { ServerApi } from "./api.ts";
 import { contentPageRoutes, onlyPagesOnContentHost } from "./content-pages.ts";
 import { desktopViewerRoutes } from "./desktop-viewer.ts";
 import { failureResponse } from "./errors.ts";
+import { operationRoutes } from "./operation-routes.ts";
 import type { HttpServices } from "./services.ts";
 import { limitJsonBody, validateRequestLayer } from "./validation.ts";
 
@@ -72,8 +58,10 @@ const betterAuthRoutes = Layer.effectDiscard(
  *
  * What the endpoints are is `Api` in `@sugabots/contracts/http`, which
  * `packages/sdk` derives its client from; this is where each group gets its
- * handlers and each middleware its implementation. A group left out, or a
- * handler missing from one, does not compile. better-auth's wildcard is beside
+ * handlers and each middleware its implementation. Every operation offered
+ * over HTTP has the one handler `operationRoutes` gives; the groups written
+ * by hand have their own. A hand-written group left out, or a handler missing
+ * from one, does not compile. better-auth's wildcard is beside
  * the API rather than in it, because the client reaches it through
  * better-auth's own SDK.
  *
@@ -88,27 +76,12 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 	HttpApiBuilder.layer(ServerApi).pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				systemRoutes,
-				workspaceRoutes,
-				eventRoutes,
-				workspaceSetupRoutes,
-				projectRoutes,
-				systemBotRoutes,
-				modelProviderRoutes,
-				searchProviderRoutes,
-				computerProviderRoutes,
-				projectComputerRoutes,
-				gitHubConnectorRoutes,
-				gitHubWebhookRoutes,
-				connectorRoutes,
-				fileRoutes,
-				botRoutes,
-				chatRoutes,
-				automationRoutes,
-				approvalRoutes,
-				usageRoutes,
-				referralRoutes,
-				notificationRoutes,
+				operationRoutes,
+				sessionRoutes,
+				chatFileRoutes,
+				signInCallbackRoutes,
+				eventStreamRoutes,
+				webhookRoutes,
 			).pipe(Layer.provide(Layer.merge(sessionLayer, validateRequestLayer))),
 		),
 	),

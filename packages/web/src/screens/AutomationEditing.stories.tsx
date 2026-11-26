@@ -485,7 +485,7 @@ export const DeliveryIdHeader = meta.story({
 			http.put(
 				`${API}/projects/:projectId/automations/:automationId/triggers/:triggerId`,
 				async ({ request, params }) => {
-					const input = (await request.json()) as AutomationTriggerInput;
+					const { trigger: input } = (await request.json()) as { trigger: AutomationTriggerInput };
 					if (input.kind !== "webhook") return HttpResponse.json({}, { status: 400 });
 					automation = {
 						...automation,

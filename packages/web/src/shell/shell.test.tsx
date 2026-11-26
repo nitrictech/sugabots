@@ -6,6 +6,7 @@ import {
 	type Run,
 	streamEvent,
 } from "@sugabots/contracts";
+import { EmailUnverified } from "@sugabots/contracts/errors/workspace";
 import { Conflict, Forbidden, InternalServerError } from "@sugabots/contracts/http";
 import { listedChat } from "@sugabots/contracts/testing";
 import { UserText, userText } from "@sugabots/errors";
@@ -1364,7 +1365,7 @@ describe("routes", () => {
 		await screen.findByRole("heading", { name: "Choose a model" });
 		expect(client.api.modelProviders.create).toHaveBeenCalledWith({
 			params: { workspace: workspace.id },
-			payload: { builtIn: "openrouter", apiKey: "sk-or-test" },
+			payload: { provider: { builtIn: "openrouter", apiKey: "sk-or-test" } },
 		});
 		const next = screen.getByRole("button", { name: "Continue" });
 		expect(next.hasAttribute("disabled")).toBe(true);
@@ -1376,7 +1377,7 @@ describe("routes", () => {
 		expect(client.api.bots.update).not.toHaveBeenCalled();
 		expect(client.api.modelProviders.updateModel).toHaveBeenCalledWith({
 			params: { workspace: workspace.id, providerId: openrouter.id, modelId: large?.id },
-			payload: { enabled: true },
+			payload: { changes: { enabled: true } },
 		});
 		await screen.findByRole("heading", { name: "Make your first bot" });
 	});
@@ -1467,15 +1468,13 @@ describe("routes", () => {
 	});
 
 	it("tells an invitee to verify rather than blaming the address", async () => {
+		const unverified = new EmailUnverified();
 		client.api.workspaces.invitation.mockReturnValue(
 			Effect.fail(
-				failureForStatus(
-					403,
-					UserText.unchecked(
-						"Email verification required to view or list invitations for the session email",
-					),
-					"EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION",
-				),
+				new Forbidden({
+					message: unverified.userMessage,
+					error: { _tag: unverified._tag, userMessage: unverified.userMessage, isRetryable: false },
+				}),
 			),
 		);
 
@@ -1846,7 +1845,7 @@ describe("workspace settings", () => {
 		await waitFor(() =>
 			expect(client.api.modelProviders.updateModel).toHaveBeenCalledWith({
 				params: { workspace: workspace.id, providerId: anthropic.id, modelId: model.id },
-				payload: { enabled: false },
+				payload: { changes: { enabled: false } },
 			}),
 		);
 	});
@@ -1932,7 +1931,7 @@ describe("workspace settings", () => {
 		await waitFor(() => {
 			expect(patched()).toHaveBeenCalledWith({
 				params: { workspace: workspace.id, providerId: ollama.id },
-				payload: { baseUrl: "http://studio.local:9000/v1" },
+				payload: { changes: { baseUrl: "http://studio.local:9000/v1" } },
 			});
 		});
 	});
@@ -1958,7 +1957,7 @@ describe("workspace settings", () => {
 		await waitFor(() => {
 			expect(patched()).toHaveBeenCalledWith({
 				params: { workspace: workspace.id, providerId: ollama.id },
-				payload: { apiKey: null },
+				payload: { changes: { apiKey: null } },
 			});
 		});
 	});
@@ -1992,11 +1991,13 @@ describe("workspace settings", () => {
 			expect(client.api.modelProviders.create).toHaveBeenCalledWith({
 				params: { workspace: workspace.id },
 				payload: {
-					name: provider.name,
-					baseUrl: provider.baseUrl,
-					apiFormat: "anthropic",
-					apiKey: undefined,
-					customHeaders: [],
+					provider: {
+						name: provider.name,
+						baseUrl: provider.baseUrl,
+						apiFormat: "anthropic",
+						apiKey: undefined,
+						customHeaders: [],
+					},
 				},
 			});
 		});
@@ -2029,7 +2030,7 @@ describe("workspace settings", () => {
 		await waitFor(() => {
 			expect(client.api.modelProviders.create).toHaveBeenCalledWith({
 				params: { workspace: workspace.id },
-				payload: { builtIn: "groq", apiKey: "gsk-test" },
+				payload: { provider: { builtIn: "groq", apiKey: "gsk-test" } },
 			});
 		});
 	});
@@ -2051,7 +2052,7 @@ describe("workspace settings", () => {
 		await waitFor(() =>
 			expect(patched()).toHaveBeenCalledWith({
 				params: { workspace: workspace.id, providerId: openai.id },
-				payload: { active: true, apiKey: "sk-new" },
+				payload: { changes: { active: true, apiKey: "sk-new" } },
 			}),
 		);
 		expect(client.api.modelProviders.create).not.toHaveBeenCalled();
@@ -2088,7 +2089,7 @@ describe("workspace settings", () => {
 		await waitFor(() =>
 			expect(patched()).toHaveBeenCalledWith({
 				params: { workspace: workspace.id, providerId: openai.id },
-				payload: { active: true, apiKey: "sk-new" },
+				payload: { changes: { active: true, apiKey: "sk-new" } },
 			}),
 		);
 	});
@@ -2104,7 +2105,7 @@ describe("workspace settings", () => {
 		await waitFor(() =>
 			expect(patched()).toHaveBeenCalledWith({
 				params: { workspace: workspace.id, providerId: openai.id },
-				payload: { active: false, apiKey: null },
+				payload: { changes: { active: false, apiKey: null } },
 			}),
 		);
 		expect(client.api.modelProviders.remove).not.toHaveBeenCalled();
@@ -2432,16 +2433,16 @@ describe("settings, over the page they were opened on", () => {
 	it("opens over a bot's page, keeping the page and the bot's sidebar beneath, with Settings shaded", async () => {
 		const { router, composer, sidebar, botPages } = await openBotPage();
 
-		fireEvent.click(settingsInSidebar(sidebar));
+		const settings = settingsInSidebar(sidebar);
+		fireEvent.click(settings);
 
 		await screen.findByRole("dialog", { name: "Settings" });
 		expect(router.state.location.pathname).toBe(linearPage);
 		// The same elements, not the page drawn again or the workspace's sidebar in its place.
 		expect(screen.getByLabelText(`Message ${linear.name}`)).toBe(composer);
-		expect(within(sidebar).getByRole("navigation", { name: `${linear.name}'s pages` })).toBe(
-			botPages,
-		);
-		expect(settingsInSidebar(sidebar).getAttribute("aria-current")).toBe("page");
+		expect(sidebar.contains(botPages)).toBe(true);
+		expect(sidebar.closest("[inert]")).not.toBeNull();
+		expect(settings.getAttribute("aria-current")).toBe("page");
 	});
 
 	it.each([
@@ -2462,6 +2463,43 @@ describe("settings, over the page they were opened on", () => {
 		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull());
 		expect(router.state.location.href).toBe(linearPage);
 		expect(screen.getByLabelText(`Message ${linear.name}`)).toBe(composer);
+	});
+
+	it("goes back from a tablet section to its list without adding a history entry", async () => {
+		const { router, sidebar } = await openBotPage();
+		fireEvent.click(settingsInSidebar(sidebar));
+		const list = await screen.findByRole("navigation", { name: "Settings sections" });
+		fireEvent.click(await within(list).findByRole("link", { name: /^Members/ }));
+		const dialog = await screen.findByRole("dialog", { name: "Settings" });
+		await within(dialog).findByRole("heading", { name: "Members", level: 2 });
+
+		fireEvent.click(
+			within(within(dialog).getByRole("main")).getByRole("link", { name: "Settings" }),
+		);
+		await screen.findByRole("navigation", { name: "Settings sections" });
+		router.history.back();
+
+		await waitFor(() => expect(router.state.location.href).toBe(linearPage));
+		expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+	});
+
+	it("goes back from a member's page to Members on a tablet without adding a history entry", async () => {
+		const { router, sidebar } = await openBotPage();
+		fireEvent.click(settingsInSidebar(sidebar));
+		const list = await screen.findByRole("navigation", { name: "Settings sections" });
+		fireEvent.click(await within(list).findByRole("link", { name: /^Members/ }));
+		const dialog = await screen.findByRole("dialog", { name: "Settings" });
+		fireEvent.click(await within(dialog).findByRole("link", { name: new RegExp(juno.name) }));
+		await within(dialog).findByRole("heading", { name: juno.name });
+
+		// The member's page draws its own Back, which stands in for the frame's.
+		const pageBack = dialog.querySelector("[data-page-back]") as HTMLElement;
+		fireEvent.click(within(pageBack).getByRole("link", { name: "Back to Members" }));
+		await waitFor(() => expect(settingsOpenIn(router)).toBe("members"));
+		router.history.back();
+
+		// The list Members was opened from, not the member's page again.
+		await waitFor(() => expect(settingsOpenIn(router)).toBe(""));
 	});
 
 	it("moves between sections and into a member's page over the same page, and closes onto it", async () => {
@@ -2485,15 +2523,24 @@ describe("settings, over the page they were opened on", () => {
 	});
 
 	it.each([
-		["wide, over the workspace's home", onWideScreen, "/suga?settings=members"],
-		["on a phone, over You", () => {}, "/suga/you?settings=members"],
-	])("opens a section from its old address, %s", async (_where, screenSize, address) => {
-		screenSize();
-		const { router } = mount("/suga/settings/members");
+		["a wide screen", onWideScreen, "/suga/settings/members", "/suga?settings=members"],
+		["a phone", () => {}, "/suga/settings/members", "/suga/you?settings=members"],
+		[
+			"the phone Home address on a wide screen",
+			onWideScreen,
+			"/suga/home?settings=members",
+			"/suga?settings=members",
+		],
+	])(
+		"preserves the settings section when redirecting from %s",
+		async (_where, screenSize, from, address) => {
+			screenSize();
+			const { router } = mount(from);
 
-		await screen.findByRole("heading", { name: "Members", level: 2 });
-		expect(router.state.location.href).toBe(address);
-	});
+			await screen.findByRole("heading", { name: "Members", level: 2 });
+			expect(router.state.location.href).toBe(address);
+		},
+	);
 });
 
 describe("settings on a phone", () => {

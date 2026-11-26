@@ -2,23 +2,14 @@ import { randomUUID } from "node:crypto";
 import { FILE_WRITE_TOOL, START_CHAT_TOOL } from "@sugabots/contracts";
 import { seedProject, seedProjectChat } from "@sugabots/core/authentication/seed.test-support";
 import { aChatWithConnectorAwaitingReply, runningTurns } from "@sugabots/core/chats/turns/testing";
-import {
-	automation,
-	bot,
-	chat,
-	file,
-	placedChat,
-	projectChat,
-	toolCall,
-	turn,
-} from "@sugabots/core/database/schema";
+import { automation, bot, chat, file, projectChat, turn } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
 import { operationsForTests } from "@sugabots/core/operations/testing";
 import type { BotPrincipal } from "@sugabots/core/principal";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { botLoopOnPostgres, type ScriptedStep, scriptedSteps } from "./testing.ts";
+import { botLoopOnPostgres, callsOf, type ScriptedStep, scriptedSteps } from "./testing.ts";
 
 /**
  * A tool call's writes once its turn was asked to end: an interrupt that
@@ -39,20 +30,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a tool's writes after an interrupt",
 	afterAll(closeDatabase);
 
 	beforeEach(async () => {
-		({ chatId, workspaceId, botId, adminId, connectorId } =
+		({ chatId, workspaceId, botId, adminId, connectorId, projectId } =
 			await aChatWithConnectorAwaitingReply(chatsAs));
-		const [placed] = await onDatabase((db) =>
-			db
-				.select({ projectId: placedChat.projectId })
-				.from(placedChat)
-				.where(eq(placedChat.id, chatId)),
-		);
-		if (!placed?.projectId) throw new Error("The test chat has no project");
-		projectId = placed.projectId;
 	});
-
-	const callsOf = (turnId: string) =>
-		onDatabase((db) => db.select().from(toolCall).where(eq(toolCall.turnId, turnId)));
 
 	/**
 	 * Its asker interrupts the turn `turnId` while its step runs a call: still

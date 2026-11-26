@@ -149,14 +149,14 @@ describe("quick changes to what bots may do with a connector's tools", () => {
 			choose("off");
 		});
 		expect(client.api.connectors.update.mock.calls.map(([request]) => request.payload)).toEqual([
-			{ toolAccess: { create_issue: "allow" } },
+			{ changes: { toolAccess: { create_issue: "allow" } } },
 		]);
 
 		first.answer(Effect.succeed(undefined));
 
 		await waitFor(() => expect(client.api.connectors.update).toHaveBeenCalledTimes(2));
 		expect(client.api.connectors.update).toHaveBeenLastCalledWith(
-			expect.objectContaining({ payload: { toolAccess: { create_issue: "off" } } }),
+			expect.objectContaining({ payload: { changes: { toolAccess: { create_issue: "off" } } } }),
 		);
 	});
 

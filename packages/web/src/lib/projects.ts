@@ -75,7 +75,9 @@ export function useUpdateProject(projectId: string) {
 
 	return useMutation({
 		mutationFn: (input: ProjectUpdate) =>
-			Effect.runPromise(client.api.projects.update({ params: { projectId }, payload: input })),
+			Effect.runPromise(
+				client.api.projects.update({ params: { projectId }, payload: { changes: input } }),
+			),
 		onSuccess: () =>
 			Promise.all([
 				queries.invalidateQueries({ queryKey: ["projects", workspaceId] }),

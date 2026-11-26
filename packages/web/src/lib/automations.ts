@@ -180,7 +180,7 @@ export function useAutomationActions() {
 				json: AutomationUpdate;
 			}) =>
 				Effect.runPromise(
-					automations.update({ params: { projectId, automationId }, payload: json }),
+					automations.update({ params: { projectId, automationId }, payload: { changes: json } }),
 				),
 			onSuccess: (result) =>
 				"restricted" in result.automation
@@ -216,22 +216,16 @@ export function useAutomationActions() {
 				json: AutomationTriggerInput;
 			}) =>
 				Effect.runPromise(
-					// The generated client splits a union payload into one request type
-					// per member, which a request holding the whole union does not satisfy.
 					automations.addTrigger({
 						params: { projectId, automationId },
-						payload: json,
-					} as Parameters<typeof automations.addTrigger>[0]),
+						payload: { trigger: json },
+					}),
 				),
 			onSuccess: written,
 		}),
 		updateTrigger: useMutation({
 			mutationFn: ({ json, ...params }: TriggerAddress & { json: AutomationTriggerInput }) =>
-				Effect.runPromise(
-					automations.updateTrigger({ params, payload: json } as Parameters<
-						typeof automations.updateTrigger
-					>[0]),
-				),
+				Effect.runPromise(automations.updateTrigger({ params, payload: { trigger: json } })),
 			onSuccess: written,
 		}),
 		removeTrigger: useMutation({

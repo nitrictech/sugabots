@@ -2,6 +2,7 @@ import type { InputOf, OutputOf, RequestOperationName } from "@sugabots/contract
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { seedMember } from "../../../authentication/seed.test-support.ts";
 import { closeDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { Secrets } from "../../../secrets/secrets.ts";
 import { connectorsIn } from "../connector-reads.ts";
@@ -119,13 +120,14 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 
 	it("makes the project's GitHub connector once GitHub has made the app, signed in once it is installed", async () => {
 		const fixture = await workspaceWithProject("Install");
-		const { workspaceId, projectId, adminId, editorId } = fixture;
+		const { workspaceId, projectId, adminId } = fixture;
+		const otherAdmin = as(await seedMember(workspaceId, "admin"));
 		const admin = as(adminId);
 		const form = await admin("gitHubConnectors.start", { projectId, organization: undefined });
 		const state = stateIn(form.url);
 		const webhookUrl = JSON.parse(form.manifest).hook_attributes.url as string;
 
-		const someoneElse = await as(editorId)("gitHubConnectors.gitHubAppMade", {
+		const someoneElse = await otherAdmin("gitHubConnectors.gitHubAppMade", {
 			code: MANIFEST_CODE,
 			state,
 		});
@@ -144,13 +146,21 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 		expect(webhookUrl.endsWith(`/${pending?.id}`)).toBe(true);
 		expect(await runOnPostgres(connectors.forProject(fixture))).toBeUndefined();
 
+		const installState = stateIn(made.url);
+		await expect(
+			otherAdmin("gitHubConnectors.gitHubAppInstalled", {
+				installationId: INSTALLATION_ID,
+				state: installState,
+			}),
+		).resolves.toEqual({ kind: "failed", at: undefined, failure: "expired" });
+
 		const notOurs = await admin("gitHubConnectors.gitHubAppInstalled", {
 			installationId: 999,
-			state: stateIn(made.url),
+			state: installState,
 		});
 		const installed = await admin("gitHubConnectors.gitHubAppInstalled", {
 			installationId: INSTALLATION_ID,
-			state: stateIn(made.url),
+			state: installState,
 		});
 
 		expect(notOurs).toEqual({

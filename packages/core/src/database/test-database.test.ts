@@ -37,6 +37,15 @@ describe("choosing the tests' database", () => {
 		);
 	});
 
+	it("refuses the development database named another way, with other credentials or options", () => {
+		expect(() =>
+			testDatabaseUrl({
+				DATABASE_URL: development,
+				TEST_DATABASE_URL: "postgres://tester:other@localhost:5436/sugabots?sslmode=disable",
+			}),
+		).toThrow(DevelopmentDatabaseRefused);
+	});
+
 	it("has nothing to offer when no database is configured at all", () => {
 		// The database tests skip themselves rather than failing.
 		expect(testDatabaseUrl({})).toBeUndefined();

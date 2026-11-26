@@ -1,4 +1,4 @@
-import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
+import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { toolCallPartSchema } from "@sugabots/contracts/messages";
 import {
 	seedBot,
@@ -25,10 +25,12 @@ import {
 	botLoopOnPostgres,
 	calling,
 	callsOf,
+	failedCall,
 	resumeAt,
 	scriptedSteps,
 	storedReply,
 	storedTurn,
+	toolResultFor,
 	wikiWipe,
 } from "./testing.ts";
 
@@ -410,27 +412,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			]);
 		}, 15_000);
 
-		it("hides a connector outside chat bounds even when the bot and asker reach its project", async () => {
+		it("hides a connector outside chat bounds even when the catalog offers it", async () => {
 			const project = await seedProject(workspaceId, { leadBotId: botId });
-			const outside = await seedConnector(workspaceId, project, {
-				tools: [{ name: "lookup", description: null, readOnly: true, destructive: null }],
-			});
-			const { model } = scriptedSteps({
-				calls: [
-					{ toolCallId: "wipe", toolName: CALL_TOOL, input: { tool: "wiki__wipe", arguments: {} } },
-				],
-			});
-			const result = await loop.runTurn(chatId, {
-				model,
-				connectorTools: wiki("ask", async () => ({})),
-			});
-			await expect(
-				loop.call(result.principal, "connectors.callTool", {
-					connectorId: outside,
-					tool: "lookup",
-					arguments: {},
-				}),
-			).rejects.toMatchObject({ _tag: "ResourceHidden" });
+			const outside = await seedConnector(workspaceId, project);
+			const execute = vi.fn(async () => ({ removed: true }));
+			const { model, requests } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
+
+			await loop.runTurn(chatId, { model, connectorTools: wiki("allow", execute, outside) });
+
+			expect(toolResultFor(requests[1], "sdk-1")).toEqual(
+				failedCall(new ResourceHidden({ resource: "connector" }).userMessage),
+			);
+			expect(execute).not.toHaveBeenCalled();
 		});
 
 		it.each([false, true])(
@@ -446,7 +439,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					destructive: false,
 				};
 				const schema = { type: "object" as const };
-				const close = vi.fn(async () => {});
+				const sessionEvents: Array<"connect" | "close"> = [];
+				const close = async () => {
+					sessionEvents.push("close");
+				};
 				const run = vi.fn(async () => ({ found: true }));
 				const list = vi.fn(async () => ({
 					definitions: { tools: [] },
@@ -464,10 +460,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						},
 					],
 				}));
-				const connect = vi.fn(async () => {
-					if (connect.mock.calls.length === 2) expect(close).toHaveBeenCalledOnce();
+				const connect = async () => {
+					sessionEvents.push("connect");
 					return { list, run, close };
-				});
+				};
 				const url = "https://wiki.example.com/mcp";
 				const discovery = ConnectorCatalog.from({
 					connectors: {
@@ -510,7 +506,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(await steps.step(running.request, first, { turnId, attempt: 0, step: 0 })).toEqual({
 					_tag: "Continue",
 				});
-				expect(close).not.toHaveBeenCalled();
+				expect(sessionEvents).toEqual(["connect"]);
 				const principal = takeover ? await authentication.authenticate(turnId) : first;
 				for (const step of [1, 2, 3]) {
 					expect(
@@ -536,10 +532,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						}),
 					]),
 				);
-				expect(connect).toHaveBeenCalledTimes(takeover ? 2 : 1);
 				expect(list).toHaveBeenCalledOnce();
 				expect(run).toHaveBeenCalledTimes(2);
-				expect(close).toHaveBeenCalledTimes(takeover ? 2 : 1);
+				expect(sessionEvents).toEqual(
+					takeover ? ["connect", "close", "connect", "close"] : ["connect", "close"],
+				);
 			},
 			15_000,
 		);

@@ -104,6 +104,8 @@ export function ComputerSheet({
 						may.manageProviders && (
 							<Link
 								{...settingsSectionLink("computers")}
+								// Settings open over the chat, which keeps this sheet open unless it closes too.
+								onClick={onDismiss}
 								className={cn(buttonStyles(), "h-11 w-full")}
 							>
 								Set up computers

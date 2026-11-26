@@ -10,8 +10,12 @@ import { createEventsApi, type EventsApi } from "./events.ts";
  * request sends the browser's session cookie.
  *
  * `api` is derived from the API's definition in `@sugabots/contracts/http`,
- * which the server implements, so an endpoint added there appears here with
- * no second declaration to keep in step. Each call is an `Effect` that
+ * which the server implements. An operation offered over HTTP is an endpoint
+ * there because its contract says so, named for it: `chats.setResolved` is
+ * `api.chats.setResolved({ params, payload })`, its path parameters in
+ * `params` and its other input in `query` or `payload`, as the operation
+ * takes them. So an operation added there appears here with no second
+ * declaration to keep in step. Each call is an `Effect` that
  * succeeds with the decoded response, or fails with one of the errors that
  * endpoint declares — or with the transport or decoding failure of a request
  * that never got an answer.

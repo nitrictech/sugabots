@@ -165,13 +165,28 @@ export const OverABotsPage = meta.story({
 			await within(dialog).findByRole("heading", { name: "Members", level: 2 }),
 		).toBeVisible();
 		await expect(
-			await canvas.findByRole("navigation", { name: `${growthDesk.name}'s pages` }),
+			await canvas.findByRole("navigation", { name: `${growthDesk.name}'s pages`, hidden: true }),
 		).toBeInTheDocument();
 		// Once the bot's page beneath has loaded, which hides the app while it does.
 		await userEvent.click(await within(dialog).findByRole("link", { name: "Close settings" }));
 		await waitFor(() => expect(canvas.queryByRole("dialog", { name: "Settings" })).toBeNull());
-		await expect(
-			canvas.getByRole("navigation", { name: `${growthDesk.name}'s pages` }),
-		).toBeVisible();
+		const sidebar = canvas.getByRole("navigation", { name: "Sidebar" });
+		const botPages = within(sidebar).getByRole("navigation", {
+			name: `${growthDesk.name}'s pages`,
+		});
+		await expect(botPages).toBeVisible();
+		const settings = within(sidebar)
+			.getAllByRole("link", { name: "Settings" })
+			.find((link) => !botPages.contains(link));
+		if (!settings) throw new Error("The workspace settings link is missing");
+		settings.focus();
+		await userEvent.keyboard("{Enter}");
+		const reopened = await canvas.findByRole("dialog", { name: "Settings" });
+		await expect(reopened).toContainElement(document.activeElement as HTMLElement);
+
+		await userEvent.keyboard("{Escape}");
+
+		await waitFor(() => expect(settings).toHaveFocus());
+		await expect(canvas.queryByRole("dialog", { name: "Settings" })).toBeNull();
 	},
 });

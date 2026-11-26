@@ -126,8 +126,7 @@ export const client = {
 			startInterview: vi.fn(),
 			openAutomationFeed: vi.fn(),
 			startProjectChat: vi.fn(),
-			markResolved: vi.fn(),
-			reopen: vi.fn(),
+			setResolved: vi.fn(),
 			interruptTurn: vi.fn(),
 			messages: vi.fn(),
 			history: vi.fn(),
@@ -139,9 +138,7 @@ export const client = {
 			context: vi.fn(),
 		},
 		events: {
-			workspace: vi.fn(),
-			chat: vi.fn(),
-			typing: vi.fn(),
+			reportTyping: vi.fn(),
 		},
 		approvals: {
 			decide: vi.fn(),

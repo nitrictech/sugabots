@@ -32,7 +32,7 @@ import {
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert, Success } from "@/ui/alert.tsx";
 import { MemberAvatar } from "@/ui/avatar.tsx";
-import { useLeave } from "@/ui/back-button.tsx";
+import { useBackToLinkedPage, useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -306,6 +306,7 @@ function MemberPage({
 	const projects = useProjects();
 	const router = useRouter();
 	const { leaveForPage } = useLeave();
+	const backToMembers = useBackToLinkedPage();
 	const [confirming, setConfirming] = useState(false);
 	const [transferring, setTransferring] = useState(false);
 	const role = membership.role;
@@ -339,7 +340,13 @@ function MemberPage({
 			back={
 				<PageBackLink
 					label="Members"
-					render={<Link {...settingsSectionLink("members")} aria-label="Back to Members" />}
+					render={
+						<Link
+							{...settingsSectionLink("members")}
+							aria-label="Back to Members"
+							onClick={backToMembers}
+						/>
+					}
 				/>
 			}
 			hero={<MemberAvatar member={membership.member} size={44} />}

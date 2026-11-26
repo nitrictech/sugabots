@@ -1,6 +1,6 @@
 /**
- * The bots operations' contracts, and their entries in the exposure manifest.
- * `index.ts` spreads both, so adding an operation here touches no other file.
+ * The bots operations' contracts, each with its decisions in the exposure manifest.
+ * `index.ts` spreads them, so adding an operation here touches no other file.
  */
 
 import { Schema } from "effect";
@@ -37,7 +37,6 @@ import { TurnExecutionSuperseded } from "../errors/turns.ts";
 import { systemBotSchema, systemBotUpdateSchema } from "../system-bots.ts";
 import { uuidSchema } from "../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../workspaces.ts";
-import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
 
 /** How an operation that proves what it may do in a workspace, or to a bot, refuses. */
@@ -54,6 +53,25 @@ const approvalAndFenceRefusals = [
 /** A bot, by its id. */
 const aBot = Schema.Struct({ botId: uuidSchema.annotate({ description: "The bot's id." }) });
 
+/**
+ * Offered as `tool` only in member bounds, a personal bot's own turns,
+ * where each call asks its creator: it changes the member's own sidebar.
+ */
+const forMemberInMemberBounds = <const Tool extends string>(tool: Tool) =>
+	({
+		kind: "offered",
+		tool,
+		offeredIn: "memberBounds",
+		approval: { kind: "always", approvers: "turn" },
+	}) as const;
+
+/** Held back: it manages the workspace or a bot, which a bot may do only in member bounds. */
+const managesInMemberBounds = {
+	kind: "heldBack",
+	reason:
+		"It manages the workspace or a bot, which a bot may do only in member bounds, and no tool does it yet.",
+} as const;
+
 export const botsContracts = {
 	"bots.list": OperationContract.make("bots.list", {
 		description:
@@ -62,6 +80,12 @@ export const botsContracts = {
 		output: Schema.Array(botSchema),
 		errors: refusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/workspaces/:workspace/bots" },
+		botLoop: {
+			kind: "coveredBy",
+			operation: "workspaces.guide",
+			reason: "A Personal Assistant's workspace guide lists the bots its member reaches.",
+		},
 	}),
 	"bots.create": OperationContract.make("bots.create", {
 		description:
@@ -70,6 +94,8 @@ export const botsContracts = {
 		output: botSchema,
 		errors: [...refusals, ModelNotEnabled, BotNameTaken, BotHandleReserved],
 		changes: true,
+		http: { kind: "offered", method: "POST", path: "/workspaces/:workspace/bots", status: 201 },
+		botLoop: managesInMemberBounds,
 	}),
 	"bots.update": OperationContract.make("bots.update", {
 		description:
@@ -89,6 +115,12 @@ export const botsContracts = {
 			AssistantHandleFixed,
 		],
 		changes: true,
+		http: { kind: "offered", method: "PATCH", path: "/bots/:botId" },
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"A bot changes only its own instructions and description, through bots.saveInstructions; any other change manages a bot, which a bot may do only in member bounds, and no tool does it yet.",
+		},
 	}),
 	"bots.saveInstructions": OperationContract.make("bots.saveInstructions", {
 		description:
@@ -113,6 +145,17 @@ export const botsContracts = {
 		}),
 		errors: [...refusals, BotGone, AssistantInstructionsManaged, ...approvalAndFenceRefusals],
 		changes: true,
+		http: {
+			kind: "heldBack",
+			reason:
+				"A bot saves its own instructions in a turn; members change a bot through bots.update.",
+		},
+		botLoop: {
+			kind: "offered",
+			tool: "save_instructions",
+			offeredIn: "ownChats",
+			approval: { kind: "always", approvers: "turn" },
+		},
 	}),
 	"bots.remove": OperationContract.make("bots.remove", {
 		description:
@@ -128,6 +171,11 @@ export const botsContracts = {
 			ClaimLost,
 		],
 		changes: true,
+		http: { kind: "offered", method: "DELETE", path: "/bots/:botId" },
+		botLoop: {
+			kind: "heldBack",
+			reason: "Deleting a bot deletes its chats, files and computer; members do it in the web app.",
+		},
 	}),
 	"bots.pin": OperationContract.make("bots.pin", {
 		description:
@@ -136,6 +184,8 @@ export const botsContracts = {
 		output: botSchema,
 		errors: [...refusals, ...approvalAndFenceRefusals],
 		changes: true,
+		http: { kind: "offered", method: "PUT", path: "/bots/:botId/pin" },
+		botLoop: forMemberInMemberBounds("pin_bot"),
 	}),
 	"bots.unpin": OperationContract.make("bots.unpin", {
 		description:
@@ -144,6 +194,8 @@ export const botsContracts = {
 		output: botSchema,
 		errors: [...refusals, ...approvalAndFenceRefusals],
 		changes: true,
+		http: { kind: "offered", method: "DELETE", path: "/bots/:botId/pin" },
+		botLoop: forMemberInMemberBounds("unpin_bot"),
 	}),
 	"bots.createAssistant": OperationContract.make("bots.createAssistant", {
 		description:
@@ -152,6 +204,17 @@ export const botsContracts = {
 		output: botSchema,
 		errors: refusals,
 		changes: true,
+		http: {
+			kind: "offered",
+			method: "POST",
+			path: "/workspaces/:workspace/assistants",
+			status: 201,
+		},
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"A member makes their own Personal Assistants from the web app; joining a workspace gives them their first. A bot that made one would make a bot for its asker, which no tool does yet.",
+		},
 	}),
 	"systemBots.list": OperationContract.make("systemBots.list", {
 		description:
@@ -160,6 +223,12 @@ export const botsContracts = {
 		output: Schema.Array(systemBotSchema),
 		errors: refusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/workspaces/:workspace/system-bots" },
+		botLoop: {
+			kind: "heldBack",
+			reason:
+				"It is the workspace settings' list of the system bots' models, which no bot chooses.",
+		},
 	}),
 	"systemBots.update": OperationContract.make("systemBots.update", {
 		description: "Choose the model, one the workspace offers, that one of its system bots runs on.",
@@ -171,95 +240,7 @@ export const botsContracts = {
 		output: systemBotSchema,
 		errors: [...refusals, ModelNotEnabled, SystemBotMissing],
 		changes: true,
+		http: { kind: "offered", method: "PATCH", path: "/workspaces/:workspace/system-bots/:key" },
+		botLoop: managesInMemberBounds,
 	}),
 } as const;
-
-/**
- * Offered as `tool` only in member bounds, a personal bot's own turns,
- * where each call asks its creator: it changes the member's own sidebar.
- */
-const forMemberInMemberBounds = <const Tool extends string>(tool: Tool) =>
-	({
-		kind: "offered",
-		tool,
-		offeredIn: "memberBounds",
-		approval: { kind: "always", approvers: "turn" },
-	}) as const;
-
-/** Held back: it manages the workspace or a bot, which a bot may do only in member bounds. */
-const managesInMemberBounds = {
-	kind: "heldBack",
-	reason:
-		"It manages the workspace or a bot, which a bot may do only in member bounds, and no tool does it yet.",
-} as const;
-
-export const botsExposure = {
-	"bots.list": {
-		http: { kind: "offered", endpoint: "bots.list" },
-		botLoop: {
-			kind: "coveredBy",
-			operation: "workspaces.guide",
-			reason: "A Personal Assistant's workspace guide lists the bots its member reaches.",
-		},
-	},
-	"bots.create": {
-		http: { kind: "offered", endpoint: "bots.create" },
-		botLoop: managesInMemberBounds,
-	},
-	"bots.update": {
-		http: { kind: "offered", endpoint: "bots.update" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"A bot changes only its own instructions and description, through bots.saveInstructions; any other change manages a bot, which a bot may do only in member bounds, and no tool does it yet.",
-		},
-	},
-	"bots.saveInstructions": {
-		http: {
-			kind: "heldBack",
-			reason:
-				"A bot saves its own instructions in a turn; members change a bot through bots.update.",
-		},
-		botLoop: {
-			kind: "offered",
-			tool: "save_instructions",
-			offeredIn: "ownChats",
-			approval: { kind: "always", approvers: "turn" },
-		},
-	},
-	"bots.remove": {
-		http: { kind: "offered", endpoint: "bots.remove" },
-		botLoop: {
-			kind: "heldBack",
-			reason: "Deleting a bot deletes its chats, files and computer; members do it in the web app.",
-		},
-	},
-	"bots.pin": {
-		http: { kind: "offered", endpoint: "bots.pin" },
-		botLoop: forMemberInMemberBounds("pin_bot"),
-	},
-	"bots.unpin": {
-		http: { kind: "offered", endpoint: "bots.unpin" },
-		botLoop: forMemberInMemberBounds("unpin_bot"),
-	},
-	"bots.createAssistant": {
-		http: { kind: "offered", endpoint: "bots.createAssistant" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"A member makes their own Personal Assistants from the web app; joining a workspace gives them their first. A bot that made one would make a bot for its asker, which no tool does yet.",
-		},
-	},
-	"systemBots.list": {
-		http: { kind: "offered", endpoint: "systemBots.list" },
-		botLoop: {
-			kind: "heldBack",
-			reason:
-				"It is the workspace settings' list of the system bots' models, which no bot chooses.",
-		},
-	},
-	"systemBots.update": {
-		http: { kind: "offered", endpoint: "systemBots.update" },
-		botLoop: managesInMemberBounds,
-	},
-} as const satisfies DomainExposure<typeof botsContracts>;

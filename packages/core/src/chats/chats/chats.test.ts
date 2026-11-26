@@ -1426,6 +1426,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 		const strangers = asMember(call, stranger.id).reactions;
 		await expect(strangers.add(asked.id, "👍🏽")).rejects.toMatchObject({ _tag: "ResourceHidden" });
+		await expect(reactions.add("not-a-message", "👍🏽")).rejects.toMatchObject({
+			_tag: "ResourceHidden",
+			resource: "message",
+		});
 	});
 
 	it("refuses a reaction to a reply still being written, and a new emoji past the limit", async () => {

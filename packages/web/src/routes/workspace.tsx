@@ -221,7 +221,7 @@ export const homeRoute = createRoute({
 	path: "/home",
 	component: () => {
 		const wide = useMediaQuery(SIDE_BY_SIDE);
-		if (wide) return <Navigate from="/$workspace" to="." replace />;
+		if (wide) return <Navigate from="/$workspace" to="." search={true} replace />;
 		return <MobileHome />;
 	},
 });

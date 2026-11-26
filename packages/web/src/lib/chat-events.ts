@@ -142,7 +142,7 @@ export function useTypingSignal(chatId: string | undefined, draft: string): void
 		if (now - lastSentAt.current < TYPING_SIGNAL_INTERVAL_MS) return;
 		lastSentAt.current = now;
 		// Best effort: a lost signal only means the dots show a moment late.
-		void Effect.runPromise(client.api.events.typing({ params: { chatId } })).catch(() => {});
+		void Effect.runPromise(client.api.events.reportTyping({ params: { chatId } })).catch(() => {});
 	}, [chatId, draft]);
 }
 

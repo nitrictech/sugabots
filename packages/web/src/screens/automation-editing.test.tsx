@@ -437,7 +437,9 @@ describe("a bot's automations", () => {
 		await waitFor(() =>
 			expect(client.api.automations.updateTrigger).toHaveBeenCalledWith({
 				params: onlyTrigger(webhook),
-				payload: { kind: "webhook", auth: { kind: "api_key", header: "X-Signup-Key" } },
+				payload: {
+					trigger: { kind: "webhook", auth: { kind: "api_key", header: "X-Signup-Key" } },
+				},
 			}),
 		);
 
@@ -446,7 +448,7 @@ describe("a bot's automations", () => {
 		await waitFor(() =>
 			expect(client.api.automations.updateTrigger).toHaveBeenCalledWith({
 				params: onlyTrigger(webhook),
-				payload: { kind: "webhook", auth: { kind: "basic", username: "sugabots" } },
+				payload: { trigger: { kind: "webhook", auth: { kind: "basic", username: "sugabots" } } },
 			}),
 		);
 	});
@@ -471,7 +473,7 @@ describe("a bot's automations", () => {
 		await waitFor(() =>
 			expect(client.api.automations.updateTrigger).toHaveBeenLastCalledWith({
 				params: onlyTrigger(webhook),
-				payload: { kind: "webhook", deliveryIdHeader: "X-Request-Id" },
+				payload: { trigger: { kind: "webhook", deliveryIdHeader: "X-Request-Id" } },
 			}),
 		);
 
@@ -480,7 +482,7 @@ describe("a bot's automations", () => {
 		await waitFor(() =>
 			expect(client.api.automations.updateTrigger).toHaveBeenLastCalledWith({
 				params: onlyTrigger(webhook),
-				payload: { kind: "webhook", deliveryIdHeader: null },
+				payload: { trigger: { kind: "webhook", deliveryIdHeader: null } },
 			}),
 		);
 	});
@@ -511,7 +513,7 @@ describe("a bot's automations", () => {
 				kind: "webhook",
 				deliveryIdHeader: null,
 				auth: { kind: "linear" },
-				filter: "filter" in payload ? payload.filter : undefined,
+				filter: "filter" in payload.trigger ? payload.trigger.filter : undefined,
 			});
 			return Effect.succeed({ automation: webhook.automation, secrets: [] });
 		});
@@ -529,7 +531,9 @@ describe("a bot's automations", () => {
 		await waitFor(() =>
 			expect(client.api.automations.updateTrigger).toHaveBeenLastCalledWith({
 				params: onlyTrigger(webhook),
-				payload: { kind: "webhook", filter: [{ path: "type", oneOf: ["Issue"] }, labelled] },
+				payload: {
+					trigger: { kind: "webhook", filter: [{ path: "type", oneOf: ["Issue"] }, labelled] },
+				},
 			}),
 		);
 		fireEvent.click(await screen.findByRole("button", { name: "Edit test 1" }));
@@ -540,7 +544,7 @@ describe("a bot's automations", () => {
 		await waitFor(() =>
 			expect(client.api.automations.updateTrigger).toHaveBeenLastCalledWith({
 				params: onlyTrigger(webhook),
-				payload: { kind: "webhook", filter: [labelled] },
+				payload: { trigger: { kind: "webhook", filter: [labelled] } },
 			}),
 		);
 	});
@@ -745,7 +749,7 @@ describe("a bot's automations", () => {
 		await waitFor(() =>
 			expect(client.api.automations.update).toHaveBeenCalledWith({
 				params: { projectId: researcher.defaultProjectId, automationId: churnReport.automation.id },
-				payload: { state: "enabled" },
+				payload: { changes: { state: "enabled" } },
 			}),
 		);
 	});
@@ -777,7 +781,7 @@ describe("a bot's automations", () => {
 		await waitFor(() =>
 			expect(client.api.automations.update).toHaveBeenCalledWith({
 				params: { projectId: linear.defaultProjectId, automationId: morningBrief.automation.id },
-				payload: { instructions: "Brief the team." },
+				payload: { changes: { instructions: "Brief the team." } },
 			}),
 		);
 	});
@@ -798,15 +802,17 @@ describe("a bot's automations", () => {
 			expect(client.api.automations.updateTrigger).toHaveBeenCalledWith({
 				params: onlyTrigger(morningBrief),
 				payload: {
-					kind: "routine",
-					schedule: {
-						repeat: "weekly",
-						every: 1,
-						days: ["mon", "tue", "wed", "thu", "fri"],
-						times: [9 * 60],
-						startsOn: today(),
+					trigger: {
+						kind: "routine",
+						schedule: {
+							repeat: "weekly",
+							every: 1,
+							days: ["mon", "tue", "wed", "thu", "fri"],
+							times: [9 * 60],
+							startsOn: today(),
+						},
+						timezone: "UTC",
 					},
-					timezone: "UTC",
 				},
 			}),
 		);
@@ -827,10 +833,12 @@ describe("a bot's automations", () => {
 			expect(client.api.automations.addTrigger).toHaveBeenCalledWith({
 				params: { projectId: linear.defaultProjectId, automationId: morningBrief.automation.id },
 				payload: {
-					kind: "webhook",
-					auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
-					deliveryIdHeader: "Idempotency-Key",
-					secret: null,
+					trigger: {
+						kind: "webhook",
+						auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+						deliveryIdHeader: "Idempotency-Key",
+						secret: null,
+					},
 				},
 			}),
 		);
@@ -867,9 +875,11 @@ describe("a bot's automations", () => {
 			expect(client.api.automations.updateTrigger).toHaveBeenCalledWith({
 				params: onlyTrigger(hourly),
 				payload: {
-					kind: "routine",
-					schedule: { repeat: "daily", every: 1, times: [9 * 60], startsOn: today() },
-					timezone: "UTC",
+					trigger: {
+						kind: "routine",
+						schedule: { repeat: "daily", every: 1, times: [9 * 60], startsOn: today() },
+						timezone: "UTC",
+					},
 				},
 			}),
 		);
@@ -1001,7 +1011,7 @@ describe("a bot's automations", () => {
 		await waitFor(() =>
 			expect(client.api.automations.update).toHaveBeenCalledWith({
 				params: { projectId: morningBrief.automation.projectId, automationId: id },
-				payload: { state: "paused" },
+				payload: { changes: { state: "paused" } },
 			}),
 		);
 	});

@@ -2,10 +2,11 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Browser, BrowserContext, Route } from "playwright";
+import type { Browser, BrowserContext } from "playwright";
 import { click, drawCursor, openNewChat, write } from "./app.ts";
 import type { Backdrop } from "./backdrops.ts";
 import { signedInContext, WORKSPACE } from "./browser.ts";
+import { answerChatWrites } from "./chat-writes.ts";
 import { type Environment, REPO, step } from "./environment.ts";
 import { type Chrome, chromes, openStage, type Stage } from "./stage.ts";
 
@@ -36,8 +37,6 @@ const END_HOLD_SECONDS = 3;
 const JPEG_QUALITY = 92;
 /** x264's constant quality: lower is sharper and larger. */
 const QUALITY = "20";
-/** How long a send's answer waits, so the message's own event reaches the page first. */
-const EVENT_LEAD_MILLISECONDS = 500;
 const OUTPUT = join(REPO, "packages/website/public/demo");
 const NAME = "sugabots-demo";
 
@@ -251,37 +250,6 @@ function ffmpeg(args: string[]) {
 
 type Director = ReturnType<typeof directorFor>;
 
-/** The id a `/chats/:id/messages` or `/projects/:id/chats` request names. */
-function addressedIdOf(url: string) {
-	return new URL(url).pathname.split("/").at(-2) ?? "";
-}
-
-/**
- * The bot whose default project a `/projects/:id/chats` request starts a
- * chat in, read from the workspace's bots as the signed-in page would: the
- * stage starts a bot's chat by its bot.
- */
-async function botOfDefaultProject(context: BrowserContext, url: string): Promise<string> {
-	const projectId = addressedIdOf(url);
-	const answer = await context.request.get(
-		new URL(`/api/workspaces/${WORKSPACE}/bots`, url).toString(),
-	);
-	const bots = (await answer.json()) as Array<{ id: string; defaultProjectId: string }>;
-	const bot = bots.find((one) => one.defaultProjectId === projectId);
-	if (!bot) throw new Error(`No bot has the default project ${projectId}`);
-	return bot.id;
-}
-
-/**
- * Answers the page's send once the stage's own event, which reaches it through
- * Postgres and the server, has landed: the page drops its copy of the message
- * when this answers, so answering first makes the message vanish for a frame.
- */
-async function answerAfterEvent(route: Route, body: string) {
-	await new Promise((resolve) => setTimeout(resolve, EVENT_LEAD_MILLISECONDS));
-	await route.fulfill({ status: 201, contentType: "application/json", body });
-}
-
 /** Runs the showcase stage against the capture's database, and answers the app's writes with it. */
 function directorFor(environment: Environment) {
 	/** Runs a stage command, resolving with the first line it prints, and leaves it to finish. */
@@ -321,22 +289,7 @@ function directorFor(environment: Environment) {
 		 * stage plays the rest.
 		 */
 		async answerFor(context: BrowserContext) {
-			await context.route("**/api/projects/*/chats", async (route) => {
-				const request = route.request();
-				if (request.method() !== "POST") return route.continue();
-				const sent = request.postDataJSON() as { id: string; message: string };
-				const botId = await botOfDefaultProject(context, request.url());
-				const started = await stage(["start", botId, sent.id, sent.message]);
-				await answerAfterEvent(route, started);
-			});
-			await context.route("**/api/chats/*/messages", async (route) => {
-				const request = route.request();
-				if (request.method() !== "POST") return route.continue();
-				const sent = request.postDataJSON() as { id: string; message: string };
-				const chatId = addressedIdOf(request.url());
-				const posted = await stage(["send", chatId, sent.id, sent.message]);
-				await answerAfterEvent(route, posted);
-			});
+			await answerChatWrites(context, stage);
 			await context.route("**/tool-calls/*/approval", async (route) => {
 				const toolCallId = new URL(route.request().url()).pathname.split("/").at(-2) ?? "";
 				void stage(["allow", toolCallId]);

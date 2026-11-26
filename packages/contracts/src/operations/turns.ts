@@ -1,6 +1,6 @@
 /**
- * The turns operations' contracts, and their entries in the exposure manifest.
- * `index.ts` spreads both, so adding an operation here touches no other file.
+ * The turns operations' contracts, each with its decisions in the exposure manifest.
+ * `index.ts` spreads them, so adding an operation here touches no other file.
  *
  * These are the bot loop's own records of a turn: loading it for a step, the
  * step's model request, its tool calls and their results, asking for
@@ -29,7 +29,6 @@ import {
 	turnSettingSchema,
 } from "../turns.ts";
 import { uuidSchema } from "../uuid.ts";
-import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
 
 /**
@@ -49,6 +48,16 @@ const aTurn = { chatId: uuidSchema, turnId: uuidSchema };
 
 /** A step of a turn, counted from 0: its `step`th model request. */
 const aStep = { ...aTurn, step: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) };
+
+/** Every one is the loop's own, offered to no model and no HTTP client. */
+const loopsOwn = {
+	http: {
+		kind: "heldBack",
+		reason:
+			"The bot loop records its own turns; no member or client records a step, a tool call or a turn's end.",
+	},
+	botLoop: { kind: "calledByLoop" },
+} as const;
 
 export const turnsContracts = {
 	"turns.load": OperationContract.make("turns.load", {
@@ -78,6 +87,7 @@ export const turnsContracts = {
 		]),
 		errors: runsTurnRefusals,
 		changes: true,
+		...loopsOwn,
 	}),
 	"turns.makeModelRequest": OperationContract.make("turns.makeModelRequest", {
 		description:
@@ -103,6 +113,7 @@ export const turnsContracts = {
 		]),
 		errors: runsTurnRefusals,
 		changes: true,
+		...loopsOwn,
 	}),
 	"turns.recordToolCall": OperationContract.make("turns.recordToolCall", {
 		description:
@@ -120,6 +131,7 @@ export const turnsContracts = {
 		output: callRecordSchema,
 		errors: runsTurnRefusals,
 		changes: true,
+		...loopsOwn,
 	}),
 	"turns.planToolCalls": OperationContract.make("turns.planToolCalls", {
 		description:
@@ -131,6 +143,7 @@ export const turnsContracts = {
 		output: Schema.Void,
 		errors: runsTurnRefusals,
 		changes: true,
+		...loopsOwn,
 	}),
 	"turns.finishToolCall": OperationContract.make("turns.finishToolCall", {
 		description: "Record what one of the turn's tool calls returned, or how it failed.",
@@ -143,6 +156,7 @@ export const turnsContracts = {
 		output: Schema.Void,
 		errors: runsTurnRefusals,
 		changes: true,
+		...loopsOwn,
 	}),
 	"turns.startApprovedToolCall": OperationContract.make("turns.startApprovedToolCall", {
 		description:
@@ -160,6 +174,7 @@ export const turnsContracts = {
 		]),
 		errors: runsTurnRefusals,
 		changes: true,
+		...loopsOwn,
 	}),
 	"turns.askForApprovals": OperationContract.make("turns.askForApprovals", {
 		description:
@@ -180,6 +195,7 @@ export const turnsContracts = {
 		]),
 		errors: runsTurnRefusals,
 		changes: true,
+		...loopsOwn,
 	}),
 	"turns.recordToolResults": OperationContract.make("turns.recordToolResults", {
 		description:
@@ -193,6 +209,7 @@ export const turnsContracts = {
 		output: Schema.Void,
 		errors: runsTurnRefusals,
 		changes: true,
+		...loopsOwn,
 	}),
 	"turns.end": OperationContract.make("turns.end", {
 		description:
@@ -227,6 +244,7 @@ export const turnsContracts = {
 		}),
 		errors: runsTurnRefusals,
 		changes: true,
+		...loopsOwn,
 	}),
 	"turns.endLost": OperationContract.make("turns.endLost", {
 		description:
@@ -246,28 +264,6 @@ export const turnsContracts = {
 		output: Schema.Void,
 		errors: [TurnEnded, TurnExecutionSuperseded, ResourceHidden],
 		changes: true,
+		...loopsOwn,
 	}),
 } as const;
-
-/** Every one is the loop's own, offered to no model and no HTTP client. */
-const loopsOwn = {
-	http: {
-		kind: "heldBack",
-		reason:
-			"The bot loop records its own turns; no member or client records a step, a tool call or a turn's end.",
-	},
-	botLoop: { kind: "calledByLoop" },
-} as const;
-
-export const turnsExposure = {
-	"turns.load": loopsOwn,
-	"turns.makeModelRequest": loopsOwn,
-	"turns.recordToolCall": loopsOwn,
-	"turns.planToolCalls": loopsOwn,
-	"turns.finishToolCall": loopsOwn,
-	"turns.startApprovedToolCall": loopsOwn,
-	"turns.askForApprovals": loopsOwn,
-	"turns.recordToolResults": loopsOwn,
-	"turns.end": loopsOwn,
-	"turns.endLost": loopsOwn,
-} as const satisfies DomainExposure<typeof turnsContracts>;

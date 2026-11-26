@@ -6,6 +6,7 @@ const root = join(import.meta.dirname, "..");
 const fixtures = [
 	["packages/core", "src/proofs/mistakes.ts"],
 	["packages/contracts", "src/operations/mistakes.ts"],
+	["packages/contracts", "src/http/mistakes.ts"],
 ] as const;
 const directive = /^\s*\/\/ @ts-expect-error\b(?: TS(\d+) \[(.+)\])?/;
 

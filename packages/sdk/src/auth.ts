@@ -106,22 +106,16 @@ async function orThrow<T>(
 
 /**
  * Whether the API refused because this account has not proved its address.
- * Other refusals share its 403, so only the code in `details` tells them apart.
+ * Other refusals share its 403, so only what is behind it tells them apart:
+ * better-auth's code in `details` when signing in, and the `EmailUnverified`
+ * error when opening or accepting an invitation.
  */
 export function isEmailUnverified(failure: unknown): boolean {
 	return (
 		isApiFailure(failure) &&
-		typeof failure.details === "string" &&
-		emailUnverifiedCodes.has(failure.details)
+		(failure.details === "EMAIL_NOT_VERIFIED" || failure.error?._tag === "EmailUnverified")
 	);
 }
-
-const emailUnverifiedCodes = new Set([
-	// Signing in, from better-auth.
-	"EMAIL_NOT_VERIFIED",
-	// Accepting an invitation.
-	"EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION",
-]);
 
 /** Whether a password reset was refused because its link has been used or has expired. */
 export function isResetLinkInvalid(failure: unknown): boolean {

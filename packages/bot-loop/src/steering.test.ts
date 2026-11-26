@@ -964,6 +964,9 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			const { model, requests } = scriptedSteps(wipe, { text: ["Never asked."] });
 			const ran = await loop.runTurn(chatId, { model, connectorTools: wiki("ask", execute) });
 
+			await expect(
+				chatsAs(vee).interruptTurn({ chatId, turnId: ran.turnId }),
+			).rejects.toMatchObject({ _tag: "ActionForbidden" });
 			await chatsAs(admin).interruptTurn({ chatId, turnId: ran.turnId });
 			expect(await storedTurn(ran.turnId)).toMatchObject({ status: "cancelled" });
 			expect(await callsOf(ran.turnId)).toMatchObject([
@@ -981,6 +984,9 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 
 			expect(execute).not.toHaveBeenCalled();
 			expect(requests).toHaveLength(1);
+
+			await chatsAs(sam).interruptTurn({ chatId, turnId: ran.turnId });
+			expect(await storedTurn(ran.turnId)).toMatchObject({ status: "cancelled" });
 		});
 
 		it("ends a turn interrupted as its last step answers as interrupted, so its mentions start no helpers", async () => {
@@ -1065,24 +1071,6 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 
 			await chatsAs(sam).interruptTurn({ chatId, turnId: ran.turnId });
 			expect(await interruptibleFor(sam)).toEqual([]);
-		});
-
-		it("lets only its asker, or whoever manages its project, interrupt it", async () => {
-			await say(sam, "Wipe the wiki.");
-			const { model } = scriptedSteps(wipe);
-			const ran = await loop.runTurn(chatId, {
-				model,
-				connectorTools: wiki("ask", async () => ({})),
-			});
-
-			await expect(
-				chatsAs(vee).interruptTurn({ chatId, turnId: ran.turnId }),
-			).rejects.toMatchObject({ _tag: "ActionForbidden" });
-			expect(await storedTurn(ran.turnId)).toMatchObject({ status: "waiting" });
-			await chatsAs(sam).interruptTurn({ chatId, turnId: ran.turnId });
-			expect(await storedTurn(ran.turnId)).toMatchObject({ status: "cancelled" });
-			// Interrupting a turn that has ended changes nothing.
-			await chatsAs(sam).interruptTurn({ chatId, turnId: ran.turnId });
 		});
 	});
 

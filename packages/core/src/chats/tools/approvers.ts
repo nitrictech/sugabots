@@ -1,6 +1,6 @@
 import type { JsonValue, ToolApprovers } from "@sugabots/contracts";
 import { HOST_REQUEST_TOOL } from "@sugabots/contracts";
-import { botLoopTools, manifest } from "@sugabots/contracts/operations";
+import { botLoopTools, operationContracts } from "@sugabots/contracts/operations";
 import { computersContracts } from "@sugabots/contracts/operations/computers";
 import { WEB_FETCH_TOOL, webContracts } from "@sugabots/contracts/operations/web";
 import { Schema } from "effect";
@@ -10,7 +10,7 @@ import { Schema } from "effect";
  * what it may reach, which those who manage that computer's project decide:
  * the operations whose exposure says those approve them.
  */
-export const COMPUTER_REQUEST_TOOLS: readonly string[] = botLoopTools(manifest).flatMap(
+export const COMPUTER_REQUEST_TOOLS: readonly string[] = botLoopTools(operationContracts).flatMap(
 	({ approval, tool }) =>
 		approval.kind === "always" && approval.approvers === "computerManagers" ? [tool] : [],
 );

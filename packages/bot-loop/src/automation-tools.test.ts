@@ -13,14 +13,7 @@ import { AutomationRunner } from "@sugabots/core/chats/automations/automation-ru
 import { startRunning } from "@sugabots/core/chats/automations/testing";
 import { startBotChat } from "@sugabots/core/chats/chats/testing";
 import { aChatAwaitingReply } from "@sugabots/core/chats/turns/testing";
-import {
-	automation,
-	bot,
-	placedChat,
-	project,
-	toolCall,
-	workspace,
-} from "@sugabots/core/database/schema";
+import { automation, bot, project, toolCall, workspace } from "@sugabots/core/database/schema";
 import {
 	closeDatabase,
 	onDatabase,
@@ -33,7 +26,7 @@ import { asSchema } from "ai";
 import { eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { botLoopOnPostgres, failedCall, scriptedSteps, toolResultFor } from "./testing.ts";
+import { botLoopOnPostgres, callsOf, failedCall, scriptedSteps, toolResultFor } from "./testing.ts";
 
 const standup = {
 	name: "Morning standup",
@@ -58,22 +51,17 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 	afterAll(closeDatabase);
 
 	beforeEach(async () => {
-		({ chatId, workspaceId, botId, adminId } = await aChatAwaitingReply(chatsAs));
-		const [chat] = await onDatabase((db) =>
-			db
-				.select({ projectId: placedChat.projectId })
-				.from(placedChat)
-				.where(eq(placedChat.id, chatId)),
-		);
-		if (!chat?.projectId) throw new Error("The test chat has no project");
-		defaultProject = chat.projectId;
+		({
+			chatId,
+			workspaceId,
+			botId,
+			adminId,
+			projectId: defaultProject,
+		} = await aChatAwaitingReply(chatsAs));
 		await onDatabase((db) =>
 			db.update(workspace).set({ timeZone: routine.timezone }).where(eq(workspace.id, workspaceId)),
 		);
 	});
-
-	const callsOf = (turnId: string) =>
-		onDatabase((db) => db.select().from(toolCall).where(eq(toolCall.turnId, turnId)));
 
 	const automationsOf = (projectId: string) =>
 		onDatabase((db) => db.select().from(automation).where(eq(automation.projectId, projectId)));

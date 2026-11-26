@@ -48,6 +48,7 @@ import type { Files } from "../files/files.ts";
 import type { FilePages } from "../files/pages.ts";
 import type { Notifications } from "../notifications/notifications.ts";
 import { type Call, defineOperation } from "../operations/operation.ts";
+import { managingWorkspace, readingWorkspace } from "../operations/workspace-openings.ts";
 import type {
 	BotForAsker,
 	MemberSession,
@@ -128,7 +129,11 @@ import { proveRunsTurn, type RunsTurn } from "./runs-turn.ts";
 import { proveSignedByGitHubApp } from "./signed-by-github-app.ts";
 import { proveCanInterrupt, proveCanSteer } from "./turn-control.ts";
 import { underWorkspaceLock } from "./workspace-lock.ts";
-import { proveCanManageWorkspace, proveCanReadWorkspace } from "./workspace-permissions.ts";
+import {
+	type CanManageWorkspace,
+	proveCanManageWorkspace,
+	proveCanReadWorkspace,
+} from "./workspace-permissions.ts";
 
 const proveRealApproved = <
 	P,
@@ -411,6 +416,8 @@ const setResolved = OperationContract.make("chats.setResolved", {
 	output: Schema.Void,
 	errors: [],
 	changes: true,
+	http: { kind: "heldBack", reason: "Stand-in." },
+	botLoop: { kind: "heldBack", reason: "Stand-in." },
 });
 
 // An operation's body failing with an error its contract doesn't list.
@@ -1495,3 +1502,35 @@ export const approvalInputMistake = named(principal, projectCall, "bot", (princi
 		);
 	}),
 );
+
+export const workspaceOpeningMistakes = Effect.gen(function* () {
+	// @ts-expect-error TS2345 [Argument of type 'CanReadWorkspace<P, W>' is not assignable to parameter of type 'CanManageWorkspace<P, W>'] Opening a workspace to read it does not let a body manage it.
+	yield* readingWorkspace(principal, "acme", (canRead) => usage.month(canRead, month));
+	yield* managingWorkspace(principal, "acme", (canManage) => usage.month(canManage, month));
+});
+
+/** An opening for a body that manages the workspace, which proves only that its principal reads it. */
+export const managingWorkspaceProvingRead = <Success, Failure, Services>(
+	principal: Principal,
+	workspaceId: string,
+	body: <P, W>(canManage: CanManageWorkspace<P, W>) => Effect.Effect<Success, Failure, Services>,
+) =>
+	named(principal, workspaceId, (principal, workspace) =>
+		Effect.flatMap(
+			Effect.flatMap(proveRealInWorkspace(principal, workspace), proveCanReadWorkspace),
+			// @ts-expect-error TS2345 [is not assignable to parameter of type '(a: CanReadWorkspace<NameA, NameB>)] Proving the workspace is read hands a body that manages it the wrong proof.
+			body,
+		),
+	);
+
+export const managingWorkspaceProvingManagement = <Success, Failure, Services>(
+	principal: Principal,
+	workspaceId: string,
+	body: <P, W>(canManage: CanManageWorkspace<P, W>) => Effect.Effect<Success, Failure, Services>,
+) =>
+	named(principal, workspaceId, (principal, workspace) =>
+		Effect.flatMap(
+			Effect.flatMap(proveRealInWorkspace(principal, workspace), proveCanManageWorkspace),
+			body,
+		),
+	);

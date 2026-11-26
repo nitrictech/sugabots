@@ -333,7 +333,7 @@ describe("an admin", () => {
 		await waitFor(() =>
 			expect(client.api.bots.update).toHaveBeenCalledWith({
 				params: { botId: linear.id },
-				payload: { name: "Linear Steward" },
+				payload: { changes: { name: "Linear Steward" } },
 			}),
 		);
 	});
@@ -377,7 +377,7 @@ describe("an admin", () => {
 		await waitFor(() =>
 			expect(client.api.bots.update).toHaveBeenCalledWith({
 				params: { botId: linear.id },
-				payload: { description: "Digs through calls." },
+				payload: { changes: { description: "Digs through calls." } },
 			}),
 		);
 		fireEvent.change(description, { target: { value: "Something else" } });
@@ -402,7 +402,7 @@ describe("an admin", () => {
 		await waitFor(() =>
 			expect(client.api.bots.update).toHaveBeenCalledWith({
 				params: { botId: linear.id },
-				payload: { color: "rose", shape: "star", eyes: "wink" },
+				payload: { changes: { color: "rose", shape: "star", eyes: "wink" } },
 			}),
 		);
 		expect(client.api.bots.update).toHaveBeenCalledOnce();
@@ -469,7 +469,7 @@ describe("an admin", () => {
 		await waitFor(() => {
 			expect(client.api.bots.update).toHaveBeenCalledWith({
 				params: { botId: linear.id },
-				payload: { instructions: "Be terse." },
+				payload: { changes: { instructions: "Be terse." } },
 			});
 		});
 	});
@@ -508,7 +508,7 @@ describe("an admin", () => {
 		await waitFor(() =>
 			expect(client.api.bots.update).toHaveBeenCalledWith({
 				params: { botId: linear.id },
-				payload: { model: MODELS[1] },
+				payload: { changes: { model: MODELS[1] } },
 			}),
 		);
 	});
@@ -539,7 +539,7 @@ describe("an admin", () => {
 		await waitFor(() => {
 			expect(client.api.bots.update).toHaveBeenCalledWith({
 				params: { botId: linear.id },
-				payload: { disabledTools: ["web_fetch", "web_search"] },
+				payload: { changes: { disabledTools: ["web_fetch", "web_search"] } },
 			});
 		});
 		const off = await screen.findByRole("switch", { name: "Turn on Web search" });
@@ -550,7 +550,7 @@ describe("an admin", () => {
 		await waitFor(() => {
 			expect(client.api.bots.update).toHaveBeenLastCalledWith({
 				params: { botId: linear.id },
-				payload: { disabledTools: [] },
+				payload: { changes: { disabledTools: [] } },
 			});
 		});
 	});

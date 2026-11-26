@@ -28,12 +28,12 @@ import { unimplemented } from "../../testing.ts";
 import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
 
 /**
- * The connectors operations, each called for every kind of principal through
- * the registry, as an entrypoint calls them. What each comes to is "ok", the
- * tag of its refusal, or the tag of the error its service answers once the
- * proofs let it act: hidden where the principal doesn't reach the project,
- * forbidden where it does but may not read or manage its connectors. What
- * the services do with what they are given is `providers/connectors/`' to test.
+ * What the connectors operations prove beyond the rule `permissions.test.ts`
+ * states for each: that a connector they name is their project's, what an
+ * admin may do to a personal bot's connector without reaching it, and the
+ * callers only a sign-in or a GitHub app's signature lets in. What each comes
+ * to is "ok", the tag of its refusal, or the tag of the error its service
+ * answers once the proofs let it act.
  *
  * The world is `buildWorld`'s: in workspace A, Ed (an editor) made the public
  * bot Pub, which leads the private project J with Helper in it, and his
@@ -55,7 +55,7 @@ const localEgress = unimplemented(Egress.Service, {
 	webFetch: fetch,
 });
 
-describe("the connectors operations, for each kind of principal", () => {
+describe("the connectors operations, beyond who may call them", () => {
 	let world: World;
 	let auth: Authenticators;
 	let call: CallOperation;
@@ -64,8 +64,6 @@ describe("the connectors operations, for each kind of principal", () => {
 	let store: Promised<ConnectorStore.Interface>;
 	/** Every principal the cases call for, on J unless its name says otherwise. */
 	let who: Awaited<ReturnType<typeof everyKindOfPrincipal>>;
-	/** J's GitHub app, made but not installed. */
-	let jsApp: string;
 
 	const WEBHOOK_SECRET = "the-webhook-secret";
 
@@ -88,121 +86,24 @@ describe("the connectors operations, for each kind of principal", () => {
 		as = principals(auth);
 		store = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
 		who = await everyKindOfPrincipal(world, as);
-		jsApp = await gitHubAppOf(a.project);
 	});
 
 	afterAll(async () => {
 		await closeDatabase();
 	});
 
-	describe("reading a project's connectors", () => {
-		it("lists and shows them, and its GitHub app's repositories, to whoever reaches it but a webhook call or system work", async () => {
-			const connectorId = await seedConnector(a.workspace, a.project);
-			const reads = [
-				["connectors.list", { projectId: a.project }],
-				["connectors.get", { projectId: a.project, connectorId }],
-				["gitHubConnectors.repositories", { projectId: a.project, connectorId: jsApp }],
-			] as const;
-			for (const [name, input] of reads) {
-				const read = (principal: Principal) =>
-					operationOutcome(
-						call,
-						principal,
-						name as "connectors.get",
-						input as InputOf<"connectors.get">,
-					);
-				expect({
-					name,
-					outcomes: await outcomesFor(
-						{
-							viewer: who.vi,
-							notInProject: who.erin,
-							webhook: who.webhook,
-						},
-						read,
-					),
-				}).toEqual({
-					name,
-					outcomes: {
-						viewer: "ok",
-						notInProject: "ResourceHidden",
-						webhook: "ResourceHidden",
-					},
-				});
-			}
-		});
-	});
-
-	describe("managing a project's connectors", () => {
+	describe("a project's connectors", () => {
+		/** Every way of managing a connector a project has, with what besides its address each takes. */
 		const manages = [
-			["connectors.update", { changes: { access: "off" } }, "ok"],
-			["connectors.remove", {}, "ok"],
-			["connectors.test", {}, "ok"],
-			["connectors.startOAuth", {}, "ConnectorDoesNotUseOAuth"],
-			["connectors.testUnsaved", { url: `${NOWHERE}/mcp` }, "ok"],
-			["gitHubConnectors.start", { organization: undefined }, "ProjectHasGitHubConnector"],
-			["gitHubConnectors.installUrl", {}, "NotGitHubConnector"],
-			["gitHubConnectors.reachableRepositories", {}, "NotGitHubConnector"],
-			["gitHubConnectors.addRepository", { repository: "acme/web" }, "NotGitHubConnector"],
-			["gitHubConnectors.removeRepository", { repository: "acme/web" }, "NotGitHubConnector"],
+			["connectors.update", { changes: { access: "off" } }],
+			["connectors.remove", {}],
+			["connectors.test", {}],
+			["connectors.startOAuth", {}],
+			["gitHubConnectors.installUrl", {}],
+			["gitHubConnectors.reachableRepositories", {}],
+			["gitHubConnectors.addRepository", { repository: "acme/web" }],
+			["gitHubConnectors.removeRepository", { repository: "acme/web" }],
 		] as const;
-
-		it("lets only J's owner and admins, or a bot acting for one, manage J's", async () => {
-			for (const [name, input, acted] of manages) {
-				const manage = async (principal: Principal) => {
-					const connectorId = await seedConnector(a.workspace, a.project);
-					try {
-						if (name === "connectors.test") {
-							await onDatabase((db) =>
-								db
-									.update(connector)
-									.set({ url: `${NOWHERE}/mcp` })
-									.where(eq(connector.id, connectorId)),
-							);
-						}
-						return await operationOutcome(call, principal, name, {
-							projectId: a.project,
-							connectorId,
-							...input,
-						} as InputOf<typeof name>);
-					} finally {
-						await onDatabase((db) => db.delete(connector).where(eq(connector.id, connectorId)));
-					}
-				};
-				const permitted = name === "connectors.startOAuth" ? who.admin : who.pubForAdmin;
-				const forbidden = name === "connectors.startOAuth" ? who.pubForAdmin : who.ed;
-				expect(await manage(permitted), name).toBe(acted);
-				expect(await manage(forbidden), name).toBe("ActionForbidden");
-				expect(await manage(who.erin), name).toBe("ResourceHidden");
-			}
-		});
-
-		it("connects J to an HTTP endpoint for an admin, as added by them, and changes and removes it", async () => {
-			const made = await call(who.admin, "connectors.create", {
-				projectId: a.project,
-				connector: { kind: "http", name: "Alerts", url: `${NOWHERE}/v2` },
-			});
-			const changed = await call(who.admin, "connectors.update", {
-				projectId: a.project,
-				connectorId: made.id,
-				changes: { access: "off" },
-			});
-			await call(who.admin, "connectors.remove", { projectId: a.project, connectorId: made.id });
-
-			expect(made).toMatchObject({
-				kind: "http",
-				status: "connected",
-				connectedBy: { id: a.admin },
-			});
-			if (!("toolCounts" in changed)) throw new Error("Expected connector settings");
-			expect(changed.toolCounts).toMatchObject({ allow: 0, ask: 0 });
-			expect(
-				await operationOutcome(call, who.admin, "connectors.get", {
-					projectId: a.project,
-					connectorId: made.id,
-				}),
-			).toBe("ResourceHidden");
-		});
 
 		it("hides missing connectors and connectors of another project from every connector operation", async () => {
 			const elsewhere = await seedConnector(a.workspace, a.otherProject);
@@ -216,7 +117,6 @@ describe("the connectors operations, for each kind of principal", () => {
 				).toBe("ResourceHidden");
 				const address = { projectId: a.project, connectorId };
 				for (const [name, input] of manages) {
-					if (name === "connectors.testUnsaved" || name === "gitHubConnectors.start") continue;
 					expect(
 						await operationOutcome(call, who.admin, name, { ...address, ...input } as InputOf<
 							typeof name
@@ -233,25 +133,32 @@ describe("the connectors operations, for each kind of principal", () => {
 		});
 	});
 
-	it("lists a public bot's connector for its viewer and restricts changes to its managers", async () => {
+	it("lets a public bot's creator manage its HTTP connector and shows the changes to a viewer", async () => {
 		const projectId = a.pub.defaultProject;
-		const connectorId = await seedConnector(a.workspace, projectId);
-		const input = { projectId, connectorId, changes: { name: "Project wiki" } };
+		const made = await call(who.ed, "connectors.create", {
+			projectId,
+			connector: { kind: "http", name: "Alerts", url: `${NOWHERE}/v2` },
+		});
+		const address = { projectId, connectorId: made.id };
+		const changes = { name: "Project wiki", access: "off" } as const;
+
+		expect(made).toMatchObject({ kind: "http", status: "connected", connectedBy: { id: a.ed } });
 		expect(await call(who.vi, "connectors.list", { projectId })).toContainEqual(
-			expect.objectContaining({ id: connectorId }),
+			expect.objectContaining({ id: made.id, name: "Alerts" }),
 		);
-		await expect(call(who.vi, "connectors.update", input)).rejects.toMatchObject({
+		await expect(call(who.vi, "connectors.update", { ...address, changes })).rejects.toMatchObject({
 			_tag: "ActionForbidden",
 		});
-		await expect(call(who.outsider, "connectors.update", input)).rejects.toMatchObject({
-			_tag: "ResourceHidden",
+		await call(who.ed, "connectors.update", { ...address, changes });
+		expect(await call(who.vi, "connectors.get", address)).toMatchObject({
+			id: made.id,
+			name: changes.name,
+			toolCounts: { allow: 0, ask: 0 },
 		});
 
-		await call(who.ed, "connectors.update", input);
-
-		expect(await call(who.vi, "connectors.get", { projectId, connectorId })).toMatchObject({
-			id: connectorId,
-			name: input.changes.name,
+		await call(who.ed, "connectors.remove", address);
+		await expect(call(who.vi, "connectors.get", address)).rejects.toMatchObject({
+			_tag: "ResourceHidden",
 		});
 	});
 
@@ -372,7 +279,7 @@ describe("the connectors operations, for each kind of principal", () => {
 				body,
 			});
 
-		it("starts the matching automation when its operation accepts a signed delivery", async () => {
+		it("starts a matching automation only for a delivery signed by its GitHub app", async () => {
 			const projectId = a.pub.defaultProject;
 			const connectorId = await gitHubAppOf(projectId);
 			const automationId = await seedAutomation(a.workspace, projectId);
@@ -396,27 +303,14 @@ describe("the connectors operations, for each kind of principal", () => {
 					},
 				}),
 			);
-
 			await call(who.admin, "chats.openAutomationFeed", { workspace: a.workspace, automationId });
-			await call(await runOnPostgres(signedFor(connectorId)), "gitHubWebhooks.delivery", {
-				connectorId,
-				event: "issues",
-				deliveryId: "review-delivery",
-				body,
-			});
-			const { items } = await call(who.admin, "automations.projectRuns", { projectId, limit: 10 });
-			expect(items.filter((run) => run.automationId === automationId)).toEqual([
-				expect.objectContaining({ trigger: expect.objectContaining({ kind: "github" }) }),
-			]);
-		});
 
-		it("reads a delivery only for the GitHub app that signed it", async () => {
 			const ksApp = await gitHubAppOf(a.otherProject);
-			const jsDelivery = await runOnPostgres(signedFor(jsApp));
+			const jsDelivery = await runOnPostgres(signedFor(connectorId));
 			const ksDelivery = await runOnPostgres(signedFor(ksApp));
 			const deliver = (principal: Principal) =>
 				operationOutcome(call, principal, "gitHubWebhooks.delivery", {
-					connectorId: jsApp,
+					connectorId,
 					event: "issues",
 					deliveryId: "delivery-1",
 					body,
@@ -425,7 +319,6 @@ describe("the connectors operations, for each kind of principal", () => {
 			expect(
 				await outcomesFor(
 					{
-						signedByIt: jsDelivery,
 						signedByAnotherApp: ksDelivery,
 						trigger: who.webhook,
 						admin: who.admin,
@@ -434,7 +327,6 @@ describe("the connectors operations, for each kind of principal", () => {
 					deliver,
 				),
 			).toEqual({
-				signedByIt: "ok",
 				signedByAnotherApp: "ResourceHidden",
 				trigger: "ResourceHidden",
 				admin: "ResourceHidden",
@@ -442,17 +334,20 @@ describe("the connectors operations, for each kind of principal", () => {
 			});
 			expect(
 				await operationOutcome(call, jsDelivery, "automations.projectRuns", {
-					projectId: a.project,
+					projectId,
 					limit: 10,
 				}),
 			).toBe("ResourceHidden");
 			expect(
-				await operationOutcome(call, jsDelivery, "chats.messages", { chatId: a.chat, limit: 10 }),
+				await operationOutcome(call, jsDelivery, "chats.messages", {
+					chatId: a.pubChat,
+					limit: 10,
+				}),
 			).toBe("ResourceHidden");
 
 			expect(
 				await call(jsDelivery, "gitHubWebhooks.delivery", {
-					connectorId: jsApp,
+					connectorId,
 					event: "issues",
 					deliveryId: "delivery-1",
 					body,
@@ -462,6 +357,13 @@ describe("the connectors operations, for each kind of principal", () => {
 				deliveryId: "delivery-1",
 				activity: { event: "issue_opened", repository: "acme/web", number: 3 },
 			});
+			const { items } = await call(who.admin, "automations.projectRuns", {
+				projectId,
+				limit: 10,
+			});
+			expect(items.filter((run) => run.automationId === automationId)).toEqual([
+				expect.objectContaining({ trigger: expect.objectContaining({ kind: "github" }) }),
+			]);
 		});
 	});
 });

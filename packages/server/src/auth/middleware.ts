@@ -10,8 +10,9 @@ import type {
 	HttpOperationName,
 	InputOf,
 	LongRunningOperationName,
-	Manifest,
+	OperationContracts,
 	OutputOf,
+	OwnEndpointOperationName,
 } from "@sugabots/contracts/operations";
 import { SessionAuthentication } from "@sugabots/core/authentication/session";
 import { Ids } from "@sugabots/core/ids/ids";
@@ -153,17 +154,22 @@ const authenticatedRequest = Effect.gen(function* () {
 	);
 });
 
+/** The operations the HTTP API serves: at endpoints derived from their contracts, or their own. */
+type ServedOperationName =
+	| HttpOperationName<OperationContracts>
+	| OwnEndpointOperationName<OperationContracts>;
+
 /**
  * The function that calls an operation for the member whose session the
- * request carries, as the request's call: `call(name, input)`, the whole of a
- * handler for an endpoint behind `Session` that the exposure manifest offers
- * an operation at, besides shaping its input and mapping its errors with
- * `asHttpError`. Yield it where a group's handlers are built.
+ * request carries, as the request's call: `call(name, input)`. The handler
+ * of every endpoint derived from a contract is this and `answerAsHttp`; an
+ * endpoint of an operation's own shapes its input and answer around it.
+ * Yield it where a group's handlers are built.
  */
 export const operationCaller = Effect.map(
 	Operations.Service,
 	(operations) =>
-		<Name extends HttpOperationName<Manifest>>(
+		<Name extends ServedOperationName>(
 			name: Name,
 			input: InputOf<Name>,
 		): Effect.Effect<OutputOf<Name>, FailureOf<Name>> =>

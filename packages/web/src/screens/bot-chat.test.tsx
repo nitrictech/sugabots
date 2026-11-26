@@ -1350,13 +1350,13 @@ describe("members typing in the chat", () => {
 	it("does not say you are typing just because a draft was kept from before", async () => {
 		const { router } = mount(chatPage);
 		writeDraft(await screen.findByLabelText(`Message ${linear.name}`), "Half a thought");
-		await waitFor(() => expect(client.api.events.typing).toHaveBeenCalledTimes(1));
-		client.api.events.typing.mockClear();
+		await waitFor(() => expect(client.api.events.reportTyping).toHaveBeenCalledTimes(1));
+		client.api.events.reportTyping.mockClear();
 		client.events.chat.mockClear();
 
 		await leaveAndReturn(router);
 		await waitFor(() => expect(client.events.chat).toHaveBeenCalledWith(chat.id));
-		expect(client.api.events.typing).not.toHaveBeenCalled();
+		expect(client.api.events.reportTyping).not.toHaveBeenCalled();
 	});
 
 	it("tells the chat you are typing, once for a burst of keystrokes", async () => {
@@ -1368,11 +1368,11 @@ describe("members typing in the chat", () => {
 		writeDraft(composer, "Sen");
 
 		await waitFor(() =>
-			expect(client.api.events.typing).toHaveBeenCalledWith({
+			expect(client.api.events.reportTyping).toHaveBeenCalledWith({
 				params: { chatId: chat.id },
 			}),
 		);
-		expect(client.api.events.typing).toHaveBeenCalledTimes(1);
+		expect(client.api.events.reportTyping).toHaveBeenCalledTimes(1);
 	});
 });
 

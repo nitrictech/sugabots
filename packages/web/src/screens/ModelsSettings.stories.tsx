@@ -365,8 +365,10 @@ export const Provider = meta.story({
 	render: () => <ProviderSettings providerId={anthropic.id} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Anthropic" })).toBeInTheDocument();
-		await expect(canvas.getByText(/^Default · 3 bots/)).toBeInTheDocument();
-		await expect(canvas.getByText(/^System bots · 2 bots/)).toBeInTheDocument();
+		await expect(canvas.getByText("Default")).toBeInTheDocument();
+		await expect(canvas.getByText("3 bots")).toBeInTheDocument();
+		await expect(canvas.getByText("System bots")).toBeInTheDocument();
+		await expect(canvas.getByText("2 bots")).toBeInTheDocument();
 		await expect(canvas.getByText("Not used yet")).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Opus" })).toHaveAttribute(
 			"aria-checked",

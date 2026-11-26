@@ -1,32 +1,47 @@
 /**
- * The exposure manifest: for every operation, an explicit decision for the
- * HTTP API and one for the bot loop. Offering an operation grants nothing by
- * itself; it makes the operation reachable through that entrypoint, where it
- * proves access like any other caller.
+ * The exposure manifest: each operation's contract carries an explicit
+ * decision for the HTTP API and one for the bot loop. Offering an operation
+ * grants nothing by itself; it makes the operation reachable through that
+ * entrypoint, where it proves access like any other caller.
  *
- * `defineManifest` fails to compile when an operation has no entry, a reason
- * isn't written out, an endpoint is misspelt or named twice, the bot loop is
+ * A contract without both decisions fails to compile, and `checkExposure`
+ * fails to compile when a reason isn't written out, two operations are
+ * offered at one method and path, a path names a parameter its input lacks,
+ * an operation that changes something is offered as a `GET`, the bot loop is
  * said to be covered by an operation it isn't offered directly, or a tool
  * that manages a project outside member bounds runs without the asker's
  * approval.
  */
 
-import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
-import type { Api } from "../http/api.ts";
+import type { Schema } from "effect";
 import type { OperationContract } from "./operation.ts";
 
-type ApiGroups = typeof Api extends HttpApi.HttpApi<string, infer Groups> ? Groups : never;
+/** The HTTP methods an operation can be offered with. */
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-type EndpointNamesOf<Group> = Group extends HttpApiGroup.Constraint
-	? `${Group["identifier"]}.${HttpApiEndpoint.Identifier<HttpApiGroup.Endpoints<Group>>}`
-	: never;
+/**
+ * Where the HTTP API offers an operation: at `method` and `path`, where each
+ * `:name` in the path is a field of its input. Its other fields are the query
+ * of a `GET` or `DELETE`, and the JSON body otherwise. It answers with its
+ * output, as `200`, or `204` when it returns nothing, unless `status` says
+ * otherwise.
+ */
+export interface HttpOffer {
+	readonly kind: "offered";
+	readonly method: HttpMethod;
+	readonly path: `/${string}`;
+	readonly status?: 201 | 202;
+}
 
-/** An endpoint of `Api`, as `<group>.<endpoint>`, such as `chats.setResolved`. */
-type EndpointName = EndpointNamesOf<ApiGroups>;
-
-/** The HTTP API's decision: offer the operation at one endpoint, or hold it back and say why. */
-type HttpDecision =
-	| { readonly kind: "offered"; readonly endpoint: EndpointName }
+/**
+ * The HTTP API's decision: offer the operation at a method and path; serve it
+ * at an endpoint of its own, written by hand, because a request for it can't
+ * be decoded into its input or answered with its output like the others; or
+ * hold it back. Both of the last say why.
+ */
+export type HttpDecision =
+	| HttpOffer
+	| { readonly kind: "ownEndpoint"; readonly reason: string }
 	| { readonly kind: "heldBack"; readonly reason: string };
 
 /**
@@ -81,7 +96,7 @@ export type OfferedIn = "everywhere" | "chatBounds" | "ownChats" | "memberBounds
  * A tool offered in `chatBounds` or `ownChats` manages a project for the
  * asker, so it always waits for the asker's approval.
  */
-type BotLoopDecision =
+export type BotLoopDecision =
 	| {
 			readonly kind: "offered";
 			readonly tool: string;
@@ -98,13 +113,41 @@ type BotLoopDecision =
 	| { readonly kind: "coveredBy"; readonly operation: string; readonly reason: string }
 	| { readonly kind: "calledByLoop" };
 
-export interface Decisions {
-	readonly http: HttpDecision;
-	readonly botLoop: BotLoopDecision;
-}
+/** The segments of an HTTP path, between its slashes. */
+type Segments<Path extends string> = Path extends `${infer Segment}/${infer Rest}`
+	? Segment | Segments<Rest>
+	: Path;
 
-/** One domain's entries: a decision for each of its operations. */
-export type DomainExposure<Contracts> = { readonly [Name in keyof Contracts]: Decisions };
+/** The names of the `:name` parameters in an HTTP path, such as `chatId` in `/chats/:chatId/name`. */
+type PathParameters<Path extends string> =
+	Segments<Path> extends infer Segment ? (Segment extends `:${infer Name}` ? Name : never) : never;
+
+/** Characters the router reads as more than a plain segment or a parameter's name. */
+type RouteSyntax = ":" | "*" | "?" | "(" | ")" | "+" | "." | "{" | "}" | " " | "#";
+
+/**
+ * Whether `Path` is in the one grammar offered paths use: segments after a
+ * leading slash, none empty, each either plain or `:` and a name, with
+ * nothing the router reads as more. The endpoint's parameters are then
+ * exactly its `:` segments, however they are read.
+ */
+type PlainPath<Path extends string> = Path extends `/${infer Rest}`
+	? Segments<Rest> extends infer Segment extends string
+		? true extends (
+				Segment extends ""
+					? true
+					: Segment extends `:${infer Name}`
+						? Name extends "" | `${string}${RouteSyntax | "-"}${string}`
+							? true
+							: false
+						: Segment extends `${string}${RouteSyntax}${string}`
+							? true
+							: false
+			)
+			? false
+			: true
+		: false
+	: false;
 
 type Whitespace = " " | "\n" | "\t";
 type Trimmed<Text extends string> = Text extends `${Whitespace}${infer Rest}`
@@ -122,15 +165,15 @@ type ReasonUnwritten<Decision> = Decision extends { readonly reason: infer Reaso
 			: false
 	: false;
 
-type WithUnwrittenReasons<Manifest> = {
-	[Name in keyof Manifest]: Manifest[Name] extends Decisions
+type WithUnwrittenReasons<Contracts> = {
+	[Name in keyof Contracts]: Contracts[Name] extends OperationContract.Contract
 		? true extends
-				| ReasonUnwritten<Manifest[Name]["http"]>
-				| ReasonUnwritten<Manifest[Name]["botLoop"]>
+				| ReasonUnwritten<Contracts[Name]["http"]>
+				| ReasonUnwritten<Contracts[Name]["botLoop"]>
 			? Name
 			: never
 		: never;
-}[keyof Manifest];
+}[keyof Contracts];
 
 type CoveringOperation<Decision> = Decision extends {
 	readonly kind: "coveredBy";
@@ -140,123 +183,167 @@ type CoveringOperation<Decision> = Decision extends {
 	: never;
 
 /** Operations the bot loop says are covered by one it isn't offered directly, or by themselves. */
-type WithBadCover<Manifest> = {
-	[Name in keyof Manifest]: Manifest[Name] extends Decisions
-		? CoveringOperation<Manifest[Name]["botLoop"]> extends infer Covering
+type WithBadCover<Contracts> = {
+	[Name in keyof Contracts]: Contracts[Name] extends OperationContract.Contract
+		? CoveringOperation<Contracts[Name]["botLoop"]> extends infer Covering
 			? [Covering] extends [never]
 				? never
 				: Covering extends Name
 					? Name
-					: Covering extends keyof Manifest
-						? Manifest[Covering] extends { readonly botLoop: { readonly kind: "offered" } }
+					: Covering extends keyof Contracts
+						? Contracts[Covering] extends { readonly botLoop: { readonly kind: "offered" } }
 							? never
 							: Name
 						: Name
 			: never
 		: never;
-}[keyof Manifest];
+}[keyof Contracts];
 
-type OfferedEndpoint<Decision> = Decision extends {
+type RouteSegment<Segment extends string> = Segment extends `:${string}` ? ":" : Lowercase<Segment>;
+
+/** RoutePattern mirrors the HTTP router's matching of static and named path segments. */
+export type RoutePattern<Path extends string> = Path extends `${infer Segment}/${infer Rest}`
+	? Segment extends ""
+		? RoutePattern<Rest>
+		: `/${RouteSegment<Segment>}${RoutePattern<Rest>}`
+	: Path extends ""
+		? ""
+		: `/${RouteSegment<Path>}`;
+
+/** Where `Decision` offers its operation, as `<method> <path>`, matched as the router matches it. */
+export type OfferedRoute<Decision> = Decision extends {
 	readonly kind: "offered";
-	readonly endpoint: infer Endpoint;
+	readonly method: infer Method extends string;
+	readonly path: infer Path extends string;
 }
-	? Endpoint
+	? `${Method} ${RoutePattern<Path>}`
 	: never;
 
-type EndpointsOfOthers<Manifest, Name extends keyof Manifest> = {
-	[Other in Exclude<keyof Manifest, Name>]: Manifest[Other] extends Decisions
-		? OfferedEndpoint<Manifest[Other]["http"]>
+type RoutesOfOthers<Contracts, Name extends keyof Contracts> = {
+	[Other in Exclude<keyof Contracts, Name>]: Contracts[Other] extends OperationContract.Contract
+		? OfferedRoute<Contracts[Other]["http"]>
 		: never;
-}[Exclude<keyof Manifest, Name>];
+}[Exclude<keyof Contracts, Name>];
 
-type WithSharedEndpoint<Manifest> = {
-	[Name in keyof Manifest]: Manifest[Name] extends Decisions
-		? [OfferedEndpoint<Manifest[Name]["http"]>] extends [never]
+type WithSharedRoute<Contracts> = {
+	[Name in keyof Contracts]: Contracts[Name] extends OperationContract.Contract
+		? [OfferedRoute<Contracts[Name]["http"]>] extends [never]
 			? never
-			: OfferedEndpoint<Manifest[Name]["http"]> extends EndpointsOfOthers<Manifest, Name>
+			: OfferedRoute<Contracts[Name]["http"]> extends RoutesOfOthers<Contracts, Name>
 				? Name
 				: never
 		: never;
-}[keyof Manifest];
+}[keyof Contracts];
 
 /**
- * Nothing when `Manifest` is sound. Otherwise, the properties it lacks: an
- * entry for each registered operation; for each entry at fault, a property
- * named with what is wrong, so the compiler prints the sentence beside the
- * operation; and one naming the operations that share an endpoint. TypeScript
- * has no custom errors.
- *
- * Checks nothing once `Manifest` has fallen back to its constraint after
- * another error, so that error is the only one shown.
+ * Operations offered over HTTP whose path is outside the grammar, whose
+ * input isn't a struct, or whose path names a parameter that isn't a field
+ * of it.
  */
-type ManifestCheck<Contracts, Manifest> = string extends keyof Manifest
-	? unknown
-	: { readonly [Name in Exclude<keyof Contracts, keyof Manifest>]: Decisions } & {
-			readonly [Name in Exclude<keyof Manifest, keyof Contracts>]: {
-				readonly "no operation is registered under this name": Name;
-			};
-		} & {
-			readonly [Name in WithUnwrittenReasons<Manifest>]: {
-				readonly "a decision that holds back or covers an operation needs its reason written out here, not blank or typed as string": Name;
-			};
-		} & {
-			readonly [Name in WithBadCover<Manifest>]: {
-				readonly "covered by an operation the bot loop must offer directly: not this one, and not one held back or covered": Name;
-			};
-		} & ([WithSharedEndpoint<Manifest>] extends [never]
-				? unknown
-				: {
-						readonly "one operation per endpoint: these operations name the same endpoint": WithSharedEndpoint<Manifest>;
-					});
+type WithUnfitPath<Contracts> = {
+	[Name in keyof Contracts]: Contracts[Name] extends OperationContract.Contract
+		? Contracts[Name]["http"] extends {
+				readonly kind: "offered";
+				readonly path: infer Path extends string;
+			}
+			? PlainPath<Path> extends false
+				? Name
+				: Contracts[Name]["input"] extends Schema.Struct<infer Fields>
+					? [Exclude<PathParameters<Path>, keyof Fields>] extends [never]
+						? never
+						: Name
+					: Name
+			: never
+		: never;
+}[keyof Contracts];
 
 /**
- * Checks the whole manifest against the registered operations and returns it:
- * `defineManifest<typeof operationContracts>()({ ...chatsExposure, … })`.
- * Each contract must be filed under its own name.
+ * Operations that may change something but are offered as a `GET`. A `GET`
+ * is a safe method, which the server lets through without checking a
+ * cookie's request came from a trusted origin, so another site could make
+ * a member's browser call it.
  */
-export const defineManifest =
-	<
-		Contracts extends {
-			readonly [Name in keyof Contracts]: OperationContract.Contract<Name & string>;
-		},
-	>() =>
-	<const Manifest extends { readonly [name: string]: Decisions }>(
-		manifest: Manifest & ManifestCheck<Contracts, Manifest>,
-	): Manifest =>
-		manifest;
+type WithChangingGet<Contracts> = {
+	[Name in keyof Contracts]: Contracts[Name] extends OperationContract.Contract
+		? true extends Contracts[Name]["changes"]
+			? Contracts[Name]["http"] extends { readonly kind: "offered"; readonly method: "GET" }
+				? Name
+				: never
+			: never
+		: never;
+}[keyof Contracts];
 
-/** The operations `Manifest` offers through the HTTP API. */
-export type HttpOperationName<Manifest> = {
-	[Name in keyof Manifest]: Manifest[Name] extends { readonly http: { readonly kind: "offered" } }
+/**
+ * Nothing when `Contracts` is sound. Otherwise, for each contract at fault, a
+ * property named with what is wrong, so the compiler prints the sentence
+ * beside the operation; and one naming the operations that share a route.
+ * TypeScript has no custom errors.
+ */
+type ExposureCheck<Contracts> = {
+	readonly [Name in WithUnwrittenReasons<Contracts>]: {
+		readonly "a decision that holds back an operation, serves it at its own endpoint or covers it needs its reason written out here, not blank or typed as string": Name;
+	};
+} & {
+	readonly [Name in WithBadCover<Contracts>]: {
+		readonly "covered by an operation the bot loop must offer directly: not this one, and not one held back or covered": Name;
+	};
+} & {
+	readonly [Name in WithChangingGet<Contracts>]: {
+		readonly "changes something, so it can't be offered as a GET, which skips the check that a cookie's request came from a trusted origin: offer it with POST, PUT, PATCH or DELETE": Name;
+	};
+} & {
+	readonly [Name in WithUnfitPath<Contracts>]: {
+		readonly "offered over HTTP: its path must be plain segments and `:name` parameters, and its input a struct with a field for each parameter": Name;
+	};
+} & ([WithSharedRoute<Contracts>] extends [never]
+		? unknown
+		: {
+				readonly "one operation per method and path: these operations are offered at the same one": WithSharedRoute<Contracts>;
+			});
+
+/**
+ * Checks every operation's contract against the others and returns them:
+ * `checkExposure({ ...chatsContracts, … })`. Each contract must be filed under
+ * its own name.
+ */
+export const checkExposure = <
+	const Contracts extends {
+		readonly [Name in keyof Contracts]: OperationContract.Contract<Name & string>;
+	},
+>(
+	contracts: Contracts & ExposureCheck<Contracts>,
+): Contracts => contracts;
+
+/** Fails to compile unless `Check` is `true`: how a type-level check is applied to the API as written. */
+export const requireTrue = <_Check extends true>(): void => {};
+
+/** The operations among `Contracts` that the HTTP API offers at a method and path. */
+export type HttpOperationName<Contracts> = {
+	[Name in keyof Contracts]: Contracts[Name] extends { readonly http: { readonly kind: "offered" } }
 		? Name
 		: never;
-}[keyof Manifest] &
+}[keyof Contracts] &
 	string;
 
-/** The operations `Manifest` offers the bot loop directly, as tools. */
-export type BotLoopOperationName<Manifest> = {
-	[Name in keyof Manifest]: Manifest[Name] extends {
+/** The operations among `Contracts` that the HTTP API serves at endpoints of their own. */
+export type OwnEndpointOperationName<Contracts> = {
+	[Name in keyof Contracts]: Contracts[Name] extends {
+		readonly http: { readonly kind: "ownEndpoint" };
+	}
+		? Name
+		: never;
+}[keyof Contracts] &
+	string;
+
+/** The operations among `Contracts` that the bot loop offers directly, as tools. */
+export type BotLoopOperationName<Contracts> = {
+	[Name in keyof Contracts]: Contracts[Name] extends {
 		readonly botLoop: { readonly kind: "offered" };
 	}
 		? Name
 		: never;
-}[keyof Manifest] &
+}[keyof Contracts] &
 	string;
-
-/** Each operation the HTTP API offers, with its endpoint, in name order. */
-export const httpOperations = <Manifest extends { readonly [name: string]: Decisions }>(
-	manifest: Manifest,
-): ReadonlyArray<{
-	readonly operation: HttpOperationName<Manifest>;
-	readonly endpoint: EndpointName;
-}> =>
-	Object.entries(manifest)
-		.flatMap(([operation, { http }]) =>
-			http.kind === "offered"
-				? [{ operation: operation as HttpOperationName<Manifest>, endpoint: http.endpoint }]
-				: [],
-		)
-		.sort((a, b) => a.operation.localeCompare(b.operation));
 
 /**
  * Each operation the bot loop offers as a tool, with the tool's name, the
@@ -264,20 +351,22 @@ export const httpOperations = <Manifest extends { readonly [name: string]: Decis
  * keeps the model's prompt cache. An operation covered by another, or called by
  * the loop, offers no tool of its own.
  */
-export const botLoopTools = <Manifest extends { readonly [name: string]: Decisions }>(
-	manifest: Manifest,
+export const botLoopTools = <
+	Contracts extends { readonly [name: string]: { readonly botLoop: BotLoopDecision } },
+>(
+	contracts: Contracts,
 ): ReadonlyArray<{
-	readonly operation: BotLoopOperationName<Manifest>;
+	readonly operation: BotLoopOperationName<Contracts>;
 	readonly tool: string;
 	readonly offeredIn: OfferedIn;
 	readonly approval: Approval;
 }> =>
-	Object.entries(manifest)
+	Object.entries(contracts)
 		.flatMap(([operation, { botLoop }]) =>
 			botLoop.kind === "offered"
 				? [
 						{
-							operation: operation as BotLoopOperationName<Manifest>,
+							operation: operation as BotLoopOperationName<Contracts>,
 							tool: botLoop.tool,
 							offeredIn: botLoop.offeredIn,
 							approval: botLoop.approval,

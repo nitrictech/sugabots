@@ -666,9 +666,7 @@ export function useSetResolved(chatId: string) {
 	return useMutation({
 		mutationFn: (resolved: boolean) =>
 			Effect.runPromise(
-				resolved
-					? client.api.chats.markResolved({ params: { chatId } })
-					: client.api.chats.reopen({ params: { chatId } }),
+				client.api.chats.setResolved({ params: { chatId }, payload: { resolved } }),
 			),
 		onSettled: refresh,
 	});

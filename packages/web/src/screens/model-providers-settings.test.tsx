@@ -82,7 +82,9 @@ describe("switching a provider on", () => {
 		fireEvent.click(await screen.findByRole("switch", { name: `Use ${openai.name}` }));
 
 		await waitFor(() =>
-			expect(providers.update.mock.calls[0]?.[0]).toMatchObject({ payload: { active: true } }),
+			expect(providers.update.mock.calls[0]?.[0]).toMatchObject({
+				payload: { changes: { active: true } },
+			}),
 		);
 		expect(providers.test).not.toHaveBeenCalled();
 	});
@@ -121,7 +123,7 @@ describe("a model's capabilities", () => {
 		await waitFor(() =>
 			expect(providers.updateModel).toHaveBeenCalledWith({
 				params: { workspace: expect.any(String), providerId: gateway.id, modelId: gpt.id },
-				payload: { disabledCapabilities: ["vision"] },
+				payload: { changes: { disabledCapabilities: ["vision"] } },
 			}),
 		);
 		await waitFor(() =>

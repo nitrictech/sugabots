@@ -1,17 +1,11 @@
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
-import { type ApiFailure, Forbidden, NotFound } from "@sugabots/contracts/http";
-import { type DomainError, type PublicError, toPublicError, type UserText } from "@sugabots/errors";
+import { type ApiFailure, type ApiFailureClass, failureForError } from "@sugabots/contracts/http";
+import { type DomainError, toPublicError } from "@sugabots/errors";
 import { Effect, Schema, SchemaAST } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 
-/** One of the API's failure classes, such as `NotFound`. */
-type ApiFailureClass = new (fields: {
-	readonly message: UserText;
-	readonly error?: PublicError;
-}) => ApiFailure;
-
 /**
- * Turns a service's own errors into the API's, choosing each one's class, and
+ * Turns an operation's errors into the API's, choosing each one's class, and
  * so its status, by its tag. The response carries the error's `userMessage`,
  * plus its {@link toPublicError} fields for a `DomainError`. Its internal
  * `message` and `cause` never reach a client.
@@ -43,17 +37,10 @@ export const asHttpError =
 		});
 
 /**
- * How core's refusals are answered, for the `asHttpError` of any endpoint
- * whose operation authorizes. Something the caller cannot reach is `NotFound`,
- * so an id cannot be probed for; something they reach but may not act on is
- * `Forbidden`. `BotCannotReach` is a bot's refusal, which a member's session
- * never meets: the bot's asker reaches what it may not act on.
+ * Answers an operation's errors as the HTTP API answers them everywhere, by
+ * `failureForError`.
  */
-export const refusals = {
-	ResourceHidden: NotFound,
-	ActionForbidden: Forbidden,
-	BotCannotReach: Forbidden,
-};
+export const answerAsHttp = asHttpError(failureForError);
 
 /**
  * For an operation only a member signed in may call, such as one on their own

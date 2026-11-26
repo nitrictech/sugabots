@@ -118,11 +118,13 @@ describe("the Web search settings", () => {
 
 	it("holds the switch off until a provider that needs a key has one", async () => {
 		route.get.mockReturnValue(Effect.succeed({ provider: brave }));
-		route.update.mockImplementation((request: { payload: Record<string, unknown> }) => {
-			const next = { ...keyed, enabled: request.payload.enabled === true };
-			route.get.mockReturnValue(Effect.succeed({ provider: next }));
-			return Effect.succeed(next);
-		});
+		route.update.mockImplementation(
+			(request: { payload: { changes: Record<string, unknown> } }) => {
+				const next = { ...keyed, enabled: request.payload.changes.enabled === true };
+				route.get.mockReturnValue(Effect.succeed({ provider: next }));
+				return Effect.succeed(next);
+			},
+		);
 		mount("/suga/settings/search");
 
 		expect(await searchSwitch()).toHaveProperty("disabled", true);
@@ -133,7 +135,9 @@ describe("the Web search settings", () => {
 		fireEvent.keyDown(key, { key: "Enter" });
 
 		await waitFor(() => expect(route.update).toHaveBeenCalledOnce());
-		expect(route.update.mock.calls[0]?.[0]).toMatchObject({ payload: { apiKey: "brave-key" } });
+		expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+			payload: { changes: { apiKey: "brave-key" } },
+		});
 		await screen.findByText("••••••••");
 
 		const power = await searchSwitch();
@@ -141,7 +145,9 @@ describe("the Web search settings", () => {
 		fireEvent.click(power);
 
 		await waitFor(() => expect(route.update).toHaveBeenCalledTimes(2));
-		expect(route.update.mock.calls[1]?.[0]).toMatchObject({ payload: { enabled: true } });
+		expect(route.update.mock.calls[1]?.[0]).toMatchObject({
+			payload: { changes: { enabled: true } },
+		});
 	});
 
 	it("removes a saved key after asking", async () => {
@@ -160,7 +166,9 @@ describe("the Web search settings", () => {
 		fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
 
 		await waitFor(() =>
-			expect(route.update.mock.calls[0]?.[0]).toMatchObject({ payload: { apiKey: null } }),
+			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+				payload: { changes: { apiKey: null } },
+			}),
 		);
 		await screen.findByPlaceholderText("Paste your key");
 	});

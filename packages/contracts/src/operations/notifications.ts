@@ -1,6 +1,6 @@
 /**
- * The notifications operations' contracts, and their entries in the exposure manifest.
- * `index.ts` spreads both, so adding an operation here touches no other file.
+ * The notifications operations' contracts, each with its decisions in the exposure manifest.
+ * `index.ts` spreads them, so adding an operation here touches no other file.
  */
 
 import { Schema } from "effect";
@@ -14,7 +14,6 @@ import {
 	presenceSchema,
 } from "../notifications.ts";
 import { uuidSchema } from "../uuid.ts";
-import type { DomainExposure } from "./exposure.ts";
 import { OperationContract } from "./operation.ts";
 
 /** How an operation only a member signed in may call refuses anyone else. */
@@ -26,6 +25,13 @@ const placeRefusals = [ResourceHidden, BotCannotReach, ActionForbidden] as const
 /** A project or a bot, where a member chooses in place of the level above. */
 const place = { kind: notificationPlaceKindSchema, id: uuidSchema };
 
+/** Held back: notifications are their member's own, set from their own tabs. */
+const membersOwn = {
+	kind: "heldBack",
+	reason:
+		"A member's notifications and tabs are their own, set from the web app; only a member signed in may change them.",
+} as const;
+
 export const notificationsContracts = {
 	"notifications.settings": OperationContract.make("notifications.settings", {
 		description: "Read what you are notified about, and when not.",
@@ -33,6 +39,8 @@ export const notificationsContracts = {
 		output: notificationSettingsSchema,
 		errors: memberRefusals,
 		changes: false,
+		http: { kind: "offered", method: "GET", path: "/notifications" },
+		botLoop: membersOwn,
 	}),
 	"notifications.updatePreferences": OperationContract.make("notifications.updatePreferences", {
 		description:
@@ -41,6 +49,8 @@ export const notificationsContracts = {
 		output: notificationSettingsSchema,
 		errors: memberRefusals,
 		changes: true,
+		http: { kind: "offered", method: "PUT", path: "/notifications" },
+		botLoop: membersOwn,
 	}),
 	"notifications.setLevel": OperationContract.make("notifications.setLevel", {
 		description:
@@ -49,6 +59,8 @@ export const notificationsContracts = {
 		output: Schema.Void,
 		errors: placeRefusals,
 		changes: true,
+		http: { kind: "offered", method: "PUT", path: "/notifications/:kind/:id/level" },
+		botLoop: membersOwn,
 	}),
 	"notifications.mute": OperationContract.make("notifications.mute", {
 		description:
@@ -57,6 +69,8 @@ export const notificationsContracts = {
 		output: Schema.Void,
 		errors: placeRefusals,
 		changes: true,
+		http: { kind: "offered", method: "PUT", path: "/notifications/:kind/:id/mute" },
+		botLoop: membersOwn,
 	}),
 	"notifications.sendTest": OperationContract.make("notifications.sendTest", {
 		description: "Notify every tab you have open, whatever you chose, to see that it works.",
@@ -64,6 +78,8 @@ export const notificationsContracts = {
 		output: Schema.Void,
 		errors: memberRefusals,
 		changes: false,
+		http: { kind: "offered", method: "POST", path: "/notifications/test" },
+		botLoop: membersOwn,
 	}),
 	"notifications.reportPresence": OperationContract.make("notifications.reportPresence", {
 		description: "Tell your other tabs which chat one of yours is showing.",
@@ -71,39 +87,7 @@ export const notificationsContracts = {
 		output: Schema.Void,
 		errors: memberRefusals,
 		changes: false,
+		http: { kind: "offered", method: "PUT", path: "/notifications/presence" },
+		botLoop: membersOwn,
 	}),
 } as const;
-
-/** Held back: notifications are their member's own, set from their own tabs. */
-const membersOwn = {
-	kind: "heldBack",
-	reason:
-		"A member's notifications and tabs are their own, set from the web app; only a member signed in may change them.",
-} as const;
-
-export const notificationsExposure = {
-	"notifications.settings": {
-		http: { kind: "offered", endpoint: "notifications.settings" },
-		botLoop: membersOwn,
-	},
-	"notifications.updatePreferences": {
-		http: { kind: "offered", endpoint: "notifications.updatePreferences" },
-		botLoop: membersOwn,
-	},
-	"notifications.setLevel": {
-		http: { kind: "offered", endpoint: "notifications.setLevel" },
-		botLoop: membersOwn,
-	},
-	"notifications.mute": {
-		http: { kind: "offered", endpoint: "notifications.mute" },
-		botLoop: membersOwn,
-	},
-	"notifications.sendTest": {
-		http: { kind: "offered", endpoint: "notifications.sendTest" },
-		botLoop: membersOwn,
-	},
-	"notifications.reportPresence": {
-		http: { kind: "offered", endpoint: "notifications.reportPresence" },
-		botLoop: membersOwn,
-	},
-} as const satisfies DomainExposure<typeof notificationsContracts>;

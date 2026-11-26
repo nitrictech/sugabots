@@ -1,7 +1,7 @@
-import { botLoopTools, manifest, operationContracts } from "@sugabots/contracts/operations";
+import { botLoopTools, operationContracts } from "@sugabots/contracts/operations";
 import { Schema } from "effect";
 
-const builtInTools = botLoopTools(manifest);
+const builtInTools = botLoopTools(operationContracts);
 
 /**
  * A built-in tool call's stored arguments, decoded by the tool's current
