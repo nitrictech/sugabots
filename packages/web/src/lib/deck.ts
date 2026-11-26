@@ -22,6 +22,7 @@ import {
 	SLIDE,
 	SLIDE_BODY,
 	SLIDE_BOX,
+	SPEAKER_NOTES,
 	takeBoxOffSlide,
 } from "@sugabots/contracts/live-slides";
 import {
@@ -443,8 +444,8 @@ export const BOX_REMOVAL_BLOCKED_WORDS: Record<BoxRemovalBlocked, string> = {
  * slide (`isOffItsSlide`). It stays in the slide's body, so the body still
  * holds every box its layout places, and a placed slide a frame for each,
  * where undoing the removal puts it back. One change, undone whole, with what
- * the box held. A caret left in the box is moved out of it
- * (`selectionOutOfRemovedBox`).
+ * the box held. On the stage, a caret in the box moves to the nearest box left
+ * on the slide (`selectionOutOfRemovedBox`).
  *
  * Like placing a box, it is never a suggestion. `undefined` when no slide
  * starts there, when its boxes wait on a suggestion (`boxesWaitOnSuggestion`),
@@ -466,16 +467,28 @@ export function removeBox(
 }
 
 /**
- * Moves a selection with an end in a box off its slide (`isOffItsSlide`),
- * where it isn't seen and whatever is typed would put the box back, to the
- * start of the nearest box on that slide, the next or else the one before,
- * or else to the start of the slide's notes. However it got there: by the
- * box's removal, the removal of the slide before it, an undo, or a change from
- * elsewhere. `undefined` when neither end is in such a box.
+ * Moves a selection out of a box off its slide (`isOffItsSlide`), where it
+ * isn't seen and whatever is typed would put the box back, to the start of
+ * the nearest box on that slide, the next or else the one before, or else to
+ * the start of the slide's notes. That is a selection with an end in such a
+ * box, however it got there: by the removal of the slide before it, an undo,
+ * or a change from elsewhere. It is also one whose head was in a box before
+ * `transactions`, the changes that made `state` of `before`, took that box off
+ * its slide, and which they left in the slide's notes: emptying a box moves a
+ * selection in it on past it, into the next box on the slide, or, from its
+ * last, into the notes, though a box before it may still be on the slide.
+ * `undefined` for any other selection.
  */
-export function selectionOutOfRemovedBox(state: EditorState): Transaction | undefined {
+export function selectionOutOfRemovedBox(
+	transactions: readonly Transaction[],
+	before: EditorState,
+	state: EditorState,
+): Transaction | undefined {
 	const { $from, $to } = state.selection;
-	const holding = removedBoxHolding($from) ?? removedBoxHolding($to);
+	const holding =
+		removedBoxHolding($from) ??
+		removedBoxHolding($to) ??
+		removedBoxHeadLeftForNotes(transactions, before, state);
 	if (!holding) return undefined;
 	const { slide, slidePos, box } = holding;
 	const boxes = boxesOf(slide);
@@ -488,12 +501,51 @@ export function selectionOutOfRemovedBox(state: EditorState): Transaction | unde
 	return state.tr.setSelection(TextSelection.near(state.doc.resolve(start + 1)));
 }
 
-/** The slide, where it starts, and the place on it of the box off it (`isOffItsSlide`) holding `place`, if one does. */
-function removedBoxHolding(place: ResolvedPos) {
-	// A deck holds slides, which hold their body, which holds the boxes.
-	const inBox = place.depth >= 3 && place.node(2).type.name === SLIDE_BODY;
-	if (!inBox || !isOffItsSlide(place.node(3))) return undefined;
+/** A box of a slide: the slide, where it starts, and the box's place among its boxes. */
+interface BoxOnSlide {
+	slide: Node;
+	slidePos: number;
+	box: number;
+}
+
+/** Whether `place` is in a box: a deck holds slides, which hold their body, which holds the boxes. */
+const isInBox = (place: ResolvedPos) => place.depth >= 3 && place.node(2).type.name === SLIDE_BODY;
+
+/** The box off its slide (`isOffItsSlide`) holding `place`, if one does. */
+function removedBoxHolding(place: ResolvedPos): BoxOnSlide | undefined {
+	if (!isInBox(place) || !isOffItsSlide(place.node(3))) return undefined;
 	return { slide: place.node(1), slidePos: place.before(1), box: place.index(2) };
+}
+
+/**
+ * The box `before`'s selection head was in, when `transactions` took it off
+ * its slide and left the head in the slide's notes in `state`. The slide is
+ * followed through `transactions` by where it starts. A change from
+ * elsewhere, which the sync layer makes by replacing the slides it touches
+ * whole, keeps where the first of them starts and loses where the others do,
+ * so a slide after the first isn't found.
+ */
+function removedBoxHeadLeftForNotes(
+	transactions: readonly Transaction[],
+	before: EditorState,
+	state: EditorState,
+): BoxOnSlide | undefined {
+	const was = before.selection.$head;
+	if (!isInBox(was)) return undefined;
+	let slidePos = was.before(1);
+	for (const { mapping } of transactions) {
+		const mapped = mapping.mapResult(slidePos, -1);
+		if (mapped.deleted) return undefined;
+		slidePos = mapped.pos;
+	}
+	const { $head } = state.selection;
+	const inNotes =
+		$head.depth >= 2 && $head.node(2).type.name === SPEAKER_NOTES && $head.before(1) === slidePos;
+	if (!inNotes) return undefined;
+	const slide = $head.node(1);
+	const box = was.index(2);
+	const now = bodyOf(slide).maybeChild(box);
+	return now && isOffItsSlide(now) ? { slide, slidePos, box } : undefined;
 }
 
 /**

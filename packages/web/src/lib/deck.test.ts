@@ -637,6 +637,41 @@ describe("the caret on the stage, kept out of a box deleted from its slide", () 
 		},
 	);
 
+	it.each([
+		["here", "kim"],
+		["by somebody else", "sam"],
+	] as const)(
+		"moves back to the box before it when the box it is in, its slide's last, is deleted %s",
+		(_, who) => {
+			const people = twoPeople({ onStage: true });
+			const { kim } = people;
+			caretIn(kim, 0, 1);
+
+			make(people[who], (state) => removeBox(state, slideStart(state.doc, 0), boxIndex(1)));
+
+			expect(offSlide(kim.state.doc, 0)).toEqual([false, true]);
+			expect(whereCaretIs(kim)).toEqual({ slide: 0, box: 0, offSlide: false });
+		},
+	);
+
+	it.each([
+		["here", "kim"],
+		["by somebody else", "sam"],
+	] as const)(
+		"moves to the slide's notes when the box it is in, the last left on its slide, is deleted %s",
+		(_, who) => {
+			const people = twoPeople({ onStage: true });
+			const { kim } = people;
+			make(kim, (state) => removeBox(state, slideStart(state.doc, 0), boxIndex(0)));
+			caretIn(kim, 0, 1);
+
+			make(people[who], (state) => removeBox(state, slideStart(state.doc, 0), boxIndex(1)));
+
+			expect(offSlide(kim.state.doc, 0)).toEqual([true, true]);
+			expect(whereCaretIs(kim)).toEqual({ slide: 0, box: undefined, offSlide: false });
+		},
+	);
+
 	it("moves on past a deleted box it would land in when the slide before it is removed", () => {
 		const { kim } = twoPeople({ onStage: true });
 		make(kim, (state) => removeBox(state, slideStart(state.doc, 1), boxIndex(0)));

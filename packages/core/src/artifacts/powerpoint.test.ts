@@ -160,6 +160,12 @@ function boxOf(shape: string) {
 	return { x, y, w, h };
 }
 
+/** Where a shape's foot is on its slide, in points. */
+const footOf = (shape: string) => {
+	const { y, h } = boxOf(shape);
+	return y + h;
+};
+
 /**
  * The step the deck's PDF draws its first slide's text at: the size of its
  * last stretch of text, which is text of `fullSize` units at full size, over
@@ -443,6 +449,52 @@ describe("a deck's PowerPoint file", () => {
 		// The padding is 4 units of 16 points, the title a line of 2.5 units at 1.15, and the gap under it 2 units.
 		expect(boxOf(shapeHolding(xml, "Ship it")).y).toBeCloseTo(64 + 40 * 1.15 + 32);
 	});
+
+	it("sets the text under an empty title as far down as the app does: the title takes no room, but the gap under it goes only with the removed title", async () => {
+		const untitled = deckOf("<!-- layout: bullets -->\n\n##\n\n<!-- box -->\n\n- Ship it");
+
+		const empty = await slideXml((await powerPointOfDeck(untitled)).file, 1);
+		const removed = await slideXml(
+			(await powerPointOfDeck(withBoxRemoved(untitled, 0, 0))).file,
+			1,
+		);
+
+		// Under the 64-point padding, the gap of 2 units of 16 points.
+		expect(boxOf(shapeHolding(empty, "Ship it")).y).toBeCloseTo(64 + 32);
+		expect(boxOf(shapeHolding(removed, "Ship it")).y).toBeCloseTo(64);
+	});
+
+	it.each([
+		[
+			"a title over an empty subtitle, the two together in the middle",
+			"<!-- layout: title -->\n\n# Launch",
+			(xml: string) => footOf(shapeHolding(xml, "Launch")),
+			// Between margins 412 points apart, a title of 3.75 units of 16 at 1.1, 66 points, and the gap of 1.25 units under it.
+			64 + (412 - 66 - 20) / 2 + 66,
+		],
+		[
+			"the text under an empty title beside the image, the two together in the middle",
+			"<!-- layout: image -->\n\n##\n\n<!-- box -->\n\nWords\n\n<!-- box -->\n\nPicture",
+			(xml: string) => boxOf(shapeHolding(xml, "Words")).y,
+			// The 1.25 units under the title, 20 points, and a line of 1.375 units at 1.5, 33 points.
+			64 + (412 - 20 - 33) / 2 + 20,
+		],
+		[
+			"a section break's accent bar over an empty label",
+			"<!-- layout: section -->\n\n## Pricing",
+			(xml: string) =>
+				boxOf(shapesOf(xml).find((shape) => shape.includes('name="Accent bar"')) ?? "").y,
+			// Up from the margin at 476 points: a title of 4 units of 16 at 1.05, the gap of a unit, the label, the gap and the bar, 0.3 units.
+			476 - (67.2 + 16 + 0 + 16 + 4.8),
+		],
+	])(
+		"keeps an empty box apart from the rest as the app does: %s",
+		async (_, markdown, edgeOf, at) => {
+			const { file } = await powerPointFile(markdown);
+
+			expect(edgeOf(await slideXml(file, 1))).toBeCloseTo(at);
+		},
+	);
 
 	it("sets the text of a slide too long for full size at the step the PDF draws it at, every region placed for that step", async () => {
 		const step = await pdfStepOf(TWO_COLUMNS, 1.25);

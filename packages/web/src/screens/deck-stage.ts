@@ -111,11 +111,12 @@ export function deckStage({
 							return stageOf(state);
 						},
 					},
-					// It moves only a selection in a box off its slide, never into one, and changes nothing in the
-					// deck, only where this person's selection is, so it settles at once and sends the others nothing.
-					appendTransaction: (transactions, _before, state) =>
+					// It moves only a selection in a box off its slide, or one just moved out of such a box into its
+					// slide's notes, never into such a box, and changes nothing in the deck, only where this person's
+					// selection is, so it settles at once and sends the others nothing.
+					appendTransaction: (transactions, before, state) =>
 						transactions.some(({ docChanged, selectionSet }) => docChanged || selectionSet)
-							? (selectionOutOfRemovedBox(state) ?? null)
+							? (selectionOutOfRemovedBox(transactions, before, state) ?? null)
 							: null,
 					props: {
 						decorations: (state) => stageKey.getState(state)?.decorations,

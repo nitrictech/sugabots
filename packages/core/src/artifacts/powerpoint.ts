@@ -52,6 +52,7 @@ import {
 	RULE,
 	RULE_THICKNESS,
 	SECTION_BAR,
+	type SlideBlocks,
 	type SlidePart,
 	slideBlocksOf,
 	TABLE_LOOK,
@@ -221,10 +222,32 @@ interface TextToPlace {
 	step: number;
 	/** How tall it is in each region. */
 	heightOf: HeightOf;
+	/**
+	 * Whether it puts anything in the region numbered `region`, if only an
+	 * empty line. An empty line takes no room, but the app sets it as far from
+	 * what is around it as any block, so a region holding one is as far from
+	 * the others as one holding words.
+	 */
+	holds: (region: number) => boolean;
 	/** Whether the slide fits at `step`. */
 	fits: boolean;
-	/** Whether the slide shows a section break's label, which its accent bar goes with. */
-	labelled: boolean;
+	/** The section break's label, which its accent bar goes with. */
+	label: SectionLabel;
+}
+
+/**
+ * A slide's section break label, as the file sets it: `"held"` when it holds
+ * more than empty paragraphs, which the section break's text region holds
+ * (`sectionParts`); `"empty"` when it holds only empty paragraphs, which no
+ * region holds, though the app sets them between the accent bar and the
+ * title, as far from each as it sets its blocks apart; and `undefined` when
+ * the slide shows no label, or is no section break.
+ */
+type SectionLabel = "held" | "empty" | undefined;
+
+function sectionLabelOf(blocks: SlideBlocks): SectionLabel {
+	if (blocks.layout !== "section" || !blocks.shows("label")) return undefined;
+	return blocks.inBox("label").every(isEmptyParagraph) ? "empty" : "held";
 }
 
 /** Where a layout's regions are for `text`, as the app places it. */
@@ -283,7 +306,7 @@ function sectionParts(blocks: BlocksOfLayout<"section">): {
 	title: readonly Node[];
 	text: readonly Node[];
 } {
-	if (!blocks.inBox("label").every(isEmptyParagraph)) return { title: [], text: blocks.all };
+	if (sectionLabelOf(blocks) === "held") return { title: [], text: blocks.all };
 	const [first, ...rest] = blocks.inBox("title");
 	if (first?.type.name !== "heading") return { title: [], text: blocks.inBox("title") };
 	return { title: [first], text: rest };
@@ -326,15 +349,19 @@ const footRegion = <R extends BoxRole>(
 	box,
 });
 
-/** The title across the top, and `columns` regions side by side under it, as far under it as `layout` sets its blocks apart. */
+/**
+ * The title across the top, and `columns` regions side by side under it, as
+ * far under it as `layout` sets its blocks apart while there is a title, if
+ * only an empty line.
+ */
 const underTitle =
 	(layout: SlideLayout, columns: 1 | 2): Place =>
-	({ step, heightOf, fits }) => {
+	({ step, heightOf, holds, fits }) => {
 		const unit = step * SLIDE_UNIT;
 		const sideMargin = SLIDE_SIDE_MARGINS[layout];
 		const contentWidth = contentWidthOf(layout);
 		const title = heightOf(0, contentWidth);
-		const top = SLIDE_END_MARGIN + (title > 0 ? title + LAYOUT_LOOKS[layout].gap * unit : 0);
+		const top = SLIDE_END_MARGIN + (holds(0) ? title + LAYOUT_LOOKS[layout].gap * unit : 0);
 		const gap = COLUMN_GAP_UNITS * unit;
 		const width = columns === 1 ? contentWidth : (contentWidth - gap) / 2;
 		return {
@@ -347,15 +374,19 @@ const underTitle =
 		};
 	};
 
-/** Two regions one over the other, together in the middle of `layout`'s margins, as far apart as it sets its blocks. */
+/**
+ * Two regions one over the other, together in the middle of `layout`'s
+ * margins, as far apart as it sets its blocks while both hold something, if
+ * only an empty line.
+ */
 const centred =
 	(layout: SlideLayout): Place =>
-	({ step, heightOf }) => {
+	({ step, heightOf, holds }) => {
 		const x = SLIDE_SIDE_MARGINS[layout];
 		const width = contentWidthOf(layout);
 		const first = heightOf(0, width);
 		const second = heightOf(1, width);
-		const gap = first > 0 && second > 0 ? LAYOUT_LOOKS[layout].gap * step * SLIDE_UNIT : 0;
+		const gap = holds(0) && holds(1) ? LAYOUT_LOOKS[layout].gap * step * SLIDE_UNIT : 0;
 		const top = SLIDE_END_MARGIN + Math.max(0, (CONTENT_HEIGHT - first - gap - second) / 2);
 		return {
 			boxes: [above(x, width, top + first, first), below(x, width, top + first + gap, second)],
@@ -363,33 +394,69 @@ const centred =
 	};
 
 /**
- * The section break's accent bar, while it has a label, its title and its
- * text, one under another at the margin at the slide's foot.
+ * The section break's accent bar and an empty label, while it shows a label,
+ * then its title and its text, while they hold anything, one under another at
+ * the margin at the slide's foot, as far apart as the layout sets its blocks.
+ * An empty label takes no room, as an empty title doesn't.
  */
-const atFoot: Place = ({ step, heightOf, labelled }) => {
+const atFoot: Place = ({ step, heightOf, holds, label }) => {
 	const unit = step * SLIDE_UNIT;
 	const sideMargin = SLIDE_SIDE_MARGINS.section;
 	const width = contentWidthOf("section");
-	const gap = LAYOUT_LOOKS.section.gap * unit;
 	const bar = { w: SECTION_BAR.width * unit, h: SECTION_BAR.height * unit };
 	const title = heightOf(0, width);
 	const text = heightOf(1, width);
-	const shown = [labelled ? bar.h : 0, title, text].filter((height) => height > 0);
-	const height = shown.reduce((sum, each) => sum + each, 0) + gap * Math.max(0, shown.length - 1);
+	const {
+		tops: [, , titleTop = 0, textTop = 0],
+		height,
+	} = stackedTops(
+		[
+			label ? bar.h : undefined,
+			label === "empty" ? 0 : undefined,
+			holds(0) ? title : undefined,
+			holds(1) ? text : undefined,
+		],
+		LAYOUT_LOOKS.section.gap * unit,
+	);
 	const top = SLIDE_END_MARGIN + Math.max(0, CONTENT_HEIGHT - height);
-	const titleTop = top + (labelled ? bar.h + gap : 0);
-	const textTop = titleTop + (title > 0 ? title + gap : 0);
 	return {
 		boxes: [
-			above(sideMargin, width, titleTop + title, title),
-			below(sideMargin, width, textTop, text),
+			above(sideMargin, width, top + titleTop + title, title),
+			below(sideMargin, width, top + textTop, text),
 		],
-		bar: labelled ? { x: sideMargin, y: top, ...bar } : undefined,
+		bar: label ? { x: sideMargin, y: top, ...bar } : undefined,
 	};
 };
 
-/** The title and the text box under it together in the middle of the left, and the image box in the middle of the right. */
-const besideImage: Place = ({ step, heightOf }) => {
+/**
+ * Where each of `heights` starts, from 0, one under another `gap` apart, and
+ * how tall they are together. An `undefined` height is of something that
+ * isn't there, which takes neither room nor a gap, and starts where the next
+ * would.
+ */
+function stackedTops(
+	heights: readonly (number | undefined)[],
+	gap: number,
+): { tops: number[]; height: number } {
+	const tops: number[] = [];
+	let height = 0;
+	let anyBefore = false;
+	for (const each of heights) {
+		const top = anyBefore ? height + gap : 0;
+		tops.push(top);
+		if (each === undefined) continue;
+		height = top + each;
+		anyBefore = true;
+	}
+	return { tops, height };
+}
+
+/**
+ * The title and the text box under it together in the middle of the left,
+ * the text as far under the title as the layout sets it while there is a
+ * title, if only an empty line, and the image box in the middle of the right.
+ */
+const besideImage: Place = ({ step, heightOf, holds }) => {
 	const unit = step * SLIDE_UNIT;
 	const sideMargin = SLIDE_SIDE_MARGINS.image;
 	const gap = COLUMN_GAP_UNITS * unit;
@@ -397,7 +464,7 @@ const besideImage: Place = ({ step, heightOf }) => {
 	const title = heightOf(0, width);
 	const text = heightOf(1, width);
 	const image = heightOf(2, width);
-	const titleGap = title > 0 ? IMAGE_LAYOUT.titleGap * unit : 0;
+	const titleGap = holds(0) ? IMAGE_LAYOUT.titleGap * unit : 0;
 	const left = title + titleGap + text;
 	const height = Math.max(CONTENT_HEIGHT, left, image);
 	const leftTop = SLIDE_END_MARGIN + (height - left) / 2;
@@ -569,26 +636,29 @@ const LAYOUTS: { readonly [L in SlideLayout]: LayoutDesign<L> } = {
  * What `blocks`, a slide's, puts in each region of the slide's layout: what
  * the region's box holds, or, on a slide its layout places, rather than one
  * `placed` by hand, what the region holds of it (`Region.holds`). Nothing for
- * a region that would hold only empty lines.
+ * a region whose box is off the slide.
  */
 function heldInRegions<L extends SlideLayout>(
 	blocks: BlocksOfLayout<L>,
 	placed: boolean,
 ): (readonly Node[])[] {
 	const regions: readonly Region<L>[] = LAYOUTS[blocks.layout].regions;
-	return regions.map((region) => {
-		const holds = placed || !region.holds ? blocks.inBox(region.box) : region.holds(blocks);
-		return holds.every(isEmptyParagraph) ? [] : holds;
-	});
+	return regions.map((region) =>
+		placed || !region.holds ? blocks.inBox(region.box) : region.holds(blocks),
+	);
 }
+
+/** What the file writes of `held`, what a region holds: nothing when it is only empty paragraphs, which show nothing. */
+const writtenOf = (held: readonly Node[]) => (held.every(isEmptyParagraph) ? [] : held);
 
 /** Where a layout's regions are on a slide made from it in PowerPoint: with room for the text each is made for, a section break's label included. */
 const roomyBoxes = ({ regions, place }: LayoutDesign<SlideLayout>) =>
 	place({
 		step: 1,
 		heightOf: (region) => regions[region]?.room ?? 0,
+		holds: () => true,
 		fits: true,
-		labelled: true,
+		label: "held",
 	}).boxes;
 
 /**
@@ -779,10 +849,16 @@ function addSlide(
 		const holds = held[index] ?? [];
 		return holds.length === 0 ? 0 : heightOfBlocks(holds, placingOf(index, width), measure);
 	};
-	const labelled = blocks.layout === "section" && blocks.shows("label");
+	const label = sectionLabelOf(blocks);
 	const { boxes, bar } = placement
-		? placedRegions(design.regions, layout, placement, step, heightOf, labelled)
-		: design.place({ step, heightOf, fits, labelled });
+		? placedRegions(design.regions, layout, placement, step, heightOf, label !== undefined)
+		: design.place({
+				step,
+				heightOf,
+				holds: (index) => (held[index]?.length ?? 0) > 0,
+				fits,
+				label,
+			});
 	const added = presentation.addSlide({ masterName: design.name });
 	if (bar)
 		added.addShape(presentation.ShapeType.rect, {
@@ -795,7 +871,7 @@ function addSlide(
 	design.regions.forEach((region, index) => {
 		const placeholder = FIRST_PLACEHOLDER_INDEX + index;
 		const box = boxes[index];
-		const parts = partsOf(held[index] ?? [], draw);
+		const parts = partsOf(writtenOf(held[index] ?? []), draw);
 		const [first] = parts;
 		if (!first || !box) {
 			unused.push(placeholder);
