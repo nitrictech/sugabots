@@ -1,11 +1,16 @@
 import type { ArtifactImageType } from "@sugabots/contracts";
 import { type ArtifactImageIds, ownImageAt } from "@sugabots/contracts/http";
 import { linkMayGoTo } from "@sugabots/contracts/live-document";
-import { isRemovedBox, layoutOf, SLIDE_BODY } from "@sugabots/contracts/live-slides";
+import { layoutOf, shownBoxesOf } from "@sugabots/contracts/live-slides";
 import {
 	type BoxRole,
+	type BoxRoleOf,
 	type Frame,
 	SLIDE_BOX_ROLES,
+	SLIDE_END_MARGIN,
+	SLIDE_HEIGHT,
+	SLIDE_SIDE_MARGINS,
+	SLIDE_WIDTH,
 	type SlideLayout,
 } from "@sugabots/contracts/slides-markdown";
 import type { Node } from "@tiptap/pm/model";
@@ -14,30 +19,26 @@ import type { Node } from "@tiptap/pm/model";
  * A deck's slides as the app draws them, in its light colours, for the files
  * a deck is saved as: a PowerPoint file (`powerpoint.ts`) and a PDF
  * (`pdf.ts`). It follows the slide styles in the web app's `app.css`, which
- * size everything in a unit of a 60th of the slide's width: a slide is 60
- * units wide and 33.75 tall. Its text is drawn at full size, or at the
- * largest of `SLIDE_TEXT_STEPS` at which it fits, and everything sized in
- * ems of the slide's text steps down with it, while its padding, which is in
- * the unit alone, stays.
+ * size everything in the slide's unit (`SLIDE_UNIT`). Its text is drawn at
+ * full size, or at the largest of `SLIDE_TEXT_STEPS` at which it fits, and
+ * everything sized in ems of the slide's text steps down with it, while its
+ * margins, which are in the unit alone, stay.
  *
- * Positions and sizes in points are on a slide 960 wide, a point to each
- * pixel of a slide the app draws 960 pixels wide, where the unit is 16.
+ * Positions and sizes in points are a slide's pixels (`SLIDE_WIDTH` across),
+ * a point to each.
  */
 
-/** The slide's unit, in points. */
-export const EM = 16;
-export const SLIDE_WIDTH = 60 * EM;
-export const SLIDE_HEIGHT = 33.75 * EM;
-export const PADDING_X = 5 * EM;
-export const PADDING_Y = 4 * EM;
-export const CONTENT_WIDTH = SLIDE_WIDTH - 2 * PADDING_X;
-export const CONTENT_BOTTOM = SLIDE_HEIGHT - PADDING_Y;
+/** How wide a slide of `layout` is within the margins at its sides, in points. */
+export const contentWidthOf = (layout: SlideLayout) => SLIDE_WIDTH - 2 * SLIDE_SIDE_MARGINS[layout];
+
+/** How far down a slide the margin at its foot starts, in points. */
+export const CONTENT_BOTTOM = SLIDE_HEIGHT - SLIDE_END_MARGIN;
+
+/** How tall a slide is within the margins at its top and foot, in points. */
+export const CONTENT_HEIGHT = SLIDE_HEIGHT - 2 * SLIDE_END_MARGIN;
 
 /** The space between a slide's two columns, in units. */
 export const COLUMN_GAP_UNITS = 3.5;
-
-/** The quote layout's wider padding at either side, in units. */
-export const QUOTE_PADDING_UNITS = 7;
 
 /** The light colours, as hex: a deck holds no theme, and a file to hand on is light. */
 export const BACKGROUND = "FFFFFF";
@@ -101,7 +102,7 @@ export const LAYOUT_LOOKS: Readonly<Record<SlideLayout, LayoutLook>> = {
 	bullets: BODY,
 	/** The title across the top, and the columns side by side under it (`COLUMN_LOOK`). */
 	columns: BODY,
-	/** The title and the first column's text on the left (`IMAGE_LAYOUT`), and the second column, its image, on the right. */
+	/** The title over the text box on the left, and the image box on the right (`IMAGE_LAYOUT`). */
 	image: BODY,
 	/** An accent bar (`SECTION_BAR`), a label and a very large title, at the foot of the slide. */
 	section: {
@@ -110,12 +111,16 @@ export const LAYOUT_LOOKS: Readonly<Record<SlideLayout, LayoutLook>> = {
 		gap: 1,
 		align: "end",
 	},
-	/** The quote large (`QUOTE_LOOK`), and who said it under it, in the middle, within wider padding. */
+	/** The quote large (`QUOTE_LOOK`), and who said it under it, in the middle, within wider margins. */
 	quote: { ...BODY, text: { ...SMALL_TEXT, color: SECONDARY }, gap: 1.75, align: "center" },
 	table: { ...BODY, text: SMALL_TEXT },
 };
 
-/** A column's look, in a layout with columns: smaller text and headings, nearer each other. */
+/**
+ * The look of a column of the columns layout, and, but for their text, of
+ * the image layout's text box and image box: smaller text and headings,
+ * nearer each other.
+ */
 export const COLUMN_LOOK = {
 	heading: { ...HEADING, size: 1.375, lineHeight: 1.2, tracking: 0 },
 	text: SMALL_TEXT,
@@ -129,8 +134,8 @@ export const COLUMN_LOOK = {
 
 /**
  * The parts of a slide that set their blocks each their own way: the slide's
- * own flow, a column of the columns layout, and the image layout's text and
- * the column its image is in.
+ * own flow, a column of the columns layout, and the image layout's text box
+ * and image box. A box's part is its role's (`BOX_PARTS`).
  */
 export type SlidePart = "flow" | "column" | "imageText" | "imageColumn";
 
@@ -144,14 +149,14 @@ export interface PartLook {
 	listGap: number;
 	/** Whether each heading has a rule under it, `COLUMN_LOOK.headingRuleGap` below. */
 	ruledHeadings: boolean;
-	/** Where its blocks sit across it: the image's column centres each. */
+	/** Where its blocks sit across it: the image box centres each. */
 	align: "start" | "center";
 }
 
 /**
  * The part of its slide a box of each role is, which sets what the box holds
  * as `[data-box-role=…]` sets it: a column of the columns layout, the image
- * layout's text and image, and the slide's own flow for every other.
+ * layout's text box and image box, and the slide's own flow for every other.
  */
 export const BOX_PARTS: Readonly<Record<BoxRole, SlidePart>> = {
 	title: "flow",
@@ -196,9 +201,12 @@ export function partLook(layout: SlideLayout, part: SlidePart): PartLook {
 	};
 }
 
-/** The image layout: the title, then the first column's text, centred on the left, and the image filling the right. */
+/**
+ * The image layout: its title over its text box, together in the middle of
+ * the left, and its image box filling the right.
+ */
 export const IMAGE_LAYOUT = {
-	/** Both columns' text. */
+	/** The text of its text box and of its image box. */
 	text: { ...BODY_TEXT, size: 1.375, color: SECONDARY, lineHeight: 1.5 },
 	/** Between the title and the text, in units of the step. */
 	titleGap: 1.25,
@@ -331,15 +339,21 @@ export interface DeckImage {
 	bytes: Uint8Array;
 }
 
-/** What a slide holds, as its layouts place it, its boxes removed from it left out. */
-export interface SlideBlocks {
-	/** Whether it shows its box of `role` in its layout (`SLIDE_BOX_ROLES`): one its layout has, that nobody removed. */
-	shows: (role: BoxRole) => boolean;
+/** What a slide of layout `L` holds, as its layout places it, its boxes off the slide left out. */
+export interface BlocksOfLayout<L extends SlideLayout> {
+	layout: L;
+	/**
+	 * The blocks of each of its boxes, in the order of its layout's roles
+	 * (`SLIDE_BOX_ROLES`): `undefined` for a box off the slide.
+	 */
+	boxes: readonly (readonly Node[] | undefined)[];
+	/** Whether it shows its box of `role`: one that isn't off the slide. */
+	shows(role: BoxRoleOf<L>): boolean;
 	/**
 	 * The blocks of its box of `role`, as the layouts that set boxes beside
-	 * each other place them: none when it doesn't show one.
+	 * each other place them: none when it doesn't show it.
 	 */
-	inBox: (role: BoxRole) => readonly Node[];
+	inBox(role: BoxRoleOf<L>): readonly Node[];
 	/**
 	 * Every block in the boxes it shows, in order: what the layouts that set a
 	 * slide's blocks one under another set, box after box, as far apart as
@@ -347,6 +361,9 @@ export interface SlideBlocks {
 	 */
 	all: readonly Node[];
 }
+
+/** What a slide holds (`BlocksOfLayout`), told apart by its layout. */
+export type SlideBlocks = { [L in SlideLayout]: BlocksOfLayout<L> }[SlideLayout];
 
 export function childNamed(node: Node, name: string): Node {
 	const child = node.children.find((each) => each.type.name === name);
@@ -357,17 +374,18 @@ export function childNamed(node: Node, name: string): Node {
 export const isEmptyParagraph = (block: Node) =>
 	block.type.name === "paragraph" && block.childCount === 0;
 
-/** What `slide`, its frame fitted to its layout, holds, as its layouts place it. */
+/** What `slide`, its body fitted to its layout, holds, as its layout places it. */
 export function slideBlocksOf(slide: Node): SlideBlocks {
-	const roles: readonly BoxRole[] = SLIDE_BOX_ROLES[layoutOf(slide)];
-	const shown = childNamed(slide, SLIDE_BODY).children.map((box) =>
-		isRemovedBox(box) ? undefined : box,
-	);
-	const boxOf = (role: BoxRole) => shown[roles.indexOf(role)];
+	const layout = layoutOf(slide);
+	const roles: readonly BoxRole[] = SLIDE_BOX_ROLES[layout];
+	const boxes = shownBoxesOf(slide).map((box) => box?.children);
+	const blocksOf = (role: BoxRole) => boxes[roles.indexOf(role)];
 	return {
-		shows: (role) => boxOf(role) !== undefined,
-		inBox: (role) => boxOf(role)?.children ?? [],
-		all: shown.flatMap((box) => box?.children ?? []),
+		layout,
+		boxes,
+		shows: (role: BoxRole) => blocksOf(role) !== undefined,
+		inBox: (role: BoxRole) => blocksOf(role) ?? [],
+		all: boxes.flatMap((blocks) => blocks ?? []),
 	};
 }
 

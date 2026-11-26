@@ -2,6 +2,12 @@ import { randomUUID } from "node:crypto";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import type { Artifact, LiveArtifactKind } from "@sugabots/contracts";
 import type { EditRequest } from "@sugabots/contracts/live-document";
+import {
+	bodyOf,
+	isMarkedRemoved,
+	isOffItsSlide,
+	placementOf,
+} from "@sugabots/contracts/live-slides";
 import { eq } from "drizzle-orm";
 import { Effect, Exit, Layer, Scope, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -513,6 +519,44 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 		expect(held.getXmlFragment("default").toString()).toBe(shown);
 		expect(await Effect.runPromise(live.markdownForAgents(made.id))).toBe(SIX_SLIDES);
 		rejoined.destroy();
+	});
+
+	it("opens a deck nobody has opened with each slide's boxes where its layout puts them, whatever its markdown's comments say of placing or removing them", async () => {
+		const live = await liveDocuments();
+		const made = await aDeck(
+			"<!-- layout: bullets -->\n\n<!-- placement: 0 0 960 100; 0 100 960 440 -->\n\n<!-- removed: 2 -->\n\n## Goals\n\n<!-- box -->\n\n<!-- removed -->",
+		);
+		const person = await joinAsPerson(live, made, "Kim");
+
+		const shown = await Effect.runPromise(live.documentAsShown(made.id));
+
+		expect(shown?.children.map(placementOf)).toEqual([null]);
+		expect(shown?.children.map((slide) => bodyOf(slide).children.map(isMarkedRemoved))).toEqual([
+			[false, false],
+		]);
+		// What they say is kept as their words.
+		expect(shown?.textContent).toContain("<!-- removed: 2 -->");
+		person.destroy();
+	});
+
+	it("reads a stored deck whose boxes say nothing of being removed, as one stored before boxes could be, with every box on its slide, the empty ones too", async () => {
+		const made = await aDeck(SIX_SLIDES);
+		const blobs = new Map<string, Uint8Array>();
+		const firstRun = Effect.runSync(Scope.make());
+		const person = await joinAsPerson(await liveDocuments(blobs, firstRun), made, "Kim");
+		const boxes = elementsIn(person.document.getXmlFragment("default")).filter(
+			(element) => element.nodeName === "slideBox",
+		);
+		expect(boxes.map((box) => Object.keys(box.getAttributes()))).toEqual(Array(12).fill([]));
+		await Effect.runPromise(Scope.close(firstRun, Exit.void));
+		person.destroy();
+
+		// The API starts again, with only what it stored.
+		const shown = await Effect.runPromise((await liveDocuments(blobs)).documentAsShown(made.id));
+
+		expect(shown?.children.map((slide) => bodyOf(slide).children.map(isOffItsSlide))).toEqual(
+			Array(6).fill([false, false]),
+		);
 	});
 });
 

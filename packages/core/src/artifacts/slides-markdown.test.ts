@@ -5,6 +5,7 @@ import {
 } from "@sugabots/contracts/live-document-markdown";
 import {
 	fitSlideBody,
+	isMarkedRemoved,
 	laidOutAnew,
 	layoutOf,
 	newSlide,
@@ -12,13 +13,15 @@ import {
 	SLIDE_BOX,
 } from "@sugabots/contracts/live-slides";
 import {
+	type Frame,
 	placementIn,
-	SLIDE_BOX_ROLES,
+	roomBottom,
 	SLIDE_LAYOUTS,
 	type SlideLayout,
 } from "@sugabots/contracts/slides-markdown";
 import type { Node } from "@tiptap/pm/model";
 import { describe, expect, it } from "vitest";
+import { titleOf } from "./slides.test-support.ts";
 
 /*
  * A deck's markdown, read and written as the API does (see `live.ts`): what
@@ -49,14 +52,14 @@ const heading = (level: number, text?: string) =>
 
 const box = (...blocks: Node[]) => node(SLIDE_BOX, blocks);
 
-/** The slides, by number from 1, whose frame doesn't hold what their layout says. */
+/** The slides, by number from 1, whose body doesn't hold what their layout says. */
 const unfitted = (deck: Node) =>
 	deck.children.flatMap((slide, index) => {
 		const body = slide.child(0);
 		return fitSlideBody(body, layoutOf(slide)) === body ? [] : [index + 1];
 	});
 
-/** What a slide's frame and notes hold, as lines of text, each box after the first starting with `|`. */
+/** What a slide's body and notes hold, as lines of text, each box after the first starting with `|`. */
 const linesOf = (slide: Node) => {
 	const lines: string[] = [];
 	slide.descendants((node, _pos, _parent, index) => {
@@ -68,16 +71,6 @@ const linesOf = (slide: Node) => {
 	return lines;
 };
 
-/** The words of the slide's first heading: its title, on any layout. */
-const titleOf = (slide: Node) => {
-	let title: string | undefined;
-	slide.descendants((node) => {
-		if (title === undefined && node.type.name === "heading") title = node.textContent;
-		return title === undefined;
-	});
-	return title;
-};
-
 const IMAGE = `/api/pods/0199a3a0-0000-7000-8000-000000000001/artifacts/0199a3a0-0000-7000-8000-000000000002/images/${"a".repeat(64)}`;
 
 /** A deck with a slide of every layout, and slides with nothing in them. */
@@ -85,11 +78,11 @@ const EVERY_LAYOUT = [
 	"<!-- layout: title -->\n\n# Launch review\n\nQ3, for the whole team\n\n<!-- notes: Welcome everyone.\n\nSay the **new** pod's name. -->",
 	"<!-- layout: section -->\n\n## Where we are",
 	"<!-- layout: bullets -->\n\n## Goals\n\n- Ship *live* slides\n  - with suggestions\n  - and notes\n- Keep `markdown` as it is\n- Mark x<sup>2</sup> and <u>this</u>",
-	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- column -->\n\n### People\n\n- Type in the page\n\n<!-- column -->\n\n### Bots\n\n1. Suggest changes\n2. Wait for a person",
-	`<!-- layout: image -->\n\n## The chart\n\n<!-- column -->\n\nSales went <mark>up</mark>.\n\n<!-- column -->\n\n![The launch chart](${IMAGE})`,
+	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- box -->\n\n### People\n\n- Type in the page\n\n<!-- box -->\n\n### Bots\n\n1. Suggest changes\n2. Wait for a person",
+	`<!-- layout: image -->\n\n## The chart\n\n<!-- box -->\n\nSales went <mark>up</mark>.\n\n<!-- box -->\n\n![The launch chart](${IMAGE})`,
 	"<!-- layout: quote -->\n\n> Nothing a person writes is lost.\n\nThe team",
 	"<!-- layout: table -->\n\n## Owners\n\n| Milestone | Owner |\n| --- | --- |\n| Beta | Priya |\n| Launch | Marco<br>Aiko |",
-	"<!-- layout: columns -->\n\n## Nothing in the columns yet\n\n<!-- column -->\n\n<!-- column -->",
+	"<!-- layout: columns -->\n\n## Nothing in the columns yet\n\n<!-- box -->\n\n<!-- box -->",
 	"<!-- layout: bullets -->",
 ].join("\n\n---\n\n");
 
@@ -181,14 +174,13 @@ describe("a deck's markdown", () => {
 		expect(slides[0]).toMatch(
 			/<!-- notes: Welcome everyone\.\n\nSay the \*\*new\*\* pod's name\. -->$/,
 		);
-		expect(slides.map((slide) => slide.match(/<!-- box -->/g)?.length)).toEqual(
-			deck.children.map((slide) => SLIDE_BOX_ROLES[layoutOf(slide)].length - 1),
-		);
+		expect(slides.map((slide) => slide.match(/<!-- box -->/g)?.length)).toEqual([
+			1, 1, 1, 2, 2, 1, 1, 2, 1,
+		]);
 		expect(slides[1]).toBe("<!-- layout: section -->\n\n<!-- box -->\n\n## Where we are");
 		// An empty slide is its layout and its empty boxes, and no slide says it has notes when it has none.
 		expect(slides[8]).toBe("<!-- layout: bullets -->\n\n##\n\n<!-- box -->");
 		expect(text.match(/<!-- notes:/g)).toHaveLength(1);
-		expect(text).not.toContain("<!-- column -->");
 	});
 
 	it("never writes a line of text straight above the line between two slides", () => {
@@ -334,7 +326,7 @@ describe("a deck's markdown", () => {
 		["a list", "## Goals\n\n- One\n- Two", ["bullets"]],
 		["a quote with whose it is", "> Ship it.\n\nKim", ["quote"]],
 		["a table", "## Owners\n\n| A | B |\n| - | - |\n| 1 | 2 |", ["table"]],
-		["columns", "## Two\n\n<!-- column -->\n\nA\n\n<!-- column -->\n\nB", ["columns"]],
+		["columns", "## Two\n\n<!-- box -->\n\nA\n\n<!-- box -->\n\nB", ["columns"]],
 		[
 			"a layout this version doesn't know",
 			"<!-- layout: timeline -->\n\n## Goals\n\n- One",
@@ -392,11 +384,6 @@ describe("a deck's markdown", () => {
 			["T", "Before", "|", "A", "|", "B", "C", "notes:", ""],
 		],
 		[
-			"boxes written as the columns decks were written with before",
-			"<!-- layout: columns -->\n\n## T\n\n<!-- column -->\n\nA\n\n<!-- columns -->\n\nB",
-			["T", "|", "A", "|", "B", "notes:", ""],
-		],
-		[
 			"no boxes, all of it but the title going into the second",
 			"<!-- layout: image -->\n\n## T\n\nWords",
 			["T", "|", "Words", "|", "", "notes:", ""],
@@ -444,24 +431,25 @@ describe("a deck's markdown", () => {
 		expect(linesOf(slide).slice(0, -2)).toEqual(lines);
 	});
 
-	it.each<[SlideLayout, string]>([
-		["title", "heading"],
-		["bullets", "heading"],
-		["columns", "heading"],
-		["image", "heading"],
-		["table", "heading"],
-		["section", "paragraph"],
-		["quote", "blockquote"],
-	])("gives a %s slide's empty first box %s to type in, as a new slide's", (layout, kind) => {
-		const slide = parsed(`<!-- layout: ${layout} -->`).child(0);
+	it.each<[SlideLayout, string, number | undefined]>([
+		["title", "heading", 1],
+		["bullets", "heading", 2],
+		["columns", "heading", 2],
+		["image", "heading", 2],
+		["table", "heading", 2],
+		["section", "paragraph", undefined],
+		["quote", "blockquote", undefined],
+	])(
+		"gives a %s slide's empty first box %s to type in, as a new slide's",
+		(layout, kind, level) => {
+			const slide = parsed(`<!-- layout: ${layout} -->`).child(0);
 
-		const first = slide.child(0).child(0);
-		expect(first.childCount).toBe(1);
-		expect(first.firstChild?.type.name).toBe(kind);
-		expect(first.firstChild?.attrs.level).toBe(
-			kind === "heading" ? (layout === "title" ? 1 : 2) : undefined,
-		);
-	});
+			const first = slide.child(0).child(0);
+			expect(first.childCount).toBe(1);
+			expect(first.firstChild?.type.name).toBe(kind);
+			expect(first.firstChild?.attrs.level).toBe(level);
+		},
+	);
 
 	it("reads a comment inside a quote as its text, and a line there as nothing", () => {
 		const deck = parsed("> A quote\n>\n> <!-- notes: not these -->\n>\n> ***\n\nKim");
@@ -488,8 +476,8 @@ describe("a slide's placement", () => {
 	const GOALS =
 		"<!-- layout: bullets -->\n\n## Goals\n\nFor the quarter\n\n<!-- box -->\n\n- Ship it";
 	const FRAMES = [
-		{ x: 80, y: 64, w: 800, h: 46 },
-		{ x: 80, y: 142, w: 440, h: 300 },
+		{ x: 80, y: 64, width: 800, height: 46 },
+		{ x: 80, y: 142, width: 440, height: 300 },
 	];
 
 	it("is never read from markdown: a comment saying where boxes are, or which were removed, is only its words", () => {
@@ -503,12 +491,7 @@ describe("a slide's placement", () => {
 		);
 
 		expect(placementOf(deck.child(0))).toBeNull();
-		expect(
-			deck
-				.child(0)
-				.child(0)
-				.children.map((each) => each.attrs.removed),
-		).toEqual([null, null]);
+		expect(deck.child(0).child(0).children.map(isMarkedRemoved)).toEqual([false, false]);
 		expect(linesOf(deck.child(0))).toEqual([
 			placing,
 			removing,
@@ -545,16 +528,71 @@ describe("a slide's placement", () => {
 	});
 
 	it("is a frame for each box of the slide's layout, in whole pixels, within the slide", () => {
-		const frame = { x: 0, y: 0, w: 960, h: 540 };
+		const frame = { x: 0, y: 0, width: 960, height: 540 };
 
 		expect(placementIn([frame, frame], "bullets")).toEqual([frame, frame]);
 		expect(placementIn([frame, frame], "columns")).toBeNull();
 		expect(placementIn([frame, { ...frame, x: 1 }], "bullets")).toBeNull();
-		expect(placementIn([frame, { ...frame, w: "960" }], "bullets")).toBeNull();
-		expect(placementIn([frame, { x: 0, y: 0, w: 960 }], "bullets")).toBeNull();
+		expect(placementIn([frame, { ...frame, width: "960" }], "bullets")).toBeNull();
+		expect(placementIn([frame, { x: 0, y: 0, width: 960 }], "bullets")).toBeNull();
 		expect(placementIn([frame, null], "bullets")).toBeNull();
 		expect(placementIn("0 0 960 540; 0 0 960 540", "bullets")).toBeNull();
 		expect(placementIn(null, "bullets")).toBeNull();
+	});
+});
+
+describe("the room a placed box has down its slide", () => {
+	const box: Frame = { x: 80, y: 64, width: 400, height: 100 };
+
+	it.each<[string, Frame[], boolean[], number]>([
+		["the slide's bottom margin, with no box below it", [box], [true], 476],
+		[
+			"the top of a box below it that shares some of its width",
+			[box, { x: 400, y: 300, width: 300, height: 100 }],
+			[true, true],
+			300,
+		],
+		[
+			"the top of the nearest of the boxes below it",
+			[box, { x: 80, y: 400, width: 400, height: 60 }, { x: 300, y: 250, width: 100, height: 60 }],
+			[true, true, true],
+			250,
+		],
+		[
+			"the slide's bottom margin, past a box below it that shares none of its width",
+			[box, { x: 480, y: 300, width: 300, height: 100 }],
+			[true, true],
+			476,
+		],
+		[
+			"the slide's bottom margin, past a box above it",
+			[box, { x: 80, y: 20, width: 400, height: 30 }],
+			[true, true],
+			476,
+		],
+		[
+			"the slide's bottom margin, past a box below it that is off the slide",
+			[box, { x: 80, y: 300, width: 400, height: 100 }],
+			[true, false],
+			476,
+		],
+		[
+			"its own frame's bottom, when a box below starts inside its frame",
+			[
+				{ x: 80, y: 64, width: 400, height: 300 },
+				{ x: 80, y: 200, width: 400, height: 100 },
+			],
+			[true, true],
+			364,
+		],
+		[
+			"its own frame's bottom, when its frame reaches past the bottom margin",
+			[{ x: 80, y: 440, width: 400, height: 100 }],
+			[true],
+			540,
+		],
+	])("ends at %s", (_, frames, shown, bottom) => {
+		expect(roomBottom(frames, shown, 0)).toBe(bottom);
 	});
 });
 
@@ -611,7 +649,45 @@ describe("a slide's layout", () => {
 		},
 	);
 
-	it("leaves the slide's frame as it was when it fits already", () => {
+	/** What each box of `slide` holds, by the names of its blocks. */
+	const blocksOf = (slide: Node) =>
+		slide.child(0).children.map((each) => each.children.map((block) => block.type.name));
+
+	const GOALS = "<!-- layout: bullets -->\n\n## Goals\n\n<!-- box -->\n\n- Ship it";
+
+	it("changed from bullets to a section break keeps the heading as its title, with what was under it, the label left empty", () => {
+		const section = laidOutAnew(parsed(GOALS).child(0), "section");
+
+		expect(boxesOf(section)).toEqual(["", "GoalsShip it"]);
+		expect(blocksOf(section)).toEqual([["paragraph"], ["heading", "bulletList"]]);
+	});
+
+	it("changed from a section break to bullets and back is the slide it was, either way round", () => {
+		const inBullets = parsed(GOALS).child(0);
+		const section = laidOutAnew(inBullets, "section");
+
+		const bullets = laidOutAnew(section, "bullets");
+
+		expect(bullets.eq(inBullets)).toBe(true);
+		expect(laidOutAnew(bullets, "section").eq(section)).toBe(true);
+	});
+
+	it("changed to a layout of as many boxes and back keeps a right column the right one when the left holds nothing", () => {
+		const rightOnly = parsed(
+			"<!-- layout: columns -->\n\n## People and bots\n\n<!-- box -->\n\n<!-- box -->\n\n- Bots suggest",
+		).child(0);
+
+		const withImage = laidOutAnew(rightOnly, "image");
+
+		expect(boxesOf(withImage)).toEqual(["People and bots", "", "Bots suggest"]);
+		expect(boxesOf(laidOutAnew(withImage, "columns"))).toEqual([
+			"People and bots",
+			"",
+			"Bots suggest",
+		]);
+	});
+
+	it("leaves the slide's body as it was when it fits already", () => {
 		const body = inColumns().child(0);
 
 		expect(fitSlideBody(body, "columns")).toBe(body);

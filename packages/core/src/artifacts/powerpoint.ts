@@ -4,13 +4,17 @@ import {
 	MAX_ARTIFACT_IMAGES_BYTES,
 } from "@sugabots/contracts";
 import type { ArtifactImageIds } from "@sugabots/contracts/http";
-import { layoutOf, placementOf, SPEAKER_NOTES } from "@sugabots/contracts/live-slides";
+import { placementOf, SPEAKER_NOTES } from "@sugabots/contracts/live-slides";
 import {
 	type BoxRole,
+	type BoxRoleOf,
 	type Frame,
 	type Placement,
 	SLIDE_BOX_ROLES,
+	SLIDE_END_MARGIN,
 	SLIDE_LAYOUTS,
+	SLIDE_SIDE_MARGINS,
+	SLIDE_UNIT,
 	type SlideLayout,
 } from "@sugabots/contracts/slides-markdown";
 import { Fragment, type Mark, type Node } from "@tiptap/pm/model";
@@ -25,32 +29,29 @@ import {
 	accentBarOver,
 	BACKGROUND,
 	BLOCK_QUOTE_LOOK,
+	type BlocksOfLayout,
 	BOLD_WEIGHT,
+	BOX_PARTS,
 	CODE_LOOK,
 	COLUMN_GAP_UNITS,
 	COLUMN_LOOK,
 	CONTENT_BOTTOM,
-	CONTENT_WIDTH,
+	CONTENT_HEIGHT,
 	childNamed,
+	contentWidthOf,
 	type DeckImage,
-	EM,
 	IMAGE_LAYOUT,
 	isEmptyParagraph,
 	LAYOUT_LOOKS,
 	LIST_LOOK,
 	linkInFile,
 	ownImagesIn,
-	PADDING_X,
-	PADDING_Y,
 	type PartLook,
 	partLook,
 	QUOTE_LOOK,
-	QUOTE_PADDING_UNITS,
 	RULE,
 	RULE_THICKNESS,
 	SECTION_BAR,
-	SLIDE_WIDTH,
-	type SlideBlocks,
 	type SlidePart,
 	slideBlocksOf,
 	TABLE_LOOK,
@@ -129,8 +130,8 @@ export const powerPointFileOf = <E, R>(
 	});
 
 /*
- * Positions and sizes are in points on a slide 960 wide (`slide-design.ts`),
- * which is the size of PowerPoint's 13.33in-wide 16:9 slide.
+ * Positions and sizes are in points, a slide's pixels (`slide-design.ts`), as
+ * many across as PowerPoint's 13.33in-wide 16:9 slide has.
  */
 
 const POINTS_PER_INCH = 72;
@@ -164,6 +165,7 @@ const ARIAL_ALLOWANCE = 0.05;
 /** The bullets of each level of a list, as a browser draws them. */
 const BULLET_CHARACTERS = ["2022", "25E6", "25AA"];
 
+/** A box on a slide, as PptxGenJS places one: its left, top, width and height. */
 interface Box {
 	x: number;
 	y: number;
@@ -171,32 +173,38 @@ interface Box {
 	h: number;
 }
 
-/** A part of a layout, which is a placeholder of the file's. */
-interface Region {
+/** A part of a layout of `L`, which is a placeholder of the file's, standing for one of the layout's boxes. */
+interface Region<L extends SlideLayout> {
 	/** Its placeholder's name, by which a slide's text for it is put in it. */
 	name: string;
 	/** What PowerPoint takes it for: the slide's title, or its text. */
 	type: "title" | "body";
 	/** What it shows when empty on a slide made in PowerPoint. */
 	prompt: string;
-	/** The part of the slide its blocks are set in, as the app sets them there. */
-	part: SlidePart;
 	/** How text typed into it on a slide made in PowerPoint looks. */
 	writes: TextLook;
 	/** How tall the text its box has room for is on a slide made in PowerPoint, in points. */
 	room: number;
 	/** The edge of its box its text sits against. */
 	anchor: "top" | "bottom";
-	/** What a slide holds in it. */
-	holds: (blocks: SlideBlocks) => readonly Node[];
 	/**
-	 * The box of a slide it stands for once somebody placed the slide's boxes
-	 * by hand: it is at that box's frame, holding what the box holds. A
+	 * The box of a slide it stands for: it holds what the box holds, set as
+	 * the app sets that box's part of the slide (`BOX_PARTS`), and once
+	 * somebody placed the slide's boxes by hand, it is at the box's frame. A
 	 * section break's text stands for its label, which has a frame of its
 	 * own, and its title for the whole of its title's box.
 	 */
-	box: BoxRole;
+	box: BoxRoleOf<L>;
+	/**
+	 * What a slide its layout places holds in it, when that isn't what its box
+	 * holds: on a section break, whose label the file's layout has no place
+	 * over its title for.
+	 */
+	holds?(blocks: BlocksOfLayout<L>): readonly Node[];
 }
+
+/** A region standing for the box of role `R`, for any layout with a box of that role. */
+type RegionFor<R extends BoxRole> = Omit<Region<SlideLayout>, "box" | "holds"> & { box: R };
 
 /** How tall the text a slide puts in its region numbered `region` is, set across `width`, in points: 0 for none. */
 type HeightOf = (region: number, width: number) => number;
@@ -207,22 +215,31 @@ interface Placed {
 	bar?: Box;
 }
 
-/** One of the deck's layouts as a layout of the file's. */
-interface LayoutDesign {
+/** A slide's text, which a layout places its regions for. */
+interface TextToPlace {
+	/** The step it is set at, one of `SLIDE_TEXT_STEPS`. */
+	step: number;
+	/** How tall it is in each region. */
+	heightOf: HeightOf;
+	/** Whether the slide fits at `step`. */
+	fits: boolean;
+	/** Whether the slide shows a section break's label, which its accent bar goes with. */
+	labelled: boolean;
+}
+
+/** Where a layout's regions are for `text`, as the app places it. */
+type Place = (text: TextToPlace) => Placed;
+
+/** One of the deck's layouts, `L`, as a layout of the file's. */
+interface LayoutDesign<L extends SlideLayout> {
 	/** Its name in PowerPoint's Layout menu, as the app's layout picker names it. */
 	name: string;
-	regions: readonly Region[];
-	/**
-	 * Where its regions are for text as tall as `heightOf` says, at `step`, as
-	 * the app places it; `fits` is whether the slide fits at that step, and
-	 * `labelled` whether it shows a section break's label, which its accent
-	 * bar goes with.
-	 */
-	place: (step: number, heightOf: HeightOf, fits: boolean, labelled: boolean) => Placed;
+	regions: readonly Region<L>[];
+	place: Place;
 }
 
 /** The height of `count` lines of `look` at full size. */
-const lines = (count: number, look: TextLook) => count * look.size * EM * look.lineHeight;
+const lines = (count: number, look: TextLook) => count * look.size * SLIDE_UNIT * look.lineHeight;
 
 /** Text `height` tall, with Arial's allowance. */
 const grown = (height: number) => height * (1 + ARIAL_ALLOWANCE);
@@ -244,10 +261,10 @@ const above = (x: number, w: number, bottom: number, height: number): Box => ({
 });
 
 /**
- * A box from `top` to the foot of the padding, as the app lets the text
- * under a slide's title run, or further for text `height` tall that fits at
- * its step. Text that runs over even at the smallest step keeps to the
- * padding, so shrinking it when it is edited fits it within.
+ * A box from `top` to the margin at the slide's foot, as the app lets the
+ * text under a slide's title run, or further for text `height` tall that fits
+ * at its step. Text that runs over even at the smallest step keeps to the
+ * margin, so shrinking it when it is edited fits it within.
  */
 const toFoot = (x: number, w: number, top: number, height: number, fits: boolean): Box => ({
 	x,
@@ -256,42 +273,34 @@ const toFoot = (x: number, w: number, top: number, height: number, fits: boolean
 	h: fits ? Math.max(CONTENT_BOTTOM - top, grown(height)) : CONTENT_BOTTOM - top,
 });
 
-/** The height within the padding. */
-const CONTENT_HEIGHT = CONTENT_BOTTOM - PADDING_Y;
-
-/** What a slide's box of `role` holds. */
-const inBox =
-	(role: BoxRole): Region["holds"] =>
-	(blocks) =>
-		blocks.inBox(role);
-
 /**
  * A section break's title and text, as its regions hold them. The file's
  * layout has no place over a title for a label, so a section break with a
  * label is all text, in the order it reads; without one, a heading its title
  * box starts with is its title, and what follows it is text.
  */
-function sectionParts(blocks: SlideBlocks): { title: readonly Node[]; text: readonly Node[] } {
+function sectionParts(blocks: BlocksOfLayout<"section">): {
+	title: readonly Node[];
+	text: readonly Node[];
+} {
 	if (!blocks.inBox("label").every(isEmptyParagraph)) return { title: [], text: blocks.all };
 	const [first, ...rest] = blocks.inBox("title");
 	if (first?.type.name !== "heading") return { title: [], text: blocks.inBox("title") };
 	return { title: [first], text: rest };
 }
 
+/** The region standing for a slide's title box, which PowerPoint takes for its title. */
 const titleRegion = (
 	writes: TextLook,
 	room: number,
-	anchor: Region["anchor"],
-	holds: Region["holds"] = inBox("title"),
-): Region => ({
+	anchor: Region<SlideLayout>["anchor"],
+): RegionFor<"title"> => ({
 	name: "title",
 	type: "title",
 	prompt: "Title",
-	part: "flow",
 	writes,
 	room,
 	anchor,
-	holds,
 	box: "title",
 });
 
@@ -301,52 +310,53 @@ const TOP_TITLE = titleRegion(
 	"top",
 );
 
-/** A body region running from under the title to the foot of the padding, holding the box of `box`. */
-const footRegion = (
+/** A body region running from under the title to the margin at the slide's foot, standing for the box of `box`. */
+const footRegion = <R extends BoxRole>(
 	name: string,
 	prompt: string,
-	part: SlidePart,
 	writes: TextLook,
-	box: BoxRole,
-): Region => ({
+	box: R,
+): RegionFor<R> => ({
 	name,
 	type: "body",
 	prompt,
-	part,
 	writes,
 	room: 0,
 	anchor: "top",
-	holds: inBox(box),
 	box,
 });
 
 /** The title across the top, and `columns` regions side by side under it, as far under it as `layout` sets its blocks apart. */
 const underTitle =
-	(layout: SlideLayout, columns: 1 | 2): LayoutDesign["place"] =>
-	(step, heightOf, fits) => {
-		const unit = step * EM;
-		const title = heightOf(0, CONTENT_WIDTH);
-		const top = PADDING_Y + (title > 0 ? title + LAYOUT_LOOKS[layout].gap * unit : 0);
+	(layout: SlideLayout, columns: 1 | 2): Place =>
+	({ step, heightOf, fits }) => {
+		const unit = step * SLIDE_UNIT;
+		const sideMargin = SLIDE_SIDE_MARGINS[layout];
+		const contentWidth = contentWidthOf(layout);
+		const title = heightOf(0, contentWidth);
+		const top = SLIDE_END_MARGIN + (title > 0 ? title + LAYOUT_LOOKS[layout].gap * unit : 0);
 		const gap = COLUMN_GAP_UNITS * unit;
-		const width = columns === 1 ? CONTENT_WIDTH : (CONTENT_WIDTH - gap) / 2;
+		const width = columns === 1 ? contentWidth : (contentWidth - gap) / 2;
 		return {
 			boxes: [
-				below(PADDING_X, CONTENT_WIDTH, PADDING_Y, title),
+				below(sideMargin, contentWidth, SLIDE_END_MARGIN, title),
 				...Array.from({ length: columns }, (_, index) =>
-					toFoot(PADDING_X + index * (width + gap), width, top, heightOf(index + 1, width), fits),
+					toFoot(sideMargin + index * (width + gap), width, top, heightOf(index + 1, width), fits),
 				),
 			],
 		};
 	};
 
-/** Two regions one over the other, together in the middle of the padding, as far apart as `layout` sets its blocks. */
+/** Two regions one over the other, together in the middle of `layout`'s margins, as far apart as it sets its blocks. */
 const centred =
-	(layout: SlideLayout, x: number, width: number): LayoutDesign["place"] =>
-	(step, heightOf) => {
+	(layout: SlideLayout): Place =>
+	({ step, heightOf }) => {
+		const x = SLIDE_SIDE_MARGINS[layout];
+		const width = contentWidthOf(layout);
 		const first = heightOf(0, width);
 		const second = heightOf(1, width);
-		const gap = first > 0 && second > 0 ? LAYOUT_LOOKS[layout].gap * step * EM : 0;
-		const top = PADDING_Y + Math.max(0, (CONTENT_HEIGHT - first - gap - second) / 2);
+		const gap = first > 0 && second > 0 ? LAYOUT_LOOKS[layout].gap * step * SLIDE_UNIT : 0;
+		const top = SLIDE_END_MARGIN + Math.max(0, (CONTENT_HEIGHT - first - gap - second) / 2);
 		return {
 			boxes: [above(x, width, top + first, first), below(x, width, top + first + gap, second)],
 		};
@@ -354,60 +364,63 @@ const centred =
 
 /**
  * The section break's accent bar, while it has a label, its title and its
- * text, one under another at the foot of the padding.
+ * text, one under another at the margin at the slide's foot.
  */
-const atFoot: LayoutDesign["place"] = (step, heightOf, _fits, labelled) => {
-	const unit = step * EM;
+const atFoot: Place = ({ step, heightOf, labelled }) => {
+	const unit = step * SLIDE_UNIT;
+	const sideMargin = SLIDE_SIDE_MARGINS.section;
+	const width = contentWidthOf("section");
 	const gap = LAYOUT_LOOKS.section.gap * unit;
 	const bar = { w: SECTION_BAR.width * unit, h: SECTION_BAR.height * unit };
-	const title = heightOf(0, CONTENT_WIDTH);
-	const text = heightOf(1, CONTENT_WIDTH);
+	const title = heightOf(0, width);
+	const text = heightOf(1, width);
 	const shown = [labelled ? bar.h : 0, title, text].filter((height) => height > 0);
 	const height = shown.reduce((sum, each) => sum + each, 0) + gap * Math.max(0, shown.length - 1);
-	const top = PADDING_Y + Math.max(0, CONTENT_HEIGHT - height);
+	const top = SLIDE_END_MARGIN + Math.max(0, CONTENT_HEIGHT - height);
 	const titleTop = top + (labelled ? bar.h + gap : 0);
 	const textTop = titleTop + (title > 0 ? title + gap : 0);
 	return {
 		boxes: [
-			above(PADDING_X, CONTENT_WIDTH, titleTop + title, title),
-			below(PADDING_X, CONTENT_WIDTH, textTop, text),
+			above(sideMargin, width, titleTop + title, title),
+			below(sideMargin, width, textTop, text),
 		],
-		bar: labelled ? { x: PADDING_X, y: top, ...bar } : undefined,
+		bar: labelled ? { x: sideMargin, y: top, ...bar } : undefined,
 	};
 };
 
-/** The title and the text under it together in the middle of the left, and the image's column in the middle of the right. */
-const besideImage: LayoutDesign["place"] = (step, heightOf) => {
-	const unit = step * EM;
+/** The title and the text box under it together in the middle of the left, and the image box in the middle of the right. */
+const besideImage: Place = ({ step, heightOf }) => {
+	const unit = step * SLIDE_UNIT;
+	const sideMargin = SLIDE_SIDE_MARGINS.image;
 	const gap = COLUMN_GAP_UNITS * unit;
-	const width = (CONTENT_WIDTH - gap) / 2;
+	const width = (contentWidthOf("image") - gap) / 2;
 	const title = heightOf(0, width);
 	const text = heightOf(1, width);
 	const image = heightOf(2, width);
 	const titleGap = title > 0 ? IMAGE_LAYOUT.titleGap * unit : 0;
 	const left = title + titleGap + text;
 	const height = Math.max(CONTENT_HEIGHT, left, image);
-	const leftTop = PADDING_Y + (height - left) / 2;
+	const leftTop = SLIDE_END_MARGIN + (height - left) / 2;
 	return {
 		boxes: [
-			above(PADDING_X, width, leftTop + title, title),
-			below(PADDING_X, width, leftTop + title + titleGap, text),
-			below(PADDING_X + width + gap, width, PADDING_Y + (height - image) / 2, image),
+			above(sideMargin, width, leftTop + title, title),
+			below(sideMargin, width, leftTop + title + titleGap, text),
+			below(sideMargin + width + gap, width, SLIDE_END_MARGIN + (height - image) / 2, image),
 		],
 	};
 };
 
 /**
- * Where a layout's regions are on a slide whose boxes somebody placed by
- * hand, at `step`: each at the frame of the box it stands for (`Region.box`),
- * across it, its text from the frame's top, as the app draws a placed box,
- * but in the middle of the frame for the image layout's image, which the app
- * centres there. A region whose text sits at the foot of its box is as tall
- * as its text; another reaches the frame's foot at least. The section
- * break's accent bar is over its label, while it shows one.
+ * Where `regions`, a layout's, are on a slide of that `layout` whose boxes
+ * somebody placed by hand, at `step`: each at the frame of the box it stands
+ * for (`Region.box`), across it, its text from the frame's top, as the app
+ * draws a placed box, but in the middle of the frame for the image layout's
+ * image box, which the app centres there. A region whose text sits at the
+ * foot of its box is as tall as its text; another reaches the frame's foot at
+ * least. The section break's accent bar is over its label, while it shows one.
  */
 function placedRegions(
-	regions: readonly Region[],
+	regions: readonly Region<SlideLayout>[],
 	layout: SlideLayout,
 	placement: Placement,
 	step: number,
@@ -416,13 +429,18 @@ function placedRegions(
 ): Placed {
 	const boxes = regions.map((region, index): Box => {
 		const frame = frameOfBox(placement, layout, region.box);
-		const height = heightOf(index, frame.w);
-		const top = region.box === "image" ? frame.y + (frame.h - height) / 2 : frame.y;
-		if (region.anchor === "bottom") return above(frame.x, frame.w, top + height, height);
-		return { x: frame.x, y: top, w: frame.w, h: Math.max(frame.y + frame.h - top, grown(height)) };
+		const height = heightOf(index, frame.width);
+		const top = region.box === "image" ? frame.y + (frame.height - height) / 2 : frame.y;
+		if (region.anchor === "bottom") return above(frame.x, frame.width, top + height, height);
+		return {
+			x: frame.x,
+			y: top,
+			w: frame.width,
+			h: Math.max(frame.y + frame.height - top, grown(height)),
+		};
 	});
 	if (!labelled) return { boxes };
-	const bar = accentBarOver(frameOfBox(placement, layout, "label"), step * EM);
+	const bar = accentBarOver(frameOfBox(placement, layout, "label"), step * SLIDE_UNIT);
 	return { boxes, bar: { x: bar.x, y: bar.y, w: bar.width, h: bar.height } };
 }
 
@@ -434,12 +452,8 @@ function frameOfBox(placement: Placement, layout: SlideLayout, role: BoxRole): F
 	return frame;
 }
 
-/** The quote layout's wider padding. */
-const QUOTE_X = QUOTE_PADDING_UNITS * EM;
-const QUOTE_WIDTH = SLIDE_WIDTH - 2 * QUOTE_X;
-
 /** Each of the deck's layouts as the file lays it out, after the mock-ups the app draws. */
-const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
+const LAYOUTS: { readonly [L in SlideLayout]: LayoutDesign<L> } = {
 	title: {
 		name: "Title",
 		regions: [
@@ -448,27 +462,25 @@ const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
 				name: "subtitle",
 				type: "body",
 				prompt: "Subtitle",
-				part: "flow",
 				writes: LAYOUT_LOOKS.title.text,
 				room: lines(2, LAYOUT_LOOKS.title.text),
 				anchor: "top",
-				holds: inBox("subtitle"),
 				box: "subtitle",
 			},
 		],
-		place: centred("title", PADDING_X, CONTENT_WIDTH),
+		place: centred("title"),
 	},
 	bullets: {
 		name: "Title and bullets",
-		regions: [TOP_TITLE, footRegion("body", "Text", "flow", LAYOUT_LOOKS.bullets.text, "body")],
+		regions: [TOP_TITLE, footRegion("body", "Text", LAYOUT_LOOKS.bullets.text, "body")],
 		place: underTitle("bullets", 1),
 	},
 	columns: {
 		name: "Two columns",
 		regions: [
 			TOP_TITLE,
-			footRegion("left", "Left column", "column", COLUMN_LOOK.text, "leftColumn"),
-			footRegion("right", "Right column", "column", COLUMN_LOOK.text, "rightColumn"),
+			footRegion("left", "Left column", COLUMN_LOOK.text, "leftColumn"),
+			footRegion("right", "Right column", COLUMN_LOOK.text, "rightColumn"),
 		],
 		place: underTitle("columns", 2),
 	},
@@ -480,22 +492,18 @@ const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
 				name: "text",
 				type: "body",
 				prompt: "Text",
-				part: "imageText",
 				writes: IMAGE_LAYOUT.text,
 				room: lines(3, IMAGE_LAYOUT.text),
 				anchor: "top",
-				holds: inBox("text"),
 				box: "text",
 			},
 			{
 				name: "image",
 				type: "body",
 				prompt: "Image",
-				part: "imageColumn",
 				writes: IMAGE_LAYOUT.text,
 				room: CONTENT_HEIGHT,
 				anchor: "top",
-				holds: inBox("image"),
 				box: "image",
 			},
 		],
@@ -504,22 +512,23 @@ const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
 	section: {
 		name: "Section break",
 		regions: [
-			titleRegion(
-				LAYOUT_LOOKS.section.heading,
-				lines(2, LAYOUT_LOOKS.section.heading),
-				"bottom",
-				(blocks) => sectionParts(blocks).title,
-			),
+			{
+				...titleRegion(
+					LAYOUT_LOOKS.section.heading,
+					lines(2, LAYOUT_LOOKS.section.heading),
+					"bottom",
+				),
+				holds: (blocks) => sectionParts(blocks).title,
+			},
 			{
 				name: "body",
 				type: "body",
 				prompt: "Text",
-				part: "flow",
 				writes: LAYOUT_LOOKS.section.text,
 				room: lines(1, LAYOUT_LOOKS.section.text),
 				anchor: "top",
-				holds: (blocks) => sectionParts(blocks).text,
 				box: "label",
+				holds: (blocks) => sectionParts(blocks).text,
 			},
 		],
 		place: atFoot,
@@ -532,37 +541,55 @@ const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
 				// The slide's title, as PowerPoint's own quote layouts have it, for an outline and a screen reader.
 				type: "title",
 				prompt: "Quote",
-				part: "flow",
 				writes: QUOTE_LOOK,
 				room: lines(3, QUOTE_LOOK),
 				anchor: "bottom",
-				holds: inBox("quote"),
 				box: "quote",
 			},
 			{
 				name: "attribution",
 				type: "body",
 				prompt: "Who said it",
-				part: "flow",
 				writes: LAYOUT_LOOKS.quote.text,
 				room: lines(1, LAYOUT_LOOKS.quote.text),
 				anchor: "top",
-				holds: inBox("attribution"),
 				box: "attribution",
 			},
 		],
-		place: centred("quote", QUOTE_X, QUOTE_WIDTH),
+		place: centred("quote"),
 	},
 	table: {
 		name: "Table",
-		regions: [TOP_TITLE, footRegion("table", "Table", "flow", LAYOUT_LOOKS.table.text, "table")],
+		regions: [TOP_TITLE, footRegion("table", "Table", LAYOUT_LOOKS.table.text, "table")],
 		place: underTitle("table", 1),
 	},
 };
 
+/**
+ * What `blocks`, a slide's, puts in each region of the slide's layout: what
+ * the region's box holds, or, on a slide its layout places, rather than one
+ * `placed` by hand, what the region holds of it (`Region.holds`). Nothing for
+ * a region that would hold only empty lines.
+ */
+function heldInRegions<L extends SlideLayout>(
+	blocks: BlocksOfLayout<L>,
+	placed: boolean,
+): (readonly Node[])[] {
+	const regions: readonly Region<L>[] = LAYOUTS[blocks.layout].regions;
+	return regions.map((region) => {
+		const holds = placed || !region.holds ? blocks.inBox(region.box) : region.holds(blocks);
+		return holds.every(isEmptyParagraph) ? [] : holds;
+	});
+}
+
 /** Where a layout's regions are on a slide made from it in PowerPoint: with room for the text each is made for, a section break's label included. */
-const roomyBoxes = ({ regions, place }: LayoutDesign) =>
-	place(1, (region) => regions[region]?.room ?? 0, true, true).boxes;
+const roomyBoxes = ({ regions, place }: LayoutDesign<SlideLayout>) =>
+	place({
+		step: 1,
+		heightOf: (region) => regions[region]?.room ?? 0,
+		fits: true,
+		labelled: true,
+	}).boxes;
 
 /**
  * PptxGenJS numbers a layout's placeholders from 100, in the order they are
@@ -683,7 +710,7 @@ function presentationOf(
 }
 
 function masterOf(layout: SlideLayout): PptxGenJS.SlideMasterProps {
-	const design = LAYOUTS[layout];
+	const design: LayoutDesign<SlideLayout> = LAYOUTS[layout];
 	const boxes = roomyBoxes(design);
 	return {
 		title: design.name,
@@ -704,10 +731,10 @@ function masterOf(layout: SlideLayout): PptxGenJS.SlideMasterProps {
  */
 function placeholderOptions(
 	layout: SlideLayout,
-	region: Region,
+	region: Region<SlideLayout>,
 	box: Box | undefined,
 ): PptxGenJS.PlaceholderProps {
-	const style = styleOf(region.writes, EM);
+	const style = styleOf(region.writes, SLIDE_UNIT);
 	const options: PptxGenJS.PlaceholderProps &
 		Pick<PptxGenJS.TextPropsOptions, "lineSpacingMultiple"> = {
 		name: region.name,
@@ -717,7 +744,7 @@ function placeholderOptions(
 		color: style.color,
 		...(style.bold ? { bold: true } : {}),
 		lineSpacingMultiple: style.lineHeight / ARIAL_LINE_HEIGHT,
-		align: alignOf(partLook(layout, region.part)),
+		align: alignOf(partLook(layout, BOX_PARTS[region.box])),
 		valign: region.anchor,
 		margin: 0,
 	};
@@ -732,33 +759,30 @@ function addSlide(
 	draw: ImageDrawer,
 	measure: Measure,
 ): DrawnSlide {
-	const layout = layoutOf(slide);
-	const design = LAYOUTS[layout];
 	const blocks = slideBlocksOf(slide);
+	const { layout } = blocks;
+	const design: LayoutDesign<SlideLayout> = LAYOUTS[layout];
 	const placement = placementOf(slide);
 	const { step, fits } = arrangedSlide(slide, measure);
-	const held = design.regions.map((region) => {
-		const holds = placement ? blocks.inBox(region.box) : region.holds(blocks);
-		return holds.every(isEmptyParagraph) ? [] : holds;
-	});
+	const held = heldInRegions(blocks, placement !== null);
 	const placingOf = (index: number, width: number): Placing => {
 		const region = design.regions[index];
 		return {
 			layout,
-			part: region?.part ?? "flow",
+			part: region ? BOX_PARTS[region.box] : "flow",
 			step,
 			width,
-			boxHeight: placement && region ? frameOfBox(placement, layout, region.box).h : undefined,
+			boxHeight: placement && region ? frameOfBox(placement, layout, region.box).height : undefined,
 		};
 	};
 	const heightOf: HeightOf = (index, width) => {
 		const holds = held[index] ?? [];
 		return holds.length === 0 ? 0 : heightOfBlocks(holds, placingOf(index, width), measure);
 	};
-	const labelled = blocks.shows("label");
+	const labelled = blocks.layout === "section" && blocks.shows("label");
 	const { boxes, bar } = placement
 		? placedRegions(design.regions, layout, placement, step, heightOf, labelled)
-		: design.place(step, heightOf, fits, labelled);
+		: design.place({ step, heightOf, fits, labelled });
 	const added = presentation.addSlide({ masterName: design.name });
 	if (bar)
 		added.addShape(presentation.ShapeType.rect, {
@@ -777,7 +801,7 @@ function addSlide(
 			unused.push(placeholder);
 			return;
 		}
-		const setting = settingIn(layout, region.part, step);
+		const setting = settingIn(layout, BOX_PARTS[region.box], step);
 		if (parts.length === 1 && first.kind === "text") {
 			added.addText(textOf(paragraphsIn(first.blocks, setting)), {
 				placeholder: region.name,
@@ -1066,7 +1090,7 @@ interface Setting {
 /** What `part` of a slide of `layout` sets its blocks with, at `step`. */
 function settingIn(layout: SlideLayout, part: SlidePart, step: number): Setting {
 	const look = partLook(layout, part);
-	const unit = step * EM;
+	const unit = step * SLIDE_UNIT;
 	return {
 		look,
 		unit,
@@ -1540,7 +1564,7 @@ const NOTE_MARK_ATTRIBUTES: Readonly<Record<string, string>> = {
 /** What PptxGenJS writes for a layout placeholder's text box, saying nothing of its edge or padding. */
 const LAYOUT_BODY_PROPERTIES = '<a:bodyPr wrap="square" rtlCol="0"></a:bodyPr>';
 
-const withRegionsLaidOut = (xml: string, regions: readonly Region[]) =>
+const withRegionsLaidOut = (xml: string, regions: readonly Region<SlideLayout>[]) =>
 	eachShape(xml, (shape) => {
 		const region = regions[placeholderIndexOf(shape) - FIRST_PLACEHOLDER_INDEX];
 		if (!region) return shape;

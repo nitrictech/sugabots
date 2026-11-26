@@ -2,12 +2,15 @@ import { crc32, deflateSync } from "node:zlib";
 import type { ArtifactImageType } from "@sugabots/contracts";
 import { artifactImageAddress, artifactImageIds } from "@sugabots/contracts/http";
 import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
+import type { Frame } from "@sugabots/contracts/slides-markdown";
+import type { Node } from "@tiptap/pm/model";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
 import { getDocumentProxy, getMeta, getResolvedPDFJS } from "unpdf";
 import { describe, expect, it } from "vitest";
 import { pdfFileOf } from "./pdf.ts";
 import type { DeckImage } from "./slide-design.ts";
+import { withBoxRemoved, withSlidePlaced } from "./slides.test-support.ts";
 
 /*
  * A deck's PDF, read back as a PDF reader reads it: its pages and their size,
@@ -60,8 +63,8 @@ const DECK = [
 		"> Quoted",
 		"```\nbun run dev\n```",
 	].join("\n\n"),
-	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- column -->\n\n### People\n\n- Type in the page\n\n<!-- column -->\n\n### Bots\n\n1. Suggest changes",
-	`<!-- layout: image -->\n\n## The chart\n\n<!-- column -->\n\nSales went up.\n\n<!-- column -->\n\n![The launch chart](${keptImage("image/png")})`,
+	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- box -->\n\n### People\n\n- Type in the page\n\n<!-- box -->\n\n### Bots\n\n1. Suggest changes",
+	`<!-- layout: image -->\n\n## The chart\n\n<!-- box -->\n\nSales went up.\n\n<!-- box -->\n\n![The launch chart](${keptImage("image/png")})`,
 	"<!-- layout: section -->\n\nPart 2\n\n## Where we are",
 	"<!-- layout: quote -->\n\n> Nothing a person writes is lost.\n\nThe team",
 	"<!-- layout: table -->\n\n## Owners\n\n| Milestone | Owner |\n| --- | --- |\n| Beta | Priya |\n| Launch | Marco |",
@@ -70,13 +73,16 @@ const DECK = [
 /** The deck `markdown` reads as. */
 const deckOf = (markdown: string) => liveDocumentFromMarkdown("slides", markdown);
 
-/** The PDF of the deck `markdown` reads as, made at the start of 1970 by the test clock. */
-const pdfFile = (markdown: string) =>
+/** The PDF of `deck`, made at the start of 1970 by the test clock. */
+const pdfOfDeck = (deck: Node) =>
 	Effect.runPromise(
-		pdfFileOf(ARTIFACT, deckOf(markdown), (image) =>
-			Effect.succeed(keptImages.get(image.imageId)),
-		).pipe(Effect.provide(TestClock.layer())),
+		pdfFileOf(ARTIFACT, deck, (image) => Effect.succeed(keptImages.get(image.imageId))).pipe(
+			Effect.provide(TestClock.layer()),
+		),
 	);
+
+/** The PDF of the deck `markdown` reads as, made at the start of 1970 by the test clock. */
+const pdfFile = (markdown: string) => pdfOfDeck(deckOf(markdown));
 
 /** The address of an image the artifact keeps under an id made from `name`. */
 function keptImageNamed(name: string): string {
@@ -180,6 +186,14 @@ async function pagesOf(file: Uint8Array) {
 				links: annotations.map((annotation) => annotation.url),
 				/** How far up the page each stretch of text's baseline is, in points. */
 				baselines: items.map((item) => Math.round(item.transform[5])),
+				/** Each stretch of text that says something, where it starts across the page and its baseline up it, in points. */
+				stretches: items
+					.filter((item) => item.str !== "")
+					.map((item) => ({ text: item.str, x: item.transform[4], baseline: item.transform[5] })),
+				/** The colours shapes are filled with, as `#rrggbb`. */
+				fills: operators.fnArray.flatMap((operator, index) =>
+					operator === OPS.setFillRGBColor ? [String(operators.argsArray[index]?.[0])] : [],
+				),
 				images: operators.fnArray.filter((operator) => operator === OPS.paintImageXObject).length,
 				/** How many stretches of text are drawn as the mark for a missing character, each marked with what it stands for. */
 				missing: operators.fnArray.filter((operator) => operator === OPS.beginMarkedContentProps)
@@ -192,6 +206,26 @@ async function pagesOf(file: Uint8Array) {
 		}),
 	);
 }
+
+/** A page's height, in points; a reader measures how far up a page something is from its foot. */
+const PAGE_HEIGHT = 405;
+
+/** The points to a slide's pixel, on a page 720 points wide for a slide 960 pixels wide. */
+const POINTS_PER_SLIDE_PX = 0.75;
+
+/** Whether `stretch` of text starts inside `frame`, in a slide's pixels: across it, and its baseline between the frame's top and foot. */
+const startsInside = ({ x, baseline }: { x: number; baseline: number }, frame: Frame) =>
+	x >= frame.x * POINTS_PER_SLIDE_PX &&
+	x < (frame.x + frame.width) * POINTS_PER_SLIDE_PX &&
+	baseline < PAGE_HEIGHT - frame.y * POINTS_PER_SLIDE_PX &&
+	baseline > PAGE_HEIGHT - (frame.y + frame.height) * POINTS_PER_SLIDE_PX;
+
+/** The baseline of the stretch of text saying `text`, of a page's `stretches`. */
+const baselineOf = (stretches: readonly { text: string; baseline: number }[], text: string) =>
+	stretches.find((stretch) => stretch.text === text)?.baseline;
+
+/** The app's accent colour, which a section break's bar is filled with. */
+const ACCENT = "#2563eb";
 
 /**
  * The fonts `file` holds a subset of, by name, which a PDF writes before the
@@ -259,9 +293,9 @@ describe("a deck's PDF", () => {
 				[
 					"<!-- layout: image -->",
 					"## Charts",
-					"<!-- column -->",
+					"<!-- box -->",
 					`![Theirs](${keptImage("image/png", "0199a3a0-0000-7000-8000-000000000009")}) and ![A WebP chart](${keptImage("image/webp")})`,
-					"<!-- column -->",
+					"<!-- box -->",
 					`![The launch chart](${keptImage("image/png")})`,
 					`[![The photo](${keptImage("image/jpeg")})](https://example.com/photo)`,
 				].join("\n\n"),
@@ -388,6 +422,65 @@ describe("a deck's PDF", () => {
 		expect(slide?.text).toContain("cooperate softhyphen");
 		const baselines = slide?.baselines ?? [];
 		expect(new Set(baselines.slice(-2)).size).toBe(2);
+	});
+
+	it("draws a placed slide's boxes at their frames, wherever its layout would put them", async () => {
+		const title = { x: 480, y: 300, width: 400, height: 60 };
+		const list = { x: 80, y: 64, width: 360, height: 200 };
+
+		const [slide] = await pagesOf(
+			await pdfOfDeck(withSlidePlaced(deckOf("## Goals\n\n- Ship it"), 0, [title, list])),
+		);
+
+		const [goals, shipIt] = ["Goals", "Ship it"].map((text) =>
+			slide?.stretches.find((stretch) => stretch.text === text),
+		);
+		// A heading starts at its box's left edge.
+		expect(goals?.x).toBeCloseTo(title.x * POINTS_PER_SLIDE_PX);
+		expect(goals && startsInside(goals, title)).toBe(true);
+		expect(shipIt && startsInside(shipIt, list)).toBe(true);
+	});
+
+	it("leaves out a box somebody removed: a section break's label, with its accent bar, and a slide's title, the text under it rising to the top", async () => {
+		const kept = deckOf(
+			"<!-- layout: section -->\n\n<!-- box -->\n\n## Where we are\n\n---\n\n<!-- layout: bullets -->\n\n##\n\n<!-- box -->\n\n- Ship it",
+		);
+
+		const [labelled, titled] = await pagesOf(await pdfOfDeck(kept));
+		const [unlabelled, untitled] = await pagesOf(
+			await pdfOfDeck(withBoxRemoved(withBoxRemoved(kept, 0, 0), 1, 0)),
+		);
+
+		expect(labelled?.fills).toContain(ACCENT);
+		expect(unlabelled?.fills).not.toContain(ACCENT);
+		expect(unlabelled?.text).toBe("Where we are");
+		// An empty title takes no room, but the gap under it, 2 units of 16 pixels, goes with it.
+		expect(
+			(baselineOf(untitled?.stretches ?? [], "Ship it") ?? 0) -
+				(baselineOf(titled?.stretches ?? [], "Ship it") ?? 0),
+		).toBeCloseTo(32 * POINTS_PER_SLIDE_PX);
+	});
+
+	it("keeps a placed box's text at full size where it runs past its frame into room below it, and steps it down where a box below leaves it none", async () => {
+		const points = Array.from({ length: 6 }, (_, index) => `- Point ${index + 1}`).join("\n");
+		const deck = deckOf(`## Points\n\n${points}`);
+		const list = { x: 80, y: 142, width: 800, height: 60 };
+		const roomy = withSlidePlaced(deck, 0, [{ x: 80, y: 64, width: 800, height: 46 }, list]);
+		// The title placed just under the list's frame, across the same width.
+		const crowded = withSlidePlaced(deck, 0, [
+			{ x: 80, y: 130, width: 800, height: 46 },
+			{ x: 80, y: 64, width: 800, height: 60 },
+		]);
+
+		const [roomyPage] = await pagesOf(await pdfOfDeck(roomy));
+		const [crowdedPage] = await pagesOf(await pdfOfDeck(crowded));
+
+		// A bullet's text is 1.5 units, a unit being a 60th of the slide's 720 points.
+		expect(roomyPage?.textSizes.at(-1)).toBeCloseTo(18);
+		expect(baselineOf(roomyPage?.stretches ?? [], "Point 6")).toBeLessThan(
+			PAGE_HEIGHT - (list.y + list.height) * POINTS_PER_SLIDE_PX,
+		);
+		expect(crowdedPage?.textSizes.at(-1)).toBeCloseTo(18 * 0.7);
 	});
 
 	it("is the same file each time, titled as the deck, and naming nobody", async () => {

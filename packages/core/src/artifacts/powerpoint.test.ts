@@ -5,12 +5,14 @@ import {
 	artifactImageIds,
 } from "@sugabots/contracts/http";
 import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
+import type { Node } from "@tiptap/pm/model";
 import { Effect } from "effect";
 import JSZip from "jszip";
 import { getDocumentProxy } from "unpdf";
 import { describe, expect, it } from "vitest";
 import { pdfFileOf } from "./pdf.ts";
 import { type PowerPointImage, powerPointFileOf } from "./powerpoint.ts";
+import { withBoxRemoved, withSlidePlaced } from "./slides.test-support.ts";
 
 /*
  * A deck's PowerPoint file, read back from its XML, as PowerPoint reads it:
@@ -58,8 +60,8 @@ const DECK = [
 		"- Ship *live* slides\n  - with suggestions\n  - and notes\n- Keep **everything**, ~~nothing~~ lost: `markdown`, x<sup>2</sup>, H<sub>2</sub>O, <u>this</u> and <mark>that</mark>\n- Read [the plan](https://example.com/plan), not [this](javascript:alert(1))",
 		"3. Third\n4. Fourth",
 	].join("\n\n"),
-	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- column -->\n\n### People\n\n- Type in the page\n\n<!-- column -->\n\n### Bots\n\n1. Suggest changes",
-	`<!-- layout: image -->\n\n## The chart\n\n<!-- column -->\n\nSales went up.\n\n<!-- column -->\n\n![The launch chart](${keptImage("image/png")})`,
+	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- box -->\n\n### People\n\n- Type in the page\n\n<!-- box -->\n\n### Bots\n\n1. Suggest changes",
+	`<!-- layout: image -->\n\n## The chart\n\n<!-- box -->\n\nSales went up.\n\n<!-- box -->\n\n![The launch chart](${keptImage("image/png")})`,
 	"<!-- layout: section -->\n\n## Where we are",
 	"<!-- layout: quote -->\n\n> Nothing a person writes is lost.\n\nThe team",
 	"<!-- layout: table -->\n\n## Owners\n\n| Milestone | Owner |\n| --- | --- |\n| Beta | Priya |\n| Launch | Marco |",
@@ -68,17 +70,20 @@ const DECK = [
 /** The deck `markdown` reads as. */
 const deckOf = (markdown: string) => liveDocumentFromMarkdown("slides", markdown);
 
-/** The PowerPoint file of the deck `markdown` reads as, and the images it asked for. */
-async function powerPointFile(markdown: string) {
+/** The PowerPoint file of `deck`, and the images it asked for. */
+async function powerPointOfDeck(deck: Node) {
 	const asked: ArtifactImageIds[] = [];
 	const file = await Effect.runPromise(
-		powerPointFileOf(ARTIFACT, deckOf(markdown), (image) => {
+		powerPointFileOf(ARTIFACT, deck, (image) => {
 			asked.push(image);
 			return Effect.succeed(keptImages.get(image.imageId));
 		}),
 	);
 	return { file: await JSZip.loadAsync(file), asked };
 }
+
+/** The PowerPoint file of the deck `markdown` reads as, and the images it asked for. */
+const powerPointFile = (markdown: string) => powerPointOfDeck(deckOf(markdown));
 
 type File = JSZip;
 
@@ -175,7 +180,7 @@ async function pdfStepOf(markdown: string, fullSize: number): Promise<number> {
 const TWO_COLUMNS = [
 	"<!-- layout: columns -->",
 	"## One page for people and bots",
-	"<!-- column -->",
+	"<!-- box -->",
 	"Shared documents let a team and its bots write one page together, without anyone losing work.",
 	[
 		"- **What it is:** one page that people and bots edit side by side.",
@@ -183,7 +188,7 @@ const TWO_COLUMNS = [
 		"- **What changes:** edits from bots arrive as suggestions, so people stay in control.",
 		"- **Where we start:** our own workspaces, then teams who asked to join.",
 	].join("\n"),
-	"<!-- column -->",
+	"<!-- box -->",
 	"|  |  |  |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |",
 ].join("\n\n");
 
@@ -342,9 +347,9 @@ describe("a deck's PowerPoint file", () => {
 			[
 				"<!-- layout: image -->",
 				"## Charts",
-				"<!-- column -->",
+				"<!-- box -->",
 				`![Theirs](${keptImage("image/png", "0199a3a0-0000-7000-8000-000000000009")}) and ![A WebP chart](${keptImage("image/webp")})`,
-				"<!-- column -->",
+				"<!-- box -->",
 				`![The launch chart](${keptImage("image/png")})`,
 			].join("\n\n"),
 		);
@@ -394,7 +399,7 @@ describe("a deck's PowerPoint file", () => {
 		expect(shapesOf(xml).filter((shape) => shape.includes("<p:ph"))).toHaveLength(1);
 	});
 
-	it("states each region's alignment as the app draws it, to the left but for the image's column, leaving nothing to a centred default", async () => {
+	it("states each region's alignment as the app draws it, to the left but for the image box, leaving nothing to a centred default", async () => {
 		const { file } = await powerPointFile(DECK);
 
 		const slides = await Promise.all(LAYOUT_NAMES.map((_name, index) => slideXml(file, index + 1)));
@@ -491,6 +496,41 @@ describe("a deck's PowerPoint file", () => {
 		const [textBox, tableBox, quoteBox] = [text, table, quote].map((shape) => boxOf(shape ?? ""));
 		expect(tableBox?.y).toBeGreaterThan((textBox?.y ?? 0) + 6 * 24 * step);
 		expect(quoteBox?.y).toBeGreaterThan((tableBox?.y ?? 0) + (tableBox?.h ?? 0));
+	});
+
+	it("puts a placed slide's boxes at their frames, wherever its layout would put them", async () => {
+		const title = { x: 480, y: 300, width: 400, height: 60 };
+		const list = { x: 80, y: 64, width: 360, height: 200 };
+
+		const { file } = await powerPointOfDeck(
+			withSlidePlaced(deckOf("## Goals\n\n- Ship it"), 0, [title, list]),
+		);
+
+		const xml = await slideXml(file, 1);
+		for (const [text, frame] of [
+			["Goals", title],
+			["Ship it", list],
+		] as const) {
+			const box = boxOf(shapeHolding(xml, text));
+			expect(box.x).toBeCloseTo(frame.x);
+			expect(box.y).toBeCloseTo(frame.y);
+			expect(box.w).toBeCloseTo(frame.width);
+			expect(box.h).toBeGreaterThanOrEqual(frame.height);
+		}
+	});
+
+	it("leaves out a box somebody removed, as a section break's label, with its accent bar", async () => {
+		const labelled = deckOf("<!-- layout: section -->\n\n<!-- box -->\n\n## Where we are");
+
+		const kept = await slideXml((await powerPointOfDeck(labelled)).file, 1);
+		const removed = await slideXml(
+			(await powerPointOfDeck(withBoxRemoved(labelled, 0, 0))).file,
+			1,
+		);
+
+		expect(kept).toContain('name="Accent bar"');
+		expect(removed).not.toContain('name="Accent bar"');
+		expect(filledPlaceholders(removed)).toEqual([["title", ["Where we are"]]]);
 	});
 
 	it("writes each paragraph's properties once and first, and each shape an id of its own, as PowerPoint reads them", async () => {

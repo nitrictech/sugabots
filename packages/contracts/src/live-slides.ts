@@ -7,6 +7,7 @@ import {
 } from "@tiptap/core";
 import { Document } from "@tiptap/extension-document";
 import { Fragment, type Node, type Schema } from "@tiptap/pm/model";
+import type { Transform } from "@tiptap/pm/transform";
 import {
 	BOX_COMMENT,
 	type BoxRole,
@@ -20,25 +21,26 @@ import {
 	readSlideComments,
 	SLIDE_BOX_ROLES,
 	SLIDE_SEPARATOR,
+	type SlideComment,
 	type SlideLayout,
 } from "./slides-markdown.ts";
 import { withValidContent } from "./valid-content.ts";
 
 /*
  * What a `slides` deck holds as a live document: slides, each laid out by
- * one of a few layouts and filled in. A slide is its frame, holding the boxes
+ * one of a few layouts and filled in. A slide is its body, holding the boxes
  * its layout places (`SLIDE_BOX_ROLES`), each holding the same blocks a
  * document does, and the speaker's notes below it. Its layout is an
  * attribute, and so is where its boxes were placed by hand, if they were; a
- * box somebody removed from the slide stays in its frame, marked so by an
- * attribute of its own (`REMOVED`). Neither is in the deck's markdown, so a
- * deck read from markdown has every box on its slide, placed by its layout
- * (see `slides-markdown.ts`). What its frame holds is made to fit the
- * layout by `fitSlideBody`, and to a new layout by `laidOutAnew`, never by
- * the schema: while a change of layout waits as a suggestion, the frame holds
- * the boxes it holds now and those it would hold, side by side, and the sync
- * layer deletes whatever its schema cannot hold. The nodes here are a deck's
- * alone, so a document can't hold a slide.
+ * box somebody removed from the slide stays in its body, marked removed
+ * (`isMarkedRemoved`). Neither is in the deck's markdown, so a deck read from
+ * markdown has every box on its slide, placed by its layout (see
+ * `slides-markdown.ts`). What a body holds is made to fit its layout by
+ * `fitSlideBody`, and to a new layout by `laidOutAnew`, never by the schema:
+ * while a change of layout waits as a suggestion, the body holds the boxes it
+ * holds now and those it would hold, side by side, and the sync layer deletes
+ * whatever its schema cannot hold. The nodes here are a deck's alone, so a
+ * document can't hold a slide.
  */
 
 export const SLIDE = "slide";
@@ -50,12 +52,21 @@ export const SPEAKER_NOTES = "speakerNotes";
 export const PLACEMENT = "placement";
 
 /**
- * The attribute of a box saying somebody removed it from its slide: `true`
- * once they did, and `null` while it is on it, so a box nobody removed holds
- * no such attribute for the sync layer to write. Whether the box is off its
- * slide also depends on what it holds (`isRemovedBox`).
+ * What a drawn slide whose boxes were placed by hand says its placement with,
+ * as `placementText` writes it: what a slide copied and pasted is read back
+ * from, and what the placed slide's styles go by.
  */
-export const REMOVED = "removed";
+export const PLACEMENT_ATTRIBUTE = "data-placement";
+
+/**
+ * The attribute of a box marking it removed from its slide: `true` once
+ * somebody removed it, and `null` while nobody has, so a box nobody removed
+ * holds no such attribute for the sync layer to write.
+ */
+const REMOVED = "removed";
+
+/** What a box marked removed is drawn with, so a slide copied and pasted keeps the mark. */
+const MARKED_REMOVED_ATTRIBUTE = "data-marked-removed";
 
 /** The layout a slide made without one has. */
 const DEFAULT_LAYOUT: SlideLayout = "bullets";
@@ -85,8 +96,10 @@ const placementOfAttributes = (attributes: Record<string, unknown> | undefined) 
 const titleLevel = (layout: SlideLayout) => (layout === "title" ? 1 : 2);
 
 /**
- * A new slide of `layout`, as the editor adds one: its boxes empty, which
- * the editor names with words that are not stored.
+ * A new slide of `layout`, as the editor adds one: each box holding the line
+ * a box of its role is left with (`emptyLine`), but for an empty bulleted
+ * list in a `body` box and an empty table in a `table` box. The editor names
+ * its empty boxes with words that are not stored.
  */
 export function newSlide(schema: Schema, layout: SlideLayout): Node {
 	const node = (name: string, content?: Node | Node[], attributes?: Record<string, unknown>) =>
@@ -97,20 +110,13 @@ export function newSlide(schema: Schema, layout: SlideLayout): Node {
 			"tableRow",
 			Array.from({ length: NEW_TABLE_COLUMNS }, () => node(cell, paragraph())),
 		);
-	const newContent: Record<BoxRole, () => Node> = {
-		title: () => emptyTitle(schema, layout),
-		subtitle: paragraph,
+	const newContent: Partial<Record<BoxRole, () => Node>> = {
 		body: () => node("bulletList", node("listItem", paragraph())),
-		leftColumn: paragraph,
-		rightColumn: paragraph,
-		text: paragraph,
-		image: paragraph,
-		label: paragraph,
-		quote: () => emptyQuote(schema),
-		attribution: paragraph,
 		table: () => node("table", [row("tableHeader"), row("tableCell"), row("tableCell")]),
 	};
-	const boxes = SLIDE_BOX_ROLES[layout].map((role) => node(SLIDE_BOX, newContent[role]()));
+	const boxes = SLIDE_BOX_ROLES[layout].map((role) =>
+		node(SLIDE_BOX, newContent[role]?.() ?? emptyLine(schema, layout, role)),
+	);
 	return node(SLIDE, [node(SLIDE_BODY, boxes), node(SPEAKER_NOTES, paragraph())], { layout });
 }
 
@@ -126,12 +132,10 @@ export const Deck = Document.extend({
 
 /**
  * A slide: its layout, where its boxes were placed by hand if they were, its
- * frame, and the speaker's notes for it. Drawn, a placed slide says its
- * placement, and each of its boxes' frames as custom properties, numbered
- * from 1 in the order of its boxes, in a slide's pixels: `--box-1-x`,
- * `--box-1-y`, `--box-1-w` and `--box-1-h`. Written as markdown, it says its
- * layout and what it holds, never where its boxes were placed or which were
- * removed.
+ * body (`bodyOf`), and the speaker's notes for it (`notesOf`). Drawn, a placed
+ * slide says its placement (`PLACEMENT_ATTRIBUTE`); whatever draws its boxes
+ * draws each at its frame. Written as markdown, it says its layout and what it
+ * holds, never where its boxes were placed or which were removed.
  */
 export const Slide = SchemaNode.create({
 	name: SLIDE,
@@ -147,10 +151,13 @@ export const Slide = SchemaNode.create({
 			default: null,
 			parseHTML: (element) =>
 				placementFromText(
-					element.getAttribute("data-placement") ?? "",
+					element.getAttribute(PLACEMENT_ATTRIBUTE) ?? "",
 					layoutIn({ layout: element.getAttribute("data-layout") }),
 				),
-			renderHTML: (attributes) => placementAttributes(placementOfAttributes(attributes)),
+			renderHTML: (attributes) => {
+				const placement = placementOfAttributes(attributes);
+				return placement ? { [PLACEMENT_ATTRIBUTE]: placementText(placement) } : {};
+			},
 		},
 	}),
 	parseHTML: () => [{ tag: "section[data-slide]" }],
@@ -166,34 +173,21 @@ export const Slide = SchemaNode.create({
 		]),
 });
 
-function placementAttributes(placement: Placement | null): Record<string, string> {
-	if (!placement) return {};
-	const style = Object.entries(placementProperties(placement))
-		.map(([name, value]) => `${name}: ${value}`)
-		.join("; ");
-	return { "data-placement": placementText(placement), style };
-}
+/** `slide`'s body, the first of what it holds, which holds its boxes. */
+export const bodyOf = (slide: Node): Node => slide.child(0);
+
+/** `slide`'s speaker's notes, which follow its body. */
+export const notesOf = (slide: Node): Node => slide.child(1);
 
 /**
- * The custom properties a placed slide is drawn with (see `Slide`), by name,
- * for a drawing of it made without the editor, which has to say the same.
+ * Where a slide's first box starts, counted from where the slide starts: past
+ * the slide's own start and its body's, as its body is the first of what it
+ * holds.
  */
-export function placementProperties(placement: Placement): Record<string, string> {
-	return Object.fromEntries(
-		placement.flatMap(({ x, y, w, h }, index) => {
-			const box = `--box-${index + 1}`;
-			return [
-				[`${box}-x`, String(x)],
-				[`${box}-y`, String(y)],
-				[`${box}-w`, String(w)],
-				[`${box}-h`, String(h)],
-			];
-		}),
-	);
-}
+export const FIRST_BOX_IN_SLIDE = 2;
 
 /**
- * A slide's frame. It holds boxes, as many and in whatever order the editor
+ * A slide's body. It holds boxes, as many and in whatever order the editor
  * and a pending suggestion leave them; `fitSlideBody` makes them the boxes
  * the slide's layout places. Written, each box after the first starts with
  * its comment.
@@ -218,20 +212,21 @@ export const SlideBody = SchemaNode.create({
 
 /**
  * One of the boxes a slide's layout places, holding blocks one under another,
- * and whether somebody removed it from the slide (`REMOVED`).
+ * and whether somebody marked it removed from the slide (`isMarkedRemoved`).
+ * Drawn, a box marked removed says so (`data-marked-removed`), which is not
+ * whether it is off the slide (`isOffItsSlide`).
  */
 export const SlideBox = SchemaNode.create({
 	name: SLIDE_BOX,
 	content: "block+",
 	isolating: true,
 	addAttributes: () => ({
-		/*
-		 * Not drawn as it is: whether a box shows depends on what it holds too
-		 * (`isRemovedBox`), and the editor draws a node anew only when its
-		 * attributes change, not when what it holds does. So whoever draws a
-		 * slide says which of its boxes are off it.
-		 */
-		[REMOVED]: { default: null, rendered: false },
+		[REMOVED]: {
+			default: null,
+			parseHTML: (element) => (element.hasAttribute(MARKED_REMOVED_ATTRIBUTE) ? true : null),
+			renderHTML: (attributes) =>
+				attributes[REMOVED] === true ? { [MARKED_REMOVED_ATTRIBUTE]: "" } : {},
+		},
 	}),
 	parseHTML: () => [{ tag: "div[data-slide-box]" }],
 	renderHTML: ({ HTMLAttributes }) => [
@@ -243,14 +238,27 @@ export const SlideBox = SchemaNode.create({
 });
 
 /**
- * Whether `box` is off its slide: somebody removed it (`REMOVED`), and
- * nothing has been put in it since, as by somebody typing in it at the moment
- * it was removed, which shows it again rather than hiding what they typed.
- * A box off its slide isn't drawn, takes no room on it, and isn't in a file
- * the deck is saved as.
+ * Whether somebody marked `box` removed from its slide. A box so marked is off
+ * the slide only while it holds nothing (`isOffItsSlide`).
  */
-export const isRemovedBox = (box: Node): boolean =>
-	box.attrs[REMOVED] === true && holdsNothing(box);
+export const isMarkedRemoved = (box: Node): boolean => box.attrs[REMOVED] === true;
+
+/**
+ * Whether `box` is off its slide: marked removed (`isMarkedRemoved`), and
+ * holding nothing, as removing it leaves it. A box marked removed that holds
+ * something, as one somebody was typing in at the moment it was removed, is
+ * on the slide, rather than hiding what they typed. A box off its slide isn't
+ * drawn, takes no room on it, and isn't in a file the deck is saved as.
+ */
+export const isOffItsSlide = (box: Node): boolean => isMarkedRemoved(box) && holdsNothing(box);
+
+/**
+ * The boxes `slide`'s body holds, in order, each `undefined` where it is off
+ * the slide (`isOffItsSlide`), so each box shown keeps its place among the
+ * roles of the slide's layout (`SLIDE_BOX_ROLES`).
+ */
+export const shownBoxesOf = (slide: Node): (Node | undefined)[] =>
+	bodyOf(slide).children.map((box) => (isOffItsSlide(box) ? undefined : box));
 
 /** Whether `holder`, a box or a block, holds no words, images or anything else on a line: nothing but empty lines, as of an empty list or table. */
 function holdsNothing(holder: Node): boolean {
@@ -260,6 +268,50 @@ function holdsNothing(holder: Node): boolean {
 		return nothing;
 	});
 	return nothing;
+}
+
+/**
+ * `change` with the box starting at `boxPos` taken off its slide: what it
+ * holds replaced by the line a box of its role is left with (`emptyLine`),
+ * and the box marked removed, which together put it off the slide
+ * (`isOffItsSlide`). The box stays in its slide's body, so the body still
+ * holds a box for each of its layout's roles. Throws a `RangeError` when no
+ * box with a role in its slide's layout starts at `boxPos`.
+ */
+export function takeBoxOffSlide<T extends Transform>(change: T, boxPos: number): T {
+	const box = change.doc.nodeAt(boxPos);
+	const place = change.doc.resolve(boxPos);
+	if (box?.type.name !== SLIDE_BOX || place.depth < 1) {
+		throw new RangeError(`No slide's box starts at ${boxPos}`);
+	}
+	const layout = layoutOf(place.node(place.depth - 1));
+	const role = SLIDE_BOX_ROLES[layout][place.index()];
+	if (!role) throw new RangeError(`A slide laid out as ${layout} has no box ${place.index()}`);
+	return change
+		.setNodeAttribute(boxPos, REMOVED, true)
+		.replaceWith(
+			boxPos + 1,
+			boxPos + box.nodeSize - 1,
+			emptyLine(change.doc.type.schema, layout, role),
+		);
+}
+
+/**
+ * `change` with the boxes of the slide starting at `slidePos` left to its
+ * layout: no longer placed by hand, and every box marked removed back on the
+ * slide, holding what it holds. Only the attributes saying either change, so
+ * whatever anybody is typing in the slide is kept. Throws a `RangeError` when
+ * no slide starts at `slidePos`.
+ */
+export function leaveBoxesToLayout<T extends Transform>(change: T, slidePos: number): T {
+	const slide = change.doc.nodeAt(slidePos);
+	if (slide?.type.name !== SLIDE) throw new RangeError(`No slide starts at ${slidePos}`);
+	if (slide.attrs[PLACEMENT] !== null) change.setNodeAttribute(slidePos, PLACEMENT, null);
+	const boxesStart = slidePos + FIRST_BOX_IN_SLIDE;
+	bodyOf(slide).forEach((box, offset) => {
+		if (isMarkedRemoved(box)) change.setNodeAttribute(boxesStart + offset, REMOVED, null);
+	});
+	return change;
 }
 
 /**
@@ -304,11 +356,13 @@ const nonEmptyParts = (parts: string[]) => parts.filter((part) => part !== "").j
 /** Stands in for a deck's comments, or a line between two slides, among the blocks read. */
 const SLIDE_MARKUP = "slideMarkup";
 
-/** What a stand-in says, in the order the markdown says it. */
+/**
+ * What a stand-in says, in the order the markdown says it: a line between two
+ * slides, or one of the deck's comments, a slide's notes read as paragraphs.
+ */
 type Said =
 	| { kind: "break" }
-	| { kind: "layout"; layout: string }
-	| { kind: "box" }
+	| Exclude<SlideComment, { kind: "notes" }>
 	| { kind: "notes"; paragraphs: JSONContent[] };
 
 interface SlideMarkup extends JSONContent {
@@ -465,7 +519,7 @@ function withMarkupAsText(node: JSONContent): JSONContent {
 
 /**
  * The slide `draft` says. Its blocks are fitted to its layout before they
- * are made valid, as a frame holds only boxes, and blocks standing in no box
+ * are made valid, as a body holds only boxes, and blocks standing in no box
  * are shared out among them by the layout (see `fitSlideBody`) rather than
  * each put in a box of its own.
  */
@@ -524,66 +578,58 @@ const isEmptyParagraph = (node: JSONContent) =>
 	node.type === "paragraph" && (node.content ?? []).length === 0;
 
 /**
- * `body`, a slide's frame, holding exactly the boxes `layout` places, in
- * order, having lost nothing: `body` itself when it does already. Its boxes
- * keep what they hold, box for box; one past the layout's last goes into its
- * last, after what that holds, unless it holds only the empty paragraph it
- * was given to type in, which is nothing to keep; and one the layout places
- * that the frame lacks is added. Blocks standing in no box, as markdown that
- * says no boxes is read, are shared out by the layout (`sharedOut`); a block
- * after a box goes at its end, and one before the first box at the first's
- * start. A box left with nothing is given a line to type in: an empty heading
- * for the slide's title, as a new slide's is, and an empty paragraph for any
- * other. A box somebody removed that holds something again, as when somebody
- * typed in it as it was removed, is back on the slide (see `isRemovedBox`),
- * so it isn't taken off once more when what it holds is next deleted.
+ * `body`, a slide's body, holding exactly the boxes `layout` places, in
+ * order, having lost nothing: `body` itself when it does already. What each
+ * box is to hold comes from `body` (`heldBlocks`): its boxes, box for box, or
+ * blocks standing in no box, as markdown that says no boxes is read, shared
+ * out by the layout. A box the layout places that `body` lacks is added, and
+ * a box left with nothing is given its line to type in (`emptyLine`). A box
+ * marked removed that holds something, as when somebody typed in it as it was
+ * removed, is no longer marked (see `isOffItsSlide`), so it isn't taken off
+ * the slide again when what it holds is next deleted.
  *
- * Box for box is how a frame fits the layout its boxes are in order for: a
+ * Box for box is how a body fits the layout its boxes are in order for: a
  * slide given a new layout is laid out by `laidOutAnew`, which moves what its
- * boxes hold by what each is for.
- *
- * It fits content as it reads. A frame holding a suggestion to change its
+ * boxes hold by what each is for. A body holding a suggestion to change its
  * slide's layout holds both layouts' boxes until the suggestion is settled,
- * so it is fitted once it is.
+ * and is to be fitted only once it is.
  */
 export function fitSlideBody(body: Node, layout: SlideLayout): Node {
 	const schema = body.type.schema;
-	const roles = SLIDE_BOX_ROLES[layout];
-	const held = heldBlocks(body.content.content, layout, roles.length);
-	const boxes = roles.map((role, index) => {
+	const held = heldBlocks(body.content.content, layout);
+	const boxes = SLIDE_BOX_ROLES[layout].map((role, index) => {
 		const { box, blocks } = held[index] ?? { box: undefined, blocks: [] };
 		const content = Fragment.fromArray(
 			blocks.length > 0 ? [...blocks] : [emptyLine(schema, layout, role)],
 		);
 		return box
-			? backOnSlideOnceFilled(box.copy(content))
+			? onSlideOnceFilled(box.copy(content))
 			: nodeType(schema, SLIDE_BOX).create(null, content);
 	});
 	const fitted = Fragment.fromArray(boxes);
 	return fitted.eq(body.content) ? body : body.copy(fitted);
 }
 
-/** `box`, back on its slide when somebody removed it and something has been put in it since. */
-const backOnSlideOnceFilled = (box: Node): Node =>
-	box.attrs[REMOVED] === true && !isRemovedBox(box) ? backOnSlide(box) : box;
+/** `box`, no longer marked removed when it is marked and holds something. */
+const onSlideOnceFilled = (box: Node): Node =>
+	isMarkedRemoved(box) && !isOffItsSlide(box) ? unmarked(box) : box;
 
-const backOnSlide = (box: Node): Node =>
+/** `box`, no longer marked removed, holding what it holds. */
+const unmarked = (box: Node): Node =>
 	box.type.create({ ...box.attrs, [REMOVED]: null }, box.content, box.marks);
 
 /**
  * `slide` laid out anew by `layout`, as a change of a slide's layout lays it
- * out, whoever makes it: placed by the layout rather than by hand, as a
- * placement is of the old layout's boxes; with every box somebody removed
- * from it back on it, holding what it holds; and with what its boxes hold
- * moved to the new layout's by what each box is for (`boxesInNewLayout`).
- * Given the layout it has, its boxes keep what they hold, box for box.
+ * out, whoever makes it: no longer placed by hand, as a placement is of the
+ * old layout's boxes; with every box marked removed back on it, holding what
+ * it holds; and with what its boxes hold moved to the new layout's by what
+ * each box is for (`boxesInNewLayout`). Given the layout it has, its boxes
+ * keep what they hold, box for box.
  */
 export function laidOutAnew(slide: Node, layout: SlideLayout): Node {
-	const body = slide.child(0);
+	const body = bodyOf(slide);
 	const everyBoxOnSlide = body.copy(
-		Fragment.fromArray(
-			body.children.map((box) => (box.attrs[REMOVED] === true ? backOnSlide(box) : box)),
-		),
+		Fragment.fromArray(body.children.map((box) => (isMarkedRemoved(box) ? unmarked(box) : box))),
 	);
 	return slide.type.create(
 		{ ...slide.attrs, layout, [PLACEMENT]: null },
@@ -592,26 +638,26 @@ export function laidOutAnew(slide: Node, layout: SlideLayout): Node {
 	);
 }
 
-/** A box of a frame being laid out anew, if it is one already, and the blocks it holds or is to hold. */
+/** A box of a body being laid out anew, if it is one already, and the blocks it holds or is to hold. */
 interface Moving {
 	box: Node | undefined;
 	blocks: readonly Node[];
 }
 
 /**
- * `body`, the frame of a slide laid out by `from`, holding the boxes `to`
- * places instead, having lost nothing. A box for something both layouts have
- * a box for, as the slide's title, keeps what it holds. The other boxes go,
- * in order, to the boxes of `to` left, one to each, those past the last
- * joining it. A section break has a box left only for its label, which is
- * never given another box's blocks: they go under its title, in its title's
- * box. So a section break's title box holds its title and what is under it,
- * which another layout has a box of its own for: leaving the section break,
- * its title keeps only the heading the box starts with, and what follows goes
- * on as another box would, after the label. A box holding nothing gives
- * nothing but keeps its place, so a right column stays the right one; but a
- * label holding nothing has no place to keep, as no other layout has one. A
- * box left with nothing is given its line to type in (`emptyLine`).
+ * `body`, the body of a slide laid out by `from`, holding the boxes `to`
+ * places instead, having lost nothing. A box of a role both layouts have, as
+ * the slide's title, keeps what it holds. The other boxes go, in order, to
+ * the boxes of `to` left, one to each, those past the last joining it. A
+ * section break has a box left only for its label, which is never given
+ * another box's blocks: they go under its title, in its title's box. So a
+ * section break's title box holds its title and what is under it, which
+ * another layout has a box of its own for: leaving the section break, its
+ * title keeps only the heading the box starts with, and what follows goes on
+ * as another box would, after the label. A box holding nothing gives nothing
+ * but keeps its place, so a right column stays the right one; but a label
+ * holding nothing has no place to keep, as no other layout has one. A box
+ * left with nothing is given its line to type in (`emptyLine`).
  */
 function boxesInNewLayout(body: Node, from: SlideLayout, to: SlideLayout): Node {
 	if (from === to) return fitSlideBody(body, to);
@@ -662,53 +708,56 @@ function boxesInNewLayout(body: Node, from: SlideLayout, to: SlideLayout): Node 
 	return body.copy(Fragment.fromArray(boxes));
 }
 
-/** A box of a frame being fitted, if it was one already, and the blocks it is to hold. */
+/** A box of a body being fitted, if it was one already, and the blocks it is to hold. */
 interface Held {
 	box: Node | undefined;
 	blocks: readonly Node[];
 }
 
-/** What each of the `count` boxes of a frame of `layout` is to hold, from `children`, the frame's boxes and blocks. */
-function heldBlocks(children: readonly Node[], layout: SlideLayout, count: number): Held[] {
-	const before: Node[] = [];
-	const boxes: { box: Node; blocks: Node[] }[] = [];
-	for (const child of children) {
-		if (child.type.name !== SLIDE_BOX) {
-			(boxes.at(-1)?.blocks ?? before).push(child);
-			continue;
-		}
-		boxes.push({ box: child, blocks: [...child.content.content] });
-	}
+/**
+ * What each box `layout` places is to hold, in order, from `children`, what
+ * a slide's body holds: either blocks standing in no box, as markdown that
+ * says no boxes is read, shared out by the layout (`sharedOut`), or boxes.
+ * Boxes keep what they hold, box for box, and those past the layout's last
+ * join it, after what it holds; a box among those holding only an empty
+ * paragraph, the line it was given to type in, gives nothing.
+ */
+function heldBlocks(children: readonly Node[], layout: SlideLayout): Held[] {
+	const boxes = children.filter((child) => child.type.name === SLIDE_BOX);
 	if (boxes.length === 0) {
-		return sharedOut(before, layout).map((blocks) => ({ box: undefined, blocks }));
+		return sharedOut(children, layout).map((blocks) => ({ box: undefined, blocks }));
 	}
-	const [first, ...rest] = boxes;
-	const inOrder = [{ box: first?.box, blocks: [...before, ...(first?.blocks ?? [])] }, ...rest];
-	if (inOrder.length <= count) return inOrder;
-	const last = inOrder.slice(count - 1);
+	const held = boxes.map((box) => ({ box, blocks: box.content.content }));
+	const count = SLIDE_BOX_ROLES[layout].length;
+	if (held.length <= count) return held;
+	const joined = held.slice(count - 1);
 	return [
-		...inOrder.slice(0, count - 1),
+		...held.slice(0, count - 1),
 		{
-			box: last[0]?.box,
-			blocks: last.flatMap(({ blocks }) => (isOnlyAnEmptyParagraph(blocks) ? [] : blocks)),
+			box: joined[0]?.box,
+			blocks: joined.flatMap(({ blocks }) => (isOnlyAnEmptyParagraph(blocks) ? [] : blocks)),
 		},
 	];
 }
 
 /**
- * Blocks standing in no box shared out among a slide's boxes, as its layout
- * is led: a heading they start with is the title of a slide led by one, and a
- * quote they start with the quote of a quote slide; a section break's label,
- * over its title, is what comes before its first heading, or all of them
- * without one. The rest goes into the next box, so a third, as a right
- * column, is left empty.
+ * `blocks`, standing in no box, shared out between the first two boxes of a
+ * slide of `layout`: the first takes the blocks the slide starts with that
+ * belong in it (`leadingCount`), and the second the rest. A third box, as a
+ * right column, is given none.
  */
 function sharedOut(blocks: readonly Node[], layout: SlideLayout): Node[][] {
 	const leading = leadingCount(blocks, layout);
 	return [blocks.slice(0, leading), blocks.slice(leading)];
 }
 
-/** How many of `blocks` lead a slide of `layout`, going into its first box (see `sharedOut`). */
+/**
+ * How many of `blocks` the first box of a slide of `layout` takes. A section
+ * break's first box is its label, which takes the blocks before the first
+ * heading, or all of them without one. A quote slide's is its quote, which
+ * takes a quote the blocks start with. Every other layout's is its title,
+ * which takes a heading the blocks start with.
+ */
 function leadingCount(blocks: readonly Node[], layout: SlideLayout): number {
 	if (layout === "section") {
 		const title = blocks.findIndex((block) => block.type.name === "heading");
@@ -719,11 +768,12 @@ function leadingCount(blocks: readonly Node[], layout: SlideLayout): number {
 }
 
 /**
- * The line a box of `role`, on a slide of `layout`, is given when it is left
- * with nothing, or removed from its slide: the line a new slide's box of that
- * role has, so what is typed there is styled as it would be on a new slide.
+ * The line a box of `role` on a slide of `layout` is given when it is left
+ * with nothing, or taken off its slide: an empty heading at the slide's title
+ * level for its title, an empty quote for its quote, and an empty paragraph
+ * for any other, so what is typed there is styled as the box styles it.
  */
-export function emptyLine(schema: Schema, layout: SlideLayout, role: BoxRole): Node {
+function emptyLine(schema: Schema, layout: SlideLayout, role: BoxRole): Node {
 	if (role === "title") return emptyTitle(schema, layout);
 	if (role === "quote") return emptyQuote(schema);
 	return nodeType(schema, "paragraph").create();

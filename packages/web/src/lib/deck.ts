@@ -9,20 +9,23 @@ import {
 	SUGGESTED_MODIFICATION,
 } from "@sugabots/contracts/live-document";
 import {
-	emptyLine,
+	bodyOf,
+	FIRST_BOX_IN_SLIDE,
 	fitSlideBody,
-	isRemovedBox,
+	isOffItsSlide,
 	laidOutAnew,
 	layoutOf,
+	leaveBoxesToLayout,
 	newSlide,
 	PLACEMENT,
 	placementOf,
-	REMOVED,
 	SLIDE,
 	SLIDE_BODY,
 	SLIDE_BOX,
+	takeBoxOffSlide,
 } from "@sugabots/contracts/live-slides";
 import {
+	type BoxRole,
 	type Frame,
 	placementIn,
 	SLIDE_BOX_ROLES,
@@ -31,22 +34,38 @@ import {
 import { getChangedRanges } from "@tiptap/core";
 import { isChangeOrigin } from "@tiptap/extension-collaboration";
 import type { Fragment, Node, NodeType, ResolvedPos, Schema } from "@tiptap/pm/model";
-import {
-	EditorState,
-	Plugin,
-	PluginKey,
-	type Selection,
-	TextSelection,
-	type Transaction,
-} from "@tiptap/pm/state";
+import { EditorState, Plugin, PluginKey, TextSelection, type Transaction } from "@tiptap/pm/state";
 import { sameFrame } from "./box-frames.ts";
-import { neverSuggested } from "./suggesting.ts";
+import { type FollowedNode, whereFollowedNodeIs } from "./followed-node.ts";
+import { madeAsItIs } from "./suggesting.ts";
 
 /*
  * A `slides` deck being edited: its slides, and the changes made to them
  * whole, from the strip of slides and the stage. Each change is one
  * transaction, which suggesting mode turns into one suggestion.
+ *
+ * A slide is known by where it starts in the deck (`SlidePos`) or by its
+ * place among the slides (`SlideIndex`), and a box by its place among its
+ * slide's boxes (`BoxIndex`) or by where it starts (`BoxPos`): each a number
+ * of its own type, so one given where another is asked for doesn't compile.
  */
+
+declare const slidePosBrand: unique symbol;
+declare const slideIndexBrand: unique symbol;
+declare const boxIndexBrand: unique symbol;
+declare const boxPosBrand: unique symbol;
+
+/** Where a slide starts in its deck's document. */
+export type SlidePos = number & { readonly [slidePosBrand]: true };
+
+/** A slide's place among its deck's slides, from 0. */
+export type SlideIndex = number & { readonly [slideIndexBrand]: true };
+
+/** A box's place among the boxes of its slide's body, from 0. */
+export type BoxIndex = number & { readonly [boxIndexBrand]: true };
+
+/** Where a box starts in its deck's document. */
+export type BoxPos = number & { readonly [boxPosBrand]: true };
 
 /** What each layout is called, in the layout picker and in a suggestion's card. */
 export const LAYOUT_NAMES: Record<SlideLayout, string> = {
@@ -60,32 +79,106 @@ export const LAYOUT_NAMES: Record<SlideLayout, string> = {
 };
 
 /** A slide of a deck: the node, where it starts, and its place among the slides. */
-export interface PlacedSlide {
+export interface SlideAt {
 	node: Node;
-	pos: number;
-	index: number;
+	pos: SlidePos;
+	index: SlideIndex;
 }
 
-export function slidesOf(deck: Node): PlacedSlide[] {
-	const slides: PlacedSlide[] = [];
+export function slidesOf(deck: Node): SlideAt[] {
+	const slides: SlideAt[] = [];
 	deck.forEach((node, pos, index) => {
-		slides.push({ node, pos, index });
+		slides.push({ node, pos: pos as SlidePos, index: index as SlideIndex });
 	});
 	return slides;
 }
 
 /** The index of the slide holding `pos`, or of the slide after it when it falls between two. */
-export function slideIndexAt(deck: Node, pos: number): number {
-	return Math.min(deck.resolve(pos).index(0), deck.childCount - 1);
+export function slideIndexAt(deck: Node, pos: number): SlideIndex {
+	return Math.min(deck.resolve(pos).index(0), deck.childCount - 1) as SlideIndex;
+}
+
+/**
+ * `index`, a slide's place as a list of `deck`'s slides numbers it from 0, as
+ * that slide's index: `undefined` when `deck` has no slide there.
+ */
+export const slideIndexIn = (deck: Node, index: number): SlideIndex | undefined =>
+	Number.isInteger(index) && index >= 0 && index < deck.childCount
+		? (index as SlideIndex)
+		: undefined;
+
+/**
+ * Where the slide `followed` (see `followNode`) starts in `deck`, or
+ * `undefined` once it is gone, or when what `followed` follows is no slide.
+ */
+export function whereFollowedSlideIs(deck: Node, followed: FollowedNode): SlidePos | undefined {
+	const pos = whereFollowedNodeIs(deck, followed);
+	if (pos === undefined || deck.nodeAt(pos)?.type.name !== SLIDE) return undefined;
+	return pos as SlidePos;
+}
+
+/**
+ * Where the box `followed` (see `followNode`) starts in `deck`, or
+ * `undefined` once it is gone, or when what `followed` follows is no box.
+ */
+export function whereFollowedBoxIs(deck: Node, followed: FollowedNode): BoxPos | undefined {
+	const pos = whereFollowedNodeIs(deck, followed);
+	if (pos === undefined || deck.nodeAt(pos)?.type.name !== SLIDE_BOX) return undefined;
+	return pos as BoxPos;
 }
 
 /** The index of the box on the slide at `slideIndex` that holds `pos`, if one does. */
-export function boxAt(deck: Node, pos: number, slideIndex: number): number | undefined {
+export function boxHolding(deck: Node, pos: number, slideIndex: SlideIndex): BoxIndex | undefined {
 	const place = deck.resolve(pos);
-	// A deck holds slides, which hold their frame, which holds the boxes.
+	// A deck holds slides, which hold their body, which holds the boxes.
 	if (place.depth < 3 || place.index(0) !== slideIndex) return undefined;
-	return place.node(2).type.name === SLIDE_BODY ? place.index(2) : undefined;
+	return place.node(2).type.name === SLIDE_BODY ? (place.index(2) as BoxIndex) : undefined;
 }
+
+/** `index`, a place among `slide`'s boxes, as that box's index: `undefined` when its body holds no box there. */
+export const boxIndexIn = (slide: Node, index: number): BoxIndex | undefined =>
+	Number.isInteger(index) && index >= 0 && index < bodyOf(slide).childCount
+		? (index as BoxIndex)
+		: undefined;
+
+/** One of the boxes a slide's body holds, as the stage and a drawing of the slide treat it. */
+export interface BoxOfSlide {
+	node: Node;
+	index: BoxIndex;
+	/** Where it starts, counted from where its slide starts. */
+	startInSlide: number;
+	/**
+	 * What it is for. The roles of its slide's layout (`SLIDE_BOX_ROLES`) are
+	 * taken in turn by the boxes nobody proposes removing: while a new layout
+	 * waits as a suggestion, the slide is drawn in it, and its body holds the
+	 * boxes the layout would remove beside those it keeps and adds. A box
+	 * proposed for removal, or one past the layout's last, is for nothing.
+	 */
+	role: BoxRole | undefined;
+	/** Whether it is off its slide (`isOffItsSlide`), and so not drawn, whatever it is for. */
+	offSlide: boolean;
+}
+
+/** The boxes `slide`'s body holds, in order. */
+export function boxesOf(slide: Node): BoxOfSlide[] {
+	const roles = SLIDE_BOX_ROLES[layoutOf(slide)];
+	let rolesTaken = 0;
+	const boxes: BoxOfSlide[] = [];
+	bodyOf(slide).forEach((node, offset, index) => {
+		const proposedForRemoval = node.marks.some((mark) => mark.type.name === SUGGESTED_DELETION);
+		boxes.push({
+			node,
+			index: index as BoxIndex,
+			startInSlide: FIRST_BOX_IN_SLIDE + offset,
+			role: proposedForRemoval ? undefined : roles[rolesTaken++],
+			offSlide: isOffItsSlide(node),
+		});
+	});
+	return boxes;
+}
+
+/** Where `slide`'s notes start, counted from where the slide starts: past its own start and its body. */
+export const notesStartInSlide = (slide: Node): number => 1 + bodyOf(slide).nodeSize;
 
 /** Whether somebody proposes adding the slide, or removing it. */
 export function proposedChangeOf(slide: Node): "adding" | "removing" | undefined {
@@ -100,26 +193,28 @@ function nodeType(schema: Schema, name: string): NodeType {
 	return type;
 }
 
+/** Where the first box of the slide starting at `slidePos` starts. */
+const firstBoxPos = (slidePos: number) => slidePos + FIRST_BOX_IN_SLIDE;
+
 /** Adds a new slide of `layout` after the slide at `after`, with the caret at its start. */
-export function addSlide(state: EditorState, after: number, layout: SlideLayout): Transaction {
+export function addSlide(state: EditorState, after: SlideIndex, layout: SlideLayout): Transaction {
 	const previous = slidesOf(state.doc)[after];
 	const at = previous ? previous.pos + previous.node.nodeSize : state.doc.content.size;
 	const adding = state.tr.insert(at, newSlide(state.schema, layout));
-	return adding.setSelection(TextSelection.near(adding.doc.resolve(inside(at)))).scrollIntoView();
+	return adding
+		.setSelection(TextSelection.near(adding.doc.resolve(firstBoxPos(at))))
+		.scrollIntoView();
 }
-
-/** Where what the first child of a node starting at `pos` holds starts: past the node's own start and that child's. */
-const inside = (pos: number) => pos + 2;
 
 /**
  * Puts the caret at the start of the slide at `index`: in its first box, from
  * which a caret in a box off the slide is moved on to the first box on it
  * (`selectionOutOfRemovedBox`).
  */
-export function selectSlide(state: EditorState, index: number): Transaction | undefined {
+export function selectSlide(state: EditorState, index: SlideIndex): Transaction | undefined {
 	const slide = slidesOf(state.doc)[index];
 	if (!slide) return undefined;
-	return state.tr.setSelection(TextSelection.near(state.doc.resolve(inside(slide.pos))));
+	return state.tr.setSelection(TextSelection.near(state.doc.resolve(firstBoxPos(slide.pos))));
 }
 
 /**
@@ -131,26 +226,27 @@ export function selectSlide(state: EditorState, index: number): Transaction | un
  * Only the boxes that change are replaced, so somebody typing in the slide's
  * title keeps what they type. `undefined` when the slide has that layout
  * already, or when a suggestion waits in it (see `holdsSuggestion`): its
- * frame may hold two layouts' content until that is settled, and a
- * suggestion in a box that changes would be lost.
+ * body may hold two layouts' boxes until that is settled, and a suggestion in
+ * a box that changes would be lost.
  */
 export function changeLayout(
 	state: EditorState,
-	index: number,
+	index: SlideIndex,
 	layout: SlideLayout,
 ): Transaction | undefined {
 	const slide = slidesOf(state.doc)[index];
 	if (!slide || layoutOf(slide.node) === layout || holdsSuggestion(slide.node)) return undefined;
 	const laidOut = laidOutAnew(slide.node, layout);
 	// The attributes first, as the API's change does: setting them moves nothing still to be replaced.
-	const changing = state.tr.setNodeAttribute(slide.pos, "layout", layout);
-	if (slide.node.attrs[PLACEMENT] !== null) changing.setNodeAttribute(slide.pos, PLACEMENT, null);
-	bringBackRemovedBoxes(changing, slide.pos);
+	const changing = leaveBoxesToLayout(
+		state.tr.setNodeAttribute(slide.pos, "layout", layout),
+		slide.pos,
+	);
 	replaceChangedChildren(
 		changing,
-		inside(slide.pos),
-		changing.doc.child(index).child(0).content,
-		laidOut.child(0).content,
+		firstBoxPos(slide.pos),
+		bodyOf(changing.doc.child(index)).content,
+		bodyOf(laidOut).content,
 	);
 	return changing;
 }
@@ -204,7 +300,11 @@ function sizeOf(fragment: Fragment, from: number, to: number): number {
  * keeping the caret in it. `undefined` when either isn't a slide's place, or
  * when they are the same.
  */
-export function moveSlideTo(state: EditorState, from: number, to: number): Transaction | undefined {
+export function moveSlideTo(
+	state: EditorState,
+	from: SlideIndex,
+	to: SlideIndex,
+): Transaction | undefined {
 	const slides = slidesOf(state.doc);
 	const [moving, there] = [slides[from], slides[to]];
 	if (!moving || !there || from === to) return undefined;
@@ -217,7 +317,7 @@ export function moveSlideTo(state: EditorState, from: number, to: number): Trans
 		moved.delete(pos, pos + node.nodeSize).insert(there.pos, node);
 	}
 	const movedTo = to > from ? there.pos + there.node.nodeSize - node.nodeSize : there.pos;
-	return moved.setSelection(TextSelection.near(moved.doc.resolve(inside(movedTo))));
+	return moved.setSelection(TextSelection.near(moved.doc.resolve(firstBoxPos(movedTo))));
 }
 
 /**
@@ -226,43 +326,51 @@ export function moveSlideTo(state: EditorState, from: number, to: number): Trans
  * the slide where it was too, proposed for removal until the move is
  * accepted, so a slide moved later stands one place further on.
  */
-export function placeOfMovedSlide(before: Node, after: Node, from: number, to: number): number {
+export function placeOfMovedSlide(
+	before: Node,
+	after: Node,
+	from: SlideIndex,
+	to: SlideIndex,
+): SlideIndex {
 	const keptWhereItWas = after.childCount - before.childCount;
-	return to > from ? to + keptWhereItWas : to;
+	return (to > from ? to + keptWhereItWas : to) as SlideIndex;
 }
 
 /** Removes the slide at `index`. `undefined` for a deck's last slide, which a deck can't be without. */
-export function removeSlide(state: EditorState, index: number): Transaction | undefined {
+export function removeSlide(state: EditorState, index: SlideIndex): Transaction | undefined {
 	const slide = slidesOf(state.doc)[index];
 	if (!slide || state.doc.childCount <= 1) return undefined;
 	return state.tr.delete(slide.pos, slide.pos + slide.node.nodeSize);
 }
 
 /**
- * Puts the image `src`, its words `alt`, in the box that starts at `box`: on
- * its empty line, or on a line of its own after what it holds. `undefined`
+ * Puts the image `src`, its words `alt`, in the box that starts at `boxPos`:
+ * on its empty line, or on a line of its own after what it holds. `undefined`
  * when no box starts there any more.
  */
 export function addImage(
 	state: EditorState,
-	box: number,
+	boxPos: BoxPos,
 	{ src, alt }: { src: string; alt: string },
 ): Transaction | undefined {
-	const holder = state.doc.nodeAt(box);
-	if (holder?.type.name !== SLIDE_BOX) return undefined;
+	const box = state.doc.nodeAt(boxPos);
+	if (box?.type.name !== SLIDE_BOX) return undefined;
 	const image = nodeType(state.schema, "image").create({ src, alt });
-	const first = holder.firstChild;
+	const first = box.firstChild;
 	if (first?.type.name === "paragraph" && first.content.size === 0) {
-		return state.tr.insert(inside(box), image);
+		return state.tr.insert(inside(boxPos), image);
 	}
-	const end = box + holder.nodeSize - 1;
+	const end = boxPos + box.nodeSize - 1;
 	return state.tr.insert(end, nodeType(state.schema, "paragraph").create(null, image));
 }
+
+/** Where what the first child of a node starting at `pos` holds starts: past the node's own start and that child's. */
+const inside = (pos: number) => pos + 2;
 
 /**
  * Whether the slide's boxes wait on a suggestion: a new layout for it, or a
  * box somebody proposes adding or removing, as a new layout does. Until it is
- * settled, its frame may hold the boxes of two layouts.
+ * settled, its body may hold the boxes of two layouts.
  */
 export function boxesWaitOnSuggestion(slide: Node): boolean {
 	const newLayout = slide.marks.some(
@@ -270,13 +378,11 @@ export function boxesWaitOnSuggestion(slide: Node): boolean {
 	);
 	return (
 		newLayout ||
-		slide
-			.child(0)
-			.children.some((box) =>
-				box.marks.some(
-					(mark) => mark.type.name === SUGGESTED_INSERTION || mark.type.name === SUGGESTED_DELETION,
-				),
-			)
+		bodyOf(slide).children.some((box) =>
+			box.marks.some(
+				(mark) => mark.type.name === SUGGESTED_INSERTION || mark.type.name === SUGGESTED_DELETION,
+			),
+		)
 	);
 }
 
@@ -294,8 +400,8 @@ export function boxesWaitOnSuggestion(slide: Node): boolean {
  */
 export function placeBox(
 	state: EditorState,
-	slidePos: number,
-	box: number,
+	slidePos: SlidePos,
+	box: BoxIndex,
 	frame: Frame,
 	drawn: readonly Frame[],
 ): Transaction | undefined {
@@ -307,7 +413,7 @@ export function placeBox(
 	const frames = before.map((each, index) => (index === box ? frame : each));
 	const placement = placementIn(frames, layoutOf(slide));
 	if (!placement) return undefined;
-	return neverSuggested(state.tr.setNodeAttribute(slidePos, PLACEMENT, placement));
+	return madeAsItIs(state.tr.setNodeAttribute(slidePos, PLACEMENT, placement));
 }
 
 /**
@@ -324,14 +430,21 @@ export function boxRemovalBlocked(state: EditorState, box: Node): BoxRemovalBloc
 	return undefined;
 }
 
+/** Why a box can't be removed now, as the person is told it. */
+export const BOX_REMOVAL_BLOCKED_WORDS: Record<BoxRemovalBlocked, string> = {
+	suggesting: "Turn off Suggesting to delete a box.",
+	suggestionPending: "Accept or undo the suggestions in this box to delete it.",
+};
+
 /**
  * Removes the box at `box` from the slide starting at `slidePos`, for
- * everybody: what it holds goes, leaving the line a box of its role is left
- * with, and it is marked as removed (`REMOVED`), which takes it off the slide
- * (`isRemovedBox`). It stays in the frame, so the frame still holds every box
- * its layout places, and a placed slide a frame for each, where undoing the
- * removal puts it back. One change, undone whole, with what the box held.
- * A caret left in the box is moved out of it (`selectionOutOfRemovedBox`).
+ * everybody (`takeBoxOffSlide`): what it holds goes, leaving the line a box of
+ * its role is left with, and it is marked removed, which takes it off the
+ * slide (`isOffItsSlide`). It stays in the slide's body, so the body still
+ * holds every box its layout places, and a placed slide a frame for each,
+ * where undoing the removal puts it back. One change, undone whole, with what
+ * the box held. A caret left in the box is moved out of it
+ * (`selectionOutOfRemovedBox`).
  *
  * Like placing a box, it is never a suggestion. `undefined` when no slide
  * starts there, when its boxes wait on a suggestion (`boxesWaitOnSuggestion`),
@@ -340,93 +453,47 @@ export function boxRemovalBlocked(state: EditorState, box: Node): BoxRemovalBloc
  */
 export function removeBox(
 	state: EditorState,
-	slidePos: number,
-	box: number,
+	slidePos: SlidePos,
+	box: BoxIndex,
 ): Transaction | undefined {
 	const slide = state.doc.nodeAt(slidePos);
 	if (slide?.type.name !== SLIDE || boxesWaitOnSuggestion(slide)) return undefined;
-	const removed = slide.child(0).maybeChild(box);
-	const role = SLIDE_BOX_ROLES[layoutOf(slide)][box];
-	const at = boxStarts(slide, slidePos)[box];
-	if (
-		!removed ||
-		!role ||
-		at === undefined ||
-		isRemovedBox(removed) ||
-		boxRemovalBlocked(state, removed)
-	) {
+	const removed = boxesOf(slide)[box];
+	if (!removed?.role || removed.offSlide || boxRemovalBlocked(state, removed.node)) {
 		return undefined;
 	}
-	return neverSuggested(
-		state.tr
-			.setNodeAttribute(at, REMOVED, true)
-			.replaceWith(
-				at + 1,
-				at + removed.nodeSize - 1,
-				emptyLine(state.schema, layoutOf(slide), role),
-			),
-	);
+	return madeAsItIs(takeBoxOffSlide(state.tr, slidePos + removed.startInSlide));
 }
 
 /**
- * Moves a selection with an end in a box off its slide (`isRemovedBox`), where
- * it isn't seen and whatever is typed would put the box back, to the start of
- * the nearest box on that slide, the next or else the one before, or else to
- * the start of the slide's notes. However it got there: by the box's removal,
- * the removal of the slide before it, an undo, or a change from elsewhere.
- * `undefined` when neither end is in such a box.
+ * Moves a selection with an end in a box off its slide (`isOffItsSlide`),
+ * where it isn't seen and whatever is typed would put the box back, to the
+ * start of the nearest box on that slide, the next or else the one before,
+ * or else to the start of the slide's notes. However it got there: by the
+ * box's removal, the removal of the slide before it, an undo, or a change from
+ * elsewhere. `undefined` when neither end is in such a box.
  */
 export function selectionOutOfRemovedBox(state: EditorState): Transaction | undefined {
 	const { $from, $to } = state.selection;
 	const holding = removedBoxHolding($from) ?? removedBoxHolding($to);
 	if (!holding) return undefined;
 	const { slide, slidePos, box } = holding;
-	const indexes = boxIndexes(slide);
+	const boxes = boxesOf(slide);
 	const nearestFirst = [
-		...indexes.filter((index) => index > box),
-		...indexes.filter((index) => index < box).toReversed(),
+		...boxes.filter(({ index }) => index > box),
+		...boxes.filter(({ index }) => index < box).toReversed(),
 	];
-	return state.tr.setSelection(caretInFirstShownBox(state.doc, slidePos, nearestFirst));
+	const nearestShown = nearestFirst.find(({ offSlide }) => !offSlide);
+	const start = slidePos + (nearestShown?.startInSlide ?? notesStartInSlide(slide));
+	return state.tr.setSelection(TextSelection.near(state.doc.resolve(start + 1)));
 }
 
-/** The slide, where it starts, and the place on it of the box off it (`isRemovedBox`) holding `place`, if one does. */
+/** The slide, where it starts, and the place on it of the box off it (`isOffItsSlide`) holding `place`, if one does. */
 function removedBoxHolding(place: ResolvedPos) {
-	// A deck holds slides, which hold their frame, which holds the boxes.
+	// A deck holds slides, which hold their body, which holds the boxes.
 	const inBox = place.depth >= 3 && place.node(2).type.name === SLIDE_BODY;
-	if (!inBox || !isRemovedBox(place.node(3))) return undefined;
+	if (!inBox || !isOffItsSlide(place.node(3))) return undefined;
 	return { slide: place.node(1), slidePos: place.before(1), box: place.index(2) };
-}
-
-/** Where each box of `slide`, which starts at `slidePos`, starts, in its order. */
-function boxStarts(slide: Node, slidePos: number): number[] {
-	const starts: number[] = [];
-	slide.child(0).forEach((_, offset) => {
-		starts.push(inside(slidePos) + offset);
-	});
-	return starts;
-}
-
-/** The places of `slide`'s boxes, in its order. */
-const boxIndexes = (slide: Node): number[] => slide.child(0).children.map((_, index) => index);
-
-/**
- * The caret at the start of the first of the boxes at `indexes`, on the slide
- * starting at `slidePos` in `deck`, that is on the slide, or at the start of
- * the slide's notes when none is: never in a box off the slide, which isn't
- * drawn, where whatever is typed would put it back.
- */
-function caretInFirstShownBox(deck: Node, slidePos: number, indexes: readonly number[]): Selection {
-	const slide = deck.nodeAt(slidePos);
-	if (!slide) return TextSelection.near(deck.resolve(slidePos));
-	const boxes = slide.child(0).children;
-	const starts = boxStarts(slide, slidePos);
-	const first = indexes.find((index) => {
-		const box = boxes[index];
-		return box !== undefined && !isRemovedBox(box);
-	});
-	const notesStart = slidePos + 1 + slide.child(0).nodeSize;
-	const start = (first === undefined ? undefined : starts[first]) ?? notesStart;
-	return TextSelection.near(deck.resolve(start + 1));
 }
 
 /**
@@ -434,33 +501,19 @@ function caretInFirstShownBox(deck: Node, slidePos: number, indexes: readonly nu
  * placed its boxes, or removed one of them from it.
  */
 export const laidOutByHand = (slide: Node): boolean =>
-	placementOf(slide) !== null || slide.child(0).children.some(isRemovedBox);
+	placementOf(slide) !== null || bodyOf(slide).children.some(isOffItsSlide);
 
 /**
  * Leaves the boxes of the slide at `index` to its layout again, as they were
  * before anybody placed them, and brings back every box removed from it,
- * holding the line it was left with. Like placing and removing them, it is
- * never a suggestion. `undefined` when nobody laid the slide out by hand
- * (`laidOutByHand`).
+ * holding the line it was left with (`leaveBoxesToLayout`). Like placing and
+ * removing them, it is never a suggestion. `undefined` when nobody laid the
+ * slide out by hand (`laidOutByHand`).
  */
-export function resetLayout(state: EditorState, index: number): Transaction | undefined {
+export function resetLayout(state: EditorState, index: SlideIndex): Transaction | undefined {
 	const slide = slidesOf(state.doc)[index];
 	if (!slide || !laidOutByHand(slide.node)) return undefined;
-	const resetting = state.tr;
-	if (slide.node.attrs[PLACEMENT] !== null) resetting.setNodeAttribute(slide.pos, PLACEMENT, null);
-	bringBackRemovedBoxes(resetting, slide.pos);
-	return neverSuggested(resetting);
-}
-
-/** Puts every box removed from the slide starting at `slidePos` back on it, holding what it holds. */
-function bringBackRemovedBoxes(transaction: Transaction, slidePos: number): void {
-	const slide = transaction.doc.nodeAt(slidePos);
-	if (!slide) return;
-	boxStarts(slide, slidePos).forEach((at, index) => {
-		if (slide.child(0).child(index).attrs[REMOVED] !== null) {
-			transaction.setNodeAttribute(at, REMOVED, null);
-		}
-	});
+	return madeAsItIs(leaveBoxesToLayout(state.tr, slide.pos));
 }
 
 /** A stretch of the document, by position. */
@@ -476,7 +529,7 @@ interface Range {
  *
  * It leaves alone what arrives from the others: their editors fit their own
  * changes, and the API fits a bot's, so refitting here would only fight them.
- * And it leaves alone a slide with a suggestion waiting in it, whose frame
+ * And it leaves alone a slide with a suggestion waiting in it, whose body
  * holds two layouts' boxes while a new layout is suggested.
  */
 export const keepSlidesFitting = new Plugin({
@@ -488,12 +541,12 @@ export const keepSlidesFitting = new Plugin({
 		for (const { node, pos } of slidesOf(state.doc)) {
 			const touched = changed.some(({ from, to }) => from <= pos + node.nodeSize && to >= pos);
 			if (!touched || holdsSuggestion(node)) continue;
-			const body = node.child(0);
+			const body = bodyOf(node);
 			const fitted = fitSlideBody(body, layoutOf(node));
 			if (fitted === body) continue;
 			replaceChangedChildren(
 				fitting,
-				fitting.mapping.map(inside(pos)),
+				fitting.mapping.map(firstBoxPos(pos)),
 				body.content,
 				fitted.content,
 			);

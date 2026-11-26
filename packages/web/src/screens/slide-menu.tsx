@@ -5,16 +5,18 @@ import type { Editor } from "@tiptap/react";
 import { ClipboardPaste, ClipboardType, Copy, RotateCcw, Scissors, Trash2 } from "lucide-react";
 import { type MouseEvent, type PointerEvent, useRef, useState } from "react";
 import {
-	type BoxRemovalBlocked,
-	boxAt,
+	BOX_REMOVAL_BLOCKED_WORDS,
+	type BoxIndex,
+	boxesOf,
+	boxHolding,
 	boxRemovalBlocked,
 	laidOutByHand,
-	type PlacedSlide,
-	removeBox,
 	resetLayout,
+	type SlideAt,
+	whereFollowedSlideIs,
 } from "@/lib/deck.ts";
-import { cutOrCopy, pasteInto, readClipboard } from "@/lib/editor-clipboard.ts";
-import { type FollowedNode, followNode, whereFollowedNodeIs } from "@/lib/followed-node.ts";
+import { cutOrCopy, type PasteForm, pasteInto, readClipboard } from "@/lib/editor-clipboard.ts";
+import { type FollowedNode, followNode } from "@/lib/followed-node.ts";
 import { IS_MAC } from "@/lib/platform.ts";
 import {
 	ContextMenu,
@@ -23,8 +25,9 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuShortcut,
 } from "@/ui/dropdown-menu.tsx";
-import { outlinedBoxOf } from "./box-outlines.tsx";
+import { outlinedBoxOf, removeBoxFocusingWords } from "./box-outlines.tsx";
 import { drawnSlideBody } from "./deck-stage.ts";
+import { DRAWN_BOX } from "./slide-drawing.tsx";
 
 /*
  * The menu of the slide on a deck's stage, which right-clicking the slide
@@ -54,12 +57,6 @@ const KEYS = IS_MAC
 			deleteBox: "Del",
 		};
 
-/** Why a box can't be deleted now, as the menu says it under Delete. */
-const REMOVAL_BLOCKED_WORDS: Record<BoxRemovalBlocked, string> = {
-	suggesting: "Turn off Suggesting to delete a box.",
-	suggestionPending: "Accept or undo the suggestions in this box to delete it.",
-};
-
 const NOTHING_TO_PASTE = "The clipboard has no text to paste.";
 
 /** Where on the stage the menu was opened: on the slide, or in its notes, which have no boxes and no layout. */
@@ -68,8 +65,8 @@ type Region = "slide" | "notes";
 /** What the menu was opened on. */
 interface MenuTarget {
 	region: Region;
-	/** The box it was opened on, by its place on the slide: the one right-clicked, or whose outline has the focus. */
-	box: number | undefined;
+	/** The box it was opened on: the one right-clicked, or whose outline has the focus. */
+	box: BoxIndex | undefined;
 	/** Whether it was opened on words, where a right-click puts the caret. */
 	onWords: boolean;
 }
@@ -85,7 +82,7 @@ interface OpenedMenu {
 	anchor: Element | VirtualPoint;
 	region: Region;
 	/** The box it offers to delete, when the slide's boxes can be edited here. */
-	box: number | undefined;
+	box: BoxIndex | undefined;
 	/** The slide it was opened on, followed through anybody's changes, so it acts on no other. */
 	slide: FollowedNode | undefined;
 	/** Whether nothing was selected, which leaves nothing to cut or copy. */
@@ -110,7 +107,7 @@ export function useSlideMenu(
 		slide,
 		editable,
 		boxesEditable,
-	}: { slide: PlacedSlide | undefined; editable: boolean; boxesEditable: boolean },
+	}: { slide: SlideAt | undefined; editable: boolean; boxesEditable: boolean },
 ) {
 	const [open, setOpen] = useState(false);
 	const [opened, setOpened] = useState<OpenedMenu>();
@@ -133,7 +130,7 @@ export function useSlideMenu(
 		if (!byKeyboard && target.onWords && editable) putCaretAtPointer(view, event);
 		setOpened({
 			anchor: byKeyboard
-				? keyboardAnchor(view, event.target)
+				? keyboardAnchor(view, slide, event.target)
 				: pointAt(event.clientX, event.clientY),
 			region: target.region,
 			box: boxesEditable ? target.box : undefined,
@@ -145,10 +142,10 @@ export function useSlideMenu(
 	}
 
 	/** The slide the menu was opened on, if it is still the one on the stage. */
-	function slideOpenedOn(): PlacedSlide | undefined {
+	function slideOpenedOn(): SlideAt | undefined {
 		const followed = opened?.slide;
 		if (!slide || !followed) return undefined;
-		return whereFollowedNodeIs(editor.state.doc, followed) === slide.pos ? slide : undefined;
+		return whereFollowedSlideIs(editor.state.doc, followed) === slide.pos ? slide : undefined;
 	}
 
 	function cutOrCopyFromMenu(command: "cut" | "copy") {
@@ -166,25 +163,21 @@ export function useSlideMenu(
 	}
 
 	/** Pastes what the clipboard holds, read first in full, so a paste is made whole or not at all. */
-	async function pasteFromMenu(withFormatting: boolean) {
+	async function pasteFromMenu(form: PasteForm) {
 		setNotice(undefined);
 		// Read at once, in answer to the person's choice, which some browsers require.
-		const content = await readClipboard(withFormatting).catch(() => undefined);
+		const content = await readClipboard(form).catch(() => undefined);
 		if (!content) {
-			const keys = withFormatting ? KEYS.paste : KEYS.pasteAsText;
+			const keys = form === "formatted" ? KEYS.paste : KEYS.pasteAsText;
 			return setNotice(`Your browser didn't allow pasting from the menu. Press ${keys}.`);
 		}
 		if (editor.isDestroyed || !editor.isEditable) return;
 		if (!pasteInto(editor.view, content)) setNotice(NOTHING_TO_PASTE);
 	}
 
-	function deleteBox(box: number) {
+	function deleteBox(box: BoxIndex) {
 		const on = slideOpenedOn();
-		const removing = on && removeBox(editor.state, on.pos, box);
-		if (!removing) return;
-		editor.view.dispatch(removing);
-		// Its outline goes with it, so the focus goes to the slide's words.
-		editor.view.focus();
+		if (on) removeBoxFocusingWords(editor, on.pos, box);
 	}
 
 	function resetSlideLayout() {
@@ -195,7 +188,7 @@ export function useSlideMenu(
 
 	const onSlide = editable && opened?.region === "slide";
 	const box = onSlide && opened?.box !== undefined ? opened.box : undefined;
-	const boxNode = box === undefined ? undefined : slide?.node.child(0).maybeChild(box);
+	const boxNode = box === undefined || !slide ? undefined : boxesOf(slide.node)[box]?.node;
 	const removalBlocked = boxNode && boxRemovalBlocked(editor.state, boxNode);
 	const offersReset = onSlide && slide !== undefined && laidOutByHand(slide.node);
 
@@ -222,12 +215,12 @@ export function useSlideMenu(
 				</DropdownMenuItem>
 				{editable && (
 					<>
-						<DropdownMenuItem onClick={() => void pasteFromMenu(true)}>
+						<DropdownMenuItem onClick={() => void pasteFromMenu("formatted")}>
 							<ClipboardPaste aria-hidden />
 							Paste
 							<DropdownMenuShortcut>{KEYS.paste}</DropdownMenuShortcut>
 						</DropdownMenuItem>
-						<DropdownMenuItem onClick={() => void pasteFromMenu(false)}>
+						<DropdownMenuItem onClick={() => void pasteFromMenu("plainText")}>
 							<ClipboardType aria-hidden />
 							Paste without formatting
 							<DropdownMenuShortcut>{KEYS.pasteAsText}</DropdownMenuShortcut>
@@ -246,7 +239,7 @@ export function useSlideMenu(
 							Delete
 							{removalBlocked && (
 								<span className="text-muted-foreground text-2xs">
-									{REMOVAL_BLOCKED_WORDS[removalBlocked]}
+									{BOX_REMOVAL_BLOCKED_WORDS[removalBlocked]}
 								</span>
 							)}
 						</span>
@@ -290,21 +283,16 @@ export function useSlideMenu(
 /** The mouse button a right-click presses, as a mouse event numbers it. */
 const RIGHT_BUTTON = 2;
 
-/** How the editor draws a slide's notes, and each of its boxes. */
+/** How the editor draws a slide's notes. */
 const DRAWN_NOTES = "[data-speaker-notes]";
-const DRAWN_BOX = "[data-slide-box]";
 
 /**
  * What right-clicking `element` opens the menu on: a box's outline, a box's
  * words, the slide around its boxes, or its notes. `undefined` anywhere else
  * on the stage, such as on a suggestion's card under the slide.
  */
-function pointerTarget(
-	view: EditorView,
-	slide: PlacedSlide,
-	element: Element,
-): MenuTarget | undefined {
-	const outlined = outlinedBoxOf(element);
+function pointerTarget(view: EditorView, slide: SlideAt, element: Element): MenuTarget | undefined {
+	const outlined = outlinedBoxOf(element, slide.node);
 	if (outlined !== undefined) return { region: "slide", box: outlined, onWords: false };
 	const drawn = view.nodeDOM(slide.pos);
 	if (!(drawn instanceof Element) || !drawn.contains(element)) return undefined;
@@ -312,7 +300,7 @@ function pointerTarget(
 	if (!drawnSlideBody(view, slide.pos)?.contains(element)) return undefined;
 	const drawnBox = element.closest(DRAWN_BOX);
 	if (!drawnBox) return { region: "slide", box: undefined, onWords: false };
-	const box = boxAt(view.state.doc, view.posAtDOM(drawnBox, 0), slide.index);
+	const box = boxHolding(view.state.doc, view.posAtDOM(drawnBox, 0), slide.index);
 	return { region: "slide", box, onWords: true };
 }
 
@@ -324,21 +312,25 @@ function pointerTarget(
  */
 function keyboardTarget(
 	view: EditorView,
-	slide: PlacedSlide,
+	slide: SlideAt,
 	element: Element,
 ): MenuTarget | undefined {
-	const outlined = outlinedBoxOf(element);
+	const outlined = outlinedBoxOf(element, slide.node);
 	if (outlined !== undefined) return { region: "slide", box: outlined, onWords: false };
 	if (element !== view.dom && !pointerTarget(view, slide, element)) return undefined;
 	const { $head } = view.state.selection;
-	// A deck holds slides, which hold their frame and then their notes.
+	// A deck holds slides, which hold their body and then their notes.
 	const inNotes = $head.depth >= 2 && $head.node(2).type.name === SPEAKER_NOTES;
 	return { region: inNotes ? "notes" : "slide", box: undefined, onWords: false };
 }
 
 /** Where the keyboard's menu key opens the menu: at the outline with the focus, or under the caret. */
-function keyboardAnchor(view: EditorView, element: Element): Element | VirtualPoint {
-	if (outlinedBoxOf(element) !== undefined) return element;
+function keyboardAnchor(
+	view: EditorView,
+	slide: SlideAt,
+	element: Element,
+): Element | VirtualPoint {
+	if (outlinedBoxOf(element, slide.node) !== undefined) return element;
 	const { left, top, bottom } = view.coordsAtPos(view.state.selection.head);
 	return pointAt(left, top, bottom - top);
 }

@@ -30,17 +30,15 @@ import {
 	placeOfMovedSlide,
 	removeSlide,
 	resetLayout,
+	type SlidePos,
 	selectSlide,
+	slideIndexIn,
 	slidesOf,
+	whereFollowedBoxIs,
 } from "@/lib/deck.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import type { KeepImage } from "@/lib/file-import.ts";
-import {
-	type FollowedNode,
-	followNode,
-	keyOfFollowedNode,
-	whereFollowedNodeIs,
-} from "@/lib/followed-node.ts";
+import { type FollowedNode, followNode, keyOfFollowedNode } from "@/lib/followed-node.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { importPowerPointFile, type PowerPointImported } from "@/lib/powerpoint-import.ts";
 import { dispatchAsOneChange } from "@/lib/suggesting.ts";
@@ -168,14 +166,14 @@ function DeckEditor({
 	presenceSlot: HTMLElement | null;
 	statusSlot: HTMLElement | null;
 }) {
-	// What the stage draws under the slide's frame, inside the editor, is put in this.
+	// What the stage draws under the slide's body, inside the editor, is put in this.
 	const [underSlide, setUnderSlide] = useState<HTMLElement>();
-	const addImageTo = useRef<(box: number, file: File | undefined) => void>(undefined);
+	const addImageTo = useRef<(boxPos: number, file: File | undefined) => void>(undefined);
 	const [extensions] = useState(() => [
 		deckStage({
 			// The editor draws it while it updates, which may be while React renders.
 			onUnderSlide: (change) => queueMicrotask(() => setUnderSlide(change)),
-			onAddImage: (box, file) => addImageTo.current?.(box, file),
+			onAddImage: (boxPos, file) => addImageTo.current?.(boxPos, file),
 		}),
 	]);
 	const { editor, slashKeys, outOfDate } = useLiveEditor({
@@ -242,10 +240,10 @@ function DeckView({
 	statusSlot: HTMLElement | null;
 	slashKeys: Parameters<typeof EditorOverlays>[0]["slashKeys"];
 	outOfDate: boolean;
-	/** Drawn under the frame of the slide on the stage, inside the editor (see `deck-stage.ts`). */
+	/** Drawn under the body of the slide on the stage, inside the editor (see `deck-stage.ts`). */
 	underSlide: HTMLElement | undefined;
 	/** Where the stage asks for an image for a slide's empty image box. */
-	addImageTo: RefObject<((box: number, file: File | undefined) => void) | undefined>;
+	addImageTo: RefObject<((boxPos: number, file: File | undefined) => void) | undefined>;
 }) {
 	const others = useOthers(provider);
 	const deck = useEditorState({
@@ -271,7 +269,8 @@ function DeckView({
 	}, [provider, current]);
 	const serializer = useMemo(() => DOMSerializer.fromSchema(editor.schema), [editor]);
 	const page = useRef<HTMLDivElement>(null);
-	const frame = useRef<HTMLDivElement>(null);
+	// The positioned element holding the editor, and over it the outlines of the slide's boxes.
+	const stage = useRef<HTMLDivElement>(null);
 	const text = useRef<HTMLElement>(null);
 	const [asking, setAsking] = useState<Asking>();
 	const images = useImageAdding(editor, artifact, as.name);
@@ -297,7 +296,7 @@ function DeckView({
 	});
 	const slides = slidesOf(deck.doc);
 	const shown = slides[current];
-	const overflowing = useFittedStage(editor, frame, shown?.pos, shown?.node);
+	const overflowing = useFittedStage(editor, stage, shown?.pos, shown?.node);
 	const pending = useSlideSuggestions(
 		editor,
 		shown && { from: shown.pos, to: shown.pos + shown.node.nodeSize },
@@ -305,6 +304,7 @@ function DeckView({
 	const pageWidth = useWidth(page);
 	const beside = pending.length > 0 && pageWidth >= CARDS_BESIDE_MIN_PAGE_PX;
 	const sideBySide = useMediaQuery(SIDE_BY_SIDE);
+	const finePointer = useMediaQuery(FINE_POINTER);
 	const editable = !outOfDate;
 	// From Tailwind's `md`, as the strip's slides are dragged, and not while a suggestion may change which boxes the slide has.
 	const boxesMovable =
@@ -314,6 +314,8 @@ function DeckView({
 	const change = (transaction: Transaction | undefined) => {
 		if (transaction) dispatchAsOneChange(editor, transaction, as.name);
 	};
+	/** `index`, a slide's place in the strip or the pager, as the index of the slide there now, if there is one. */
+	const slideNumbered = (index: number) => slideIndexIn(editor.state.doc, index);
 	const settle = (suggestionId: string, how: "accept" | "reject") =>
 		settlingSuggestion(suggestionId, how)(editor.state, editor.view.dispatch);
 	const cards = (shape: "card" | "bar") =>
@@ -327,7 +329,8 @@ function DeckView({
 			/>
 		));
 	function select(index: number) {
-		const selecting = selectSlide(editor.state, index);
+		const slide = slideNumbered(index);
+		const selecting = slide === undefined ? undefined : selectSlide(editor.state, slide);
 		if (selecting) editor.view.dispatch(selecting);
 		// On a touch screen the keyboard would cover the slide just picked.
 		if (!window.matchMedia(COARSE_POINTER).matches) editor.view.focus();
@@ -371,12 +374,17 @@ function DeckView({
 						// As a suggestion the selection lands after what was added, so the new slide is chosen again.
 						select(current + 1);
 					}}
-					onMove={(from, to) => {
+					onMove={(fromIndex, toIndex) => {
+						const [from, to] = [slideNumbered(fromIndex), slideNumbered(toIndex)];
+						if (from === undefined || to === undefined) return;
 						const before = editor.state.doc;
 						change(moveSlideTo(editor.state, from, to));
 						select(placeOfMovedSlide(before, editor.state.doc, from, to));
 					}}
-					onRemove={(index) => change(removeSlide(editor.state, index))}
+					onRemove={(index) => {
+						const slide = slideNumbered(index);
+						if (slide !== undefined) change(removeSlide(editor.state, slide));
+					}}
 				/>
 				<div ref={page} className="relative min-h-0 min-w-0 flex-1 overflow-y-auto">
 					<div className="flex justify-center gap-6 px-8 pt-4 pb-8 max-md:px-4 max-md:pt-1">
@@ -409,7 +417,7 @@ function DeckView({
 								<span className="flex-1" />
 								<SlidePager current={current} total={slides.length} onSelect={select} />
 							</div>
-							<div ref={frame} className="relative" {...slideMenu.stageProps}>
+							<div ref={stage} className="relative" {...slideMenu.stageProps}>
 								<LiveDocumentText
 									editor={editor}
 									ref={text}
@@ -417,7 +425,8 @@ function DeckView({
 									page={page}
 									askBoxOpen={asking !== undefined}
 								/>
-								{boxesMovable && deck.followed && (
+								{/* Only for a fine pointer: a touch drag is no move, and on a touch screen the outlines would take taps near a box's edge. */}
+								{boxesMovable && finePointer && deck.followed && (
 									<BoxOutlines
 										// Its boxes are known by their place on the slide, which means nothing on another. The
 										// slide is known by itself, not by its place in the deck, which others' changes shift.
@@ -425,7 +434,7 @@ function DeckView({
 										editor={editor}
 										slide={shown}
 										followed={deck.followed}
-										stage={frame}
+										stage={stage}
 										menuFor={slideMenu.box}
 									/>
 								)}
@@ -483,6 +492,9 @@ function DeckView({
 }
 
 const COARSE_POINTER = "(pointer: coarse)";
+
+/** A mouse, a touchpad or a pen: a pointer that can grab a box's edge. */
+const FINE_POINTER = "(pointer: fine)";
 
 /** Something the person should know about the deck, across the top of it until they dismiss it. */
 function DismissibleNotice({
@@ -567,30 +579,30 @@ const CARDS_BESIDE_MIN_PAGE_PX = 1000;
  */
 function useFittedStage(
 	editor: Editor,
-	frame: RefObject<HTMLDivElement | null>,
-	slidePos: number | undefined,
+	stage: RefObject<HTMLDivElement | null>,
+	slidePos: SlidePos | undefined,
 	slide: unknown,
 ) {
 	const [overflowing, setOverflowing] = useState(false);
 	const measure = useCallback(() => {
-		const holder = frame.current;
+		const element = stage.current;
 		const body = slidePos === undefined ? undefined : drawnSlideBody(editor.view, slidePos);
-		if (!holder || !body) return;
-		setOverflowing(fitSlideText(holder, body));
-	}, [editor, frame, slidePos]);
+		if (!element || !body) return;
+		setOverflowing(fitSlideText(element, body));
+	}, [editor, stage, slidePos]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: measured again whenever the slide changes.
 	useLayoutEffect(measure, [measure, slide]);
 	useEffect(() => {
-		const holder = frame.current;
-		if (!holder) return;
+		const element = stage.current;
+		if (!element) return;
 		const resized = new ResizeObserver(measure);
-		resized.observe(holder);
-		holder.addEventListener("load", measure, true);
+		resized.observe(element);
+		element.addEventListener("load", measure, true);
 		return () => {
 			resized.disconnect();
-			holder.removeEventListener("load", measure, true);
+			element.removeEventListener("load", measure, true);
 		};
-	}, [frame, measure]);
+	}, [stage, measure]);
 	return overflowing;
 }
 
@@ -692,7 +704,7 @@ function useImageAdding(
 			const type = imageTypeOf(bytes);
 			if (!type || bytes.byteLength > MAX_ARTIFACT_IMAGE_BYTES) return setNotice(IMAGE_REFUSED);
 			const src = await uploadArtifactImage(artifact, { type, bytes });
-			const at = whereFollowedNodeIs(editor.state.doc, box);
+			const at = whereFollowedBoxIs(editor.state.doc, box);
 			if (at === undefined) return setNotice(BOX_GONE);
 			const adding = addImage(editor.state, at, { src, alt: file.name.replace(/\.[^.]*$/, "") });
 			if (adding) dispatchAsOneChange(editor, adding, name);

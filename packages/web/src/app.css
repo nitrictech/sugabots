@@ -1126,10 +1126,10 @@
 	line-height: 1.4;
 }
 
-/* A drawing clips what runs over; the stage lets the frame grow, so what runs over can still be edited. */
+/* A drawing clips what runs over; the stage lets the body grow, so what runs over can still be edited. */
 .slide-drawing [data-slide-body] {
 	overflow: hidden;
-	/* The frame paints the slide, so it takes the corners its holder is rounded to. */
+	/* The body paints the slide, so it takes the corners its holder is rounded to. */
 	border-radius: inherit;
 }
 
@@ -1330,16 +1330,29 @@
 	--slide-text-size: 1.25;
 	--slide-text-color: var(--slide-sub);
 	--slide-gap: 1em;
+	--section-accent-height: 0.3em;
 	justify-content: safe flex-end;
 }
 
-[data-slide][data-layout="section"] > [data-slide-body]::before {
+/*
+ * The accent, over the label wherever the label is, a slide's gap above it,
+ * and gone with it. On a slide its layout places, the label keeps room above
+ * it for the accent and the gap, as the slide's first block would take.
+ */
+[data-slide][data-layout="section"] [data-box-role="label"]::before {
 	content: "";
-	flex: none;
+	position: absolute;
+	bottom: calc(100% + var(--slide-gap));
+	left: 0;
 	width: 3em;
-	height: 0.3em;
+	height: var(--section-accent-height);
 	border-radius: 0.15em;
 	background: var(--slide-accent);
+}
+
+[data-slide][data-layout="section"]:not([data-placement]) [data-box-role="label"] {
+	position: relative;
+	margin-top: calc(var(--section-accent-height) + var(--slide-gap));
 }
 
 [data-slide][data-layout="section"] > [data-slide-body] p {
@@ -1442,14 +1455,14 @@
  * corner, whatever its layout's padding, and scaled with it. Its layout still
  * styles what each box holds by what the box is for; only where the layout
  * would put its boxes, and how it would space them, gives way. What a box
- * holds starts at its top, and what runs past its foot is cut at the
- * slide's edge, on the stage too.
+ * holds starts at its top, but for an image layout's image, which stays in
+ * the middle of its box, and what runs past its foot is cut at the slide's
+ * edge, on the stage too.
  *
- * The slide gives the frames as `--box-1-x` and so on (see `Slide` in
- * `live-slides.ts`), and each box takes its own as `--box-x`, `--box-y`,
- * `--box-w` and `--box-h`, which a box being dragged on the stage is given
- * directly (`deck-stage.ts`). These come after the layouts' rules, so they
- * win where they say the same as one.
+ * Whoever draws the slide gives each box its frame as `--box-x`, `--box-y`,
+ * `--box-w` for its width and `--box-h` for its height (`boxFrameProperties`
+ * in `slide-drawing.tsx`). Where these rules say the same as one of the
+ * layouts', they are as specific as it and come after it, so they win.
  */
 [data-slide][data-placement] > [data-slide-body] {
 	/* A pixel of a slide 960 wide, on which the unit is 16. */
@@ -1466,29 +1479,6 @@
 	left: calc(var(--box-x) * var(--slide-pixel));
 	width: calc(var(--box-w) * var(--slide-pixel));
 	height: calc(var(--box-h) * var(--slide-pixel));
-	margin: 0;
-}
-
-/* A frame holds only boxes, so a box's place among its children is its place among the slide's boxes. */
-[data-slide][data-placement] > [data-slide-body] > [data-slide-box]:nth-child(1) {
-	--box-x: var(--box-1-x);
-	--box-y: var(--box-1-y);
-	--box-w: var(--box-1-w);
-	--box-h: var(--box-1-h);
-}
-
-[data-slide][data-placement] > [data-slide-body] > [data-slide-box]:nth-child(2) {
-	--box-x: var(--box-2-x);
-	--box-y: var(--box-2-y);
-	--box-w: var(--box-2-w);
-	--box-h: var(--box-2-h);
-}
-
-[data-slide][data-placement] > [data-slide-body] > [data-slide-box]:nth-child(3) {
-	--box-x: var(--box-3-x);
-	--box-y: var(--box-3-y);
-	--box-w: var(--box-3-w);
-	--box-h: var(--box-3-h);
 }
 
 /* An image no taller than its box, nor than its layout draws it. */
@@ -1500,38 +1490,17 @@
 	max-height: min(calc(25 * var(--slide-unit)), calc(var(--box-h) * var(--slide-pixel)));
 }
 
-/* A section break's accent stays over its label, wherever the label goes. */
-[data-slide][data-layout="section"][data-placement] > [data-slide-body]::before {
-	content: none;
-}
-
-[data-slide][data-layout="section"][data-placement] [data-box-role="label"]::before {
-	content: "";
-	position: absolute;
-	bottom: calc(100% + var(--slide-gap));
-	left: 0;
-	width: 3em;
-	height: 0.3em;
-	border-radius: 0.15em;
-	background: var(--slide-accent);
-}
-
 /*
- * A box off its slide (`isRemovedBox`), which whoever draws the slide says
+ * A box off its slide (`isOffItsSlide`), which whoever draws the slide says
  * with `data-removed`: not drawn, and taking no room among the others. A
- * section break's accent goes with its label, as it does on a placed slide.
+ * section break's accent, which its label draws, goes with the label.
  */
 :is(.live-deck, .slide-drawing) [data-slide-box][data-removed] {
 	display: none;
 }
 
-[data-slide][data-layout="section"]
-	> [data-slide-body]:has([data-box-role="label"][data-removed])::before {
-	content: none;
-}
-
 /*
- * The deck in its editor: the slide on the stage, its frame lifted off the
+ * The deck in its editor: the slide on the stage, its body lifted off the
  * page and its notes under it. The other slides stay in the editor, hidden.
  */
 .live-deck {
@@ -1553,7 +1522,7 @@
 	box-shadow: var(--slide-shadow);
 }
 
-/* What the stage puts under the frame (`deck-stage.ts`): a slide that runs over, and suggestions without room beside it. */
+/* What the stage puts under the body (`deck-stage.ts`): a slide that runs over, and suggestions without room beside it. */
 .live-deck .slide-under {
 	display: flex;
 	flex-direction: column;
@@ -1667,18 +1636,18 @@
 	pointer-events: none;
 }
 
-.box-outlines .box-frame {
+.box-outlines .box-outline {
 	position: absolute;
 }
 
-.box-outlines .box-frame::before {
+.box-outlines .box-outline::before {
 	content: "";
 	position: absolute;
 	inset: 0;
 	outline: 1px solid var(--border-dashed);
 }
 
-.box-outlines .box-frame[data-editing]::before {
+.box-outlines .box-outline[data-editing]::before {
 	outline: 1.5px solid var(--slide-accent);
 }
 
@@ -1686,7 +1655,8 @@
  * The band along a box's outline: `--band-outside` outside it, which the
  * outlines are given, and a little way inside, so a press at the very start
  * of its words still puts the caret there. Only the band takes the pointer,
- * not what it goes round.
+ * not what it goes round, and a pen dragging it moves the box rather than
+ * the page.
  */
 .box-outlines .box-move {
 	--band: calc(var(--band-outside) + 2px);
@@ -1698,6 +1668,7 @@
 	background: none;
 	cursor: move;
 	pointer-events: auto;
+	touch-action: none;
 	clip-path: polygon(
 		evenodd,
 		0 0,
@@ -1717,7 +1688,7 @@
 	box-shadow: inset 0 0 0 var(--band) var(--ring-halo);
 }
 
-/* A handle: a small square on the outline, in a larger area that is easier to grab. */
+/* A handle: a small square on the outline, in a larger area that is easier to grab, which a pen drags rather than the page. */
 .box-outlines .box-handle {
 	position: absolute;
 	width: 16px;
@@ -1728,6 +1699,7 @@
 	background: none;
 	translate: -50% -50%;
 	pointer-events: auto;
+	touch-action: none;
 }
 
 .box-outlines .box-handle > span {

@@ -692,13 +692,14 @@ export function suggestionBy(id: unknown): SuggestionBy {
 }
 
 /**
- * Which nodes and marks a live document of either kind holds, as a number
- * that goes up whenever they change. The sync layer deletes whatever its own
- * schema cannot hold, so a browser tab built for another number, such as one
- * left open across an update, must not join: it would delete what newer tabs
- * wrote.
+ * Which nodes and marks a live document of either kind holds, and the shape
+ * of each attribute's value, as a number that goes up whenever either
+ * changes. The sync layer deletes whatever its own schema cannot hold, and an
+ * editor reads an attribute of another shape as none, so a browser tab built
+ * for another number, such as one left open across an update, must not join:
+ * it would delete or write over what newer tabs wrote.
  */
-export const LIVE_DOCUMENT_SCHEMA = 7;
+export const LIVE_DOCUMENT_SCHEMA = 8;
 
 /** The shared type holding the document's content, which the editor's collaboration extension binds to. */
 export const LIVE_DOCUMENT_CONTENT = "default";

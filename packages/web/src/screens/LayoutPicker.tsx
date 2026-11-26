@@ -102,11 +102,11 @@ export function LayoutPicker({
 
 /** A slide of `layout` drawn as bars where its words go, a block where its image goes, and a grid for its table. */
 function LayoutSketch({ layout, current }: { layout: SlideLayout; current: boolean }) {
-	const { frame, parts } = SKETCHES[layout];
+	const { arrangement, parts } = SKETCHES[layout];
 	return (
 		<span
 			aria-hidden
-			style={frame}
+			style={arrangement}
 			className={cn(
 				"box-border flex aspect-video w-full flex-col rounded-md border bg-slide-background",
 				current ? "border-slide-accent" : "border-border-strong",
@@ -171,10 +171,10 @@ const Lines = ({ widths }: { widths: string[] }) => (
 const TABLE_COLUMNS = 3;
 const TABLE_CELLS = Array.from({ length: TABLE_COLUMNS * 3 }, (_, cell) => cell);
 
-/** Where each layout's parts go, as the design sketches them. */
-const SKETCHES: Record<SlideLayout, { frame: CSSProperties; parts: ReactNode }> = {
+/** Where each layout's parts go, as the design sketches them: how the sketch arranges them, and the parts. */
+const SKETCHES: Record<SlideLayout, { arrangement: CSSProperties; parts: ReactNode }> = {
 	title: {
-		frame: { padding: "10%", justifyContent: "center", gap: 6 },
+		arrangement: { padding: "10%", justifyContent: "center", gap: 6 },
 		parts: (
 			<>
 				<Bar width="70%" height={9} tone="title" />
@@ -183,7 +183,7 @@ const SKETCHES: Record<SlideLayout, { frame: CSSProperties; parts: ReactNode }> 
 		),
 	},
 	bullets: {
-		frame: { padding: "10%", gap: 6 },
+		arrangement: { padding: "10%", gap: 6 },
 		parts: (
 			<>
 				<Bar width="40%" height={6} tone="title" style={{ marginBottom: 3 }} />
@@ -194,7 +194,7 @@ const SKETCHES: Record<SlideLayout, { frame: CSSProperties; parts: ReactNode }> 
 		),
 	},
 	columns: {
-		frame: { padding: "10%", gap: 8 },
+		arrangement: { padding: "10%", gap: 8 },
 		parts: (
 			<>
 				<Bar width="55%" height={6} tone="title" />
@@ -206,7 +206,7 @@ const SKETCHES: Record<SlideLayout, { frame: CSSProperties; parts: ReactNode }> 
 		),
 	},
 	image: {
-		frame: {
+		arrangement: {
 			padding: "10%",
 			display: "grid",
 			gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
@@ -225,7 +225,7 @@ const SKETCHES: Record<SlideLayout, { frame: CSSProperties; parts: ReactNode }> 
 		),
 	},
 	section: {
-		frame: { padding: "10%", justifyContent: "flex-end", gap: 5 },
+		arrangement: { padding: "10%", justifyContent: "flex-end", gap: 5 },
 		parts: (
 			<>
 				<Bar width="14%" height={3} tone="accent" />
@@ -235,7 +235,7 @@ const SKETCHES: Record<SlideLayout, { frame: CSSProperties; parts: ReactNode }> 
 		),
 	},
 	quote: {
-		frame: { padding: "10% 16%", justifyContent: "center", gap: 5 },
+		arrangement: { padding: "10% 16%", justifyContent: "center", gap: 5 },
 		parts: (
 			<>
 				<Bar width="100%" height={7} tone="title" />
@@ -245,7 +245,7 @@ const SKETCHES: Record<SlideLayout, { frame: CSSProperties; parts: ReactNode }> 
 		),
 	},
 	table: {
-		frame: { padding: "10%", gap: 7 },
+		arrangement: { padding: "10%", gap: 7 },
 		parts: (
 			<>
 				<Bar width="45%" height={6} tone="title" />

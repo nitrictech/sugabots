@@ -1,5 +1,6 @@
 import { linkMayGoTo } from "@sugabots/contracts/live-document";
 import {
+	bodyOf,
 	fitSlideBody,
 	newSlide,
 	SLIDE,
@@ -259,26 +260,29 @@ const SHORT_LINE_CHARACTERS = 100;
 /** How far two boxes side by side may overlap and still be taken for side by side, in points. */
 const SIDE_BY_SIDE_OVERLAP_PT = 8;
 
-/**
- * A slide's layout, and what its frame holds, in the order the layout reads
- * it: its boxes, or blocks in no box, which the layout shares out among its
- * boxes (see `fitSlideBody`).
- */
+/** A slide's layout, and what its body is to hold. */
 interface LaidOut {
 	layout: SlideLayout;
-	blocks: Node[];
+	/**
+	 * What the slide's body is to hold, in the order the layout reads it:
+	 * either its boxes, or blocks standing in no box, which the layout shares
+	 * out among its boxes (see `fitSlideBody`).
+	 */
+	bodyContent: Node[];
 }
 
-/** A slide of `layout` holding `blocks`, made to fit it, with its notes. An empty one holds what a new slide of its layout does. */
-function slideOf({ layout, blocks }: LaidOut, notes: Node, schema: Schema): Node {
+/** A slide of `layout` holding `bodyContent`, made to fit it, with its notes. An empty one holds what a new slide of its layout does. */
+function slideOf({ layout, bodyContent }: LaidOut, notes: Node, schema: Schema): Node {
 	const body =
-		blocks.length > 0 ? nodeOf(schema, SLIDE_BODY, blocks) : newSlide(schema, layout).child(0);
+		bodyContent.length > 0
+			? nodeOf(schema, SLIDE_BODY, bodyContent)
+			: bodyOf(newSlide(schema, layout));
 	return nodeOf(schema, SLIDE, [fitSlideBody(body, layout), notes], { layout });
 }
 
 /**
- * The layout a slide of `pieces`, in reading order, gets, and the blocks of
- * its frame, by the first of these that fits it:
+ * The layout a slide of `pieces`, in reading order, gets, and what its body
+ * holds, by the first of these that fits it:
  *
  * - Nothing: an empty slide, `title` when it is the first and `bullets`
  *   after.
@@ -288,40 +292,41 @@ function slideOf({ layout, blocks }: LaidOut, notes: Node, schema: Schema): Node
  *   with no chart or other content left out beside them: `title` when it is
  *   the first slide, and `section` after.
  * - Things side by side (`sideBySide`): `image` when one side holds the
- *   slide's one image, with the words in the first column and the image in
- *   the second, and `columns` otherwise.
- * - Only an image: `image`, its first column empty.
+ *   slide's one image, with the words in its text's box and the image in its
+ *   image's box, and `columns` otherwise.
+ * - Only an image: `image`, its text's box empty.
  * - Anything else: `bullets`.
  *
- * The title is the frame's heading, first, but on a section break, where a
- * label may sit above it, everything stays in reading order. What a layout
- * has no box of its own for stays in its frame, in reading order, in the box
- * after the title. Side by side, the title, empty or not, and each side are
- * boxes of their own.
+ * The title is a heading at the start of the body, but on a section break,
+ * where a label may sit above it, everything stays in reading order. What a
+ * layout has no box of its own for stays in the body, in reading order, in
+ * the box after the title. Side by side, the title, empty or not, and each
+ * side are boxes of their own.
  */
 function laidOut(
 	pieces: readonly Piece<Node>[],
 	{ first, contentLeftOut }: { first: boolean; contentLeftOut: boolean },
 	schema: Schema,
 ): LaidOut {
-	if (pieces.length === 0) return { layout: first ? "title" : "bullets", blocks: [] };
+	if (pieces.length === 0) return { layout: first ? "title" : "bullets", bodyContent: [] };
 	const quote = quoteIn(pieces);
 	if (quote) {
 		return {
 			layout: "quote",
-			blocks: [nodeOf(schema, "blockquote", quote.quote), ...quote.saidBy],
+			bodyContent: [nodeOf(schema, "blockquote", quote.quote), ...quote.saidBy],
 		};
 	}
 	const title = titleAmong(pieces);
 	const rest = pieces.filter((piece) => piece !== title);
 	const heading = (level: number) => (title ? [headingOf(title, level, schema)] : []);
 	const flow = (level: number) => [...heading(level), ...rest.flatMap(blocksOfPiece)];
-	if (rest.some((piece) => piece.kind === "table")) return { layout: "table", blocks: flow(2) };
+	if (rest.some((piece) => piece.kind === "table"))
+		return { layout: "table", bodyContent: flow(2) };
 	if (title && !contentLeftOut && holdsAtMostASubtitle(rest)) {
-		if (first) return { layout: "title", blocks: flow(1) };
+		if (first) return { layout: "title", bodyContent: flow(1) };
 		return {
 			layout: "section",
-			blocks: pieces.flatMap((piece) => (piece === title ? heading(2) : blocksOfPiece(piece))),
+			bodyContent: pieces.flatMap((piece) => (piece === title ? heading(2) : blocksOfPiece(piece))),
 		};
 	}
 	const images = rest.filter((piece) => piece.kind === "image");
@@ -332,22 +337,22 @@ function laidOut(
 		if (images.length !== 1) {
 			return {
 				layout: "columns",
-				blocks: [titleBox(), boxOf(left, schema), boxOf(right, schema)],
+				bodyContent: [titleBox(), boxOf(left, schema), boxOf(right, schema)],
 			};
 		}
 		const [words, image] = left.some((piece) => piece.kind === "image") ? [right, left] : sides;
 		return {
 			layout: "image",
-			blocks: [titleBox(), boxOf(words, schema), boxOf(image, schema)],
+			bodyContent: [titleBox(), boxOf(words, schema), boxOf(image, schema)],
 		};
 	}
 	if (rest.length === 1 && images.length === 1) {
 		return {
 			layout: "image",
-			blocks: [titleBox(), boxOf([], schema), boxOf(images, schema)],
+			bodyContent: [titleBox(), boxOf([], schema), boxOf(images, schema)],
 		};
 	}
-	return { layout: "bullets", blocks: flow(2) };
+	return { layout: "bullets", bodyContent: flow(2) };
 }
 
 /** `pieces` in the order they are read: from the top of the slide down, and from the left across. */

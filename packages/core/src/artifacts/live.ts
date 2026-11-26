@@ -48,9 +48,10 @@ import { type Blocked, changedTo, markdownForAgents, withoutSuggestions } from "
  * would be deleted by every editor, whose schema can't hold it.
  *
  * A document becomes live the first time a person opens it, and stays live:
- * its state is kept in the blob store beside its versions, and from then on
- * the versions are snapshots of it as agents read it, in markdown, which says
- * nothing of where people placed a deck's boxes or which boxes they removed.
+ * its state is kept in the blob store beside its versions. Its versions are
+ * then snapshots of `markdownForAgents`, which says nothing of where people
+ * placed a deck's boxes or which boxes they removed; `documentAsShown` says
+ * both, and is never for an agent.
  */
 export interface Interface {
 	/**
@@ -256,7 +257,7 @@ export const make = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const kind = yield* openedKindOf(artifactId);
 				if (kind === undefined) return undefined;
-				return yield* withDocument(artifactId, (document) => toMarkdown(document, kind));
+				return yield* withDocument(artifactId, (document) => markdownForAgentsIn(document, kind));
 			}),
 
 		documentAsShown: (artifactId) =>
@@ -300,7 +301,7 @@ export const make = Effect.gen(function* () {
 					});
 					if (request) requests.set(author.threadId, { ...request, answered: true });
 					return {
-						markdown: toMarkdown(document, kind),
+						markdown: markdownForAgentsIn(document, kind),
 						outcome: request ? "suggested" : "written",
 					};
 				});
@@ -420,11 +421,8 @@ function sizeOf(shared: XmlFragment | XmlElement): { blocks: number; text: numbe
 	return { blocks, text };
 }
 
-/**
- * The document as an agent reads it (`markdownForAgents`), as far as it can be
- * read: as it reads until someone accepts a suggestion pending in it.
- */
-const toMarkdown = (document: Document, kind: LiveArtifactKind) =>
+/** `document`, of `kind`, as an agent reads it (`markdownForAgents`), as far as it can be read. */
+const markdownForAgentsIn = (document: Document, kind: LiveArtifactKind) =>
 	markdownForAgents(read(document, kind).content);
 
 /** Beside the artifact's versions, so it is deleted with them. */

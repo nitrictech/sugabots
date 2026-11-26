@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import {
 	revertSuggestions,
 	suggestChanges,
@@ -29,23 +30,22 @@ import type { Mappable } from "@tiptap/pm/transform";
 
 /*
  * An agent's change to a live document. The agent reads the document as
- * markdown, as it reads without the suggestions pending in it, and writes
- * what it should read instead. Only what the agent changed in that markdown
- * is applied: everything else stays as the document holds it, which may be
- * more than its markdown says. The difference is worked out block by block,
- * then word by word, and only that much is changed, so what people are
- * typing elsewhere and the suggestions waiting there are left alone. The
- * change is either made, or handed to the suggesting library to write into
- * the document as a suggestion, exactly as it writes a person's.
+ * markdown (`markdownForAgents`), and writes the markdown it should read as
+ * instead. `changedTo` applies only what the agent changed in that markdown:
+ * everything else stays as the document holds it, which may be more than its
+ * markdown says. The difference is found block by block, then word by word,
+ * and only that much is changed, so what people are typing elsewhere, and the
+ * suggestions waiting there, are left alone. The change is either made, or
+ * handed to the suggesting library to write into the document as a
+ * suggestion, exactly as it writes a person's.
  *
- * Where people placed a deck's boxes by hand, and which boxes they removed,
- * is theirs, and the markdown has no way to say either: an agent never reads
- * them, and what it writes can't set them. So a slide whose layout it leaves
- * keeps its boxes where they are, and a box removed from it, which holds
- * nothing, reads as an empty box. A slide it gives a new layout is laid out
- * anew by that layout as a person's change of layout lays it out
- * (`laidOutAnew`), placed by the layout and with every box on it. A removed
- * box it writes in is back on its slide.
+ * The markdown says nothing of where people placed a deck's boxes by hand or
+ * which boxes they removed, so an agent can neither read nor set either. A
+ * slide whose layout the agent leaves keeps its boxes where they are, and a
+ * box removed from it, which holds nothing, reads as an empty box, which is
+ * back on the slide once the agent writes in it. A slide the agent gives a
+ * new layout is laid out anew by it (`laidOutAnew`), as a person's change of
+ * layout is: placed by the layout, with every box on it.
  */
 
 /** How a change is made: at once, or as the suggestion with this id. */
@@ -71,9 +71,9 @@ export type ChangeAs = "edit" | { suggestionId: string };
 export type Blocked = "unmarkable" | "layoutPending" | "suggestionPending";
 
 /**
- * The document as it reads with every pending suggestion left out, as people
- * see it until somebody accepts one: a deck's boxes where people placed them,
- * and those they removed off their slides.
+ * The document as people see it until somebody accepts a suggestion pending
+ * in it: every pending suggestion left out, a deck's boxes where people
+ * placed them, and those they removed off their slides.
  */
 export function withoutSuggestions(document: Node): Node {
 	return plain(reverted(document));
@@ -98,8 +98,7 @@ export function changedTo(live: Node, wanted: string, as: ChangeAs): Node | "unc
 	const revert = reverted(live);
 	const before = plain(revert);
 	const read = (markdown: string) => liveDocumentFromMarkdown(liveDocumentKind(live), markdown);
-	// The markdown the agent read is `before`'s, as `markdownForAgents` writes it.
-	const target = withChangesOf(before, read(markdownOfLiveDocument(before)), read(wanted));
+	const target = withChangesOf(before, read(markdownForAgents(live)), read(wanted));
 	const found: Found = { replacements: [], attributes: [], slides: [], unmarkable: false };
 	findDifferences(before, target, 0, found);
 	if (found.replacements.length === 0 && found.attributes.length === 0) return "unchanged";
@@ -172,7 +171,7 @@ function withChildrenChanged(before: Node, shown: Node, wanted: Node): Node {
 	const attributes = Object.fromEntries(
 		Object.entries(wanted.attrs).map(([name, value]) => [
 			name,
-			shown.attrs[name] === value ? before.attrs[name] : value,
+			isDeepStrictEqual(shown.attrs[name], value) ? before.attrs[name] : value,
 		]),
 	);
 	return before.type.create(attributes, content, before.marks);
@@ -180,13 +179,13 @@ function withChildrenChanged(before: Node, shown: Node, wanted: Node): Node {
 
 /**
  * `before`, a slide, with the changes an agent made to it (see
- * `withChangesOf`), its frame holding what its layout says, as every slide
- * read from markdown does, which puts a removed box the agent wrote in back
- * on the slide. A slide the agent gives a new layout is laid out anew by it
- * (`laidOutAnew`). When the agent changed nothing in the slide's boxes but
- * the layout, what they hold is moved as a person's change of layout moves
- * it, by what each box is for. When it wrote the boxes anew, they are in the
- * order it wrote them, the new layout's.
+ * `withChangesOf`), its body holding what its layout says (`fitSlideBody`),
+ * as every slide read from markdown does, so a removed box the agent wrote in
+ * is back on the slide. A slide the agent gives a new layout is laid out anew
+ * by it (`laidOutAnew`). When the agent changed nothing in the slide's boxes
+ * but the layout, what they hold is moved as a person's change of layout
+ * moves it, by what each box is for. When it wrote the boxes anew, they are
+ * in the order it wrote them, the new layout's.
  */
 function slideWithChangesOf(before: Node, shown: Node, wanted: Node): Node {
 	const layout = layoutOf(wanted);
@@ -399,10 +398,15 @@ const comparedInside = (was: Node, becomes: Node) =>
 	!was.isLeaf &&
 	(was.sameMarkup(becomes) || (was.type === becomes.type && keepsPlaceWhenAttributesChange(was)));
 
-/** The attributes `becomes` has that `was`, at `at`, doesn't, but for what is suggested for it. */
+/**
+ * The attributes `becomes` has that `was`, at `at`, doesn't, compared by
+ * value, as a slide's placement is a list, but for what is suggested for it.
+ */
 const attributeChanges = (was: Node, becomes: Node, at: number): AttributeChange[] =>
 	Object.entries(becomes.attrs)
-		.filter(([name, value]) => name !== NODE_SUGGESTION && was.attrs[name] !== value)
+		.filter(
+			([name, value]) => name !== NODE_SUGGESTION && !isDeepStrictEqual(was.attrs[name], value),
+		)
 		.map(([name, value]) => ({ at, name, value }));
 
 /**

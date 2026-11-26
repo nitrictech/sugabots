@@ -10,13 +10,22 @@ import {
 	liveDocumentSchema,
 	markdownOfLiveDocument,
 } from "@sugabots/contracts/live-document-markdown";
-import { fitSlideBody, layoutOf, newSlide, placementOf } from "@sugabots/contracts/live-slides";
+import {
+	bodyOf,
+	fitSlideBody,
+	isMarkedRemoved,
+	isOffItsSlide,
+	layoutOf,
+	newSlide,
+	placementOf,
+} from "@sugabots/contracts/live-slides";
 import { SLIDE_LAYOUTS } from "@sugabots/contracts/slides-markdown";
 import type { Node } from "@tiptap/pm/model";
 import { EditorState } from "@tiptap/pm/state";
 import { prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from "@tiptap/y-tiptap";
 import { describe, expect, it } from "vitest";
 import { Doc } from "yjs";
+import { titleOf, withBoxRemoved, withSlidePlaced } from "./slides.test-support.ts";
 import { type ChangeAs, changedTo, markdownForAgents, withoutSuggestions } from "./suggestions.ts";
 
 const document = (text: string) => liveDocumentFromMarkdown("document", text);
@@ -300,7 +309,7 @@ const deck = (text: string) => liveDocumentFromMarkdown("slides", text);
 
 const slides = (...texts: string[]) => texts.join("\n\n---\n\n");
 
-/** The slides, by number from 1, whose frame doesn't hold what their layout says. */
+/** The slides, by number from 1, whose body doesn't hold what their layout says. */
 const unfitted = (node: Node) =>
 	node.children.flatMap((slide, index) => {
 		const body = slide.child(0);
@@ -311,21 +320,11 @@ const unfitted = (node: Node) =>
 const slideMarks = (node: Node) =>
 	node.children.map((slide) => slide.marks.map((mark) => mark.type.name));
 
-/** The words of the slide's first heading: its title, on any layout. */
-function titleOf(slide: Node): string | undefined {
-	let title: string | undefined;
-	slide.descendants((node) => {
-		if (title === undefined && node.type.name === "heading") title = node.textContent;
-		return title === undefined;
-	});
-	return title;
-}
-
 const TITLE = "<!-- layout: title -->\n\n# Launch review";
 const GOALS =
 	"<!-- layout: bullets -->\n\n## Goals\n\n- Ship on Friday\n- Tell support first\n\n<!-- notes: Start with the date. -->";
 const COLUMNS =
-	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- column -->\n\n- People type\n\n<!-- column -->\n\n- Bots suggest";
+	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- box -->\n\n- People type\n\n<!-- box -->\n\n- Bots suggest";
 const QUESTIONS = "<!-- layout: section -->\n\n## Questions";
 
 describe("an agent's suggestion in a deck", () => {
@@ -637,8 +636,8 @@ describe("an agent's change to a deck holding what its markdown can't say", () =
 
 describe("an agent's change to a deck whose boxes somebody placed", () => {
 	const PLACED_GOALS = [
-		{ x: 80, y: 64, w: 800, h: 46 },
-		{ x: 80, y: 142, w: 440, h: 300 },
+		{ x: 80, y: 64, width: 800, height: 46 },
+		{ x: 80, y: 142, width: 440, height: 300 },
 	];
 	/** The deck, the goals' boxes placed by hand, as only a person's editor places them. */
 	const unplaced = deck(slides(TITLE, GOALS, COLUMNS, QUESTIONS));
@@ -713,6 +712,139 @@ describe("an agent's change to a deck whose boxes somebody placed", () => {
 		const kept = undone(after).child(1);
 		expect(layoutOf(kept)).toBe("bullets");
 		expect(placementOf(kept)).toEqual(PLACED_GOALS);
+	});
+});
+
+describe("an agent's change to a deck with a box somebody removed", () => {
+	/** Whether each box of each slide is off it. */
+	const offSlide = (node: Node) =>
+		node.children.map((slide) => bodyOf(slide).children.map(isOffItsSlide));
+
+	/** The deck, the right column of its slide in columns removed. */
+	const live = withBoxRemoved(deck(slides(TITLE, GOALS, COLUMNS, QUESTIONS)), 2, 2);
+	const EVERY_BOX_ON = [
+		[false, false],
+		[false, false],
+		[false, false, false],
+		[false, false],
+	];
+	const RIGHT_COLUMN_OFF = [
+		[false, false],
+		[false, false],
+		[false, false, true],
+		[false, false],
+	];
+
+	it("reads to the agent as markdown in which the removed box is an empty box", () => {
+		expect(offSlide(live)).toEqual(RIGHT_COLUMN_OFF);
+
+		expect(markdownForAgents(live)).toBe(
+			markdownForAgents(
+				deck(
+					slides(
+						TITLE,
+						GOALS,
+						"<!-- layout: columns -->\n\n## People and bots\n\n<!-- box -->\n\n- People type\n\n<!-- box -->",
+						QUESTIONS,
+					),
+				),
+			),
+		);
+	});
+
+	it.each(MADE_OR_SUGGESTED)(
+		"removes no box for a removal the agent writes, which is only words to the deck, %s",
+		(_, as) => {
+			const unremoved = deck(slides(TITLE, GOALS, COLUMNS, QUESTIONS));
+			const removing = markdownForAgents(unremoved).replace("- Bots suggest", "<!-- removed -->");
+
+			const after = accepted(synced(changed(unremoved, removing, as)));
+
+			expect(
+				after.children.flatMap((slide) => bodyOf(slide).children.map(isMarkedRemoved)),
+			).toEqual(Array(9).fill(false));
+			expect(shown(after)).toContain("<!-- removed -->");
+		},
+	);
+
+	it.each(MADE_OR_SUGGESTED)(
+		"keeps the removed box off its slide when the agent changes the words on it, %s, however it is settled",
+		(_, as) => {
+			const after = synced(
+				changed(live, markdownForAgents(live).replace("People type", "People write"), as),
+			);
+
+			for (const settled of [accepted(after), undone(after)]) {
+				expect(offSlide(settled)).toEqual(RIGHT_COLUMN_OFF);
+			}
+			expect(shown(accepted(after))).toContain("People write");
+		},
+	);
+
+	describe("whose boxes somebody placed too", () => {
+		const PLACED_GOALS = [
+			{ x: 80, y: 64, width: 800, height: 46 },
+			{ x: 80, y: 142, width: 440, height: 300 },
+		];
+		/** The deck, the goals' boxes placed and their title removed, as only a person's editor does. */
+		const laidOutByHand = withSlidePlaced(
+			withBoxRemoved(deck(slides(TITLE, GOALS, COLUMNS, QUESTIONS)), 1, 0),
+			1,
+			PLACED_GOALS,
+		);
+		const inColumns = markdownForAgents(laidOutByHand).replace(
+			"layout: bullets",
+			"layout: columns",
+		);
+
+		it("is laid out by the layout an agent gives it, no longer placed and with every box back on it", () => {
+			expect(offSlide(laidOutByHand)[1]).toEqual([true, false]);
+
+			const edited = changed(laidOutByHand, inColumns, "edit");
+
+			const relaidOut = edited.child(1);
+			expect(layoutOf(relaidOut)).toBe("columns");
+			expect(placementOf(relaidOut)).toBeNull();
+			expect(bodyOf(relaidOut).children.map(isMarkedRemoved)).toEqual([false, false, false]);
+		});
+
+		it("is laid out by a layout an agent suggests, every box back on it, once that is accepted, and left as it was if it is undone", () => {
+			const after = synced(suggested(laidOutByHand, inColumns));
+
+			const kept = accepted(after).child(1);
+			expect(layoutOf(kept)).toBe("columns");
+			expect(placementOf(kept)).toBeNull();
+			expect(bodyOf(kept).children.map(isMarkedRemoved)).toEqual([false, false, false]);
+			const dropped = undone(after).child(1);
+			expect(layoutOf(dropped)).toBe("bullets");
+			expect(placementOf(dropped)).toEqual(PLACED_GOALS);
+			expect(bodyOf(dropped).children.map(isOffItsSlide)).toEqual([true, false]);
+		});
+	});
+
+	const writingInIt = markdownForAgents(live).replace(
+		"- People type\n\n<!-- box -->",
+		"- People type\n\n<!-- box -->\n\n- Bots write",
+	);
+
+	it("puts the box back on its slide when the agent writes in it, no longer marked removed", () => {
+		const edited = changed(live, writingInIt, "edit");
+
+		const rightColumn = bodyOf(edited.child(2)).child(2);
+		expect(rightColumn.textContent).toBe("Bots write");
+		expect(isMarkedRemoved(rightColumn)).toBe(false);
+		expect(offSlide(edited)).toEqual(EVERY_BOX_ON);
+	});
+
+	it("shows the box on its slide while the agent's suggestion to write in it waits, and takes it off again if that is undone", () => {
+		const after = synced(suggested(live, writingInIt));
+
+		expect(offSlide(after)).toEqual(EVERY_BOX_ON);
+		expect(shown(after)).toContain("[+Bots write+]");
+		const kept = accepted(after);
+		expect(bodyOf(kept.child(2)).child(2).textContent).toBe("Bots write");
+		expect(isMarkedRemoved(bodyOf(kept.child(2)).child(2))).toBe(false);
+		expect(offSlide(undone(after))).toEqual(RIGHT_COLUMN_OFF);
 	});
 });
 

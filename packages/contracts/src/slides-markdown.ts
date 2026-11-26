@@ -13,7 +13,7 @@
  * from markdown has every box on its slide, where its layout puts it.
  */
 
-/** How a slide is laid out, which says what its frame holds. */
+/** How a slide is laid out, which says what boxes its body holds. */
 export const SLIDE_LAYOUTS = [
 	"title",
 	"bullets",
@@ -30,7 +30,7 @@ export const isSlideLayout = (value: unknown): value is SlideLayout =>
 
 /**
  * The boxes a slide of each layout holds, by what each is for, in the order
- * its frame holds them and its markdown writes them. A box's role is how the
+ * its body holds them and its markdown writes them. A box's role is how the
  * app draws it, what it says while empty, and where a file the deck is saved
  * as puts it. In `image`, the image's box is where an image goes, which
  * nothing enforces; in `section`, the label, such as "Part 2", sits over the
@@ -46,8 +46,11 @@ export const SLIDE_BOX_ROLES = {
 	table: ["title", "table"],
 } as const satisfies Record<SlideLayout, readonly string[]>;
 
-/** What a box on a slide is for, in its slide's layout. */
-export type BoxRole = (typeof SLIDE_BOX_ROLES)[SlideLayout][number];
+/** What a box on a slide of `L` is for: one of the roles `SLIDE_BOX_ROLES` gives that layout. */
+export type BoxRoleOf<L extends SlideLayout> = (typeof SLIDE_BOX_ROLES)[L][number];
+
+/** What a box on a slide is for, in its slide's layout, whichever layout that is. */
+export type BoxRole = BoxRoleOf<SlideLayout>;
 
 /** What goes between two slides, with a blank line on either side. */
 export const SLIDE_SEPARATOR = "---";
@@ -59,6 +62,33 @@ export const layoutComment = (layout: SlideLayout) => `<!-- layout: ${layout} --
 export const BOX_COMMENT = "<!-- box -->";
 
 /*
+ * A slide's size and the margins its layouts keep, in a slide's pixels, which
+ * its boxes are placed in: the pixels of the slide drawn `SLIDE_WIDTH` pixels
+ * wide.
+ */
+
+/** The unit the slide styles size everything in, a 60th of a slide's width, in a slide's pixels. */
+export const SLIDE_UNIT = 16;
+
+/** A slide's size in its pixels: 60 units across and 33.75 down, 16:9. */
+export const SLIDE_WIDTH = 60 * SLIDE_UNIT;
+export const SLIDE_HEIGHT = 33.75 * SLIDE_UNIT;
+
+/** The margin every layout keeps inside a slide at its top and at its foot, in a slide's pixels. */
+export const SLIDE_END_MARGIN = 4 * SLIDE_UNIT;
+
+/** The margin each layout keeps inside a slide at its left and at its right, in a slide's pixels. */
+export const SLIDE_SIDE_MARGINS: Readonly<Record<SlideLayout, number>> = {
+	title: 5 * SLIDE_UNIT,
+	bullets: 5 * SLIDE_UNIT,
+	columns: 5 * SLIDE_UNIT,
+	image: 5 * SLIDE_UNIT,
+	section: 5 * SLIDE_UNIT,
+	quote: 7 * SLIDE_UNIT,
+	table: 5 * SLIDE_UNIT,
+};
+
+/*
  * Where a slide's boxes are, when somebody placed them by hand rather than
  * leaving them to its layout. A slide is placed whole or not at all: a frame
  * for each of its boxes, or none, so a slide can't hold some boxes placed and
@@ -66,31 +96,26 @@ export const BOX_COMMENT = "<!-- box -->";
  */
 
 /**
- * A slide's size in the unit its boxes are placed in: a pixel of a slide
- * drawn 960 pixels wide, on which the unit the slide styles size everything
- * in is 16.
+ * The least a placed box may be across or down, in a slide's pixels: a unit,
+ * so no box is kept out of sight. A placement holding a smaller box is no
+ * placement (`placementIn`).
  */
-export const SLIDE_WIDTH = 960;
-export const SLIDE_HEIGHT = 540;
+const SMALLEST_PLACED_SIDE = SLIDE_UNIT;
 
 /**
- * The margin every layout keeps inside a slide at its top and at its foot, in
- * a slide's pixels: four units of the slide styles.
+ * The least a person may make a box across and down by hand, in a slide's
+ * pixels: room for a short word of the smallest text. It is more than a
+ * placement needs (`SMALLEST_PLACED_SIDE`), so a box a placement holds may be
+ * smaller than this.
  */
-export const SLIDE_END_MARGIN = 64;
-
-/**
- * The least a box may be placed across or down, in a slide's pixels: one
- * unit of the slide styles, so a box can't be shrunk out of sight.
- */
-const SMALLEST_FRAME = 16;
+export const SMALLEST_BOX_BY_HAND = { width: 3 * SLIDE_UNIT, height: 1.5 * SLIDE_UNIT } as const;
 
 /** Where a box sits on its slide: its left, top, width and height, in a slide's whole pixels. */
 export interface Frame {
 	x: number;
 	y: number;
-	w: number;
-	h: number;
+	width: number;
+	height: number;
 }
 
 declare const placementParsed: unique symbol;
@@ -105,9 +130,9 @@ export type Placement = readonly Frame[] & { readonly [placementParsed]: true };
 /**
  * `value` as the placement of a slide of `layout`: `null` unless it is a
  * frame for each of the layout's boxes, each in whole pixels, at least
- * `SMALLEST_FRAME` across and down, and within the slide. What a slide holds
- * comes from people's editors and from markdown bots write, so it is read
- * through this, never taken as it is.
+ * `SMALLEST_PLACED_SIDE` across and down, and within the slide. What a slide
+ * holds comes from people's editors and from markdown bots write, so it is
+ * read through this, never taken as it is.
  */
 export function placementIn(value: unknown, layout: SlideLayout): Placement | null {
 	if (!Array.isArray(value) || value.length !== SLIDE_BOX_ROLES[layout].length) return null;
@@ -117,18 +142,18 @@ export function placementIn(value: unknown, layout: SlideLayout): Placement | nu
 
 function isFrame(value: unknown): value is Frame {
 	if (typeof value !== "object" || value === null) return false;
-	const { x, y, w, h } = value as Partial<Record<keyof Frame, unknown>>;
+	const { x, y, width, height } = value as Partial<Record<keyof Frame, unknown>>;
 	return (
 		isWhole(x) &&
 		isWhole(y) &&
-		isWhole(w) &&
-		isWhole(h) &&
+		isWhole(width) &&
+		isWhole(height) &&
 		x >= 0 &&
 		y >= 0 &&
-		w >= SMALLEST_FRAME &&
-		h >= SMALLEST_FRAME &&
-		x + w <= SLIDE_WIDTH &&
-		y + h <= SLIDE_HEIGHT
+		width >= SMALLEST_PLACED_SIDE &&
+		height >= SMALLEST_PLACED_SIDE &&
+		x + width <= SLIDE_WIDTH &&
+		y + height <= SLIDE_HEIGHT
 	);
 }
 
@@ -159,26 +184,26 @@ export function roomBottom(
 		.filter((other, index) => shown[index] && other.y > frame.y && shareWidth(other, frame))
 		.map(({ y }) => y);
 	const end = topsBelow.length > 0 ? Math.min(...topsBelow) : SLIDE_HEIGHT - SLIDE_END_MARGIN;
-	return Math.max(frame.y + frame.h, end);
+	return Math.max(frame.y + frame.height, end);
 }
 
 /** Whether `one` and `other` share some of a slide's width, so a line down the slide would cross both. */
 const shareWidth = (one: Frame, other: Frame) =>
-	one.x < other.x + other.w && other.x < one.x + one.w;
+	one.x < other.x + other.width && other.x < one.x + one.width;
 
 /**
  * A placement as a drawn slide says it (`data-placement`), which a slide
- * copied from the editor and pasted keeps: each frame's `x y w h`, a `;`
- * between each two.
+ * copied from the editor and pasted keeps: each frame's left, top, width and
+ * height, a space between each two, and a `;` between each two frames.
  */
 export const placementText = (placement: Placement) =>
-	placement.map(({ x, y, w, h }) => `${x} ${y} ${w} ${h}`).join("; ");
+	placement.map(({ x, y, width, height }) => `${x} ${y} ${width} ${height}`).join("; ");
 
 /** The placement `text` says, as `placementText` writes one, for a slide of `layout`: `null` when it says none whole. */
 export function placementFromText(text: string, layout: SlideLayout): Placement | null {
 	const frames = text.split(";").map((frame) => {
-		const [x, y, w, h, ...more] = frame.trim().split(/\s+/).map(wholeNumber);
-		return more.length === 0 ? { x, y, w, h } : undefined;
+		const [x, y, width, height, ...more] = frame.trim().split(/\s+/).map(wholeNumber);
+		return more.length === 0 ? { x, y, width, height } : undefined;
 	});
 	return placementIn(frames, layout);
 }
@@ -230,21 +255,14 @@ export function readSlideComments(
 /** An HTML comment at the start of some text, with what it says. */
 const COMMENT = /^\s*<!--([\s\S]*?)-->/;
 
-/**
- * What a comment says, when it is one of a deck's: forgiving of case and a
- * missing colon. Decks written before slides held boxes started each of a
- * slide's two columns with `<!-- column -->`, and bots still may, or with
- * `<!-- columns -->`, so either starts a box.
- */
+/** What a comment says, when it is one of a deck's: forgiving of case and a missing colon. */
 function slideComment(said: string): SlideComment | undefined {
 	const [, keyword, value = ""] =
-		/^\s*(layout|box|columns?|notes)\b\s*:?\s*([\s\S]*?)\s*$/i.exec(said) ?? [];
+		/^\s*(layout|box|notes)\b\s*:?\s*([\s\S]*?)\s*$/i.exec(said) ?? [];
 	switch (keyword?.toLowerCase()) {
 		case "layout":
 			return { kind: "layout", layout: value.toLowerCase() };
 		case "box":
-		case "column":
-		case "columns":
 			return { kind: "box" };
 		case "notes":
 			return { kind: "notes", markdown: notesInComment(value) };

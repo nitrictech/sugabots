@@ -170,13 +170,13 @@ export function EditorOverlays({
 		const element = page.current;
 		if (!element) return;
 		const { from } = editor.state.selection;
-		const frame = element.getBoundingClientRect();
+		const pageArea = element.getBoundingClientRect();
 		const line = editor.view.coordsAtPos(from);
 		const roomAcross = element.clientWidth - ASK_BOX_WIDTH_PX - ASK_BOX_MARGIN_PX;
 		onAskingChange({
 			...askedAbout(editor.state.doc, { from, to: from }),
-			top: line.bottom - frame.top + element.scrollTop + EDIT_OFFER_GAP_PX,
-			left: Math.max(ASK_BOX_MARGIN_PX, Math.min(line.left - frame.left, roomAcross)),
+			top: line.bottom - pageArea.top + element.scrollTop + EDIT_OFFER_GAP_PX,
+			left: Math.max(ASK_BOX_MARGIN_PX, Math.min(line.left - pageArea.left, roomAcross)),
 		});
 	}
 	function stopAsking() {
@@ -635,18 +635,18 @@ function useSelectionMenu(
 		const element = page.current;
 		if (held) return;
 		if (!element || !selected || dragging || !offered) return setOffer(undefined);
-		const frame = element.getBoundingClientRect();
+		const pageArea = element.getBoundingClientRect();
 		const [start, end] = [
 			editor.view.coordsAtPos(selected.from),
 			editor.view.coordsAtPos(selected.to),
 		];
 		// Scrolled out of sight, the selection has nowhere to show a menu.
-		if (start.top < frame.top || start.top > frame.bottom) return setOffer(undefined);
+		if (start.top < pageArea.top || start.top > pageArea.bottom) return setOffer(undefined);
 		setOffer({
 			selected,
 			menu: { top: start.top - MENU_GAP_PX, left: start.left },
-			below: end.bottom - frame.top + element.scrollTop + EDIT_OFFER_GAP_PX,
-			left: start.left - frame.left,
+			below: end.bottom - pageArea.top + element.scrollTop + EDIT_OFFER_GAP_PX,
+			left: start.left - pageArea.left,
 		});
 	}, [editor, page, selected, dragging, offered, held]);
 	useLayoutEffect(place, [place]);

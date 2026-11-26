@@ -80,17 +80,16 @@ export function dispatchAsOneChange(editor: Editor, change: Transaction, name: s
 		return;
 	}
 	const id = suggestionId(uuidv4(), { kind: "person", name });
-	const suggested = transformToSuggestionTransaction(change, state, () => id);
-	// Already a suggestion, which `suggestingAs` passes on as it is.
-	view.dispatch(suggested.setMeta(suggestChangesKey, { skip: true }));
+	view.dispatch(madeAsItIs(transformToSuggestionTransaction(change, state, () => id)));
 }
 
 /**
- * `transaction`, marked to be made as it is, never as a suggestion, even
- * while the person is suggesting: for what nobody accepts or rejects, as
- * where a slide's boxes sit.
+ * `transaction`, marked to be made as it is, even while the person is
+ * suggesting, rather than turned into a suggestion (see `suggestingAs`): for
+ * what nobody accepts or rejects, as where a slide's boxes sit, and for a
+ * change made into one suggestion already.
  */
-export const neverSuggested = (transaction: Transaction): Transaction =>
+export const madeAsItIs = (transaction: Transaction): Transaction =>
 	transaction.setMeta(suggestChangesKey, { skip: true });
 
 /**

@@ -1,17 +1,12 @@
 import type { Artifact, ArtifactImageType } from "@sugabots/contracts";
 import type { ArtifactImageIds } from "@sugabots/contracts/http";
+import { SLIDE_HEIGHT, SLIDE_WIDTH } from "@sugabots/contracts/slides-markdown";
 import type { Node } from "@tiptap/pm/model";
 import { Clock, Effect } from "effect";
 import { imageSize } from "image-size";
 import PDFDocument from "pdfkit";
 import { piecesIn, type Typesetter, typesetterOn, widthOfSpaces } from "./pdf-fonts.ts";
-import {
-	BACKGROUND,
-	type DeckImage,
-	ownImagesIn,
-	SLIDE_HEIGHT,
-	SLIDE_WIDTH,
-} from "./slide-design.ts";
+import { BACKGROUND, type DeckImage, ownImagesIn } from "./slide-design.ts";
 import { arrangedSlide, type Box, type Measure, type Pen, type Size } from "./slide-layout.ts";
 
 /** The media type of a PDF. */
@@ -26,8 +21,8 @@ export const PDF_CONTENT_TYPE = "application/pdf";
  * holds as much of as it draws (`pdf-fonts.ts`), and a slide's text is drawn
  * at the largest of the app's steps at which it fits, as in the app
  * (`slide-layout.ts`); what runs over even at the smallest is cut off where
- * the app cuts it off, at the padding, or at the slide's edges once its boxes
- * are placed by hand. A link to an absolute address can be followed. An
+ * the app cuts it off, at the margin at its foot, or at the slide's edges once
+ * its boxes are placed by hand. A link to an absolute address can be followed. An
  * image the deck keeps is drawn when it is a PNG or a JPEG PDFKit can read
  * and hold, within the pixels a deck may have unpacked to draw it
  * (`drawnImagesIn`); any other image is its words in a dashed box, as the app

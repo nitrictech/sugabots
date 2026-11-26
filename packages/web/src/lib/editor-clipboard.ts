@@ -27,16 +27,18 @@ export interface ClipboardContent {
 	text: string;
 }
 
+/** How a paste takes what the clipboard holds: with its formatting, or as its text alone. */
+export type PasteForm = "formatted" | "plainText";
+
 /**
- * Reads the clipboard, with its formatting or as text alone. Rejects where the
- * browser can't read it from a page, or when the person, asked to allow it,
- * doesn't.
+ * Reads the clipboard, for a paste in `form`. Rejects where the browser can't
+ * read it from a page, or when the person, asked to allow it, doesn't.
  */
-export async function readClipboard(withFormatting: boolean): Promise<ClipboardContent> {
-	if (!withFormatting) return { html: "", text: await navigator.clipboard.readText() };
-	// As copied, the HTML is what a paste from the keyboard gets. Chrome otherwise hands over a copy
-	// it has rewritten with styles of its own, which the editor would read as formatting. The editor
-	// only ever parses it into its own content, as it does a keyboard paste's.
+export async function readClipboard(form: PasteForm): Promise<ClipboardContent> {
+	if (form === "plainText") return { html: "", text: await navigator.clipboard.readText() };
+	// As copied, the HTML is what a paste from the keyboard gets. A browser may otherwise hand over a
+	// copy it has rewritten with styles of its own, which the editor would read as formatting. The
+	// editor only ever parses it into its own content, as it does a keyboard paste's.
 	const items = await navigator.clipboard.read({ unsanitized: [HTML] });
 	return { html: await contentOf(items, HTML), text: await contentOf(items, TEXT) };
 }

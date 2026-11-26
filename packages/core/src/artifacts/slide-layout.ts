@@ -1,10 +1,15 @@
-import { layoutOf, placementOf, SLIDE_TEXT_STEPS } from "@sugabots/contracts/live-slides";
+import { placementOf, SLIDE_TEXT_STEPS } from "@sugabots/contracts/live-slides";
 import {
 	type BoxRole,
 	type Frame,
 	type Placement,
 	roomBottom,
 	SLIDE_BOX_ROLES,
+	SLIDE_END_MARGIN,
+	SLIDE_HEIGHT,
+	SLIDE_SIDE_MARGINS,
+	SLIDE_UNIT,
+	SLIDE_WIDTH,
 	type SlideLayout,
 } from "@sugabots/contracts/slides-markdown";
 import type { Mark, Node } from "@tiptap/pm/model";
@@ -13,13 +18,14 @@ import {
 	ACCENT,
 	accentBarOver,
 	BLOCK_QUOTE_LOOK,
+	type BlocksOfLayout,
 	BOX_PARTS,
 	CODE_LOOK,
 	COLUMN_GAP_UNITS,
 	COLUMN_LOOK,
 	CONTENT_BOTTOM,
-	CONTENT_WIDTH,
-	EM,
+	CONTENT_HEIGHT,
+	contentWidthOf,
 	HIGHLIGHT,
 	IMAGE_LAYOUT,
 	IMAGE_RADIUS,
@@ -29,17 +35,12 @@ import {
 	LINK_UNDERLINE_OFFSET,
 	LIST_LOOK,
 	linkInFile,
-	PADDING_X,
-	PADDING_Y,
 	partLook,
 	QUOTE_LOOK,
-	QUOTE_PADDING_UNITS,
 	RULE,
 	RULE_THICKNESS,
 	SCRIPT,
 	SECTION_BAR,
-	SLIDE_HEIGHT,
-	SLIDE_WIDTH,
 	type SlideBlocks,
 	type SlidePart,
 	slideBlocksOf,
@@ -62,7 +63,7 @@ import {
  * was laid out, so a slide's text can be laid out again at a smaller step
  * before anything is drawn, and measured without being drawn at all.
  *
- * A slide is cut off at the foot of its padding, or, once its boxes are
+ * A slide is cut off at the margin at its foot, or, once its boxes are
  * placed by hand, at its edges, as the app cuts each off; the pen cuts off
  * what is drawn past that (`Pen.clipped`). What is stacked one thing under
  * another leaves out what starts where it is cut off (`stacked`), numbers,
@@ -172,17 +173,14 @@ export interface ArrangedSlide {
 	draw: (pen: Pen) => void;
 }
 
-/** The height within a slide's padding. */
-const CONTENT_HEIGHT = SLIDE_HEIGHT - 2 * PADDING_Y;
-
 /** How far past the room it has a slide's content may reach and still fit, as the app allows a pixel for rounding. */
 const FIT_ALLOWANCE = 1;
 
-/** The room a slide's content has, from the top of its padding. */
+/** The room a slide's content has, from the margin at its top. */
 const SLIDE_ROOM = CONTENT_HEIGHT + FIT_ALLOWANCE;
 
-/** Where a slide its layout places is cut off: at the foot of its padding. */
-const WITHIN_PADDING: Box = { x: 0, y: 0, width: SLIDE_WIDTH, height: CONTENT_BOTTOM };
+/** Where a slide its layout places is cut off: at the margin at its foot. */
+const WITHIN_MARGINS: Box = { x: 0, y: 0, width: SLIDE_WIDTH, height: CONTENT_BOTTOM };
 
 /** Where a slide whose boxes were placed by hand is cut off: at its edges. */
 const WHOLE_SLIDE: Box = { x: 0, y: 0, width: SLIDE_WIDTH, height: SLIDE_HEIGHT };
@@ -193,14 +191,13 @@ const WHOLE_SLIDE: Box = { x: 0, y: 0, width: SLIDE_WIDTH, height: SLIDE_HEIGHT 
  * frame (`placedBoxes`).
  */
 export function arrangedSlide(slide: Node, measure: Measure): ArrangedSlide {
-	const layout = layoutOf(slide);
 	const blocks = slideBlocksOf(slide);
 	const placement = placementOf(slide);
-	const cutOffAt = placement ? WHOLE_SLIDE : WITHIN_PADDING;
+	const cutOffAt = placement ? WHOLE_SLIDE : WITHIN_MARGINS;
 	const atStep = (step: number): ArrangedSlide => {
 		const { fits, draw } = placement
-			? placedBoxes(layout, blocks, placement, measure, step)
-			: arranged(layout, blocks, measure, step * EM);
+			? placedBoxes(blocks, placement, measure, step)
+			: arranged(blocks, measure, step * SLIDE_UNIT);
 		return { step, fits, draw: (pen) => pen.clipped(cutOffAt, () => draw(pen)) };
 	};
 	const [largest, ...smaller] = SLIDE_TEXT_STEPS;
@@ -257,7 +254,7 @@ export function rowHeightsOf(table: Node, placing: Placing, measure: Measure): n
 
 /** What blocks set as `placing` says inherit. */
 function settingOf(placing: Placing, measure: Measure): Setting {
-	const setting = settingIn(placing.layout, placing.part, measure, placing.step * EM);
+	const setting = settingIn(placing.layout, placing.part, measure, placing.step * SLIDE_UNIT);
 	if (placing.boxHeight === undefined) return setting;
 	return { ...setting, imageMaxHeight: Math.min(setting.imageMaxHeight, placing.boxHeight) };
 }
@@ -279,28 +276,27 @@ function settingIn(layout: SlideLayout, part: SlidePart, measure: Measure, unit:
 		balancedHeadings: layout === "title" || layout === "image",
 		balancedText: false,
 		quoteLayout: layout === "quote",
-		imageMaxHeight: imageColumn ? IMAGE_LAYOUT.imageMaxHeight * EM : Number.POSITIVE_INFINITY,
+		imageMaxHeight: imageColumn
+			? IMAGE_LAYOUT.imageMaxHeight * SLIDE_UNIT
+			: Number.POSITIVE_INFINITY,
 		imageRadius: imageColumn ? IMAGE_LAYOUT.imageRadius : IMAGE_RADIUS,
 	};
 }
 
 const REGULAR = 400;
 
-/** A slide laid out: whether it fits within its padding, and drawing it. */
+/** A slide laid out: whether it fits within its margins, and drawing it. */
 interface Arrangement {
 	fits: boolean;
 	draw: (pen: Pen) => void;
 }
 
-function arranged(
-	layout: SlideLayout,
-	blocks: SlideBlocks,
-	measure: Measure,
-	unit: number,
-): Arrangement {
+/** `blocks`, a slide's, laid out by the slide's layout, the slide's unit at its text's step being `unit`. */
+function arranged(blocks: SlideBlocks, measure: Measure, unit: number): Arrangement {
+	const { layout } = blocks;
 	const look = LAYOUT_LOOKS[layout];
 	const setting = settingIn(layout, "flow", measure, unit);
-	switch (layout) {
+	switch (blocks.layout) {
 		case "columns":
 			return inColumns(blocks, setting, settingIn(layout, "column", measure, unit));
 		case "image":
@@ -310,32 +306,33 @@ function arranged(
 				settingIn(layout, "imageText", measure, unit),
 				settingIn(layout, "imageColumn", measure, unit),
 			);
-		case "quote":
-			return inFlow(blocks.all, setting, look, QUOTE_PADDING_UNITS * EM);
 		case "section":
 			return inFlow(
 				blocks.all,
 				setting,
 				look,
-				PADDING_X,
+				SLIDE_SIDE_MARGINS[layout],
 				blocks.shows("label") ? sectionBar(setting) : undefined,
 			);
 		default:
-			return inFlow(blocks.all, setting, look, PADDING_X);
+			return inFlow(blocks.all, setting, look, SLIDE_SIDE_MARGINS[layout]);
 	}
 }
 
 const fitsSlide = (height: number) => height <= SLIDE_ROOM;
 
-/** Blocks one under another, as far apart as `look` sets them, where it sets them, after `first`. */
+/**
+ * Blocks one under another within `sideMargin` at either side, as far apart
+ * as `look` sets them, where it sets them, after `first`.
+ */
 function inFlow(
 	blocks: readonly Node[],
 	setting: Setting,
 	look: LayoutLook,
-	paddingX: number,
+	sideMargin: number,
 	first?: Laid,
 ): Arrangement {
-	const width = SLIDE_WIDTH - 2 * paddingX;
+	const width = SLIDE_WIDTH - 2 * sideMargin;
 	const laid = stackedWithin(
 		[
 			...(first ? [() => first] : []),
@@ -351,25 +348,29 @@ function inFlow(
 	const fits = fitsSlide(laid.height);
 	const room = CONTENT_HEIGHT - laid.height;
 	const offset = !fits ? 0 : look.align === "center" ? room / 2 : look.align === "end" ? room : 0;
-	return { fits, draw: (pen) => laid.draw(pen, paddingX, PADDING_Y + offset) };
+	return { fits, draw: (pen) => laid.draw(pen, sideMargin, SLIDE_END_MARGIN + offset) };
 }
 
 /** The title across the top, and the two columns side by side under it. */
-function inColumns(blocks: SlideBlocks, setting: Setting, columnSetting: Setting): Arrangement {
+function inColumns(
+	blocks: BlocksOfLayout<"columns">,
+	setting: Setting,
+	columnSetting: Setting,
+): Arrangement {
 	const gap = COLUMN_GAP_UNITS * setting.unit;
-	const columnWidth = (CONTENT_WIDTH - gap) / 2;
+	const width = contentWidthOf("columns");
+	const columnWidth = (width - gap) / 2;
 	const across = blocks.inBox("title").map(
 		(block): LayOut =>
 			(room) =>
-				laidBlock(block, setting, CONTENT_WIDTH, room),
+				laidBlock(block, setting, width, room),
 	);
 	const columns: LayOut = (room) => {
-		const [left, right] = [blocks.inBox("leftColumn"), blocks.inBox("rightColumn")].map((column) =>
-			laidColumn(column, columnSetting, columnWidth, room),
-		) as [Laid, Laid];
+		const left = laidColumn(blocks.inBox("leftColumn"), columnSetting, columnWidth, room);
+		const right = laidColumn(blocks.inBox("rightColumn"), columnSetting, columnWidth, room);
 		return {
 			height: Math.max(left.height, right.height),
-			width: CONTENT_WIDTH,
+			width,
 			baseline: undefined,
 			draw: (pen, x, y) => {
 				left.draw(pen, x, y);
@@ -384,22 +385,23 @@ function inColumns(blocks: SlideBlocks, setting: Setting, columnSetting: Setting
 	);
 	return {
 		fits: fitsSlide(laid.height),
-		draw: (pen) => laid.draw(pen, PADDING_X, PADDING_Y),
+		draw: (pen) => laid.draw(pen, SLIDE_SIDE_MARGINS.columns, SLIDE_END_MARGIN),
 	};
 }
 
 /**
- * The title, and the text under it, together in the middle of the left, and
- * the image's box in the middle of the right.
+ * The title, and the text box under it, together in the middle of the left,
+ * and the image box in the middle of the right.
  */
 function besideImage(
-	blocks: SlideBlocks,
+	blocks: BlocksOfLayout<"image">,
 	setting: Setting,
 	textSetting: Setting,
 	imageSetting: Setting,
 ): Arrangement {
 	const gap = COLUMN_GAP_UNITS * setting.unit;
-	const columnWidth = (CONTENT_WIDTH - gap) / 2;
+	const sideMargin = SLIDE_SIDE_MARGINS.image;
+	const columnWidth = (contentWidthOf("image") - gap) / 2;
 	const heads = blocks.inBox("title");
 	const head = stackedWithin(
 		heads.map(
@@ -423,10 +425,14 @@ function besideImage(
 	return {
 		fits: fitsSlide(Math.max(leftHeight, image.height)),
 		draw: (pen) => {
-			const leftTop = PADDING_Y + (height - leftHeight) / 2;
-			head.draw(pen, PADDING_X, leftTop);
-			text.draw(pen, PADDING_X, leftTop + head.height + titleGap);
-			image.draw(pen, PADDING_X + columnWidth + gap, PADDING_Y + (height - image.height) / 2);
+			const leftTop = SLIDE_END_MARGIN + (height - leftHeight) / 2;
+			head.draw(pen, sideMargin, leftTop);
+			text.draw(pen, sideMargin, leftTop + head.height + titleGap);
+			image.draw(
+				pen,
+				sideMargin + columnWidth + gap,
+				SLIDE_END_MARGIN + (height - image.height) / 2,
+			);
 		},
 	};
 }
@@ -453,23 +459,23 @@ function laidColumn(
 /**
  * A slide whose boxes somebody placed by hand, its text at `step`: each box
  * it shows at its frame (`placedBox`), and nothing else, whatever its
- * layout's padding, as the app draws a placed slide. It fits when what each
+ * layout's margins, as the app draws a placed slide. It fits when what each
  * box holds ends no lower than the room the box has on the slide
  * (`roomBottom`), give or take the pixel the app allows, as the app fits it.
  */
 function placedBoxes(
-	layout: SlideLayout,
 	blocks: SlideBlocks,
 	placement: Placement,
 	measure: Measure,
 	step: number,
 ): Arrangement {
-	const roles: readonly BoxRole[] = SLIDE_BOX_ROLES[layout];
-	const shown = roles.map((role) => blocks.shows(role));
+	const roles: readonly BoxRole[] = SLIDE_BOX_ROLES[blocks.layout];
+	const shown = roles.map((_, index) => blocks.boxes[index] !== undefined);
 	const boxes = roles.flatMap((role, index) => {
 		const frame = placement[index];
-		if (!frame || !shown[index]) return [];
-		const box = placedBox(layout, role, blocks.inBox(role), frame, measure, step);
+		const held = blocks.boxes[index];
+		if (!frame || !held) return [];
+		const box = placedBox(blocks.layout, role, held, frame, measure, step);
 		return [{ ...box, fits: box.bottom <= roomBottom(placement, shown, index) + FIT_ALLOWANCE }];
 	});
 	return {
@@ -498,7 +504,7 @@ function placedBox(
 	step: number,
 ): { bottom: number; draw: (pen: Pen) => void } {
 	const setting = settingOf(
-		{ layout, part: BOX_PARTS[role], step, width: frame.w, boxHeight: frame.h },
+		{ layout, part: BOX_PARTS[role], step, width: frame.width, boxHeight: frame.height },
 		measure,
 	);
 	const centred = role === "image";
@@ -507,14 +513,14 @@ function placedBox(
 		blocks.map(
 			(block): LayOut =>
 				(room) =>
-					laidBlock(block, setting, frame.w, room),
+					laidBlock(block, setting, frame.width, room),
 		),
 		boxGap(layout, role) * setting.unit,
 		// Centred, what is taller than the frame reaches below it by half as much as it is taller.
-		centred ? 2 * shownBelowTop - frame.h : shownBelowTop,
-		centred ? frame.w : undefined,
+		centred ? 2 * shownBelowTop - frame.height : shownBelowTop,
+		centred ? frame.width : undefined,
 	);
-	const top = centred ? frame.y + (frame.h - laid.height) / 2 : frame.y;
+	const top = centred ? frame.y + (frame.height - laid.height) / 2 : frame.y;
 	const bar = role === "label" ? sectionBar(setting) : undefined;
 	return {
 		bottom: top + laid.height,
