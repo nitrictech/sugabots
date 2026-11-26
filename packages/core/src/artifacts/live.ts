@@ -34,7 +34,7 @@ import { BlobStore } from "../blob-store/blob-store.ts";
 import { Database, query } from "../database/database.ts";
 import { artifact } from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
-import { type Blocked, changedTo, markdownWithoutSuggestions } from "./suggestions.ts";
+import { type Blocked, changedTo, markdownForAgents, withoutSuggestions } from "./suggestions.ts";
 
 /**
  * A `document` or `slides` artifact while it is being edited: one copy held
@@ -49,7 +49,8 @@ import { type Blocked, changedTo, markdownWithoutSuggestions } from "./suggestio
  *
  * A document becomes live the first time a person opens it, and stays live:
  * its state is kept in the blob store beside its versions, and from then on
- * the versions are snapshots of it.
+ * the versions are snapshots of it as agents read it, in markdown, which says
+ * nothing of where people placed a deck's boxes or which boxes they removed.
  */
 export interface Interface {
 	/**
@@ -65,20 +66,31 @@ export interface Interface {
 		outgoing: Outgoing,
 	) => Effect.Effect<Participant>;
 	/**
-	 * The live document of the artifact `artifactId` as markdown, without the
-	 * suggestions pending in it, or `undefined` if it has none: it has never
-	 * been opened live, or it isn't of a kind people edit live.
+	 * The live document of the artifact `artifactId` as an agent reads it: as
+	 * markdown, without the suggestions pending in it, which says nothing of
+	 * where people placed a deck's boxes or which boxes they removed.
+	 * `undefined` if it has none: it has never been opened live, or it isn't
+	 * of a kind people edit live.
 	 */
-	readonly markdown: (artifactId: string) => Effect.Effect<string | undefined>;
+	readonly markdownForAgents: (artifactId: string) => Effect.Effect<string | undefined>;
+	/**
+	 * The live document of the artifact `artifactId` as people see it until
+	 * somebody accepts a suggestion pending in it: with a deck's boxes where
+	 * people placed them, and those they removed off their slides, as a file
+	 * the deck is saved as draws them. Never for an agent, which may neither
+	 * read nor set either (see `markdownForAgents`). `undefined` when it has
+	 * none, as for `markdownForAgents`.
+	 */
+	readonly documentAsShown: (artifactId: string) => Effect.Effect<Node | undefined>;
 	/**
 	 * Changes the live document of the artifact `artifactId` as `change` asks,
 	 * showing `author` to the people in it: `change` is given the document as
-	 * `markdown` gives it, and returns that markdown changed. Only what it
-	 * changed is written. Every block it left as it was stays as the document
-	 * holds it, even where markdown can't say all of that, and what people are
-	 * typing elsewhere is kept. A `change` returning `undefined` changes
-	 * nothing. `undefined` if the artifact has no live document, as for
-	 * `markdown`.
+	 * `markdownForAgents` gives it, and returns that markdown changed. Only
+	 * what it changed is written. Every block it left as it was stays as the
+	 * document holds it, even where markdown can't say all of that, and what
+	 * people are typing elsewhere is kept. A `change` returning `undefined`
+	 * changes nothing. `undefined` if the artifact has no live document, as
+	 * for `markdownForAgents`.
 	 *
 	 * A change the agent makes in a thread somebody started by asking for an
 	 * edit from inside the document is not made: it is shown to the people in
@@ -240,11 +252,20 @@ export const make = Effect.gen(function* () {
 				};
 			}),
 
-		markdown: (artifactId) =>
+		markdownForAgents: (artifactId) =>
 			Effect.gen(function* () {
 				const kind = yield* openedKindOf(artifactId);
 				if (kind === undefined) return undefined;
 				return yield* withDocument(artifactId, (document) => toMarkdown(document, kind));
+			}),
+
+		documentAsShown: (artifactId) =>
+			Effect.gen(function* () {
+				const kind = yield* openedKindOf(artifactId);
+				if (kind === undefined) return undefined;
+				return yield* withDocument(artifactId, (document) =>
+					withoutSuggestions(read(document, kind).content),
+				);
 			}),
 
 		rewrite: (artifactId, author, change) =>
@@ -254,7 +275,7 @@ export const make = Effect.gen(function* () {
 				const unique = yield* ids.next;
 				const rewritten = yield* withDocument(artifactId, (document): Rewritten => {
 					const { content, unreadable } = read(document, kind);
-					const markdown = markdownWithoutSuggestions(content);
+					const markdown = markdownForAgents(content);
 					const wanted = change(markdown);
 					if (wanted === undefined) return { markdown, outcome: "unchanged" };
 					// Writing what could be read back would write over what could not.
@@ -399,9 +420,12 @@ function sizeOf(shared: XmlFragment | XmlElement): { blocks: number; text: numbe
 	return { blocks, text };
 }
 
-/** The document as it reads until someone accepts a suggestion pending in it, as far as it can be read. */
+/**
+ * The document as an agent reads it (`markdownForAgents`), as far as it can be
+ * read: as it reads until someone accepts a suggestion pending in it.
+ */
 const toMarkdown = (document: Document, kind: LiveArtifactKind) =>
-	markdownWithoutSuggestions(read(document, kind).content);
+	markdownForAgents(read(document, kind).content);
 
 /** Beside the artifact's versions, so it is deleted with them. */
 const stateKey = (artifactId: string) => BlobStore.key("artifacts", artifactId, "live");

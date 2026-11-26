@@ -31,10 +31,10 @@ import {
 	Deck,
 	SLIDE,
 	SLIDE_BODY,
-	SLIDE_COLUMN,
+	SLIDE_BOX,
 	Slide,
 	SlideBody,
-	SlideColumn,
+	SlideBox,
 	SPEAKER_NOTES,
 	SpeakerNotes,
 	slideMarkdownReaders,
@@ -124,7 +124,7 @@ export const NODE_SUGGESTION = "suggestion";
 const NODES_SUGGESTED_WHOLE = [
 	SLIDE,
 	SLIDE_BODY,
-	SLIDE_COLUMN,
+	SLIDE_BOX,
 	SPEAKER_NOTES,
 	"paragraph",
 	"heading",
@@ -163,7 +163,7 @@ export const saysNodeSuggestion = (node: Node) => !node.isText && NODE_SUGGESTIO
 /**
  * Whether a suggestion waits on `node` itself or on anything in it. A slide
  * holding one keeps its layout, whoever would change it, in the editor or
- * through the API: a new layout replaces the blocks it moves, and a
+ * through the API: a new layout replaces the boxes it changes, and a
  * suggestion in one of them would be lost.
  */
 export function holdsSuggestion(node: Node): boolean {
@@ -268,7 +268,7 @@ const blocksHoldingBlocks = [
 const KIND_NODES: Record<LiveArtifactKind, Extensions> = {
 	document: [Document.extend(SUGGESTIONS_ON_CHILDREN)],
 	slides: [
-		...[Deck, Slide, SlideBody, SlideColumn, SpeakerNotes].map((node) =>
+		...[Deck, Slide, SlideBody, SlideBox, SpeakerNotes].map((node) =>
 			node.extend(SUGGESTIONS_ON_CHILDREN),
 		),
 		...slideMarkdownReaders,
@@ -698,7 +698,7 @@ export function suggestionBy(id: unknown): SuggestionBy {
  * left open across an update, must not join: it would delete what newer tabs
  * wrote.
  */
-export const LIVE_DOCUMENT_SCHEMA = 5;
+export const LIVE_DOCUMENT_SCHEMA = 7;
 
 /** The shared type holding the document's content, which the editor's collaboration extension binds to. */
 export const LIVE_DOCUMENT_CONTENT = "default";

@@ -3,8 +3,20 @@ import {
 	liveDocumentSchema,
 	markdownOfLiveDocument,
 } from "@sugabots/contracts/live-document-markdown";
-import { fitSlideBody, layoutOf, newSlide } from "@sugabots/contracts/live-slides";
-import { SLIDE_LAYOUTS, type SlideLayout } from "@sugabots/contracts/slides-markdown";
+import {
+	fitSlideBody,
+	laidOutAnew,
+	layoutOf,
+	newSlide,
+	placementOf,
+	SLIDE_BOX,
+} from "@sugabots/contracts/live-slides";
+import {
+	placementIn,
+	SLIDE_BOX_ROLES,
+	SLIDE_LAYOUTS,
+	type SlideLayout,
+} from "@sugabots/contracts/slides-markdown";
 import type { Node } from "@tiptap/pm/model";
 import { describe, expect, it } from "vitest";
 
@@ -32,6 +44,11 @@ const node = (type: string, content?: Node | Node[], attrs?: Record<string, unkn
 
 const paragraph = (text?: string) => node("paragraph", text ? schema.text(text) : undefined);
 
+const heading = (level: number, text?: string) =>
+	node("heading", text ? schema.text(text) : undefined, { level });
+
+const box = (...blocks: Node[]) => node(SLIDE_BOX, blocks);
+
 /** The slides, by number from 1, whose frame doesn't hold what their layout says. */
 const unfitted = (deck: Node) =>
 	deck.children.flatMap((slide, index) => {
@@ -39,16 +56,26 @@ const unfitted = (deck: Node) =>
 		return fitSlideBody(body, layoutOf(slide)) === body ? [] : [index + 1];
 	});
 
-/** What a slide's frame and notes hold, as lines of text, a column's starting with `|`. */
+/** What a slide's frame and notes hold, as lines of text, each box after the first starting with `|`. */
 const linesOf = (slide: Node) => {
 	const lines: string[] = [];
-	slide.descendants((node) => {
-		if (node.type.name === "slideColumn") lines.push("|");
+	slide.descendants((node, _pos, _parent, index) => {
+		if (node.type.name === SLIDE_BOX && index > 0) lines.push("|");
 		if (node.type.name === "speakerNotes") lines.push("notes:");
 		if (node.isTextblock) lines.push(node.textContent);
 		return !node.isTextblock;
 	});
 	return lines;
+};
+
+/** The words of the slide's first heading: its title, on any layout. */
+const titleOf = (slide: Node) => {
+	let title: string | undefined;
+	slide.descendants((node) => {
+		if (title === undefined && node.type.name === "heading") title = node.textContent;
+		return title === undefined;
+	});
+	return title;
 };
 
 const IMAGE = `/api/pods/0199a3a0-0000-7000-8000-000000000001/artifacts/0199a3a0-0000-7000-8000-000000000002/images/${"a".repeat(64)}`;
@@ -84,14 +111,17 @@ describe("a deck's markdown", () => {
 		expect(deck.children.map(linesOf)).toEqual([
 			[
 				"Launch review",
+				"|",
 				"Q3, for the whole team",
 				"notes:",
 				"Welcome everyone.",
 				"Say the new pod's name.",
 			],
-			["Where we are", "notes:", ""],
+			// A section break with no label over its title.
+			["", "|", "Where we are", "notes:", ""],
 			[
 				"Goals",
+				"|",
 				"Ship live slides",
 				"with suggestions",
 				"and notes",
@@ -113,10 +143,10 @@ describe("a deck's markdown", () => {
 				"",
 			],
 			["The chart", "|", "Sales went up.", "|", "", "notes:", ""],
-			["Nothing a person writes is lost.", "The team", "notes:", ""],
-			["Owners", "Milestone", "Owner", "Beta", "Priya", "Launch", "MarcoAiko", "notes:", ""],
+			["Nothing a person writes is lost.", "|", "The team", "notes:", ""],
+			["Owners", "|", "Milestone", "Owner", "Beta", "Priya", "Launch", "MarcoAiko", "notes:", ""],
 			["Nothing in the columns yet", "|", "", "|", "", "notes:", ""],
-			["", "notes:", ""],
+			["", "|", "", "notes:", ""],
 		]);
 	});
 
@@ -130,8 +160,9 @@ describe("a deck's markdown", () => {
 		expect(again.eq(deck)).toBe(true);
 	});
 
-	it("writes each slide's layout first, a comment before each column and the notes last", () => {
-		const text = written(parsed(EVERY_LAYOUT));
+	it("writes each slide's layout first, a comment before each box after the first and the notes last", () => {
+		const deck = parsed(EVERY_LAYOUT);
+		const text = written(deck);
 
 		const slides = text.split("\n\n---\n\n");
 		expect(slides.map((slide) => slide.split("\n")[0])).toEqual(
@@ -150,10 +181,14 @@ describe("a deck's markdown", () => {
 		expect(slides[0]).toMatch(
 			/<!-- notes: Welcome everyone\.\n\nSay the \*\*new\*\* pod's name\. -->$/,
 		);
-		expect(slides[3]?.match(/<!-- column -->/g)).toHaveLength(2);
-		// An empty slide is its layout alone, and no slide says it has notes when it has none.
-		expect(slides[8]).toBe("<!-- layout: bullets -->");
+		expect(slides.map((slide) => slide.match(/<!-- box -->/g)?.length)).toEqual(
+			deck.children.map((slide) => SLIDE_BOX_ROLES[layoutOf(slide)].length - 1),
+		);
+		expect(slides[1]).toBe("<!-- layout: section -->\n\n<!-- box -->\n\n## Where we are");
+		// An empty slide is its layout and its empty boxes, and no slide says it has notes when it has none.
+		expect(slides[8]).toBe("<!-- layout: bullets -->\n\n##\n\n<!-- box -->");
 		expect(text.match(/<!-- notes:/g)).toHaveLength(1);
+		expect(text).not.toContain("<!-- column -->");
 	});
 
 	it("never writes a line of text straight above the line between two slides", () => {
@@ -179,16 +214,18 @@ describe("a deck's markdown", () => {
 		const overALine = (text: string) =>
 			node("paragraph", [schema.text("Over a line"), node("hardBreak"), schema.text(text)]);
 		const deck = node("doc", [
-			node("slide", [node("slideBody", paragraph()), node("speakerNotes", paragraph())], {
-				layout: "title",
-			}),
+			node(
+				"slide",
+				[node("slideBody", [box(heading(1)), box(paragraph())]), node("speakerNotes", paragraph())],
+				{ layout: "title" },
+			),
 			node(
 				"slide",
 				[
 					node("slideBody", [
-						node("heading", schema.text("Two columns"), { level: 2 }),
-						node("slideColumn", [paragraph(), paragraph("After an empty line")]),
-						node("slideColumn", paragraph()),
+						box(heading(2, "Two columns")),
+						box(paragraph(), paragraph("After an empty line")),
+						box(paragraph()),
 					]),
 					node("speakerNotes", [
 						paragraph("First"),
@@ -202,7 +239,10 @@ describe("a deck's markdown", () => {
 			node(
 				"slide",
 				[
-					node("slideBody", [paragraph("A line"), paragraph(), paragraph()]),
+					node("slideBody", [
+						box(heading(2, "A title"), paragraph("And a line under it")),
+						box(paragraph("A line"), paragraph(), paragraph()),
+					]),
 					node("speakerNotes", [paragraph(), paragraph("After an empty line")]),
 				],
 				{ layout: "bullets" },
@@ -211,20 +251,23 @@ describe("a deck's markdown", () => {
 				"slide",
 				[
 					node("slideBody", [
-						paragraph("---"),
-						paragraph("***"),
-						paragraph("___"),
-						paragraph("- - -"),
-						paragraph("* * *"),
-						paragraph("-"),
-						paragraph("==="),
-						overALine("---"),
-						overALine("==="),
-						node("bulletList", [
-							node("listItem", paragraph("---")),
-							node("listItem", paragraph("- - -")),
-						]),
-						node("blockquote", paragraph("---")),
+						box(heading(2)),
+						box(
+							paragraph("---"),
+							paragraph("***"),
+							paragraph("___"),
+							paragraph("- - -"),
+							paragraph("* * *"),
+							paragraph("-"),
+							paragraph("==="),
+							overALine("---"),
+							overALine("==="),
+							node("bulletList", [
+								node("listItem", paragraph("---")),
+								node("listItem", paragraph("- - -")),
+							]),
+							node("blockquote", paragraph("---")),
+						),
 					]),
 					node("speakerNotes", [paragraph("---"), paragraph("- - -")]),
 				],
@@ -246,7 +289,7 @@ describe("a deck's markdown", () => {
 			node(
 				"slide",
 				[
-					node("slideBody", paragraph("Before")),
+					node("slideBody", [box(heading(2)), box(paragraph("Before"))]),
 					node(
 						"speakerNotes",
 						said.flatMap((text) => [
@@ -260,7 +303,7 @@ describe("a deck's markdown", () => {
 			node(
 				"slide",
 				[
-					node("slideBody", node("heading", schema.text("After"), { level: 2 })),
+					node("slideBody", [box(paragraph()), box(heading(2, "After"))]),
 					node("speakerNotes", paragraph()),
 				],
 				{ layout: "section" },
@@ -270,8 +313,8 @@ describe("a deck's markdown", () => {
 		const readBack = parsed(written(deck));
 
 		expect(readBack.children.map(linesOf)).toEqual([
-			["Before", "notes:", ...said.flatMap((text) => [text, text])],
-			["After", "notes:", ""],
+			["", "|", "Before", "notes:", ...said.flatMap((text) => [text, text])],
+			["", "|", "After", "notes:", ""],
 		]);
 		expect(readBack.eq(deck)).toBe(true);
 	});
@@ -315,7 +358,7 @@ describe("a deck's markdown", () => {
 			["A", "B"],
 		],
 	])("makes no empty slide from %s", (_, text, titles) => {
-		expect(parsed(text).children.map((slide) => linesOf(slide)[0])).toEqual(titles);
+		expect(parsed(text).children.map(titleOf)).toEqual(titles);
 	});
 
 	it("keeps an empty slide written as its layout alone", () => {
@@ -324,14 +367,14 @@ describe("a deck's markdown", () => {
 		);
 
 		expect(layouts(deck)).toEqual(["title", "bullets", "section"]);
-		expect(linesOf(deck.child(1))).toEqual(["", "notes:", ""]);
+		expect(linesOf(deck.child(1))).toEqual(["", "|", "", "notes:", ""]);
 	});
 
 	it("reads markdown with nothing in it as one empty title slide", () => {
 		for (const text of ["", "\n\n", "---"]) {
 			const deck = parsed(text);
 			expect(layouts(deck)).toEqual(["title"]);
-			expect(linesOf(deck.child(0))).toEqual(["", "notes:", ""]);
+			expect(linesOf(deck.child(0))).toEqual(["", "|", "", "notes:", ""]);
 		}
 	});
 
@@ -339,27 +382,85 @@ describe("a deck's markdown", () => {
 		const deck = parsed("Some text\n---\n\nMore");
 
 		expect(deck.childCount).toBe(1);
-		expect(deck.child(0).child(0).firstChild?.type.name).toBe("heading");
+		expect(titleOf(deck.child(0))).toBe("Some text");
 	});
 
 	it.each([
 		[
-			"three columns, the third going into the second",
-			"<!-- layout: columns -->\n\n## T\n\nBefore\n\n<!-- column -->\n\nA\n\n<!-- column -->\n\nB\n\n<!-- column -->\n\nC",
-			["T", "|", "Before", "A", "|", "B", "C", "notes:", ""],
+			"a fourth box, which goes into the third",
+			"<!-- layout: columns -->\n\n## T\n\nBefore\n\n<!-- box -->\n\nA\n\n<!-- box -->\n\nB\n\n<!-- box -->\n\nC",
+			["T", "Before", "|", "A", "|", "B", "C", "notes:", ""],
 		],
 		[
-			"no columns, all of it going into the first",
+			"boxes written as the columns decks were written with before",
+			"<!-- layout: columns -->\n\n## T\n\n<!-- column -->\n\nA\n\n<!-- columns -->\n\nB",
+			["T", "|", "A", "|", "B", "notes:", ""],
+		],
+		[
+			"no boxes, all of it but the title going into the second",
 			"<!-- layout: image -->\n\n## T\n\nWords",
 			["T", "|", "Words", "|", "", "notes:", ""],
 		],
 		[
-			"columns in a layout without, in one flow",
-			"<!-- layout: bullets -->\n\n## T\n\n<!-- column -->\n\nA\n\n<!-- column -->\n\nB",
-			["T", "A", "B", "notes:", ""],
+			"more boxes than its layout has, the extra one's words joining the last",
+			"<!-- layout: bullets -->\n\n## T\n\n<!-- box -->\n\nA\n\n<!-- box -->\n\nB",
+			["T", "|", "A", "B", "notes:", ""],
+		],
+		[
+			"an empty box among the extra ones, which holds nothing to keep",
+			"<!-- layout: bullets -->\n\n## T\n\n<!-- box -->\n\n<!-- box -->\n\nB",
+			["T", "|", "B", "notes:", ""],
+		],
+		[
+			"fewer boxes than its layout has, the missing one added empty",
+			"<!-- layout: columns -->\n\n## T\n\n<!-- box -->\n\nA",
+			["T", "|", "A", "|", "", "notes:", ""],
+		],
+		[
+			"an empty first box, given an empty title",
+			"<!-- layout: columns -->\n\n<!-- box -->\n\nA\n\n<!-- box -->\n\nB",
+			["", "|", "A", "|", "B", "notes:", ""],
 		],
 	])("fits %s to the slide's layout", (_, text, lines) => {
 		expect(linesOf(parsed(text).child(0))).toEqual(lines);
+	});
+
+	it.each<[SlideLayout, string, string[]]>([
+		["title", "# T\n\nUnder it", ["T", "|", "Under it"]],
+		["title", "Under it", ["", "|", "Under it"]],
+		["bullets", "## T\n\n- One\n- Two", ["T", "|", "One", "Two"]],
+		["bullets", "- One\n\n## Not first", ["", "|", "One", "Not first"]],
+		["columns", "## T\n\nA\n\n- B", ["T", "|", "A", "B", "|", ""]],
+		["image", "## T\n\nWords", ["T", "|", "Words", "|", ""]],
+		["section", "Part 2\n\n## T\n\nUnder it", ["Part 2", "|", "T", "Under it"]],
+		["section", "## T", ["", "|", "T"]],
+		["section", "Part 2", ["Part 2", "|", ""]],
+		["quote", "> Ship it.\n\nKim", ["Ship it.", "|", "Kim"]],
+		["quote", "Kim", ["", "|", "Kim"]],
+		["table", "## T\n\n| A |\n| - |\n| 1 |", ["T", "|", "A", "1"]],
+	])("shares out a %s slide written without boxes, from `%s`", (layout, content, lines) => {
+		const slide = parsed(`<!-- layout: ${layout} -->\n\n${content}`).child(0);
+
+		expect(linesOf(slide).slice(0, -2)).toEqual(lines);
+	});
+
+	it.each<[SlideLayout, string]>([
+		["title", "heading"],
+		["bullets", "heading"],
+		["columns", "heading"],
+		["image", "heading"],
+		["table", "heading"],
+		["section", "paragraph"],
+		["quote", "blockquote"],
+	])("gives a %s slide's empty first box %s to type in, as a new slide's", (layout, kind) => {
+		const slide = parsed(`<!-- layout: ${layout} -->`).child(0);
+
+		const first = slide.child(0).child(0);
+		expect(first.childCount).toBe(1);
+		expect(first.firstChild?.type.name).toBe(kind);
+		expect(first.firstChild?.attrs.level).toBe(
+			kind === "heading" ? (layout === "title" ? 1 : 2) : undefined,
+		);
 	});
 
 	it("reads a comment inside a quote as its text, and a line there as nothing", () => {
@@ -368,6 +469,7 @@ describe("a deck's markdown", () => {
 		expect(linesOf(deck.child(0))).toEqual([
 			"A quote",
 			"<!-- notes: not these -->",
+			"|",
 			"Kim",
 			"notes:",
 			"",
@@ -375,40 +477,142 @@ describe("a deck's markdown", () => {
 	});
 
 	it("keeps words written after a comment on its line", () => {
-		const deck = parsed("<!-- layout: columns --><!-- column --> ### People\n\n- Type");
+		const deck = parsed("<!-- layout: columns --><!-- box --> ### People\n\n- Type");
 
 		expect(layouts(deck)).toEqual(["columns"]);
-		expect(linesOf(deck.child(0))).toEqual(["|", "### People", "Type", "|", "", "notes:", ""]);
+		expect(linesOf(deck.child(0))).toEqual(["", "|", "### People", "Type", "|", "", "notes:", ""]);
+	});
+});
+
+describe("a slide's placement", () => {
+	const GOALS =
+		"<!-- layout: bullets -->\n\n## Goals\n\nFor the quarter\n\n<!-- box -->\n\n- Ship it";
+	const FRAMES = [
+		{ x: 80, y: 64, w: 800, h: 46 },
+		{ x: 80, y: 142, w: 440, h: 300 },
+	];
+
+	it("is never read from markdown: a comment saying where boxes are, or which were removed, is only its words", () => {
+		const placing = "<!-- placement: 80 64 800 46; 80 142 440 300 -->";
+		const removing = "<!-- removed: 2 -->";
+		const deck = parsed(
+			GOALS.replace(
+				"<!-- layout: bullets -->",
+				`<!-- layout: bullets -->\n\n${placing}\n\n${removing}`,
+			),
+		);
+
+		expect(placementOf(deck.child(0))).toBeNull();
+		expect(
+			deck
+				.child(0)
+				.child(0)
+				.children.map((each) => each.attrs.removed),
+		).toEqual([null, null]);
+		expect(linesOf(deck.child(0))).toEqual([
+			placing,
+			removing,
+			"Goals",
+			"For the quarter",
+			"|",
+			"Ship it",
+			"notes:",
+			"",
+		]);
+	});
+
+	it("is never written as markdown, nor which boxes were removed", () => {
+		const deck = parsed(GOALS);
+		const slide = deck.child(0);
+		const body = slide.child(0);
+		const removedBody = body.copy(
+			body.content.replaceChild(1, node(SLIDE_BOX, paragraph(), { removed: true })),
+		);
+		const laidOutByHand = deck.copy(
+			deck.content.replaceChild(
+				0,
+				slide.type.create(
+					{ ...slide.attrs, placement: FRAMES },
+					slide.content.replaceChild(0, removedBody),
+				),
+			),
+		);
+		expect(placementOf(laidOutByHand.child(0))).toEqual(FRAMES);
+
+		expect(written(laidOutByHand)).toBe(
+			"<!-- layout: bullets -->\n\n## Goals\n\nFor the quarter\n\n<!-- box -->",
+		);
+	});
+
+	it("is a frame for each box of the slide's layout, in whole pixels, within the slide", () => {
+		const frame = { x: 0, y: 0, w: 960, h: 540 };
+
+		expect(placementIn([frame, frame], "bullets")).toEqual([frame, frame]);
+		expect(placementIn([frame, frame], "columns")).toBeNull();
+		expect(placementIn([frame, { ...frame, x: 1 }], "bullets")).toBeNull();
+		expect(placementIn([frame, { ...frame, w: "960" }], "bullets")).toBeNull();
+		expect(placementIn([frame, { x: 0, y: 0, w: 960 }], "bullets")).toBeNull();
+		expect(placementIn([frame, null], "bullets")).toBeNull();
+		expect(placementIn("0 0 960 540; 0 0 960 540", "bullets")).toBeNull();
+		expect(placementIn(null, "bullets")).toBeNull();
 	});
 });
 
 describe("a slide's layout", () => {
-	/** The frame of a slide in two columns, under a title. */
+	/** A slide in two columns, under a title. */
 	const inColumns = () =>
 		parsed(
-			"<!-- layout: columns -->\n\n## People and bots\n\n<!-- column -->\n\n- People type\n\n<!-- column -->\n\n- Bots suggest",
-		)
-			.child(0)
-			.child(0);
+			"<!-- layout: columns -->\n\n## People and bots\n\n<!-- box -->\n\n- People type\n\n<!-- box -->\n\n- Bots suggest",
+		).child(0);
+
+	/** What each box of `slide` holds, as its text. */
+	const boxesOf = (slide: Node) => slide.child(0).children.map((each) => each.textContent);
+
+	it.each<[SlideLayout, string[]]>([
+		["title", ["People and bots", "People typeBots suggest"]],
+		["bullets", ["People and bots", "People typeBots suggest"]],
+		["image", ["People and bots", "People type", "Bots suggest"]],
+		// A section break's label is left empty, and the columns go under its title.
+		["section", ["", "People and botsPeople typeBots suggest"]],
+		["quote", ["People and bots", "People typeBots suggest"]],
+		["table", ["People and bots", "People typeBots suggest"]],
+	])(
+		"changed to %s keeps the title the title, the other boxes going in order to the boxes left",
+		(layout, boxes) => {
+			expect(boxesOf(laidOutAnew(inColumns(), layout))).toEqual(boxes);
+		},
+	);
+
+	it("changed to a layout with more boxes, adds the boxes it lacks empty", () => {
+		const inBullets = parsed(
+			"<!-- layout: bullets -->\n\n## Goals\n\n<!-- box -->\n\n- Ship it",
+		).child(0);
+
+		const changed = laidOutAnew(inBullets, "columns");
+
+		expect(boxesOf(changed)).toEqual(["Goals", "Ship it", ""]);
+		expect(changed.child(0).child(0).eq(inBullets.child(0).child(0))).toBe(true);
+		expect(changed.child(0).child(1).eq(inBullets.child(0).child(1))).toBe(true);
+	});
 
 	it.each(SLIDE_LAYOUTS)(
 		"changed to %s and back keeps everything the slide holds, and fits",
 		(layout) => {
-			const body = inColumns();
+			const slide = inColumns();
 
-			const changed = fitSlideBody(body, layout);
-			const back = fitSlideBody(changed, "columns");
+			const changed = laidOutAnew(slide, layout);
+			const back = laidOutAnew(changed, "columns");
 
-			expect(changed.textContent).toBe(body.textContent);
-			expect(back.textContent).toBe(body.textContent);
-			expect(fitSlideBody(changed, layout)).toBe(changed);
+			expect(changed.textContent).toBe(slide.textContent);
+			expect(back.textContent).toBe(slide.textContent);
+			expect(fitSlideBody(changed.child(0), layout)).toBe(changed.child(0));
 			changed.check();
 			back.check();
 		},
 	);
 
-	it("leaves the slide as it was when it fits already", () => {
-		const body = inColumns();
+	it("leaves the slide's frame as it was when it fits already", () => {
+		const body = inColumns().child(0);
 
 		expect(fitSlideBody(body, "columns")).toBe(body);
 	});

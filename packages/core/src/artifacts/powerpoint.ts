@@ -4,9 +4,15 @@ import {
 	MAX_ARTIFACT_IMAGES_BYTES,
 } from "@sugabots/contracts";
 import type { ArtifactImageIds } from "@sugabots/contracts/http";
-import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
-import { layoutOf, SLIDE_BODY, SPEAKER_NOTES } from "@sugabots/contracts/live-slides";
-import { SLIDE_LAYOUTS, type SlideLayout } from "@sugabots/contracts/slides-markdown";
+import { layoutOf, placementOf, SPEAKER_NOTES } from "@sugabots/contracts/live-slides";
+import {
+	type BoxRole,
+	type Frame,
+	type Placement,
+	SLIDE_BOX_ROLES,
+	SLIDE_LAYOUTS,
+	type SlideLayout,
+} from "@sugabots/contracts/slides-markdown";
 import { Fragment, type Mark, type Node } from "@tiptap/pm/model";
 import { Effect } from "effect";
 import { imageSize } from "image-size";
@@ -16,6 +22,7 @@ import PptxGenJS from "pptxgenjs";
 import { typesetterOn } from "./pdf-fonts.ts";
 import {
 	ACCENT,
+	accentBarOver,
 	BACKGROUND,
 	BLOCK_QUOTE_LOOK,
 	BOLD_WEIGHT,
@@ -27,7 +34,6 @@ import {
 	childNamed,
 	type DeckImage,
 	EM,
-	everyBlock,
 	IMAGE_LAYOUT,
 	isEmptyParagraph,
 	LAYOUT_LOOKS,
@@ -69,8 +75,9 @@ export const POWERPOINT_CONTENT_TYPE =
 export type PowerPointImage = DeckImage;
 
 /**
- * A `slides` deck's markdown as a PowerPoint file titled as the artifact is,
- * 16:9, a slide for each of the deck's in order. Each of the deck's layouts
+ * `deck`, a `slides` deck as people see it, as a PowerPoint file titled as
+ * the artifact is, 16:9, a slide for each of the deck's in order, without the
+ * boxes people removed from them. Each of the deck's layouts
  * is a layout of the file's, named as the app names it and laid out as the
  * app draws it, in light colours and Arial, and each slide's title and text
  * are in its layout's placeholders. Text keeps its bold, italics, underline,
@@ -89,17 +96,20 @@ export type PowerPointImage = DeckImage;
  * a presentation program works out when the text is next edited, for a slide
  * that runs over even at the smallest step.
  *
+ * A slide whose boxes somebody placed by hand has each region at the frame of
+ * the box it stands for (`Region.box`), from the frame's top, as the app
+ * draws a placed slide, and its text at the step the app fits it at.
+ *
  * Whatever a layout has no place for, such as a table on a title slide, is
  * stacked with the rest of what its region holds, in boxes of its own, so
  * nothing the deck holds is left out.
  */
 export const powerPointFileOf = <E, R>(
 	artifact: Pick<Artifact, "podId" | "id" | "title">,
-	markdown: string,
+	deck: Node,
 	imageOf: (image: ArtifactImageIds) => Effect.Effect<PowerPointImage | undefined, E, R>,
 ): Effect.Effect<Uint8Array, E, R> =>
 	Effect.gen(function* () {
-		const deck = liveDocumentFromMarkdown("slides", markdown);
 		const own = ownImagesIn(deck, { podId: artifact.podId, artifactId: artifact.id });
 		const found = yield* Effect.forEach(own, ([address, ids]) =>
 			Effect.map(imageOf(ids), (image) => [address, image && drawable(image)] as const),
@@ -179,6 +189,13 @@ interface Region {
 	anchor: "top" | "bottom";
 	/** What a slide holds in it. */
 	holds: (blocks: SlideBlocks) => readonly Node[];
+	/**
+	 * The box of a slide it stands for once somebody placed the slide's boxes
+	 * by hand: it is at that box's frame, holding what the box holds. A
+	 * section break's text stands for its label, which has a frame of its
+	 * own, and its title for the whole of its title's box.
+	 */
+	box: BoxRole;
 }
 
 /** How tall the text a slide puts in its region numbered `region` is, set across `width`, in points: 0 for none. */
@@ -197,9 +214,11 @@ interface LayoutDesign {
 	regions: readonly Region[];
 	/**
 	 * Where its regions are for text as tall as `heightOf` says, at `step`, as
-	 * the app places it; `fits` is whether the slide fits at that step.
+	 * the app places it; `fits` is whether the slide fits at that step, and
+	 * `labelled` whether it shows a section break's label, which its accent
+	 * bar goes with.
 	 */
-	place: (step: number, heightOf: HeightOf, fits: boolean) => Placed;
+	place: (step: number, heightOf: HeightOf, fits: boolean, labelled: boolean) => Placed;
 }
 
 /** The height of `count` lines of `look` at full size. */
@@ -240,18 +259,31 @@ const toFoot = (x: number, w: number, top: number, height: number, fits: boolean
 /** The height within the padding. */
 const CONTENT_HEIGHT = CONTENT_BOTTOM - PADDING_Y;
 
-const titleOf = ({ title }: SlideBlocks) => title;
+/** What a slide's box of `role` holds. */
+const inBox =
+	(role: BoxRole): Region["holds"] =>
+	(blocks) =>
+		blocks.inBox(role);
 
-/** Everything but the title, as one flow. */
-const allButTitle = ({ flow, columns }: SlideBlocks) => [...flow, ...columns.flat()];
-
-/** A quote slide's first block, its quote, and what follows, whose words they are. */
-function quoteAndRest(blocks: SlideBlocks): { quote: readonly Node[]; rest: readonly Node[] } {
-	const [first, ...rest] = everyBlock(blocks);
-	return { quote: first ? [first] : [], rest };
+/**
+ * A section break's title and text, as its regions hold them. The file's
+ * layout has no place over a title for a label, so a section break with a
+ * label is all text, in the order it reads; without one, a heading its title
+ * box starts with is its title, and what follows it is text.
+ */
+function sectionParts(blocks: SlideBlocks): { title: readonly Node[]; text: readonly Node[] } {
+	if (!blocks.inBox("label").every(isEmptyParagraph)) return { title: [], text: blocks.all };
+	const [first, ...rest] = blocks.inBox("title");
+	if (first?.type.name !== "heading") return { title: [], text: blocks.inBox("title") };
+	return { title: [first], text: rest };
 }
 
-const titleRegion = (writes: TextLook, room: number, anchor: Region["anchor"]): Region => ({
+const titleRegion = (
+	writes: TextLook,
+	room: number,
+	anchor: Region["anchor"],
+	holds: Region["holds"] = inBox("title"),
+): Region => ({
 	name: "title",
 	type: "title",
 	prompt: "Title",
@@ -259,7 +291,8 @@ const titleRegion = (writes: TextLook, room: number, anchor: Region["anchor"]): 
 	writes,
 	room,
 	anchor,
-	holds: titleOf,
+	holds,
+	box: "title",
 });
 
 const TOP_TITLE = titleRegion(
@@ -268,14 +301,24 @@ const TOP_TITLE = titleRegion(
 	"top",
 );
 
-/** A body region running from under the title to the foot of the padding. */
+/** A body region running from under the title to the foot of the padding, holding the box of `box`. */
 const footRegion = (
 	name: string,
 	prompt: string,
 	part: SlidePart,
 	writes: TextLook,
-	holds: Region["holds"],
-): Region => ({ name, type: "body", prompt, part, writes, room: 0, anchor: "top", holds });
+	box: BoxRole,
+): Region => ({
+	name,
+	type: "body",
+	prompt,
+	part,
+	writes,
+	room: 0,
+	anchor: "top",
+	holds: inBox(box),
+	box,
+});
 
 /** The title across the top, and `columns` regions side by side under it, as far under it as `layout` sets its blocks apart. */
 const underTitle =
@@ -309,22 +352,27 @@ const centred =
 		};
 	};
 
-/** The section break's accent bar, its title and its text, one under another at the foot of the padding. */
-const atFoot: LayoutDesign["place"] = (step, heightOf) => {
+/**
+ * The section break's accent bar, while it has a label, its title and its
+ * text, one under another at the foot of the padding.
+ */
+const atFoot: LayoutDesign["place"] = (step, heightOf, _fits, labelled) => {
 	const unit = step * EM;
 	const gap = LAYOUT_LOOKS.section.gap * unit;
 	const bar = { w: SECTION_BAR.width * unit, h: SECTION_BAR.height * unit };
 	const title = heightOf(0, CONTENT_WIDTH);
 	const text = heightOf(1, CONTENT_WIDTH);
-	const height = bar.h + (title > 0 ? gap + title : 0) + (text > 0 ? gap + text : 0);
+	const shown = [labelled ? bar.h : 0, title, text].filter((height) => height > 0);
+	const height = shown.reduce((sum, each) => sum + each, 0) + gap * Math.max(0, shown.length - 1);
 	const top = PADDING_Y + Math.max(0, CONTENT_HEIGHT - height);
-	const titleBottom = top + bar.h + (title > 0 ? gap + title : 0);
+	const titleTop = top + (labelled ? bar.h + gap : 0);
+	const textTop = titleTop + (title > 0 ? title + gap : 0);
 	return {
 		boxes: [
-			above(PADDING_X, CONTENT_WIDTH, titleBottom, title),
-			below(PADDING_X, CONTENT_WIDTH, titleBottom + gap, text),
+			above(PADDING_X, CONTENT_WIDTH, titleTop + title, title),
+			below(PADDING_X, CONTENT_WIDTH, textTop, text),
 		],
-		bar: { x: PADDING_X, y: top, ...bar },
+		bar: labelled ? { x: PADDING_X, y: top, ...bar } : undefined,
 	};
 };
 
@@ -349,6 +397,43 @@ const besideImage: LayoutDesign["place"] = (step, heightOf) => {
 	};
 };
 
+/**
+ * Where a layout's regions are on a slide whose boxes somebody placed by
+ * hand, at `step`: each at the frame of the box it stands for (`Region.box`),
+ * across it, its text from the frame's top, as the app draws a placed box,
+ * but in the middle of the frame for the image layout's image, which the app
+ * centres there. A region whose text sits at the foot of its box is as tall
+ * as its text; another reaches the frame's foot at least. The section
+ * break's accent bar is over its label, while it shows one.
+ */
+function placedRegions(
+	regions: readonly Region[],
+	layout: SlideLayout,
+	placement: Placement,
+	step: number,
+	heightOf: HeightOf,
+	labelled: boolean,
+): Placed {
+	const boxes = regions.map((region, index): Box => {
+		const frame = frameOfBox(placement, layout, region.box);
+		const height = heightOf(index, frame.w);
+		const top = region.box === "image" ? frame.y + (frame.h - height) / 2 : frame.y;
+		if (region.anchor === "bottom") return above(frame.x, frame.w, top + height, height);
+		return { x: frame.x, y: top, w: frame.w, h: Math.max(frame.y + frame.h - top, grown(height)) };
+	});
+	if (!labelled) return { boxes };
+	const bar = accentBarOver(frameOfBox(placement, layout, "label"), step * EM);
+	return { boxes, bar: { x: bar.x, y: bar.y, w: bar.width, h: bar.height } };
+}
+
+/** The frame of the box of `role` on a slide of `layout` placed at `placement`. */
+function frameOfBox(placement: Placement, layout: SlideLayout, role: BoxRole): Frame {
+	const roles: readonly BoxRole[] = SLIDE_BOX_ROLES[layout];
+	const frame = placement[roles.indexOf(role)];
+	if (!frame) throw new Error(`A slide laid out as ${layout} has no box for its ${role}`);
+	return frame;
+}
+
 /** The quote layout's wider padding. */
 const QUOTE_X = QUOTE_PADDING_UNITS * EM;
 const QUOTE_WIDTH = SLIDE_WIDTH - 2 * QUOTE_X;
@@ -367,28 +452,23 @@ const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
 				writes: LAYOUT_LOOKS.title.text,
 				room: lines(2, LAYOUT_LOOKS.title.text),
 				anchor: "top",
-				holds: allButTitle,
+				holds: inBox("subtitle"),
+				box: "subtitle",
 			},
 		],
 		place: centred("title", PADDING_X, CONTENT_WIDTH),
 	},
 	bullets: {
 		name: "Title and bullets",
-		regions: [
-			TOP_TITLE,
-			footRegion("body", "Text", "flow", LAYOUT_LOOKS.bullets.text, allButTitle),
-		],
+		regions: [TOP_TITLE, footRegion("body", "Text", "flow", LAYOUT_LOOKS.bullets.text, "body")],
 		place: underTitle("bullets", 1),
 	},
 	columns: {
 		name: "Two columns",
 		regions: [
 			TOP_TITLE,
-			footRegion("left", "Left column", "column", COLUMN_LOOK.text, ({ flow, columns }) => [
-				...flow,
-				...columns[0],
-			]),
-			footRegion("right", "Right column", "column", COLUMN_LOOK.text, ({ columns }) => columns[1]),
+			footRegion("left", "Left column", "column", COLUMN_LOOK.text, "leftColumn"),
+			footRegion("right", "Right column", "column", COLUMN_LOOK.text, "rightColumn"),
 		],
 		place: underTitle("columns", 2),
 	},
@@ -404,7 +484,8 @@ const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
 				writes: IMAGE_LAYOUT.text,
 				room: lines(3, IMAGE_LAYOUT.text),
 				anchor: "top",
-				holds: ({ flow, columns }) => [...flow, ...columns[0]],
+				holds: inBox("text"),
+				box: "text",
 			},
 			{
 				name: "image",
@@ -414,7 +495,8 @@ const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
 				writes: IMAGE_LAYOUT.text,
 				room: CONTENT_HEIGHT,
 				anchor: "top",
-				holds: ({ columns }) => columns[1],
+				holds: inBox("image"),
+				box: "image",
 			},
 		],
 		place: besideImage,
@@ -422,7 +504,12 @@ const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
 	section: {
 		name: "Section break",
 		regions: [
-			titleRegion(LAYOUT_LOOKS.section.heading, lines(2, LAYOUT_LOOKS.section.heading), "bottom"),
+			titleRegion(
+				LAYOUT_LOOKS.section.heading,
+				lines(2, LAYOUT_LOOKS.section.heading),
+				"bottom",
+				(blocks) => sectionParts(blocks).title,
+			),
 			{
 				name: "body",
 				type: "body",
@@ -431,7 +518,8 @@ const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
 				writes: LAYOUT_LOOKS.section.text,
 				room: lines(1, LAYOUT_LOOKS.section.text),
 				anchor: "top",
-				holds: allButTitle,
+				holds: (blocks) => sectionParts(blocks).text,
+				box: "label",
 			},
 		],
 		place: atFoot,
@@ -448,7 +536,8 @@ const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
 				writes: QUOTE_LOOK,
 				room: lines(3, QUOTE_LOOK),
 				anchor: "bottom",
-				holds: (blocks) => quoteAndRest(blocks).quote,
+				holds: inBox("quote"),
+				box: "quote",
 			},
 			{
 				name: "attribution",
@@ -458,24 +547,22 @@ const LAYOUTS: Readonly<Record<SlideLayout, LayoutDesign>> = {
 				writes: LAYOUT_LOOKS.quote.text,
 				room: lines(1, LAYOUT_LOOKS.quote.text),
 				anchor: "top",
-				holds: (blocks) => quoteAndRest(blocks).rest,
+				holds: inBox("attribution"),
+				box: "attribution",
 			},
 		],
 		place: centred("quote", QUOTE_X, QUOTE_WIDTH),
 	},
 	table: {
 		name: "Table",
-		regions: [
-			TOP_TITLE,
-			footRegion("table", "Table", "flow", LAYOUT_LOOKS.table.text, allButTitle),
-		],
+		regions: [TOP_TITLE, footRegion("table", "Table", "flow", LAYOUT_LOOKS.table.text, "table")],
 		place: underTitle("table", 1),
 	},
 };
 
-/** Where a layout's regions are on a slide made from it in PowerPoint: with room for the text each is made for. */
+/** Where a layout's regions are on a slide made from it in PowerPoint: with room for the text each is made for, a section break's label included. */
 const roomyBoxes = ({ regions, place }: LayoutDesign) =>
-	place(1, (region) => regions[region]?.room ?? 0, true).boxes;
+	place(1, (region) => regions[region]?.room ?? 0, true, true).boxes;
 
 /**
  * PptxGenJS numbers a layout's placeholders from 100, in the order they are
@@ -647,26 +734,31 @@ function addSlide(
 ): DrawnSlide {
 	const layout = layoutOf(slide);
 	const design = LAYOUTS[layout];
-	const blocks = slideBlocksOf(childNamed(slide, SLIDE_BODY));
+	const blocks = slideBlocksOf(slide);
+	const placement = placementOf(slide);
 	const { step, fits } = arrangedSlide(slide, measure);
 	const held = design.regions.map((region) => {
-		const holds = region.holds(blocks);
+		const holds = placement ? blocks.inBox(region.box) : region.holds(blocks);
 		return holds.every(isEmptyParagraph) ? [] : holds;
 	});
-	const placingOf = (index: number, width: number): Placing => ({
-		layout,
-		part: design.regions[index]?.part ?? "flow",
-		step,
-		width,
-	});
-	const { boxes, bar } = design.place(
-		step,
-		(index, width) => {
-			const holds = held[index] ?? [];
-			return holds.length === 0 ? 0 : heightOfBlocks(holds, placingOf(index, width), measure);
-		},
-		fits,
-	);
+	const placingOf = (index: number, width: number): Placing => {
+		const region = design.regions[index];
+		return {
+			layout,
+			part: region?.part ?? "flow",
+			step,
+			width,
+			boxHeight: placement && region ? frameOfBox(placement, layout, region.box).h : undefined,
+		};
+	};
+	const heightOf: HeightOf = (index, width) => {
+		const holds = held[index] ?? [];
+		return holds.length === 0 ? 0 : heightOfBlocks(holds, placingOf(index, width), measure);
+	};
+	const labelled = blocks.shows("label");
+	const { boxes, bar } = placement
+		? placedRegions(design.regions, layout, placement, step, heightOf, labelled)
+		: design.place(step, heightOf, fits, labelled);
 	const added = presentation.addSlide({ masterName: design.name });
 	if (bar)
 		added.addShape(presentation.ShapeType.rect, {

@@ -86,6 +86,14 @@ export function dispatchAsOneChange(editor: Editor, change: Transaction, name: s
 }
 
 /**
+ * `transaction`, marked to be made as it is, never as a suggestion, even
+ * while the person is suggesting: for what nobody accepts or rejects, as
+ * where a slide's boxes sit.
+ */
+export const neverSuggested = (transaction: Transaction): Transaction =>
+	transaction.setMeta(suggestChangesKey, { skip: true });
+
+/**
  * Has `editor` hand every change `name` makes to the suggesting library,
  * which turns it into a suggestion of theirs while they are in suggesting
  * mode and passes it through otherwise. Returns how to stop.

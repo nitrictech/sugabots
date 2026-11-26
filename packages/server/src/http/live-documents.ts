@@ -9,6 +9,7 @@ import {
 } from "@sugabots/contracts";
 import { API_BASE_PATH, type ArtifactImageIds } from "@sugabots/contracts/http";
 import { LIVE_DOCUMENT_SCHEMA } from "@sugabots/contracts/live-document";
+import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { LiveDocuments } from "@sugabots/core/artifacts/live";
 import { PDF_CONTENT_TYPE, pdfFileOf } from "@sugabots/core/artifacts/pdf";
@@ -115,9 +116,11 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 				Effect.gen(function* () {
 					const { artifact, asHolder } = yield* requestedArtifact;
 					if (artifact.kind !== download.kind) return yield* new Refused({ status: 404 });
-					// What people have typed, where the artifact is live; its last version otherwise.
-					const markdown = (yield* live.markdown(artifact.id)) ?? artifact.content;
-					const file = yield* download.fileOf(artifact, markdown, (image, kinds) =>
+					// As people see it where the artifact is live; otherwise as its last version reads, which is how it opens.
+					const document =
+						(yield* live.documentAsShown(artifact.id)) ??
+						liveDocumentFromMarkdown(download.kind, artifact.content);
+					const file = yield* download.fileOf(artifact, document, (image, kinds) =>
 						keptImage(image, kinds).pipe(asHolder),
 					);
 					return HttpServerResponse.uint8Array(file, { contentType: download.contentType }).pipe(
@@ -136,7 +139,10 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 	}),
 );
 
-/** A file a live artifact of one kind downloads as, built from its markdown and the images it keeps. */
+/** A live document as the editor's schema holds it. */
+type LiveDocument = ReturnType<typeof liveDocumentFromMarkdown>;
+
+/** A file a live artifact of one kind downloads as, built from the document as people see it and the images it keeps. */
 interface Download {
 	/** The last part of its address, after the artifact's. */
 	path: string;
@@ -145,7 +151,7 @@ interface Download {
 	extension: string;
 	fileOf: <E, R>(
 		artifact: Pick<Artifact, "podId" | "id" | "title">,
-		markdown: string,
+		document: LiveDocument,
 		/** An image the artifact keeps, when it is of `kinds`, which a file that draws only some kinds asks for. */
 		imageOf: (
 			image: ArtifactImageIds,

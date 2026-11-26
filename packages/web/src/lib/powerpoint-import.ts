@@ -4,7 +4,7 @@ import {
 	newSlide,
 	SLIDE,
 	SLIDE_BODY,
-	SLIDE_COLUMN,
+	SLIDE_BOX,
 	SPEAKER_NOTES,
 } from "@sugabots/contracts/live-slides";
 import type { SlideLayout } from "@sugabots/contracts/slides-markdown";
@@ -259,7 +259,11 @@ const SHORT_LINE_CHARACTERS = 100;
 /** How far two boxes side by side may overlap and still be taken for side by side, in points. */
 const SIDE_BY_SIDE_OVERLAP_PT = 8;
 
-/** A slide's layout, and the blocks of its frame, in the order the layout reads them. */
+/**
+ * A slide's layout, and what its frame holds, in the order the layout reads
+ * it: its boxes, or blocks in no box, which the layout shares out among its
+ * boxes (see `fitSlideBody`).
+ */
 interface LaidOut {
 	layout: SlideLayout;
 	blocks: Node[];
@@ -291,7 +295,9 @@ function slideOf({ layout, blocks }: LaidOut, notes: Node, schema: Schema): Node
  *
  * The title is the frame's heading, first, but on a section break, where a
  * label may sit above it, everything stays in reading order. What a layout
- * has no place of its own for stays in its frame, in reading order.
+ * has no box of its own for stays in its frame, in reading order, in the box
+ * after the title. Side by side, the title, empty or not, and each side are
+ * boxes of their own.
  */
 function laidOut(
 	pieces: readonly Piece<Node>[],
@@ -319,25 +325,26 @@ function laidOut(
 		};
 	}
 	const images = rest.filter((piece) => piece.kind === "image");
+	const titleBox = () => nodeOf(schema, SLIDE_BOX, heading(2));
 	const sides = sideBySide(rest);
 	if (sides) {
 		const [left, right] = sides;
 		if (images.length !== 1) {
 			return {
 				layout: "columns",
-				blocks: [...heading(2), columnOf(left, schema), columnOf(right, schema)],
+				blocks: [titleBox(), boxOf(left, schema), boxOf(right, schema)],
 			};
 		}
 		const [words, image] = left.some((piece) => piece.kind === "image") ? [right, left] : sides;
 		return {
 			layout: "image",
-			blocks: [...heading(2), columnOf(words, schema), columnOf(image, schema)],
+			blocks: [titleBox(), boxOf(words, schema), boxOf(image, schema)],
 		};
 	}
 	if (rest.length === 1 && images.length === 1) {
 		return {
 			layout: "image",
-			blocks: [...heading(2), columnOf([], schema), columnOf(images, schema)],
+			blocks: [titleBox(), boxOf([], schema), boxOf(images, schema)],
 		};
 	}
 	return { layout: "bullets", blocks: flow(2) };
@@ -440,8 +447,8 @@ function blocksOfPiece(piece: Piece<Node>): Node[] {
 	}
 }
 
-const columnOf = (pieces: readonly Piece<Node>[], schema: Schema) =>
-	nodeOf(schema, SLIDE_COLUMN, pieces.flatMap(blocksOfPiece));
+const boxOf = (pieces: readonly Piece<Node>[], schema: Schema) =>
+	nodeOf(schema, SLIDE_BOX, pieces.flatMap(blocksOfPiece));
 
 /** The title's words as a heading of `level`, each of its lines after a break. */
 const headingOf = (title: TextPiece, level: number, schema: Schema) =>

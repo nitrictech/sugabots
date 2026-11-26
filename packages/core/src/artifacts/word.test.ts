@@ -4,6 +4,7 @@ import {
 	artifactImageAddress,
 	artifactImageIds,
 } from "@sugabots/contracts/http";
+import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
 import { Effect } from "effect";
 import JSZip from "jszip";
 import mammoth from "mammoth";
@@ -54,11 +55,11 @@ const keptImages = new Map(
 	]),
 );
 
-/** The Word file of `markdown`, and the images it asked for. */
+/** The Word file of the document `markdown` reads as, and the images it asked for. */
 async function wordFile(markdown: string) {
 	const asked: ArtifactImageIds[] = [];
 	const file = await Effect.runPromise(
-		wordFileOf(ARTIFACT, markdown, (image) => {
+		wordFileOf(ARTIFACT, liveDocumentFromMarkdown("document", markdown), (image) => {
 			asked.push(image);
 			return Effect.succeed(keptImages.get(image.imageId));
 		}),
@@ -259,27 +260,25 @@ describe("a document's Word file", () => {
 		expect(await readBack(file)).toMatch(/<(u|mark)><(u|mark)>on time<\/\2><\/\1>/);
 	});
 
-	it("puts inline code in Word's own HTML Code style, in bold, a link and a table cell too", async () => {
+	it("puts inline code in Word's own HTML Code style, in a table cell too", async () => {
+		// A document holds code beside other marks, never inside them: the editor's code takes no other mark.
 		const { file } = await wordFile(
-			"Run `a < b && c`, **bold `x`** and [see `docs`](https://example.com/docs).\n\n| Key | Value |\n| --- | --- |\n| `id` | 1 |",
+			"Run `a < b && c` after **reading** [the docs](https://example.com/docs).\n\n| Key | Value |\n| --- | --- |\n| `id` | 1 |",
 		);
 
 		const xml = await documentXml(file);
 		const runs = runsInCodeStyle(xml);
 		expect(runs.map((run) => run.match(/<w:t[^>]*>([^<]*)</)?.[1])).toEqual([
 			"a &lt; b &amp;&amp; c",
-			"x",
-			"docs",
 			"id",
 		]);
-		expect(runs[1]).toContain("<w:b/>");
-		expect(runs[2]).not.toContain("Hyperlink");
 		expect(await partOf(file, "word/styles.xml")).toMatch(
 			/<w:style w:type="character" w:styleId="HTMLCode"><w:name w:val="HTML Code"\/>.*Courier New/,
 		);
 		const html = await readBack(file);
-		expect(html).toContain("<p>Run <code>a &lt; b &amp;&amp; c</code>, <strong>bold </strong>");
-		expect(html).toContain('<a href="https://example.com/docs">see <code>docs</code></a>');
+		expect(html).toContain(
+			"<p>Run <code>a &lt; b &amp;&amp; c</code> after <strong>reading</strong>",
+		);
 		expect(html).toContain("<td><p><code>id</code></p></td>");
 	});
 

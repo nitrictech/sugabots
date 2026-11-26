@@ -4,6 +4,7 @@ import {
 	artifactImageAddress,
 	artifactImageIds,
 } from "@sugabots/contracts/http";
+import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
 import { Effect } from "effect";
 import JSZip from "jszip";
 import { getDocumentProxy } from "unpdf";
@@ -64,11 +65,14 @@ const DECK = [
 	"<!-- layout: table -->\n\n## Owners\n\n| Milestone | Owner |\n| --- | --- |\n| Beta | Priya |\n| Launch | Marco |",
 ].join("\n\n---\n\n");
 
-/** The PowerPoint file of `markdown`, and the images it asked for. */
+/** The deck `markdown` reads as. */
+const deckOf = (markdown: string) => liveDocumentFromMarkdown("slides", markdown);
+
+/** The PowerPoint file of the deck `markdown` reads as, and the images it asked for. */
 async function powerPointFile(markdown: string) {
 	const asked: ArtifactImageIds[] = [];
 	const file = await Effect.runPromise(
-		powerPointFileOf(ARTIFACT, markdown, (image) => {
+		powerPointFileOf(ARTIFACT, deckOf(markdown), (image) => {
 			asked.push(image);
 			return Effect.succeed(keptImages.get(image.imageId));
 		}),
@@ -158,7 +162,7 @@ function boxOf(shape: string) {
  */
 async function pdfStepOf(markdown: string, fullSize: number): Promise<number> {
 	const file = await Effect.runPromise(
-		pdfFileOf(ARTIFACT, markdown, () => Effect.succeed(undefined)),
+		pdfFileOf(ARTIFACT, deckOf(markdown), () => Effect.succeed(undefined)),
 	);
 	const page = await (await getDocumentProxy(file.slice())).getPage(1);
 	const last = (await page.getTextContent()).items

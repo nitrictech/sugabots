@@ -1,17 +1,35 @@
-import { layoutOf, SLIDE_COLUMN, SPEAKER_NOTES } from "@sugabots/contracts/live-slides";
-import type { SlideLayout } from "@sugabots/contracts/slides-markdown";
+import { isRemovedBox, placementOf, SLIDE, SPEAKER_NOTES } from "@sugabots/contracts/live-slides";
+import type { BoxRole, Frame } from "@sugabots/contracts/slides-markdown";
 import { Extension } from "@tiptap/core";
 import type { Node } from "@tiptap/pm/model";
-import { type EditorState, Plugin, PluginKey } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import { keepSlidesFitting, type PlacedSlide, slideIndexAt, slidesOf } from "@/lib/deck.ts";
+import { type EditorState, Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
+import {
+	keepSlidesFitting,
+	type PlacedSlide,
+	selectionOutOfRemovedBox,
+	slideIndexAt,
+	slidesOf,
+} from "@/lib/deck.ts";
+import { type FollowedNode, whereFollowedNodeIs } from "@/lib/followed-node.ts";
+import { neverSuggested } from "@/lib/suggesting.ts";
+import {
+	BOX_ROLE_ATTRIBUTE,
+	PLACED_ATTRIBUTE,
+	REMOVED_ATTRIBUTE,
+	rolesOfBoxes,
+} from "./slide-drawing.tsx";
 
 /*
  * The stage a deck is edited on. One editor holds the whole deck, and the
  * stage shows the slide the selection is in: the others stay in the editor,
  * hidden, so nothing anyone types in them is lost or redrawn. The slide in
- * view says what goes in each of its empty parts, and holds a place under its
- * frame for what the stage puts there.
+ * view says what each of its boxes is for, which its layout's styles place
+ * it by, which of them are off it, which they hide, and what goes in each
+ * empty part of the others, and holds a place under its frame for what the
+ * stage puts there. While one of its boxes is dragged, it is drawn where the
+ * drag has its boxes, until the drag ends. A caret never stays in a box off
+ * its slide (`selectionOutOfRemovedBox`).
  */
 
 interface Stage {
@@ -29,8 +47,8 @@ export const slideInView = (state: EditorState): number => stageKey.getState(sta
  * The stage's part of a deck's editor. It draws an element under the frame of
  * the slide in view, above its notes, for the stage to put things in, and
  * tells `onUnderSlide` which element that is now, as a change to the one it
- * was: a new one each time it draws one, and none once the one there is gone. `onAddImage` is asked for an image for the empty column,
- * starting at `column`, of a slide laid out with an image, with the file
+ * was: a new one each time it draws one, and none once the one there is gone. `onAddImage` is asked for an image for the empty image box,
+ * starting at `box`, of a slide laid out with an image, with the file
  * dropped there if one was.
  */
 export function deckStage({
@@ -38,7 +56,7 @@ export function deckStage({
 	onAddImage,
 }: {
 	onUnderSlide: (change: (element: HTMLElement | undefined) => HTMLElement | undefined) => void;
-	onAddImage: (column: number, file: File | undefined) => void;
+	onAddImage: (box: number, file: File | undefined) => void;
 }) {
 	const underSlide: UnderSlide = {
 		// A new element each time the editor draws one: one it drew before may still be in its old place.
@@ -71,6 +89,7 @@ export function deckStage({
 		addProseMirrorPlugins() {
 			return [
 				keepSlidesFitting,
+				boxesPreview,
 				new Plugin<Stage>({
 					key: stageKey,
 					state: {
@@ -85,6 +104,12 @@ export function deckStage({
 							return stageOf(state);
 						},
 					},
+					// It moves only a selection in a box off its slide, never into one, and changes nothing in the
+					// deck, only where this person's selection is, so it settles at once and sends the others nothing.
+					appendTransaction: (transactions, _before, state) =>
+						transactions.some(({ docChanged, selectionSet }) => docChanged || selectionSet)
+							? (selectionOutOfRemovedBox(state) ?? null)
+							: null,
 					props: {
 						decorations: (state) => stageKey.getState(state)?.decorations,
 					},
@@ -97,22 +122,45 @@ export function deckStage({
 function decorationsInView(
 	{ node: slide, pos }: PlacedSlide,
 	underSlide: UnderSlide,
-	onAddImage: (column: number, file: File | undefined) => void,
+	onAddImage: (box: number, file: File | undefined) => void,
 ): Decoration[] {
 	const body = slide.child(0);
 	const bodyStart = pos + 2;
 	const afterBody = pos + 1 + body.nodeSize;
+	const roles = rolesOfBoxes(slide);
+	const boxes: Decoration[] = [];
+	body.forEach((box, offset, index) => {
+		const role = roles[index];
+		if (!role) return;
+		const at = bodyStart + offset;
+		if (isRemovedBox(box)) {
+			boxes.push(
+				Decoration.node(at, at + box.nodeSize, {
+					[BOX_ROLE_ATTRIBUTE]: role,
+					[REMOVED_ATTRIBUTE]: "",
+				}),
+			);
+			return;
+		}
+		boxes.push(
+			Decoration.node(at, at + box.nodeSize, { [BOX_ROLE_ATTRIBUTE]: role }),
+			...emptyPartsOf(box, at, role).map(({ node, at: partAt, words }) =>
+				words === ADD_IMAGE
+					? Decoration.widget(partAt + 1, imageArea(onAddImage), {
+							key: "add-image",
+							side: -1,
+							stopEvent: () => true,
+							ignoreSelection: true,
+						})
+					: Decoration.node(partAt, partAt + node.nodeSize, {
+							class: "is-empty",
+							"data-placeholder": words,
+						}),
+			),
+		);
+	});
 	return [
-		...emptyPartsOf(body, bodyStart, layoutOf(slide)).map(({ node, at, words }) =>
-			words === ADD_IMAGE
-				? Decoration.widget(at + 1, imageArea(onAddImage), {
-						key: "add-image",
-						side: -1,
-						stopEvent: () => true,
-						ignoreSelection: true,
-					})
-				: Decoration.node(at, at + node.nodeSize, { class: "is-empty", "data-placeholder": words }),
-		),
+		...boxes,
 		...notesHint(slide.child(1), afterBody),
 		Decoration.widget(afterBody, underSlide.draw, {
 			key: "under-slide",
@@ -124,6 +172,104 @@ function decorationsInView(
 	];
 }
 
+/** The frame the editor draws the slide starting at `slidePos` in, if it draws it. */
+export function drawnSlideBody(view: EditorView, slidePos: number): HTMLElement | undefined {
+	const drawn = view.nodeDOM(slidePos);
+	const body =
+		drawn instanceof HTMLElement ? drawn.querySelector(":scope > [data-slide-body]") : null;
+	return body instanceof HTMLElement ? body : undefined;
+}
+
+/** A slide of the deck: where it starts now, and the slide itself, followed through anybody's changes. */
+interface FollowedSlide {
+	pos: number;
+	followed: FollowedNode;
+}
+
+/** Where a drag has the boxes of `slide`, before it is written. */
+interface BoxesPreview {
+	slide: FollowedSlide;
+	frames: readonly Frame[];
+}
+
+const boxesPreviewKey = new PluginKey<BoxesPreview | null>("boxesPreview");
+
+/**
+ * Draws the boxes of `slide` at `frames`, as one of them is dragged, until
+ * the drag ends with `withoutBoxesPreview`. It changes nothing in the deck,
+ * for anybody: the slide is only drawn placed here, so a drag is written
+ * once, when it ends.
+ */
+export const previewingBoxes = (
+	state: EditorState,
+	slide: FollowedSlide,
+	frames: readonly Frame[],
+): Transaction => neverSuggested(state.tr.setMeta(boxesPreviewKey, { slide, frames }));
+
+/** `transaction`, ending the drawing of a drag's boxes (see `previewingBoxes`) as it is made. */
+export const withoutBoxesPreview = (transaction: Transaction): Transaction =>
+	transaction.setMeta(boxesPreviewKey, null);
+
+/**
+ * Drawing a drag's boxes. The slide is followed through anybody's changes as
+ * the drag goes on, and the drawing ends once the slide is gone. A change
+ * made here moves it step by step; a change from elsewhere, or an undo,
+ * replaces each slide it touches whole, which reads as the slide's deletion,
+ * so the slide is then looked for where the shared document has it.
+ */
+const boxesPreview = new Plugin<BoxesPreview | null>({
+	key: boxesPreviewKey,
+	state: {
+		init: () => null,
+		apply(transaction, preview, _before, state) {
+			const said: BoxesPreview | null | undefined = transaction.getMeta(boxesPreviewKey);
+			if (said !== undefined) return said;
+			if (!preview || !transaction.docChanged) return preview;
+			const { followed } = preview.slide;
+			const mapped = transaction.mapping.mapResult(preview.slide.pos, 1);
+			const pos = mapped.deleted ? whereFollowedNodeIs(state.doc, followed) : mapped.pos;
+			return pos === undefined ? null : { ...preview, slide: { pos, followed } };
+		},
+	},
+	props: {
+		decorations(state) {
+			const preview = boxesPreviewKey.getState(state);
+			return preview
+				? DecorationSet.create(state.doc, previewDecorations(state.doc, preview))
+				: null;
+		},
+	},
+});
+
+/**
+ * The slide `preview` is of, drawn placed, and each of its boxes at the
+ * drag's frame for it, as the custom properties the placed slide's styles
+ * draw a box at (see `app.css`). Nothing once the slide no longer holds a box
+ * for each of the drag's frames.
+ */
+function previewDecorations(
+	deck: Node,
+	{ slide: { pos: slidePos }, frames }: BoxesPreview,
+): Decoration[] {
+	const slide = deck.nodeAt(slidePos);
+	if (slide?.type.name !== SLIDE) return [];
+	const body = slide.child(0);
+	if (body.childCount !== frames.length) return [];
+	const decorations = placementOf(slide)
+		? []
+		: [Decoration.node(slidePos, slidePos + slide.nodeSize, { [PLACED_ATTRIBUTE]: "" })];
+	body.forEach((box, offset, index) => {
+		const frame = frames[index];
+		const at = slidePos + 2 + offset;
+		if (frame)
+			decorations.push(Decoration.node(at, at + box.nodeSize, { style: frameStyle(frame) }));
+	});
+	return decorations;
+}
+
+const frameStyle = ({ x, y, w, h }: Frame) =>
+	`--box-x: ${x}; --box-y: ${y}; --box-w: ${w}; --box-h: ${h}`;
+
 /** Drawing the element under the slide in view, and saying it is gone. */
 interface UnderSlide {
 	draw: () => HTMLElement;
@@ -133,82 +279,89 @@ interface UnderSlide {
 /** Stands for the place an image goes in, which is drawn as an area to add one, not as words. */
 const ADD_IMAGE = Symbol("an image");
 
-/** An empty part of a slide's frame, where it starts, and what goes there. */
+/** An empty part of a slide's box, where it starts, and what goes there. */
 interface EmptyPart {
 	node: Node;
 	at: number;
 	words: string | typeof ADD_IMAGE;
 }
 
+/** What goes on an empty line of a box, by what the box is for. */
+const EMPTY_LINE_WORDS: Record<BoxRole, string> = {
+	title: "Add a title",
+	subtitle: "Add a subtitle",
+	body: "Add text",
+	leftColumn: "Add text",
+	rightColumn: "Add text",
+	text: "Add text",
+	image: "Add text",
+	label: "Add a label",
+	quote: "Add a quote",
+	attribution: "Who said it",
+	table: "Add text",
+};
+
 /**
- * The empty parts of a slide's frame, `body`, which starts at `start`, with
- * what goes in each as the slide's layout has it: a title, a subtitle under
- * it, a quote and who said it, text, and in the second column of a slide
- * laid out with an image, the image.
+ * A box, by what it is for, as a person is told of it, in the words its
+ * empty lines' placeholders use, and with the side each column is on.
  */
-function emptyPartsOf(body: Node, start: number, layout: SlideLayout): EmptyPart[] {
+export const BOX_NAMES: Record<BoxRole, string> = {
+	title: "the title",
+	subtitle: "the subtitle",
+	body: "the text",
+	leftColumn: "the left column",
+	rightColumn: "the right column",
+	text: "the text",
+	image: "the image",
+	label: "the label",
+	quote: "the quote",
+	attribution: "who said it",
+	table: "the table",
+};
+
+/**
+ * The empty parts of a slide's box of `role`, which starts at `start`, with
+ * what goes in each: in the image's box, while it holds only an empty line,
+ * the image; in any other, on each empty line but those in a table or code,
+ * what the box is for, a heading on a heading, and a quote in a quote. In the
+ * title's box, the heading it starts with is the title, and a line under it
+ * the subtitle.
+ */
+function emptyPartsOf(box: Node, start: number, role: BoxRole): EmptyPart[] {
+	if (role === "image" && holdsOnlyAnEmptyParagraph(box)) {
+		return [{ node: box, at: start, words: ADD_IMAGE }];
+	}
 	const parts: EmptyPart[] = [];
 	let titled = false;
-	let column = 0;
-	body.forEach((child, offset, index) => {
-		const at = start + offset;
-		const before = index > 0 ? body.child(index - 1) : undefined;
-		if (child.type.name === SLIDE_COLUMN) {
-			if (layout === "image" && column === 1 && holdsOnlyAnEmptyParagraph(child)) {
-				parts.push({ node: child, at, words: ADD_IMAGE });
-			} else {
-				parts.push(...emptyTextIn(child, at + 1, "Add text"));
-			}
-			column++;
-			return;
-		}
-		if (child.type.name === "heading") {
-			if (child.content.size === 0)
-				parts.push({ node: child, at, words: titled ? "Add a heading" : "Add a title" });
-			titled = true;
-			return;
-		}
-		if (child.type.name === "paragraph") {
-			if (child.content.size === 0)
-				parts.push({ node: child, at, words: paragraphWords(layout, titled, before) });
-			return;
-		}
-		parts.push(
-			...emptyTextIn(child, at + 1, child.type.name === "blockquote" ? "Add a quote" : "Add text"),
-		);
-	});
-	return parts;
-}
-
-/** What goes in an empty paragraph of a slide's own, where `before` is the block above it. */
-function paragraphWords(layout: SlideLayout, titled: boolean, before: Node | undefined): string {
-	if (layout === "title" && titled) return "Add a subtitle";
-	if (layout === "section") return titled ? "Add a subtitle" : "Add a label";
-	if (layout === "quote" && before?.type.name === "blockquote") return "Who said it";
-	return "Add text";
-}
-
-/** The empty lines of text in `node`, whose content starts at `start`, but for those in a table or code. */
-function emptyTextIn(node: Node, start: number, words: string): EmptyPart[] {
-	const parts: EmptyPart[] = [];
-	node.descendants((child, offset) => {
+	box.descendants((child, offset, parent) => {
 		if (child.type.name === "table" || child.type.name === "codeBlock") return false;
-		if (child.isTextblock && child.content.size === 0) {
+		if (!child.isTextblock) return true;
+		if (child.content.size === 0) {
 			parts.push({
 				node: child,
-				at: start + offset,
-				words: child.type.name === "heading" ? "Add a heading" : words,
+				at: start + 1 + offset,
+				words: lineWords(child, parent, role, titled),
 			});
 		}
-		return !child.isTextblock;
+		titled ||= child.type.name === "heading";
+		return false;
 	});
 	return parts;
 }
 
-const holdsOnlyAnEmptyParagraph = (region: Node) =>
-	region.childCount === 1 &&
-	region.firstChild?.type.name === "paragraph" &&
-	region.firstChild.content.size === 0;
+/** What goes on `line`, an empty line in `parent`, in a box of `role` that has a heading above it when `titled`. */
+function lineWords(line: Node, parent: Node | null, role: BoxRole, titled: boolean): string {
+	if (line.type.name === "heading")
+		return role === "title" && !titled ? "Add a title" : "Add a heading";
+	if (parent?.type.name === "blockquote") return "Add a quote";
+	if (role === "title" && titled) return "Add a subtitle";
+	return EMPTY_LINE_WORDS[role];
+}
+
+const holdsOnlyAnEmptyParagraph = (box: Node) =>
+	box.childCount === 1 &&
+	box.firstChild?.type.name === "paragraph" &&
+	box.firstChild.content.size === 0;
 
 /** Says what the notes under a slide are for, while they say nothing. */
 function notesHint(notes: Node, start: number): Decoration[] {
@@ -229,12 +382,12 @@ function notesHint(notes: Node, start: number): Decoration[] {
 }
 
 /**
- * The area an empty image column is drawn as: a dashed frame saying to add
- * an image, which opens the picker for one when pressed, and takes one
- * dropped on it.
+ * The area an empty image box is drawn as: a dashed frame saying to add an
+ * image, which opens the picker for one when pressed, and takes one dropped
+ * on it.
  */
 const imageArea =
-	(onAddImage: (column: number, file: File | undefined) => void) =>
+	(onAddImage: (box: number, file: File | undefined) => void) =>
 	(_view: unknown, getPos: () => number | undefined) => {
 		const area = document.createElement("button");
 		area.type = "button";
@@ -244,13 +397,13 @@ const imageArea =
 			pictureIcon(),
 			Object.assign(document.createElement("span"), { textContent: "Add an image" }),
 		);
-		/** Where the column starts: the area is drawn at the start of what it holds. */
-		const column = () => {
+		/** Where the box starts: the area is drawn at the start of what it holds. */
+		const box = () => {
 			const at = getPos();
 			return at === undefined ? undefined : at - 1;
 		};
 		area.addEventListener("click", () => {
-			const at = column();
+			const at = box();
 			if (at !== undefined) onAddImage(at, undefined);
 		});
 		area.addEventListener("dragover", (event) => {
@@ -258,7 +411,7 @@ const imageArea =
 		});
 		area.addEventListener("drop", (event) => {
 			const [file] = event.dataTransfer?.files ?? [];
-			const at = column();
+			const at = box();
 			if (!file || at === undefined) return;
 			event.preventDefault();
 			onAddImage(at, file);

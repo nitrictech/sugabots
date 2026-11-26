@@ -1,18 +1,25 @@
-import { layoutOf, SLIDE_BODY, SLIDE_TEXT_STEPS } from "@sugabots/contracts/live-slides";
-import type { SlideLayout } from "@sugabots/contracts/slides-markdown";
+import { layoutOf, placementOf, SLIDE_TEXT_STEPS } from "@sugabots/contracts/live-slides";
+import {
+	type BoxRole,
+	type Frame,
+	type Placement,
+	roomBottom,
+	SLIDE_BOX_ROLES,
+	type SlideLayout,
+} from "@sugabots/contracts/slides-markdown";
 import type { Mark, Node } from "@tiptap/pm/model";
 import { metricsOf, type TextType } from "./pdf-fonts.ts";
 import {
 	ACCENT,
+	accentBarOver,
 	BLOCK_QUOTE_LOOK,
+	BOX_PARTS,
 	CODE_LOOK,
 	COLUMN_GAP_UNITS,
 	COLUMN_LOOK,
 	CONTENT_BOTTOM,
 	CONTENT_WIDTH,
-	childNamed,
 	EM,
-	everyBlock,
 	HIGHLIGHT,
 	IMAGE_LAYOUT,
 	IMAGE_RADIUS,
@@ -45,20 +52,23 @@ import {
 /*
  * A deck's slides laid out as the app's slide styles lay them out
  * (`slide-design.ts`), measured in its fonts, each at the largest of
- * `SLIDE_TEXT_STEPS` at which it fits, as in the app. The PDF draws a slide
- * where it is laid out (`pdf.ts`), and the PowerPoint file sets a slide's text
- * at the step it is laid out at, in boxes as tall as it is laid out
- * (`powerpoint.ts`).
+ * `SLIDE_TEXT_STEPS` at which it fits, as in the app. A slide whose boxes
+ * somebody placed by hand has each box at its frame, as the app draws a
+ * placed slide (`placedBoxes`). The PDF draws a slide where it is laid out
+ * (`pdf.ts`), and the PowerPoint file sets a slide's text at the step it is
+ * laid out at, in boxes as tall as it is laid out (`powerpoint.ts`).
  *
  * Everything is laid out first, measured, and drawn after with a pen where it
  * was laid out, so a slide's text can be laid out again at a smaller step
  * before anything is drawn, and measured without being drawn at all.
  *
- * A slide is cut off at the foot of its padding, and what is stacked one
- * thing under another owns that (`stacked`): what starts at or past the foot
- * isn't drawn, numbers, rules and links with it, and is laid out only as far
- * as it takes to know the slide can't fit, so a slide that runs over by any
- * amount costs no more than one that runs over a little.
+ * A slide is cut off at the foot of its padding, or, once its boxes are
+ * placed by hand, at its edges, as the app cuts each off; the pen cuts off
+ * what is drawn past that (`Pen.clipped`). What is stacked one thing under
+ * another leaves out what starts where it is cut off (`stacked`), numbers,
+ * rules and links with it, and is laid out only as far as it takes to know
+ * the slide can't fit, or as far as the slide shows, so a slide that runs
+ * over by any amount costs no more than one that runs over a little.
  */
 
 /** How a stretch of text is set, and its colour. */
@@ -99,6 +109,8 @@ export interface Pen {
 	image(address: string, box: Box, radius: number): void;
 	/** Draws what `draw` draws, cut off at the edges of `box`. */
 	clipped(box: Box, draw: () => void): void;
+	/** Whether what is drawn from `y` down is cut off whole: `y` is at or past the foot of a box drawing is cut off at (`clipped`). */
+	cutsOffFrom(y: number): boolean;
 	/** A link over `box`, as far as what it is drawn within shows. */
 	link(box: Box, url: string): void;
 }
@@ -151,28 +163,46 @@ type LayOut = (room: number) => Laid;
 
 const NOTHING: Laid = { height: 0, width: 0, baseline: undefined, draw: () => {} };
 
-/** A slide laid out: the step its text is drawn at, whether it fits within its padding at it, and drawing it. */
+/** A slide laid out: the step its text is drawn at, whether it fits at it, and drawing it. */
 export interface ArrangedSlide {
 	/** One of `SLIDE_TEXT_STEPS`. */
 	step: number;
 	fits: boolean;
+	/** Draws the slide, cut off where the app cuts it off. */
 	draw: (pen: Pen) => void;
 }
 
 /** The height within a slide's padding. */
 const CONTENT_HEIGHT = SLIDE_HEIGHT - 2 * PADDING_Y;
 
-/** How far past the padding a slide's content may reach and still fit, as the app allows a pixel for rounding. */
+/** How far past the room it has a slide's content may reach and still fit, as the app allows a pixel for rounding. */
 const FIT_ALLOWANCE = 1;
 
 /** The room a slide's content has, from the top of its padding. */
 const SLIDE_ROOM = CONTENT_HEIGHT + FIT_ALLOWANCE;
 
-/** `slide` laid out at the largest step at which it fits, or the smallest. */
+/** Where a slide its layout places is cut off: at the foot of its padding. */
+const WITHIN_PADDING: Box = { x: 0, y: 0, width: SLIDE_WIDTH, height: CONTENT_BOTTOM };
+
+/** Where a slide whose boxes were placed by hand is cut off: at its edges. */
+const WHOLE_SLIDE: Box = { x: 0, y: 0, width: SLIDE_WIDTH, height: SLIDE_HEIGHT };
+
+/**
+ * `slide` laid out at the largest step at which it fits, or the smallest: by
+ * its layout, or, where somebody placed its boxes by hand, each box at its
+ * frame (`placedBoxes`).
+ */
 export function arrangedSlide(slide: Node, measure: Measure): ArrangedSlide {
 	const layout = layoutOf(slide);
-	const blocks = slideBlocksOf(childNamed(slide, SLIDE_BODY));
-	const atStep = (step: number) => ({ step, ...arranged(layout, blocks, measure, step * EM) });
+	const blocks = slideBlocksOf(slide);
+	const placement = placementOf(slide);
+	const cutOffAt = placement ? WHOLE_SLIDE : WITHIN_PADDING;
+	const atStep = (step: number): ArrangedSlide => {
+		const { fits, draw } = placement
+			? placedBoxes(layout, blocks, placement, measure, step)
+			: arranged(layout, blocks, measure, step * EM);
+		return { step, fits, draw: (pen) => pen.clipped(cutOffAt, () => draw(pen)) };
+	};
 	const [largest, ...smaller] = SLIDE_TEXT_STEPS;
 	let arrangement = atStep(largest);
 	for (const step of smaller) {
@@ -190,6 +220,12 @@ export interface Placing {
 	step: number;
 	/** In points. */
 	width: number;
+	/**
+	 * How tall the box the blocks are in is, in points, on a slide whose boxes
+	 * somebody placed by hand, where no image in a box is taller than the box:
+	 * `undefined` on a slide its layout places.
+	 */
+	boxHeight: number | undefined;
 }
 
 /**
@@ -201,7 +237,7 @@ export function heightOfBlocks(
 	placing: Placing,
 	measure: Measure,
 ): number {
-	const setting = settingIn(placing.layout, placing.part, measure, placing.step * EM);
+	const setting = settingOf(placing, measure);
 	return stackedWithin(
 		blocks.map((block) => (room) => laidBlock(block, setting, placing.width, room)),
 		partLook(placing.layout, placing.part).gap * setting.unit,
@@ -215,8 +251,15 @@ export function heightOfBlocks(
  * slide's content may be aren't measured.
  */
 export function rowHeightsOf(table: Node, placing: Placing, measure: Measure): number[] {
-	const setting = settingIn(placing.layout, placing.part, measure, placing.step * EM);
+	const setting = settingOf(placing, measure);
 	return tableRows(table, setting, placing.width, SLIDE_ROOM).map((row) => row.height);
+}
+
+/** What blocks set as `placing` says inherit. */
+function settingOf(placing: Placing, measure: Measure): Setting {
+	const setting = settingIn(placing.layout, placing.part, measure, placing.step * EM);
+	if (placing.boxHeight === undefined) return setting;
+	return { ...setting, imageMaxHeight: Math.min(setting.imageMaxHeight, placing.boxHeight) };
 }
 
 /** What the blocks in `part` of a slide of `layout` inherit, at `unit`. */
@@ -268,11 +311,17 @@ function arranged(
 				settingIn(layout, "imageColumn", measure, unit),
 			);
 		case "quote":
-			return inFlow(everyBlock(blocks), setting, look, QUOTE_PADDING_UNITS * EM);
+			return inFlow(blocks.all, setting, look, QUOTE_PADDING_UNITS * EM);
 		case "section":
-			return inFlow(everyBlock(blocks), setting, look, PADDING_X, sectionBar(setting));
+			return inFlow(
+				blocks.all,
+				setting,
+				look,
+				PADDING_X,
+				blocks.shows("label") ? sectionBar(setting) : undefined,
+			);
 		default:
-			return inFlow(everyBlock(blocks), setting, look, PADDING_X);
+			return inFlow(blocks.all, setting, look, PADDING_X);
 	}
 }
 
@@ -305,17 +354,17 @@ function inFlow(
 	return { fits, draw: (pen) => laid.draw(pen, paddingX, PADDING_Y + offset) };
 }
 
-/** The title and anything else outside the columns across the top, and the two columns side by side under it. */
+/** The title across the top, and the two columns side by side under it. */
 function inColumns(blocks: SlideBlocks, setting: Setting, columnSetting: Setting): Arrangement {
 	const gap = COLUMN_GAP_UNITS * setting.unit;
 	const columnWidth = (CONTENT_WIDTH - gap) / 2;
-	const across = [...blocks.title, ...blocks.flow].map(
+	const across = blocks.inBox("title").map(
 		(block): LayOut =>
 			(room) =>
 				laidBlock(block, setting, CONTENT_WIDTH, room),
 	);
 	const columns: LayOut = (room) => {
-		const [left, right] = blocks.columns.map((column) =>
+		const [left, right] = [blocks.inBox("leftColumn"), blocks.inBox("rightColumn")].map((column) =>
 			laidColumn(column, columnSetting, columnWidth, room),
 		) as [Laid, Laid];
 		return {
@@ -340,8 +389,8 @@ function inColumns(blocks: SlideBlocks, setting: Setting, columnSetting: Setting
 }
 
 /**
- * The title, and the first column's text under it, together in the middle of
- * the left, and the second column, its image, in the middle of the right.
+ * The title, and the text under it, together in the middle of the left, and
+ * the image's box in the middle of the right.
  */
 function besideImage(
 	blocks: SlideBlocks,
@@ -351,24 +400,24 @@ function besideImage(
 ): Arrangement {
 	const gap = COLUMN_GAP_UNITS * setting.unit;
 	const columnWidth = (CONTENT_WIDTH - gap) / 2;
-	const heads = [...blocks.title, ...blocks.flow];
+	const heads = blocks.inBox("title");
 	const head = stackedWithin(
 		heads.map(
 			(block): LayOut =>
 				(room) =>
 					laidBlock(block, setting, columnWidth, room),
 		),
-		0,
+		IMAGE_LAYOUT.titleBlockGap * setting.unit,
 		SLIDE_ROOM,
 	);
 	const titleGap = heads.length > 0 ? IMAGE_LAYOUT.titleGap * setting.unit : 0;
 	const text = laidColumn(
-		blocks.columns[0],
+		blocks.inBox("text"),
 		textSetting,
 		columnWidth,
 		SLIDE_ROOM - head.height - titleGap,
 	);
-	const image = laidColumn(blocks.columns[1], imageSetting, columnWidth, SLIDE_ROOM, "center");
+	const image = laidColumn(blocks.inBox("image"), imageSetting, columnWidth, SLIDE_ROOM, "center");
 	const leftHeight = head.height + titleGap + text.height;
 	const height = Math.max(CONTENT_HEIGHT, leftHeight, image.height);
 	return {
@@ -401,7 +450,95 @@ function laidColumn(
 	);
 }
 
-/** The section break's accent bar, over its label and title. */
+/**
+ * A slide whose boxes somebody placed by hand, its text at `step`: each box
+ * it shows at its frame (`placedBox`), and nothing else, whatever its
+ * layout's padding, as the app draws a placed slide. It fits when what each
+ * box holds ends no lower than the room the box has on the slide
+ * (`roomBottom`), give or take the pixel the app allows, as the app fits it.
+ */
+function placedBoxes(
+	layout: SlideLayout,
+	blocks: SlideBlocks,
+	placement: Placement,
+	measure: Measure,
+	step: number,
+): Arrangement {
+	const roles: readonly BoxRole[] = SLIDE_BOX_ROLES[layout];
+	const shown = roles.map((role) => blocks.shows(role));
+	const boxes = roles.flatMap((role, index) => {
+		const frame = placement[index];
+		if (!frame || !shown[index]) return [];
+		const box = placedBox(layout, role, blocks.inBox(role), frame, measure, step);
+		return [{ ...box, fits: box.bottom <= roomBottom(placement, shown, index) + FIT_ALLOWANCE }];
+	});
+	return {
+		fits: boxes.every((box) => box.fits),
+		draw: (pen) => {
+			for (const box of boxes) box.draw(pen);
+		},
+	};
+}
+
+/**
+ * What a box of `role` placed at `frame` holds, laid out as the app's styles
+ * for a placed slide set it: across the frame, as far apart as the box's
+ * role sets its blocks, from the frame's top, but in the middle of the frame
+ * both ways in the image layout's image box; no image in it taller than the
+ * frame; and over a section break's label, the accent bar. It is laid out as
+ * far down as the slide shows, and `bottom` is how far down the slide what it
+ * holds reaches.
+ */
+function placedBox(
+	layout: SlideLayout,
+	role: BoxRole,
+	blocks: readonly Node[],
+	frame: Frame,
+	measure: Measure,
+	step: number,
+): { bottom: number; draw: (pen: Pen) => void } {
+	const setting = settingOf(
+		{ layout, part: BOX_PARTS[role], step, width: frame.w, boxHeight: frame.h },
+		measure,
+	);
+	const centred = role === "image";
+	const shownBelowTop = SLIDE_HEIGHT - frame.y;
+	const laid = stackedWithin(
+		blocks.map(
+			(block): LayOut =>
+				(room) =>
+					laidBlock(block, setting, frame.w, room),
+		),
+		boxGap(layout, role) * setting.unit,
+		// Centred, what is taller than the frame reaches below it by half as much as it is taller.
+		centred ? 2 * shownBelowTop - frame.h : shownBelowTop,
+		centred ? frame.w : undefined,
+	);
+	const top = centred ? frame.y + (frame.h - laid.height) / 2 : frame.y;
+	const bar = role === "label" ? sectionBar(setting) : undefined;
+	return {
+		bottom: top + laid.height,
+		draw: (pen) => {
+			if (bar) {
+				const over = accentBarOver(frame, setting.unit);
+				bar.draw(pen, over.x, over.y);
+			}
+			laid.draw(pen, frame.x, top);
+		},
+	};
+}
+
+/**
+ * The space between the blocks a box of `role` holds, in units of the step,
+ * as the app's styles set it: its part's, but in the image layout's title,
+ * whose layout sets none between its rows, none.
+ */
+const boxGap = (layout: SlideLayout, role: BoxRole) =>
+	layout === "image" && role === "title"
+		? IMAGE_LAYOUT.titleBlockGap
+		: partLook(layout, BOX_PARTS[role]).gap;
+
+/** The section break's accent bar, over its label and title, which goes with its label when that is removed. */
 function sectionBar({ unit }: Setting): Laid {
 	const width = SECTION_BAR.width * unit;
 	const height = SECTION_BAR.height * unit;
@@ -416,8 +553,8 @@ function sectionBar({ unit }: Setting): Laid {
 
 /**
  * `items` one under another, `gap` apart, each at the left, or each in the
- * middle of `centredIn` when given. Drawn, those that start at or past the
- * foot of the slide's padding are left out: the slide is cut off there.
+ * middle of `centredIn` when given. Drawn, those that start where the pen
+ * cuts off what it draws (`Pen.cutsOffFrom`) are left out.
  */
 function stacked(items: readonly Laid[], gap: number, centredIn?: number): Laid {
 	if (items.length === 0) return NOTHING;
@@ -440,7 +577,7 @@ function stacked(items: readonly Laid[], gap: number, centredIn?: number): Laid 
 		draw: (pen, x, y) => {
 			for (const [index, item] of items.entries()) {
 				const top = y + (tops[index] ?? 0);
-				if (top >= CONTENT_BOTTOM) return;
+				if (pen.cutsOffFrom(top)) return;
 				const indent = centredIn === undefined ? 0 : (centredIn - item.width) / 2;
 				item.draw(pen, x + indent, top);
 			}

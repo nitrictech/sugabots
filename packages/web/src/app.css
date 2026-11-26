@@ -1092,8 +1092,8 @@
  * (`screens/slide-drawing.tsx`). Everything on it is sized off its width, in
  * a unit that is 16px on a slide 960px wide, so one set of styles draws it at
  * any size. Its text is drawn at the step `--slide-fit` gives, the largest at
- * which it fits. Each layout, and each part of a slide, sets the sizes of
- * what it holds, in the unit.
+ * which it fits. Each layout, and each of a slide's boxes by what it is for
+ * (`data-box-role`), sets the sizes of what it holds, in the unit.
  */
 .live-deck section[data-slide],
 .slide-drawing {
@@ -1109,10 +1109,12 @@
 	--slide-heading-weight: 600;
 	--slide-heading-leading: 1.15;
 	--slide-heading-tracking: -0.01em;
+	/* Between the slide's blocks, its boxes' as much as its own. */
+	--slide-gap: 2em;
 	box-sizing: border-box;
 	display: flex;
 	flex-direction: column;
-	gap: 2em;
+	gap: var(--slide-gap);
 	aspect-ratio: 16 / 9;
 	/* In the unit alone, so the margins stay as the text steps down. */
 	padding: calc(4 * var(--slide-unit)) calc(5 * var(--slide-unit));
@@ -1242,41 +1244,63 @@
 	margin-top: 0.4em;
 }
 
-/* One of the two columns of a slide laid out in columns. */
-:is(.live-deck, .slide-drawing) [data-slide-column] {
+/*
+ * A box on a slide, a part its layout places, holding blocks one under
+ * another as far apart as the slide's own, so a layout that sets its boxes
+ * one under another draws their blocks as one flow.
+ */
+:is(.live-deck, .slide-drawing) [data-slide-box] {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: var(--slide-gap);
+}
+
+/* The columns of a slide in two columns, and the text and image of one with an image: smaller, and nearer each other. */
+:is(.live-deck, .slide-drawing)
+:is(
+	[data-box-role="leftColumn"],
+	[data-box-role="rightColumn"],
+	[data-box-role="text"],
+	[data-box-role="image"]
+) {
 	--slide-text-size: 1.25;
 	--slide-heading-size: 1.375;
 	--slide-heading-leading: 1.2;
 	--slide-heading-tracking: 0;
-	display: flex;
-	min-width: 0;
-	flex-direction: column;
 	gap: 0.9em;
 }
 
-:is(.live-deck, .slide-drawing) [data-slide-column] :is(ul, ol) {
+:is(.live-deck, .slide-drawing)
+	:is(
+		[data-box-role="leftColumn"],
+		[data-box-role="rightColumn"],
+		[data-box-role="text"],
+		[data-box-role="image"]
+	)
+	:is(ul, ol) {
 	gap: 0.6em;
 }
 
 /*
- * Columns somebody proposes adding or removing, as while a new layout is
- * suggested, sit in their slide as any column does, each marked as the
+ * Boxes somebody proposes adding or removing, as while a new layout is
+ * suggested, sit in their slide as any box does, each marked as the
  * suggestion's words are: the element saying so is no box of its own.
  */
 :is(.live-deck, .slide-drawing)
 	[data-slide-body]
-	> :is(ins, del, [data-type="modification"]):has(> [data-slide-column]) {
+	> :is(ins, del, [data-type="modification"]):has(> [data-slide-box]) {
 	/* biome-ignore lint/complexity/noImportantStyles: the suggesting library draws the element with its own inline `display: block`. */
 	display: contents !important;
 }
 
-:is(.live-deck, .slide-drawing) [data-slide-body] ins[data-id] > [data-slide-column] {
+:is(.live-deck, .slide-drawing) [data-slide-body] ins[data-id] > [data-slide-box] {
 	border-radius: 0.25em;
 	background: color-mix(in srgb, var(--suggestion) 12%, transparent);
 	color: var(--suggestion);
 }
 
-:is(.live-deck, .slide-drawing) [data-slide-body] del[data-id] > [data-slide-column] {
+:is(.live-deck, .slide-drawing) [data-slide-body] del[data-id] > [data-slide-box] {
 	color: var(--subtle-foreground);
 	text-decoration: line-through;
 }
@@ -1288,8 +1312,8 @@
 	--slide-heading-leading: 1.1;
 	--slide-heading-tracking: -0.02em;
 	--slide-text-color: var(--slide-sub);
+	--slide-gap: 1.25em;
 	justify-content: safe center;
-	gap: 1.25em;
 }
 
 [data-slide][data-layout="title"] > [data-slide-body] :is(h1, h2, h3),
@@ -1305,8 +1329,8 @@
 	--slide-heading-tracking: -0.02em;
 	--slide-text-size: 1.25;
 	--slide-text-color: var(--slide-sub);
+	--slide-gap: 1em;
 	justify-content: safe flex-end;
-	gap: 1em;
 }
 
 [data-slide][data-layout="section"] > [data-slide-body]::before {
@@ -1326,8 +1350,8 @@
 [data-slide][data-layout="quote"] > [data-slide-body] {
 	--slide-text-size: 1.25;
 	--slide-text-color: var(--slide-sub);
+	--slide-gap: 1.75em;
 	justify-content: safe center;
-	gap: 1.75em;
 	padding-inline: calc(7 * var(--slide-unit));
 }
 
@@ -1347,35 +1371,46 @@
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 	align-content: start;
-	gap: 2em 3.5em;
+	gap: var(--slide-gap) 3.5em;
 }
 
+/* The title, and a box that is no column, as one proposed for removal, across the top. */
 [data-slide][data-layout="columns"]
-	> [data-slide-body]
-	> :not([data-slide-column], :has(> [data-slide-column])) {
+[data-slide-box]:not([data-box-role="leftColumn"], [data-box-role="rightColumn"]) {
 	grid-column: 1 / -1;
 }
 
-[data-slide][data-layout="columns"] [data-slide-column] :is(h1, h2, h3) {
+/* The right column on the right, even with the left one removed, as a file the deck is saved as draws it. */
+[data-slide][data-layout="columns"] [data-box-role="rightColumn"] {
+	grid-column: 2;
+}
+
+[data-slide][data-layout="columns"]
+	:is([data-box-role="leftColumn"], [data-box-role="rightColumn"])
+	:is(h1, h2, h3) {
 	padding-bottom: 0.6em;
 	border-bottom: 1px solid var(--slide-rule);
 }
 
 /* Image and text: the title and its text on the left, in the middle, and the image filling the right. */
 [data-slide][data-layout="image"] > [data-slide-body] {
+	/* Nothing between its rows, nor between its title's blocks: the title keeps its own room under it. */
+	--slide-gap: 0;
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 	grid-template-rows: 1fr auto auto 1fr;
-	gap: 0 3.5em;
+	gap: var(--slide-gap) 3.5em;
 }
 
-[data-slide][data-layout="image"] > [data-slide-body] > :not([data-slide-column]) {
+/* The title, and a box that is neither text nor image, as one proposed for removal, over the text. */
+[data-slide][data-layout="image"]
+[data-slide-box]:not([data-box-role="text"], [data-box-role="image"]) {
 	grid-column: 1;
 	grid-row: 2;
 	margin-bottom: calc(1.25 * var(--slide-text));
 }
 
-[data-slide][data-layout="image"] > [data-slide-body] > [data-slide-column] {
+[data-slide][data-layout="image"] :is([data-box-role="text"], [data-box-role="image"]) {
 	--slide-text-size: 1.375;
 	--slide-text-color: var(--slide-sub);
 	grid-column: 1;
@@ -1383,7 +1418,7 @@
 	line-height: 1.5;
 }
 
-[data-slide][data-layout="image"] > [data-slide-body] > [data-slide-column] ~ [data-slide-column] {
+[data-slide][data-layout="image"] [data-box-role="image"] {
 	position: relative;
 	grid-column: 2;
 	grid-row: 1 / -1;
@@ -1391,7 +1426,7 @@
 	justify-content: center;
 }
 
-[data-slide][data-layout="image"] [data-slide-column] ~ [data-slide-column] img {
+[data-slide][data-layout="image"] [data-box-role="image"] img {
 	max-height: calc(25 * var(--slide-unit));
 	border-radius: 0.75em;
 }
@@ -1399,6 +1434,100 @@
 /* Table: a title, and the table under it. */
 [data-slide][data-layout="table"] > [data-slide-body] {
 	--slide-text-size: 1.25;
+}
+
+/*
+ * A slide whose boxes were placed by hand (`data-placement`): each box drawn
+ * at its frame, measured in a slide's pixels from the slide's top left
+ * corner, whatever its layout's padding, and scaled with it. Its layout still
+ * styles what each box holds by what the box is for; only where the layout
+ * would put its boxes, and how it would space them, gives way. What a box
+ * holds starts at its top, and what runs past its foot is cut at the
+ * slide's edge, on the stage too.
+ *
+ * The slide gives the frames as `--box-1-x` and so on (see `Slide` in
+ * `live-slides.ts`), and each box takes its own as `--box-x`, `--box-y`,
+ * `--box-w` and `--box-h`, which a box being dragged on the stage is given
+ * directly (`deck-stage.ts`). These come after the layouts' rules, so they
+ * win where they say the same as one.
+ */
+[data-slide][data-placement] > [data-slide-body] {
+	/* A pixel of a slide 960 wide, on which the unit is 16. */
+	--slide-pixel: calc(var(--slide-unit) / 16);
+	position: relative;
+	display: block;
+	overflow: clip;
+}
+
+/* biome-ignore lint/style/noDescendingSpecificity: it says where a box goes, which the rules colouring a box proposed for adding or removing say nothing of. */
+[data-slide][data-placement] [data-slide-box] {
+	position: absolute;
+	top: calc(var(--box-y) * var(--slide-pixel));
+	left: calc(var(--box-x) * var(--slide-pixel));
+	width: calc(var(--box-w) * var(--slide-pixel));
+	height: calc(var(--box-h) * var(--slide-pixel));
+	margin: 0;
+}
+
+/* A frame holds only boxes, so a box's place among its children is its place among the slide's boxes. */
+[data-slide][data-placement] > [data-slide-body] > [data-slide-box]:nth-child(1) {
+	--box-x: var(--box-1-x);
+	--box-y: var(--box-1-y);
+	--box-w: var(--box-1-w);
+	--box-h: var(--box-1-h);
+}
+
+[data-slide][data-placement] > [data-slide-body] > [data-slide-box]:nth-child(2) {
+	--box-x: var(--box-2-x);
+	--box-y: var(--box-2-y);
+	--box-w: var(--box-2-w);
+	--box-h: var(--box-2-h);
+}
+
+[data-slide][data-placement] > [data-slide-body] > [data-slide-box]:nth-child(3) {
+	--box-x: var(--box-3-x);
+	--box-y: var(--box-3-y);
+	--box-w: var(--box-3-w);
+	--box-h: var(--box-3-h);
+}
+
+/* An image no taller than its box, nor than its layout draws it. */
+[data-slide][data-placement] [data-slide-box] img {
+	max-height: calc(var(--box-h) * var(--slide-pixel));
+}
+
+[data-slide][data-layout="image"][data-placement] [data-box-role="image"] img {
+	max-height: min(calc(25 * var(--slide-unit)), calc(var(--box-h) * var(--slide-pixel)));
+}
+
+/* A section break's accent stays over its label, wherever the label goes. */
+[data-slide][data-layout="section"][data-placement] > [data-slide-body]::before {
+	content: none;
+}
+
+[data-slide][data-layout="section"][data-placement] [data-box-role="label"]::before {
+	content: "";
+	position: absolute;
+	bottom: calc(100% + var(--slide-gap));
+	left: 0;
+	width: 3em;
+	height: 0.3em;
+	border-radius: 0.15em;
+	background: var(--slide-accent);
+}
+
+/*
+ * A box off its slide (`isRemovedBox`), which whoever draws the slide says
+ * with `data-removed`: not drawn, and taking no room among the others. A
+ * section break's accent goes with its label, as it does on a placed slide.
+ */
+:is(.live-deck, .slide-drawing) [data-slide-box][data-removed] {
+	display: none;
+}
+
+[data-slide][data-layout="section"]
+	> [data-slide-body]:has([data-box-role="label"][data-removed])::before {
+	content: none;
 }
 
 /*
@@ -1490,7 +1619,7 @@
 	opacity: 0.5;
 }
 
-/* Where an empty image column's image goes: a dashed area that opens the picker, or takes an image dropped on it. */
+/* Where an empty image box's image goes: a dashed area that opens the picker, or takes an image dropped on it. */
 .live-deck .slide-add-image {
 	position: absolute;
 	inset: 0;
@@ -1521,4 +1650,113 @@
 .live-deck .slide-add-image svg {
 	width: 2.25em;
 	height: 2.25em;
+}
+
+/*
+ * Moving and resizing the boxes of the slide on the stage, drawn over it
+ * (`screens/box-outlines.tsx`): the box being edited outlined in the
+ * slide's accent, with a handle at each corner and side to resize it from; a
+ * fainter outline round a box the pointer is over; along either outline, a
+ * band that moves the box; and a line across the slide wherever a box being
+ * dragged lines up with something.
+ */
+.box-outlines {
+	position: absolute;
+	z-index: 1;
+	aspect-ratio: 16 / 9;
+	pointer-events: none;
+}
+
+.box-outlines .box-frame {
+	position: absolute;
+}
+
+.box-outlines .box-frame::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	outline: 1px solid var(--border-dashed);
+}
+
+.box-outlines .box-frame[data-editing]::before {
+	outline: 1.5px solid var(--slide-accent);
+}
+
+/*
+ * The band along a box's outline: `--band-outside` outside it, which the
+ * outlines are given, and a little way inside, so a press at the very start
+ * of its words still puts the caret there. Only the band takes the pointer,
+ * not what it goes round.
+ */
+.box-outlines .box-move {
+	--band: calc(var(--band-outside) + 2px);
+	position: absolute;
+	inset: calc(-1 * var(--band-outside));
+	padding: 0;
+	border: 0;
+	outline: none;
+	background: none;
+	cursor: move;
+	pointer-events: auto;
+	clip-path: polygon(
+		evenodd,
+		0 0,
+		100% 0,
+		100% 100%,
+		0 100%,
+		0 0,
+		var(--band) var(--band),
+		var(--band) calc(100% - var(--band)),
+		calc(100% - var(--band)) calc(100% - var(--band)),
+		calc(100% - var(--band)) var(--band),
+		var(--band) var(--band)
+	);
+}
+
+.box-outlines .box-move:focus-visible {
+	box-shadow: inset 0 0 0 var(--band) var(--ring-halo);
+}
+
+/* A handle: a small square on the outline, in a larger area that is easier to grab. */
+.box-outlines .box-handle {
+	position: absolute;
+	width: 16px;
+	height: 16px;
+	padding: 3px;
+	border: 0;
+	outline: none;
+	background: none;
+	translate: -50% -50%;
+	pointer-events: auto;
+}
+
+.box-outlines .box-handle > span {
+	display: block;
+	box-sizing: border-box;
+	width: 10px;
+	height: 10px;
+	border: 1.5px solid var(--slide-accent);
+	border-radius: 2px;
+	background: var(--slide-background);
+}
+
+.box-outlines .box-handle:focus-visible > span {
+	box-shadow: var(--ring-shadow);
+}
+
+.box-outlines .box-guide {
+	position: absolute;
+	background: var(--slide-accent);
+}
+
+.box-outlines .box-guide[data-direction="down"] {
+	top: 0;
+	bottom: 0;
+	width: 1px;
+}
+
+.box-outlines .box-guide[data-direction="across"] {
+	right: 0;
+	left: 0;
+	height: 1px;
 }

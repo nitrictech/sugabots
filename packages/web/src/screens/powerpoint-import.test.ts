@@ -71,6 +71,7 @@ describe("importing a PowerPoint file", () => {
 			lines(
 				"<!-- layout: title -->",
 				"# Quarterly review",
+				"<!-- box -->",
 				"Q3, for the whole team",
 				"<!-- notes: Welcome everyone.",
 				"Say the new pod's name. -->",
@@ -83,6 +84,7 @@ describe("importing a PowerPoint file", () => {
 			lines(
 				"<!-- layout: bullets -->",
 				"## Goals",
+				"<!-- box -->",
 				[
 					"- Ship *live* slides",
 					"  - with suggestions",
@@ -101,10 +103,10 @@ describe("importing a PowerPoint file", () => {
 			lines(
 				"<!-- layout: columns -->",
 				"## People and bots",
-				"<!-- column -->",
+				"<!-- box -->",
 				"**People**",
 				"Type in the page at the same time.",
-				"<!-- column -->",
+				"<!-- box -->",
 				"**Bots**",
 				"Suggest changes to accept or undo.",
 			),
@@ -116,14 +118,15 @@ describe("importing a PowerPoint file", () => {
 			lines(
 				"<!-- layout: image -->",
 				"## Sales went up",
-				"<!-- column -->",
+				"<!-- box -->",
 				"Every region grew, the north most of all.",
-				"<!-- column -->",
+				"<!-- box -->",
 				"![The sales chart](/images/1)",
 			),
 		);
+		// A slide with no title of its own has an empty one to type it in.
 		expect(deck.slides[5]).toBe(
-			lines("<!-- layout: image -->", "<!-- column -->", "<!-- column -->", "![](/images/1)"),
+			lines("<!-- layout: image -->", "##", "<!-- box -->", "<!-- box -->", "![](/images/1)"),
 		);
 		expect(deck.kept).toEqual([{ type: "image/png", bytes: TEST_PICTURE }]);
 	});
@@ -133,6 +136,7 @@ describe("importing a PowerPoint file", () => {
 			lines(
 				"<!-- layout: table -->",
 				"## Owners",
+				"<!-- box -->",
 				[
 					"",
 					"| Milestone                | Owner |",
@@ -150,6 +154,7 @@ describe("importing a PowerPoint file", () => {
 			lines(
 				"<!-- layout: bullets -->",
 				"## Revenue",
+				"<!-- box -->",
 				"Up 60% on last year",
 				"<!-- notes: The chart is in the appendix too. -->",
 			),
@@ -165,10 +170,12 @@ describe("importing a PowerPoint file", () => {
 			lines(
 				"<!-- layout: quote -->",
 				"> “Nothing a person writes is lost.”",
+				"<!-- box -->",
 				"Priya, at the launch",
 			),
 		);
-		expect(deck.slides[8]).toBe(lines("<!-- layout: section -->", "## Questions?"));
+		// A section break with no label over its title.
+		expect(deck.slides[8]).toBe(lines("<!-- layout: section -->", "<!-- box -->", "## Questions?"));
 	});
 
 	it("keeps an empty slide, as a new one of the deck's is", () => {
@@ -232,19 +239,19 @@ describe("importing a deck exported as a PowerPoint file", () => {
 		lines(
 			"<!-- layout: columns -->",
 			"## People and bots",
-			"<!-- column -->",
+			"<!-- box -->",
 			"### People",
 			"- Type in the page",
-			"<!-- column -->",
+			"<!-- box -->",
 			"### Bots",
 			"1. Suggest changes",
 		),
 		lines(
 			"<!-- layout: image -->",
 			"## The chart",
-			"<!-- column -->",
+			"<!-- box -->",
 			"Sales went up.",
-			"<!-- column -->",
+			"<!-- box -->",
 			`![The launch chart](${artifactImageAddress(imageIds)})`,
 		),
 		lines("<!-- layout: section -->", "## Where we are", "Part 2"),
@@ -258,7 +265,7 @@ describe("importing a deck exported as a PowerPoint file", () => {
 
 	it("brings back six of its seven layouts, with each slide's title, lists, marks, links, table, image and notes; a quote comes back a section break, a column's heading a bold line and the notes without their marks", async () => {
 		const file = await Effect.runPromise(
-			powerPointFileOf(artifact, DECK, () =>
+			powerPointFileOf(artifact, liveDocumentFromMarkdown("slides", DECK), () =>
 				Effect.succeed({ contentType: "image/png" as const, bytes: TEST_PICTURE }),
 			),
 		);
@@ -285,7 +292,12 @@ describe("importing a deck exported as a PowerPoint file", () => {
 		expect(section).toBe(original[4]);
 		// The quote is written in the slide's title placeholder, without quotation marks.
 		expect(quote).toBe(
-			lines("<!-- layout: section -->", "## Nothing a person writes is lost.", "The team"),
+			lines(
+				"<!-- layout: section -->",
+				"<!-- box -->",
+				"## Nothing a person writes is lost.",
+				"The team",
+			),
 		);
 		expect(table).toBe(original[6]);
 		expect(roundTrip.kept).toEqual([{ type: "image/png", bytes: TEST_PICTURE }]);

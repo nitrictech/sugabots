@@ -1,6 +1,5 @@
 import type { Artifact, ArtifactImageType } from "@sugabots/contracts";
 import type { ArtifactImageIds } from "@sugabots/contracts/http";
-import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
 import type { Node } from "@tiptap/pm/model";
 import { Clock, Effect } from "effect";
 import { imageSize } from "image-size";
@@ -8,7 +7,6 @@ import PDFDocument from "pdfkit";
 import { piecesIn, type Typesetter, typesetterOn, widthOfSpaces } from "./pdf-fonts.ts";
 import {
 	BACKGROUND,
-	CONTENT_BOTTOM,
 	type DeckImage,
 	ownImagesIn,
 	SLIDE_HEIGHT,
@@ -20,18 +18,20 @@ import { arrangedSlide, type Box, type Measure, type Pen, type Size } from "./sl
 export const PDF_CONTENT_TYPE = "application/pdf";
 
 /**
- * A `slides` deck's markdown as a PDF titled as the artifact is: a page for
- * each of the deck's slides, in order, that is the slide, 16:9 and edge to
- * edge, drawn as the app draws it in its light colours (`slide-design.ts`).
- * Its text is real text in the app's fonts, which the file holds as much of
- * as it draws (`pdf-fonts.ts`), and a slide's text is drawn at the largest of
- * the app's steps at which it fits, as in the app (`slide-layout.ts`); what
- * runs over even at the smallest is cut off at the padding. A link to an
- * absolute address can be followed. An image the deck keeps is drawn when it
- * is a PNG or a JPEG PDFKit can read and hold, within the pixels a deck may
- * have unpacked to draw it (`drawnImagesIn`); any other image is its words in
- * a dashed box, as the app shows an image it doesn't load. Speaker notes are
- * left out.
+ * `deck`, a `slides` deck as people see it, as a PDF titled as the artifact
+ * is: a page for each of the deck's slides, in order, that is the slide, 16:9
+ * and edge to edge, drawn as the app draws it in its light colours
+ * (`slide-design.ts`), its boxes where people placed them and without those
+ * they removed. Its text is real text in the app's fonts, which the file
+ * holds as much of as it draws (`pdf-fonts.ts`), and a slide's text is drawn
+ * at the largest of the app's steps at which it fits, as in the app
+ * (`slide-layout.ts`); what runs over even at the smallest is cut off where
+ * the app cuts it off, at the padding, or at the slide's edges once its boxes
+ * are placed by hand. A link to an absolute address can be followed. An
+ * image the deck keeps is drawn when it is a PNG or a JPEG PDFKit can read
+ * and hold, within the pixels a deck may have unpacked to draw it
+ * (`drawnImagesIn`); any other image is its words in a dashed box, as the app
+ * shows an image it doesn't load. Speaker notes are left out.
  *
  * A character no font holds is drawn as the font's mark for a missing
  * character, marked with the character it stands for, which a reader that
@@ -42,14 +42,13 @@ export const PDF_CONTENT_TYPE = "application/pdf";
  */
 export const pdfFileOf = <E, R>(
 	artifact: Pick<Artifact, "podId" | "id" | "title">,
-	markdown: string,
+	deck: Node,
 	imageOf: (
 		image: ArtifactImageIds,
 		kinds: ReadonlySet<ArtifactImageType>,
 	) => Effect.Effect<DeckImage | undefined, E, R>,
 ): Effect.Effect<Uint8Array, E, R> =>
 	Effect.gen(function* () {
-		const deck = liveDocumentFromMarkdown("slides", markdown);
 		const own = ownImagesIn(deck, { podId: artifact.podId, artifactId: artifact.id });
 		const found = yield* Effect.forEach(own, ([address, ids]) =>
 			Effect.map(imageOf(ids, DRAWN_TYPES), (image) => [address, image] as const),
@@ -93,11 +92,7 @@ async function pdfOf(
 		document.addPage({ size: [PAGE.width, PAGE.height], margin: 0 });
 		document.scale(PAGE.width / SLIDE_WIDTH);
 		document.rect(0, 0, SLIDE_WIDTH, SLIDE_HEIGHT).fill(hex(BACKGROUND));
-		const arrangement = arrangedSlide(slide, measure);
-		// What runs over at the smallest step is cut off at the padding, not drawn to the page's edge.
-		pen.clipped({ x: 0, y: 0, width: SLIDE_WIDTH, height: CONTENT_BOTTOM }, () =>
-			arrangement.draw(pen),
-		);
+		arrangedSlide(slide, measure).draw(pen);
 	}
 	document.end();
 	return written;
@@ -297,6 +292,7 @@ function penOn(document: PDFKit.PDFDocument, typesetter: Typesetter, images: Dra
 			clips.pop();
 			document.restore();
 		},
+		cutsOffFrom: (y) => clips.some((clip) => y >= clip.y + clip.height),
 		// A link reaches only as far down as what it is drawn with shows.
 		link({ x, y, width, height }, url) {
 			const bottom = clips.reduce(

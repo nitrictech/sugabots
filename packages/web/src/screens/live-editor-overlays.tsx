@@ -1,7 +1,6 @@
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { type EditRequest, LIVE_DOCUMENT_EDIT_REQUESTS } from "@sugabots/contracts/live-document";
-import { SLIDE, SLIDE_BODY, SLIDE_COLUMN, SPEAKER_NOTES } from "@sugabots/contracts/live-slides";
-import type { NestedOptions } from "@tiptap/extension-drag-handle";
+import { SLIDE, SLIDE_BOX, SPEAKER_NOTES } from "@sugabots/contracts/live-slides";
 import type { Node, ResolvedPos } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import { type Editor, useEditorState } from "@tiptap/react";
@@ -59,9 +58,9 @@ import { editTarget } from "./live-editor.tsx";
 
 /*
  * What floats over a live editor's text, the same in a document and in a
- * deck: the handle beside a block, the menu of blocks, the menu for selected
- * text, asking a bot for an edit and waiting on it, and the card a
- * suggestion is settled from.
+ * deck: the menu of blocks, the menu for selected text, asking a bot for an
+ * edit and waiting on it, and the card a suggestion is settled from; and on
+ * a document's page, the handle beside a block.
  */
 
 /** The bot a person asks for an edit. */
@@ -114,7 +113,7 @@ export function EditorOverlays({
 	onAsk,
 	asking,
 	onAskingChange,
-	nestedBlocks,
+	blockHandle,
 }: {
 	editor: Editor;
 	provider: HocuspocusProvider;
@@ -129,8 +128,12 @@ export function EditorOverlays({
 	onAsk: (bot: AskedBot, asked: Asked) => Promise<string>;
 	asking: Asking | undefined;
 	onAskingChange: (asking: Asking | undefined) => void;
-	/** Which blocks inside others the handle beside a block can move, where the page's blocks hold blocks. */
-	nestedBlocks?: NestedOptions;
+	/**
+	 * Whether a handle beside each block drags it elsewhere, and adds a block
+	 * under it: on a document's page, but not on a deck's slide, where its box
+	 * is what a person drags, and a second thing to drag beside it confuses.
+	 */
+	blockHandle: boolean;
 }) {
 	const requests = useEditRequests(provider);
 	const [awaited, setAwaited] = useState<Awaited[]>([]);
@@ -194,9 +197,7 @@ export function EditorOverlays({
 	});
 	return (
 		<>
-			{editable && (
-				<BlockHandle editor={editor} onOffer={setBlocksOfferedAt} nested={nestedBlocks} />
-			)}
+			{editable && blockHandle && <BlockHandle editor={editor} onOffer={setBlocksOfferedAt} />}
 			{!asking && editable && (
 				<SlashMenu
 					editor={editor}
@@ -555,8 +556,8 @@ function askedAbout(document: Node, { from, to }: Range): AskedAbout {
 	};
 }
 
-/** The parts of a slide that hold its blocks: its frame, its columns, and its notes. */
-const SLIDE_REGIONS = new Set([SLIDE_BODY, SLIDE_COLUMN, SPEAKER_NOTES]);
+/** The parts of a slide that hold its blocks: its boxes, and its notes. */
+const SLIDE_REGIONS = new Set([SLIDE_BOX, SPEAKER_NOTES]);
 
 /**
  * Where on a deck's slide `place` is, for a bot to find it by: the slide's

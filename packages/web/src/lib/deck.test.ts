@@ -9,7 +9,13 @@ import {
 	suggestionBy,
 } from "@sugabots/contracts/live-document";
 import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
-import { fitSlideBody, layoutOf, SLIDE_COLUMN } from "@sugabots/contracts/live-slides";
+import {
+	fitSlideBody,
+	layoutOf,
+	PLACEMENT,
+	placementOf,
+	SLIDE_BOX,
+} from "@sugabots/contracts/live-slides";
 import { Editor, Extension } from "@tiptap/core";
 import { Collaboration } from "@tiptap/extension-collaboration";
 import type { Node } from "@tiptap/pm/model";
@@ -38,7 +44,7 @@ afterEach(() => {
 
 const GOALS = "<!-- layout: bullets -->\n\n## Goals\n\n- Ship on Friday\n- Tell support first";
 const PEOPLE =
-	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- column -->\n\n- People type\n\n<!-- column -->\n\n- Bots suggest";
+	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- box -->\n\n- People type\n\n<!-- box -->\n\n- Bots suggest";
 const DECK = [GOALS, PEOPLE].join("\n\n---\n\n");
 
 const KeepsSlidesFitting = Extension.create({
@@ -82,10 +88,14 @@ const unfitted = (deck: Node) =>
 		return fitSlideBody(body, layoutOf(slide)).eq(body) ? [] : [index + 1];
 	});
 
-/** What each slide's frame holds: its blocks and columns by name, and its words. */
+/** What each slide's frame holds: each box, by the names of its blocks, and its words. */
 const framesOf = (deck: Node) =>
 	deck.children.map((slide) =>
-		slide.child(0).children.map((part) => `${part.type.name}: ${part.textContent}`),
+		slide
+			.child(0)
+			.children.map(
+				(box) => `${box.children.map((block) => block.type.name).join(" ")}: ${box.textContent}`,
+			),
 	);
 
 /** The words on each slide, in order, whatever holds them. */
@@ -95,13 +105,13 @@ const LAUNCH = "<!-- layout: bullets -->\n\n## Launch\n\n- Brief sales\n- Book t
 const THANKS = "<!-- layout: title -->\n\n## Thanks";
 const FOUR = [GOALS, PEOPLE, LAUNCH, THANKS].join("\n\n---\n\n");
 
-/** The title of each slide, in order: the words of its first block. */
+/** The title of each slide, in order: the words of its first box. */
 const titlesOf = (deck: Node) => deck.children.map((slide) => slide.child(0).child(0).textContent);
 
-/** Where the frame of the slide at `index` holds its first block. */
+/** Where the frame of the slide at `index` holds its first box. */
 const frameStart = (deck: Node, index: number) => (slidesOf(deck)[index]?.pos ?? 0) + 2;
 
-/** Where `slide`'s frame holds its part at `part`, and that part. */
+/** Where `slide`'s frame holds its box at `part`, and that box. */
 function partAt(deck: Node, slide: number, part: number) {
 	const body = deck.child(slide).child(0);
 	let at = frameStart(deck, slide);
@@ -109,45 +119,53 @@ function partAt(deck: Node, slide: number, part: number) {
 	return { at, node: body.child(part) };
 }
 
+/** Where the slide at `index`'s title starts: in its first box's first line. */
+const titleStart = (deck: Node, index: number) => partAt(deck, index, 0).at + 2;
+
+/** Where the slide at `index`'s title ends: at the end of its first box's first line. */
+const titleEnd = (deck: Node, index: number) => {
+	const title = partAt(deck, index, 0);
+	return title.at + (title.node.firstChild?.nodeSize ?? 0);
+};
+
 describe("a deck's slides, kept fitting their layouts", () => {
-	it("lays a slide out again after a change here leaves its two columns as one, losing nothing", () => {
+	it("lays a slide out again after a change here leaves two of its boxes as one, losing nothing", () => {
 		const { kim, sam } = twoPeople();
 		const people = kim.state.doc.child(1).child(0);
 		const [left, right] = [partAt(kim.state.doc, 1, 1), partAt(kim.state.doc, 1, 2)];
-		const joined = kim.schema.nodes[SLIDE_COLUMN]?.create(null, [
+		const joined = kim.schema.nodes[SLIDE_BOX]?.create(null, [
 			...left.node.content.content,
 			...right.node.content.content,
 		]);
-		if (!joined) throw new Error("No column node");
+		if (!joined) throw new Error("No box node");
 
 		kim.view.dispatch(kim.state.tr.replaceWith(left.at, right.at + right.node.nodeSize, joined));
 
 		expect(unfitted(kim.state.doc)).toEqual([]);
 		expect(framesOf(kim.state.doc)[1]).toEqual([
 			"heading: People and bots",
-			"slideColumn: People typeBots suggest",
-			"slideColumn: ",
+			"bulletList bulletList: People typeBots suggest",
+			"paragraph: ",
 		]);
 		// The others get it fitted, as it was made.
 		expect(framesOf(sam.state.doc)).toEqual(framesOf(kim.state.doc));
 		expect(people.textContent).toBe(kim.state.doc.child(1).child(0).textContent);
 	});
 
-	it("brings a column pasted into a slide without columns into its flow, losing nothing", () => {
+	it("brings a box pasted into a slide whose layout has no place for it into its last box, losing nothing", () => {
 		const { kim } = twoPeople();
 		const list = partAt(kim.state.doc, 0, 1);
-		const pasted = kim.schema.nodes[SLIDE_COLUMN]?.create(null, [
+		const pasted = kim.schema.nodes[SLIDE_BOX]?.create(null, [
 			kim.schema.node("paragraph", null, [kim.schema.text("Pasted words")]),
 		]);
-		if (!pasted) throw new Error("No column node");
+		if (!pasted) throw new Error("No box node");
 
 		kim.view.dispatch(kim.state.tr.insert(list.at + list.node.nodeSize, pasted));
 
 		expect(unfitted(kim.state.doc)).toEqual([]);
 		expect(framesOf(kim.state.doc)[0]).toEqual([
 			"heading: Goals",
-			"bulletList: Ship on FridayTell support first",
-			"paragraph: Pasted words",
+			"bulletList paragraph: Ship on FridayTell support firstPasted words",
 		]);
 	});
 
@@ -164,13 +182,12 @@ describe("a deck's slides, kept fitting their layouts", () => {
 	it("leaves a slide with a suggestion waiting in it as it is, until the suggestion is settled", () => {
 		const { kim } = twoPeople();
 		enableSuggestChanges(kim.state, kim.view.dispatch);
-		const goals = partAt(kim.state.doc, 0, 0);
-		kim.view.dispatch(kim.state.tr.insertText(" for launch", goals.at + goals.node.nodeSize - 1));
+		kim.view.dispatch(kim.state.tr.insertText(" for launch", titleEnd(kim.state.doc, 0)));
 		disableSuggestChanges(kim.state, kim.view.dispatch);
-		const extra = kim.schema.nodes[SLIDE_COLUMN]?.create(null, [
-			kim.schema.node("paragraph", null, [kim.schema.text("A column too many")]),
+		const extra = kim.schema.nodes[SLIDE_BOX]?.create(null, [
+			kim.schema.node("paragraph", null, [kim.schema.text("A box too many")]),
 		]);
-		if (!extra) throw new Error("No column node");
+		if (!extra) throw new Error("No box node");
 
 		kim.view.dispatch(kim.state.tr.insert(frameStart(kim.state.doc, 0), extra));
 
@@ -180,13 +197,13 @@ describe("a deck's slides, kept fitting their layouts", () => {
 		settlingSuggestion(suggestion.id, "accept")(kim.state, kim.view.dispatch);
 		expect(unfitted(kim.state.doc)).toEqual([]);
 		expect(wordsOf(kim.state.doc)[0]).toBe(
-			"A column too manyGoals for launchShip on FridayTell support first",
+			"A box too manyGoals for launchShip on FridayTell support first",
 		);
 	});
 });
 
 describe("a slide's layout, changed", () => {
-	it("is suggested as the API suggests it: the new layout on the slide, its old content to remove and its columns to add", () => {
+	it("is suggested as the API suggests it: the new layout on the slide, and the box it lacks to add", () => {
 		const { kim, sam } = twoPeople();
 		enableSuggestChanges(kim.state, kim.view.dispatch);
 
@@ -202,12 +219,11 @@ describe("a slide's layout, changed", () => {
 		expect(
 			goals
 				.child(0)
-				.children.map((block) => [block.type.name, block.marks.map((mark) => mark.type.name)]),
+				.children.map((box) => [box.textContent, box.marks.map((mark) => mark.type.name)]),
 		).toEqual([
-			["heading", []],
-			["bulletList", ["deletion"]],
-			["slideColumn", ["insertion"]],
-			["slideColumn", ["insertion"]],
+			["Goals", []],
+			["Ship on FridayTell support first", []],
+			["", ["insertion"]],
 		]);
 		// One suggestion, which says what it does.
 		expect(pendingSuggestions(sam.state.doc)).toMatchObject([
@@ -266,8 +282,7 @@ describe("a slide's layout, changed", () => {
 
 		expect(framesOf(sam.state.doc)[1]).toEqual([
 			"heading: People and bots",
-			"bulletList: People type",
-			"bulletList: Bots suggest",
+			"bulletList bulletList: People typeBots suggest",
 		]);
 		// The title stays the node it was, so someone typing in it keeps what they type.
 		expect(kim.state.doc.child(1).child(0).child(0)).toBe(title);
@@ -276,11 +291,69 @@ describe("a slide's layout, changed", () => {
 	it("is refused while a suggestion waits in the slide", () => {
 		const { kim } = twoPeople();
 		enableSuggestChanges(kim.state, kim.view.dispatch);
-		const goals = partAt(kim.state.doc, 0, 0);
-		kim.view.dispatch(kim.state.tr.insertText(" for launch", goals.at + goals.node.nodeSize - 1));
+		kim.view.dispatch(kim.state.tr.insertText(" for launch", titleEnd(kim.state.doc, 0)));
 
 		expect(changeLayout(kim.state, 0, "quote")).toBeUndefined();
 	});
+});
+
+describe("a placed slide's layout, changed", () => {
+	const PLACED_GOALS = [
+		{ x: 80, y: 64, w: 800, h: 46 },
+		{ x: 80, y: 142, w: 440, h: 300 },
+	];
+
+	/** Kim and Sam in the deck, Kim having placed the goals' boxes by hand. */
+	function placedGoals() {
+		const people = twoPeople();
+		const { kim } = people;
+		const goals = slidesOf(kim.state.doc)[0];
+		if (!goals) throw new Error("No slide");
+		kim.view.dispatch(kim.state.tr.setNodeAttribute(goals.pos, PLACEMENT, PLACED_GOALS));
+		return people;
+	}
+
+	it.each([
+		["columns", "with a box more"],
+		["quote", "with as many boxes"],
+	] as const)("to %s, %s, is laid out by it, its boxes no longer placed", (layout, _) => {
+		const { kim, sam } = placedGoals();
+		expect(placementOf(sam.state.doc.child(0))).toEqual(PLACED_GOALS);
+
+		const change = changeLayout(kim.state, 0, layout);
+		if (!change) throw new Error("No change");
+		dispatchAsOneChange(kim, change, "Kim");
+
+		expect(sam.state.doc.child(0).attrs.layout).toBe(layout);
+		expect(sam.state.doc.child(0).attrs[PLACEMENT]).toBeNull();
+	});
+
+	it.each([
+		["accepted", "accept", "columns", null],
+		["undone", "reject", "bullets", PLACED_GOALS],
+	] as const)(
+		"as a suggestion %s, leaves the slide laid out as it then is",
+		(_, how, layout, placement) => {
+			const { kim, sam } = placedGoals();
+			enableSuggestChanges(kim.state, kim.view.dispatch);
+			const change = changeLayout(kim.state, 0, "columns");
+			if (!change) throw new Error("No change");
+			dispatchAsOneChange(kim, change, "Kim");
+			// One suggestion, of the new layout, which takes the placement with it.
+			const [suggestion, ...more] = pendingSuggestions(sam.state.doc);
+			if (!suggestion) throw new Error("No suggestion");
+			expect(more).toEqual([]);
+			expect(suggestion.slides).toMatchObject({ layout: "columns" });
+
+			settlingSuggestion(suggestion.id, how)(sam.state, sam.view.dispatch);
+
+			for (const deck of [sam.state.doc, kim.state.doc]) {
+				expect(deck.child(0).attrs.layout).toBe(layout);
+				expect(placementOf(deck.child(0))).toEqual(placement);
+				expect(unfitted(deck)).toEqual([]);
+			}
+		},
+	);
 });
 
 describe("a suggestion across several slides, settled while a layout suggested between them waits", () => {
@@ -296,17 +369,16 @@ describe("a suggestion across several slides, settled while a layout suggested b
 		if (!layout) throw new Error("No change");
 		dispatchAsOneChange(kim, layout, "Kim");
 		enableSuggestChanges(sam.state, sam.view.dispatch);
-		const [first, third] = [partAt(sam.state.doc, 0, 0), partAt(sam.state.doc, 2, 0)];
 		const titles = sam.state.tr
-			.insertText(" now", third.at + third.node.nodeSize - 1)
-			.insertText(" now", first.at + first.node.nodeSize - 1);
+			.insertText(" now", titleEnd(sam.state.doc, 2))
+			.insertText(" now", titleEnd(sam.state.doc, 0));
 		dispatchAsOneChange(sam, titles, "Sam");
 		return { kim, sam };
 	}
 
 	/** What slide 2's frame holds once its layout is settled, by the layout it is left with. */
 	const LAUNCH_FRAMES = {
-		columns: ["heading: Launch", "slideColumn: Brief salesBook the room", "slideColumn: "],
+		columns: ["heading: Launch", "bulletList: Brief salesBook the room", "paragraph: "],
 		bullets: ["heading: Launch", "bulletList: Brief salesBook the room"],
 	};
 
@@ -542,12 +614,6 @@ describe("a person's own suggestion, undone and redone", () => {
 	const pause = (editor: Editor) =>
 		yUndoPluginKey.getState(editor.state)?.undoManager.stopCapturing();
 
-	/** Where the title of the slide at `index` ends. */
-	const titleEnd = (deck: Node, index: number) => {
-		const title = partAt(deck, index, 0);
-		return title.at + title.node.nodeSize - 1;
-	};
-
 	/** Somebody's change as a suggestion, made in their editor. */
 	type Suggest = (editor: Editor, name: string) => void;
 
@@ -577,7 +643,7 @@ describe("a person's own suggestion, undone and redone", () => {
 		(_, suggest) => {
 			const { kim, sam } = twoPeople({ deck: FOUR });
 			pause(kim);
-			kim.view.dispatch(kim.state.tr.insertText("Our ", frameStart(kim.state.doc, 3) + 1));
+			kim.view.dispatch(kim.state.tr.insertText("Our ", titleStart(kim.state.doc, 3)));
 			pause(kim);
 			const edited = sam.state.doc.toJSON();
 			enableSuggestChanges(kim.state, kim.view.dispatch);

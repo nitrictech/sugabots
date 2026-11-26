@@ -185,6 +185,7 @@ function LiveEditor({
 					onAsk={onAsk}
 					asking={asking}
 					onAskingChange={setAsking}
+					blockHandle
 				/>
 				{suggestions.map(({ suggestion, at }) => (
 					<PlacedSuggestionCard

@@ -227,7 +227,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live document, against Postgres", 
 		expect(written).toMatchObject({
 			version: 2,
 			content:
-				"<!-- layout: title -->\n\n# Launch review (draft 2)\n\n---\n\n<!-- layout: bullets -->\n\n## Goals\n\n- Ship on Monday",
+				"<!-- layout: title -->\n\n# Launch review (draft 2)\n\n<!-- box -->\n\n---\n\n<!-- layout: bullets -->\n\n## Goals\n\n<!-- box -->\n\n- Ship on Monday",
 		});
 		await until(() => slideTexts(person.document).includes("Ship on Monday"));
 		person.destroy();
@@ -298,7 +298,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live document, against Postgres", 
 			}),
 		);
 
-		expect(await runOnPostgres(live.markdown(made.id))).toBeUndefined();
+		expect(await runOnPostgres(live.markdownForAgents(made.id))).toBeUndefined();
 		expect(await runOnPostgres(authoring.read(by, made.id))).toMatchObject({
 			content: "Text with a [^1] footnote.",
 		});
@@ -364,13 +364,14 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 
 	const planner = () => authorIn(randomUUID());
 
+	/** Six slides, written as a deck's markdown is: each box after the first started by its comment, empty or not. */
 	const SIX_SLIDES = [
-		"<!-- layout: title -->\n\n# Launch review",
-		"<!-- layout: section -->\n\n## Where we are",
-		"<!-- layout: bullets -->\n\n## Goals\n\n- Ship on Friday\n- Tell support first",
-		"<!-- layout: quote -->\n\n> Nothing a person writes is lost.",
-		"<!-- layout: bullets -->\n\n## Risks\n\n- None yet",
-		"<!-- layout: section -->\n\n## Questions",
+		"<!-- layout: title -->\n\n# Launch review\n\n<!-- box -->",
+		"<!-- layout: section -->\n\n<!-- box -->\n\n## Where we are",
+		"<!-- layout: bullets -->\n\n## Goals\n\n<!-- box -->\n\n- Ship on Friday\n- Tell support first",
+		"<!-- layout: quote -->\n\n> Nothing a person writes is lost.\n\n<!-- box -->",
+		"<!-- layout: bullets -->\n\n## Risks\n\n<!-- box -->\n\n- None yet",
+		"<!-- layout: section -->\n\n<!-- box -->\n\n## Questions",
 	].join("\n\n---\n\n");
 
 	it("changes only the slide a rewrite changes, keeping what a person typed elsewhere before it arrived", async () => {
@@ -398,9 +399,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 		expect(elementsAfter).toHaveLength(elementsBefore.length);
 		expect(elementsAfter.every((element, index) => element === elementsBefore[index])).toBe(true);
 		await until(async () =>
-			((await Effect.runPromise(live.markdown(made.id))) ?? "").includes("Risks we see"),
+			((await Effect.runPromise(live.markdownForAgents(made.id))) ?? "").includes("Risks we see"),
 		);
-		expect(await Effect.runPromise(live.markdown(made.id))).toBe(
+		expect(await Effect.runPromise(live.markdownForAgents(made.id))).toBe(
 			SIX_SLIDES.replace("Ship on Friday", "Ship on Monday").replace("## Risks", "## Risks we see"),
 		);
 		person.destroy();
@@ -438,7 +439,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 				attrs: { attrName: "layout", previousValue: "bullets", newValue: "columns" },
 			},
 		]);
-		expect(await Effect.runPromise(live.markdown(made.id))).toBe(SIX_SLIDES);
+		expect(await Effect.runPromise(live.markdownForAgents(made.id))).toBe(SIX_SLIDES);
 		person.destroy();
 	});
 
@@ -460,7 +461,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 		expect(rewritten).toMatchObject({ outcome: "blocked", blocked: "unreadable" });
 		await new Promise((resolve) => setTimeout(resolve, 150));
 		expect(body.toArray().map((block) => (block as XmlElement).nodeName)).toEqual([
-			"heading",
+			"slideBox",
+			"slideBox",
 			"fromANewerVersion",
 		]);
 		person.destroy();
@@ -488,7 +490,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 			await new Promise((resolve) => setTimeout(resolve, 150));
 
 			expect(held.getXmlFragment("default").toString()).toBe(shown);
-			expect(await Effect.runPromise(restarted.markdown(made.id))).toBe(made.content);
+			expect(await Effect.runPromise(restarted.markdownForAgents(made.id))).toBe(made.content);
 			rejoined.destroy();
 		},
 	);
@@ -509,7 +511,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 		await new Promise((resolve) => setTimeout(resolve, 150));
 
 		expect(held.getXmlFragment("default").toString()).toBe(shown);
-		expect(await Effect.runPromise(live.markdown(made.id))).toBe(SIX_SLIDES);
+		expect(await Effect.runPromise(live.markdownForAgents(made.id))).toBe(SIX_SLIDES);
 		rejoined.destroy();
 	});
 });
@@ -660,11 +662,11 @@ const textOf = (document: Doc) =>
 		.map((block) => (block as XmlElement).toArray().join(""))
 		.join("");
 
-/** The first run of text on a deck's slide `index`: its title, where a person's caret would be. */
+/** The first run of text in the first box on a deck's slide `index`: its title, where a person's caret would be. */
 function textInSlide(fragment: XmlFragment, index: number): XmlText {
 	const slide = fragment.get(index) as XmlElement;
-	const body = slide.get(0) as XmlElement;
-	const text = (body.get(0) as XmlElement).get(0);
+	const firstBox = (slide.get(0) as XmlElement).get(0) as XmlElement;
+	const text = (firstBox.get(0) as XmlElement).get(0);
 	if (!(text instanceof XmlText)) throw new Error(`Slide ${index + 1} doesn't start with text`);
 	return text;
 }

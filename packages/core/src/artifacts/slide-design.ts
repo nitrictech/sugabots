@@ -1,8 +1,13 @@
 import type { ArtifactImageType } from "@sugabots/contracts";
 import { type ArtifactImageIds, ownImageAt } from "@sugabots/contracts/http";
 import { linkMayGoTo } from "@sugabots/contracts/live-document";
-import { SLIDE_COLUMN } from "@sugabots/contracts/live-slides";
-import type { SlideLayout } from "@sugabots/contracts/slides-markdown";
+import { isRemovedBox, layoutOf, SLIDE_BODY } from "@sugabots/contracts/live-slides";
+import {
+	type BoxRole,
+	type Frame,
+	SLIDE_BOX_ROLES,
+	type SlideLayout,
+} from "@sugabots/contracts/slides-markdown";
 import type { Node } from "@tiptap/pm/model";
 
 /*
@@ -143,7 +148,26 @@ export interface PartLook {
 	align: "start" | "center";
 }
 
-/** How `part` of a slide of `layout` sets its blocks, as `[data-layout=…]` and `[data-slide-column]` set them. */
+/**
+ * The part of its slide a box of each role is, which sets what the box holds
+ * as `[data-box-role=…]` sets it: a column of the columns layout, the image
+ * layout's text and image, and the slide's own flow for every other.
+ */
+export const BOX_PARTS: Readonly<Record<BoxRole, SlidePart>> = {
+	title: "flow",
+	subtitle: "flow",
+	body: "flow",
+	leftColumn: "column",
+	rightColumn: "column",
+	text: "imageText",
+	image: "imageColumn",
+	label: "flow",
+	quote: "flow",
+	attribution: "flow",
+	table: "flow",
+};
+
+/** How `part` of a slide of `layout` sets its blocks, as `[data-layout=…]` and `[data-box-role=…]` set them. */
 export function partLook(layout: SlideLayout, part: SlidePart): PartLook {
 	const look = LAYOUT_LOOKS[layout];
 	if (part === "flow") {
@@ -178,6 +202,8 @@ export const IMAGE_LAYOUT = {
 	text: { ...BODY_TEXT, size: 1.375, color: SECONDARY, lineHeight: 1.5 },
 	/** Between the title and the text, in units of the step. */
 	titleGap: 1.25,
+	/** Between the title's own blocks: none, as the layout sets nothing between its rows. */
+	titleBlockGap: 0,
 	/** The image's most height, in units: it doesn't step down with the text. */
 	imageMaxHeight: 25,
 	/** Its image's corners, in ems of its text. */
@@ -197,8 +223,27 @@ export const QUOTE_LOOK: TextLook = {
 	tracking: -0.01 / 2.5,
 };
 
-/** The section break's accent bar, in units of the step: its size and its corners. */
+/** The section break's accent bar, in units of the step: its size and its corners. A slide whose label was removed shows none. */
 export const SECTION_BAR = { width: 3, height: 0.3, radius: 0.15 } as const;
+
+/**
+ * Where the section break's accent bar is, at `unit`, on a slide whose boxes
+ * somebody placed by hand: over its label's box, placed at `label`, from the
+ * box's left, as far above it as the layout sets its blocks apart, as it goes
+ * wherever the label goes. In points.
+ */
+export function accentBarOver(
+	label: Frame,
+	unit: number,
+): { x: number; y: number; width: number; height: number } {
+	const height = SECTION_BAR.height * unit;
+	return {
+		x: label.x,
+		y: label.y - LAYOUT_LOOKS.section.gap * unit - height,
+		width: SECTION_BAR.width * unit,
+		height,
+	};
+}
 
 /** A table: its text, and its header row's, on a tint, a rule under each row. */
 export const TABLE_LOOK = {
@@ -286,22 +331,22 @@ export interface DeckImage {
 	bytes: Uint8Array;
 }
 
-/** What a slide holds, as its layouts place it. */
+/** What a slide holds, as its layouts place it, its boxes removed from it left out. */
 export interface SlideBlocks {
-	/** Its first block when that is a heading: its title. */
-	title: readonly Node[];
-	/** Its other blocks outside columns, in order. */
-	flow: readonly Node[];
-	/** What each of its two columns holds, in a layout with columns. */
-	columns: readonly [readonly Node[], readonly Node[]];
+	/** Whether it shows its box of `role` in its layout (`SLIDE_BOX_ROLES`): one its layout has, that nobody removed. */
+	shows: (role: BoxRole) => boolean;
+	/**
+	 * The blocks of its box of `role`, as the layouts that set boxes beside
+	 * each other place them: none when it doesn't show one.
+	 */
+	inBox: (role: BoxRole) => readonly Node[];
+	/**
+	 * Every block in the boxes it shows, in order: what the layouts that set a
+	 * slide's blocks one under another set, box after box, as far apart as
+	 * each other.
+	 */
+	all: readonly Node[];
 }
-
-/** Everything a slide holds, as one flow, in order. */
-export const everyBlock = ({ title, flow, columns }: SlideBlocks) => [
-	...title,
-	...flow,
-	...columns.flat(),
-];
 
 export function childNamed(node: Node, name: string): Node {
 	const child = node.children.find((each) => each.type.name === name);
@@ -309,21 +354,20 @@ export function childNamed(node: Node, name: string): Node {
 	return child;
 }
 
-const isColumn = (block: Node) => block.type.name === SLIDE_COLUMN;
-
 export const isEmptyParagraph = (block: Node) =>
 	block.type.name === "paragraph" && block.childCount === 0;
 
-/** A slide's frame as its layouts place it. A third column or more, which a frame fitted to its layout holds none of, goes in the second. */
-export function slideBlocksOf(body: Node): SlideBlocks {
-	const blocks = body.children;
-	const title = blocks[0]?.type.name === "heading" ? blocks.slice(0, 1) : [];
-	const rest = blocks.slice(title.length);
-	const [first = [], second = [], ...more] = rest.filter(isColumn).map((column) => column.children);
+/** What `slide`, its frame fitted to its layout, holds, as its layouts place it. */
+export function slideBlocksOf(slide: Node): SlideBlocks {
+	const roles: readonly BoxRole[] = SLIDE_BOX_ROLES[layoutOf(slide)];
+	const shown = childNamed(slide, SLIDE_BODY).children.map((box) =>
+		isRemovedBox(box) ? undefined : box,
+	);
+	const boxOf = (role: BoxRole) => shown[roles.indexOf(role)];
 	return {
-		title,
-		flow: rest.filter((block) => !isColumn(block)),
-		columns: [first, [...second, ...more.flat()]],
+		shows: (role) => boxOf(role) !== undefined,
+		inBox: (role) => boxOf(role)?.children ?? [],
+		all: shown.flatMap((box) => box?.children ?? []),
 	};
 }
 

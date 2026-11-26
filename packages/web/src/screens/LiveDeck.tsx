@@ -1,13 +1,12 @@
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { imageTypeOf, MAX_ARTIFACT_IMAGE_BYTES } from "@sugabots/contracts";
 import { holdsSuggestion } from "@sugabots/contracts/live-document";
-import { layoutOf, SLIDE_BODY, SLIDE_COLUMN } from "@sugabots/contracts/live-slides";
+import { layoutOf } from "@sugabots/contracts/live-slides";
 import type { SlideLayout } from "@sugabots/contracts/slides-markdown";
-import type { NestedOptions } from "@tiptap/extension-drag-handle";
 import { DOMSerializer } from "@tiptap/pm/model";
 import type { Transaction } from "@tiptap/pm/state";
 import { type Editor, useEditorState } from "@tiptap/react";
-import { ChevronDown, ChevronLeft, ChevronRight, LayoutTemplate, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, LayoutTemplate, RotateCcw, X } from "lucide-react";
 import {
 	type ReactNode,
 	type RefObject,
@@ -23,16 +22,26 @@ import { uploadArtifactImage } from "@/lib/artifacts.ts";
 import {
 	addImage,
 	addSlide,
+	boxesWaitOnSuggestion,
 	changeLayout,
 	LAYOUT_NAMES,
+	laidOutByHand,
 	moveSlideTo,
 	placeOfMovedSlide,
 	removeSlide,
+	resetLayout,
 	selectSlide,
 	slidesOf,
 } from "@/lib/deck.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import type { KeepImage } from "@/lib/file-import.ts";
+import {
+	type FollowedNode,
+	followNode,
+	keyOfFollowedNode,
+	whereFollowedNodeIs,
+} from "@/lib/followed-node.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { importPowerPointFile, type PowerPointImported } from "@/lib/powerpoint-import.ts";
 import { dispatchAsOneChange } from "@/lib/suggesting.ts";
 import {
@@ -40,9 +49,11 @@ import {
 	pendingSuggestions,
 	settlingSuggestion,
 } from "@/lib/suggestions.ts";
+import { Button } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { BoxOutlines } from "./box-outlines.tsx";
 import { DeckPresent } from "./DeckPresent.tsx";
-import { deckStage, slideInView } from "./deck-stage.ts";
+import { deckStage, drawnSlideBody, slideInView } from "./deck-stage.ts";
 import { LayoutPicker } from "./LayoutPicker.tsx";
 import { LiveDocumentText } from "./live-document-text.tsx";
 import {
@@ -159,12 +170,12 @@ function DeckEditor({
 }) {
 	// What the stage draws under the slide's frame, inside the editor, is put in this.
 	const [underSlide, setUnderSlide] = useState<HTMLElement>();
-	const addImageTo = useRef<(column: number, file: File | undefined) => void>(undefined);
+	const addImageTo = useRef<(box: number, file: File | undefined) => void>(undefined);
 	const [extensions] = useState(() => [
 		deckStage({
 			// The editor draws it while it updates, which may be while React renders.
 			onUnderSlide: (change) => queueMicrotask(() => setUnderSlide(change)),
-			onAddImage: (column, file) => addImageTo.current?.(column, file),
+			onAddImage: (box, file) => addImageTo.current?.(box, file),
 		}),
 	]);
 	const { editor, slashKeys, outOfDate } = useLiveEditor({
@@ -233,16 +244,24 @@ function DeckView({
 	outOfDate: boolean;
 	/** Drawn under the frame of the slide on the stage, inside the editor (see `deck-stage.ts`). */
 	underSlide: HTMLElement | undefined;
-	/** Where the stage asks for an image for a slide's empty image column. */
-	addImageTo: RefObject<((column: number, file: File | undefined) => void) | undefined>;
+	/** Where the stage asks for an image for a slide's empty image box. */
+	addImageTo: RefObject<((box: number, file: File | undefined) => void) | undefined>;
 }) {
 	const others = useOthers(provider);
 	const deck = useEditorState({
 		editor,
-		selector: ({ editor: current }) => ({
-			doc: current.state.doc,
-			current: slideInView(current.state),
-		}),
+		selector: ({ editor: current }) => {
+			const { state } = current;
+			const inView = slideInView(state);
+			const slide = slidesOf(state.doc)[inView];
+			return {
+				doc: state.doc,
+				current: inView,
+				// The slide in view, to follow through others' changes: taken from the same state as
+				// the document, so the two always agree.
+				followed: slide && followNode(state, slide.pos),
+			};
+		},
 		equalityFn: (before, after) => before.doc === after?.doc && before.current === after.current,
 	});
 	const current = deck.current;
@@ -285,8 +304,11 @@ function DeckView({
 	);
 	const pageWidth = useWidth(page);
 	const beside = pending.length > 0 && pageWidth >= CARDS_BESIDE_MIN_PAGE_PX;
+	const sideBySide = useMediaQuery(SIDE_BY_SIDE);
 	if (!shown) return null;
 	const editable = !outOfDate;
+	// From Tailwind's `md`, as the strip's slides are dragged, and not while a suggestion may change which boxes the slide has.
+	const boxesMovable = editable && sideBySide && !boxesWaitOnSuggestion(shown.node);
 	const change = (transaction: Transaction | undefined) => {
 		if (transaction) dispatchAsOneChange(editor, transaction, as.name);
 	};
@@ -377,10 +399,25 @@ function DeckView({
 										<ChevronDown aria-hidden size={12} className="text-subtle-foreground" />
 									</LayoutPicker>
 								)}
+								{editable && (
+									<Button
+										variant="ghost"
+										size="sm"
+										disabled={!laidOutByHand(shown.node)}
+										onClick={() => {
+											const resetting = resetLayout(editor.state, current);
+											if (resetting) editor.view.dispatch(resetting);
+										}}
+										className="h-8 rounded-sm px-2 max-md:h-11 max-md:text-sm"
+									>
+										<RotateCcw aria-hidden />
+										Reset layout
+									</Button>
+								)}
 								<span className="flex-1" />
 								<SlidePager current={current} total={slides.length} onSelect={select} />
 							</div>
-							<div ref={frame}>
+							<div ref={frame} className="relative">
 								<LiveDocumentText
 									editor={editor}
 									ref={text}
@@ -388,6 +425,17 @@ function DeckView({
 									page={page}
 									askBoxOpen={asking !== undefined}
 								/>
+								{boxesMovable && deck.followed && (
+									<BoxOutlines
+										// Its boxes are known by their place on the slide, which means nothing on another. The
+										// slide is known by itself, not by its place in the deck, which others' changes shift.
+										key={keyOfFollowedNode(deck.followed)}
+										editor={editor}
+										slide={shown}
+										followed={deck.followed}
+										stage={frame}
+									/>
+								)}
 							</div>
 						</section>
 						{beside && (
@@ -406,7 +454,7 @@ function DeckView({
 						onAsk={onAsk}
 						asking={asking}
 						onAskingChange={setAsking}
-						nestedBlocks={SLIDE_BLOCKS}
+						blockHandle={false}
 					/>
 				</div>
 			</div>
@@ -496,30 +544,6 @@ function SlidePager({
 const PAGER_BUTTON =
 	"rounded-xs disabled:pointer-events-none max-md:size-9 max-md:[&_svg]:size-4.5";
 
-/**
- * The blocks the handle beside a block moves on a slide: those in its frame
- * and in its columns, but not a column itself, which its layout places, nor
- * anything in a list, a quote or a table, which moves with it.
- */
-const SLIDE_BLOCKS: NestedOptions = {
-	defaultRules: false,
-	edgeDetection: "none",
-	rules: [
-		{
-			id: "slideBlocks",
-			evaluate: ({ node, parent }) =>
-				parent &&
-				(parent.type.name === SLIDE_BODY || parent.type.name === SLIDE_COLUMN) &&
-				node.type.name !== SLIDE_COLUMN
-					? 0
-					: EXCLUDED,
-		},
-	],
-};
-
-/** The score that takes a node out of the handle's reach (see the drag handle's rules). */
-const EXCLUDED = 1000;
-
 /** How wide the stage must be for the suggestions' cards to sit in a column beside the slide. */
 const CARDS_BESIDE_MIN_PAGE_PX = 1000;
 
@@ -538,10 +562,8 @@ function useFittedStage(
 	const [overflowing, setOverflowing] = useState(false);
 	const measure = useCallback(() => {
 		const holder = frame.current;
-		const drawn = slidePos === undefined ? null : editor.view.nodeDOM(slidePos);
-		const body =
-			drawn instanceof HTMLElement ? drawn.querySelector(":scope > [data-slide-body]") : null;
-		if (!holder || !(body instanceof HTMLElement)) return;
+		const body = slidePos === undefined ? undefined : drawnSlideBody(editor.view, slidePos);
+		if (!holder || !body) return;
 		setOverflowing(fitSlideText(holder, body));
 	}, [editor, frame, slidePos]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: measured again whenever the slide changes.
@@ -636,10 +658,12 @@ const CARD_HEIGHT_PX = 136;
 const CARD_GAP_PX = 12;
 
 /**
- * Adding an image to a slide's empty image column: from the picker that
- * `add` opens with no file, or from a file dropped there. The image is kept
- * for the deck as a Word file's images are kept for a document, then put in
- * the column, wherever others' changes have moved it meanwhile.
+ * Adding an image to a slide's empty image box: from the picker that `add`
+ * opens with no file, or from a file dropped there. The image is kept for the
+ * deck as a Word file's images are kept for a document, then put in the box.
+ * The box is followed from the moment the image is asked for, through
+ * anybody's changes meanwhile, as the person picks a file and as it uploads
+ * (see `followNode`), and the person is told if it is gone by the end.
  */
 function useImageAdding(
 	editor: Editor,
@@ -648,37 +672,30 @@ function useImageAdding(
 ) {
 	const [notice, setNotice] = useState<string>();
 	const input = useRef<HTMLInputElement>(null);
-	const pickingFor = useRef<number>(undefined);
-	async function keep(column: number, file: File) {
+	const pickingFor = useRef<FollowedNode>(undefined);
+	async function keep(box: FollowedNode, file: File) {
 		setNotice(undefined);
-		let at = column;
-		const follow = ({
-			transaction,
-		}: {
-			transaction: { mapping: { map: (pos: number) => number } };
-		}) => {
-			at = transaction.mapping.map(at);
-		};
-		editor.on("transaction", follow);
 		try {
 			const bytes = new Uint8Array(await file.arrayBuffer());
 			const type = imageTypeOf(bytes);
 			if (!type || bytes.byteLength > MAX_ARTIFACT_IMAGE_BYTES) return setNotice(IMAGE_REFUSED);
 			const src = await uploadArtifactImage(artifact, { type, bytes });
+			const at = whereFollowedNodeIs(editor.state.doc, box);
+			if (at === undefined) return setNotice(BOX_GONE);
 			const adding = addImage(editor.state, at, { src, alt: file.name.replace(/\.[^.]*$/, "") });
 			if (adding) dispatchAsOneChange(editor, adding, name);
 		} catch (failure) {
 			setNotice(`The image wasn't added. ${failureMessage(failure)}.`);
-		} finally {
-			editor.off("transaction", follow);
 		}
 	}
 	return {
 		notice,
 		dismiss: () => setNotice(undefined),
-		add: (column: number, file: File | undefined) => {
-			if (file) return void keep(column, file);
-			pickingFor.current = column;
+		add: (boxPos: number, file: File | undefined) => {
+			const box = followNode(editor.state, boxPos);
+			if (!box) return;
+			if (file) return void keep(box, file);
+			pickingFor.current = box;
 			input.current?.click();
 		},
 		picker: (
@@ -689,8 +706,8 @@ function useImageAdding(
 				hidden
 				onChange={(event) => {
 					const [file] = event.target.files ?? [];
-					const column = pickingFor.current;
-					if (file && column !== undefined) void keep(column, file);
+					const box = pickingFor.current;
+					if (file && box !== undefined) void keep(box, file);
 					event.target.value = "";
 				}}
 			/>
@@ -721,5 +738,7 @@ function othersLeftOutInWords(count: number): string {
 }
 
 const IMAGE_TYPES = "image/png,image/jpeg,image/gif,image/webp";
+
+const BOX_GONE = "The image wasn't added. The box it was for was deleted while it uploaded.";
 
 const IMAGE_REFUSED = `That file isn't an image a deck can show. A deck shows PNG, JPEG, GIF and WebP images of up to ${MAX_ARTIFACT_IMAGE_BYTES / (1024 * 1024)} MB.`;

@@ -1,6 +1,7 @@
 import { crc32, deflateSync } from "node:zlib";
 import type { ArtifactImageType } from "@sugabots/contracts";
 import { artifactImageAddress, artifactImageIds } from "@sugabots/contracts/http";
+import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
 import { getDocumentProxy, getMeta, getResolvedPDFJS } from "unpdf";
@@ -66,12 +67,15 @@ const DECK = [
 	"<!-- layout: table -->\n\n## Owners\n\n| Milestone | Owner |\n| --- | --- |\n| Beta | Priya |\n| Launch | Marco |",
 ].join("\n\n---\n\n");
 
-/** The PDF of `markdown`, made at the start of 1970 by the test clock. */
+/** The deck `markdown` reads as. */
+const deckOf = (markdown: string) => liveDocumentFromMarkdown("slides", markdown);
+
+/** The PDF of the deck `markdown` reads as, made at the start of 1970 by the test clock. */
 const pdfFile = (markdown: string) =>
 	Effect.runPromise(
-		pdfFileOf(ARTIFACT, markdown, (image) => Effect.succeed(keptImages.get(image.imageId))).pipe(
-			Effect.provide(TestClock.layer()),
-		),
+		pdfFileOf(ARTIFACT, deckOf(markdown), (image) =>
+			Effect.succeed(keptImages.get(image.imageId)),
+		).pipe(Effect.provide(TestClock.layer())),
 	);
 
 /** The address of an image the artifact keeps under an id made from `name`. */
@@ -82,10 +86,10 @@ function keptImageNamed(name: string): string {
 	return artifactImageAddress(ids);
 }
 
-/** The PDF of `markdown` when the artifact keeps `images`, by the names their addresses are made from. */
+/** The PDF of the deck `markdown` reads as when the artifact keeps `images`, by the names their addresses are made from. */
 const pdfWithImages = (markdown: string, images: Readonly<Record<string, DeckImage>>) =>
 	Effect.runPromise(
-		pdfFileOf(ARTIFACT, markdown, (image) =>
+		pdfFileOf(ARTIFACT, deckOf(markdown), (image) =>
 			Effect.succeed(
 				Object.entries(images).find(
 					([name]) => keptImageNamed(name).split("/").at(-1) === image.imageId,

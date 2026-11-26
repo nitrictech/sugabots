@@ -10,19 +10,14 @@ import {
 	liveDocumentSchema,
 	markdownOfLiveDocument,
 } from "@sugabots/contracts/live-document-markdown";
-import { fitSlideBody, layoutOf, newSlide } from "@sugabots/contracts/live-slides";
+import { fitSlideBody, layoutOf, newSlide, placementOf } from "@sugabots/contracts/live-slides";
 import { SLIDE_LAYOUTS } from "@sugabots/contracts/slides-markdown";
 import type { Node } from "@tiptap/pm/model";
 import { EditorState } from "@tiptap/pm/state";
 import { prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from "@tiptap/y-tiptap";
 import { describe, expect, it } from "vitest";
 import { Doc } from "yjs";
-import {
-	type ChangeAs,
-	changedTo,
-	markdownWithoutSuggestions,
-	withoutSuggestions,
-} from "./suggestions.ts";
+import { type ChangeAs, changedTo, markdownForAgents, withoutSuggestions } from "./suggestions.ts";
 
 const document = (text: string) => liveDocumentFromMarkdown("document", text);
 
@@ -287,13 +282,13 @@ describe("an agent's change to a live document holding what its markdown can't s
 
 	it.each(MADE_OR_SUGGESTED)("is unchanged when the agent changes nothing, %s", (_, as) => {
 		// The markdown the agent reads doesn't read back as the document.
-		expect(document(markdownWithoutSuggestions(plan)).eq(plan)).toBe(false);
+		expect(document(markdownForAgents(plan)).eq(plan)).toBe(false);
 
-		expect(changedTo(plan, markdownWithoutSuggestions(plan), as)).toBe("unchanged");
+		expect(changedTo(plan, markdownForAgents(plan), as)).toBe("unchanged");
 	});
 
 	it.each(MADE_OR_SUGGESTED)("changes only the paragraph the agent changes, %s", (_, as) => {
-		const after = changed(plan, markdownWithoutSuggestions(plan).replace("Friday", "Monday"), as);
+		const after = changed(plan, markdownForAgents(plan).replace("Friday", "Monday"), as);
 
 		expect(after.childCount).toBe(plan.childCount);
 		expect(changedChildren(plan, after)).toEqual([4]);
@@ -316,6 +311,16 @@ const unfitted = (node: Node) =>
 const slideMarks = (node: Node) =>
 	node.children.map((slide) => slide.marks.map((mark) => mark.type.name));
 
+/** The words of the slide's first heading: its title, on any layout. */
+function titleOf(slide: Node): string | undefined {
+	let title: string | undefined;
+	slide.descendants((node) => {
+		if (title === undefined && node.type.name === "heading") title = node.textContent;
+		return title === undefined;
+	});
+	return title;
+}
+
 const TITLE = "<!-- layout: title -->\n\n# Launch review";
 const GOALS =
 	"<!-- layout: bullets -->\n\n## Goals\n\n- Ship on Friday\n- Tell support first\n\n<!-- notes: Start with the date. -->";
@@ -335,7 +340,7 @@ describe("an agent's suggestion in a deck", () => {
 			"s2:agent:Planner",
 		);
 
-		expect(after.children.map((slide) => slide.child(0).child(0).textContent)).toEqual([
+		expect(after.children.map(titleOf)).toEqual([
 			"Launch review",
 			"Budget",
 			"Goals",
@@ -417,8 +422,10 @@ describe("an agent's suggestion in a deck", () => {
 			slides(TITLE, GOALS.replace("Friday", "Monday"), COLUMNS, QUESTIONS),
 		);
 
+		// The title slide's empty subtitle and the section break's empty label hold lines too.
 		expect(shown(after)).toEqual([
 			"Launch review",
+			"",
 			"",
 			"Goals",
 			"Ship on [-Friday-][+Monday+]",
@@ -428,13 +435,14 @@ describe("an agent's suggestion in a deck", () => {
 			"People type",
 			"Bots suggest",
 			"",
+			"",
 			"Questions",
 			"",
 		]);
 		expect(slideMarks(after)).toEqual([[], [], [], []]);
 	});
 
-	it("suggests a new layout on the slide itself, moving what it holds into columns", () => {
+	it("suggests a new layout on the slide itself, adding the box it lacks", () => {
 		const after = synced(
 			suggested(
 				live,
@@ -447,16 +455,15 @@ describe("an agent's suggestion in a deck", () => {
 		expect(goals.marks.map((mark) => mark.attrs)).toMatchObject([
 			{ type: "attr", attrName: "layout", previousValue: "bullets", newValue: "columns" },
 		]);
-		// The list as it was is proposed for removal, and the columns holding it for adding.
+		// The title and the list stay in their boxes, and the right column is proposed for adding.
 		expect(
 			goals
 				.child(0)
-				.children.map((block) => [block.type.name, block.marks.map((mark) => mark.type.name)]),
+				.children.map((box) => [box.textContent, box.marks.map((mark) => mark.type.name)]),
 		).toEqual([
-			["heading", []],
-			["bulletList", ["deletion"]],
-			["slideColumn", ["insertion"]],
-			["slideColumn", ["insertion"]],
+			["Goals", []],
+			["Ship on FridayTell support first", []],
+			["", ["insertion"]],
 		]);
 	});
 
@@ -511,7 +518,7 @@ describe("an agent's suggestion in a deck", () => {
 				[accepted(waiting), inColumns],
 				[undone(waiting), slides(TITLE, GOALS, COLUMNS, QUESTIONS)],
 			] as const) {
-				const after = accepted(changed(settled, onMonday(markdownWithoutSuggestions(settled)), as));
+				const after = accepted(changed(settled, onMonday(markdownForAgents(settled)), as));
 				expect(asMarkdown(after)).toBe(asMarkdown(deck(onMonday(reads))));
 			}
 		},
@@ -594,8 +601,8 @@ describe("an agent's change to a deck holding what its markdown can't say", () =
 		"slide",
 		[
 			node("slideBody", [
-				node("heading", schema.text("Kept as typed"), { level: 2 }),
-				paragraph("# is how a heading starts"),
+				node("slideBox", node("heading", schema.text("Kept as typed"), { level: 2 })),
+				node("slideBox", paragraph("# is how a heading starts")),
 			]),
 			node("speakerNotes", paragraph("Pause here.   ")),
 		],
@@ -609,13 +616,13 @@ describe("an agent's change to a deck holding what its markdown can't say", () =
 
 	it.each(MADE_OR_SUGGESTED)("is unchanged when the agent changes nothing, %s", (_, as) => {
 		// The markdown the agent reads doesn't read back as the deck.
-		expect(deck(markdownWithoutSuggestions(newSlides)).eq(newSlides)).toBe(false);
+		expect(deck(markdownForAgents(newSlides)).eq(newSlides)).toBe(false);
 
-		expect(changedTo(newSlides, markdownWithoutSuggestions(newSlides), as)).toBe("unchanged");
+		expect(changedTo(newSlides, markdownForAgents(newSlides), as)).toBe("unchanged");
 	});
 
 	it.each(MADE_OR_SUGGESTED)("changes only the slide the agent changes, %s", (_, as) => {
-		const titled = markdownWithoutSuggestions(newSlides).replace(
+		const titled = markdownForAgents(newSlides).replace(
 			"<!-- layout: bullets -->\n\n##\n",
 			"<!-- layout: bullets -->\n\n## Goals\n",
 		);
@@ -625,6 +632,87 @@ describe("an agent's change to a deck holding what its markdown can't say", () =
 		expect(after.childCount).toBe(newSlides.childCount);
 		expect(changedChildren(newSlides, after)).toEqual([SLIDE_LAYOUTS.indexOf("bullets")]);
 		expect(shown(accepted(after))).toContain("Goals");
+	});
+});
+
+describe("an agent's change to a deck whose boxes somebody placed", () => {
+	const PLACED_GOALS = [
+		{ x: 80, y: 64, w: 800, h: 46 },
+		{ x: 80, y: 142, w: 440, h: 300 },
+	];
+	/** The deck, the goals' boxes placed by hand, as only a person's editor places them. */
+	const unplaced = deck(slides(TITLE, GOALS, COLUMNS, QUESTIONS));
+	const goals = unplaced.child(1);
+	const live = unplaced.copy(
+		unplaced.content.replaceChild(
+			1,
+			goals.type.create({ ...goals.attrs, placement: PLACED_GOALS }, goals.content),
+		),
+	);
+
+	it("reads to the agent as markdown saying nothing of where the boxes are", () => {
+		expect(placementOf(live.child(1))).toEqual(PLACED_GOALS);
+
+		expect(markdownForAgents(live)).not.toContain("placement");
+		expect(markdownForAgents(live)).toBe(
+			markdownForAgents(deck(slides(TITLE, GOALS, COLUMNS, QUESTIONS))),
+		);
+	});
+
+	it.each(MADE_OR_SUGGESTED)(
+		"keeps the boxes where they are on a slide whose words the agent changes, %s, however it is settled",
+		(_, as) => {
+			const after = synced(changed(live, markdownForAgents(live).replace("Friday", "Monday"), as));
+
+			for (const settled of [accepted(after), undone(after)]) {
+				expect(placementOf(settled.child(1))).toEqual(PLACED_GOALS);
+			}
+			expect(shown(accepted(after))).toContain("Ship on Monday");
+		},
+	);
+
+	it.each(MADE_OR_SUGGESTED)(
+		"places no box for a placement the agent writes, which is only words to the deck, %s",
+		(_, as) => {
+			const placing = markdownForAgents(live)
+				.replace(
+					"<!-- layout: bullets -->",
+					"<!-- layout: bullets -->\n\n<!-- placement: 0 0 960 100; 0 100 960 440 -->",
+				)
+				.replace(
+					"<!-- layout: section -->",
+					"<!-- layout: section -->\n\n<!-- placement: 0 0 960 100; 0 100 960 440 -->",
+				);
+
+			const after = accepted(synced(changed(live, placing, as)));
+
+			expect(after.children.map(placementOf)).toEqual([null, PLACED_GOALS, null, null]);
+			expect(shown(after)).toContain("<!-- placement: 0 0 960 100; 0 100 960 440 -->");
+		},
+	);
+
+	it.each([
+		["into columns, with a box more", "columns"],
+		["as a quote, with as many boxes", "quote"],
+	] as const)("lays a placed slide out by the layout an agent gives it, %s", (_, layout) => {
+		const relaidOut = markdownForAgents(live).replace("layout: bullets", `layout: ${layout}`);
+
+		const edited = changed(live, relaidOut, "edit");
+
+		expect(layoutOf(edited.child(1))).toBe(layout);
+		expect(placementOf(edited.child(1))).toBeNull();
+		expect(edited.child(1).attrs.placement).toBeNull();
+	});
+
+	it("lays a placed slide out by a layout the agent suggests once it is accepted, and puts its boxes back if it is undone", () => {
+		const after = synced(
+			suggested(live, markdownForAgents(live).replace("layout: bullets", "layout: quote")),
+		);
+
+		expect(placementOf(accepted(after).child(1))).toBeNull();
+		const kept = undone(after).child(1);
+		expect(layoutOf(kept)).toBe("bullets");
+		expect(placementOf(kept)).toEqual(PLACED_GOALS);
 	});
 });
 

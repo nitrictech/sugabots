@@ -56,6 +56,6 @@ describe("LIVE_DOCUMENT_SCHEMA", () => {
 		expect(
 			{ [LIVE_DOCUMENT_SCHEMA]: await fingerprint() },
 			"A live document's nodes or marks changed. Raise LIVE_DOCUMENT_SCHEMA in live-document.ts, so tabs built for the old schema can't join and delete what they can't hold, then record the new number with this fingerprint here.",
-		).toEqual({ 5: "b41d664433b518a2" });
+		).toEqual({ 7: "ae9b79445eae400f" });
 	});
 });

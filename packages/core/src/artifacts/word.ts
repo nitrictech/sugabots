@@ -6,6 +6,8 @@ import {
 } from "@sugabots/contracts";
 import { allowedHtmlTag } from "@sugabots/contracts/document-markdown";
 import { type ArtifactImageIds, ownImageAt } from "@sugabots/contracts/http";
+import { markdownOfLiveDocument } from "@sugabots/contracts/live-document-markdown";
+import type { Node } from "@tiptap/pm/model";
 import htmlToDocx from "@turbodocx/html-to-docx";
 import { Effect } from "effect";
 import JSZip from "jszip";
@@ -22,23 +24,23 @@ export interface WordImage {
 }
 
 /**
- * A `document` artifact's markdown as a Word file titled as the artifact is:
- * headings, lists, quotes, links, code, tables and dividers as Word's own,
- * in Word's default styles, with underline, superscript, subscript and
- * highlight. An image the artifact keeps is held in the file, as `imageOf`
- * gives it, whichever kind it is, inside its link when it has one. Word
- * shows a PNG, JPEG or GIF; a WebP only where that version of Word reads
- * WebP. Any other image, and raw HTML but for the tags the editor writes,
- * come out as their text. A code block's language is lost, as Word keeps
- * none for code.
+ * `document`, a `document` artifact as people see it, as a Word file titled
+ * as the artifact is, made from its markdown: headings, lists, quotes, links,
+ * code, tables and dividers as Word's own, in Word's default styles, with
+ * underline, superscript, subscript and highlight. An image the artifact
+ * keeps is held in the file, as `imageOf` gives it, whichever kind it is,
+ * inside its link when it has one. Word shows a PNG, JPEG or GIF; a WebP only
+ * where that version of Word reads WebP. Any other image, and raw HTML but
+ * for the tags the editor writes, come out as their text. A code block's
+ * language is lost, as Word keeps none for code.
  */
 export const wordFileOf = <E, R>(
 	artifact: Pick<Artifact, "podId" | "id" | "title">,
-	markdown: string,
+	document: Node,
 	imageOf: (image: ArtifactImageIds) => Effect.Effect<WordImage | undefined, E, R>,
 ): Effect.Effect<Uint8Array, E, R> =>
 	Effect.gen(function* () {
-		const tokens = new Marked().lexer(markdown);
+		const tokens = new Marked().lexer(markdownOfLiveDocument(document));
 		const own = ownImagesIn(tokens, { podId: artifact.podId, artifactId: artifact.id });
 		const found = yield* Effect.forEach(own, ([address, ids]) =>
 			Effect.map(imageOf(ids), (image) => [address, image] as const),

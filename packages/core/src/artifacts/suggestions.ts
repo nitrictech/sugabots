@@ -16,7 +16,13 @@ import {
 	liveDocumentKind,
 	markdownOfLiveDocument,
 } from "@sugabots/contracts/live-document-markdown";
-import { fitSlideBody, layoutOf, SLIDE } from "@sugabots/contracts/live-slides";
+import {
+	fitSlideBody,
+	laidOutAnew,
+	layoutOf,
+	SLIDE,
+	SLIDE_BOX,
+} from "@sugabots/contracts/live-slides";
 import { Fragment, Mark, type Node, Slice } from "@tiptap/pm/model";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
 import type { Mappable } from "@tiptap/pm/transform";
@@ -31,6 +37,15 @@ import type { Mappable } from "@tiptap/pm/transform";
  * typing elsewhere and the suggestions waiting there are left alone. The
  * change is either made, or handed to the suggesting library to write into
  * the document as a suggestion, exactly as it writes a person's.
+ *
+ * Where people placed a deck's boxes by hand, and which boxes they removed,
+ * is theirs, and the markdown has no way to say either: an agent never reads
+ * them, and what it writes can't set them. So a slide whose layout it leaves
+ * keeps its boxes where they are, and a box removed from it, which holds
+ * nothing, reads as an empty box. A slide it gives a new layout is laid out
+ * anew by that layout as a person's change of layout lays it out
+ * (`laidOutAnew`), placed by the layout and with every box on it. A removed
+ * box it writes in is back on its slide.
  */
 
 /** How a change is made: at once, or as the suggestion with this id. */
@@ -43,31 +58,39 @@ export type ChangeAs = "edit" | { suggestionId: string };
  *   carry a suggestion's marks, as a code block's can't.
  * - `layoutPending`: it changes or removes a slide while a new layout
  *   suggested for that slide waits. Until somebody settles that suggestion,
- *   the slide holds its blocks as they are and as the new layout moves them,
+ *   the slide holds its boxes as they are and as the new layout changes them,
  *   one copy proposed for removal and the other for adding, so a change to
  *   its words would be made to one copy and lost when the suggestion went the
  *   other way; and its suggestion's mark keeps the layout to go back to, so
  *   it has no layout of its own to change.
  * - `suggestionPending`: it changes the layout of a slide holding a
- *   suggestion. A new layout replaces the blocks it moves, so a suggestion in
- *   one of them would be lost. People are held to the same rule in the
+ *   suggestion. A new layout replaces the boxes it changes, so a suggestion
+ *   in one of them would be lost. People are held to the same rule in the
  *   editor.
  */
 export type Blocked = "unmarkable" | "layoutPending" | "suggestionPending";
 
-/** The document as it reads with every pending suggestion left out. */
+/**
+ * The document as it reads with every pending suggestion left out, as people
+ * see it until somebody accepts one: a deck's boxes where people placed them,
+ * and those they removed off their slides.
+ */
 export function withoutSuggestions(document: Node): Node {
 	return plain(reverted(document));
 }
 
-/** The document as an agent reads it, and changes it with `changedTo`: as markdown, without its pending suggestions. */
-export const markdownWithoutSuggestions = (document: Node): string =>
+/**
+ * The document as an agent reads it, and changes it with `changedTo`: as
+ * markdown, without its pending suggestions, which says nothing of where
+ * people placed a deck's boxes or which boxes they removed.
+ */
+export const markdownForAgents = (document: Node): string =>
 	markdownOfLiveDocument(withoutSuggestions(document));
 
 /**
  * `live` changed as an agent asks, by writing `wanted` in place of the
- * markdown it read, `markdownWithoutSuggestions(live)`. What it left as it
- * read it stays as `live` holds it; what it changed is made to read, pending
+ * markdown it read, `markdownForAgents(live)`. What it left as it read it
+ * stays as `live` holds it; what it changed is made to read, pending
  * suggestions aside, as `wanted` says. `unchanged` when that is nothing. A
  * `Blocked` reason when the change can't be made as asked.
  */
@@ -75,7 +98,7 @@ export function changedTo(live: Node, wanted: string, as: ChangeAs): Node | "unc
 	const revert = reverted(live);
 	const before = plain(revert);
 	const read = (markdown: string) => liveDocumentFromMarkdown(liveDocumentKind(live), markdown);
-	// The markdown the agent read is `before`'s, as `markdownWithoutSuggestions` writes it.
+	// The markdown the agent read is `before`'s, as `markdownForAgents` writes it.
 	const target = withChangesOf(before, read(markdownOfLiveDocument(before)), read(wanted));
 	const found: Found = { replacements: [], attributes: [], slides: [], unmarkable: false };
 	findDifferences(before, target, 0, found);
@@ -137,6 +160,12 @@ const LAYOUT = "layout";
  */
 function withChangesOf(before: Node, shown: Node, wanted: Node): Node {
 	if (shown.eq(wanted)) return before;
+	if (before.type.name === SLIDE) return slideWithChangesOf(before, shown, wanted);
+	return withChildrenChanged(before, shown, wanted);
+}
+
+/** `before` with the changes an agent made to its attributes and inside it (see `withChangesOf`). */
+function withChildrenChanged(before: Node, shown: Node, wanted: Node): Node {
 	const content = Fragment.fromArray(childrenWithChangesOf(before, shown, wanted));
 	// Blocks of `before` beside blocks of `wanted` might not be what this block may hold; then it is `wanted`'s.
 	if (!before.type.validContent(content)) return wanted;
@@ -146,8 +175,51 @@ function withChangesOf(before: Node, shown: Node, wanted: Node): Node {
 			shown.attrs[name] === value ? before.attrs[name] : value,
 		]),
 	);
-	const changed = before.type.create(attributes, content, before.marks);
-	return changed.type.name === SLIDE ? withBodyFitted(changed) : changed;
+	return before.type.create(attributes, content, before.marks);
+}
+
+/**
+ * `before`, a slide, with the changes an agent made to it (see
+ * `withChangesOf`), its frame holding what its layout says, as every slide
+ * read from markdown does, which puts a removed box the agent wrote in back
+ * on the slide. A slide the agent gives a new layout is laid out anew by it
+ * (`laidOutAnew`). When the agent changed nothing in the slide's boxes but
+ * the layout, what they hold is moved as a person's change of layout moves
+ * it, by what each box is for. When it wrote the boxes anew, they are in the
+ * order it wrote them, the new layout's.
+ */
+function slideWithChangesOf(before: Node, shown: Node, wanted: Node): Node {
+	const layout = layoutOf(wanted);
+	if (layout === layoutOf(shown)) {
+		const changed = withChildrenChanged(before, shown, wanted);
+		const body = changed.child(0);
+		const fitted = fitSlideBody(body, layout);
+		return fitted === body ? changed : changed.copy(changed.content.replaceChild(0, fitted));
+	}
+	if (leftBoxesAsRead(shown, wanted)) {
+		const relaidOut = laidOutAnew(before, layout);
+		const notes = withChangesOf(before.child(1), shown.child(1), wanted.child(1));
+		return relaidOut.copy(relaidOut.content.replaceChild(1, notes));
+	}
+	return laidOutAnew(withChildrenChanged(before, shown, wanted), layout);
+}
+
+/**
+ * Whether `wanted`, a slide an agent gave a layout other than `shown`'s,
+ * holds in its boxes just what the agent read in them: what `shown`, the
+ * slide as it read it, reads back as with the new layout's comment in place
+ * of the old. The boxes after a layout's comment are then still in the old
+ * layout's order, as the agent read them.
+ */
+function leftBoxesAsRead(shown: Node, wanted: Node): boolean {
+	const relabelled = shown.type.create(
+		{ ...shown.attrs, layout: layoutOf(wanted) },
+		shown.content,
+		shown.marks,
+	);
+	const alone = shown.type.schema.topNodeType.create(null, relabelled);
+	const readBack = liveDocumentFromMarkdown("slides", markdownOfLiveDocument(alone));
+	return readBack.child(0).child(0).eq(wanted.child(0));
 }
 
 /** `before`'s children, with the changes an agent made to them (see `withChangesOf`). */
@@ -258,13 +330,6 @@ function changedRuns(steps: readonly Step[], runOf: readonly number[]): Set<numb
 	return changed;
 }
 
-/** The slide with its frame holding what its layout says, as every slide read from markdown does. */
-function withBodyFitted(slide: Node): Node {
-	const body = slide.child(0);
-	const fitted = fitSlideBody(body, layoutOf(slide));
-	return fitted === body ? slide : slide.copy(slide.content.replaceChild(0, fitted));
-}
-
 /**
  * The document a `reverted` transaction leaves, with no block still saying in
  * its attribute that something is suggested for it. Every place in it is
@@ -317,14 +382,17 @@ const hasSuggestedAttribute = (node: Node | null, name: string) =>
 /**
  * Whether a node keeps its place when its attributes change, so that it is
  * compared inside and its attributes changed, as a slide is when its layout
- * changes. The blocks the new layout leaves where they are, such as the
- * slide's title, are kept, with what somebody is typing in them, and a
- * suggestion shows the new layout over what the slide holds rather than a
- * whole slide removed and another added. The blocks it moves are replaced,
- * which a suggestion in one wouldn't survive (see `Blocked`). Any other node
- * whose attributes change, as a heading's level, is replaced.
+ * changes. The boxes the new layout leaves as they are, such as the slide's
+ * title, are kept, with what somebody is typing in them, and a suggestion
+ * shows the new layout over what the slide holds rather than a whole slide
+ * removed and another added. The boxes it changes are replaced, which a
+ * suggestion in one wouldn't survive (see `Blocked`). A box an agent writes
+ * in after it was removed is put back on its slide the same way, keeping its
+ * place. Any other node whose attributes change, as a heading's level, is
+ * replaced.
  */
-const keepsPlaceWhenAttributesChange = (node: Node) => node.type.name === SLIDE;
+const keepsPlaceWhenAttributesChange = (node: Node) =>
+	node.type.name === SLIDE || node.type.name === SLIDE_BOX;
 
 /** Whether `was` and `becomes` are compared inside, rather than one replacing the other. */
 const comparedInside = (was: Node, becomes: Node) =>

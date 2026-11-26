@@ -291,7 +291,7 @@ export const makeAuthoring = Effect.gen(function* () {
 	/** The artifact with what its live document holds, when it has one. */
 	const withLiveContent = (shown: Artifact) =>
 		isEditedLive(shown)
-			? Effect.map(live.markdown(shown.id), (markdown) =>
+			? Effect.map(live.markdownForAgents(shown.id), (markdown) =>
 					markdown === undefined ? shown : { ...shown, content: markdown },
 				)
 			: Effect.succeed(shown);

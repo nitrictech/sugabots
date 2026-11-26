@@ -1,5 +1,4 @@
-import { SLIDE_BODY, SLIDE_COLUMN } from "@sugabots/contracts/live-slides";
-import type { NestedOptions } from "@tiptap/extension-drag-handle";
+import { SLIDE_BOX } from "@sugabots/contracts/live-slides";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import type { Node, ResolvedPos } from "@tiptap/pm/model";
 import { type Editor, useEditorState } from "@tiptap/react";
@@ -132,8 +131,8 @@ function searching(editor: Editor, offeredAt: number | undefined): Searching | n
 	return match ? { from: $from.start(), to: $from.end(), query: match[1] ?? "" } : null;
 }
 
-/** What holds the lines of the page: a document itself, and a deck's slide, in its frame or a column. */
-const PAGE_REGIONS = new Set(["doc", SLIDE_BODY, SLIDE_COLUMN]);
+/** What holds the lines of the page: a document itself, and a deck's slide, in its boxes. */
+const PAGE_REGIONS = new Set(["doc", SLIDE_BOX]);
 
 /** Whether `$from` is in a paragraph of the page's own, not one inside a list, a quote or a cell. */
 const isPageLine = ($from: ResolvedPos) =>
@@ -314,13 +313,10 @@ const SLASH_MENU_GAP_PX = 6;
 export function BlockHandle({
 	editor,
 	onOffer,
-	nested,
 }: {
 	editor: Editor;
 	/** Opens the menu of blocks on the empty line that starts at `at`. */
 	onOffer: (at: number) => void;
-	/** Which blocks inside others it shows beside, where the page's blocks hold blocks. Without, only the page's own. */
-	nested?: NestedOptions;
 }) {
 	const over = useRef<{ node: Node; pos: number }>(null);
 	function addBelow() {
@@ -337,7 +333,6 @@ export function BlockHandle({
 	return (
 		<DragHandle
 			editor={editor}
-			nested={nested}
 			onNodeChange={({ node, pos }) => {
 				over.current = node && pos >= 0 ? { node, pos } : null;
 			}}
