@@ -111,8 +111,7 @@ export function NewChatPage({ owner }: { owner: ResourceOwner }) {
 							onSubmit={submit}
 							submitLabel="Start chat"
 							sending={chats.isPending}
-							held={withoutModel.length > 0}
-							notice={withoutModel.length > 0 && <BotsWithoutModelNotice bots={withoutModel} />}
+							held={withoutModel.length > 0 && <BotsWithoutModelNotice bots={withoutModel} />}
 							error={failed ? CHAT_NOT_STARTED : undefined}
 							mentionable={mentionable}
 						/>

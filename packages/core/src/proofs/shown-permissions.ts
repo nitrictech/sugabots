@@ -12,7 +12,6 @@ import type {
 	WorkspacePermissions,
 } from "@sugabots/contracts";
 import type { Actor, BotFacts } from "../authorization/permissions.ts";
-import { deletable } from "./bot-permissions.ts";
 import { mayJoin } from "./can-join-project.ts";
 import { takesOverDesktop } from "./can-use-computer.ts";
 import { memberManagingChats } from "./chat-permissions.ts";
@@ -95,7 +94,7 @@ export function botPermissionsShown(
 	const managesIt = managesBot(actor, facts);
 	return {
 		update: managesIt,
-		delete: (managesIt || restrictsBot(actor, memberFacing)) && deletable(facts),
+		delete: managesIt || restrictsBot(actor, memberFacing),
 		talk: memberReachesBot(actor, memberFacing),
 		// Nobody is in a default project: it is reached through its bot.
 		resources: resourcePermissionsShown(

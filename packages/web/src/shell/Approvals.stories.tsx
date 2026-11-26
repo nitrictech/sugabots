@@ -7,8 +7,9 @@ import type {
 import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, revenue } from "@/shell/story-fixtures.test-support.ts";
-import { appHandlers, StoryApp, storyChatFor, storyWorkspace } from "@/story-app.test-support.tsx";
+import { storyApproval } from "@/shell/approval-story.test-support.ts";
+import { revenue } from "@/shell/story-fixtures.test-support.ts";
+import { appHandlers, StoryApp, storyWorkspace } from "@/story-app.test-support.tsx";
 
 /*
  * Every approval across the workspace, opened from the sidebar: what waits on
@@ -17,8 +18,8 @@ import { appHandlers, StoryApp, storyChatFor, storyWorkspace } from "@/story-app
 
 const API = import.meta.env.VITE_API_URL as string;
 
-function call(id: string, tool: string, approval: ToolCallPart["approval"]): ToolCallPart {
-	return {
+function request(id: string, tool: string, approval: ToolCallPart["approval"]) {
+	return storyApproval({
 		type: "tool_call",
 		id: `0199a3a0-0000-7000-8000-0000000007${id}`,
 		tool,
@@ -35,25 +36,7 @@ function call(id: string, tool: string, approval: ToolCallPart["approval"]): Too
 		startedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
 		finishedAt: null,
 		approval,
-	};
-}
-
-function request(id: string, tool: string, approval: ToolCallPart["approval"]): ApprovalRequest {
-	return {
-		call: call(id, tool, approval),
-		bot: {
-			kind: "bot",
-			id: growthDesk.id,
-			name: growthDesk.name,
-			handle: growthDesk.handle,
-			color: growthDesk.color,
-			eyes: growthDesk.eyes,
-			shape: "circle",
-		},
-		projectId: revenue.id,
-		chatId: storyChatFor(growthDesk).id,
-		rootChatId: storyChatFor(growthDesk).id,
-	};
+	});
 }
 
 function answered(id: string, tool: string, answer: AnsweredApproval["answer"]): AnsweredApproval {

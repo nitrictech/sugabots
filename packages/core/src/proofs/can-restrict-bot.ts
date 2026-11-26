@@ -13,8 +13,8 @@ import { defineProof, type Named, type Proof } from "./proof.ts";
 /**
  * P is an admin of the bot B's workspace, and so may delete B or switch off
  * its automations and connectors without reaching it, as admins may a
- * personal bot. Another member's Personal Assistant is hidden to them, and a
- * system bot can't be restricted. A bot acting for its asker gets it only in
+ * personal bot, a Personal Assistant included. A system bot can't be
+ * restricted. A bot acting for its asker gets it only in
  * member bounds; a run never does.
  */
 export interface CanRestrictBot<P, B> extends Proof<"CanRestrictBot", [P, B]> {
@@ -62,9 +62,8 @@ const restrictingAdmin = (
 		if (met.kind === "none") return yield* Effect.fail(hidden);
 		if (met.kind === "run") return yield* Effect.fail(forbidden);
 		const { actor } = met;
-		// Admins see every bot but another member's Personal Assistant, without reaching it.
-		const seen =
-			memberReachesBot(actor, record) || (administers(actor) && record.assistantOf === null);
+		// Admins see every bot, without reaching it.
+		const seen = memberReachesBot(actor, record) || administers(actor);
 		if (!seen) return yield* Effect.fail(hidden);
 		if (!restrictsBot(actor, record) || met.mayManage !== "always") {
 			return yield* Effect.fail(forbidden);

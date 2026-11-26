@@ -1,3 +1,8 @@
+import {
+	addTestMemberships,
+	createTestMember,
+	createTestWorkspace,
+} from "../database/workspace.test-support.ts";
 /**
  * Rows for the authenticator and prover tests, written straight into the
  * test database: a workspace, its members by role, bots of each kind,
@@ -23,7 +28,6 @@ import {
 	connector,
 	file,
 	invitation,
-	member,
 	membership,
 	message,
 	project,
@@ -35,7 +39,6 @@ import {
 	type TurnReason,
 	type TurnStatus,
 	turn,
-	workspace,
 } from "../database/schema.ts";
 import { onDatabase, runOnPostgres } from "../database/testing.ts";
 import { askerColumns } from "./turn-facts.ts";
@@ -51,16 +54,7 @@ function only<Row>(rows: readonly Row[]): Row {
 }
 
 export async function seedWorkspace(): Promise<string> {
-	const suffix = unique();
-	const row = only(
-		await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Workspace ${suffix}`, slug: `workspace-${suffix}` })
-				.returning({ id: workspace.id }),
-		),
-	);
-	return row.id;
+	return (await createTestWorkspace()).id;
 }
 
 /** A new member with `role` in `workspaceId`. */
@@ -70,24 +64,19 @@ export async function seedMember(
 	fields: { readonly email?: string; readonly emailVerified?: boolean } = {},
 ): Promise<string> {
 	const suffix = unique();
-	const row = only(
-		await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({
-					name: `Member ${suffix}`,
-					email: fields.email ?? `member-${suffix}@example.com`,
-					emailVerified: fields.emailVerified ?? true,
-				})
-				.returning({ id: member.id }),
-		),
+	const created = await createTestMember(
+		{
+			name: `Member ${suffix}`,
+			email: fields.email ?? `member-${suffix}@example.com`,
+			emailVerified: fields.emailVerified ?? true,
+		},
+		{ workspaceId, role },
 	);
-	await addMembership(workspaceId, row.id, role);
-	return row.id;
+	return created.id;
 }
 
 export async function addMembership(workspaceId: string, memberId: string, role: WorkspaceRole) {
-	await onDatabase((db) => db.insert(membership).values({ workspaceId, memberId, role }));
+	await addTestMemberships({ workspaceId, memberId, role });
 }
 
 export async function setRole(workspaceId: string, memberId: string, role: WorkspaceRole) {
@@ -128,7 +117,8 @@ export async function seedBot(
 					color: "green",
 					eyes: "pill",
 					visibility: fields.visibility ?? "public",
-					createdById: fields.createdById ?? null,
+					// A Personal Assistant's creator is the member it is for.
+					createdById: fields.createdById ?? fields.assistantOf ?? null,
 					assistantOf: fields.assistantOf ?? null,
 					systemBotKey: fields.systemBotKey ?? null,
 					usesComputer: fields.usesComputer ?? false,

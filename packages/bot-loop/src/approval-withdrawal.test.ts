@@ -8,7 +8,6 @@ import {
 	seedProjectChat,
 	seedWorkspace,
 } from "@sugabots/core/authentication/seed.test-support";
-import { startBotChat } from "@sugabots/core/chats/chats/testing";
 import { runningTurns } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import { query } from "@sugabots/core/database/database";
@@ -86,7 +85,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			"project departure": "ToolApprovalNotFound",
 			"workspace departure": "ResourceHidden",
 			"workspace member removal": "ResourceHidden",
-			"bot visibility": "ToolApprovalNotFound",
 			"bot removal": "ResourceHidden",
 			"project bot removal": "ToolApprovalNotFound",
 			"project deletion": "ResourceHidden",
@@ -103,9 +101,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				const adminSession = await signedIn.member(adminId);
 				const projectId = await seedProject(workspaceId, {
 					leadBotId:
-						reason === "project bot removal" ||
-						reason === "bot removal" ||
-						reason === "bot visibility"
+						reason === "project bot removal" || reason === "bot removal"
 							? (await seedBot(workspaceId)).id
 							: botId,
 					members: [asker],
@@ -121,17 +117,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						reason: "mention",
 					}),
 				);
-				const waitingChat =
-					reason === "bot visibility"
-						? (
-								await startBotChat(chatsAs(asker), {
-									botId,
-									messageId: crypto.randomUUID(),
-									content: "Draft the report.",
-								})
-							).chat.id
-						: inProject;
-				const { workflow, turnId, parked, requests } = await pendingBrief(waitingChat);
+				const { workflow, turnId, parked, requests } = await pendingBrief(inProject);
 				const error =
 					reason === "expiry"
 						? "This approval expired before anyone decided it."
@@ -176,12 +162,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						});
 						break;
 					}
-					case "bot visibility":
-						await loop.call(adminSession, "bots.update", {
-							botId,
-							changes: { visibility: "personal" },
-						});
-						break;
 					case "bot removal":
 						await loop.call(adminSession, "bots.remove", { botId });
 						break;

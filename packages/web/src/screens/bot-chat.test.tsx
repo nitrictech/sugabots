@@ -23,6 +23,7 @@ import {
 	mount,
 	pendingAnswer,
 	sam,
+	settingsOpenIn,
 	triager,
 	workspace,
 	writeDraft,
@@ -431,7 +432,7 @@ describe("a bot's chat", () => {
 		);
 		mount(chatPage);
 
-		await screen.findByText(/has no model yet, so it cannot answer/);
+		await screen.findByText(/has no model yet/);
 		expect(screen.getByRole("link", { name: "Choose a model" }).getAttribute("href")).toBe(
 			`/suga/bots/${linear.handle}/settings`,
 		);
@@ -1061,19 +1062,6 @@ describe("a bot's chat", () => {
 		expect(screen.queryByRole("complementary", { name: "Details" })).toBeNull();
 	});
 
-	/**
-	 * The way back to the chat a settings page was opened from: the Back above
-	 * the page on a phone. Wide, the trail and the sidebar go back instead, so
-	 * the bar is hidden there by style, which the test DOM does not apply.
-	 */
-	async function backToChat() {
-		const [back] = await within(await screen.findByRole("main")).findAllByRole("link", {
-			name: "Chat",
-		});
-		if (!back) throw new Error("No way back to the chat");
-		return back;
-	}
-
 	/** A phone's Back at the head of a bot's own page, which returns to the page it was opened from. */
 	async function backFromBotPage() {
 		const header = (await screen.findByRole("heading", { name: "Settings", level: 1 })).closest(
@@ -1095,7 +1083,7 @@ describe("a bot's chat", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe(chatPage));
 	});
 
-	it("leads from a member's name to their page under Members, and back to the chat", async () => {
+	it("leads from a member's name to their page over the chat, and back to it", async () => {
 		answerMessagesWith({
 			...mainMessage,
 			id: "0199a3a0-0000-7000-8000-0000000000fa",
@@ -1106,14 +1094,15 @@ describe("a bot's chat", () => {
 		const messages = await screen.findByRole("log", { name: "Chat messages" });
 
 		fireEvent.click(await within(messages).findByRole("link", { name: juno.name }));
-		await waitFor(() =>
-			expect(router.state.location.pathname).toBe(
-				"/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d2",
-			),
-		);
-		fireEvent.click(await backToChat());
+		await screen.findByRole("heading", { name: juno.name });
+		expect(settingsOpenIn(router)).toBe("members/0199a3a0-0000-7000-8000-0000000000d2");
+		// The bar's Back and the page's own, which style hides one of, both go back.
+		const [back] = await within(await screen.findByRole("main")).findAllByRole("link", {
+			name: "Back",
+		});
+		fireEvent.click(back as HTMLElement);
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(chatPage));
+		await waitFor(() => expect(router.state.location.href).toBe(chatPage));
 	});
 
 	it("leads from a bot's name to its settings, and back to the chat", async () => {

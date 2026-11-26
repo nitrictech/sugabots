@@ -10,7 +10,7 @@ import {
 	type UnsavedConnector,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ArrowUpRight, ChevronDown, ChevronRight, Code, Globe, Plus } from "lucide-react";
+import { ArrowUpRight, ChevronDown, ChevronRight, Code, Globe } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import {
 	bearerAuthorization,
@@ -66,14 +66,18 @@ import { accessSummaryText } from "./tool-access.tsx";
 export function ConnectorsSettings({
 	owner,
 	signInError,
+	adding,
+	onAddingChange,
 }: {
 	/** The bot or project whose connectors these are. */
 	owner: ResourceOwner;
 	/** Why the OAuth sign-in that just returned here did not finish, in our own words. */
 	signInError?: string;
+	/** Whether the Add connector dialog is open; the page's header opens it. */
+	adding: boolean;
+	onAddingChange: (adding: boolean) => void;
 }) {
 	const canManage = resourcePermissions(owner).manageConnectors;
-	const [adding, setAdding] = useState(false);
 	const projectId = resourceProjectId(owner);
 	const connectors = useConnectors(projectId);
 	if (connectors.isPending) return null;
@@ -88,14 +92,6 @@ export function ConnectorsSettings({
 				label={"project" in owner ? `${ownerName(owner)}'s own` : undefined}
 				headingLevel={2}
 				note="Bots act as whoever connected each one. Open one to choose for each tool."
-				action={
-					canManage && (
-						<Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
-							<Plus aria-hidden />
-							Add connector
-						</Button>
-					)
-				}
 			>
 				{listed.map((one) => (
 					<ConnectorRow key={one.id} connector={one} owner={owner} canManage={canManage} />
@@ -105,14 +101,14 @@ export function ConnectorsSettings({
 				)}
 			</SettingsGroup>
 			{canManage && (
-				<Dialog open={adding} onOpenChange={setAdding}>
+				<Dialog open={adding} onOpenChange={onAddingChange}>
 					{adding && (
 						<AddConnectorDialog
 							projectId={projectId}
 							addingTo={ownerName(owner)}
 							available={builtInConnectors.filter((builtIn) => !taken.has(builtIn.id))}
 							offersGitHub={!listed.some((one) => one.kind === "github")}
-							done={() => setAdding(false)}
+							done={() => onAddingChange(false)}
 						/>
 					)}
 				</Dialog>

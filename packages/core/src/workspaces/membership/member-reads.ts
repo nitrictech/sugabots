@@ -1,4 +1,4 @@
-import { and, eq, inArray, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
@@ -37,8 +37,8 @@ export function membershipOf(workspaceId: PgColumn, memberId: PgColumn): SQL | u
 /**
  * Whether `memberId` can record a sign-in, read under a share of the workspace
  * lock. A departure waits for these sign-ins, and a sign-in that waits for a
- * departure sees its intent even while the Personal Assistant's computer is
- * being destroyed.
+ * departure sees its intent, the membership marked leaving, even while its
+ * Personal Assistants' computers are being destroyed.
  */
 export const inWorkspaceUnderMembershipLock = (workspaceId: string, memberId: string) =>
 	Effect.gen(function* () {
@@ -62,11 +62,11 @@ export const inWorkspaceUnderMembershipLock = (workspaceId: string, memberId: st
 					),
 				),
 		);
-		return found !== undefined && !(yield* assistantProjectFor(workspaceId, memberId))?.deleting;
+		return found !== undefined;
 	});
 
-/** The member's Personal Assistant's default project, if they have one. */
-export const assistantProjectFor = (workspaceId: string, memberId: string) =>
+/** The default projects of the member's Personal Assistants, which go with their membership. */
+export const assistantProjectsFor = (workspaceId: string, memberId: string) =>
 	query((db) =>
 		db
 			.select({ id: project.id, deleting: project.deleting })
@@ -75,8 +75,9 @@ export const assistantProjectFor = (workspaceId: string, memberId: string) =>
 				project,
 				and(eq(project.defaultOfBotId, bot.id), eq(project.workspaceId, bot.workspaceId)),
 			)
-			.where(and(eq(bot.workspaceId, workspaceId), eq(bot.assistantOf, memberId))),
-	).pipe(Effect.map(([found]) => found));
+			.where(and(eq(bot.workspaceId, workspaceId), eq(bot.assistantOf, memberId)))
+			.orderBy(asc(bot.createdAt), asc(bot.id)),
+	);
 
 /**
  * The member whose membership of the workspace `membershipId` is, for an

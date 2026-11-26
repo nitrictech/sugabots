@@ -300,7 +300,7 @@ export const Overview = meta.story({
 		await expect(
 			await canvas.findByRole("link", { name: /Default for new bots/ }),
 		).toHaveTextContent("Claude Sonnet");
-		await expect(canvas.getByRole("link", { name: /Compaction/ })).toHaveTextContent(
+		await expect(canvas.getByRole("link", { name: /Default for system bots/ })).toHaveTextContent(
 			"Claude Haiku",
 		);
 		await expect(canvas.getByRole("link", { name: /Anthropic/ })).toHaveTextContent("Connected");
@@ -366,7 +366,7 @@ export const Provider = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Anthropic" })).toBeInTheDocument();
 		await expect(canvas.getByText(/^Default · 3 bots/)).toBeInTheDocument();
-		await expect(canvas.getByText(/^Compaction · 2 bots/)).toBeInTheDocument();
+		await expect(canvas.getByText(/^System bots · 2 bots/)).toBeInTheDocument();
 		await expect(canvas.getByText("Not used yet")).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Opus" })).toHaveAttribute(
 			"aria-checked",
@@ -467,7 +467,7 @@ export const SwitchOffProviderWithDefaults = meta.story({
 			),
 		).toBeInTheDocument();
 		await expect(
-			within(dialog).getByRole("button", { name: "Move compaction to: GPT-5" }),
+			within(dialog).getByRole("button", { name: "Move system bots to: GPT-5" }),
 		).toBeInTheDocument();
 		await expect(within(dialog).getByRole("button", { name: "Move and switch off" })).toBeEnabled();
 	},
@@ -672,7 +672,9 @@ export const ChatgptSignedIn = meta.story({
 export const SystemBots = meta.story({
 	render: () => <SystemModelSettings />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "Compaction" })).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: "Default for system bots" }),
+		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Claude Opus" })).toBeNull();
 		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
 	},

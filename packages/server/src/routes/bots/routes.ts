@@ -5,7 +5,7 @@ import { operationCaller } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
-/** A workspace's bots, and each member's Personal Assistant, each endpoint its operation. */
+/** A workspace's bots, and each member's Personal Assistants, each endpoint its operation. */
 export const botRoutes = HttpApiBuilder.group(ServerApi, "bots", (handlers) =>
 	Effect.map(operationCaller, (callOperation) =>
 		handlers
@@ -37,11 +37,10 @@ export const botRoutes = HttpApiBuilder.group(ServerApi, "bots", (handlers) =>
 					asHttpError(botErrors),
 				),
 			)
-			.handle("ensureAssistant", ({ params, payload }) =>
-				callOperation("bots.ensureAssistant", {
-					workspace: params.workspace,
-					model: payload.model,
-				}).pipe(asHttpError(botErrors)),
+			.handle("createAssistant", ({ params }) =>
+				callOperation("bots.createAssistant", { workspace: params.workspace }).pipe(
+					asHttpError(botErrors),
+				),
 			),
 	),
 );
@@ -55,9 +54,9 @@ const botErrors = {
 	BotHandleReserved: BadRequest,
 	BotGone: NotFound,
 	SystemBotImmutable: BadRequest,
-	AssistantVisibilityFixed: BadRequest,
+	PersonalVisibilityFixed: BadRequest,
 	AssistantInstructionsManaged: BadRequest,
-	AssistantManaged: BadRequest,
+	AssistantHandleFixed: BadRequest,
 	ComputerUnavailable: Conflict,
 	ComputerMadeMeanwhile: Conflict,
 	ClaimLost: Conflict,

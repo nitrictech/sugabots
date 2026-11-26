@@ -445,7 +445,7 @@ CREATE INDEX "thread_pod_updated_at_idx" ON "thread" ("pod_id","updated_at");-->
 CREATE INDEX "thread_host_updated_at_idx" ON "thread" ("host_agent_id","updated_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "agent_name_idx" ON "agent" ("workspace_id",lower("name")) WHERE "system_agent_key" is null and "assistant_of" is null;--> statement-breakpoint
 CREATE UNIQUE INDEX "agent_handle_idx" ON "agent" ("workspace_id","handle") WHERE "system_agent_key" is null and "assistant_of" is null;--> statement-breakpoint
-CREATE UNIQUE INDEX "agent_assistant_idx" ON "agent" ("workspace_id","assistant_of") WHERE "assistant_of" is not null;--> statement-breakpoint
+CREATE UNIQUE INDEX "agent_assistant_handle_idx" ON "agent" ("workspace_id","assistant_of","handle") WHERE "assistant_of" is not null;--> statement-breakpoint
 ALTER TABLE "agent" ADD CONSTRAINT "agent_assistant_workspace_member_fkey" FOREIGN KEY ("workspace_id","assistant_of") REFERENCES "workspace_member"("workspace_id","user_id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "artifact" DROP CONSTRAINT "artifact_created_in_thread_id_thread_id_fkey", ADD CONSTRAINT "artifact_created_in_thread_id_thread_id_fkey" FOREIGN KEY ("created_in_thread_id") REFERENCES "thread"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "thread" ADD CONSTRAINT "thread_pod_valid" CHECK (("type" = 'pod_chat') = ("pod_id" is not null));--> statement-breakpoint
@@ -855,7 +855,7 @@ ALTER INDEX "notification_override_agent_idx" RENAME TO "notification_override_b
 ALTER INDEX "connection_github_agent_idx" RENAME TO "connection_github_bot_idx";--> statement-breakpoint
 ALTER INDEX "agent_name_idx" RENAME TO "bot_name_idx";--> statement-breakpoint
 ALTER INDEX "agent_handle_idx" RENAME TO "bot_handle_idx";--> statement-breakpoint
-ALTER INDEX "agent_assistant_idx" RENAME TO "bot_assistant_idx";--> statement-breakpoint
+ALTER INDEX "agent_assistant_handle_idx" RENAME TO "bot_assistant_handle_idx";--> statement-breakpoint
 ALTER INDEX "agent_system_agent_key_idx" RENAME TO "bot_system_bot_key_idx";--> statement-breakpoint
 ALTER INDEX "agent_id_workspace_id_idx" RENAME TO "bot_id_workspace_id_idx";--> statement-breakpoint
 ALTER INDEX "channel_bot_agent_id_idx" RENAME TO "channel_bot_bot_id_idx";--> statement-breakpoint
@@ -2538,6 +2538,10 @@ ALTER TABLE "message_reaction" DROP CONSTRAINT "message_reaction_one_reactor", A
 ALTER TABLE "bot" DROP CONSTRAINT "bot_visibility_check";--> statement-breakpoint
 UPDATE "bot" SET "visibility" = 'personal' WHERE "visibility" = 'private';--> statement-breakpoint
 ALTER TABLE "bot" ADD CONSTRAINT "bot_visibility_check" CHECK ("visibility" in ('public', 'personal'));--> statement-breakpoint
+-- A Personal Assistant is a personal bot, whose creator is the member it is for.
+UPDATE "bot" SET "created_by_id" = "assistant_of"
+WHERE "assistant_of" IS NOT NULL AND "created_by_id" IS DISTINCT FROM "assistant_of";--> statement-breakpoint
+ALTER TABLE "bot" ADD CONSTRAINT "bot_personal_assistant_check" CHECK ("assistant_of" is null or ("visibility" = 'personal' and ("created_by_id" is null or "created_by_id" = "assistant_of")));--> statement-breakpoint
 -- The triggers that put administrators in every project members made name the
 -- renamed column.
 CREATE OR REPLACE FUNCTION add_administrators_to_new_project() RETURNS trigger
@@ -3113,11 +3117,11 @@ DROP TRIGGER "turn_asker" ON "turn";--> statement-breakpoint
 DROP FUNCTION set_turn_asker();--> statement-breakpoint
 DROP FUNCTION turn_asker(uuid, uuid);--> statement-breakpoint
 
--- Who the bot `answering_bot`'s turn answering `trigger_message` in `chat` acts for: the member who wrote the message; when a bot's turn wrote it, that turn's asker, or its run; when its automation's trigger posted it, its run. A Personal Assistant's run, in its own chats, acts for its member. A bot's message no turn wrote, such as a brief, acts for the member who started the chat, and so does an interview's turn, which answers its own first reply.
+-- Who the bot `answering_bot`'s turn answering `trigger_message` in `chat` acts for: the member who wrote the message; when a bot's turn wrote it, that turn's asker, or its run; when its automation's trigger posted it, its run. A personal bot's run, in its own chats, acts for its creator. A bot's message no turn wrote, such as a brief, acts for the member who started the chat, and so does an interview's turn, which answers its own first reply.
 CREATE FUNCTION turn_asker(chat uuid, trigger_message uuid, answering_bot uuid, OUT member_id uuid, OUT automation boolean)
 LANGUAGE sql STABLE AS $$
 	SELECT
-		coalesce(asked.member_id, CASE WHEN asked.automation AND run.id IS NOT NULL THEN assistant.assistant_of END),
+		coalesce(asked.member_id, CASE WHEN asked.automation AND run.id IS NOT NULL AND personal.visibility = 'personal' THEN personal.created_by_id END),
 		asked.automation
 	FROM (
 		SELECT
@@ -3140,20 +3144,21 @@ LANGUAGE sql STABLE AS $$
 	LEFT JOIN "run" AS run ON run.chat_id = chat
 	LEFT JOIN "placed_chat" AS place ON place.id = chat
 	LEFT JOIN "project" AS own ON own.id = place.project_id AND own.default_of_bot_id = answering_bot
-	LEFT JOIN "bot" AS assistant ON assistant.id = own.default_of_bot_id;
+	LEFT JOIN "bot" AS personal ON personal.id = own.default_of_bot_id;
 $$;--> statement-breakpoint
 
--- A Personal Assistant's runs' turns, in its own chats, act for its member, which they now store.
-UPDATE "turn" AS t SET "asker_id" = assistant."assistant_of"
-FROM "run" AS run, "placed_chat" AS place, "project" AS own, "bot" AS assistant
+-- A personal bot's runs' turns, in its own chats, act for its creator, which they now store.
+UPDATE "turn" AS t SET "asker_id" = personal."created_by_id"
+FROM "run" AS run, "placed_chat" AS place, "project" AS own, "bot" AS personal
 WHERE t."asker_id" IS NULL
 	AND t."asked_by_automation"
 	AND run."chat_id" = t."chat_id"
 	AND place."id" = t."chat_id"
 	AND own."id" = place."project_id"
 	AND own."default_of_bot_id" = t."bot_id"
-	AND assistant."id" = t."bot_id"
-	AND assistant."assistant_of" IS NOT NULL;--> statement-breakpoint
+	AND personal."id" = t."bot_id"
+	AND personal."visibility" = 'personal'
+	AND personal."created_by_id" IS NOT NULL;--> statement-breakpoint
 
 -- A turn still in flight that the backfill found nobody to act for is asked to end, so it ends as it next runs, or, waiting, as the cancel sweep tells its workflow.
 UPDATE "turn" AS t SET "end_requested" = 'lost_reach'

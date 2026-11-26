@@ -9,15 +9,17 @@ import { inMemoryEventStore } from "../../database/events/testing.ts";
 import {
 	bot,
 	chatParticipant,
-	member,
-	membership,
 	message,
 	projectBot,
 	projectMember,
 	turn,
-	workspace,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import {
+	addTestMemberships,
+	createTestMember,
+	createTestWorkspace,
+} from "../../database/workspace.test-support.ts";
 import { asMember } from "../../operations/chats/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
 import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
@@ -64,22 +66,17 @@ describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", a
 
 	beforeEach(async () => {
 		const suffix = crypto.randomUUID();
-		const [sam] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Sam", email: `collaboration-${suffix}@example.com` })
-				.returning(),
-		);
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: "Collaborations", slug: `collaborations-${suffix}` })
-				.returning(),
-		);
-		if (!sam || !space) throw new Error("fixture");
+		const sam = await createTestMember({
+			name: "Sam",
+			email: `collaboration-${suffix}@example.com`,
+		});
+		const space = await createTestWorkspace({
+			name: "Collaborations",
+			slug: `collaborations-${suffix}`,
+		});
 		samId = sam.id;
 		const workspaceId = space.id;
-		await onDatabase((db) => db.insert(membership).values({ workspaceId, memberId: samId }));
+		await addTestMemberships({ workspaceId, memberId: samId, role: "editor" });
 		const names = ["asker", "helper", "checker", "scout", "outsider"] as const;
 		const made = await onDatabase((db) =>
 			db

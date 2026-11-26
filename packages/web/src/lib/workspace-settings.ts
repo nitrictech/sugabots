@@ -10,28 +10,27 @@ import type { WorkspacePermissions } from "@sugabots/contracts";
  * that permission.
  */
 export const workspaceSettingSections = [
-	{ id: "general", label: "General", path: "/settings" },
-	{ id: "members", label: "Members", path: "/settings/members" },
-	{ id: "providers", label: "Models", path: "/settings/providers", needs: "manageProviders" },
-	{ id: "computers", label: "Computers", path: "/settings/computers", needs: "manageProviders" },
-	{ id: "search", label: "Web search", path: "/settings/search", needs: "manageProviders" },
-	{ id: "usage", label: "Usage", path: "/settings/usage", needs: "manageUsage" },
+	{ id: "general", label: "General" },
+	{ id: "members", label: "Members" },
+	{ id: "providers", label: "Models", needs: "manageProviders" },
+	{ id: "computers", label: "Computers", needs: "manageProviders" },
+	{ id: "search", label: "Web search", needs: "manageProviders" },
+	{ id: "usage", label: "Usage", needs: "manageUsage" },
 ] as const satisfies ReadonlyArray<SectionShape>;
 
 /** Your own settings, under You at the head of the navigation. */
 export const yourSettingSections = [
-	{ id: "account", label: "General", path: "/settings/account" },
-	{ id: "notifications", label: "Notifications", path: "/settings/notifications" },
+	{ id: "account", label: "General" },
+	{ id: "notifications", label: "Notifications" },
 ] as const satisfies ReadonlyArray<SectionShape>;
 
 interface SectionShape {
 	id: string;
 	label: string;
-	path: string;
 	needs?: keyof WorkspacePermissions;
 }
 
-/** One section of settings, by its address. */
+/** One section of settings, as `?settings=` names it by its id. */
 export type SettingSection =
 	| (typeof workspaceSettingSections)[number]
 	| (typeof yourSettingSections)[number];
@@ -40,8 +39,6 @@ const allSettingSections: readonly SettingSection[] = [
 	...workspaceSettingSections,
 	...yourSettingSections,
 ];
-
-export type WorkspaceSettingSection = SettingSection["id"];
 
 export function workspaceSettingSection(section: string): SettingSection | undefined {
 	return allSettingSections.find((candidate) => candidate.id === section);

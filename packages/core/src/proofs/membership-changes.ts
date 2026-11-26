@@ -7,7 +7,6 @@ import { query } from "../database/database.ts";
 import { membership } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
-import { assistantProjectFor } from "../workspaces/membership/member-reads.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 import type { HoldsWorkspaceLock } from "./workspace-lock.ts";
 
@@ -221,7 +220,7 @@ export const proveCanHandOverOwnership = <P, W, U>(
 		if (!actor.workspaceRole)
 			return yield* Effect.fail(new ResourceHidden({ resource: "workspace" }));
 		if (!currentRole) return yield* Effect.fail(new ResourceHidden({ resource: "membership" }));
-		if (!handsOverOwnership(actor) || (yield* assistantProjectFor(workspace, target))?.deleting) {
+		if (!handsOverOwnership(actor)) {
 			return yield* Effect.fail(new ActionForbidden({ proof: "CanHandOverOwnership" }));
 		}
 		const proof: CanHandOverOwnership<P, W, U> = CanHandOverOwnershipProof.prove(

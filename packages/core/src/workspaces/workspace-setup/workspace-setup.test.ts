@@ -6,8 +6,6 @@ import { seedBot, seedMember, seedWorkspace } from "../../authentication/seed.te
 import { query } from "../../database/database.ts";
 import {
 	bot,
-	member,
-	membership,
 	modelProvider,
 	providerModel,
 	workspace,
@@ -19,6 +17,7 @@ import {
 	onDatabase,
 	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
+import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
 import type { MemberSession } from "../../principal.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
@@ -48,33 +47,19 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", 
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [madeWorkspace] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Test ${stamp}`, slug: `workspace-setup-${stamp}` })
-				.returning(),
+		const {
+			workspace: madeWorkspace,
+			members: { admin, editor },
+		} = await createWorkspaceFixture(
+			{ name: `Test ${stamp}`, slug: `workspace-setup-${stamp}` },
+			{
+				admin: { name: "Admin", email: `admin-${stamp}@example.com`, role: "admin" },
+				editor: { name: "Editor", email: `editor-${stamp}@example.com`, role: "editor" },
+			},
 		);
-		const members = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Admin", email: `admin-${stamp}@example.com` },
-					{ name: "Editor", email: `editor-${stamp}@example.com` },
-				])
-				.returning(),
-		);
-		const [admin, editor] = members;
-		if (!madeWorkspace || !admin || !editor)
-			throw new Error("could not create workspace setup fixtures");
 		workspaceId = madeWorkspace.id;
 		adminId = admin.id;
 		editorId = editor.id;
-		await onDatabase((db) =>
-			db.insert(membership).values([
-				{ workspaceId, memberId: adminId, role: "admin" },
-				{ workspaceId, memberId: editorId, role: "editor" },
-			]),
-		);
 		const [provider] = await onDatabase((db) =>
 			db
 				.insert(modelProvider)

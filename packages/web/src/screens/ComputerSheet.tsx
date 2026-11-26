@@ -6,7 +6,7 @@ import { type PointerEvent, useRef, useState } from "react";
 import { useUpdateBot } from "@/lib/bots.ts";
 import { useComputerGap } from "@/lib/computer-providers.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
+import { settingsSectionLink } from "@/lib/links.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
@@ -39,7 +39,6 @@ export function ComputerSheet({
 	const update = useUpdateBot(bot.id);
 	// Whether it uses a computer is the computer's to manage, not the rest of the bot's.
 	const mayGiveComputer = bot.permissions.resources.manageComputer;
-	const backToChat = useBackToHere("Chat");
 	const title = `${bot.name}'s computer`;
 
 	return (
@@ -94,9 +93,7 @@ export function ComputerSheet({
 				>
 					{mayGiveComputer
 						? "Give it one to run commands, browse and make files."
-						: bot.assistant
-							? "Sugabots sets up your Personal Assistant, its computer included."
-							: "Ask somebody who can edit it to give it one."}
+						: "Ask somebody who can edit it to give it one."}
 				</EmptyState>
 			) : missing === "workspace" ? (
 				<EmptyState
@@ -106,10 +103,7 @@ export function ComputerSheet({
 					actions={
 						may.manageProviders && (
 							<Link
-								from="/$workspace"
-								to="./settings/$section"
-								params={{ section: "computers" }}
-								state={backToChat}
+								{...settingsSectionLink("computers")}
 								className={cn(buttonStyles(), "h-11 w-full")}
 							>
 								Set up computers

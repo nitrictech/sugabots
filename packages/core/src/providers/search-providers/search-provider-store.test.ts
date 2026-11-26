@@ -3,14 +3,13 @@ import { SearchProviderApiKeyRequired } from "@sugabots/contracts/errors/provide
 import { userText } from "@sugabots/errors";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { seedMember } from "../../authentication/seed.test-support.ts";
-import { workspace } from "../../database/schema.ts";
 import {
 	closeDatabase,
-	onDatabase,
 	type Promised,
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { createTestWorkspace } from "../../database/workspace.test-support.ts";
 import { searchProviderOf, toSearchProvider } from "./search-provider-reads.ts";
 import { SearchProviderStore } from "./search-provider-store.ts";
 
@@ -44,13 +43,7 @@ describe.skipIf(!process.env.DATABASE_URL)("search providers, against Postgres",
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Search ${suffix}`, slug: `search-${suffix}` })
-				.returning(),
-		);
-		if (!space) throw new Error("fixture");
+		const space = await createTestWorkspace({ name: `Search ${suffix}`, slug: `search-${suffix}` });
 		workspaceId = space.id;
 		memberId = await seedMember(workspaceId, "admin");
 	});

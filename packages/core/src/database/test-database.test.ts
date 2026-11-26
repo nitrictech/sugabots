@@ -25,21 +25,16 @@ describe("choosing the tests' database", () => {
 		);
 	});
 
-	it("refuses the development database, however it was named", () => {
-		// The failure this exists for: the tests filled the database a dev server
-		// was using, and nothing said so until somebody opened the sidebar.
-		expect(() =>
-			testDatabaseUrl({ DATABASE_URL: development, TEST_DATABASE_URL: development }),
-		).toThrow(DevelopmentDatabaseRefused);
-	});
+	it("refuses to run on the development database and redacts its password", () => {
+		const useDevelopmentDatabase = () =>
+			testDatabaseUrl({ DATABASE_URL: development, TEST_DATABASE_URL: development });
 
-	it("keeps the password out of what it says when it refuses", () => {
-		expect(() =>
-			testDatabaseUrl({ DATABASE_URL: development, TEST_DATABASE_URL: development }),
-		).toThrow(/\*\*\*/);
-		expect(() =>
-			testDatabaseUrl({ DATABASE_URL: development, TEST_DATABASE_URL: development }),
-		).not.toThrow(/secret/);
+		expect(useDevelopmentDatabase).toThrow(DevelopmentDatabaseRefused);
+		expect(useDevelopmentDatabase).toThrow(
+			expect.objectContaining({
+				message: expect.not.stringContaining("secret"),
+			}),
+		);
 	});
 
 	it("has nothing to offer when no database is configured at all", () => {

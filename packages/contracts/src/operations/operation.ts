@@ -41,8 +41,8 @@ export interface Contract<
 	/** Every error it can fail with. Each is a `DomainError`, so each has a user message. */
 	readonly errors: ErrorSchemas;
 	/**
-	 * Whether it changes anything. A Personal Assistant asks its member before
-	 * any operation that does.
+	 * Whether it changes anything. A personal bot asks its creator before any
+	 * operation that does.
 	 */
 	readonly changes: boolean;
 }

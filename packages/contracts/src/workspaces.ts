@@ -14,7 +14,7 @@ import { uuidOrStringSchema } from "./uuid.ts";
  * - `viewer` reads and takes part in the projects they are in and with the
  *   public bots, and configures nothing.
  *
- * Everybody has their own Personal Assistant whatever their role.
+ * Everybody is given a Personal Assistant whatever their role.
  *
  * These are the whole set: the database refuses any other value.
  *
@@ -83,7 +83,7 @@ const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
 const WORKSPACE_ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
 	owner: "Administers the workspace, decides who else does, and can hand it on.",
 	admin:
-		"Administers the workspace, its providers, every project members made and every bot but others' Personal Assistants.",
+		"Administers the workspace, its providers, every project members made and every public bot, and may delete others' personal bots.",
 	editor: "Makes bots and projects, and works with the public bots.",
 	viewer: "Reads and takes part in projects and with public bots.",
 };

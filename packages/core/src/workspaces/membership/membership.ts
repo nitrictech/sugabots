@@ -74,7 +74,7 @@ import { processLayer, Tier } from "../../tiers.ts";
 import { BotStore } from "../bots/bot-store.ts";
 import { PersonalAssistants } from "../bots/personal-assistants.ts";
 import { ProjectStore } from "../projects/project-store.ts";
-import { assistantProjectFor, membershipOf } from "./member-reads.ts";
+import { assistantProjectsFor, membershipOf } from "./member-reads.ts";
 
 /**
  * The workspaces members are in, who else is, and who is invited, for
@@ -115,7 +115,7 @@ export interface Interface {
 		canChange: CanChangeMembership<P, W, U>,
 	) => Effect.Effect<void, never, Transaction>;
 	/**
-	 * Takes the member out. Their Personal Assistant, pins and project
+	 * Takes the member out. Their Personal Assistants, pins and project
 	 * memberships go with them, and so does what signs in as them (see
 	 * `MemberSignIns`); nobody is removed while a model provider signs in with
 	 * their subscription. A proof of a role change is a defect here.
@@ -245,21 +245,26 @@ export const make = Effect.gen(function* () {
 					.for("update"),
 			);
 			yield* revokeMembership(departing);
-			const assistant = yield* assistantProjectFor(workspaceId, memberId);
-			if (assistant) {
+			const assistants = yield* assistantProjectsFor(workspaceId, memberId);
+			for (const assistant of assistants) {
 				yield* projects.markDeleting(workspaceId, assistant.id);
-				const cleanupPending = yield* ProjectComputers.lockWithoutComputer({
-					workspaceId,
-					projectId: assistant.id,
-				}).pipe(
-					Effect.as(false),
-					Effect.catchTag("ComputerMadeMeanwhile", () => Effect.succeed(true)),
-				);
-				if (cleanupPending) return { cleanupPending };
 			}
+			if (yield* anyHasComputer(workspaceId, assistants)) return { cleanupPending: true };
 			yield* deleteMembership(departing);
 			return { cleanupPending: false };
 		});
+
+	/**
+	 * Whether any of `projects` still has a computer, locking those that have
+	 * none so none is made before the membership's deletion takes them.
+	 */
+	const anyHasComputer = (workspaceId: string, projects: readonly { readonly id: string }[]) =>
+		Effect.forEach(projects, ({ id: projectId }) =>
+			ProjectComputers.lockWithoutComputer({ workspaceId, projectId }).pipe(
+				Effect.as(false),
+				Effect.catchTag("ComputerMadeMeanwhile", () => Effect.succeed(true)),
+			),
+		).pipe(Effect.map((pending) => pending.includes(true)));
 
 	const sendInvitation = (
 		invitationId: string,
@@ -468,6 +473,12 @@ export const make = Effect.gen(function* () {
 					const projectId = project.value;
 					yield* Transaction;
 					yield* ProjectComputers.lockWithoutComputer({ workspaceId, projectId });
+					// Another of their Personal Assistants' computers is still being
+					// destroyed; finishing that project's deletion finishes this.
+					const others = (yield* assistantProjectsFor(workspaceId, memberId)).filter(
+						(assistant) => assistant.id !== projectId,
+					);
+					if (yield* anyHasComputer(workspaceId, others)) return;
 					// A backfilled departure may still have sign-ins and automations to clear.
 					yield* forgetDepartingMember({ workspaceId, memberId }).pipe(Effect.orDie);
 					yield* deleteMembership({ workspaceId, memberId });
@@ -778,7 +789,10 @@ export const createWorkspace = (ownerId: string, details: NewWorkspace) =>
 			yield* bots.createSystemBots({ workspaceId: created.id, createdById: ownerId });
 			yield* searchProviders.provisionDefault(created.id, ownerId);
 			yield* modelProviders.seedBuiltInProviders(created.id);
-			yield* personalAssistants.provision({ workspaceId: created.id, memberId: ownerId });
+			// The owner's membership was made in this transaction, so nothing can refuse it.
+			yield* personalAssistants
+				.provision({ workspaceId: created.id, memberId: ownerId })
+				.pipe(Effect.orDie);
 			return workspaceView(created);
 		}),
 	);

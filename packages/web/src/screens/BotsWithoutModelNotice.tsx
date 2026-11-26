@@ -1,11 +1,10 @@
 import type { Bot } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { useBots, useModelName } from "@/lib/bots.ts";
-import { botSettingsLink } from "@/lib/links.ts";
+import { useBots, useModelName, useModels } from "@/lib/bots.ts";
+import { botSettingsLink, settingsSectionLink } from "@/lib/links.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { buttonStyles } from "@/ui/button.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
-import { ComposerStrip } from "./ChatComposer.tsx";
 import { type DraftFloor, requiredRepliers } from "./chat-recipients.ts";
 
 /**
@@ -29,37 +28,30 @@ export function useRequiredRepliers(floor: DraftFloor): {
 }
 
 /**
- * Over the draft, as a strip like the one for a reply, each bot the message
- * must go to that has no model, and so can't answer, with what would give it one.
+ * By Send, in the model's place, each bot the message must go to that has no
+ * model, and so can't answer, with what would give it one.
  */
 export function BotsWithoutModelNotice({ bots }: { bots: readonly Bot[] }) {
-	return (
-		<ComposerStrip className="flex-col items-start gap-1">
-			{bots.map((bot) => (
-				<WarningText key={bot.id}>
-					{bot.name} has no model yet, so it cannot answer. <GivingItAModel bot={bot} />
-				</WarningText>
-			))}
-		</ComposerStrip>
-	);
+	return bots.map((bot) => (
+		<WarningText key={bot.id}>
+			{bot.name} has no model yet. <GivingItAModel bot={bot} />
+		</WarningText>
+	));
 }
 
 /**
- * What gives `bot` a model, for the member reading. An ordinary bot's model is
- * chosen in its settings, by whoever may change it. A Personal Assistant's is
- * Sugabots' to set, so it has none only while the workspace has no model
- * switched on, which only somebody who manages its providers can change.
+ * What gives `bot` a model. A Personal Assistant starts with the workspace's
+ * default, so when the workspace offers none, a provider needs to be set up.
  */
 function GivingItAModel({ bot }: { bot: Bot }) {
 	const manageProviders = useWorkspacePermissions().manageProviders;
-	if (bot.assistant) {
+	const { data: models } = useModels(bot.assistant);
+	if (bot.assistant && models?.models.length === 0) {
 		if (!manageProviders) return "A workspace administrator switches on a model for it.";
 		return (
 			<>
 				<Link
-					from="/$workspace"
-					to="./settings/$section"
-					params={{ section: "providers" }}
+					{...settingsSectionLink("providers")}
 					className={buttonStyles({ variant: "link", size: "bare" })}
 				>
 					Switch on a model

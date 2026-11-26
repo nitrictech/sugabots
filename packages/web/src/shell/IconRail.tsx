@@ -13,7 +13,7 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
  * The workspace's sidebar narrowed to icons, down the far left while a bot or
- * a project is open beside it: the viewer's Personal Assistant first, then
+ * a project is open beside it: the viewer's Personal Assistants first, then
  * each project they are in as its tile, then their bots as faces. Each opens where it
  * leads; the bot or project open is shaded, and a dot marks what is new or
  * waits on the viewer. Their chats are in the sidebar beside it. A phone has
@@ -21,14 +21,14 @@ import { Tooltip } from "@/ui/tooltip.tsx";
  * as the sidebar's is.
  */
 export function IconRail({
-	assistant,
+	assistants,
 	projects,
 	bots,
 	currentProjectSlug,
 	currentBotHandle,
 }: {
-	/** The viewer's Personal Assistant, with how it stands, once it is made. */
-	assistant: BotStanding | undefined;
+	/** The viewer's Personal Assistants, oldest first, with how each stands. */
+	assistants: readonly BotStanding[];
 	/** The projects the viewer is in, with how each stands. */
 	projects: readonly ProjectWithAttention[];
 	/** The bots the viewer pinned, with how each stands. */
@@ -46,15 +46,20 @@ export function IconRail({
 		>
 			<div aria-hidden className="h-10 shrink-0" />
 			<div className="flex flex-col items-center pt-1">
-				{assistant && (
+				{assistants.length > 0 && (
 					<ul className={RAIL_LIST}>
-						<li>
-							<BotPlace standing={assistant} current={assistant.bot.handle === currentBotHandle} />
-						</li>
+						{assistants.map((assistant) => (
+							<li key={assistant.bot.id}>
+								<BotPlace
+									standing={assistant}
+									current={assistant.bot.handle === currentBotHandle}
+								/>
+							</li>
+						))}
 					</ul>
 				)}
 				{/* With nothing above it, the sidebar's Projects heading starts its column. */}
-				{assistant ? <RailDivider /> : <div aria-hidden className="h-8.25 shrink-0" />}
+				{assistants.length > 0 ? <RailDivider /> : <div aria-hidden className="h-8.25 shrink-0" />}
 				<section aria-label="Projects">
 					<ul className={RAIL_LIST}>
 						{projects.map((projectWithAttention) => (

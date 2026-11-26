@@ -1,5 +1,4 @@
-import { createRoute, Navigate } from "@tanstack/react-router";
-import { botSettingsLink } from "@/lib/links.ts";
+import { createRoute } from "@tanstack/react-router";
 import type { ProjectSettingsSection } from "@/screens/ProjectSettings.tsx";
 import { botRoute } from "./bots.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
@@ -38,8 +37,6 @@ export const botComputerRoute = createRoute({
 	component: () => {
 		const owner = useBotRouteOwner();
 		if (!owner) return null;
-		// A Personal Assistant's computer is ours to set up; its member changes its look and connectors.
-		if (owner.bot.assistant) return <Navigate {...botSettingsLink(owner.bot)} replace />;
 		return <ComputerSettingsPage key={owner.bot.id} owner={owner} />;
 	},
 });

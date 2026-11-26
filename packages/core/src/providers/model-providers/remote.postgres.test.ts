@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { member, membership, workspace } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
+import { closeDatabase, runOnPostgres } from "../../database/testing.ts";
+import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
 import { emptyRegistry } from "../models/testing.ts";
 import type { EgressHttpClients } from "../network/egress.ts";
 import { providerIn } from "./model-provider-reads.ts";
@@ -21,24 +21,15 @@ describe.skipIf(!process.env.DATABASE_URL)("provider discovery, against Postgres
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [made] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Test ${stamp}`, slug: `remote-${stamp}` })
-				.returning(),
+		const {
+			workspace: made,
+			members: { somebody },
+		} = await createWorkspaceFixture(
+			{ name: `Test ${stamp}`, slug: `remote-${stamp}` },
+			{ somebody: { name: "Ada", email: `ada-${stamp}@example.com`, role: "admin" } },
 		);
-		const [somebody] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
-				.returning(),
-		);
-		if (!made || !somebody) throw new Error("could not create the fixtures");
 		workspaceId = made.id;
 		adminId = somebody.id;
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId: somebody.id, role: "admin" }),
-		);
 		const provider = await runOnPostgres(
 			Effect.flatMap(ModelProviderStore.Service, (store) =>
 				store.create(workspaceId, {

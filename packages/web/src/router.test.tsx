@@ -39,31 +39,29 @@ beforeEach(() => {
 });
 
 describe("moving between pages on a phone", () => {
-	it("slides a page further in over the one it was opened from", async () => {
+	it("slides a page of the settings in over You, and back out of it", async () => {
 		const started = recordViewTransitions();
-		const { router } = mount("/suga/settings");
+		const { router } = mount("/suga/you");
 		await waitFor(() => expect(router.state.status).toBe("idle"));
 
-		await router.navigate({
-			to: "/$workspace/settings/$section",
-			params: { workspace: "suga", section: "account" },
-		});
+		await router.navigate({ to: ".", search: { settings: "account" } });
+		expect(started).toHaveBeenLastCalledWith(expect.objectContaining({ types: ["forward"] }));
 
-		expect(started).toHaveBeenCalledWith(expect.objectContaining({ types: ["forward"] }));
+		router.history.back();
+		await waitFor(() =>
+			expect(started).toHaveBeenLastCalledWith(expect.objectContaining({ types: ["back"] })),
+		);
 	});
 
 	it("starts no transition for somebody who asks for reduced motion", async () => {
 		const started = recordViewTransitions();
 		prefersReducedMotion();
-		const { router } = mount("/suga/settings");
+		const { router } = mount("/suga/you");
 		await waitFor(() => expect(router.state.status).toBe("idle"));
 
-		await router.navigate({
-			to: "/$workspace/settings/$section",
-			params: { workspace: "suga", section: "account" },
-		});
+		await router.navigate({ to: ".", search: { settings: "account" } });
 
-		expect(router.state.location.pathname).toBe("/suga/settings/account");
+		expect(router.state.location.search).toEqual({ settings: "account" });
 		expect(started).not.toHaveBeenCalled();
 	});
 });

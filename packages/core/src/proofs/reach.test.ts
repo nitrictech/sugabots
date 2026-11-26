@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	seedAutomation,
+	seedBot,
 	seedConnector,
 	seedProject,
 	seedProjectChat,
@@ -175,14 +176,24 @@ describe("reach and what it permits", () => {
 			expect(await reachesChat(helpersTurn, chatId)).toBe("BotCannotReach");
 		});
 
-		it("lets a Personal Assistant in member bounds reach what its member reaches", async () => {
+		it("lets a personal bot in its own chats, a Personal Assistant included, reach what its creator reaches and nothing more", async () => {
 			const { a, b } = world;
-			const assistant = await as.botFor(a.ed, a.assistant.id, a.assistantChat);
-			expect(assistant.bounds).toEqual({ kind: "member" });
-			for (const projectId of [a.project, a.otherProject, a.personal.defaultProject]) {
-				expect(await reachesProject(assistant, projectId)).toBe("ok");
+			const erinsProject = await seedProject(a.workspace, {
+				leadBotId: a.helper.id,
+				members: [a.erin],
+			});
+			const personalBots = {
+				assistant: await as.botFor(a.ed, a.assistant.id, a.assistantChat),
+				personal: await as.botFor(a.ed, a.personal.id, a.personalChat),
+			};
+			for (const [name, personalBot] of Object.entries(personalBots)) {
+				expect(personalBot.bounds, name).toEqual({ kind: "member" });
+				for (const projectId of [a.project, a.otherProject, a.pub.defaultProject]) {
+					expect(await reachesProject(personalBot, projectId), name).toBe("ok");
+				}
+				expect(await reachesProject(personalBot, erinsProject), name).toBe("ResourceHidden");
+				expect(await reachesProject(personalBot, b.project), name).toBe("ResourceHidden");
 			}
-			expect(await reachesProject(assistant, b.project)).toBe("ResourceHidden");
 		});
 
 		it("lets runs reach their project while webhooks and scheduled work use target-specific proofs", async () => {
@@ -240,6 +251,17 @@ describe("reach and what it permits", () => {
 			expect(await changesChat(run, a.chat)).toBe("ok");
 			expect(await takesPart(compaction, a.chat)).toBe("ActionForbidden");
 			expect(await changesChat(compaction, a.chat)).toBe("ActionForbidden");
+		});
+
+		it("lets a viewer's own Personal Assistant change its own chats, but nothing elsewhere it reaches for them", async () => {
+			const { a } = world;
+			const assistant = await seedBot(a.workspace, { assistantOf: a.vi, visibility: "personal" });
+			const ownChat = await seedProjectChat(a.workspace, assistant.defaultProject, a.vi);
+			const visAssistant = await as.botFor(a.vi, assistant.id, ownChat);
+
+			expect(await changesChat(visAssistant, ownChat)).toBe("ok");
+			expect(await reachesChat(visAssistant, a.chat)).toBe("ok");
+			expect(await changesChat(visAssistant, a.chat)).toBe("ActionForbidden");
 		});
 
 		it("lets the owner and admins manage a project members made, and a bot's managers its default project", async () => {
@@ -648,12 +670,14 @@ describe("reach and what it permits", () => {
 			const { a } = world;
 			const edsBot = await as.botFor(a.ed, a.pub.id, a.chat);
 			const assistant = await as.botFor(a.ed, a.assistant.id, a.assistantChat);
+			const personal = await as.botFor(a.ed, a.personal.id, a.personalChat);
 			const { principal: run } = await as.run(a.workspace, a.project, a.pub.id);
 			const webhook = await as.webhook(a.workspace, a.project);
 			expect(await reachesBot(edsBot, a.pub.id)).toBe("ok");
 			expect(await reachesBot(edsBot, a.helper.id)).toBe("ok");
 			expect(await reachesBot(edsBot, a.personal.id)).toBe("ResourceHidden");
 			expect(await reachesBot(assistant, a.personal.id)).toBe("ok");
+			expect(await reachesBot(personal, a.helper.id)).toBe("ok");
 			expect(await reachesBot(run, a.helper.id)).toBe("ok");
 			expect(await reachesBot(run, a.personal.id)).toBe("ResourceHidden");
 			expect(await reachesBot(webhook, a.pub.id)).toBe("ResourceHidden");

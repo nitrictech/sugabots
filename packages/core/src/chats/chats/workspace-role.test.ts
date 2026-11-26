@@ -3,8 +3,9 @@ import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { seedTurnAnswering } from "../../authentication/seed.test-support.ts";
 import { TurnAuthentication } from "../../authentication/turn.ts";
-import { bot, chatParticipant, member, membership, workspace } from "../../database/schema.ts";
+import { bot, chatParticipant, type member } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
+import { createTestMember, createTestWorkspace } from "../../database/workspace.test-support.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
 import { seedChat } from "../seed.test-support.ts";
 
@@ -30,15 +31,9 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_role, against Postgres", (
 
 	/** A member in the workspace with `role`, named so their handle is unique to this test. */
 	async function memberWithRole(name: string, role: WorkspaceRole) {
-		const [somebody] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: `${name} ${suffix}`, email: `${name}-${suffix}@example.com` })
-				.returning(),
-		);
-		if (!somebody) throw new Error("Could not create a member");
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId: somebody.id, role }),
+		const somebody = await createTestMember(
+			{ name: `${name} ${suffix}`, email: `${name}-${suffix}@example.com` },
+			{ workspaceId, role },
 		);
 		return somebody;
 	}
@@ -57,13 +52,7 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_role, against Postgres", (
 
 	beforeEach(async () => {
 		suffix = crypto.randomUUID().slice(0, 8);
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: "Access workspace", slug: `access-${suffix}` })
-				.returning(),
-		);
-		if (!space) throw new Error("Could not create a workspace");
+		const space = await createTestWorkspace({ name: "Access workspace", slug: `access-${suffix}` });
 		workspaceId = space.id;
 		owner = await memberWithRole("Owner", "owner");
 		const [host] = await onDatabase((db) =>
@@ -161,13 +150,10 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_role, against Postgres", (
 	});
 
 	it("says someone who has left the workspace has no role", async () => {
-		const [former] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: `Former ${suffix}`, email: `former-${suffix}@example.com` })
-				.returning(),
-		);
-		if (!former) throw new Error("Could not create a member");
+		const former = await createTestMember({
+			name: `Former ${suffix}`,
+			email: `former-${suffix}@example.com`,
+		});
 		await joinChat(former.id);
 
 		expect(await lookUp(handleOf("Former"))).toMatchObject({

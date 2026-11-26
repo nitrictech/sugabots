@@ -12,7 +12,7 @@ import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { query } from "../../database/database.ts";
-import { bot, member, membership, modelProvider, workspace } from "../../database/schema.ts";
+import { bot, membership, modelProvider } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	holdTransaction,
@@ -21,6 +21,12 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import {
+	addTestMemberships,
+	createTestMember,
+	createTestWorkspace,
+	createWorkspaceFixture,
+} from "../../database/workspace.test-support.ts";
 import { servedOperations } from "../../operations/testing.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { unimplemented } from "../../testing.ts";
@@ -120,24 +126,15 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [made] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Test ${stamp}`, slug: `test-${stamp}` })
-				.returning(),
+		const {
+			workspace: made,
+			members: { somebody },
+		} = await createWorkspaceFixture(
+			{ name: `Test ${stamp}`, slug: `test-${stamp}` },
+			{ somebody: { name: "Ada", email: `ada-${stamp}@example.com`, role: "admin" } },
 		);
-		const [somebody] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
-				.returning(),
-		);
-		if (!made || !somebody) throw new Error("could not create the test workspace");
 		workspaceId = made.id;
 		memberId = somebody.id;
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId, role: "admin" }),
-		);
 		await store.seedBuiltInProviders(workspaceId);
 		const provider = await create({
 			name: `Gateway ${stamp}`,
@@ -689,15 +686,9 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	it("names who next switches on a local provider whose key was taken away, not who gave the key", async () => {
 		const ollama = (await list(workspaceId)).find(({ builtIn }) => builtIn === "ollama");
 		if (!ollama) throw new Error("fixture");
-		const [bob] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Bob", email: `bob-${workspaceId}@example.com` })
-				.returning(),
-		);
-		if (!bob) throw new Error("fixture");
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId: bob.id, role: "admin" }),
+		const bob = await createTestMember(
+			{ name: "Bob", email: `bob-${workspaceId}@example.com` },
+			{ workspaceId, role: "admin" },
 		);
 		const respond = () => Response.json({ models: [] });
 		await (await setupWith(respond)).update({
@@ -719,15 +710,9 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("names nobody as who connected a provider once they have left the workspace, though they are in another", async () => {
-		const [bob] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Bob", email: `bob-${workspaceId}@example.com` })
-				.returning(),
-		);
-		if (!bob) throw new Error("fixture");
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId: bob.id, role: "admin" }),
+		const bob = await createTestMember(
+			{ name: "Bob", email: `bob-${workspaceId}@example.com` },
+			{ workspaceId, role: "admin" },
 		);
 		await (await setupWith(() => Response.json({ data: [] }), { as: bob.id })).update({
 			workspace: workspaceId,
@@ -735,16 +720,11 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			changes: { apiKey: "bobs-key" },
 		});
 		expect(await view(providerId)).toMatchObject({ connectedBy: { name: "Bob" } });
-		const [elsewhere] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: "Elsewhere", slug: `elsewhere-${crypto.randomUUID()}` })
-				.returning(),
-		);
-		if (!elsewhere) throw new Error("fixture");
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId: elsewhere.id, memberId: bob.id, role: "admin" }),
-		);
+		const elsewhere = await createTestWorkspace({
+			name: "Elsewhere",
+			slug: `elsewhere-${crypto.randomUUID()}`,
+		});
+		await addTestMemberships({ workspaceId: elsewhere.id, memberId: bob.id, role: "admin" });
 
 		await onDatabase((db) =>
 			db
@@ -801,15 +781,9 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("lets an editor see the models offered, and nothing more", async () => {
-		const [sam] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Sam", email: `sam-${crypto.randomUUID()}@example.com` })
-				.returning(),
-		);
-		if (!sam) throw new Error("fixture");
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId: sam.id, role: "editor" }),
+		const sam = await createTestMember(
+			{ name: "Sam", email: `sam-${crypto.randomUUID()}@example.com` },
+			{ workspaceId, role: "editor" },
 		);
 		const setup = await setupWith(() => Response.json({ data: [] }), { as: sam.id });
 
@@ -1001,16 +975,10 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 	});
 
 	it("lists nothing it was not given, and seeds the built-in providers once when provisioned", async () => {
-		const [fresh] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({
-					name: "Fresh",
-					slug: `fresh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-				})
-				.returning(),
-		);
-		if (!fresh) throw new Error("fixture");
+		const fresh = await createTestWorkspace({
+			name: "Fresh",
+			slug: `fresh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+		});
 
 		expect(await list(fresh.id)).toEqual([]);
 		await store.seedBuiltInProviders(fresh.id);
@@ -1194,7 +1162,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			const bots = await botsOnPostgres();
 			await bots.createSystemBots({ workspaceId, createdById: memberId });
 			// Made while the workspace offered no model, as for somebody who joined then.
-			const assistant = await bots.provisionPersonalAssistant({ workspaceId, memberId });
+			const assistant = await bots.ensurePersonalAssistant({ workspaceId, memberId });
 			const ids = await offerable("first", "second");
 			const setup = await answering();
 

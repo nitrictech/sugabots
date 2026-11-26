@@ -21,7 +21,7 @@ import {
  * computers may reach, the bots using one, and how full each one's disk is.
  */
 
-const computers = `/${storyWorkspace.slug}/settings/computers`;
+const computers = `/${storyWorkspace.slug}?settings=computers`;
 const api = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 
 const opensandbox: ComputerProvider = {

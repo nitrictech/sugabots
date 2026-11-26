@@ -39,8 +39,8 @@ interface ChatBounds {
 }
 
 /**
- * A Personal Assistant's own turns, and its automations' routine and manual
- * runs: everything its member reaches.
+ * A personal bot's own turns, and its automations' routine and manual runs:
+ * everything its creator reaches.
  */
 interface MemberBounds {
 	readonly kind: "member";
@@ -69,7 +69,7 @@ class BotForAsker extends Authenticated<"BotForAsker"> {
 	readonly workspace: string;
 	readonly bot: string;
 	readonly asker: string;
-	/** Whether the turn answers an automation's trigger for a Personal Assistant's member. */
+	/** Whether the turn answers an automation's trigger for a personal bot's creator. */
 	readonly askedByAutomation: boolean;
 	readonly chat: string;
 	readonly turn: string;
@@ -98,8 +98,8 @@ class BotForAsker extends Authenticated<"BotForAsker"> {
 /**
  * A bot in an automation's run, which answers no member: the automation's
  * project's lead bot, or a bot it asked for help in the run's chat. Its bounds are those a turn
- * in the run's chat would have: the automation's project. A Personal
- * Assistant's runs act for its member instead, as a {@link BotForAsker}.
+ * in the run's chat would have: the automation's project. A personal bot's
+ * runs act for its creator instead, as a {@link BotForAsker}.
  */
 class AutomationRun extends Authenticated<"AutomationRun"> {
 	readonly workspace: string;

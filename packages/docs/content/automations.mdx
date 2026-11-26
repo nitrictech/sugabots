@@ -21,11 +21,15 @@ owner and admins; for a project members made, the owner and admins. Anyone in th
 project, or who can talk to the bot, can see them and, except viewers, choose
 **Start a run**.
 
-A [Personal Assistant](/docs/bots#your-personal-assistant)'s automations are its member's,
-whatever their role, so a viewer manages their own assistant's too: they make
-and change them, switch them on or off, choose **Start a run**, and answer the
-approvals their runs ask for. Nobody else sees them, not even the owner or an
-admin.
+A [personal bot](/docs/bots#public-and-personal)'s automations, a
+[Personal Assistant](/docs/bots#personal-assistants)'s included, are its
+creator's: only they see them and answer the approvals their runs ask for. The
+owner and admins can only switch them off. A viewer manages and runs their own
+Personal Assistants' automations, but not those of another personal bot they made. A run on a routine, or one started by
+hand, works with the creator's permissions, as the bot does, and asks before it
+changes anything. A run a webhook or GitHub event started works only in the
+bot's own chats and files and with its own connectors, and asks before every
+tool call.
 
 ## Who runs it
 
@@ -221,5 +225,5 @@ result links back to its run, under the message. A run that fails or is
 stopped posts nothing; its line says what happened. If a run needs an
 [approval](/docs/tools-and-approvals), only whoever manages the bot doing the
 run, and can see its chat, can answer it: the bot's creator, if they're in the
-project and not a viewer, the owner or an admin; for a Personal Assistant, its
-member, even a viewer. See [who can answer](/docs/tools-and-approvals#who-can-answer).
+project and not a viewer, the owner or an admin; for a personal bot, its
+creator alone, even a viewer. See [who can answer](/docs/tools-and-approvals#who-can-answer).

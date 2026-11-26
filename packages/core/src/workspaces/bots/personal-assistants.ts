@@ -1,5 +1,6 @@
 export * as PersonalAssistants from "./personal-assistants.ts";
 
+import type { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { Context, Effect, Layer } from "effect";
 import { serviceOperations, transaction } from "../../database/database.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
@@ -8,20 +9,23 @@ import type { MemberFacingBotRow } from "./bot.ts";
 import { BotStore } from "./bot-store.ts";
 
 /**
- * Making somebody's Personal Assistant, for the operations that let a member
- * into a workspace. They decide who that is, so this takes any `memberId` and
- * asks no actor; it is never handed to a route.
+ * Making somebody's Personal Assistants, for the operations that let a member
+ * into a workspace or make them another. They decide who that is, so this
+ * takes any `memberId` and asks no actor; it is never handed to a route. A
+ * member who has left, or whose departure commits first, is refused as
+ * someone outside the workspace.
  */
 export interface Interface {
 	/**
-	 * Makes `memberId`'s Personal Assistant, only if it is missing. A new one
-	 * starts on the workspace's default model, or on none while the workspace
-	 * offers none; an existing one with no model is given that default.
+	 * Makes `memberId` a Personal Assistant, only if they have none, and
+	 * returns their oldest. A new one starts on the workspace's default model,
+	 * or on none while the workspace offers none; an existing one with no model
+	 * is given that default.
 	 */
 	readonly provision: (input: {
 		workspaceId: string;
 		memberId: string;
-	}) => Effect.Effect<MemberFacingBotRow>;
+	}) => Effect.Effect<MemberFacingBotRow, ResourceHidden>;
 	/**
 	 * {@link Interface.provision} on `model`, which the workspace must offer. An
 	 * existing assistant moves to `model` only when the workspace does not
@@ -31,7 +35,12 @@ export interface Interface {
 		workspaceId: string;
 		memberId: string;
 		model: string;
-	}) => Effect.Effect<MemberFacingBotRow, ModelProviderStore.ModelNotEnabled>;
+	}) => Effect.Effect<MemberFacingBotRow, ModelProviderStore.ModelNotEnabled | ResourceHidden>;
+	/** Makes `memberId` another Personal Assistant, on the workspace's default model. */
+	readonly add: (input: {
+		workspaceId: string;
+		memberId: string;
+	}) => Effect.Effect<MemberFacingBotRow, ResourceHidden>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -50,7 +59,7 @@ export const make = Effect.gen(function* () {
 
 	const provision = (workspaceId: string, memberId: string, model?: string) =>
 		Effect.gen(function* () {
-			return yield* bots.provisionPersonalAssistant({
+			return yield* bots.ensurePersonalAssistant({
 				workspaceId,
 				memberId,
 				model: model ?? (yield* modelProviders.defaultModel(workspaceId)),
@@ -62,7 +71,7 @@ export const make = Effect.gen(function* () {
 		member: { workspaceId: string; memberId: string },
 		assistant: MemberFacingBotRow,
 		model: string,
-	) => bots.update(member.workspaceId, assistant.id, { model }, member.memberId).pipe(Effect.orDie);
+	) => bots.update(member.workspaceId, assistant.id, { model }).pipe(Effect.orDie);
 
 	return Service.of({
 		provision: ({ workspaceId, memberId }) =>
@@ -93,6 +102,18 @@ export const make = Effect.gen(function* () {
 						return yield* moveOnto({ workspaceId, memberId }, assistant, model);
 					}),
 				),
+			),
+
+		add: ({ workspaceId, memberId }) =>
+			operation(
+				"add",
+				Effect.gen(function* () {
+					return yield* bots.addPersonalAssistant({
+						workspaceId,
+						memberId,
+						model: yield* modelProviders.defaultModel(workspaceId),
+					});
+				}),
 			),
 	});
 });

@@ -5,10 +5,13 @@ import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+	seedBot,
 	seedConnector,
+	seedMember,
 	seedMessage,
 	seedProject,
 	seedProjectChat,
+	seedTurnAnswering,
 } from "../authentication/seed.test-support.ts";
 import { connector, projectMember, toolCall, turn } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
@@ -21,6 +24,7 @@ import {
 	proveApproved,
 	proveConnectorApproved,
 } from "./approved.ts";
+import { approvalAudience } from "./approvers.ts";
 import { proveCanDecide } from "./can-decide.ts";
 import { proveCanUseConnector } from "./can-use-connector.ts";
 import { proveEndsTurn } from "./ends-turn.ts";
@@ -147,18 +151,37 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			}
 		});
 
-		it("lets a Personal Assistant's member steer its runs' turns, which act for them", async () => {
+		it("runs a personal bot's automations for its creator, who steers their turns, in member bounds unless started from outside", async () => {
 			const { a } = world;
-			for (const startedBy of ["routine", "manual"] as const) {
-				const { run, turnId, principal } = await as.run(
-					a.workspace,
-					a.assistant.defaultProject,
-					a.assistant.id,
-					startedBy,
-				);
-				expect(principal._tag).toBe("BotForAsker");
-				expect(await steers(await as.member(a.ed), run.chat, turnId)).toBe("ok");
+			const expectedBounds = { routine: "member", manual: "member", webhook: "chat" } as const;
+			for (const bot of [a.assistant, a.personal]) {
+				for (const [startedBy, bounds] of Object.entries(expectedBounds)) {
+					const { run, turnId, principal } = await as.run(
+						a.workspace,
+						bot.defaultProject,
+						bot.id,
+						startedBy as keyof typeof expectedBounds,
+					);
+					const asked = principal._tag === "BotForAsker" ? principal : undefined;
+					expect({ asker: asked?.asker, bounds: asked?.bounds.kind }, startedBy).toEqual({
+						asker: a.ed,
+						bounds,
+					});
+					expect(await steers(await as.member(a.ed), run.chat, turnId)).toBe("ok");
+				}
 			}
+		});
+
+		it("runs a public bot's automations in its own chats for no member, not even its creator", async () => {
+			const { a } = world;
+			const { run, turnId, principal } = await as.run(
+				a.workspace,
+				a.pub.defaultProject,
+				a.pub.id,
+				"routine",
+			);
+			expect(principal._tag).toBe("AutomationRun");
+			expect(await steers(await as.member(a.ed), run.chat, turnId)).toBe("ActionForbidden");
 		});
 
 		it("lets those who may approve a run's calls interrupt its turns", async () => {
@@ -255,6 +278,37 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await decides(await as.member(a.ed), callId)).toBe("ActionForbidden");
 		});
 
+		it("lets a viewer, and nobody else, decide a request to change their own Personal Assistant's computer, but not their ordinary personal bot's", async () => {
+			const { a } = world;
+			const viewerId = await seedMember(a.workspace, "viewer");
+			const viewer = await as.member(viewerId);
+			const requestIn = async (bot: { readonly id: string; readonly defaultProject: string }) => {
+				const chat = await seedProjectChat(a.workspace, bot.defaultProject, viewerId);
+				const asking = await as.botFor(viewerId, bot.id, chat);
+				return seedToolCall(asking, {
+					tool: HOST_REQUEST_TOOL,
+					computerProjectId: bot.defaultProject,
+				});
+			};
+			const assistant = await seedBot(a.workspace, {
+				assistantOf: viewerId,
+				visibility: "personal",
+			});
+			const personalBot = await seedBot(a.workspace, {
+				createdById: viewerId,
+				visibility: "personal",
+			});
+
+			const assistantsRequest = await requestIn(assistant);
+			const personalBotsRequest = await requestIn(personalBot);
+			expect(await decides(viewer, assistantsRequest)).toBe("ok");
+			expect(await decides(viewer, personalBotsRequest)).toBe("ActionForbidden");
+			const askedOf = async (callId: string) =>
+				(await onDatabase((db) => approvalAudience(db, [callId]))).map(({ memberId }) => memberId);
+			expect(await askedOf(assistantsRequest)).toEqual([viewerId]);
+			expect(await askedOf(personalBotsRequest)).not.toContain(viewerId);
+		});
+
 		it("lets admins and the run's bot's managers who reach its chat decide a run's call", async () => {
 			const { a } = world;
 			const { run, turnId } = await as.run(a.workspace, a.project, a.pub.id);
@@ -265,12 +319,29 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await decides(await as.member(a.erin), callId)).toBe("ResourceHidden");
 		});
 
-		it("lets only its member decide a Personal Assistant's call", async () => {
+		it("lets only its creator decide a Personal Assistant's call", async () => {
 			const { a } = world;
 			const assistant = await as.botFor(a.ed, a.assistant.id, a.assistantChat);
 			const callId = await seedToolCall(assistant);
 			expect(await decides(await as.member(a.ed), callId)).toBe("ok");
 			expect(await decides(await as.member(a.owner), callId)).toBe("ResourceHidden");
+		});
+
+		it("lets a personal bot's creator decide its runs' calls even as a viewer, and nobody else", async () => {
+			const { a } = world;
+			const viewersBot = await seedBot(a.workspace, {
+				createdById: a.viewerCreator,
+				visibility: "personal",
+			});
+			const { run, turnId } = await as.run(
+				a.workspace,
+				viewersBot.defaultProject,
+				viewersBot.id,
+				"routine",
+			);
+			const callId = await seedToolCall({ chat: run.chat, turn: turnId, bot: viewersBot.id });
+			expect(await decides(await as.member(a.viewerCreator), callId)).toBe("ok");
+			expect(await decides(await as.member(a.admin), callId)).toBe("ResourceHidden");
 		});
 	});
 
@@ -439,24 +510,47 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await send("create", "allowed")).toBe("ok");
 		});
 
-		it("makes a Personal Assistant ask its member before any change, and before every call of a run from outside", async () => {
+		it("makes a personal bot ask its creator before any change, and before every call of a run from outside", async () => {
 			const { a } = world;
-			const assistant = await as.botFor(a.ed, a.assistant.id, a.assistantChat);
 			const request: Call = { kind: "request", request: "request-4" };
-			expect(await approved(assistant, request, never, input)).toBe("ApprovalNeeded");
-			expect(await approved(assistant, request, { ...never, changes: false }, input)).toBe("ok");
-			const allowed = await seedApprovalCall(assistant, { status: "allowed", decidedBy: a.ed });
-			expect(await approved(assistant, toolCallOf(allowed), never, input)).toBe("ok");
+			const personalBots = [
+				{ bot: a.assistant, chat: a.assistantChat },
+				{ bot: a.personal, chat: a.personalChat },
+			];
+			for (const { bot, chat } of personalBots) {
+				const personalBot = await as.botFor(a.ed, bot.id, chat);
+				expect(await approved(personalBot, request, never, input)).toBe("ApprovalNeeded");
+				expect(await approved(personalBot, request, { ...never, changes: false }, input)).toBe(
+					"ok",
+				);
+				const allowed = await seedApprovalCall(personalBot, { status: "allowed", decidedBy: a.ed });
+				expect(await approved(personalBot, toolCallOf(allowed), never, input)).toBe("ok");
 
-			const { principal: fromOutside } = await as.run(
-				a.workspace,
-				a.assistant.defaultProject,
-				a.assistant.id,
-				"webhook",
-			);
-			expect(await approved(fromOutside, request, { ...never, changes: false }, input)).toBe(
+				const { principal: fromOutside } = await as.run(
+					a.workspace,
+					bot.defaultProject,
+					bot.id,
+					"webhook",
+				);
+				expect(await approved(fromOutside, request, { ...never, changes: false }, input)).toBe(
+					"ApprovalNeeded",
+				);
+			}
+		});
+
+		it("makes a turn a personal bot's brief started ask before any change, as the personal bot would", async () => {
+			const { a } = world;
+			const request: Call = { kind: "request", request: "request-5" };
+			const briefedBy = async (writerId: string) => {
+				const briefed = await seedProjectChat(a.workspace, a.pub.defaultProject, a.ed);
+				return as.turn(
+					await seedTurnAnswering(briefed, a.pub.id, { bot: writerId }, { reason: "brief" }),
+				);
+			};
+			expect(await approved(await briefedBy(a.personal.id), request, never, input)).toBe(
 				"ApprovalNeeded",
 			);
+			expect(await approved(await briefedBy(a.helper.id), request, never, input)).toBe("ok");
 		});
 
 		it("takes a run's call as approved only from an admin or a manager of its bot", async () => {

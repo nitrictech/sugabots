@@ -36,6 +36,7 @@ import {
 	servedOnPostgres,
 	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
+import { createTestMember } from "../../database/workspace.test-support.ts";
 import type { Email } from "../../email/email.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
 import type { MemberSession } from "../../principal.ts";
@@ -175,17 +176,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 	const unique = () => crypto.randomUUID().slice(0, 8);
 
 	async function newMember(name: string, options?: { verified?: boolean }) {
-		const [row] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({
-					name,
-					email: `${name.toLowerCase()}-${unique()}@example.com`,
-					emailVerified: options?.verified ?? true,
-				})
-				.returning(),
-		);
-		if (!row) throw new Error("The member was not created");
+		const row = await createTestMember({
+			name,
+			email: `${name.toLowerCase()}-${unique()}@example.com`,
+			emailVerified: options?.verified ?? true,
+		});
 		return row;
 	}
 

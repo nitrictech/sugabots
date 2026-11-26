@@ -368,16 +368,30 @@
 		animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
 	}
 	/*
+	 * The marks move over both sidebars. Otherwise the sidebar sliding in,
+	 * drawn after them, covers a mark with its row's shading, as the open
+	 * bot's row has, until it is in place.
+	 */
+	html:active-view-transition-type(rail)::view-transition-group(.owner-mark) {
+		z-index: 1;
+	}
+	/*
 	 * A mark is drawn a little differently in a row and on the rail, so rather
 	 * than fade one into the other, which flickers where a mark barely moves, it
-	 * is the mark it is going to be all the way.
+	 * is the mark it is going to be all the way. One on only one side, as under
+	 * a folded section, fades as the browser fades it.
 	 */
-	html:active-view-transition-type(rail)::view-transition-old(*):not(:only-child) {
+	html:active-view-transition-type(rail)::view-transition-old(.owner-mark) {
 		animation: none;
 		opacity: 0;
 	}
-	html:active-view-transition-type(rail)::view-transition-new(*):not(:only-child) {
+	html:active-view-transition-type(rail)::view-transition-new(.owner-mark) {
 		animation: none;
+	}
+	html:active-view-transition-type(rail)::view-transition-old(.owner-mark):only-child,
+	html:active-view-transition-type(rail)::view-transition-new(.owner-mark):only-child {
+		animation: revert;
+		opacity: revert;
 	}
 	/* The sidebar coming in slides out from behind the rail; the one going slides back under it. */
 	html:active-view-transition-type(rail)::view-transition-new(owner-sidebar):only-child,

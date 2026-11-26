@@ -677,8 +677,8 @@ export function endingOf(run: schema.RunRow): Turns.Ended | undefined {
 }
 
 /**
- * Pauses the departing member's personal bots' and Personal Assistant's
- * automations, clearing their failure pauses and routine times.
+ * Pauses the departing member's personal bots' automations, their Personal
+ * Assistants' included, clearing their failure pauses and routine times.
  */
 export const pauseDepartingMembersAutomations = (departing: {
 	workspaceId: string;
@@ -704,14 +704,8 @@ export const pauseDepartingMembersAutomations = (departing: {
 				.where(
 					and(
 						eq(automation.workspaceId, departing.workspaceId),
-						or(
-							eq(bot.assistantOf, departing.memberId),
-							and(
-								eq(bot.createdById, departing.memberId),
-								eq(bot.visibility, "personal"),
-								isNull(bot.assistantOf),
-							),
-						),
+						eq(bot.createdById, departing.memberId),
+						eq(bot.visibility, "personal"),
 						isNull(automation.deletedAt),
 					),
 				)

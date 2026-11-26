@@ -8,7 +8,6 @@ import { query } from "../../database/database.ts";
 import {
 	bot as botTable,
 	connector,
-	member,
 	membership,
 	project,
 	workspace,
@@ -21,6 +20,11 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import {
+	addTestMemberships,
+	createTestWorkspace,
+	createWorkspaceFixture,
+} from "../../database/workspace.test-support.ts";
 import { signedIn } from "../../operations/chats/testing.ts";
 import { underWorkspaceLock } from "../../proofs/workspace-lock.ts";
 import { Secrets } from "../../secrets/secrets.ts";
@@ -56,24 +60,15 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Connectors ${suffix}`, slug: `connectors-${suffix}` })
-				.returning(),
+		const {
+			workspace: space,
+			members: { somebody },
+		} = await createWorkspaceFixture(
+			{ name: `Connectors ${suffix}`, slug: `connectors-${suffix}` },
+			{ somebody: { name: "Sam", email: `connectors-${suffix}@example.com`, role: "admin" } },
 		);
-		const [somebody] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Sam", email: `connectors-${suffix}@example.com` })
-				.returning(),
-		);
-		if (!space || !somebody) throw new Error("fixture");
 		workspaceId = space.id;
 		memberId = somebody.id;
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId, role: "admin" }),
-		);
 		const [bot, otherBot] = await onDatabase((db) =>
 			db
 				.insert(botTable)
@@ -240,16 +235,11 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 	it("names who added a connector while they are in the workspace, and nobody once they leave it for another", async () => {
 		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
 		expect((await shown(made.id))?.connectedBy).toMatchObject({ id: memberId, name: "Sam" });
-		const [elsewhere] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: "Elsewhere", slug: `elsewhere-${crypto.randomUUID()}` })
-				.returning(),
-		);
-		if (!elsewhere) throw new Error("could not create the other workspace");
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId: elsewhere.id, memberId, role: "editor" }),
-		);
+		const elsewhere = await createTestWorkspace({
+			name: "Elsewhere",
+			slug: `elsewhere-${crypto.randomUUID()}`,
+		});
+		await addTestMemberships({ workspaceId: elsewhere.id, memberId, role: "editor" });
 
 		await onDatabase((db) =>
 			db

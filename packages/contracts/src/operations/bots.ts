@@ -9,18 +9,17 @@ import {
 	botUpdateSchema,
 	DESCRIPTION_MAX_LENGTH,
 	INSTRUCTIONS_MAX_LENGTH,
-	modelIdSchema,
 	newBotSchema,
 	systemBotKeySchema,
 } from "../bots.ts";
 import {
+	AssistantHandleFixed,
 	AssistantInstructionsManaged,
-	AssistantManaged,
-	AssistantVisibilityFixed,
 	BotGone,
 	BotHandleReserved,
 	BotNameTaken,
 	EmptyBotUpdate,
+	PersonalVisibilityFixed,
 	SystemBotImmutable,
 	SystemBotMissing,
 } from "../errors/bots.ts";
@@ -74,7 +73,7 @@ export const botsContracts = {
 	}),
 	"bots.update": OperationContract.make("bots.update", {
 		description:
-			"Change a bot you manage: its name, handle, avatar, description, instructions, model, visibility, tools or computer use. Of a Personal Assistant, only its name and avatar.",
+			"Change a bot you manage: its name, handle, avatar, description, instructions, model, tools or computer use. Whether a bot is personal is chosen when it is made and never changes. Of a Personal Assistant, all but its instructions and handle.",
 		input: Schema.Struct({ botId: uuidSchema, changes: botUpdateSchema }),
 		output: botSchema,
 		errors: [
@@ -85,10 +84,9 @@ export const botsContracts = {
 			BotHandleReserved,
 			BotGone,
 			SystemBotImmutable,
-			LeadsProjects,
-			AssistantVisibilityFixed,
+			PersonalVisibilityFixed,
 			AssistantInstructionsManaged,
-			AssistantManaged,
+			AssistantHandleFixed,
 		],
 		changes: true,
 	}),
@@ -147,15 +145,12 @@ export const botsContracts = {
 		errors: [...refusals, ...approvalAndFenceRefusals],
 		changes: true,
 	}),
-	"bots.ensureAssistant": OperationContract.make("bots.ensureAssistant", {
+	"bots.createAssistant": OperationContract.make("bots.createAssistant", {
 		description:
-			"Your Personal Assistant in the workspace, made on the model given when you have none yet.",
-		input: Schema.Struct({
-			workspace: workspaceIdOrSlugSchema,
-			model: Schema.optional(modelIdSchema),
-		}),
+			"Make yourself a Personal Assistant, whatever your role, on the workspace's default model. It is listed with your others, oldest first.",
+		input: Schema.Struct({ workspace: workspaceIdOrSlugSchema }),
 		output: botSchema,
-		errors: [...refusals, ModelNotEnabled],
+		errors: refusals,
 		changes: true,
 	}),
 	"systemBots.list": OperationContract.make("systemBots.list", {
@@ -180,8 +175,8 @@ export const botsContracts = {
 } as const;
 
 /**
- * Offered as `tool` only in member bounds, a Personal Assistant's own turns,
- * where each call asks its member: it changes the member's own sidebar.
+ * Offered as `tool` only in member bounds, a personal bot's own turns,
+ * where each call asks its creator: it changes the member's own sidebar.
  */
 const forMemberInMemberBounds = <const Tool extends string>(tool: Tool) =>
 	({
@@ -247,12 +242,12 @@ export const botsExposure = {
 		http: { kind: "offered", endpoint: "bots.unpin" },
 		botLoop: forMemberInMemberBounds("unpin_bot"),
 	},
-	"bots.ensureAssistant": {
-		http: { kind: "offered", endpoint: "bots.ensureAssistant" },
+	"bots.createAssistant": {
+		http: { kind: "offered", endpoint: "bots.createAssistant" },
 		botLoop: {
 			kind: "heldBack",
 			reason:
-				"It makes a signed-in member's own Personal Assistant, which the web app asks for as they arrive; a bot's asker has one already.",
+				"A member makes their own Personal Assistants from the web app; joining a workspace gives them their first. A bot that made one would make a bot for its asker, which no tool does yet.",
 		},
 	},
 	"systemBots.list": {

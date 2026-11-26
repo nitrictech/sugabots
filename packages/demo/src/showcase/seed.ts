@@ -1484,9 +1484,7 @@ const ensureBot = (input: {
 				.where(and(eq(botTable.workspaceId, input.workspaceId), eq(botTable.name, bot.name))),
 		);
 		if (!existing) return yield* Effect.die(new Error(`${bot.name} was not made`));
-		yield* bots
-			.update(input.workspaceId, existing.id, { model: input.model }, input.createdById)
-			.pipe(Effect.orDie);
+		yield* bots.update(input.workspaceId, existing.id, { model: input.model }).pipe(Effect.orDie);
 		return existing.id;
 	});
 

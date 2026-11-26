@@ -170,18 +170,18 @@ describe("bot routes", () => {
 		]);
 	});
 
-	it("returns the member's Personal Assistant in the workspace in the path", async () => {
+	it("makes the member a Personal Assistant in the workspace in the path", async () => {
 		let asked: unknown;
 		const response = await app({
-			"bots.ensureAssistant": (_principal, input) =>
+			"bots.createAssistant": (_principal, input) =>
 				Effect.sync(() => {
 					asked = input;
 					return { ...bot, assistant: true, visibility: "personal" as const };
 				}),
-		}).request(`/workspaces/${WORKSPACE}/assistant`, auth({ model: MODEL }));
+		}).request(`/workspaces/${WORKSPACE}/assistants`, { ...auth(), method: "POST" });
 
-		expect(response.status).toBe(200);
-		expect(asked).toEqual({ workspace: WORKSPACE, model: MODEL });
+		expect(response.status).toBe(201);
+		expect(asked).toEqual({ workspace: WORKSPACE });
 		expect(await response.json()).toMatchObject({ assistant: true });
 	});
 

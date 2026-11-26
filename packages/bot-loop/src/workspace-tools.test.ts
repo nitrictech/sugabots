@@ -1,7 +1,7 @@
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { seedBot, seedMember, seedProject } from "@sugabots/core/authentication/seed.test-support";
 import { startBotChat } from "@sugabots/core/chats/chats/testing";
-import { aChatAwaitingReply, runningTurns } from "@sugabots/core/chats/turns/testing";
+import { aChatAwaitingReply } from "@sugabots/core/chats/turns/testing";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
 import {
 	bot,
@@ -12,12 +12,19 @@ import {
 	projectMember,
 	workspace,
 } from "@sugabots/core/database/schema";
-import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
+import { closeDatabase, onDatabase } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
 import { INTERVIEW_PROMPT } from "@sugabots/core/workspaces/bots/interview-prompt";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { botLoopOnPostgres, calling, callsOf, resumeAt, scriptedSteps } from "./testing.ts";
+import {
+	botLoopOnPostgres,
+	calling,
+	callsOf,
+	openTurnInChat,
+	resumeAt,
+	scriptedSteps,
+} from "./testing.ts";
 
 const SAVE_INSTRUCTIONS_TOOL = "save_instructions";
 
@@ -30,8 +37,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 	"a turn's bot and workspace tools, against Postgres",
 	async () => {
 		const delivered: CommittedEvent[] = [];
-		let afterCommit: ((events: readonly CommittedEvent[]) => Promise<void>) | undefined;
-		const loop = await botLoopOnPostgres(delivered, async (events) => afterCommit?.(events));
+		const loop = await botLoopOnPostgres(delivered);
 		const chatsAs = (memberId: string) => asMember(loop.call, memberId);
 		let chatId: string;
 		let workspaceId: string;
@@ -45,10 +51,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		beforeEach(async () => {
 			({ chatId, workspaceId, botId, adminId } = await aChatAwaitingReply(chatsAs));
 			delivered.length = 0;
-			afterCommit = undefined;
 		});
-
-		const deliveredEvents = () => delivered.map(({ event }) => event);
 
 		describe("a call the bot makes outside its tools", () => {
 			type TurnPrincipal = Awaited<ReturnType<typeof loop.runTurn>>["principal"];
@@ -86,10 +89,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				"refuses %s, which its asker must approve, made straight to the registry",
 				async (_name, callDirectly) => {
 					const { steps, authentication } = await loop.loopOver({ model: scriptedSteps().model });
-					const [run] = await runOnPostgres(runningTurns(chatId));
-					if (!run) throw new Error("no turn running");
-					const opened = await steps.open(run.request, 0);
-					if (opened._tag !== "Opened") throw new Error("the turn may not run");
+					const { opened } = await openTurnInChat(chatId, steps);
 					const principal = await authentication.authenticate(opened.turnId);
 
 					await expect(callDirectly(principal)).rejects.toMatchObject({ _tag: "ApprovalNeeded" });
@@ -290,7 +290,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				]);
 				expect(parked).toMatchObject({ tool: "create_project", approvalStatus: "pending", input });
 				expect(await projectsNamed("Launch")).toEqual([]);
-				expect(deliveredEvents()).not.toContainEqual(
+				expect(loop.deliveredEvents()).not.toContainEqual(
 					expect.objectContaining({
 						type: "reach.changed",
 						about: { kind: "project", projectId: expect.any(String) },
@@ -314,7 +314,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							.where(eq(projectMember.projectId, made?.id ?? "")),
 					),
 				).toEqual([{ memberId: adminId }]);
-				expect(deliveredEvents()).toContainEqual(
+				expect(loop.deliveredEvents()).toContainEqual(
 					expect.objectContaining({
 						type: "reach.changed",
 						about: { kind: "project", projectId: made?.id },
@@ -433,6 +433,25 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					});
 				},
 			);
+
+			it("withholds the workspace guide from a personal bot that isn't a Personal Assistant, which has member bounds and their tools", async () => {
+				const personal = await seedBot(workspaceId, {
+					createdById: adminId,
+					visibility: "personal",
+				});
+				await onDatabase((db) => db.update(bot).set({ model: "m" }).where(eq(bot.id, personal.id)));
+				const started = await startBotChat(chatsAs(adminId), {
+					botId: personal.id,
+					messageId: crypto.randomUUID(),
+					content: "Show me the workspace guide.",
+				});
+				const { model, requests } = calling("workspace_guide", {});
+				const ran = await loop.runTurn(started.chat.id, { model });
+
+				expect(ran.principal.bounds.kind).toBe("member");
+				expect(requests[0]?.tools).not.toHaveProperty("workspace_guide");
+				expect(requests[0]?.tools).toHaveProperty("pin_bot");
+			});
 
 			it.each(["create_project", "join_project", "add_bot_to_project", "pin_bot", "unpin_bot"])(
 				"offers no other bot %s, outside member bounds",

@@ -17,7 +17,7 @@ import {
 	type WorkspaceModelsResponse,
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
-import { Link, linkOptions, useRouter } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import {
 	Brain,
@@ -42,6 +42,7 @@ import {
 } from "react";
 import { useBots, useModels } from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { settingsSectionLink } from "@/lib/links.ts";
 import { formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { MODEL_MAKER_NAMES } from "@/lib/model-makers.ts";
 import { modelName, useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
@@ -49,7 +50,6 @@ import { searchModels } from "@/lib/model-search.ts";
 import { capitalise, countOf } from "@/lib/name-list.ts";
 import { NOT_A_SERVER_ADDRESS, parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
-import { useBackTarget } from "@/lib/settings-back.tsx";
 import { useSystemBots } from "@/lib/system-bots.ts";
 import { BotAvatar, TurnTakingAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -420,15 +420,7 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 		setDisconnecting(false);
 		// Back to Models, or Models in the provider's place, so Back never returns to one
 		// no longer connected.
-		leaveForPage(
-			router.buildLocation(
-				linkOptions({
-					from: "/$workspace",
-					to: "./settings/$section",
-					params: { section: "providers" },
-				}),
-			).href,
-		);
+		leaveForPage(router.buildLocation(settingsSectionLink("providers")).href);
 	}
 
 	return (
@@ -528,12 +520,8 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 export function BackToModels() {
 	return (
 		<PageBackLink
-			{...useBackTarget({
-				label: "Models",
-				render: (
-					<Link from="/$workspace" to="./settings/$section" params={{ section: "providers" }} />
-				),
-			})}
+			label="Models"
+			render={<Link {...settingsSectionLink("providers")} aria-label="Back to Models" />}
 		/>
 	);
 }
@@ -912,11 +900,11 @@ function SettingMoveRows({
 			)}
 			{held.systemBots && (
 				<SettingsRow
-					label="Compaction"
-					sub="Compacting long chats"
+					label="System bots"
+					sub="Built-in system tasks, like compacting long chats"
 					trailing={
 						<MoveToMenu
-							label="Move compaction to"
+							label="Move system bots to"
 							candidates={candidates}
 							value={moves.systemBotsTo}
 							onChange={(systemBotsTo) => onChange({ systemBotsTo })}
@@ -1283,7 +1271,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 							label={modelName(model)}
 							sub={
 								<span className="flex items-center gap-1.5">
-									{held ? `${held.newBots ? "Default" : "Compaction"} · ${who}` : who}
+									{held ? `${held.newBots ? "Default" : "System bots"} · ${who}` : who}
 									<CapabilityIcons model={model} />
 								</span>
 							}

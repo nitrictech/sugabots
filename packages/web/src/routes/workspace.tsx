@@ -1,8 +1,9 @@
 import type { Workspace, WorkspacePermissions } from "@sugabots/contracts";
-import { createRoute, Navigate } from "@tanstack/react-router";
-import { useAssistant, useBots, useEnsuringAssistantFailed } from "@/lib/bots.ts";
-import { API_DID_NOT_ANSWER } from "@/lib/failure.ts";
+import { createRoute, Navigate, useSearch } from "@tanstack/react-router";
+import { ownAssistants, useBots, useCreateAssistant } from "@/lib/bots.ts";
+import { failureMessage } from "@/lib/failure.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import { settingsSearchValue, validateSettingsSearch } from "@/lib/open-settings.ts";
 import { loadFailure } from "@/lib/query.ts";
 import { useWorkspace, useWorkspaceStanding, useWorkspaces } from "@/lib/workspace.ts";
 import { LoadFailure } from "@/shell/LoadFailure.tsx";
@@ -10,6 +11,7 @@ import { MobileHome } from "@/shell/MobileHome.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
 import { Splash } from "@/shell/Splash.tsx";
 import { You } from "@/shell/You.tsx";
+import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { preloadChatScreenForWideLayout } from "./chat.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
@@ -55,12 +57,15 @@ export const shellRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/$workspace",
 	beforeLoad: requireSignedIn,
+	// Settings open over any page in the workspace, so every one of them can name them.
+	validateSearch: validateSettingsSearch,
 	component: ShellRoute,
 });
 
 /**
- * Where the workspace opens: the member's Personal Assistant's page, where
- * something new is asked of it, made first if they have none. It is shown
+ * Where the workspace opens: the member's oldest Personal Assistant's page,
+ * where something new is asked of it, or, for a member with none, a way to
+ * make one. Nothing makes one for them unasked. It is shown
  * here rather than at the assistant's own address, so the sidebar beside it
  * stays the workspace's.
  */
@@ -72,10 +77,8 @@ export const workspaceIndexRoute = createRoute({
 });
 
 function AssistantRoute() {
-	const { error } = useBots();
-	const assistant = useAssistant();
-	// The shell makes the assistant when the member has none; this shows whether that failed.
-	const ensureFailed = useEnsuringAssistantFailed();
+	const { bots, isPending, error, refetch } = useBots();
+	const [assistant] = ownAssistants(bots);
 	if (assistant) {
 		return (
 			<Panes>
@@ -83,14 +86,45 @@ function AssistantRoute() {
 			</Panes>
 		);
 	}
-	if (error || ensureFailed) {
+	if (error) {
 		return (
 			<Panes>
-				<EmptyState title="Could not open your Personal Assistant">{API_DID_NOT_ANSWER}</EmptyState>
+				<LoadFailure title="Could not open your Personal Assistant" error={error} retry={refetch} />
 			</Panes>
 		);
 	}
-	return <Panes>{null}</Panes>;
+	if (isPending) {
+		return (
+			<Panes>
+				<EmptyState title="Opening your Personal Assistant…" />
+			</Panes>
+		);
+	}
+	return (
+		<Panes>
+			<NoAssistant />
+		</Panes>
+	);
+}
+
+/** The workspace's home for a member with no Personal Assistant: a way to make one. */
+function NoAssistant() {
+	const create = useCreateAssistant();
+	return (
+		<EmptyState
+			title="You have no Personal Assistant"
+			page="min"
+			actions={
+				<Button disabled={create.isPending} onClick={() => create.mutate()}>
+					Make a Personal Assistant
+				</Button>
+			}
+		>
+			{create.error
+				? failureMessage(create.error)
+				: "Make one to find your way around the workspace."}
+		</EmptyState>
+	);
 }
 
 function ShellRoute() {
@@ -154,14 +188,25 @@ function opensIntoWorkspaceSetup(
 /**
  * You on a phone, where the sidebar's foot has no room: your workspace, its
  * settings, and signing out. A wider screen, as a window widened from a phone's
- * size, has settings of its own, which it goes to in this page's place.
+ * size, has a settings dialog instead, which it opens over the workspace's
+ * home in this page's place, at whichever page of them was open.
  */
 export const youRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/you",
-	component: () => {
+	component: function YouRoute() {
 		const wide = useMediaQuery(SIDE_BY_SIDE);
-		if (wide) return <Navigate from="/$workspace" to="./settings" replace />;
+		const settings = useSearch({ from: "/$workspace", select: (search) => search.settings });
+		if (wide) {
+			return (
+				<Navigate
+					from="/$workspace"
+					to="."
+					search={{ settings: settings ?? settingsSearchValue({ kind: "sections" }) }}
+					replace
+				/>
+			);
+		}
 		return (
 			<Panes>
 				<You />

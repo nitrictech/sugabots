@@ -36,6 +36,28 @@ export function pageBehind(
 	return trails.get(history)?.get(historyIndex(location) - 1);
 }
 
+/**
+ * How many steps back from `location` the nearest page that `isTarget` is,
+ * passing only pages that `mayPass`; undefined when the app has not been
+ * there, or a page on the way is neither.
+ */
+export function stepsBackTo(
+	history: RouterHistory,
+	location: ParsedLocation,
+	isTarget: (page: TrailPage) => boolean,
+	mayPass: (page: TrailPage) => boolean,
+): number | undefined {
+	const trail = trails.get(history);
+	const index = historyIndex(location);
+	for (let behind = index - 1; behind >= 0; behind--) {
+		const page = trail?.get(behind);
+		if (!page) return undefined;
+		if (isTarget(page)) return index - behind;
+		if (!mayPass(page)) return undefined;
+	}
+	return undefined;
+}
+
 /** Where `location` is in the browser's history, counted from the app's first page. */
 export function historyIndex(location: ParsedLocation): number {
 	return (location.state as { __TSR_index?: number }).__TSR_index ?? 0;

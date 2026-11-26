@@ -1,5 +1,9 @@
 import type { InputOf } from "@sugabots/contracts/operations";
-import { Effect, Scope } from "effect";
+import { Effect, Layer, Scope } from "effect";
+import { ComputerProviderStore } from "../../../computers/computer-provider-store.ts";
+import { ComputerSignIn } from "../../../computers/computer-sign-in.ts";
+import type { ProjectComputers } from "../../../computers/project-computers.ts";
+import { localComputerEgress, recordingIds } from "../../../computers/testing.ts";
 import type { Database } from "../../../database/database.ts";
 import { runOnPostgres } from "../../../database/testing.ts";
 import {
@@ -49,4 +53,18 @@ export async function stepOnComputer(
 		};
 	};
 	return { step, call };
+}
+
+export const localComputerTools = (computerIds: Set<string>) =>
+	Layer.mergeAll(ComputerSignIn.none, recordingIds(computerIds), localComputerEgress);
+
+export async function destroyWorkspaceComputers(
+	workspaceId: string,
+	computers: ProjectComputers.Interface,
+) {
+	const providers = await runOnPostgres(
+		Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer),
+	);
+	const provider = await runOnPostgres(providers.enabled(workspaceId));
+	if (provider) await runOnPostgres(computers.destroyAllMadeBy(workspaceId, provider));
 }

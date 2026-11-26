@@ -25,7 +25,6 @@ import {
 	automationRun,
 	bot as botTable,
 	chatParticipant,
-	member,
 	membership,
 	message,
 	notificationDelivery,
@@ -45,6 +44,7 @@ import {
 	type TestInfrastructure,
 	waitUntilWaitingOnLocks,
 } from "../database/testing.ts";
+import { createWorkspaceFixture } from "../database/workspace.test-support.ts";
 import { servedOperations } from "../operations/testing.ts";
 import { authenticators, principals } from "../proofs/world.test-support.ts";
 import { unimplemented } from "../testing.ts";
@@ -217,35 +217,19 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	beforeEach(async () => {
 		published.length = 0;
 		const suffix = crypto.randomUUID().slice(0, 8);
-		const names = {
-			ada: `Ada ${suffix}`,
-			bob: `Bob ${suffix}`,
-			cy: `Cy ${suffix}`,
-			outsider: `Outsider ${suffix}`,
-		};
-		const rows = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values(
-					Object.values(names).map((name) => ({
-						name,
-						email: `${handleFromName(name)}@example.com`,
-					})),
-				)
-				.returning(),
-		);
-		const [ada, bob, cy, outsider] = rows;
-		if (!ada || !bob || !cy || !outsider) throw new Error("Could not create the members");
-		members = { ada, bob, cy, outsider };
 		workspaceSlug = `notify-${suffix}`;
-		const [space] = await onDatabase((db) =>
-			db.insert(workspace).values({ name: "Notify", slug: workspaceSlug }).returning(),
+		const { workspace: space, members: seeded } = await createWorkspaceFixture(
+			{ name: "Notify", slug: workspaceSlug },
+			{
+				ada: { name: `Ada ${suffix}`, role: "editor" },
+				bob: { name: `Bob ${suffix}`, role: "editor" },
+				cy: { name: `Cy ${suffix}`, role: "editor" },
+				outsider: { name: `Outsider ${suffix}`, role: "editor" },
+			},
 		);
-		if (!space) throw new Error("Could not create the workspace");
+		members = seeded;
+		const { ada, bob, cy } = members;
 		workspaceId = space.id;
-		await onDatabase((db) =>
-			db.insert(membership).values(rows.map((member) => ({ workspaceId, memberId: member.id }))),
-		);
 		projectSlug = `project-${suffix}`;
 		const room = await onDatabase((db) =>
 			seedProject(db, {
@@ -621,7 +605,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			const chat = await projectChat();
 			const bob = `@${handleFromName(members.bob.name)}`;
 			const cy = `@${handleFromName(members.cy.name)}`;
-			await recordedUnsent(memberPosted(chat, members.ada, `${bob} ${cy} look`));
+			const mention = `${bob} ${cy} look`;
+			await recordedUnsent(memberPosted(chat, members.ada, mention));
 			await aWhileLater();
 			let publishes = 0;
 			const failingOnce = await served(
@@ -646,8 +631,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			await run(sendLeftBehind);
 
 			expect(sentByTheFirstSweep).toBe(1);
-			expect(sentTo(members.bob.id)).toHaveLength(1);
-			expect(sentTo(members.cy.id)).toHaveLength(1);
+			expect(sentTo(members.bob.id)).toEqual([expect.objectContaining({ body: mention })]);
+			expect(sentTo(members.cy.id)).toEqual([expect.objectContaining({ body: mention })]);
 		});
 
 		it("sends again only to those who still reach the chat", async () => {
@@ -711,35 +696,6 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				resume.resolve();
 				await first.close();
 			}
-		});
-
-		it("sends again a notification it recorded and failed to publish", async () => {
-			const chat = await projectChat();
-			const mention = `@${handleFromName(members.bob.name)} look`;
-			const failing = await served(
-				unimplemented(EventBus.Service, {
-					publish: async () => {
-						throw new Error("The bus is down");
-					},
-				}),
-			);
-			try {
-				const { handler } = await failing.run(Notifications.Service);
-				const handled = joiningWhatItStarts(
-					transaction(handler([memberPosted(chat, members.ada, mention)])),
-				);
-				await failing.run(handled.handled);
-				await handled.allEnded;
-			} finally {
-				await failing.close();
-			}
-
-			await aWhileLater();
-			const { sendLeftBehind } = await notifications();
-			await run(sendLeftBehind);
-			await run(sendLeftBehind);
-
-			expect(sentTo(members.bob.id)).toEqual([expect.objectContaining({ body: mention })]);
 		});
 
 		it("sends an event's notifications it stopped before working out", async () => {

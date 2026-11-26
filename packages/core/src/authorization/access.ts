@@ -65,6 +65,36 @@ export function membersReachingProject(projectId: SQLWrapper): SQL<string> {
  * must be made here too. System bots are reached by nobody.
  */
 export function reachesBotFor(botId: SQLWrapper, memberId: string | SQLWrapper): SQL<boolean> {
+	return reachedBotFor(
+		botId,
+		memberId,
+		sql`not exists (
+				select 1
+				from ${project} as reach_bot_default_project
+				where reach_bot_default_project.default_of_bot_id = reach_bot.id
+					and reach_bot_default_project.workspace_id = reach_bot.workspace_id
+					and reach_bot_default_project.deleting
+			)`,
+	);
+}
+
+/**
+ * SQL for "`memberId` reaches the bot `botId` names, or did until its deletion
+ * began": who hears that it is going, so their lists drop it.
+ */
+export function reachedBotUntilDeletionFor(
+	botId: SQLWrapper,
+	memberId: string | SQLWrapper,
+): SQL<boolean> {
+	return reachedBotFor(botId, memberId, sql`true`);
+}
+
+/** The rule `reachesBotFor` and `reachedBotUntilDeletionFor` share, given what a deletion leaves. */
+function reachedBotFor(
+	botId: SQLWrapper,
+	memberId: string | SQLWrapper,
+	notBeingDeleted: SQL<boolean>,
+): SQL<boolean> {
 	return sql`exists (
 		select 1
 		from ${bot} as reach_bot
@@ -74,15 +104,8 @@ export function reachesBotFor(botId: SQLWrapper, memberId: string | SQLWrapper):
 			and not reach_bot_membership.leaving
 		where reach_bot.id = ${outerColumn(botId)}
 			and reach_bot.system_bot_key is null
-			and not exists (
-				select 1
-				from ${project} as reach_bot_default_project
-				where reach_bot_default_project.default_of_bot_id = reach_bot.id
-					and reach_bot_default_project.workspace_id = reach_bot.workspace_id
-					and reach_bot_default_project.deleting
-			)
+			and ${notBeingDeleted}
 			and case
-				when reach_bot.assistant_of is not null then reach_bot.assistant_of = ${outerColumn(memberId)}
 				when reach_bot.visibility = 'personal' then reach_bot.created_by_id = ${outerColumn(memberId)}
 				else true
 			end

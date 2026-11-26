@@ -2,14 +2,13 @@ import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Bot, Hash, Plus } from "lucide-react";
 import type { ReactNode } from "react";
-import { useAssistant, useBots } from "@/lib/bots.ts";
+import { ownAssistants, useBots } from "@/lib/bots.ts";
 import { useAttentionMarks } from "@/lib/chats.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
-import { botLink, botsLink, projectLink, projectsLink } from "@/lib/links.ts";
+import { botsLink, projectLink, projectsLink } from "@/lib/links.ts";
 import { ownerPages } from "@/lib/owner-pages.ts";
 import { useProjects } from "@/lib/projects.ts";
 import { OwnerLink, ownerLink, ownerName, type ResourceOwner } from "@/lib/resource-owner.tsx";
-import { BotAvatar } from "@/shell/Bot.tsx";
 import { OwnerWork, useOwnerWork } from "@/shell/OwnerWork.tsx";
 import { sidebarBots } from "@/shell/Sidebar.tsx";
 import { SidebarBot } from "@/shell/SidebarBot.tsx";
@@ -49,27 +48,27 @@ function MobilePage({
 }
 
 /**
- * Home on a phone: the Personal Assistant, the projects the member is in and
+ * Home on a phone: the Personal Assistants, the projects the member is in and
  * the bots they pinned, each opening its chats.
  */
 export function MobileHome() {
 	const { data: projects } = useProjects();
 	const { bots } = useBots();
-	const assistant = useAssistant();
+	const assistants = ownAssistants(bots);
 	const { attentionMarkOf } = useAttentionMarks();
 	const pinned = sidebarBots(bots ?? []);
 	return (
 		<MobilePage title="Home">
-			{assistant && (
-				<Link {...botLink(assistant)} className={HOME_ROW}>
-					<BotAvatar
-						color={assistant.color}
-						eyes={assistant.eyes}
-						shape={assistant.shape}
-						size={22}
-					/>
-					<span className="min-w-0 flex-1 truncate">{assistant.name}</span>
-				</Link>
+			{assistants.length > 0 && (
+				<ul className="m-0 flex list-none flex-col gap-px p-0">
+					{assistants.map((assistant) => (
+						<SidebarBot
+							key={assistant.id}
+							standing={{ bot: assistant, ...attentionMarkOf(assistant.defaultProjectId) }}
+							selected={false}
+						/>
+					))}
+				</ul>
 			)}
 			<HomeSection label="Projects">
 				{projects

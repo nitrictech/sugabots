@@ -127,8 +127,8 @@ const modelOnly = {
 } as const;
 /**
  * inTurn sets the file tools' approval to `never`. `approvalNeed` still asks for
- * changes by a Personal Assistant or a turn that inherits its rule through a
- * brief. It asks for every call in a Personal Assistant's webhook or GitHub run.
+ * changes by a personal bot or a turn that inherits its rule through a brief.
+ * It asks for every call in a personal bot's webhook or GitHub run.
  */
 const inTurn = { kind: "offered", offeredIn: "everywhere", approval: { kind: "never" } } as const;
 

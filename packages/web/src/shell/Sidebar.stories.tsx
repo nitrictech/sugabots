@@ -11,6 +11,7 @@ import { SidebarView } from "./Sidebar.tsx";
 import {
 	accountManager,
 	chief,
+	deputy,
 	design,
 	engineering,
 	growthDesk,
@@ -40,7 +41,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	args: {
-		assistant: { bot: chief, ...nothing },
+		assistants: [{ bot: chief, ...nothing }],
 		projects: projectStandings,
 		bots: [
 			{ bot: growthDesk, ...nothing },
@@ -53,6 +54,7 @@ const meta = preview.meta({
 		signedIn: { name: "Rowan Ellis", email: "rowan@example.com" },
 		onSignOut: fn(),
 		onNewBot: fn(),
+		onNewProject: fn(),
 	},
 	decorators: [
 		(Story) => (
@@ -74,7 +76,7 @@ const meta = preview.meta({
 
 /**
  * Default: the workspace's sidebar, as on Approvals or a page of the workspace's
- * own: the projects, then the bots, the Personal Assistant first, and Settings
+ * own: the Personal Assistant first, then the projects and the bots, and Settings
  * in the foot. Opening a project narrows it to the rail; see Owner open.
  */
 export const Default = meta.story({
@@ -83,6 +85,20 @@ export const Default = meta.story({
 		await expect(canvas.getByRole("group", { name: "Projects" })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: growthDesk.name })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Settings" })).toBeVisible();
+	},
+});
+
+/**
+ * Settings open: over whichever page they were opened on, which keeps its
+ * sidebar, with Settings in the foot shaded while they are.
+ */
+export const SettingsOpen = meta.story({
+	args: { view: "settings" },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("link", { name: "Settings" })).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
 	},
 });
 
@@ -106,7 +122,7 @@ export const OwnerOpen = meta.story({
 	args: {
 		rail: (
 			<IconRail
-				assistant={{ bot: chief, ...nothing }}
+				assistants={[{ bot: chief, ...nothing }]}
 				projects={projectStandings}
 				bots={[{ bot: growthDesk, ...nothing }]}
 				currentProjectSlug={revenue.slug}
@@ -125,5 +141,28 @@ export const OwnerOpen = meta.story({
 		);
 		await expect(canvas.getByRole("navigation", { name: `${revenue.name}'s pages` })).toBeVisible();
 		await expect(canvas.queryByRole("group", { name: "Projects" })).toBeNull();
+	},
+});
+
+/**
+ * Several Personal Assistants: a member who made more than the one they were
+ * given has every one of them at the top, oldest first, above the projects,
+ * and the workspace's home opens on the oldest.
+ */
+export const SeveralAssistants = meta.story({
+	args: {
+		assistants: [
+			{ bot: chief, ...nothing },
+			{ bot: deputy, ...nothing, unreadMessages: 1 },
+		],
+		assistantOpen: true,
+	},
+	play: async ({ canvas }) => {
+		const sidebar = canvas.getByRole("navigation", { name: "Sidebar" });
+		const links = within(sidebar).getAllByRole("link");
+		await expect(links[0]).toHaveAccessibleName(chief.name);
+		await expect(links[0]).toHaveAttribute("aria-current", "page");
+		await expect(links[1]).toHaveAccessibleName(new RegExp(`^${deputy.name}`));
+		await expect(links[1]).not.toHaveAttribute("aria-current");
 	},
 });

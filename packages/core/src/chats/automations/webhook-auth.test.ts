@@ -124,23 +124,19 @@ describe("GitHub and Linear, which sign the body", () => {
 	});
 });
 
+function fromSlack(timestamp: number, body = BODY) {
+	const signature = hmac("sha256", `v0:${timestamp}:${body}`).digest("hex");
+	return delivery(
+		{ "X-Slack-Request-Timestamp": String(timestamp), "X-Slack-Signature": `v0=${signature}` },
+		body,
+	);
+}
+
 describe("Slack's signatures", () => {
 	const slack: WebhookAuth = { kind: "slack" };
 
-	function fromSlack(timestamp: number, body = BODY) {
-		const signature = hmac("sha256", `v0:${timestamp}:${body}`).digest("hex");
-		return delivery(
-			{ "X-Slack-Request-Timestamp": String(timestamp), "X-Slack-Signature": `v0=${signature}` },
-			body,
-		);
-	}
-
 	it("admits a delivery Slack signed just now", () => {
 		expect(deliveryAuthentic(slack, SECRET, fromSlack(NOW_SECONDS - 10), NOW)).toBe(true);
-	});
-
-	it("refuses a delivery replayed after five minutes", () => {
-		expect(deliveryAuthentic(slack, SECRET, fromSlack(NOW_SECONDS - 301), NOW)).toBe(false);
 	});
 
 	it("refuses a delivery without its timestamp", () => {
@@ -165,15 +161,15 @@ describe("Slack's signatures", () => {
 	});
 });
 
+function fromStripe(timestamp: number, secrets: string[], body = BODY) {
+	const signatures = secrets.map(
+		(secret) => `v1=${hmac("sha256", `${timestamp}.${body}`, secret).digest("hex")}`,
+	);
+	return delivery({ "Stripe-Signature": [`t=${timestamp}`, ...signatures].join(",") }, body);
+}
+
 describe("Stripe's signatures", () => {
 	const stripe: WebhookAuth = { kind: "stripe" };
-
-	function fromStripe(timestamp: number, secrets: string[], body = BODY) {
-		const signatures = secrets.map(
-			(secret) => `v1=${hmac("sha256", `${timestamp}.${body}`, secret).digest("hex")}`,
-		);
-		return delivery({ "Stripe-Signature": [`t=${timestamp}`, ...signatures].join(",") }, body);
-	}
 
 	it("admits a delivery Stripe signed just now", () => {
 		expect(deliveryAuthentic(stripe, SECRET, fromStripe(NOW_SECONDS, [SECRET]), NOW)).toBe(true);
@@ -182,12 +178,6 @@ describe("Stripe's signatures", () => {
 	it("admits a delivery signed with each secret while Stripe rolls them", () => {
 		const rolling = fromStripe(NOW_SECONDS, ["whsec_the_old_one_000000", SECRET]);
 		expect(deliveryAuthentic(stripe, SECRET, rolling, NOW)).toBe(true);
-	});
-
-	it("refuses a delivery replayed after five minutes", () => {
-		expect(deliveryAuthentic(stripe, SECRET, fromStripe(NOW_SECONDS - 301, [SECRET]), NOW)).toBe(
-			false,
-		);
 	});
 
 	it("names the delivery by its event", () => {
@@ -200,6 +190,13 @@ describe("Stripe's signatures", () => {
 			"evt_1NG8Du2eZvKYlo2CUI79vXWy",
 		);
 	});
+});
+
+it.each([
+	{ kind: "slack", signed: (timestamp: number) => fromSlack(timestamp) },
+	{ kind: "stripe", signed: (timestamp: number) => fromStripe(timestamp, [SECRET]) },
+] as const)("$kind refuses a delivery replayed after five minutes", ({ kind, signed }) => {
+	expect(deliveryAuthentic({ kind }, SECRET, signed(NOW_SECONDS - 301), NOW)).toBe(false);
 });
 
 describe("delivery ids", () => {

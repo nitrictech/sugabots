@@ -5,12 +5,11 @@ import type { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-cata
 import { CALL_TOOL } from "@sugabots/core/chats/tools/tool-search/tool";
 import {
 	aChatWithConnectorAwaitingReply,
-	runningTurns,
 	type TurnCheckpoint,
 } from "@sugabots/core/chats/turns/testing";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
 import { membership, turn } from "@sugabots/core/database/schema";
-import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
+import { closeDatabase, onDatabase } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
 import { Models } from "@sugabots/core/providers/models/models";
 import { streamed } from "@sugabots/core/providers/models/testing";
@@ -28,6 +27,7 @@ import {
 	enableWebSearch,
 	examplePage,
 	failedCall,
+	openTurnInChat,
 	scriptedSteps,
 	storedReply,
 	storedTurn,
@@ -67,8 +67,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			afterCommit = undefined;
 		});
 
-		const deliveredEvents = () => delivered.map(({ event }) => event);
-
 		/** What a step waits for on its clock, in milliseconds: its next read of where the turn stands, and its deadline. */
 		const stepTimers = [Steps.timing.checkEvery, Steps.timing.stepTimeout].map(Duration.toMillis);
 
@@ -94,10 +92,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				}),
 			);
 			const { steps, authentication } = await loop.loopOver({ model });
-			const [run] = await runOnPostgres(runningTurns(chatId));
-			if (!run) throw new Error("no turn running");
-			const opened = await steps.open(run.request, 0);
-			if (opened._tag !== "Opened") throw new Error("the turn may not run");
+			const { run, opened } = await openTurnInChat(chatId, steps);
 			const at = { turnId: opened.turnId, attempt: 0, step: 0 };
 			const first = await authentication.authenticate(opened.turnId);
 			expect(await steps.step(run.request, first, at)).toEqual({
@@ -147,10 +142,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				).model,
 			});
 			const older = await loop.loopOver({ model: slow });
-			const [run] = await runOnPostgres(runningTurns(chatId));
-			if (!run) throw new Error("no turn running");
-			const opened = await steps.open(run.request, 0);
-			if (opened._tag !== "Opened") throw new Error("the turn may not run");
+			const { run, opened } = await openTurnInChat(chatId, steps);
 			const at = { turnId: opened.turnId, attempt: 0, step: 0 };
 			const first = await authentication.authenticate(opened.turnId);
 			const stale = older.steps.step(run.request, first, at);
@@ -207,10 +199,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				const time = await controlledClock();
 				const older = await loop.loopOver({ model: oldModel }, { clock: time.clock });
 				const newer = await loop.loopOver({ model: resumedModel });
-				const [run] = await runOnPostgres(runningTurns(chatId));
-				if (!run) throw new Error("no turn running");
-				const opened = await older.steps.open(run.request, 0);
-				if (opened._tag !== "Opened") throw new Error("the turn may not run");
+				const { run, opened } = await openTurnInChat(chatId, older.steps);
 				const at = { turnId: opened.turnId, attempt: 0, step: 0 };
 				const first = await older.authentication.authenticate(opened.turnId);
 				const stale = older.steps.step(run.request, first, at);
@@ -262,10 +251,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		it("takes no step for an execution a newer one took over, and records nothing", async () => {
 			const { model, requests } = scriptedSteps({ text: ["Hello."] });
 			const { steps, authentication } = await loop.loopOver({ model });
-			const [run] = await runOnPostgres(runningTurns(chatId));
-			if (!run) throw new Error("no turn running");
-			const opened = await steps.open(run.request, 0);
-			if (opened._tag !== "Opened") throw new Error("the turn may not run");
+			const { run, opened } = await openTurnInChat(chatId, steps);
 			const stale = await authentication.authenticate(opened.turnId);
 			// The turn resumes elsewhere before this execution's first step.
 			await authentication.authenticate(opened.turnId);
@@ -336,10 +322,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				{ model, connectorTools: wiki("allow", execute) },
 				{ clock: time.clock },
 			);
-			const [run] = await runOnPostgres(runningTurns(chatId));
-			if (!run) throw new Error("no turn running");
-			const opened = await steps.open(run.request, 0);
-			if (opened._tag !== "Opened") throw new Error("the turn may not run");
+			const { run, opened } = await openTurnInChat(chatId, steps);
 			const at = (step: number) => ({ turnId: opened.turnId, attempt: 0, step });
 			// The first execution sends the call, which doesn't come back: its process stops.
 			const first = await authentication.authenticate(opened.turnId);
@@ -405,10 +388,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				{ model, egress: unimplemented(Egress.Service, { webFetch }) },
 				{ clock: time.clock },
 			);
-			const [run] = await runOnPostgres(runningTurns(chatId));
-			if (!run) throw new Error("no turn running");
-			const opened = await steps.open(run.request, 0);
-			if (opened._tag !== "Opened") throw new Error("the turn may not run");
+			const { run, opened } = await openTurnInChat(chatId, steps);
 			const first = await authentication.authenticate(opened.turnId);
 			const stale = steps.step(run.request, first, { turnId: opened.turnId, attempt: 0, step: 0 });
 			await started.promise;
@@ -480,10 +460,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					connectorTools: liveWiki,
 				};
 				const { steps, authentication } = await loop.loopOver(outside);
-				const [run] = await runOnPostgres(runningTurns(chatId));
-				if (!run) throw new Error("no turn running");
-				const opened = await steps.open(run.request, 0);
-				if (opened._tag !== "Opened") throw new Error("the turn may not run");
+				const { run, opened } = await openTurnInChat(chatId, steps);
 				const at = { turnId: opened.turnId, attempt: 0, step: 0 };
 				const wipeRecorded = Promise.withResolvers<void>();
 				afterCommit = async (events) => {
@@ -523,7 +500,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					expect(wipe).toHaveBeenCalledOnce();
 					expect(fetches).toBe(2);
 					expect(JSON.stringify(requests[1]?.continuationMessages)).toContain('"removed":true');
-					expect(deliveredEvents()).toContainEqual(
+					expect(loop.deliveredEvents()).toContainEqual(
 						expect.objectContaining({
 							type: "message.execution_started",
 							messageId: (await storedReply(opened.turnId))?.id,
@@ -566,10 +543,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					},
 				},
 			);
-			const [run] = await runOnPostgres(runningTurns(chatId));
-			if (!run) throw new Error("no turn running");
-			const opened = await steps.open(run.request, 0);
-			if (opened._tag !== "Opened") throw new Error("the turn may not run");
+			const { run, opened } = await openTurnInChat(chatId, steps);
 			const last = { turnId: opened.turnId, attempt: 0, step: Steps.TURN_STEPS - 1 };
 			// The turn has taken every step but its last.
 			const everyStepButTheLast: TurnCheckpoint = {
@@ -613,10 +587,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		it("makes no request for a step past the turn's last", async () => {
 			const { model, requests } = scriptedSteps();
 			const { steps, authentication } = await loop.loopOver({ model });
-			const [run] = await runOnPostgres(runningTurns(chatId));
-			if (!run) throw new Error("no turn running");
-			const opened = await steps.open(run.request, 0);
-			if (opened._tag !== "Opened") throw new Error("the turn may not run");
+			const { run, opened } = await openTurnInChat(chatId, steps);
 			const past = { turnId: opened.turnId, attempt: 0, step: Steps.TURN_STEPS };
 			const principal = await authentication.authenticate(opened.turnId);
 
@@ -627,10 +598,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		it("leaves a turn whose asker left to the newer execution, when an older one finds out first", async () => {
 			const { model, requests } = scriptedSteps({ text: ["Hello."] });
 			const { steps, authentication } = await loop.loopOver({ model });
-			const [run] = await runOnPostgres(runningTurns(chatId));
-			if (!run) throw new Error("no turn running");
-			const opened = await steps.open(run.request, 0);
-			if (opened._tag !== "Opened") throw new Error("the turn may not run");
+			const { run, opened } = await openTurnInChat(chatId, steps);
 			const at = { turnId: opened.turnId, attempt: 0, step: 0 };
 			const first = await authentication.authenticate(opened.turnId);
 			const second = await authentication.authenticate(opened.turnId);

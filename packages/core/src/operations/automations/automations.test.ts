@@ -1,9 +1,11 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+	type SeededBot,
 	seedAutomation,
 	seedBot,
 	seedConnector,
+	seedMember,
 	seedProject,
 	seedProjectChat,
 	seedWebhookTrigger,
@@ -478,6 +480,53 @@ describe("the automations operations, for each kind of principal", () => {
 				anotherTrigger: "WebhookRefused",
 				member: "WebhookRefused",
 				run: "WebhookRefused",
+			});
+		});
+	});
+
+	describe("a viewer's own bots", () => {
+		it("lets a viewer manage and run their own Personal Assistant, but not an ordinary personal bot they made", async () => {
+			const viewerId = await seedMember(a.workspace, "viewer");
+			const viewer = await as.member(viewerId);
+			/** What the viewer comes to on each way of managing `bot` and running its automations. */
+			const managing = async (bot: SeededBot) => {
+				const automation = await anAutomation(bot.defaultProject);
+				return {
+					rename: await operationOutcome(call, viewer, "bots.update", {
+						botId: bot.id,
+						changes: { name: `Mine ${crypto.randomUUID()}` },
+					}),
+					makeAutomation: await operationOutcome(call, viewer, "automations.create", {
+						projectId: bot.defaultProject,
+						name: `Automation ${crypto.randomUUID()}`,
+						instructions: "Tidy up.",
+						triggers: [],
+					}),
+					runAutomation: await operationOutcome(call, viewer, "automations.run", {
+						...automation,
+						requestId: crypto.randomUUID(),
+					}),
+					pauseAutomation: await operationOutcome(call, viewer, "automations.update", {
+						...automation,
+						changes: { state: "paused" },
+					}),
+				};
+			};
+
+			expect(
+				await managing(
+					await seedBot(a.workspace, { assistantOf: viewerId, visibility: "personal" }),
+				),
+			).toEqual({ rename: "ok", makeAutomation: "ok", runAutomation: "ok", pauseAutomation: "ok" });
+			expect(
+				await managing(
+					await seedBot(a.workspace, { createdById: viewerId, visibility: "personal" }),
+				),
+			).toEqual({
+				rename: "ActionForbidden",
+				makeAutomation: "ActionForbidden",
+				runAutomation: "ActionForbidden",
+				pauseAutomation: "ActionForbidden",
 			});
 		});
 	});

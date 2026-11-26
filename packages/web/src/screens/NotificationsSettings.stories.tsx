@@ -48,7 +48,7 @@ const meta = preview.meta({
 	parameters: { layout: "fullscreen" },
 });
 
-const page = () => <StoryApp path={`/${storyWorkspace.slug}/settings/notifications`} />;
+const page = () => <StoryApp path={`/${storyWorkspace.slug}?settings=notifications`} />;
 
 /** NothingChosen is where everybody starts: mentions, replies and approvals, in every project. */
 export const NothingChosen = meta.story({

@@ -259,7 +259,7 @@ describe("switching off the model system bots run on", () => {
 
 		fireEvent.click(await screen.findByRole("switch", { name: `Bots can use ${opus}` }));
 		const dialog = await screen.findByRole("dialog", { name: `Switch off ${opus}` });
-		within(dialog).getByRole("button", { name: `Move compaction to: ${sonnet}` });
+		within(dialog).getByRole("button", { name: `Move system bots to: ${sonnet}` });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Move and switch off" }));
 
 		await waitFor(() =>

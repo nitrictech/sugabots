@@ -60,9 +60,9 @@ export function approvalRule(name: ApprovedOperation): ApprovalRule {
  * access still lets it, and the arguments they allowed equal X's input. The
  * decision is stored, not a proof, and this proves it again each time.
  *
- * A Personal Assistant's call that changes anything always waits, and so does
+ * A personal bot's call that changes anything always waits, and so does
  * every call in its runs a webhook or GitHub event started, and a brief's
- * first turn follows a Personal Assistant's rule when one wrote the brief.
+ * first turn follows a personal bot's rule when one wrote the brief.
  */
 export interface Approved<
 	P,
@@ -351,9 +351,9 @@ function sameInputAsRecorded(tool: string, recorded: unknown, input: unknown): b
 }
 
 /**
- * What a call needs, by its rule and the turn's: a Personal Assistant's calls
- * that change anything, and every call in its runs that came from outside,
- * wait for its member. An exposed tool may add its own approval rule, and a
+ * What a call needs, by its rule and the turn's: a personal bot's calls that
+ * change anything, since it acts across everything its creator reaches, and
+ * every call in its runs that came from outside, wait for its creator. An exposed tool may add its own approval rule, and a
  * connector's tool follows how that tool is configured.
  */
 export function approvalNeed(
@@ -366,7 +366,7 @@ export function approvalNeed(
 	const changes = connectorUse?.writeOrDelete ?? rule.changes;
 	if (
 		asksBeforeAllTools(facts) ||
-		((facts.assistantOf !== null || facts.briefedByAssistant) && changes)
+		((facts.personalBotCreator !== null || facts.briefedByPersonalBot) && changes)
 	)
 		return "approver";
 	if (rule.approval.kind === "outsideRuns" && startedFromOutside(facts)) return "approver";

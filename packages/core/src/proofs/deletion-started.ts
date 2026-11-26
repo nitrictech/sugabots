@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../database/database.ts";
-import { bot, project, workspace } from "../database/schema.ts";
+import { bot, membership, project, workspace } from "../database/schema.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 import type { HoldsWorkspaceLock } from "./workspace-lock.ts";
 
@@ -90,11 +90,21 @@ export const proveProjectDeletionStarted = <P, W, J>(
 		const workspaceId = lock.workspace.value;
 		const [deleting] = yield* query((db) =>
 			db
-				.select({ defaultOf: project.defaultOfBotId, assistantOf: bot.assistantOf })
+				.select({ defaultOf: project.defaultOfBotId, departingMember: membership.memberId })
 				.from(project)
 				.leftJoin(
 					bot,
 					and(eq(bot.id, project.defaultOfBotId), eq(bot.workspaceId, project.workspaceId)),
+				)
+				// A Personal Assistant's project deleted as its member leaves goes with
+				// their membership; one its creator deleted goes as any bot's does.
+				.leftJoin(
+					membership,
+					and(
+						eq(membership.workspaceId, bot.workspaceId),
+						eq(membership.memberId, bot.assistantOf),
+						eq(membership.leaving, true),
+					),
 				)
 				.where(deletingProject(workspaceId, projectId.value)),
 		);
@@ -109,7 +119,7 @@ export const proveProjectDeletionStarted = <P, W, J>(
 				workspace: lock.workspace,
 				project: projectId,
 			});
-		if (deleting.assistantOf) return prove("membership", deleting.assistantOf);
+		if (deleting.departingMember) return prove("membership", deleting.departingMember);
 		if (deleting.defaultOf) return prove("bot", deleting.defaultOf);
 		return prove("project", projectId.value);
 	});

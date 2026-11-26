@@ -327,10 +327,20 @@ export const projectMember = pgTable(
  * A bot: a name, an avatar, instructions and the tools it may reach for.
  *
  * A row is one of three things: a bot members made (`system_bot_key` and
- * `assistant_of` both null), public or personal by `visibility`; somebody's
- * Personal Assistant (`assistant_of` names them), only ever theirs; or a
- * system bot (`system_bot_key` names it), which works in the background for
- * the whole workspace and nobody talks to.
+ * `assistant_of` both null), public or personal by `visibility`; a Personal
+ * Assistant (`assistant_of` names the member it is for, who is its creator),
+ * a personal bot of which a member may have several; or a system bot
+ * (`system_bot_key` names it), which works in the background for the whole
+ * workspace and nobody talks to.
+ *
+ * A Personal Assistant holds its member twice, in `created_by_id` and
+ * `assistant_of`, which the check below keeps equal. `created_by_id` says
+ * whose a bot is, an assistant's included: whom it reaches and acts for, who
+ * manages it and who approves its calls. `assistant_of` says only that it is
+ * a Personal Assistant, and ties it to its member's membership, so a departure
+ * deletes it with the membership (`bot_assistant_membership_fkey`). They can't
+ * be one column: `created_by_id` outlives a membership, as a personal bot's
+ * creator stays its creator after leaving, while an assistant goes with it.
  *
  * Any may have no `model`, which means nobody has chosen one. That is a
  * state the product allows rather than a broken row: a system bot does not
@@ -339,7 +349,8 @@ export const projectMember = pgTable(
  * `name` and `handle` are unique per workspace among the bots members make,
  * because a handle is how a member addresses a bot (`@linear-handler` in a
  * message has to mean one of them) and a name is how they tell bots apart.
- * Every Personal Assistant may share them, as only its member talks to it.
+ * Personal Assistants are left out, as only their creator talks to them: theirs
+ * are unique among one member's assistants, which tells them apart.
  *
  * `color`, `eyes` and `shape` are the whole avatar. Small columns rather than
  * an image, which is what lets a bot created at run time have an avatar at all.
@@ -362,7 +373,8 @@ export const bot = pgTable(
 		systemBotKey: text("system_bot_key").$type<SystemBotKey>(),
 		// Whether everyone in the workspace sees the bot, or only its creator.
 		visibility: text("visibility").$type<"public" | "personal">().notNull().default("public"),
-		// On a Personal Assistant: the one member who sees it and talks to it.
+		// On a Personal Assistant: the member whose membership it goes with, who
+		// is also its creator. Whose it is is read from `createdById`.
 		assistantOf: uuid("assistant_of"),
 		description: text("description"),
 		// One of the contract's colour names. Not a Postgres enum: the palette is
@@ -389,6 +401,12 @@ export const bot = pgTable(
 	},
 	(table) => [
 		check("bot_visibility_check", sql`${table.visibility} in ('public', 'personal')`),
+		// A Personal Assistant is a personal bot its member made. Its creator is
+		// cleared only as their account goes, which takes their membership too.
+		check(
+			"bot_personal_assistant_check",
+			sql`${table.assistantOf} is null or (${table.visibility} = 'personal' and (${table.createdById} is null or ${table.createdById} = ${table.assistantOf}))`,
+		),
 		// A Personal Assistant goes with its member's membership.
 		foreignKey({
 			columns: [table.workspaceId, table.assistantOf],
@@ -403,8 +421,10 @@ export const bot = pgTable(
 		uniqueIndex("bot_handle_idx")
 			.on(table.workspaceId, table.handle)
 			.where(sql`${table.systemBotKey} is null and ${table.assistantOf} is null`),
-		uniqueIndex("bot_assistant_idx")
-			.on(table.workspaceId, table.assistantOf)
+		// A member's Personal Assistants are told apart by handle, as their
+		// addresses in the web app are.
+		uniqueIndex("bot_assistant_handle_idx")
+			.on(table.workspaceId, table.assistantOf, table.handle)
 			.where(sql`${table.assistantOf} is not null`),
 		// One of each system bot per workspace. Other bots never collide here: their
 		// `system_bot_key` is null, and nulls are distinct in a btree index.

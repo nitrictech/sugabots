@@ -1,5 +1,5 @@
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { asksBeforeAllTools, type TurnFacts, turnFacts } from "../authentication/turn-facts.ts";
 import { query } from "../database/database.ts";
@@ -99,7 +99,10 @@ export const briefRecipient = (principal: BotForAsker, handle: string | undefine
 						eq(bot.workspaceId, principal.workspace),
 						handle === undefined
 							? eq(bot.id, principal.bot)
-							: sql`lower(${bot.handle}) = lower(${handle.trim().replace(/^@/, "")})`,
+							: and(
+									sql`lower(${bot.handle}) = lower(${handle.trim().replace(/^@/, "")})`,
+									or(isNull(bot.assistantOf), eq(bot.createdById, principal.asker)),
+								),
 					),
 				)
 				.limit(1),

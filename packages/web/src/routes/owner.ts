@@ -1,12 +1,12 @@
 import type { Bot, Project } from "@sugabots/contracts";
 import { useParams } from "@tanstack/react-router";
-import { useBotWithHandle } from "@/lib/bots.ts";
+import { useBotAtAddress } from "@/lib/bots.ts";
 import { findProject, useProjects } from "@/lib/projects.ts";
 
 /** The bot an address under `/bots/$bot` names, once the roster has it. */
 export function useBotRouteOwner(): { bot: Bot } | undefined {
-	const { bot: handle } = useParams({ from: "/$workspace/bots/$bot" });
-	const { bot } = useBotWithHandle(handle);
+	const { bot: address } = useParams({ from: "/$workspace/bots/$bot" });
+	const { bot } = useBotAtAddress(address);
 	return bot && { bot };
 }
 

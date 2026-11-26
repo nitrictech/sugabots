@@ -620,8 +620,8 @@ export const chatDetailsSchema = Schema.Struct({
 		Schema.Struct({
 			/**
 			 * The replies of the chat's turns not yet ended, or still waiting on
-			 * an approval, whose tool calls this member approves: a Personal
-			 * Assistant's for its member, a run's for admins and its bot's
+			 * an approval, whose tool calls this member approves: a personal
+			 * bot's for its creator, a run's for admins and its bot's
 			 * managers, and any other turn's for its asker alone. A request to
 			 * change the computer is `approveComputerRequests`'s instead.
 			 */

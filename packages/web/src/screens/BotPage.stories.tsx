@@ -1040,7 +1040,7 @@ export const NoComputer = meta.story({
 		await expect(within(computer).getByText("No computer")).toBeVisible();
 		await expect(within(computer).getByRole("link", { name: "Set up computers" })).toHaveAttribute(
 			"href",
-			expect.stringMatching(/\/settings\/computers$/),
+			expect.stringMatching(/[?&]settings=computers$/),
 		);
 	},
 });

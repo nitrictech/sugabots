@@ -1,8 +1,9 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedBot, seedMember, unique } from "../../authentication/seed.test-support.ts";
-import { bot, modelProvider, providerModel } from "../../database/schema.ts";
-import { closeDatabase, onDatabase } from "../../database/testing.ts";
+import { query } from "../../database/database.ts";
+import { bot, membership, modelProvider, providerModel } from "../../database/schema.ts";
+import { closeDatabase, holdTransaction, onDatabase } from "../../database/testing.ts";
 import type { Principal } from "../../principal.ts";
 import {
 	authenticators,
@@ -182,20 +183,67 @@ describe("the bots operations, for each kind of principal", () => {
 		});
 	});
 
-	describe("bots.remove", () => {
-		it("deletes a personal bot for an admin who may only restrict it", async () => {
-			const target = await seedBot(a.workspace, { createdById: a.ed, visibility: "personal" });
-			expect(await operationOutcome(call, who.ed, "bots.remove", { botId: a.assistant.id })).toBe(
-				"ActionForbidden",
-			);
-			expect(await operationOutcome(call, who.outsider, "bots.remove", { botId: target.id })).toBe(
-				"ResourceHidden",
-			);
+	describe("whether a bot is personal", () => {
+		it("never changes once the bot is made, whoever asks and whichever way", async () => {
+			const publicBot = await seedBot(a.workspace, { createdById: a.ed });
+			const personalBot = await seedBot(a.workspace, { createdById: a.ed, visibility: "personal" });
+			const assistant = await seedBot(a.workspace, { assistantOf: a.ed, visibility: "personal" });
+			const attempts = [
+				["creator making their public bot personal", who.ed, publicBot, "personal"],
+				["admin making a public bot personal", who.admin, publicBot, "personal"],
+				["creator making their personal bot public", who.ed, personalBot, "public"],
+				["creator making their Personal Assistant public", who.ed, assistant, "public"],
+			] as const;
+			for (const [attempt, principal, bot, visibility] of attempts) {
+				expect(
+					await operationOutcome(call, principal, "bots.update", {
+						botId: bot.id,
+						changes: { visibility },
+					}),
+					attempt,
+				).toBe("PersonalVisibilityFixed");
+			}
 
-			await call(who.admin, "bots.remove", { botId: target.id });
+			const listed = await call(who.ed, "bots.list", { workspace: a.workspace });
+			const visibilityOf = (bot: { readonly id: string }) =>
+				listed.find(({ id }) => id === bot.id)?.visibility;
+			expect([publicBot, personalBot, assistant].map(visibilityOf)).toEqual([
+				"public",
+				"personal",
+				"personal",
+			]);
+		});
+	});
+
+	describe("bots.remove", () => {
+		it("deletes a personal bot, a Personal Assistant included, for an admin who may only restrict it", async () => {
+			const personalBot = await seedBot(a.workspace, { createdById: a.ed, visibility: "personal" });
+			const assistant = await seedBot(a.workspace, { assistantOf: a.ed, visibility: "personal" });
+			for (const target of [personalBot, assistant]) {
+				expect(
+					await operationOutcome(call, who.outsider, "bots.remove", { botId: target.id }),
+				).toBe("ResourceHidden");
+				expect(await operationOutcome(call, who.erin, "bots.remove", { botId: target.id })).toBe(
+					"ResourceHidden",
+				);
+				await call(who.admin, "bots.remove", { botId: target.id });
+			}
 
 			const bots = await call(who.ed, "bots.list", { workspace: a.workspace });
-			expect(bots.map(({ id }) => id)).not.toContain(target.id);
+			expect(bots.map(({ id }) => id)).not.toContain(personalBot.id);
+			expect(bots.map(({ id }) => id)).not.toContain(assistant.id);
+		});
+
+		it("deletes a member's Personal Assistant for them, as a bot, leaving them in the workspace with their others", async () => {
+			const assistant = await seedBot(a.workspace, { assistantOf: a.ed, visibility: "personal" });
+
+			await call(who.ed, "bots.remove", { botId: assistant.id });
+
+			const listed = (await call(who.ed, "bots.list", { workspace: a.workspace })).map(
+				({ id }) => id,
+			);
+			expect(listed).not.toContain(assistant.id);
+			expect(listed).toContain(a.assistant.id);
 		});
 	});
 
@@ -227,18 +275,46 @@ describe("the bots operations, for each kind of principal", () => {
 		});
 	});
 
-	describe("bots.ensureAssistant", () => {
-		it("lists the Personal Assistant provisioned for the member", async () => {
-			const workspace = a.workspace;
-			const member = await as.member(await seedMember(workspace, "viewer"));
-			const assistant = await call(member, "bots.ensureAssistant", { workspace, model: OFFERED });
-
-			expect(await call(member, "bots.list", { workspace })).toContainEqual(
-				expect.objectContaining({ id: assistant.id, assistant: true, model: OFFERED }),
+	describe("bots.createAssistant", () => {
+		it("refuses a member whose departure commits while their Personal Assistant is being made", async () => {
+			const memberId = await seedMember(a.workspace, "editor");
+			const member = await as.member(memberId);
+			const ofMember = and(
+				eq(membership.workspaceId, a.workspace),
+				eq(membership.memberId, memberId),
 			);
+			// A departure, holding the membership's row as one does, until it commits.
+			const departure = holdTransaction(
+				query((db) =>
+					db.select({ id: membership.id }).from(membership).where(ofMember).for("update"),
+				),
+				query((db) => db.delete(membership).where(ofMember)),
+			);
+			await departure.held;
+
+			const making = operationOutcome(call, member, "bots.createAssistant", {
+				workspace: a.workspace,
+			});
+			await departure.waitForWaiters(1);
+			await departure.release();
+
+			expect(await making).toBe("ResourceHidden");
 		});
 
-		it("makes a member signed in their Personal Assistant, and nobody else one", async () => {
+		it("makes a member a Personal Assistant each time they ask, listed with their others", async () => {
+			const workspace = a.workspace;
+			const member = await as.member(await seedMember(workspace, "viewer"));
+			const first = await call(member, "bots.createAssistant", { workspace });
+			const another = await call(member, "bots.createAssistant", { workspace });
+
+			const assistants = (await call(member, "bots.list", { workspace })).filter(
+				(listed) => listed.assistant,
+			);
+			expect(assistants.map(({ id }) => id).sort()).toEqual([first.id, another.id].sort());
+			expect(another).toMatchObject({ visibility: "personal", permissions: { talk: true } });
+		});
+
+		it("makes a Personal Assistant only for a member signed in, whatever their role", async () => {
 			expect(
 				await outcomesFor(
 					{
@@ -247,7 +323,7 @@ describe("the bots operations, for each kind of principal", () => {
 						botInMemberBounds: who.edsAssistant,
 					},
 					(principal) =>
-						operationOutcome(call, principal, "bots.ensureAssistant", { workspace: a.workspace }),
+						operationOutcome(call, principal, "bots.createAssistant", { workspace: a.workspace }),
 				),
 			).toEqual({
 				viewer: "ok",

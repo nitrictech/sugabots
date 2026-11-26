@@ -19,32 +19,33 @@ import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { recordingFirstComputer } from "../../computers/testing.ts";
-import { query, transaction } from "../../database/database.ts";
+import { query } from "../../database/database.ts";
 import {
 	bot,
 	computer,
 	computerProvider,
-	member,
 	membership,
 	modelProvider,
 	project,
 	projectMember,
 	providerModel,
-	workspace,
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	holdTransaction,
 	onDatabase,
 	type Promised,
-	runOnPostgres,
 	servedOnPostgres,
 	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
+import {
+	addTestMemberships,
+	createTestWorkspace,
+	createWorkspaceFixture,
+} from "../../database/workspace.test-support.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
 import type { MemberSession } from "../../principal.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
-import { BotStore } from "../bots/bot-store.ts";
 import { LeadsProjects } from "./project-leads.ts";
 import { ProjectStore } from "./project-store.ts";
 
@@ -138,52 +139,28 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 		// against a database that has the dev seed in it.
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-		const [made] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Test ${stamp}`, slug: `test-${stamp}` })
-				.returning(),
+		const {
+			workspace: made,
+			members: { ada, sam, kim, lee },
+		} = await createWorkspaceFixture(
+			{ name: `Test ${stamp}`, slug: `test-${stamp}` },
+			{
+				ada: { name: "Ada", email: `ada-${stamp}@example.com`, role: "admin" },
+				sam: { name: "Sam", email: `sam-${stamp}@example.com`, role: "editor" },
+				kim: { name: "Kim", email: `kim-${stamp}@example.com` },
+				lee: { name: "Lee", email: `lee-${stamp}@example.com`, role: "viewer" },
+			},
 		);
-		const [other] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Other ${stamp}`, slug: `other-${stamp}` })
-				.returning(),
-		);
-		if (!made || !other) {
-			throw new Error("could not create the test workspaces");
-		}
+		const other = await createTestWorkspace({ name: `Other ${stamp}`, slug: `other-${stamp}` });
 		workspaceId = made.id;
 		otherWorkspaceId = other.id;
-
-		const members = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Ada", email: `ada-${stamp}@example.com` },
-					{ name: "Sam", email: `sam-${stamp}@example.com` },
-					{ name: "Kim", email: `kim-${stamp}@example.com` },
-					{ name: "Lee", email: `lee-${stamp}@example.com` },
-				])
-				.returning(),
-		);
-		const [ada, sam, kim, lee] = members;
-		if (!ada || !sam || !kim || !lee) {
-			throw new Error("could not create the test members");
-		}
 		adminId = ada.id;
 		editorId = sam.id;
 		outsiderId = kim.id;
 		viewerId = lee.id;
-
-		await onDatabase((db) =>
-			db.insert(membership).values([
-				{ workspaceId, memberId: adminId, role: "admin" },
-				{ workspaceId, memberId: editorId, role: "editor" },
-				{ workspaceId, memberId: viewerId, role: "viewer" },
-				{ workspaceId: otherWorkspaceId, memberId: adminId, role: "admin" },
-				{ workspaceId: otherWorkspaceId, memberId: outsiderId, role: "editor" },
-			]),
+		await addTestMemberships(
+			{ workspaceId: otherWorkspaceId, memberId: adminId, role: "admin" },
+			{ workspaceId: otherWorkspaceId, memberId: outsiderId, role: "editor" },
 		);
 
 		const leads = await onDatabase((db) =>
@@ -395,7 +372,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 					.delete(membership)
 					.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, editorId))),
 			);
-			await onDatabase((db) => db.insert(membership).values({ workspaceId, memberId: editorId }));
+			await addTestMemberships({ workspaceId, memberId: editorId, role: "editor" });
 
 			expect(await visibleTo(editorId)).toEqual([]);
 			expect((await membersOf(made.id)).map(({ memberId }) => memberId)).not.toContain(editorId);
@@ -543,43 +520,6 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			expect((await projectsAs(editorId).bots({ projectId: made.id })).map(({ id }) => id)).toEqual(
 				[leadId],
 			);
-		});
-
-		it("does not add a bot being made personal at the same time", async () => {
-			const made = await create(editorId, { name: "Suga", slug: "suga" });
-			const bot = await aBot(adminId, "Triage");
-			let release = () => {};
-			const released = new Promise<void>((resolve) => {
-				release = resolve;
-			});
-			let madePrivate = () => {};
-			const privateUncommitted = new Promise<void>((resolve) => {
-				madePrivate = resolve;
-			});
-			const makingPrivate = runOnPostgres(
-				transaction(
-					Effect.gen(function* () {
-						const bots = yield* BotStore.Service;
-						yield* bots.update(workspaceId, bot.id, { visibility: "personal" }, adminId);
-						madePrivate();
-						yield* Effect.promise(() => released);
-					}),
-				).pipe(Effect.provide(BotStore.layer)),
-			);
-			await privateUncommitted;
-
-			const adding = repository.addBot(workspaceId, made.id, bot.id);
-			try {
-				await waitUntilWaitingOnLocks(1);
-			} finally {
-				release();
-			}
-			await makingPrivate;
-
-			await expect(adding).rejects.toBeInstanceOf(ProjectStore.BotNotPublic);
-			expect((await projectsAs(adminId).bots({ projectId: made.id })).map(({ id }) => id)).toEqual([
-				leadId,
-			]);
 		});
 
 		it("does not let a viewer add a bot", async () => {
@@ -830,7 +770,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			]);
 		});
 
-		it("keeps a lead in its project, public and undeleted, until another is chosen", async () => {
+		it("keeps a lead in its project and undeleted until another is chosen", async () => {
 			const sales = await create(adminId, { name: "Sales", slug: "sales" });
 			const ops = await create(adminId, { name: "Ops", slug: "ops" });
 			const triage = await aBot(adminId, "Triage");
@@ -843,23 +783,14 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await expect(removing).rejects.toMatchObject({
 				userMessage: "Lead leads Sales. Choose another lead bot for it first.",
 			});
-			const hiding = botsAs(adminId).update({
-				botId: leadId,
-				changes: { visibility: "personal" },
-			});
-			await expect(hiding).rejects.toMatchObject({
+			await expect(botsAs(adminId).remove({ botId: leadId })).rejects.toMatchObject({
 				userMessage: "Lead leads Ops and Sales. Choose another lead bot for each first.",
 			});
-			await expect(botsAs(adminId).remove({ botId: leadId })).rejects.toBeInstanceOf(LeadsProjects);
 
 			for (const projectId of [sales.id, ops.id]) {
 				await projectsAs(adminId).update({ projectId, changes: { leadBotId: triage.id } });
 			}
 			await projectsAs(adminId).removeBot({ projectId: sales.id, botId: leadId });
-			await botsAs(adminId).update({ botId: leadId, changes: { visibility: "personal" } });
-			expect((await projectsAs(adminId).bots({ projectId: ops.id })).map(({ id }) => id)).toEqual([
-				triage.id,
-			]);
 			await botsAs(adminId).remove({ botId: leadId });
 		});
 
@@ -879,9 +810,6 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 				userMessage:
 					"Triage leads Ops and private projects you aren't in. Each needs another lead bot first.",
 			};
-			await expect(
-				botsAs(editorId).update({ botId: triage.id, changes: { visibility: "personal" } }),
-			).rejects.toMatchObject(toCreator);
 			await expect(botsAs(editorId).remove({ botId: triage.id })).rejects.toMatchObject(toCreator);
 			await expect(botsAs(adminId).remove({ botId: triage.id })).rejects.toMatchObject({
 				userMessage: "Triage leads Ops and Secret. Choose another lead bot for each first.",

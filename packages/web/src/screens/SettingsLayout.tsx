@@ -1,5 +1,5 @@
 import { useRender } from "@base-ui/react/use-render";
-import { type HistoryState, Link, Navigate, useLocation, useMatch } from "@tanstack/react-router";
+import { CatchBoundary, Link, Navigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronRight, X } from "lucide-react";
 import {
@@ -13,13 +13,25 @@ import {
 	useRef,
 } from "react";
 import { useBots } from "@/lib/bots.ts";
-import { botSettingsLink, projectSettingsLink } from "@/lib/links.ts";
+import {
+	botSettingsLink,
+	closeSettingsLink,
+	projectSettingsLink,
+	settingsLink,
+	settingsSectionLink,
+} from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useModelProviders } from "@/lib/model-providers.ts";
+import {
+	type ModelChoice,
+	type SettingsLocation,
+	sectionOf,
+	settingsSearchValue,
+	useCloseSettings,
+} from "@/lib/open-settings.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
 import { useProjects } from "@/lib/projects.ts";
 import { useSession } from "@/lib/session.ts";
-import { useBackTarget, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useMemberships, useWorkspace, useWorkspacePermissions } from "@/lib/workspace.ts";
 import {
 	type SettingSection,
@@ -27,9 +39,12 @@ import {
 	workspaceSettingSections,
 	yourSettingSections,
 } from "@/lib/workspace-settings.ts";
+import { lazyNamed } from "@/routes/lazy-screen.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
+import { PageFailure } from "@/shell/PageFailure.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { MemberAvatar } from "@/ui/avatar.tsx";
+import { isPlainClick } from "@/ui/back-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import {
@@ -41,33 +56,32 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 
+const WorkspaceSettings = lazyNamed(
+	() => import("@/screens/WorkspaceSettings.tsx"),
+	"WorkspaceSettings",
+);
+
 /**
- * Settings, from a tablet up as a dialog over the dimmed app: your own and the
- * workspace's sections down the left, the open page beside them under a trail
- * of where it sits. A bot's and a project's settings are its own pages, beside
- * its chats. Below a laptop's width there is no room for both, so
- * settings drill down as a phone's do: the sections as one list, and each
- * opening with a way back to it.
+ * Settings, from a tablet up as a dialog over the page they were opened on,
+ * which stays as it was beneath them: your own and the workspace's sections
+ * down the left, the open page beside them under a trail of where it sits.
+ * A bot's and a project's settings are its own pages, beside its chats.
+ * Below a laptop's width there is no room for both, so settings drill down
+ * as a phone's do: the sections as one list, and each opening with a way
+ * back to it. On a phone they are pages in the page's place.
  *
  * The frame is deliberately NOT part of the settings bundle. The sections
  * behind it are a chunk of their own, and while it is on its way the click has
  * to land on something: the navigation is there to choose from, and the
  * section fills in beside it.
  */
-export function SettingsLayout({
-	index = false,
-	children,
-}: {
-	/** Whether this is `/settings` itself, which on a phone or tablet is the list of sections. */
-	index?: boolean;
-	children: ReactNode;
-}) {
-	const pathname = useSettingsPath();
+export function SettingsLayout({ page }: { page: SettingsLocation }) {
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const index = page.kind === "sections";
 	// A phone lists settings in its You tab.
 	if (index && phone) return <Navigate from="/$workspace" to="./you" replace />;
 	return (
-		// From a tablet up, a dialog over the dimmed app, which closes back to where it was opened.
+		// From a tablet up, a dialog over the dimmed page, which closes back to it.
 		<div className="contents md:fixed md:inset-0 md:z-50 md:flex md:items-center md:justify-center md:p-10">
 			<SettingsClose backdrop />
 			{/* A group, so the frame's Back can stand aside for one the page draws itself. */}
@@ -76,10 +90,10 @@ export function SettingsLayout({
 				className="group/settings flex min-h-0 min-w-0 flex-1 md:relative md:h-full md:w-full md:overflow-hidden md:rounded-xl md:border md:border-border-strong md:bg-background md:shadow-dialog"
 			>
 				<SettingsClose />
-				<SettingsNavigation />
+				<SettingsNavigation page={page} />
 				{index && <CompactSettingsList />}
 				<div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", index && "max-lg:hidden")}>
-					<SettingsTrail />
+					<SettingsTrail page={page} />
 					{/*
 					 * The scrollbar's room is kept whether or not the page is long enough
 					 * to need one, so a long page, such as Usage, centres its column where
@@ -90,15 +104,24 @@ export function SettingsLayout({
 						className="tab-bar-clearance relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background scrollbar-gutter-stable max-md:scrollbar-gutter-auto"
 					>
 						{!index && (
-							<CompactPageBackBar
-								parent={phone ? phoneParentPage(pathname) : parentPage(pathname)}
-							/>
+							<CompactPageBackBar parent={phone ? phoneParentPage(page) : parentPage(page)} />
 						)}
 						{/*
-						 * Nothing rather than a skeleton: the navigation has already answered
-						 * the click, and a shape that flashes beside it reads as a fault.
+						 * A page that fails to load fails inside the dialog, which still
+						 * closes, rather than taking the page beneath with it.
 						 */}
-						<Suspense fallback={null}>{children}</Suspense>
+						<CatchBoundary
+							getResetKey={() => settingsSearchValue(page)}
+							errorComponent={PageFailure}
+						>
+							{/*
+							 * Nothing rather than a skeleton: the navigation has already answered
+							 * the click, and a shape that flashes beside it reads as a fault.
+							 */}
+							<Suspense fallback={null}>
+								<WorkspaceSettings page={index ? { kind: "section", section: "general" } : page} />
+							</Suspense>
+						</CatchBoundary>
 					</main>
 				</div>
 			</div>
@@ -107,32 +130,37 @@ export function SettingsLayout({
 }
 
 /**
- * Closes the settings dialog, back to the page it was opened from, else the
- * workspace's home: the × in its corner, or as `backdrop`, the dimmed app
- * around it. A phone, whose settings are pages, has neither.
+ * Closes the settings dialog onto the page beneath it: the × in its corner,
+ * or as `backdrop`, the dimmed page around it. A phone, whose settings are
+ * pages, has neither.
  */
 function SettingsClose({ backdrop = false }: { backdrop?: boolean }) {
-	const back = useSettingsBack();
-	const { workspace } = useWorkspace();
-	const close = useRef<HTMLButtonElement>(null);
+	const close = useCloseSettings();
 	// Escape closes it wherever the focus is, unless something inside used the key, as a menu does.
 	useEffect(() => {
 		if (backdrop) return;
 		const onKey = (event: KeyboardEvent) => {
 			if (event.key === "Escape" && !event.defaultPrevented && matchesMedia(SIDE_BY_SIDE)) {
-				close.current?.click();
+				close();
 			}
 		};
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
-	}, [backdrop]);
-	const to = back?.render ?? (
-		<Link to="/$workspace" params={{ workspace: workspace?.slug ?? "" }} />
+	}, [backdrop, close]);
+	const to = (
+		<Link
+			{...closeSettingsLink()}
+			onClick={(event) => {
+				// A click that opens a new tab or window follows the address instead.
+				if (!isPlainClick(event)) return;
+				event.preventDefault();
+				close();
+			}}
+		/>
 	);
 	if (backdrop) return <SettingsBackdrop render={to} />;
 	return (
 		<IconButton
-			ref={close}
 			label="Close settings"
 			render={to}
 			className="absolute top-2.5 right-3 z-10 hidden md:inline-grid"
@@ -142,7 +170,7 @@ function SettingsClose({ backdrop = false }: { backdrop?: boolean }) {
 	);
 }
 
-/** The dimmed app around the settings dialog, which closes it when clicked, as the × does. */
+/** The dimmed page around the settings dialog, which closes it when clicked, as the × does. */
 function SettingsBackdrop({ render }: { render: useRender.RenderProp }) {
 	return useRender({
 		render,
@@ -156,55 +184,47 @@ function SettingsBackdrop({ render }: { render: useRender.RenderProp }) {
 
 /**
  * On a phone or tablet, where there is no trail, the bar above a page with
- * its Back: where you came from, or else the page it sits under. A page that
- * draws a Back of its own is left to it.
+ * its Back to `parent`. A page that draws a Back of its own is left to it.
  */
 function CompactPageBackBar({ parent }: { parent: BackTarget }) {
-	const back = useBackTarget(parent);
 	return (
-		<CompactBackBar {...back} className="group-has-[[data-page-back]]/settings:hidden lg:hidden" />
+		<CompactBackBar
+			{...parent}
+			className="group-has-[[data-page-back]]/settings:hidden lg:hidden"
+		/>
 	);
 }
 
 const settingsList: BackTarget = {
 	label: "Settings",
-	render: <Link from="/$workspace" to="./settings" />,
+	render: <Link {...settingsLink()} />,
 };
 
-/** The page `pathname` sits under, for its Back when nothing says where you came from. */
-function parentPage(pathname: string): BackTarget {
-	const [, sectionId, item] = pathname.split("/").filter(Boolean);
-	if (sectionId !== undefined && item !== undefined) {
-		const section = workspaceSettingSection(sectionId);
-		if (section) {
-			return {
-				label: section.label,
-				render: (
-					<Link from="/$workspace" to="./settings/$section" params={{ section: section.id }} />
-				),
-			};
-		}
-	}
-	return settingsList;
+/** The page `page` sits under, for its Back. */
+function parentPage(page: SettingsLocation): BackTarget {
+	if (page.kind === "sections" || page.kind === "section") return settingsList;
+	const section = workspaceSettingSection(page.kind === "member" ? "members" : "providers");
+	if (!section) return settingsList;
+	return {
+		label: section.label,
+		// Named for where it goes, which a phone's Back says plainly when it goes back instead.
+		render: <Link {...settingsSectionLink(section.id)} aria-label={`Back to ${section.label}`} />,
+	};
 }
 
 /**
- * The page `pathname` sits under on a phone, whose settings are listed in its
- * You tab: Notifications under your account, and what would sit under the
- * list of settings under the tab.
+ * The page `page` sits under on a phone, whose settings are listed in its
+ * You tab: Notifications under your account, a section under the page the
+ * settings were opened over, and what sits under a section under it.
  */
-function phoneParentPage(pathname: string): BackTarget {
-	const [, sectionId] = pathname.split("/").filter(Boolean);
+function phoneParentPage(page: SettingsLocation): BackTarget {
 	// Opened from a row on your account.
-	if (sectionId === "notifications") {
-		return {
-			label: "You",
-			render: <Link from="/$workspace" to="./settings/$section" params={{ section: "account" }} />,
-		};
+	if (page.kind === "section" && page.section === "notifications") {
+		return { label: "You", render: <Link {...settingsSectionLink("account")} /> };
 	}
-	const parent = parentPage(pathname);
+	const parent = parentPage(page);
 	if (parent !== settingsList) return parent;
-	return { label: "Settings", render: <Link from="/$workspace" to="./you" /> };
+	return { label: "Back", render: <Link {...closeSettingsLink()} /> };
 }
 
 /** The workspace's sections the viewer may open, with what each holds. */
@@ -236,10 +256,9 @@ function useListed() {
 /** How wide the navigation can be dragged: a third of the window, so the page beside it keeps its room. */
 const NAVIGATION_MAX_WIDTH = "33vw";
 
-function SettingsNavigation() {
+function SettingsNavigation({ page }: { page: SettingsLocation }) {
 	const { sections, counts } = useWorkspaceSections();
 	const session = useSession();
-	const pathname = useSettingsPath();
 	const navigation = useRef<HTMLElement>(null);
 	const [width, setWidth] = usePaneWidth("settings-navigation");
 
@@ -268,7 +287,7 @@ function SettingsNavigation() {
 							<SectionLink
 								key={section.id}
 								section={section}
-								selected={isSelected(section, pathname)}
+								selected={isSelected(section, page)}
 								count={undefined}
 							/>
 						))}
@@ -279,7 +298,7 @@ function SettingsNavigation() {
 						<SectionLink
 							key={section.id}
 							section={section}
-							selected={isSelected(section, pathname)}
+							selected={isSelected(section, page)}
 							count={counts[section.id]}
 						/>
 					))}
@@ -354,15 +373,10 @@ function CompactSettingsList() {
 
 /**
  * The groups of the list of settings: you, the workspace's sections, its
- * projects and its bots. A phone's You tab lists them too, with `linkState`
- * saying where your and the workspace's pages' Back returns; a project's and
- * a bot's settings are their own pages, with Back of their own.
+ * projects and its bots. A phone's You tab lists them too. A project's and a
+ * bot's settings are their own pages, with Back of their own.
  */
-export function SettingsListGroups({
-	linkState,
-}: {
-	linkState?: (state: HistoryState) => HistoryState;
-}) {
+export function SettingsListGroups() {
 	const { sections, counts } = useWorkspaceSections();
 	const { projects, bots } = useListed();
 	const { member: signedIn } = useSession();
@@ -371,10 +385,7 @@ export function SettingsListGroups({
 			{/* You first, on a card that opens your account, which leads on to your Notifications. */}
 			{signedIn && (
 				<Link
-					from="/$workspace"
-					to="./settings/$section"
-					params={{ section: "account" }}
-					state={linkState}
+					{...settingsSectionLink("account")}
 					className={cn(
 						SETTINGS_CARD,
 						"focus-ring flex shrink-0 items-center gap-4 px-4 py-4 active:bg-row-selected",
@@ -401,14 +412,7 @@ export function SettingsListGroups({
 							)
 						}
 						chevron
-						render={
-							<Link
-								from="/$workspace"
-								to="./settings/$section"
-								params={{ section: section.id }}
-								state={linkState}
-							/>
-						}
+						render={<Link {...settingsSectionLink(section.id)} />}
 					/>
 				))}
 			</SettingsGroup>
@@ -447,8 +451,8 @@ export function SettingsListGroups({
  * settings these are, then each page on the way down to this one, each a
  * link back up but the last.
  */
-function SettingsTrail() {
-	const crumbs = useSettingsCrumbs();
+function SettingsTrail({ page }: { page: SettingsLocation }) {
+	const crumbs = settingsCrumbs(page);
 	return (
 		<nav
 			aria-label="Breadcrumb"
@@ -502,38 +506,46 @@ interface Crumb {
 
 const workspaceCrumb: Crumb = {
 	label: "Workspace settings",
-	link: <Link from="/$workspace" to="./settings" />,
+	link: <Link {...settingsLink()} />,
 };
 
 function sectionCrumb(id: SettingSection["id"]): Crumb {
 	const section = workspaceSettingSection(id);
-	return {
-		label: section?.label ?? id,
-		link: <Link from="/$workspace" to="./settings/$section" params={{ section: id }} />,
-	};
+	return { label: section?.label ?? id, link: <Link {...settingsSectionLink(id)} /> };
 }
 
-/** The trail to the open page, read from its address. */
-function useSettingsCrumbs(): Crumb[] {
-	const pathname = useSettingsPath();
-	const [, sectionId, item] = pathname.split("/").filter(Boolean);
-	if (sectionId === undefined || sectionId === "general") {
-		return [workspaceCrumb, { label: "General" }];
+/** The trail to `page`. */
+function settingsCrumbs(page: SettingsLocation): Crumb[] {
+	switch (page.kind) {
+		case "sections":
+			return [workspaceCrumb, { label: "General" }];
+		case "member":
+			return [
+				workspaceCrumb,
+				sectionCrumb("members"),
+				{ label: <MemberName membershipId={page.membership} /> },
+			];
+		case "provider":
+			return [
+				workspaceCrumb,
+				sectionCrumb("providers"),
+				{ label: <ProviderPageName id={page.provider} /> },
+			];
+		case "model":
+			return [
+				workspaceCrumb,
+				sectionCrumb("providers"),
+				{ label: MODEL_CHOICE_NAMES[page.choice] },
+			];
+		case "section": {
+			const yours = yourSettingSections.find((section) => section.id === page.section);
+			if (yours) return [{ label: "Your settings" }, { label: yours.label }];
+			return [
+				workspaceCrumb,
+				{ label: workspaceSettingSection(page.section)?.label ?? page.section },
+			];
+		}
 	}
-	const yours = yourSettingSections.find((section) => section.id === sectionId);
-	if (yours) {
-		return [{ label: "Your settings" }, { label: yours.label }];
-	}
-	if (item === undefined) {
-		return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
-	}
-	if (sectionId === "members") {
-		return [workspaceCrumb, sectionCrumb("members"), { label: <MemberName membershipId={item} /> }];
-	}
-	if (sectionId === "providers") {
-		return [workspaceCrumb, sectionCrumb("providers"), { label: <ProviderPageName id={item} /> }];
-	}
-	return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
 }
 
 function MemberName({ membershipId }: { membershipId: string }) {
@@ -542,24 +554,22 @@ function MemberName({ membershipId }: { membershipId: string }) {
 	return memberships?.find((membership) => membership.id === membershipId)?.member.name ?? null;
 }
 
-/** The provider an address names, or one of the two model choices kept beside them. */
+/** What the two models kept beside the providers are called. */
+const MODEL_CHOICE_NAMES: Record<ModelChoice, string> = {
+	default: "Default for new bots",
+	system: "Default for system bots",
+};
+
+/** The provider an address names. */
 function ProviderPageName({ id }: { id: string }) {
 	const { data: providers } = useModelProviders();
-	if (id === "default") return "Default for new bots";
-	if (id === "system") return "Compaction";
 	return providers?.find((provider) => provider.id === id)?.name ?? null;
 }
 
-/** The address below the workspace, since section paths are written from inside it. */
-function useSettingsPath(): string {
-	const workspacePath = useMatch({ from: "/$workspace", select: (match) => match.pathname });
-	return useLocation({ select: (location) => location.pathname.slice(workspacePath.length) });
-}
-
-/** `/settings` is General, so it matches itself alone; the rest stay selected while you are inside one of their pages. */
-function isSelected(section: SettingSection, pathname: string): boolean {
-	if (section.id === "general") return pathname === "/settings" || pathname === "/settings/general";
-	return pathname === section.path || pathname.startsWith(`${section.path}/`);
+/** The list of sections opens General, so General is selected on either; the rest stay selected while one of their pages is open. */
+function isSelected(section: SettingSection, page: SettingsLocation): boolean {
+	if (page.kind === "sections") return section.id === "general";
+	return sectionOf(page) === section.id;
 }
 
 function SectionLink({
@@ -576,22 +586,12 @@ function SectionLink({
 	// Nothing separates the label from the count on screen but a gap, which a
 	// name taken from the contents does not hear: "Members4".
 	const label = count === undefined ? undefined : `${section.label}, ${count}`;
-	return section.id === "general" ? (
+	return (
 		<Link
-			from="/$workspace"
-			to="./settings"
-			activeOptions={{ exact: true }}
-			aria-label={label}
-			aria-current={selected ? "page" : undefined}
-			className={className}
-		>
-			{content}
-		</Link>
-	) : (
-		<Link
-			from="/$workspace"
-			to="./settings/$section"
-			params={{ section: section.id }}
+			// General is the list's own page, which a laptop opens beside it.
+			{...(section.id === "general" ? settingsLink() : settingsSectionLink(section.id))}
+			// From one section to another in place, so Back from any of them closes settings.
+			replace
 			aria-label={label}
 			aria-current={selected ? "page" : undefined}
 			className={className}

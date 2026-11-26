@@ -7,7 +7,7 @@ import {
 	useMatchRoute,
 	useSearch,
 } from "@tanstack/react-router";
-import { useBotWithHandle } from "@/lib/bots.ts";
+import { useBotAtAddress } from "@/lib/bots.ts";
 import { prefetchChat, useAnyChatLocation, useBotChatPlace } from "@/lib/chats.ts";
 import { botAutomationsLink, botConnectorsLink, botSettingsLink, chatLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
@@ -56,8 +56,8 @@ export const botRoute = createRoute({
 
 /** A bot's page beside the sidebar. */
 function BotRoute() {
-	const { bot: handle } = botRoute.useParams();
-	const { bot, isPending, error } = useBotWithHandle(handle);
+	const { bot: address } = botRoute.useParams();
+	const { bot, isPending, error } = useBotAtAddress(address);
 	const matchRoute = useMatchRoute();
 	const onAutomations = Boolean(
 		matchRoute({ to: "/$workspace/bots/$bot/automations", fuzzy: true }),
@@ -124,7 +124,7 @@ export const botIndexRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/",
 	component: () => {
-		const { bot } = useBotWithHandle(botIndexRoute.useParams().bot);
+		const { bot } = useBotAtAddress(botIndexRoute.useParams().bot);
 		const wide = useMediaQuery(SIDE_BY_SIDE);
 		if (!bot) return null;
 		return wide ? <BotNewChat bot={bot} /> : <MobileOwner owner={{ bot }} />;
@@ -136,7 +136,7 @@ export const botNewChatRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/new",
 	component: () => {
-		const { bot } = useBotWithHandle(botNewChatRoute.useParams().bot);
+		const { bot } = useBotAtAddress(botNewChatRoute.useParams().bot);
 		return bot ? <BotNewChat bot={bot} /> : null;
 	},
 });
@@ -158,10 +158,10 @@ export const chatRoute = createRoute({
 		return ChatPage.preload();
 	},
 	component: () => {
-		const { bot: handle, chat } = chatRoute.useParams();
+		const { bot: address, chat } = chatRoute.useParams();
 		const navigate = chatRoute.useNavigate();
 		const search = chatRoute.useSearch();
-		const { bot } = useBotWithHandle(handle);
+		const { bot } = useBotAtAddress(address);
 		return bot ? (
 			<BotChatScreen
 				bot={bot}
@@ -231,6 +231,7 @@ export const chatByIdRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/chats/$chat",
 	params: { parse: ({ chat }) => ({ chat: decodeRouteId(chat) }) },
+	validateSearch: (search: Record<string, unknown>) => validateChatSearch(search),
 	component: () => {
 		const { chat } = chatByIdRoute.useParams();
 		const search = useSearch({ strict: false }) as ChatSearch;

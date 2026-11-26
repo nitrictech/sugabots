@@ -273,10 +273,24 @@ describe.skipIf(!process.env.DATABASE_URL)("written file tools, against Postgres
 			expect(requests[0]?.tools).toHaveProperty(FILE_EDIT_TOOL);
 			expect(requests[0]?.tools).toHaveProperty(FILE_WRITE_TOOL);
 			const error = new ActionForbidden({ proof: "CanChangeFile" }).userMessage;
-			expect(await callsOf(ran.turnId)).toMatchObject([
-				{ tool: FILE_EDIT_TOOL, status: "failed", approvalStatus: null, error },
-				{ tool: FILE_WRITE_TOOL, status: "failed", approvalStatus: null, error },
-			]);
+			const calls = await callsOf(ran.turnId);
+			expect(calls).toHaveLength(2);
+			expect(calls).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						tool: FILE_EDIT_TOOL,
+						status: "failed",
+						approvalStatus: null,
+						error,
+					}),
+					expect.objectContaining({
+						tool: FILE_WRITE_TOOL,
+						status: "failed",
+						approvalStatus: null,
+						error,
+					}),
+				]),
+			);
 			expect(await filesIn(otherChat)).toMatchObject([{ id: report.id, currentVersion: 1 }]);
 			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
 		},

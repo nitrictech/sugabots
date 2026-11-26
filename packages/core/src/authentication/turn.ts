@@ -111,8 +111,8 @@ const newExecution = (turnId: string) =>
 export const layer = layerNoDeps;
 
 /**
- * A turn's bounds: member bounds for a Personal Assistant's own turns, and
- * those of its routine and manual runs. A brief can grant member bounds only
+ * A turn's bounds: member bounds for a personal bot's own turns, and those of
+ * its routine and manual runs. A brief can grant member bounds only
  * if the turn writing it had them.
  */
 function boundsOf(facts: TurnFacts, asker: string, project: string): TurnBounds {

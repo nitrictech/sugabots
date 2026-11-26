@@ -8,7 +8,7 @@ import type {
 } from "@sugabots/contracts";
 import { Pause } from "lucide-react";
 import { Fragment } from "react";
-import { useAuthorLinks } from "@/lib/author-links.ts";
+import { useAuthorLinks } from "@/lib/author-links.tsx";
 import { chatFileUrl } from "@/lib/chat-files.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { useReactions } from "@/lib/reactions.ts";
@@ -66,7 +66,7 @@ export function ChatTimeline({
 	onReply: (message: Message) => void;
 	onJumpToMessage: (messageId: string) => void;
 }) {
-	const authorLinkOf = useAuthorLinks("Chat");
+	const authorLinkOf = useAuthorLinks();
 	const reactions = useReactions(signedIn);
 	const reacting = { memberId: signedIn.id, onToggle: reactions.toggle, onAdd: reactions.add };
 	const automationFeed = details.chat.kind === "automation_feed";

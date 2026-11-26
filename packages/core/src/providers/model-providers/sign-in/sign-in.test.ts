@@ -1,14 +1,13 @@
-import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
+import type { InputOf, OutputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { member, membership, workspace } from "../../../database/schema.ts";
 import {
 	closeDatabase,
-	onDatabase,
 	type Promised,
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../../database/testing.ts";
+import { createWorkspaceFixture } from "../../../database/workspace.test-support.ts";
 import { servedOperations } from "../../../operations/testing.ts";
 import { authenticators, principals } from "../../../proofs/world.test-support.ts";
 import { unimplemented } from "../../../testing.ts";
@@ -78,26 +77,34 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [made] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Test ${stamp}`, slug: `test-${stamp}` })
-				.returning(),
+		const {
+			workspace: made,
+			members: { somebody },
+		} = await createWorkspaceFixture(
+			{ name: `Test ${stamp}`, slug: `test-${stamp}` },
+			{ somebody: { name: "Ada", email: `ada-${stamp}@example.com`, role: "admin" } },
 		);
-		const [somebody] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
-				.returning(),
-		);
-		if (!made || !somebody) throw new Error("could not create the test workspace");
 		workspaceId = made.id;
 		memberId = somebody.id;
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId, role: "admin" }),
-		);
 		await store.seedBuiltInProviders(workspaceId);
 	});
+
+	function expectSignedInWithModel(
+		outcome: OutputOf<"modelProviders.completeSignIn">,
+		modelId: string,
+	) {
+		expect(outcome).toMatchObject({
+			status: "signed_in",
+			provider: {
+				signedIn: true,
+				signedInAs: { id: memberId },
+				active: true,
+				status: "connected",
+			},
+		});
+		if (outcome.status !== "signed_in") throw new Error("Expected a signed-in provider");
+		expect(outcome.provider.models.map((model) => model.modelId)).toEqual([modelId]);
+	}
 
 	describe("with ChatGPT", () => {
 		let openai: ReturnType<typeof fakeOpenAI>;
@@ -152,17 +159,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 				attempt: started.attempt,
 			});
 
-			expect(outcome).toMatchObject({
-				status: "signed_in",
-				provider: {
-					signedIn: true,
-					signedInAs: { id: memberId },
-					active: true,
-					status: "connected",
-				},
-			});
-			if (outcome.status !== "signed_in") throw new Error("unreachable");
-			expect(outcome.provider.models.map(({ modelId }) => modelId)).toEqual(["gpt-5.5"]);
+			expectSignedInWithModel(outcome, "gpt-5.5");
 			expect(openai.listingHeaders).toMatchObject({
 				authorization: `Bearer ${openai.issued[0]}`,
 				"chatgpt-account-id": "account-1",
@@ -283,17 +280,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 				attempt: started.attempt,
 			});
 
-			expect(outcome).toMatchObject({
-				status: "signed_in",
-				provider: {
-					signedIn: true,
-					signedInAs: { id: memberId },
-					active: true,
-					status: "connected",
-				},
-			});
-			if (outcome.status !== "signed_in") throw new Error("unreachable");
-			expect(outcome.provider.models.map(({ modelId }) => modelId)).toEqual(["grok-4.3"]);
+			expectSignedInWithModel(outcome, "grok-4.3");
 			expect(xai.listingAuthorization).toBe("Bearer xai-access-1");
 		});
 
@@ -394,14 +381,8 @@ function fakeOpenAI() {
 		return new Response(null, { status: 404 });
 	};
 
-	const clients: EgressHttpClients = {
-		for: () =>
-			((input: string | URL | Request, init?: RequestInit) =>
-				respond(input instanceof Request ? input.url : input.toString(), init)) as typeof fetch,
-	};
-
 	return {
-		clients,
+		clients: clientsRespondingWith(respond),
 		issued,
 		refreshesSpent,
 		get listingHeaders() {
@@ -471,14 +452,8 @@ function fakeXai() {
 		return new Response(null, { status: 404 });
 	};
 
-	const clients: EgressHttpClients = {
-		for: () =>
-			((input: string | URL | Request, init?: RequestInit) =>
-				respond(input instanceof Request ? input.url : input.toString(), init)) as typeof fetch,
-	};
-
 	return {
-		clients,
+		clients: clientsRespondingWith(respond),
 		refreshesSpent,
 		get listingAuthorization() {
 			return state.listingAuthorization;
@@ -490,4 +465,12 @@ function fakeXai() {
 			code = "declined";
 		},
 	};
+}
+
+function clientsRespondingWith(
+	respond: (url: string, init?: RequestInit) => Promise<Response>,
+): EgressHttpClients {
+	const fetchFromProvider: typeof fetch = (input, init) =>
+		respond(input instanceof Request ? input.url : input.toString(), init);
+	return { for: () => fetchFromProvider };
 }

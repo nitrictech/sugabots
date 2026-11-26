@@ -10,14 +10,11 @@ import { EventStore } from "../../database/events/store.ts";
 import {
 	bot,
 	chat,
-	member,
-	membership,
 	message,
 	project,
 	projectBot,
 	projectMember,
 	turn,
-	workspace,
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
@@ -25,6 +22,11 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import {
+	addTestMemberships,
+	createTestWorkspace,
+	createWorkspaceFixture,
+} from "../../database/workspace.test-support.ts";
 import { asMember } from "../../operations/chats/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
 import { BotStore } from "../../workspaces/bots/bot-store.ts";
@@ -87,36 +89,20 @@ describe.skipIf(!process.env.DATABASE_URL)("the chat store, against Postgres", a
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [workspaceRow] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Chat test ${suffix}`, slug: `chat-test-${suffix}` })
-				.returning(),
+		const {
+			workspace: space,
+			members: { insider, outsider },
+		} = await createWorkspaceFixture(
+			{ name: `Chat test ${suffix}`, slug: `chat-test-${suffix}` },
+			{
+				insider: { name: "Sam", email: `chat-sam-${suffix}@example.com`, role: "editor" },
+				outsider: { name: "Kim", email: `chat-kim-${suffix}@example.com`, role: "editor" },
+			},
 		);
-		const members = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Sam", email: `chat-sam-${suffix}@example.com` },
-					{ name: "Kim", email: `chat-kim-${suffix}@example.com` },
-				])
-				.returning(),
-		);
-		const [insider, outsider] = members;
-		if (!workspaceRow || !insider || !outsider) {
-			throw new Error("Could not create chat test records");
-		}
-		workspaceId = workspaceRow.id;
+		workspaceId = space.id;
 		memberId = insider.id;
 		outsiderId = outsider.id;
 		outsiderEmail = outsider.email;
-
-		await onDatabase((db) =>
-			db.insert(membership).values([
-				{ workspaceId, memberId: memberId },
-				{ workspaceId, memberId: outsiderId },
-			]),
-		);
 		const projectRow = await onDatabase((db) =>
 			seedProject(db, {
 				workspaceId,
@@ -336,21 +322,15 @@ describe.skipIf(!process.env.DATABASE_URL)("the chat store, against Postgres", a
 	});
 
 	it("rejects projects and bots from another workspace at the database boundary", async () => {
-		const [otherWorkspace] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({
-					name: "Other chat workspace",
-					slug: `other-chat-${crypto.randomUUID()}`,
-				})
-				.returning(),
-		);
-		if (!otherWorkspace) {
-			throw new Error("Could not create other chat workspace");
-		}
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId: otherWorkspace.id, memberId: memberId }),
-		);
+		const otherWorkspace = await createTestWorkspace({
+			name: "Other chat workspace",
+			slug: `other-chat-${crypto.randomUUID()}`,
+		});
+		await addTestMemberships({
+			workspaceId: otherWorkspace.id,
+			memberId: memberId,
+			role: "editor",
+		});
 		const foreignProject = await onDatabase((db) =>
 			seedProject(db, {
 				workspaceId: otherWorkspace.id,

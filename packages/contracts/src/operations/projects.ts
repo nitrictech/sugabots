@@ -179,8 +179,8 @@ export const projectsContracts = {
 } as const;
 
 /**
- * Offered as `tool` only in member bounds, a Personal Assistant's own turns,
- * where each call asks its member: it changes who reaches what.
+ * Offered as `tool` only in member bounds, a personal bot's own turns,
+ * where each call asks its creator: it changes who reaches what.
  */
 const changesReachForMember = <const Tool extends string>(tool: Tool) =>
 	({

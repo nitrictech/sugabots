@@ -1,4 +1,4 @@
-import type { Bot, NamedMember } from "@sugabots/contracts";
+import type { Bot, BotVisibility, NamedMember } from "@sugabots/contracts";
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import type { Actor } from "../../authorization/permissions.ts";
 import { memberJson } from "../../chats/store/participants.ts";
@@ -26,6 +26,15 @@ export function memberFacingBotRow(row: schema.BotRow): MemberFacingBotRow | und
  * projects are read under a name of their own, so `botId` may be a column of
  * an outer query over projects.
  */
+/**
+ * Whether setting a bot that is `from` to `to` would make it personal, or stop
+ * it being personal, which never happens: whether a bot is personal is chosen
+ * when it is made. Public and private bots may switch between each other.
+ */
+export function changesPersonal(from: BotVisibility, to: BotVisibility | undefined): boolean {
+	return to !== undefined && to !== from && (from === "personal" || to === "personal");
+}
+
 export function defaultProjectIdOf(botId: SQLWrapper): SQL<string> {
 	return sql<string>`(select owned.id from ${project} as owned where owned.default_of_bot_id = ${outerColumn(botId)})`;
 }

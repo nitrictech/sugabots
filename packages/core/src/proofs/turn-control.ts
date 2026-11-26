@@ -12,7 +12,7 @@ import type { ReachesChat } from "./reaches-chat.ts";
 /**
  * Who may steer or interrupt a turn, decided from the turn once its chat is
  * proven reachable. Only its asker steers it, so nobody steers a run's turns,
- * but a Personal Assistant's member steers those of its runs. Its asker may
+ * but a personal bot's creator steers those of its runs. Its asker may
  * interrupt it, and so may anyone who may manage its project and reaches its
  * chat, and, for a run's turn, anyone who may approve its calls; interrupting
  * takes a member.
@@ -47,8 +47,8 @@ export const proveCanSteer = <P, C, T>(reach: ReachesChat<P, C>, turnId: Named<T
 	Effect.gen(function* () {
 		const facts = yield* turnInChat(reach, turnId.value);
 		const acting = reach.principal.value;
-		// A run's turns act for no member, so nobody steers them; a Personal
-		// Assistant's runs act for its member, who may.
+		// A run's turns act for no member, so nobody steers them; a personal
+		// bot's runs act for its creator, who may.
 		if (acting._tag !== "MemberSession" || acting.member !== askerOf(facts)) {
 			return yield* Effect.fail(new ActionForbidden({ proof: "CanSteer" }));
 		}

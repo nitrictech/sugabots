@@ -202,7 +202,7 @@ describe("a project's chat", () => {
 		const composer = await screen.findByRole("textbox");
 
 		writeDraft(composer, `@${other.handle} can you check?`);
-		await screen.findByText(`${other.name} has no model yet, so it cannot answer.`, {
+		await screen.findByText(`${other.name} has no model yet.`, {
 			exact: false,
 		});
 		const send = screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement;
@@ -295,7 +295,7 @@ describe("a project's new chat", () => {
 		const composer = await screen.findByLabelText(`Message ${project.name}`);
 
 		writeDraft(composer, "Check the prices");
-		await screen.findByText(`${lead.name} has no model yet, so it cannot answer.`, {
+		await screen.findByText(`${lead.name} has no model yet.`, {
 			exact: false,
 		});
 		const start = screen.getByRole("button", { name: "Start chat" }) as HTMLButtonElement;

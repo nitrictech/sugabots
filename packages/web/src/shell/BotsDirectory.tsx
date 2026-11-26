@@ -1,7 +1,14 @@
 import type { Bot } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Pin, PinOff, Plus } from "lucide-react";
-import { useBots, usePinBot } from "@/lib/bots.ts";
+import {
+	isOwnAssistant,
+	ownAssistants,
+	useBots,
+	useCreateAssistant,
+	usePinBot,
+	whoseBot,
+} from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { botLink, botSettingsLink } from "@/lib/links.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
@@ -13,17 +20,19 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
 
 /**
- * Every bot the member reaches: their Personal Assistant, the public bots
- * and their own personal ones, each opening the bot, with a pin that puts it
- * in the sidebar or takes it out. A + makes another.
+ * Every bot the member reaches: their Personal Assistants, oldest first, if
+ * they have any, with a + that makes them one, then the public bots and their own personal
+ * ones, each opening the bot, with a pin that puts it in the sidebar or takes
+ * it out. A + makes another bot.
  */
 export function BotsDirectory() {
 	const { bots: reachable, isPending, error } = useBots();
 	const pin = usePinBot();
 	const newBot = useNewBot();
+	const newAssistant = useNewAssistant();
 	const bots = reachable ?? [];
-	const assistant = bots.filter((bot) => bot.assistant);
-	const rest = bots.filter((bot) => !bot.assistant);
+	const assistants = ownAssistants(bots);
+	const rest = bots.filter((bot) => !isOwnAssistant(bot));
 	return (
 		<Page
 			title="Bots"
@@ -39,16 +48,33 @@ export function BotsDirectory() {
 			<DirectoryBody>
 				{error ? <Alert>{failureMessage(error)}</Alert> : null}
 				{pin.error ? <Alert>{failureMessage(pin.error)}</Alert> : null}
-				{assistant.length > 0 && (
-					<SettingsGroup label="Yours" headingLevel={2}>
-						{assistant.map((bot) => (
-							<BotRow key={bot.id} bot={bot} />
-						))}
+				{newAssistant.error ? <Alert>{failureMessage(newAssistant.error)}</Alert> : null}
+				{!isPending && !error && (
+					<SettingsGroup
+						label="Yours"
+						headingLevel={2}
+						action={
+							<IconButton
+								label="New Personal Assistant"
+								size="sm"
+								className="max-md:size-11"
+								disabled={newAssistant.isPending}
+								onClick={newAssistant.start}
+							>
+								<Plus strokeWidth={2.2} />
+							</IconButton>
+						}
+					>
+						{assistants.length === 0 ? (
+							<SettingsRow label="You have no Personal Assistant" />
+						) : (
+							assistants.map((bot) => <BotRow key={bot.id} bot={bot} />)
+						)}
 					</SettingsGroup>
 				)}
-				{!isPending && rest.length === 0 ? (
-					<EmptyState title="No bots yet">
-						{newBot.start ? "Make the first one with the + above." : "Nobody has made one yet."}
+				{!isPending && !error && rest.length === 0 ? (
+					<EmptyState title={assistants.length > 0 ? "No other bots yet" : "No bots yet"}>
+						{newBot.start && "Use New bot to make one."}
 					</EmptyState>
 				) : (
 					rest.length > 0 && (
@@ -82,7 +108,7 @@ function BotRow({
 	pinning = false,
 }: {
 	bot: Bot;
-	/** Pins or unpins it; absent for the Personal Assistant, which is always at the sidebar's top. */
+	/** Pins or unpins it; absent for a Personal Assistant, which is always at the sidebar's top. */
 	onPin?: (pinned: boolean) => void;
 	pinning?: boolean;
 }) {
@@ -106,12 +132,14 @@ function BotRow({
 			}
 			sub={
 				bot.assistant
-					? "Your Personal Assistant"
+					? usable
+						? "Your Personal Assistant"
+						: whoseBot(bot, "Personal Assistant")
 					: [
 							bot.visibility === "personal"
 								? usable
 									? "Personal"
-									: "Someone else's personal bot"
+									: whoseBot(bot, "personal bot")
 								: null,
 							bot.description,
 						]
@@ -134,4 +162,15 @@ function BotRow({
 			}
 		/>
 	);
+}
+
+/** Making the member a Personal Assistant, whatever their role, then opening it. */
+function useNewAssistant() {
+	const create = useCreateAssistant();
+	const navigate = useNavigate();
+	return {
+		start: () => create.mutate(undefined, { onSuccess: (made) => void navigate(botLink(made)) }),
+		isPending: create.isPending,
+		error: create.error,
+	};
 }

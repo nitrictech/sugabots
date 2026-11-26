@@ -30,14 +30,14 @@ type HttpDecision =
 	| { readonly kind: "heldBack"; readonly reason: string };
 
 /**
- * When a bot's call waits for an approver before it runs. A Personal
- * Assistant's call to an operation that changes something always waits, and
+ * When a bot's call waits for an approver before it runs. A personal bot's
+ * call to an operation that changes something always waits, and
  * so does every call in its runs that a webhook or GitHub event started,
  * whatever this says.
  *
  * - `never`: it runs at once.
  * - `always`: it waits for an approver. `turn`: by the turn's rule, its
- *   asker, or for a Personal Assistant's call its member, or for a run's call
+ *   asker, or for a personal bot's call its creator, or for a run's call
  *   admins and the managers of its bot. `computerManagers`: a request to
  *   change a computer, such as a host request, which those who may manage its
  *   project decide.

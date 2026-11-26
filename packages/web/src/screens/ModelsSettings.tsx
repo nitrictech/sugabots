@@ -16,6 +16,7 @@ import { Code } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useModels } from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { settingsLink } from "@/lib/links.ts";
 import {
 	modelName,
 	useChooseDefaultModel,
@@ -23,7 +24,6 @@ import {
 	useProviderActions,
 } from "@/lib/model-providers.ts";
 import { NOT_A_SERVER_ADDRESS, parseProviderBaseUrl } from "@/lib/provider-url.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { SYSTEM_BOT_KEYS, useChooseSystemBotModel, useSystemBots } from "@/lib/system-bots.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -68,7 +68,6 @@ const POPULAR_BUILT_INS: readonly BuiltInProviderId[] = [
  * popular providers and any other connected one, and adding another.
  */
 export function ModelsSettings() {
-	const backToModels = useBackToHere("Models");
 	const providers = useModelProviders();
 	const may = useWorkspacePermissions();
 	// `true` for the whole list; a built-in provider for Connect beside that provider.
@@ -100,12 +99,7 @@ export function ModelsSettings() {
 		? POPULAR_BUILT_INS.filter((builtInId) => !connectedPopular(builtInId))
 		: [];
 	const providerLink = (provider: ModelProvider) => (
-		<Link
-			from="/$workspace"
-			to="./settings/providers/$provider"
-			params={{ provider: provider.id }}
-			state={backToModels}
-		/>
+		<Link {...settingsLink({ kind: "provider", provider: provider.id })} />
 	);
 
 	return (
@@ -152,12 +146,7 @@ export function ModelsSettings() {
 						done={() => setAdding(undefined)}
 						onAdded={async (provider) => {
 							setAdding(undefined);
-							await navigate({
-								from: "/$workspace",
-								to: "./settings/providers/$provider",
-								params: { provider: provider.id },
-								state: backToModels,
-							});
+							await navigate(settingsLink({ kind: "provider", provider: provider.id }));
 						}}
 					/>
 				)}
@@ -247,14 +236,13 @@ function credentialLine(provider: ModelProvider): string {
 
 /** The model new bots start on. */
 function DefaultModelRow({ providers }: { providers: readonly ModelProvider[] }) {
-	const backToModels = useBackToHere("Models");
 	const current = useModels().data?.defaultModel ?? null;
 	return (
 		<DefaultRow
 			label="Default for new bots"
 			description="Any model from a provider that is on"
 			model={chosenModelName(providers, current)}
-			render={<Link from="/$workspace" to="./settings/providers/default" state={backToModels} />}
+			render={<Link {...settingsLink({ kind: "model", choice: "default" })} />}
 		/>
 	);
 }
@@ -295,17 +283,16 @@ function DefaultRow({
 	);
 }
 
-/** Compaction's model stands for the system bots', since choosing one sets them all. */
+/** Compaction's model stands for every system bot's, since choosing one sets them all. */
 function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) {
-	const backToModels = useBackToHere("Models");
 	const systemBots = useSystemBots();
 	const current = systemBots.data?.find((bot) => bot.key === "compact")?.model ?? null;
 	return (
 		<DefaultRow
-			label="Compaction"
-			description="Used to compact long chats for a bot with no model of its own"
+			label="Default for system bots"
+			description="Used for built-in system tasks, like compacting long chats"
 			model={chosenModelName(providers, current)}
-			render={<Link from="/$workspace" to="./settings/providers/system" state={backToModels} />}
+			render={<Link {...settingsLink({ kind: "model", choice: "system" })} />}
 		/>
 	);
 }
@@ -348,8 +335,8 @@ export function SystemModelSettings() {
 	const choosers = { compact };
 	return (
 		<ModelChoicePage
-			title="Compaction"
-			description="The model Sugabots uses behind the scenes to compact long chats, for a bot with no model of its own. A fast, cheap model works best."
+			title="Default for system bots"
+			description="The model Sugabots uses for its own work behind the scenes, like compacting a long chat whose bot has no model of its own. A fast, cheap model works best."
 			current={systemBots.data?.find((bot) => bot.key === "compact")?.model ?? null}
 			pending={compact.isPending}
 			choose={(modelId) =>

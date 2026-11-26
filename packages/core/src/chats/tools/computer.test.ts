@@ -8,29 +8,21 @@ import {
 	seedWorkspace,
 } from "../../authentication/seed.test-support.ts";
 import { ComputerProviderStore } from "../../computers/computer-provider-store.ts";
-import { ComputerSignIn } from "../../computers/computer-sign-in.ts";
 import { Computers } from "../../computers/computers.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
-import {
-	localComputerEgress,
-	noComputers,
-	recordingIds,
-	removeWorkVolumes,
-} from "../../computers/testing.ts";
-import {
-	allowedHost,
-	bot as botTable,
-	member,
-	membership,
-	message,
-	workspace,
-} from "../../database/schema.ts";
+import { noComputers, removeWorkVolumes } from "../../computers/testing.ts";
+import { allowedHost, bot as botTable, message } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
+import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { seedChat } from "../seed.test-support.ts";
-import { stepOnComputer } from "./computer/testing.ts";
+import {
+	destroyWorkspaceComputers,
+	localComputerTools,
+	stepOnComputer,
+} from "./computer/testing.ts";
 import { TurnComputers } from "./computer/turn-computers.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("computer tool step lifetimes", () => {
@@ -99,30 +91,18 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 		[turnComputers, projectComputers] = await runOnPostgres(
 			Effect.all([TurnComputers.Service, ProjectComputers.Service]).pipe(
 				Effect.provide(Layer.merge(TurnComputers.layer, ProjectComputers.layer)),
-				Effect.provide(ComputerSignIn.none),
-				Effect.provide(recordingIds(idsHandedOut)),
-				// Registries are asked what an image's tag names, as in production.
-				Effect.provide(localComputerEgress),
+				Effect.provide(localComputerTools(idsHandedOut)),
 			),
 		);
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Tools ${suffix}`, slug: `tools-${suffix}` })
-				.returning(),
+		const {
+			workspace: space,
+			members: { owner },
+		} = await createWorkspaceFixture(
+			{ name: `Tools ${suffix}`, slug: `tools-${suffix}` },
+			{ owner: { name: "Sam", email: `tools-${suffix}@example.com`, role: "editor" } },
 		);
-		const [owner] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Sam", email: `tools-${suffix}@example.com` })
-				.returning(),
-		);
-		if (!space || !owner) throw new Error("fixture");
 		ownerId = owner.id;
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId: space.id, memberId: owner.id }),
-		);
 		workspaceId = space.id;
 		// A bot's computer is its default project's, which comes with the bot.
 		const [bot] = await onDatabase((db) =>
@@ -165,11 +145,7 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 
 	afterAll(async () => {
 		await Effect.runPromise(Scope.close(scope, Exit.void));
-		const providers = await runOnPostgres(
-			Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer),
-		);
-		const provider = await runOnPostgres(providers.enabled(workspaceId));
-		if (provider) await runOnPostgres(projectComputers.destroyAllMadeBy(workspaceId, provider));
+		await destroyWorkspaceComputers(workspaceId, projectComputers);
 		await closeDatabase();
 		removeWorkVolumes(idsHandedOut);
 	}, SLOW);

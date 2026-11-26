@@ -1,94 +1,44 @@
 import type { Bot } from "@sugabots/contracts";
 import { InternalServerError } from "@sugabots/contracts/http";
-import { testMember } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
-import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-	createMemoryHistory,
-	createRootRoute,
-	createRouter,
-	RouterProvider,
-} from "@tanstack/react-router";
+import type { QueryClient } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { Effect } from "effect";
-import { type ReactNode, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import {
-	bots,
-	juno,
-	linear,
-	pendingAnswer,
-	personalAssistant,
-	projects,
-	sam,
-	triager,
-} from "@/api.test-support.tsx";
+import { bots, linear, pendingAnswer, personalAssistant, triager } from "@/api.test-support.tsx";
 import { client } from "@/client.test-support.ts";
 import { findBot, useUpdateBot } from "@/lib/bots.ts";
-import { useMembersReachingProject, useProjectBots } from "@/lib/projects.ts";
 import { createQueryClient } from "@/lib/query.ts";
+import { InRoute } from "@/lib/route.test-support.tsx";
 
 vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 describe("findBot", () => {
+	/** Another member's Personal Assistant, as an administrator sees it listed. */
 	const someoneElses = {
 		...personalAssistant,
 		id: "0199a3a0-0000-7000-8000-0000000000be",
-		assistant: false,
+		permissions: { ...personalAssistant.permissions, talk: false },
+	};
+	const secondAssistant = {
+		...personalAssistant,
+		id: "0199a3a0-0000-7000-8000-0000000000c1",
+		handle: "personal-assistant-2",
 	};
 
-	it("finds the member's own Personal Assistant by the handle every assistant shares", () => {
-		expect(findBot([someoneElses, ...bots, personalAssistant], "personal-assistant")).toBe(
-			personalAssistant,
-		);
+	it("finds each of the member's own Personal Assistants by the handle it shares with others'", () => {
+		const someoneElsesSecond = {
+			...someoneElses,
+			id: "0199a3a0-0000-7000-8000-0000000000c2",
+			handle: "personal-assistant-2",
+		};
+		const listed = [someoneElses, someoneElsesSecond, ...bots, personalAssistant, secondAssistant];
+		expect(findBot(listed, "personal-assistant")).toBe(personalAssistant);
+		expect(findBot(listed, "personal-assistant-2")).toBe(secondAssistant);
 	});
 
 	it("never finds someone else's Personal Assistant", () => {
 		expect(findBot([someoneElses, ...bots], "personal-assistant")).toBeUndefined();
-	});
-});
-
-describe("making a bot personal", () => {
-	it("asks again who reaches the bot's default project", async () => {
-		const reachers = [sam, juno].map(({ id, name }) => testMember({ id, name }));
-		client.api.projects.listMembersReaching.mockReturnValue(Effect.succeed(reachers));
-		client.api.bots.update.mockReturnValue(
-			Effect.succeed({ ...triager, visibility: "personal" as const }),
-		);
-		const { result } = renderHook(
-			() => ({
-				members: useMembersReachingProject(triager.defaultProjectId),
-				update: useUpdateBot(triager.id),
-			}),
-			{ wrapper: InRoute },
-		);
-		await waitFor(() => expect(result.current.members.isSuccess).toBe(true));
-		client.api.projects.listMembersReaching.mockReturnValue(Effect.succeed(reachers.slice(0, 1)));
-
-		await act(() => result.current.update.mutateAsync({ visibility: "personal" }));
-
-		await waitFor(() => expect(result.current.members.data).toEqual(reachers.slice(0, 1)));
-	});
-
-	it("takes it off the bots lists of the projects it was in", async () => {
-		const [project] = projects;
-		client.api.projects.listBots.mockReturnValue(Effect.succeed([triager, linear]));
-		client.api.bots.update.mockReturnValue(
-			Effect.succeed({ ...triager, visibility: "personal" as const }),
-		);
-		const { result } = renderHook(
-			() => ({
-				projectBots: useProjectBots(project?.id),
-				update: useUpdateBot(triager.id),
-			}),
-			{ wrapper: InRoute },
-		);
-		await waitFor(() => expect(result.current.projectBots.isSuccess).toBe(true));
-		client.api.projects.listBots.mockReturnValue(Effect.succeed([linear]));
-
-		await act(() => result.current.update.mutateAsync({ visibility: "personal" }));
-
-		await waitFor(() => expect(result.current.projectBots.data).toEqual([linear]));
 	});
 });
 
@@ -152,19 +102,3 @@ describe("quick changes to bots", () => {
 		expect(rosterIn(queries)?.find((bot) => bot.id === linear.id)?.name).toBe("Renamed linear");
 	});
 });
-
-/** Renders `children` inside a route, where `useWorkspace` reads the workspace from. */
-function InRoute({ children, queries: given }: { children: ReactNode; queries?: QueryClient }) {
-	const [queries] = useState(() => given ?? createQueryClient());
-	const [router] = useState(() =>
-		createRouter({
-			routeTree: createRootRoute({ component: () => children }),
-			history: createMemoryHistory(),
-		}),
-	);
-	return (
-		<QueryClientProvider client={queries}>
-			<RouterProvider router={router} />
-		</QueryClientProvider>
-	);
-}

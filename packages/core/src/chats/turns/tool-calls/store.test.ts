@@ -8,15 +8,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { BlobStore } from "../../../blob-store/blob-store.ts";
 import { query } from "../../../database/database.ts";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
-import {
-	bot,
-	connector,
-	member,
-	membership,
-	toolCall,
-	turn,
-	workspace,
-} from "../../../database/schema.ts";
+import { bot, connector, toolCall, turn, workspace } from "../../../database/schema.ts";
 import {
 	closeDatabase,
 	holdTransaction,
@@ -25,6 +17,7 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../../database/testing.ts";
+import { createTestMember } from "../../../database/workspace.test-support.ts";
 import { asMember } from "../../../operations/chats/testing.ts";
 import { type CallOperation, servedOperations } from "../../../operations/testing.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
@@ -506,15 +499,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		await onDatabase((db) =>
 			db.update(bot).set({ visibility: "personal" }).where(eq(bot.id, botId)),
 		);
-		const [stranger] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Kim", email: `stranger-${crypto.randomUUID()}@example.com` })
-				.returning(),
-		);
-		if (!stranger) throw new Error("fixture");
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId: stranger.id, role: "editor" }),
+		const stranger = await createTestMember(
+			{ name: "Kim", email: `stranger-${crypto.randomUUID()}@example.com` },
+			{ workspaceId, role: "editor" },
 		);
 
 		await expect(
@@ -524,15 +511,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 	it("refuses a decision to somebody who reaches the bot but may not decide", async () => {
 		const pending = await park(askedCall({ toolCallId: "sdk-viewer" }));
-		const [viewer] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Lee", email: `viewer-${crypto.randomUUID()}@example.com` })
-				.returning(),
-		);
-		if (!viewer) throw new Error("fixture");
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId: viewer.id, role: "viewer" }),
+		const viewer = await createTestMember(
+			{ name: "Lee", email: `viewer-${crypto.randomUUID()}@example.com` },
+			{ workspaceId, role: "viewer" },
 		);
 
 		await expect(
@@ -639,15 +620,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 		it("leaves a call to the member its turn acts for, not another administrator", async () => {
 			const pending = await park(workflowCall());
-			const [administrator] = await onDatabase((db) =>
-				db
-					.insert(member)
-					.values({ name: "Ada", email: `admin-${crypto.randomUUID()}@example.com` })
-					.returning(),
-			);
-			if (!administrator) throw new Error("fixture");
-			await onDatabase((db) =>
-				db.insert(membership).values({ workspaceId, memberId: administrator.id, role: "admin" }),
+			const administrator = await createTestMember(
+				{ name: "Ada", email: `admin-${crypto.randomUUID()}@example.com` },
+				{ workspaceId, role: "admin" },
 			);
 
 			await expect(

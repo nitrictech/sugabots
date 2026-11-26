@@ -1,8 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import type { ParsedLocation, RouterHistory } from "@tanstack/react-router";
-import { createRouter, RouterProvider } from "@tanstack/react-router";
+import { createRouter, defaultStringifySearch, RouterProvider } from "@tanstack/react-router";
 import { followTrail, historyIndex } from "@/lib/history-trail.ts";
 import { matchesMedia, REDUCED_MOTION, SIDE_BY_SIDE } from "@/lib/media.ts";
+import { hasSettingsOpen, type SettingsLocation, settingsLocationOf } from "@/lib/open-settings.ts";
 import { type Session, SessionContext } from "@/lib/session.ts";
 import { PageFailure } from "@/shell/PageFailure.tsx";
 import { approvalRoute, approvalsIndexRoute, approvalsRoute } from "./routes/approvals.tsx";
@@ -51,14 +52,7 @@ import {
 	projectsRoute,
 } from "./routes/projects.tsx";
 import { type RouterContext, rootRoute } from "./routes/root.tsx";
-import {
-	settingsDefaultModelRoute,
-	settingsMemberRoute,
-	settingsProviderRoute,
-	settingsRoute,
-	settingsSectionRoute,
-	settingsSystemModelRoute,
-} from "./routes/settings.tsx";
+import { settingsPageRoute, settingsRoute } from "./routes/settings.tsx";
 import { invitationRoute, joinRoute, resetPasswordRoute, signInRoute } from "./routes/sign-in.tsx";
 import {
 	homeRoute,
@@ -85,10 +79,10 @@ import { workspaceSetupRoute } from "./routes/workspace-setup.tsx";
  *   /connectors/oauth/return        where a connector's sign-in comes back
  *   /connectors/github/return       where installing a project's GitHub app comes back
  *   /workspace-setup         setting up a workspace, the first or another
- *   /$workspace              the member's Personal Assistant
- *   /$workspace/home         on a phone, Home: the Personal Assistant, projects and pinned bots
+ *   /$workspace              the member's oldest Personal Assistant
+ *   /$workspace/home         on a phone, Home: the Personal Assistants, projects and pinned bots
  *   /$workspace/you          on a phone, You: the workspace, its settings and signing out
- *   /$workspace/settings     workspace settings
+ *   /$workspace/settings[/…]   where settings were before they were a dialog, which opens them
  *   /$workspace/approvals    every approval across the workspace
  *   /$workspace/approvals/$call   one of them in full, by its tool call's id
  *   /$workspace/projects     every project the member is in or could join
@@ -109,10 +103,16 @@ import { workspaceSetupRoute } from "./routes/workspace-setup.tsx";
  *   /$workspace/bots/$bot/computer   its computer
  *   /$workspace/bots/$bot/automations[/new|/$automation]   its automations
  *   /$workspace/chats/$chat   a chat by its id alone, which goes on to its bot's address
- *   /$workspace/settings/members/$membership   one member, by membership id
- *   /$workspace/settings/providers/$provider   one model provider
- *   /$workspace/settings/providers/default  the model new bots start on
- *   /$workspace/settings/providers/system   the model the system bots use
+ *
+ * Your settings and the workspace's open over any of these as a dialog,
+ * which the search names as `?settings=` and the page of them open:
+ *
+ *   ?settings=                  the list of sections, with General beside it on a laptop
+ *   ?settings=$section          a section, such as `members` or `notifications`
+ *   ?settings=members/$membership   one member, by membership id
+ *   ?settings=providers/$provider   one model provider
+ *   ?settings=providers/default   the model new bots start on
+ *   ?settings=providers/system    the model the system bots use
  *
  * A bot's address uses its handle, unique in its workspace, rather than its
  * name, so renaming a bot keeps its links. An automation run has no address
@@ -135,11 +135,7 @@ const routeTree = rootRoute.addChildren([
 	shellRoute.addChildren([
 		workspaceIndexRoute,
 		settingsRoute,
-		settingsSectionRoute,
-		settingsMemberRoute,
-		settingsSystemModelRoute,
-		settingsDefaultModelRoute,
-		settingsProviderRoute,
+		settingsPageRoute,
 		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
 		youRoute,
 		homeRoute,
@@ -193,17 +189,29 @@ function isOwnerPath(pathname: string): boolean {
  * from a tablet up, `rail` between the sidebar and a bot's or a project's own
  * pages, on which its marks move between the sidebar's rows and the icon rail.
  * None under reduced motion, as the browser would otherwise cross-fade the pages.
+ *
+ * Whether the rail was showing is judged by the page the last navigation went
+ * to, not the one the router last finished on: a page that sends on to
+ * another as it opens, as a project's opens its newest chat, is still opening
+ * when it does, so judged by the page before, it would start a second `rail`
+ * transition that cuts the first short.
  */
-function pageTransition(locations: {
-	fromLocation?: ParsedLocation;
-	toLocation: ParsedLocation;
-	hrefChanged: boolean;
-}): string[] | false {
-	if (matchesMedia(REDUCED_MOTION)) return false;
-	if (!matchesMedia(SIDE_BY_SIDE)) return phoneSlide(locations);
-	const { fromLocation, toLocation } = locations;
-	if (!fromLocation) return false;
-	return isOwnerPath(fromLocation.pathname) !== isOwnerPath(toLocation.pathname) ? ["rail"] : false;
+function pageTransitions() {
+	let railShowing: boolean | undefined;
+	return (locations: {
+		fromLocation?: ParsedLocation;
+		toLocation: ParsedLocation;
+		hrefChanged: boolean;
+	}): string[] | false => {
+		const { fromLocation, toLocation } = locations;
+		const railWasShowing =
+			railShowing ?? (fromLocation !== undefined && isOwnerPath(fromLocation.pathname));
+		railShowing = isOwnerPath(toLocation.pathname);
+		if (matchesMedia(REDUCED_MOTION)) return false;
+		if (!matchesMedia(SIDE_BY_SIDE)) return phoneSlide(locations);
+		if (!fromLocation) return false;
+		return railWasShowing !== railShowing ? ["rail"] : false;
+	};
 }
 
 /**
@@ -237,20 +245,44 @@ function phoneSlide({
 	return [toIndex > fromIndex ? "forward" : "back"];
 }
 
-/** Whether `pathname` is one of the settings, or a phone's You tab, which lists them. */
-function isSettingsPath(pathname: string): boolean {
-	const [section] = pathname.split("/").filter(Boolean).slice(1);
-	return section === "settings" || section === "you";
+/** Whether `location` has settings open, or is a phone's You tab, which lists them. */
+function isSettingsLocation(location: ParsedLocation): boolean {
+	const [section] = location.pathname.split("/").filter(Boolean).slice(1);
+	return section === "you" || hasSettingsOpen(location);
 }
 
 /**
- * A page's depth, and a step more while a run is open over it, as a
- * notification or its automation opens one, which the address names in its
- * search rather than its path.
+ * A page's depth, and more for what its address names in its search rather
+ * than its path: a step while a run is open over it, as a notification or
+ * its automation opens one, and the depth of any settings page open over it.
  */
 function locationDepth(location: ParsedLocation): number {
-	const search = location.search as { nestedChatPage?: unknown };
-	return pageDepth(location.pathname) + (search.nestedChatPage !== undefined ? 1 : 0);
+	const search = location.search as { nestedChatPage?: unknown; settings?: unknown };
+	const settings = settingsLocationOf(search.settings);
+	return (
+		pageDepth(location.pathname) +
+		(search.nestedChatPage !== undefined ? 1 : 0) +
+		(settings ? settingsDepth(settings) : 0)
+	);
+}
+
+/**
+ * How far into the settings a page of them is on a phone, from the page they
+ * are open over: a section is one in, as is the list a wider screen opens;
+ * a member, a provider or a default model, a step past its section; and
+ * Notifications, opened from your account, a step past it too.
+ */
+function settingsDepth(page: SettingsLocation): number {
+	switch (page.kind) {
+		case "sections":
+			return 1;
+		case "section":
+			return page.section === "notifications" ? 2 : 1;
+		case "member":
+		case "provider":
+		case "model":
+			return 2;
+	}
 }
 
 /**
@@ -278,12 +310,17 @@ function pageDepth(pathname: string): number {
 		case "you":
 		case "home":
 			return 0;
-		case "settings":
-			// Opened from You, so one in at least, and a step more for each part of the address.
-			return 1 + rest.length;
 		default:
 			return 0;
 	}
+}
+
+/**
+ * The search as the router writes it, but with its slashes left as they are,
+ * which a query may hold: `?settings=members/…` rather than `members%2F…`.
+ */
+function stringifySearchWithReadableSlashes(search: Record<string, unknown>): string {
+	return defaultStringifySearch(search).replaceAll("%2F", "/");
 }
 
 export function createAppRouter(options?: {
@@ -296,10 +333,11 @@ export function createAppRouter(options?: {
 		// Supplied by `RouterProvider` once the session is known.
 		context: undefined as unknown as RouterContext,
 		defaultPreload: "intent",
-		defaultViewTransition: { types: pageTransition },
+		defaultViewTransition: { types: pageTransitions() },
 		// Back to a list of settings returns to where it was left, not its top. Only settings:
 		// a chat opens at its latest instead. What scrolls is named by `data-scroll-restoration-id`.
-		scrollRestoration: ({ location }) => isSettingsPath(location.pathname),
+		scrollRestoration: ({ location }) => isSettingsLocation(location),
+		stringifySearch: stringifySearchWithReadableSlashes,
 		// A boundary for every route, so a failed page is replaced inside its parent and the sidebar
 		// stays. The router's own boundary is above the root.
 		defaultErrorComponent: PageFailure,

@@ -3,8 +3,9 @@ import type { InputOf } from "@sugabots/contracts/operations";
 import { and, eq, ne } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { query } from "../../database/database.ts";
-import { automationRun, bot, member, membership, workspace } from "../../database/schema.ts";
+import { automationRun } from "../../database/schema.ts";
 import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
+import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
 import { signedIn } from "../../operations/chats/testing.ts";
 import {
 	type CallOperation,
@@ -14,7 +15,6 @@ import {
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { lane } from "../../workflows/sql.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
-import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
 import { lanesForTests } from "../testing.ts";
 import { releaseTurn, runningTurns } from "../turns/testing.ts";
 import { Automation, AutomationRun, automationLane } from "./automation.workflow.ts";
@@ -80,53 +80,38 @@ export const releaseRun = (run: AutomationRun) =>
  */
 export async function anAutomationAdmin() {
 	const suffix = crypto.randomUUID();
-	const [somebody] = await onDatabase((db) =>
-		db
-			.insert(member)
-			.values({ name: "Automation admin", email: `automation-${suffix}@example.com` })
-			.returning(),
-	);
-	const [created] = await onDatabase((db) =>
-		db
-			.insert(workspace)
-			.values({ name: "Automation workspace", slug: `automation-${suffix}` })
-			.returning(),
-	);
-	if (!somebody || !created) throw new Error("Could not create automation test identity");
-	const memberId = somebody.id;
-	const workspaceId = created.id;
-	await onDatabase((db) => db.insert(membership).values({ workspaceId, memberId, role: "admin" }));
-	const [automationBot] = await onDatabase((db) =>
-		db
-			.insert(bot)
-			.values({
-				workspaceId,
+	const {
+		workspace: space,
+		project,
+		members: { admin },
+	} = await createWorkspaceFixture(
+		{ name: "Automation workspace", slug: `automation-${suffix}` },
+		{ admin: { name: "Automation admin", role: "admin" } },
+		({ admin }) => ({
+			bot: {
 				name: "Automation Bot",
 				handle: handleFromName(`Automation Bot ${suffix}`),
 				color: "green",
-				eyes: "pill",
 				model: "test/model",
-				createdById: memberId,
-			})
-			.returning(),
-	);
-	if (!automationBot) throw new Error("Could not create automation test bot");
-	const project = await onDatabase((db) =>
-		seedProject(db, {
-			workspaceId,
-			name: "Automation project",
-			slug: `automation-${suffix}`,
-			createdById: memberId,
-			leadBotId: automationBot.id,
+				createdById: admin.id,
+			},
+			project: {
+				name: "Automation project",
+				slug: `automation-${suffix}`,
+				createdById: admin.id,
+			},
 		}),
 	);
+	const memberId = admin.id;
+	const workspaceId = space.id;
 	const projectId = project.id;
+	const botId = project.leadBotId;
 	return {
 		memberId,
 		workspaceId,
 		projectId,
-		botId: automationBot.id,
-		ownProjectId: await runOnPostgres(defaultProjectOf(automationBot.id)),
+		botId,
+		ownProjectId: await runOnPostgres(defaultProjectOf(botId)),
 	};
 }
 

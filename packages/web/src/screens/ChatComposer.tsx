@@ -165,7 +165,7 @@ export function ChatComposer({
 	addressed,
 	attachments,
 	notice,
-	held = false,
+	held,
 }: {
 	/** Names the box for assistive technology, and is its placeholder unless `placeholder` says otherwise. */
 	label: string;
@@ -202,8 +202,12 @@ export function ChatComposer({
 	attachments?: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
 	/** A strip over everything else in the box, of what the member should know before sending, such as a connector bots can't use. */
 	notice?: ReactNode;
-	/** Send is off, as while a bot the message must go to has no model; `notice` says why. */
-	held?: boolean;
+	/**
+	 * What holds the message back, as a bot it must go to having no model. It
+	 * shows by Send in the model's place, on a phone too, and Send is off while
+	 * there is one.
+	 */
+	held?: ReactNode;
 }) {
 	const attachedFiles = attachments?.items ?? [];
 	const id = useId();
@@ -441,7 +445,7 @@ export function ChatComposer({
 					<button
 						type="submit"
 						aria-label={submitLabel}
-						disabled={held || sending || !canSend(value, attachedFiles)}
+						disabled={!!held || sending || !canSend(value, attachedFiles)}
 						className="focus-ring order-4 ml-auto grid size-7.5 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full motion-safe:animate-rise"
 					>
 						<ArrowUp size={16} strokeWidth={2.25} className="max-md:size-4.5" />
@@ -452,21 +456,34 @@ export function ChatComposer({
 				<div aria-live="polite" className="min-w-0 flex-1 text-destructive-text empty:hidden">
 					{error}
 				</div>
-				<SendNote>{filesNote(attachedFiles) ?? model ?? "Enter to send"}</SendNote>
+				{held ? (
+					<HeldNote>{held}</HeldNote>
+				) : (
+					<SendNote>{filesNote(attachedFiles) ?? model ?? "Enter to send"}</SendNote>
+				)}
 			</div>
 		</form>
 	);
 }
 
 /**
- * By Send: what holds the message back, else the model that answers, else how
- * to send it. A phone, with its own Send key, has none.
+ * By Send: what is attached, else the model that answers, else how to send
+ * it. A phone, with its own Send key, has none.
  */
 function SendNote({ children }: { children: ReactNode }) {
 	return (
 		<span className="ml-auto min-w-0 truncate text-subtle-foreground text-xs max-md:hidden [@media(hover:none)]:hidden">
 			{children}
 		</span>
+	);
+}
+
+/** By Send, in the model's place: why it is off. A phone shows it too, since nothing else says. */
+function HeldNote({ children }: { children: ReactNode }) {
+	return (
+		<div className="ml-auto flex min-w-0 flex-col items-end gap-1 text-right text-muted-foreground text-xs">
+			{children}
+		</div>
 	);
 }
 

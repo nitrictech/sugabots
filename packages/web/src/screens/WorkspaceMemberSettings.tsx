@@ -7,15 +7,15 @@ import {
 	workspaceRoleDescription,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
-import { Link, linkOptions, useRouter } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { memberSettingsLink, settingsSectionLink } from "@/lib/links.ts";
 import { formatDate, formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { projectHeadcount } from "@/lib/project-headcount.ts";
 import { usePlaceProjectMember, useProjectMembers, useProjects } from "@/lib/projects.ts";
-import { useBackTarget, useBackToHere } from "@/lib/settings-back.tsx";
 import {
 	type InvitationFailure,
 	sendInvitations,
@@ -141,7 +141,6 @@ function Roster({
 	currentUserId?: string;
 	memberships: ReturnType<typeof useMemberships>;
 }) {
-	const backToMembers = useBackToHere("Members");
 	const invitations = useWorkspaceInvitations(workspaceId);
 	const cleanupPending = useMembershipCleanupPending(workspaceId, memberships.dataUpdatedAt);
 	const [inviting, setInviting] = useState(false);
@@ -158,7 +157,7 @@ function Roster({
 		>
 			{cleanupPending && (
 				<Success>
-					Member removed. Their Personal Assistant’s computer cleanup will finish in the background.
+					Member removed. Their Personal Assistants’ computer cleanup will finish in the background.
 				</Success>
 			)}
 			{memberships.isPending ? (
@@ -179,14 +178,7 @@ function Roster({
 							sub={membership.member.email}
 							trailing={<SettingsValue>{workspaceRoleLabel(membership.role)}</SettingsValue>}
 							chevron
-							render={
-								<Link
-									from="/$workspace"
-									to="./settings/members/$membership"
-									params={{ membership: membership.id }}
-									state={backToMembers}
-								/>
-							}
+							render={<Link {...memberSettingsLink(membership)} />}
 						/>
 					))}
 				</SettingsGroup>
@@ -316,10 +308,6 @@ function MemberPage({
 	const { leaveForPage } = useLeave();
 	const [confirming, setConfirming] = useState(false);
 	const [transferring, setTransferring] = useState(false);
-	const back = useBackTarget({
-		label: "Members",
-		render: <Link from="/$workspace" to="./settings/$section" params={{ section: "members" }} />,
-	});
 	const role = membership.role;
 	const isOwner = role === "owner";
 	const listedProjects =
@@ -342,21 +330,18 @@ function MemberPage({
 		if (!isYou) {
 			// Back to Members, or Members in their page's place, so Back never returns to
 			// somebody no longer here.
-			leaveForPage(
-				router.buildLocation(
-					linkOptions({
-						from: "/$workspace",
-						to: "./settings/$section",
-						params: { section: "members" },
-					}),
-				).href,
-			);
+			leaveForPage(router.buildLocation(settingsSectionLink("members")).href);
 		}
 	}
 
 	return (
 		<SettingsPage
-			back={<PageBackLink {...back} />}
+			back={
+				<PageBackLink
+					label="Members"
+					render={<Link {...settingsSectionLink("members")} aria-label="Back to Members" />}
+				/>
+			}
 			hero={<MemberAvatar member={membership.member} size={44} />}
 			title={membership.member.name}
 			description={membership.member.email}
@@ -459,8 +444,8 @@ function MemberPage({
 				title={isYou ? "Leave this workspace?" : `Remove ${membership.member.name}?`}
 				description={
 					isYou
-						? "You leave every project in it, and your Personal Assistant and its chats are deleted. Getting back in means somebody inviting you again."
-						: "They leave this workspace and every project in it, and their Personal Assistant and its chats are deleted. Projects and bots they made stay."
+						? "You leave every project in it, and your Personal Assistants and their chats are deleted. Getting back in means somebody inviting you again."
+						: "They leave this workspace and every project in it, and their Personal Assistants and their chats are deleted. Projects and other bots they made stay."
 				}
 				confirmLabel={isYou ? "Leave" : "Remove"}
 				pending={ending.isPending}

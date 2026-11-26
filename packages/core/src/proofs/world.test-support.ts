@@ -6,8 +6,8 @@
  * In workspace A, Ed (an editor) made the public bot Pub, which leads the
  * private project J with the bot Helper in it, and his personal bot Personal;
  * Ed, Vi (a viewer) and Quinn (an editor) are in J, and Erin (an editor) is
- * not. Ed also has a Personal Assistant. K is another project, which Ed is in
- * and Pub isn't. Ed is an admin of workspace B, which has its own project.
+ * not. Ed also has a Personal Assistant, a personal bot too. K is another
+ * project, which Ed is in and Pub isn't. Ed is an admin of workspace B, which has its own project.
  */
 
 import type { RunTriggerKind } from "@sugabots/contracts";
@@ -70,6 +70,8 @@ export interface World {
 		readonly pubChat: string;
 		/** One of Ed's Personal Assistant's chats. */
 		readonly assistantChat: string;
+		/** One of Ed's personal bot Personal's chats. */
+		readonly personalChat: string;
 	};
 	readonly b: {
 		readonly workspace: string;
@@ -105,6 +107,7 @@ export async function buildWorld(): Promise<World> {
 	const otherChat = await seedProjectChat(a, otherProject, ed);
 	const pubChat = await seedProjectChat(a, pub.defaultProject, ed);
 	const assistantChat = await seedProjectChat(a, assistant.defaultProject, ed);
+	const personalChat = await seedProjectChat(a, personal.defaultProject, ed);
 
 	const b = await seedWorkspace();
 	await addMembership(b, ed, "admin");
@@ -135,6 +138,7 @@ export async function buildWorld(): Promise<World> {
 			otherChat,
 			pubChat,
 			assistantChat,
+			personalChat,
 		},
 		b: { workspace: b, bot: bBot, project: bProject, chat: bChat },
 	};

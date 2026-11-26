@@ -1,4 +1,3 @@
-import type { ConnectorAccess, ConnectorTool } from "@sugabots/contracts";
 import type { TestConnector } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
@@ -10,6 +9,7 @@ import {
 	StoryApp,
 	storyProjects,
 } from "../story-app.test-support.tsx";
+import { storyConnector } from "./connector-story.test-support.ts";
 
 /*
  * A project's connectors, as its Connectors page shows them: each service its bots
@@ -21,51 +21,9 @@ import {
 const API = import.meta.env.VITE_API_URL as string;
 const projectPath = `/nitric/projects/${revenue.slug}/connectors`;
 
-/** A connector whose tools are all at `access`. */
-function connector(
-	n: number,
-	{
-		access = "allow",
-		tools = [
-			{ name: "list_issues", description: "List issues", readOnly: true, destructive: false },
-			{ name: "create_issue", description: "Open an issue", readOnly: false, destructive: false },
-		],
-		...over
-	}: Partial<Omit<TestConnector, "tools">> &
-		Pick<TestConnector, "name" | "handle" | "url"> & {
-			access?: ConnectorAccess;
-			tools?: ConnectorTool[];
-		},
-): TestConnector {
-	return {
-		id: `0199a3a0-0000-7000-8000-0000000008${String(n).padStart(2, "0")}`,
-		workspaceId: revenue.workspaceId,
-		projectId: revenue.id,
-		kind: "mcp",
-		auth: "header",
-		signedIn: true,
-		signInExpired: false,
-		secretHeader: "Authorization",
-		hasSecret: true,
-		appSettingsUrl: null,
-		status: "connected",
-		tools: tools.map((tool) => ({ ...tool, access })),
-		lastTestError: null,
-		connectedBy: {
-			id: "0199a3a0-0000-7000-8000-000000000009",
-			name: "Rowan Ellis",
-			email: "rowan@example.com",
-			image: null,
-		},
-		signedInAs: null,
-		createdAt: "2026-09-01T00:00:00.000Z",
-		...over,
-	};
-}
-
 /** One in each state the design draws: allowed, asking, off, failing its test, and not yet signed in. */
 const connectors: TestConnector[] = [
-	connector(1, {
+	storyConnector("0801", {
 		name: "Linear",
 		handle: "linear",
 		url: "https://mcp.linear.app/mcp",
@@ -80,7 +38,7 @@ const connectors: TestConnector[] = [
 		},
 	}),
 	{
-		...connector(6, {
+		...storyConnector("0806", {
 			name: "GitHub",
 			handle: "github",
 			url: "https://api.githubcopilot.com/mcp/",
@@ -116,7 +74,7 @@ const connectors: TestConnector[] = [
 			},
 		],
 	},
-	connector(2, {
+	storyConnector("0802", {
 		name: "Sentry",
 		handle: "sentry",
 		url: "https://mcp.sentry.dev/mcp",
@@ -125,7 +83,7 @@ const connectors: TestConnector[] = [
 			{ name: "search_issues", description: "Find errors", readOnly: true, destructive: false },
 		],
 	}),
-	connector(3, {
+	storyConnector("0803", {
 		name: "Team wiki",
 		handle: "wiki",
 		url: "https://wiki.example.com/mcp",
@@ -134,7 +92,7 @@ const connectors: TestConnector[] = [
 			{ name: "search_pages", description: "Search pages", readOnly: true, destructive: null },
 		],
 	}),
-	connector(4, {
+	storyConnector("0804", {
 		name: "Stripe",
 		handle: "stripe",
 		url: "https://mcp.stripe.com",
@@ -142,7 +100,7 @@ const connectors: TestConnector[] = [
 		lastTestError:
 			"The server didn't accept the access token or secret. Check that it hasn't expired and was copied in full (HTTP 401)",
 	}),
-	connector(5, {
+	storyConnector("0805", {
 		name: "Notion",
 		handle: "notion",
 		url: "https://mcp.notion.com/mcp",
@@ -155,7 +113,7 @@ const connectors: TestConnector[] = [
 		status: "missing_key",
 		tools: [],
 	}),
-	connector(6, {
+	storyConnector("0806", {
 		name: "Asana",
 		handle: "asana",
 		url: "https://mcp.asana.com/sse",

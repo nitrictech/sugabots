@@ -1,4 +1,4 @@
-import { WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
+import type { WorkspaceRole } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
 import {
 	type Actor,
@@ -38,13 +38,6 @@ const personalBotBy = (createdById: string): BotFacts => ({
 	visibility: "personal",
 	createdById,
 	assistantOf: null,
-});
-
-/** A Personal Assistant, which the workspace makes rather than its member. */
-const assistantOf = (memberId: string): BotFacts => ({
-	visibility: "personal",
-	createdById: null,
-	assistantOf: memberId,
 });
 
 /**
@@ -176,20 +169,6 @@ const MANAGING_A_BOT: BotPermission[] = [
 	"computer.manage",
 ];
 
-/**
- * What a member may do with their Personal Assistant besides use it: change its
- * look and connectors, and manage and run its automations.
- */
-const OWNING_AN_ASSISTANT: BotPermission[] = ["bot.update", "automation.manage", "automation.run"];
-
-/** Everything that concerns a bot's automations, which on a Personal Assistant are its member's alone. */
-const AUTOMATIONS: Array<BotPermission & ProjectPermission> = [
-	"automation.read",
-	"automation.manage",
-	"automation.run",
-	"automation.history.read",
-];
-
 describe("workspace actions", () => {
 	it.each(WORKSPACE_PERMISSIONS)("the owner may %s", (permission) => {
 		expect(mayInWorkspace(actor("owner"), permission)).toBe(true);
@@ -274,9 +253,6 @@ describe("a bot's default project", () => {
 		const personalOne = defaultProjectOf(personalBotBy(BOB));
 		expect(mayInProject(actor("editor", BOB), "project.read", personalOne)).toBe(true);
 		expect(mayInProject(actor("editor"), "project.read", personalOne)).toBe(false);
-		const assistants = defaultProjectOf(assistantOf(BOB));
-		expect(mayInProject(actor("editor", BOB), "project.read", assistants)).toBe(true);
-		expect(mayInProject(actor("owner"), "project.read", assistants)).toBe(false);
 	});
 
 	it("lets an admin manage what a personal bot's default project holds, but not see its chats", () => {
@@ -334,15 +310,9 @@ describe("reaching a bot", () => {
 		expect(reachesBot(actor("owner"), personalBotBy(BOB))).toBe(false);
 	});
 
-	it("lets only its member reach a Personal Assistant", () => {
-		expect(reachesBot(actor("viewer"), assistantOf(ALICE))).toBe(true);
-		expect(reachesBot(actor("owner", BOB), assistantOf(ALICE))).toBe(false);
-	});
-
 	it("lets nobody outside the workspace reach any bot, even one they made", () => {
 		expect(reachesBot(actor(undefined), publicBotBy(ALICE))).toBe(false);
 		expect(reachesBot(actor(undefined), personalBotBy(ALICE))).toBe(false);
-		expect(reachesBot(actor(undefined), assistantOf(ALICE))).toBe(false);
 	});
 });
 
@@ -392,42 +362,6 @@ describe("bot actions", () => {
 			expect(mayOnBot(actor("viewer"), permission, publicBotBy(ALICE))).toBe(false);
 		}
 	});
-
-	it.each(BOT_PERMISSIONS)(
-		"its member may %s on their Personal Assistant only to use it, or change its look, connectors and automations",
-		(permission) => {
-			expect(mayOnBot(actor("editor"), permission, assistantOf(ALICE))).toBe(
-				USING_A_BOT.includes(permission) || OWNING_AN_ASSISTANT.includes(permission),
-			);
-		},
-	);
-
-	it.each(AUTOMATIONS)(
-		"lets its member %s for their Personal Assistant's automations, whatever their role",
-		(permission) => {
-			const assistants = { isMember: false, defaultOf: assistantOf(ALICE) };
-			for (const role of WORKSPACE_ROLES) {
-				expect(mayInProject(actor(role), permission, assistants)).toBe(true);
-			}
-		},
-	);
-
-	it.each(AUTOMATIONS)(
-		"lets no administrator %s for another member's Personal Assistant's automations",
-		(permission) => {
-			const assistants = { isMember: false, defaultOf: assistantOf(ALICE) };
-			for (const role of ["owner", "admin"] as const) {
-				expect(mayInProject(actor(role, BOB), permission, assistants)).toBe(false);
-			}
-		},
-	);
-
-	it.each(BOT_PERMISSIONS)(
-		"nobody else may %s on a Personal Assistant, the workspace's owner included",
-		(permission) => {
-			expect(mayOnBot(actor("owner", BOB), permission, assistantOf(ALICE))).toBe(false);
-		},
-	);
 
 	it.each(BOT_PERMISSIONS)("somebody outside the workspace may not %s", (permission) => {
 		expect(mayOnBot(actor(undefined), permission, publicBotBy(ALICE))).toBe(false);

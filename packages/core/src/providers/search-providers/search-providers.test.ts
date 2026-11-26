@@ -2,8 +2,8 @@ import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { SearchProviderNotFound } from "@sugabots/contracts/errors/providers";
 import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { member, membership, workspace } from "../../database/schema.ts";
-import { closeDatabase, onDatabase } from "../../database/testing.ts";
+import { closeDatabase } from "../../database/testing.ts";
+import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
 import { servedOperations } from "../../operations/testing.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { unimplemented } from "../../testing.ts";
@@ -65,31 +65,19 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Search ${suffix}`, slug: `search-setup-${suffix}` })
-				.returning(),
+		const {
+			workspace: space,
+			members: { admin, editor },
+		} = await createWorkspaceFixture(
+			{ name: `Search ${suffix}`, slug: `search-setup-${suffix}` },
+			{
+				admin: { name: "Ada", email: `ada-${suffix}@example.com`, role: "admin" },
+				editor: { name: "Sam", email: `sam-${suffix}@example.com`, role: "editor" },
+			},
 		);
-		const [admin, editor] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Ada", email: `ada-${suffix}@example.com` },
-					{ name: "Sam", email: `sam-${suffix}@example.com` },
-				])
-				.returning(),
-		);
-		if (!space || !admin || !editor) throw new Error("fixture");
 		workspaceId = space.id;
 		adminId = admin.id;
 		editorId = editor.id;
-		await onDatabase((db) =>
-			db.insert(membership).values([
-				{ workspaceId, memberId: adminId, role: "admin" },
-				{ workspaceId, memberId: editorId, role: "editor" },
-			]),
-		);
 	});
 
 	it("refuses a local address where the server forbids private ones", async () => {

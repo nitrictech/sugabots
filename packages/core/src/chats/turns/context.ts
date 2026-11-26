@@ -458,13 +458,17 @@ const BROWSE_NATURALLY = [
 	"This is slower, and that's fine.",
 ].join("\n");
 
+/** What a personal bot is told of the permissions it works with. */
+const ACTS_FOR_CREATOR =
+	"You work with their permissions, across everything they can reach, and each change you make waits for their approval.";
+
 /** Who can talk to the bot and read its instructions. */
 function whoReachesYou(context: TurnContext): string {
 	if (context.bot.assistantOf !== null) {
-		return "You are a Personal Assistant: only your member talks to you or reads this chat.";
+		return `You are a Personal Assistant: only your member talks to you or reads this chat. ${ACTS_FOR_CREATOR}`;
 	}
 	return context.bot.visibility === "personal"
-		? "You are a personal bot: only the member who made you can talk to you or read your chats. Workspace admins can also read your instructions and manage your settings."
+		? `You are a personal bot: only the member who made you can talk to you or read your chats. Workspace admins can also read your instructions and manage your settings. ${ACTS_FOR_CREATOR}`
 		: "You are public: anyone in the workspace can talk to you, add you to their projects, and read your instructions.";
 }
 

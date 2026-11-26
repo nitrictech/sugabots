@@ -1,13 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import {
-	allowedHost,
-	blockedHost,
-	member,
-	membership,
-	projectAllowedHost,
-	workspace,
-} from "../database/schema.ts";
+import { allowedHost, blockedHost, projectAllowedHost } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import {
+	addTestMemberships,
+	createTestMember,
+	createTestWorkspace,
+} from "../database/workspace.test-support.ts";
 import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { reachOf, TRUSTED_HOSTS } from "./allowed-hosts.ts";
 import type { Computers } from "./computers.ts";
@@ -28,21 +26,10 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Hosts ${suffix}`, slug: `hosts-${suffix}` })
-				.returning(),
-		);
-		const [owner] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Sam", email: `hosts-${suffix}@example.com` })
-				.returning(),
-		);
-		if (!space || !owner) throw new Error("fixture");
+		const space = await createTestWorkspace({ name: `Hosts ${suffix}`, slug: `hosts-${suffix}` });
+		const owner = await createTestMember({ name: "Sam", email: `hosts-${suffix}@example.com` });
 		workspaceId = space.id;
-		await onDatabase((db) => db.insert(membership).values({ workspaceId, memberId: owner.id }));
+		await addTestMemberships({ workspaceId, memberId: owner.id, role: "editor" });
 		const aProject = async (name: string) => {
 			const made = await onDatabase((db) =>
 				seedProject(db, { workspaceId, name, slug: name.toLowerCase() }),

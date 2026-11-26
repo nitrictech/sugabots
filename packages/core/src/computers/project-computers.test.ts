@@ -2,26 +2,24 @@ import { ComputerUnavailable } from "@sugabots/contracts/errors/computers";
 import { eq, inArray } from "drizzle-orm";
 import { DateTime, type Duration, Effect, Exit, Fiber, Layer, Redacted, Scope } from "effect";
 import { afterAll, afterEach, describe, expect, it, onTestFinished } from "vitest";
-import { SystemWorkAuthentication } from "../authentication/system-work.ts";
 import { query, transaction } from "../database/database.ts";
 import {
 	computer,
 	computerDestruction,
 	computerLease,
 	computerProvider,
-	member,
-	membership,
 	project as projectTable,
 	workspace,
 } from "../database/schema.ts";
 import { closeDatabase, holdTransaction, onDatabase, runOnPostgres } from "../database/testing.ts";
-import { scheduledWorkOperations } from "../operations/scheduled-work.ts";
+import { createWorkspaceFixture } from "../database/workspace.test-support.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { unimplemented } from "../testing.ts";
 import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { ComputerProviderStore } from "./computer-provider-store.ts";
 import { ComputerSignIn } from "./computer-sign-in.ts";
 import type { Computers } from "./computers.ts";
+import { sweepIdleComputers } from "./project-computers.test-support.ts";
 import { ProjectComputers } from "./project-computers.ts";
 import { inMemoryComputers, type ProviderHold } from "./testing.ts";
 
@@ -109,26 +107,16 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 	);
 
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-	const [space] = await onDatabase((db) =>
-		db
-			.insert(workspace)
-			.values({ name: `Computer ${suffix}`, slug: `computer-${suffix}` })
-			.returning(),
+	const {
+		workspace: space,
+		members: { owner },
+		project: made,
+	} = await createWorkspaceFixture(
+		{ name: `Computer ${suffix}`, slug: `computer-${suffix}` },
+		{ owner: { name: "Sam", role: "editor" } },
+		() => ({ project: { name: "Launch", slug: "launch" } }),
 	);
-	const [owner] = await onDatabase((db) =>
-		db
-			.insert(member)
-			.values({ name: "Sam", email: `computer-${suffix}@example.com` })
-			.returning(),
-	);
-	if (!space || !owner) throw new Error("fixture");
 	workspacesMade.push(space.id);
-	await onDatabase((db) =>
-		db.insert(membership).values({ workspaceId: space.id, memberId: owner.id }),
-	);
-	const made = await onDatabase((db) =>
-		seedProject(db, { workspaceId: space.id, name: "Launch", slug: "launch" }),
-	);
 	const project: ProjectComputers.Project = { workspaceId: space.id, projectId: made.id };
 
 	/** A provider for the workspace at `serverUrl`, enabled, which disables any other. */
@@ -197,18 +185,7 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 					.where(eq(computer.projectId, project.projectId)),
 			),
 		/** Runs the scheduler's idle sweep: the computers idle now are put to sleep. */
-		sleepIdle: () =>
-			runOnPostgres(
-				Effect.gen(function* () {
-					const auth = yield* SystemWorkAuthentication.Service;
-					for (const computerId of yield* auth.idleComputerIds) {
-						const principal = yield* auth.computerSleep(computerId);
-						yield* scheduledWorkOperations["projectComputer.sleepIfIdle"]
-							.run(principal, { computerId }, { kind: "request", request: crypto.randomUUID() })
-							.pipe(Effect.provideService(ProjectComputers.Service, projectComputers));
-					}
-				}).pipe(Effect.provide(SystemWorkAuthentication.layer)),
-			),
+		sleepIdle: () => runOnPostgres(sweepIdleComputers(projectComputers)),
 	};
 	return world;
 }

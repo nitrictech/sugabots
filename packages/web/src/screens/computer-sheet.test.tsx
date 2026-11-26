@@ -1,6 +1,6 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { Effect } from "effect";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, it, vi } from "vitest";
 import {
 	apiAnswers,
 	chatWith,
@@ -27,16 +27,12 @@ async function openComputerSheet(bot: typeof linear) {
 }
 
 describe("a bot's computer sheet, while the bot has no computer", () => {
-	it("offers to turn one on to whoever manages its computer", async () => {
-		await openComputerSheet(linear);
+	it.each([
+		["a bot they manage", linear],
+		["their own Personal Assistant", personalAssistant],
+	])("offers to turn one on to whoever manages its computer, for %s", async (_, bot) => {
+		await openComputerSheet(bot);
 
 		screen.getByRole("button", { name: "Turn on computer" });
-	});
-
-	it("offers no computer for a Personal Assistant, which Sugabots sets up", async () => {
-		await openComputerSheet(personalAssistant);
-
-		expect(screen.queryByRole("button", { name: "Turn on computer" })).toBeNull();
-		screen.getByText("Sugabots sets up your Personal Assistant, its computer included.");
 	});
 });

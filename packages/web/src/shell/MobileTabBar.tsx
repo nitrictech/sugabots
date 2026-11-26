@@ -4,6 +4,7 @@ import { cn } from "cn";
 import { House, ShieldCheck } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useAttentionCounts } from "@/lib/chats.ts";
+import { useOpenSettings } from "@/lib/open-settings.ts";
 import { useSession } from "@/lib/session.ts";
 import { MemberAvatar } from "@/ui/avatar.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
@@ -119,17 +120,13 @@ function TabLink({
 
 /**
  * Which tab the page is under: anything in a project is Home's, an approval
- * is Approvals', and settings, reached from You, are You's.
+ * is Approvals', and settings, listed in You, are You's wherever they are open.
  */
 function useMobileTab(): MobileTab {
 	const matchRoute = useMatchRoute();
+	const settingsOpen = useOpenSettings() !== undefined;
+	if (settingsOpen || matchRoute({ to: "/$workspace/you", fuzzy: true })) return "you";
 	if (matchRoute({ to: "/$workspace/approvals", fuzzy: true })) return "approvals";
-	if (
-		matchRoute({ to: "/$workspace/you", fuzzy: true }) ||
-		matchRoute({ to: "/$workspace/settings", fuzzy: true })
-	) {
-		return "you";
-	}
 	return "home";
 }
 

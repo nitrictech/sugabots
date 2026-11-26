@@ -2,7 +2,7 @@ import type { CompleteWorkspaceSetup, ProviderModel } from "@sugabots/contracts"
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
-import { botsQuery, useEnsureAssistant } from "@/lib/bots.ts";
+import { botsQuery } from "@/lib/bots.ts";
 import { useProviderActions } from "@/lib/model-providers.ts";
 import { workspacesQuery } from "@/lib/workspace.ts";
 
@@ -39,19 +39,15 @@ export function useListFirstProviderModels(): (providerId: string) => Promise<vo
 
 /**
  * The second half of workspace setup's model step: switching `model` on for the
- * workspace and running the member's Personal Assistant on it, made now if
- * it is missing. Sugabots manages the assistant, so it moves onto `model`
- * only while it has no model the workspace offers.
+ * workspace. The first model switched on becomes the default, which the
+ * member's Personal Assistants with no model then run on.
  */
 export function useChooseFirstModel() {
 	const actions = useProviderActions();
-	const ensureAssistant = useEnsureAssistant();
 	return useMutation({
 		mutationFn: async ({ providerId, model }: { providerId: string; model: ProviderModel }) => {
-			if (!model.enabled) {
-				await actions.setModel.mutateAsync({ providerId, modelId: model.id, enabled: true });
-			}
-			await ensureAssistant.mutateAsync(model.modelId);
+			if (model.enabled) return;
+			await actions.setModel.mutateAsync({ providerId, modelId: model.id, enabled: true });
 		},
 	});
 }

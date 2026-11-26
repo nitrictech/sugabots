@@ -84,7 +84,7 @@ describe("managing, restricting and briefing bots", () => {
 			expect(await restricts(await as.member(a.admin), a.personal.id)).toBe("ok");
 		});
 
-		it("lets only its member manage a Personal Assistant, whatever their role, and nobody a system bot", async () => {
+		it("lets a Personal Assistant's member manage it whatever their role, and nobody a system bot", async () => {
 			const { a } = world;
 			const visAssistant = await seedBot(a.workspace, {
 				assistantOf: a.vi,
@@ -108,6 +108,7 @@ describe("managing, restricting and briefing bots", () => {
 			const inOwnChats = await as.botFor(a.ed, a.pub.id, a.pubChat);
 			const inProject = await as.botFor(a.ed, a.pub.id, a.chat);
 			const assistant = await as.botFor(a.ed, a.assistant.id, a.assistantChat);
+			const personal = await as.botFor(a.ed, a.personal.id, a.personalChat);
 			const { principal: run } = await as.run(a.workspace, a.project, a.pub.id);
 
 			const ownChats = await runOnPostgres(
@@ -120,19 +121,21 @@ describe("managing, restricting and briefing bots", () => {
 			expect(await manages(inProject, a.personal.id)).toBe("ResourceHidden");
 			expect(await manages(assistant, a.pub.id)).toBe("ok");
 			expect(await manages(assistant, a.personal.id)).toBe("ok");
+			expect(await manages(personal, a.pub.id)).toBe("ok");
+			expect(await manages(personal, a.helper.id)).toBe("ActionForbidden");
 			expect(await manages(run, a.pub.id)).toBe("ActionForbidden");
 			expect(await manages(run, a.personal.id)).toBe("ResourceHidden");
 		});
 	});
 
 	describe("CanRestrictBot", () => {
-		it("lets admins restrict any bot but a Personal Assistant, which is hidden to them", async () => {
+		it("lets admins restrict any bot members talk to, another member's Personal Assistant included", async () => {
 			const { a } = world;
 			for (const memberId of [a.admin, a.owner]) {
 				const admin = await as.member(memberId);
 				expect(await restricts(admin, a.personal.id)).toBe("ok");
 				expect(await restricts(admin, a.pub.id)).toBe("ok");
-				expect(await restricts(admin, a.assistant.id)).toBe("ResourceHidden");
+				expect(await restricts(admin, a.assistant.id)).toBe("ok");
 			}
 		});
 
@@ -156,7 +159,7 @@ describe("managing, restricting and briefing bots", () => {
 		});
 	});
 
-	it("proves bot deletion for managers and restriction, excluding assistants, system bots and interviews", async () => {
+	it("proves bot deletion for managers and restriction, Personal Assistants included, excluding system bots and interviews", async () => {
 		const { a } = world;
 		const who = await everyKindOfPrincipal(world, as);
 		const deletes = (principal: Principal, botId: string) =>
@@ -185,8 +188,14 @@ describe("managing, restricting and briefing bots", () => {
 			["run outside bounds", who.run, (await seedBot(a.workspace)).id, "ResourceHidden"],
 			["webhook", who.webhook, a.helper.id, "ResourceHidden"],
 			["page address", who.page, a.helper.id, "ResourceHidden"],
-			["own Personal Assistant", who.ed, a.assistant.id, "ActionForbidden"],
-			["other member’s Personal Assistant", who.admin, a.assistant.id, "ResourceHidden"],
+			["own Personal Assistant", who.ed, a.assistant.id, "ok"],
+			["admin restricting another member’s Personal Assistant", who.admin, a.assistant.id, "ok"],
+			[
+				"editor beside another member’s Personal Assistant",
+				who.erin,
+				a.assistant.id,
+				"ResourceHidden",
+			],
 			["system bot", who.admin, a.system.id, "ActionForbidden"],
 			["interview", who.pubInOwnChats, a.pub.id, "ActionForbidden"],
 			["bot in chat bounds", who.pubForEd, a.pub.id, "ActionForbidden"],

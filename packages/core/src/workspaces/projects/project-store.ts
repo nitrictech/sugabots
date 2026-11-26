@@ -132,7 +132,6 @@ export const make = Effect.gen(function* () {
 						and ${bot.id} = ${botId}
 						and ${bot.visibility} = 'public'
 						and ${bot.systemBotKey} is null
-						and ${bot.assistantOf} is null
 					where ${project.id} = ${projectId}
 					and ${project.workspaceId} = ${workspaceId}
 					for share of ${bot}

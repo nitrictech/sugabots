@@ -45,7 +45,7 @@ export const client = {
 			remove: vi.fn(),
 			pin: vi.fn(),
 			unpin: vi.fn(),
-			ensureAssistant: vi.fn(),
+			createAssistant: vi.fn(),
 		},
 		projects: {
 			list: vi.fn(),

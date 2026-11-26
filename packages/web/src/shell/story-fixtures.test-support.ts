@@ -117,6 +117,12 @@ export const chief = bot("Chief", "purple", "wink", "blob", {
 	assistant: true,
 	visibility: "personal",
 });
+/** Another Personal Assistant the viewer made after Chief, which is not in `storyBots`. */
+export const deputy = bot("Deputy", "teal", "pill", "squircle", {
+	assistant: true,
+	visibility: "personal",
+	createdAt: "2026-10-01T00:00:00.000Z",
+});
 
 export const revenue = project("a1", "Revenue", "green", growthDesk, 3);
 export const engineering = project("a2", "Engineering", "blue", linearHandler, 2);

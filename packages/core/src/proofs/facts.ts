@@ -22,6 +22,7 @@ import {
 	mayInProject,
 	mayOnBot,
 	type ProjectPermission,
+	personalBotCreator,
 	reachesBot,
 } from "../authorization/permissions.ts";
 import type { Executor } from "../database/database.ts";
@@ -53,12 +54,11 @@ export interface MemberPlace {
 	readonly inProject: boolean;
 }
 
-/** A bot's place: its workspace, whether the project has it, and on a Personal Assistant its member. */
-export interface BotPlace {
+/** A bot's place: its workspace, whether the project has it, and who it is for if it is personal. */
+export interface BotPlace extends BotFacts {
 	readonly id: string;
 	readonly workspace: string;
 	readonly inProject: boolean;
-	readonly assistantOf: string | null;
 	readonly usesComputer: boolean;
 	readonly deleting: boolean;
 }
@@ -136,6 +136,8 @@ const reachFactsWhere = (
 				role: membership.role,
 				projectMemberId: projectMember.id,
 				botWorkspace: actingBot.workspaceId,
+				botVisibility: actingBot.visibility,
+				botCreatedBy: actingBot.createdById,
 				botAssistantOf: actingBot.assistantOf,
 				botUsesComputer: actingBot.usesComputer,
 				botDeleting: botRemovalStarted(actingBot.id),
@@ -193,11 +195,13 @@ const reachFactsWhere = (
 						}
 					: undefined,
 				bot:
-					botId && row.botWorkspace
+					botId && row.botWorkspace && row.botVisibility
 						? {
 								id: botId,
 								workspace: row.botWorkspace,
 								inProject: row.botInProject,
+								visibility: row.botVisibility,
+								createdById: row.botCreatedBy,
 								assistantOf: row.botAssistantOf,
 								usesComputer: row.botUsesComputer ?? false,
 								deleting: row.botDeleting,
@@ -311,8 +315,8 @@ export function mayInProjectAs(
 
 /**
  * Whether the bot reaches the project: one it is in or leads, and its own
- * default project. A Personal Assistant reaches what its member reaches, so
- * only acting for that member.
+ * default project. A personal bot reaches what its creator reaches, so only
+ * acting for them.
  */
 function botReaches(
 	place: BotPlace | undefined,
@@ -320,22 +324,23 @@ function botReaches(
 	asker: MemberPlace | undefined,
 ): boolean {
 	if (!place || place.deleting || place.workspace !== project.workspace) return false;
-	if (place.assistantOf !== null) {
-		return place.assistantOf === asker?.actor.memberId && memberReaches(asker, project);
+	if (place.visibility === "personal") {
+		const creator = personalBotCreator(place);
+		return creator !== null && creator === asker?.actor.memberId && memberReaches(asker, project);
 	}
 	return project.defaultOf?.id === place.id || place.inProject || project.leadBot === place.id;
 }
 
 /**
  * Whether `actor` is one of the bot's managers: its creator, unless they are
- * now a viewer; an admin, for a bot that isn't personal; and for a Personal
- * Assistant, only its member. The grant tables' `bot.update` also lets an
- * admin manage a personal bot; the docs leave an admin only restricting one,
- * which `CanRestrictBot` proves.
+ * now a viewer and it isn't their Personal Assistant, and an admin, for a bot
+ * that isn't personal. The grant
+ * tables' `bot.update` also lets an admin manage a personal bot; the docs
+ * leave an admin only restricting one, which `CanRestrictBot` proves.
  */
 export function managesBot(actor: Actor, bot: BotFacts): boolean {
 	const updates = mayOnBot(actor, "bot.update", bot);
-	if (bot.assistantOf !== null || bot.visibility !== "personal") return updates;
+	if (bot.visibility !== "personal") return updates;
 	return updates && bot.createdById === actor.memberId;
 }
 
@@ -366,15 +371,11 @@ export function memberReachesBot(
 /**
  * Whether `actor` may restrict the bot: delete it or switch off its
  * automations and connectors, without reaching it, as an admin does another
- * member's personal bot. Admins see every bot but another member's Personal
- * Assistant, and a system bot can't be restricted.
+ * member's personal bot, a Personal Assistant included. A system bot can't be
+ * restricted.
  */
-export function restrictsBot(
-	actor: Actor,
-	bot: BotFacts & { readonly systemBot: boolean },
-): boolean {
-	if (!administers(actor) || bot.systemBot) return false;
-	return bot.assistantOf === null || memberReachesBot(actor, bot);
+export function restrictsBot(actor: Actor, bot: { readonly systemBot: boolean }): boolean {
+	return administers(actor) && !bot.systemBot;
 }
 
 /** The actor `memberId` is, with `role` in the workspace. */

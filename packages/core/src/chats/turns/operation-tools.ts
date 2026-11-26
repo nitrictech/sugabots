@@ -40,6 +40,9 @@ function isOfferedIn(
 	if (name === "chats.startBriefedChat" && !canWriteBrief(setting.reason)) return false;
 	// A Personal Assistant's instructions are Sugabots', so it has none of its own to save.
 	if (name === "bots.saveInstructions" && setting.bot.assistantOf !== null) return false;
+	// The workspace guide is a Personal Assistant's own: other personal bots have
+	// member bounds too, but aren't the workspace's guide.
+	if (name === "workspaces.guide" && setting.bot.assistantOf === null) return false;
 	if (name === "automations.createWithRoutine" || name === "automations.updateInChat") {
 		if (setting.projectId === null) return false;
 		if (

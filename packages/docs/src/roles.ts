@@ -18,11 +18,11 @@ const ADMINISTRATORS: readonly WorkspaceRole[] = ["owner", "admin"];
 
 /**
  * Editors change only the bots they made; administrators change every public
- * or private bot, may only delete another member's personal bot or pause its
- * automations, and never touch another member's Personal Assistant.
+ * or private bot, and may only delete another member's personal bot, a
+ * Personal Assistant included, or pause its automations.
  */
 const BOTS_THEY_MADE =
-	"Editors, for bots they made; the owner and admins, for every public or private bot, but another member's personal bot only to delete it or pause its automations, and never another member's Personal Assistant";
+	"Editors, for bots they made; the owner and admins, for every public or private bot, but another member's personal bot, Personal Assistants included, only to delete it or pause its automations";
 
 /** What each role may do, as the provers in packages/core/src/proofs/ allow it. */
 export const roleAbilities: readonly RoleAbility[] = [
@@ -37,11 +37,15 @@ export const roleAbilities: readonly RoleAbility[] = [
 		note: "The owner and admins are in every project members made",
 	},
 	{
-		label:
-			"Change their Personal Assistant's name, avatar, connectors and automations, run its automations and answer their approvals",
+		label: "Make, manage and delete their own Personal Assistants, and run their automations",
 		roles: EVERYONE,
+		note: "All but their instructions, which Sugabots keeps",
 	},
-	{ label: "Create bots", roles: ALL_BUT_VIEWERS },
+	{
+		label: "Create bots",
+		roles: ALL_BUT_VIEWERS,
+		note: "Personal Assistants aside, which everyone may make",
+	},
 	{
 		label: "Change and delete bots, with their connectors, computer and automations",
 		roles: ALL_BUT_VIEWERS,
@@ -49,8 +53,8 @@ export const roleAbilities: readonly RoleAbility[] = [
 	},
 	{
 		label: "Answer approvals from automation runs",
-		roles: ALL_BUT_VIEWERS,
-		note: "In chats they can see, of runs done by bots they manage: editors, bots they made; the owner and admins, every public or private bot. A Personal Assistant's runs ask only its member",
+		roles: EVERYONE,
+		note: "In chats they can see, of runs done by bots they manage: editors, bots they made; the owner and admins, every public or private bot. A personal bot's runs, a Personal Assistant's included, ask only its creator, even a viewer",
 	},
 	{
 		label: "Start automation runs",
@@ -64,8 +68,8 @@ export const roleAbilities: readonly RoleAbility[] = [
 	},
 	{
 		label: "Answer a bot's request to change a computer, such as a host it may reach",
-		roles: ALL_BUT_VIEWERS,
-		note: "Editors, in their own bots' chats; the owner and admins, in projects members made and public or private bots' chats",
+		roles: EVERYONE,
+		note: "Viewers, in their own Personal Assistants' chats; editors, in their own bots' chats; the owner and admins, in projects members made and public or private bots' chats",
 	},
 	{
 		label: "Mark chats resolved and reopen them",

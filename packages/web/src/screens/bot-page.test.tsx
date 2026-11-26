@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	apiAnswers,
 	bots,
+	juno,
 	linear,
 	MODELS,
 	mount,
@@ -15,6 +16,7 @@ import {
 	open,
 	pendingAnswer,
 	personalAssistant,
+	sam,
 	serveConnectors,
 	triager,
 } from "@/api.test-support.tsx";
@@ -126,6 +128,15 @@ describe("what everybody sees", () => {
 		within(profile).getByText("Added by");
 	});
 
+	it("says whether the bot is public or personal, with no way to change it", async () => {
+		mount(page);
+
+		const profile = await screen.findByRole("region", { name: "Profile" });
+		await within(profile).findByText("Visibility");
+		within(profile).getByText("Public");
+		expect(within(profile).queryByRole("switch")).toBeNull();
+	});
+
 	it("says a bot nobody added was made with the workspace", async () => {
 		rosterAnswers({ createdBy: null });
 		mount(page);
@@ -184,29 +195,18 @@ describe("an editor", () => {
 });
 
 describe("your Personal Assistant", () => {
-	it("offers only its avatar, its connectors and its automations to change", async () => {
+	it("offers all of it to change, as any personal bot of theirs, but its instructions and who may talk to it", async () => {
 		onWideScreen();
 		mount(`/suga/bots/${personalAssistant.handle}/settings`);
 
 		await screen.findByRole("textbox", { name: "Name" });
 		screen.getByRole("button", { name: "Change avatar" });
+		screen.getByRole("button", { name: /^Model/ });
+		screen.getByRole("region", { name: "Built-in tools" });
 		screen.getByRole("region", { name: "Connectors" });
-		const settings = screen.getByRole("region", { name: "Settings" });
-		within(settings).getByRole("link", { name: /^Automations/ });
-		expect(screen.queryByRole("button", { name: /^Model/ })).toBeNull();
+		screen.getByRole("button", { name: "Delete bot" });
 		expect(screen.queryByRole("textbox", { name: "Instructions" })).toBeNull();
-		expect(screen.queryByRole("region", { name: "Built-in tools" })).toBeNull();
-		expect(screen.queryByRole("button", { name: "Delete bot" })).toBeNull();
-	});
-
-	it("keeps its computer to us", async () => {
-		const { router } = mount(`/suga/bots/${personalAssistant.handle}/computer`);
-
-		await waitFor(() =>
-			expect(router.state.location.pathname).toBe(
-				`/suga/bots/${personalAssistant.handle}/settings`,
-			),
-		);
+		expect(screen.queryByText("Visibility")).toBeNull();
 	});
 });
 
@@ -268,6 +268,28 @@ describe("an admin", () => {
 		await screen.findByRole("button", { name: "Delete bot" });
 		expect(screen.queryByRole("region", { name: "Connectors" })).toBeNull();
 		expect(client.api.connectors.list).not.toHaveBeenCalled();
+	});
+
+	it("says whose each other member's Personal Assistant is, though they share a name", async () => {
+		apiAnswers({ role: "admin" });
+		const othersAssistant = (owner: typeof juno, id: string) => ({
+			...personalAssistant,
+			id,
+			createdBy: { id: owner.id, name: owner.name, email: owner.email, image: null },
+			permissions: { ...personalAssistant.permissions, talk: false, update: false },
+		});
+		client.api.bots.list.mockReturnValue(
+			Effect.succeed([
+				...bots,
+				othersAssistant(juno, "0199a3a0-0000-7000-8000-0000000000c3"),
+				othersAssistant(sam, "0199a3a0-0000-7000-8000-0000000000c4"),
+			]),
+		);
+		mount("/suga/bots");
+
+		const directory = await screen.findByRole("region", { name: "In this workspace" });
+		within(directory).getByText("Juno's Personal Assistant");
+		within(directory).getByText("Sam's Personal Assistant");
 	});
 
 	it("leads to its Automations page to set them up, saying how many it has", async () => {

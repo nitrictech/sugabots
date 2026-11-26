@@ -12,6 +12,7 @@ import {
 	Settings,
 } from "lucide-react";
 import type { ReactElement } from "react";
+import { settingsSectionLink } from "@/lib/links.ts";
 import { NOTIFICATION_LEVEL_LABELS, NOTIFICATION_LEVELS } from "@/lib/notification-choices.ts";
 import {
 	formatUntil,
@@ -114,15 +115,7 @@ function MoreOptions({
 					))
 				)}
 				{(mutedUntil || !notifiesOfNothing) && <DropdownMenuSeparator />}
-				<DropdownMenuItem
-					render={
-						<Link
-							from="/$workspace"
-							to="./settings/$section"
-							params={{ section: "notifications" }}
-						/>
-					}
-				>
+				<DropdownMenuItem render={<Link {...settingsSectionLink("notifications")} />}>
 					<Settings />
 					Notification settings
 				</DropdownMenuItem>

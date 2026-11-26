@@ -2,30 +2,24 @@ import { Effect, Exit, Layer, Scope, Stream } from "effect";
 import { WebSocket } from "undici";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ComputerProviderStore } from "../../../computers/computer-provider-store.ts";
-import { ComputerSignIn } from "../../../computers/computer-sign-in.ts";
 import { ProjectComputers } from "../../../computers/project-computers.ts";
-import {
-	localComputerEgress,
-	recordingIds,
-	removeWorkVolumes,
-} from "../../../computers/testing.ts";
+import { removeWorkVolumes } from "../../../computers/testing.ts";
 import { EventBus } from "../../../database/events/bus.ts";
 import { EventStore } from "../../../database/events/store.ts";
 import { inMemoryEventStore } from "../../../database/events/testing.ts";
-import {
-	bot as botTable,
-	chatParticipant,
-	member,
-	membership,
-	workspace,
-} from "../../../database/schema.ts";
+import { bot as botTable, chatParticipant } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
+import { createWorkspaceFixture } from "../../../database/workspace.test-support.ts";
 import { viewDesktop } from "../../../operations/computers/view-desktop.ts";
 import { authenticators, principals } from "../../../proofs/world.test-support.ts";
 import { Streams } from "../../../streams/streams.ts";
 import { defaultProjectOf } from "../../../workspaces/projects/project-reads.ts";
 import { seedChat } from "../../seed.test-support.ts";
-import { stepOnComputer } from "../computer/testing.ts";
+import {
+	destroyWorkspaceComputers,
+	localComputerTools,
+	stepOnComputer,
+} from "../computer/testing.ts";
 import { TurnComputers } from "../computer/turn-computers.ts";
 import { DesktopViewer } from "./viewer.ts";
 import { answerChallenge } from "./vnc-authentication.ts";
@@ -85,42 +79,25 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 						),
 					),
 				),
-				Effect.provide(ComputerSignIn.none),
-				Effect.provide(recordingIds(idsHandedOut)),
-				// Registries are asked what an image's tag names, as in production.
-				Effect.provide(localComputerEgress),
+				Effect.provide(localComputerTools(idsHandedOut)),
 			),
 		);
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Viewer ${suffix}`, slug: `viewer-${suffix}` })
-				.returning(),
+		const {
+			workspace: space,
+			members: { owner, outsider, watcher },
+		} = await createWorkspaceFixture(
+			{ name: `Viewer ${suffix}`, slug: `viewer-${suffix}` },
+			{
+				owner: { name: "Sam", email: `viewer-sam-${suffix}@example.com`, role: "admin" },
+				outsider: { name: "Kim", email: `viewer-kim-${suffix}@example.com` },
+				watcher: { name: "Lee", email: `viewer-lee-${suffix}@example.com`, role: "viewer" },
+			},
 		);
-		const members = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Sam", email: `viewer-sam-${suffix}@example.com` },
-					{ name: "Kim", email: `viewer-kim-${suffix}@example.com` },
-					{ name: "Lee", email: `viewer-lee-${suffix}@example.com` },
-				])
-				.returning(),
-		);
-		const [owner, outsider, watcher] = members;
-		if (!space || !owner || !outsider || !watcher) throw new Error("fixture");
 		workspaceId = space.id;
 		ownerId = owner.id;
 		outsiderId = outsider.id;
 		watcherId = watcher.id;
-		await onDatabase((db) =>
-			db.insert(membership).values([
-				// The outsider is in no workspace.
-				{ workspaceId, memberId: ownerId, role: "admin" },
-				{ workspaceId, memberId: watcherId, role: "viewer" },
-			]),
-		);
 		const botIn = (name: string, usesComputer: boolean): typeof botTable.$inferInsert => ({
 			workspaceId,
 			name,
@@ -190,11 +167,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 
 	afterAll(async () => {
 		await Effect.runPromise(Scope.close(scope, Exit.void));
-		const providers = await runOnPostgres(
-			Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer),
-		);
-		const provider = await runOnPostgres(providers.enabled(workspaceId));
-		if (provider) await runOnPostgres(projectComputers.destroyAllMadeBy(workspaceId, provider));
+		await destroyWorkspaceComputers(workspaceId, projectComputers);
 		await closeDatabase();
 		removeWorkVolumes(idsHandedOut);
 	}, SLOW);

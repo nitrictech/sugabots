@@ -3,22 +3,23 @@ import { Link, useMatchRoute, useParams } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Bot as BotIcon, ChevronRight, Hash, Plus } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef } from "react";
-import { findBot, useAssistant, useBots } from "@/lib/bots.ts";
+import { findBot, ownAssistants, useBots } from "@/lib/bots.ts";
 import { useAttentionMarks } from "@/lib/chats.ts";
 import { useFolded } from "@/lib/folded.ts";
-import { botsLink, projectsLink } from "@/lib/links.ts";
+import { botsLink, projectsLink, settingsLink } from "@/lib/links.ts";
 import { useNotificationSettings } from "@/lib/notifications.ts";
+import { useOpenSettings } from "@/lib/open-settings.ts";
 import { OWNER_PAGE_NAMES } from "@/lib/owner-pages.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
 import { findProject, useProjects } from "@/lib/projects.ts";
 import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useSession, useSignOut } from "@/lib/session.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { AccountMenu } from "@/shell/AccountMenu.tsx";
 import { HelpMenu } from "@/shell/HelpMenu.tsx";
 import { IconRail } from "@/shell/IconRail.tsx";
 import { useNewBot } from "@/shell/NewBot.tsx";
+import { useNewProject } from "@/shell/NewProject.tsx";
 import { OwnerSidebar, type OwnerSidebarPage } from "@/shell/OwnerSidebar.tsx";
 import { type BotStanding, SidebarBot } from "@/shell/SidebarBot.tsx";
 import { type ProjectWithAttention, SidebarProject } from "@/shell/SidebarProject.tsx";
@@ -27,9 +28,14 @@ import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { sidebarRow } from "@/ui/sidebar-row.ts";
 
-/** How wide the sidebar is until the viewer drags it, and how narrow it can go, in pixels. */
-const SIDEBAR_DEFAULT_WIDTH_PX = 272;
-const SIDEBAR_MIN_WIDTH_PX = 216;
+/**
+ * How wide the sidebar is until the viewer drags it, and how narrow it can
+ * go, in pixels. On a bot's or project's pages the icon rail is part of it, so
+ * the page beside starts at the same place on every page; the narrowest still
+ * leaves a bot's or project's own sidebar room beside the rail.
+ */
+const SIDEBAR_DEFAULT_WIDTH_PX = 288;
+const SIDEBAR_MIN_WIDTH_PX = 256;
 
 /** What the sidebar shades as open besides a bot or project: settings, or the project directory. */
 export type SidebarView = "settings" | "projects";
@@ -39,7 +45,7 @@ export type SidebarView = "settings" | "projects";
  * project's pages (the bot or project itself, a chat, its files or its
  * automations), the workspace narrowed to `IconRail` at the far left, and
  * beside it that bot's or project's own sidebar, `OwnerSidebar`. Everywhere
- * else: the member's Personal Assistant, the projects they are in, the bots
+ * else: the member's Personal Assistants, the projects they are in, the bots
  * they pinned, and you, Settings and Help at the foot. Its top is always left
  * clear for the button that puts it away, which sits over it while a chat is
  * open, so what is under it never moves; without `resizable`, its edge does
@@ -49,7 +55,7 @@ export type SidebarView = "settings" | "projects";
 export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 	const { data: projects } = useProjects();
 	const { bots } = useBots();
-	const assistant = useAssistant();
+	const assistants = ownAssistants(bots);
 	const { attentionMarkOf } = useAttentionMarks();
 	const { data: notificationSettings } = useNotificationSettings();
 	const { workspace } = useWorkspace();
@@ -58,12 +64,11 @@ export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 	const signOut = useSignOut();
 	const place = useSidebarPlace();
 	const newBot = useNewBot();
-	// Settings opened from any page leads back to it; opened from settings, it keeps settings' own Back.
-	const backToPageLeft = useBackToHere("Back");
-	const assistantStanding = assistant && {
+	const newProject = useNewProject();
+	const assistantStandings = assistants.map((assistant) => ({
 		bot: assistant,
 		...attentionMarkOf(assistant.defaultProjectId),
-	};
+	}));
 	const projectStandings = (projects ?? [])
 		.filter((project) => project.isMember)
 		.map((project) => ({ project, ...attentionMarkOf(project.id) }));
@@ -76,7 +81,7 @@ export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 	return (
 		<>
 			<SidebarView
-				assistant={assistantStanding}
+				assistants={assistantStandings}
 				projects={projectStandings}
 				bots={botStandings}
 				currentProjectSlug={place.projectSlug}
@@ -86,16 +91,16 @@ export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 				workspace={workspace}
 				workspaces={workspaces ?? []}
 				signedIn={session.member ?? undefined}
-				settingsBack={place.inSettings ? undefined : backToPageLeft}
 				notificationSettings={notificationSettings}
 				onSignOut={() => void signOut()}
 				onNewBot={newBot.start}
+				onNewProject={newProject.start}
 				resizable={resizable}
 				rail={
 					owner && (
 						<IconRail
 							projects={projectStandings}
-							assistant={assistantStanding}
+							assistants={assistantStandings}
 							bots={botStandings}
 							currentProjectSlug={place.projectSlug}
 							currentBotHandle={place.botHandle}
@@ -116,11 +121,12 @@ export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 				className="max-md:hidden"
 			/>
 			{newBot.dialog}
+			{newProject.dialog}
 		</>
 	);
 }
 
-/** The bots the sidebar lists, besides the Personal Assistant: those the member pinned and may use. */
+/** The bots the sidebar lists, besides Personal Assistants: those the member pinned and may use. */
 export function sidebarBots(bots: readonly Bot[]): Bot[] {
 	return bots.filter((bot) => bot.pinned && !bot.assistant && bot.permissions.talk);
 }
@@ -150,19 +156,18 @@ interface SidebarPlace {
 	botHandle: string | undefined;
 	/** Which of the bot's or project's own pages is open, if one is. */
 	ownerPage: OwnerSidebarPage;
-	/** Whether the workspace's home is open, which is the Personal Assistant's page. */
+	/** Whether the workspace's home is open, which is the oldest Personal Assistant's page. */
 	atHome: boolean;
 	/** The chat open, if one is. */
 	chatId: string | undefined;
 	view: SidebarView | undefined;
-	inSettings: boolean;
 }
 
 function useSidebarPlace(): SidebarPlace {
 	const matchRoute = useMatchRoute();
 	const { project, bot, chat } = useParams({ strict: false });
-	const inSettings = Boolean(matchRoute({ to: "/$workspace/settings", fuzzy: true }));
-	const view: SidebarView | undefined = inSettings
+	const settingsOpen = useOpenSettings() !== undefined;
+	const view: SidebarView | undefined = settingsOpen
 		? "settings"
 		: matchRoute({ to: "/$workspace/projects" })
 			? "projects"
@@ -178,12 +183,11 @@ function useSidebarPlace(): SidebarPlace {
 		atHome: Boolean(matchRoute({ to: "/$workspace" })),
 		chatId: chat,
 		view,
-		inSettings,
 	};
 }
 
 export function SidebarView({
-	assistant,
+	assistants = [],
 	projects,
 	bots,
 	currentProjectSlug,
@@ -193,17 +197,17 @@ export function SidebarView({
 	workspace,
 	workspaces = [],
 	signedIn,
-	settingsBack,
 	notificationSettings,
 	onSignOut,
 	onNewBot,
+	onNewProject,
 	resizable = true,
 	rail,
 	focus,
 	className,
 }: {
-	/** The viewer's Personal Assistant, once it is there, with how it stands. */
-	assistant?: BotStanding;
+	/** The viewer's Personal Assistants, oldest first, with how each stands. */
+	assistants?: readonly BotStanding[];
 	/** The projects the viewer is in, with how each stands. */
 	projects: readonly ProjectWithAttention[];
 	/** The bots the viewer pinned, with how each stands. */
@@ -212,20 +216,20 @@ export function SidebarView({
 	currentProjectSlug?: string;
 	/** The bot the page open is about, while it is about one. */
 	currentBotHandle?: string;
-	/** Whether the Personal Assistant's page is open as the workspace's home. */
+	/** Whether the oldest Personal Assistant's page is open as the workspace's home. */
 	assistantOpen?: boolean;
 	view: SidebarView | undefined;
 	workspace?: Workspace;
 	/** Every workspace the viewer belongs to, which your menu offers to switch to. */
 	workspaces?: readonly Workspace[];
 	signedIn?: { name: string; email: string; image?: string | null };
-	/** History state for settings links, so their Back returns to the page they left. */
-	settingsBack?: ReturnType<typeof useBackToHere>;
 	/** What the viewer is notified about, once loaded, which a project's menu changes. */
 	notificationSettings?: NotificationSettings;
 	onSignOut: () => void;
 	/** Absent when the viewer may not make a bot. */
 	onNewBot?: () => void;
+	/** Absent when the viewer may not make a project. */
+	onNewProject?: () => void;
 	/** Whether its edge drags to change its width. */
 	resizable?: boolean;
 	/** At the far left, before it, as the workspace narrows to on a bot's or a project's pages. */
@@ -236,23 +240,30 @@ export function SidebarView({
 }) {
 	const [folded, toggleFolded] = useFolded();
 	const [width, setWidth] = usePaneWidth("sidebar");
-	const nav = useRef<HTMLElement>(null);
+	// The rail and the sidebar beside it are sized together, so one width holds on every page.
+	const pane = useRef<HTMLDivElement>(null);
 	return (
-		<>
+		<div
+			ref={pane}
+			className={cn(
+				"flex min-h-0 shrink-0 max-md:flex-1 md:w-(--sidebar-width) md:max-w-100",
+				className,
+			)}
+			style={{ "--sidebar-width": `${width ?? SIDEBAR_DEFAULT_WIDTH_PX}px` } as CSSProperties}
+		>
 			{rail}
 			<nav
-				ref={nav}
 				aria-label="Sidebar"
 				className={cn(
-					"@container/sidebar relative flex min-h-0 shrink-0 flex-col bg-rail max-md:flex-1 md:w-(--sidebar-width) md:max-w-100",
-					className,
+					"@container/sidebar relative flex min-h-0 min-w-0 flex-1 flex-col bg-rail",
+					// A rule between the rail and a bot's or project's sidebar, which share its colour.
+					rail && "md:border-border md:border-s",
 				)}
-				style={{ "--sidebar-width": `${width ?? SIDEBAR_DEFAULT_WIDTH_PX}px` } as CSSProperties}
 			>
 				{resizable && (
 					<ResizeHandle
 						label="Resize the sidebar"
-						pane={nav}
+						pane={pane}
 						edge="end"
 						min={SIDEBAR_MIN_WIDTH_PX}
 						onResize={setWidth}
@@ -264,14 +275,19 @@ export function SidebarView({
 					<div className="flex min-h-0 flex-1 flex-col view-transition-owner-sidebar">{focus}</div>
 				) : (
 					<div className="scrollbar-on-hover flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pt-1 pb-3 view-transition-workspace-sidebar">
-						{/* The Personal Assistant always leads, above everything it can help with. */}
-						{assistant && (
+						{/* Personal Assistants always lead, above everything they can help with. */}
+						{assistants.length > 0 && (
 							<ul className="m-0 flex list-none flex-col p-0">
-								<SidebarBot
-									standing={assistant}
-									selected={assistantOpen || assistant.bot.handle === currentBotHandle}
-									notificationSettings={notificationSettings}
-								/>
+								{assistants.map((assistant, place) => (
+									<SidebarBot
+										key={assistant.bot.id}
+										standing={assistant}
+										selected={
+											(assistantOpen && place === 0) || assistant.bot.handle === currentBotHandle
+										}
+										notificationSettings={notificationSettings}
+									/>
+								))}
 							</ul>
 						)}
 						<FoldSection
@@ -279,9 +295,20 @@ export function SidebarView({
 							open={!folded.has(PROJECTS_FOLD)}
 							onToggle={() => toggleFolded(PROJECTS_FOLD)}
 							action={
-								<IconButton label="Browse projects" size="sm" render={<Link {...projectsLink()} />}>
-									<Hash strokeWidth={2.2} />
-								</IconButton>
+								<>
+									<IconButton
+										label="Browse projects"
+										size="sm"
+										render={<Link {...projectsLink()} />}
+									>
+										<Hash strokeWidth={2.2} />
+									</IconButton>
+									{onNewProject && (
+										<IconButton label="New project" size="sm" onClick={onNewProject}>
+											<Plus strokeWidth={2.2} />
+										</IconButton>
+									)}
+								</>
 							}
 						>
 							{projects.map((projectWithAttention) => (
@@ -339,7 +366,6 @@ export function SidebarView({
 							signedIn={signedIn}
 							current={workspace}
 							workspaces={workspaces}
-							settingsBack={settingsBack}
 							onSignOut={onSignOut}
 						/>
 					) : (
@@ -351,13 +377,7 @@ export function SidebarView({
 							side="top"
 							aria-current={view === "settings" ? "page" : undefined}
 							variant="row"
-							render={
-								<Link
-									to="/$workspace/settings"
-									params={{ workspace: workspace.slug }}
-									state={settingsBack}
-								/>
-							}
+							render={<Link {...settingsLink()} />}
 							className="size-7 text-muted-foreground [&_svg]:size-4"
 						>
 							<SettingsIcon />
@@ -366,7 +386,7 @@ export function SidebarView({
 					<HelpMenu />
 				</div>
 			</nav>
-		</>
+		</div>
 	);
 }
 
@@ -403,7 +423,8 @@ function FoldSection({
 						type="button"
 						aria-expanded={open}
 						onClick={onToggle}
-						className="focus-ring flex h-8 min-w-0 items-center gap-1 rounded-sm pl-2 text-left"
+						// The whole bar but its buttons folds the section, not just its name.
+						className="focus-ring flex h-8 min-w-0 flex-1 items-center gap-1 rounded-sm pl-2 text-left"
 					>
 						<span className="min-w-0 truncate font-medium text-muted-foreground text-xs group-hover/section:text-foreground">
 							{title}

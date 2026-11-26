@@ -4,15 +4,9 @@ import type { InputOf } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	bot,
-	member,
-	membership,
-	modelProvider,
-	modelRequest,
-	workspace,
-} from "../database/schema.ts";
+import { bot, modelProvider, modelRequest, workspace } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { createWorkspaceFixture } from "../database/workspace.test-support.ts";
 import { type CallOperation, servedOperations } from "../operations/testing.ts";
 import type { MemberSession } from "../principal.ts";
 import { authenticators, principals } from "../proofs/world.test-support.ts";
@@ -49,31 +43,19 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: "Usage", slug: `usage-${suffix}` })
-				.returning(),
+		const {
+			workspace: space,
+			members: { admin, editor },
+		} = await createWorkspaceFixture(
+			{ name: "Usage", slug: `usage-${suffix}` },
+			{
+				admin: { name: "Ada", email: `ada-${suffix}@example.com`, role: "admin" },
+				editor: { name: "Sam", email: `sam-${suffix}@example.com`, role: "editor" },
+			},
 		);
-		const [admin, editor] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Ada", email: `ada-${suffix}@example.com` },
-					{ name: "Sam", email: `sam-${suffix}@example.com` },
-				])
-				.returning(),
-		);
-		if (!space || !admin || !editor) throw new Error("fixture");
 		workspaceId = space.id;
 		adminId = admin.id;
 		editorId = editor.id;
-		await onDatabase((db) =>
-			db.insert(membership).values([
-				{ workspaceId, memberId: adminId, role: "admin" },
-				{ workspaceId, memberId: editorId, role: "editor" },
-			]),
-		);
 		const [growthDesk, accountManager] = await onDatabase((db) =>
 			db
 				.insert(bot)

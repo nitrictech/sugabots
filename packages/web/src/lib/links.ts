@@ -1,5 +1,12 @@
 import type { Bot, Connector, Project } from "@sugabots/contracts";
 import { linkOptions } from "@tanstack/react-router";
+import {
+	type SettingsLocation,
+	type SettingsSearch,
+	settingsSearchValue,
+	withoutSettings,
+} from "@/lib/open-settings.ts";
+import type { SettingSection } from "@/lib/workspace-settings.ts";
 
 /*
  * Where a project or a bot lives in the workspace being looked at.
@@ -13,7 +20,12 @@ import { linkOptions } from "@tanstack/react-router";
  */
 
 type ProjectRef = Pick<Project, "slug">;
-type BotRef = Pick<Bot, "handle">;
+type BotRef = Pick<Bot, "handle"> | Pick<Bot, "handle" | "assistant" | "id" | "permissions">;
+
+/** Administrative links need the id because each member can have assistants with the same handles. */
+export function botRouteAddress(bot: BotRef): string {
+	return "assistant" in bot && bot.assistant && !bot.permissions.talk ? `~${bot.id}` : bot.handle;
+}
 
 /** Every project the member could open or join. */
 export function projectsLink() {
@@ -36,7 +48,11 @@ export function projectLink(project: ProjectRef) {
 
 /** A bot's own page: on a phone, its chats and pages; on a wider screen, starting a chat with it. */
 export function botLink(bot: BotRef) {
-	return linkOptions({ from: "/$workspace", to: "./bots/$bot", params: { bot: bot.handle } });
+	return linkOptions({
+		from: "/$workspace",
+		to: "./bots/$bot",
+		params: { bot: botRouteAddress(bot) },
+	});
 }
 
 /** Starting a chat with a bot, from its first message. */
@@ -44,7 +60,7 @@ export function botNewChatLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/new",
-		params: { bot: bot.handle },
+		params: { bot: botRouteAddress(bot) },
 	});
 }
 
@@ -71,7 +87,7 @@ export function botFilesLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/files",
-		params: { bot: bot.handle },
+		params: { bot: botRouteAddress(bot) },
 	});
 }
 
@@ -94,7 +110,7 @@ export function botFileLink(bot: BotRef, fileId: string, search: { version?: num
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/files/$file",
-		params: { bot: bot.handle, file: fileId },
+		params: { bot: botRouteAddress(bot), file: fileId },
 		search,
 	});
 }
@@ -140,7 +156,7 @@ export function botAutomationsLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/automations",
-		params: { bot: bot.handle },
+		params: { bot: botRouteAddress(bot) },
 	});
 }
 
@@ -149,7 +165,7 @@ export function botNewAutomationLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/automations/new",
-		params: { bot: bot.handle },
+		params: { bot: botRouteAddress(bot) },
 	});
 }
 
@@ -166,7 +182,7 @@ export function botAutomationFeedLink(
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/automations/$automation",
-		params: { bot: bot.handle, automation: automationId },
+		params: { bot: botRouteAddress(bot), automation: automationId },
 		search,
 	});
 }
@@ -208,7 +224,7 @@ export function botConnectorsLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/connectors",
-		params: { bot: bot.handle },
+		params: { bot: botRouteAddress(bot) },
 	});
 }
 
@@ -217,7 +233,7 @@ export function botConnectorLink(bot: BotRef, connector: Pick<Connector, "id">) 
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/connectors/$connector",
-		params: { bot: bot.handle, connector: connector.id },
+		params: { bot: botRouteAddress(bot), connector: connector.id },
 	});
 }
 
@@ -258,7 +274,7 @@ function botChatLink(bot: BotRef, chatId: string, search: ChatLinkSearch) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/chats/$chat",
-		params: { bot: bot.handle, chat: chatId },
+		params: { bot: botRouteAddress(bot), chat: chatId },
 		search,
 	});
 }
@@ -303,7 +319,7 @@ export function botSettingsLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/settings",
-		params: { bot: bot.handle },
+		params: { bot: botRouteAddress(bot) },
 	});
 }
 
@@ -312,15 +328,35 @@ export function botComputerLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/computer",
-		params: { bot: bot.handle },
+		params: { bot: botRouteAddress(bot) },
 	});
+}
+
+/**
+ * A page of the settings, open over whatever page is open, which stays as it
+ * is beneath them: the list of sections when no page is given.
+ */
+export function settingsLink(page: SettingsLocation = { kind: "sections" }) {
+	return linkOptions({
+		to: ".",
+		search: (search: SettingsSearch) => ({ ...search, settings: settingsSearchValue(page) }),
+	});
+}
+
+/** One section of the settings, as `settingsLink` opens it. */
+export function settingsSectionLink(section: SettingSection["id"]) {
+	return settingsLink({ kind: "section", section });
 }
 
 /** A member's page among the workspace's members, by their membership's id. */
 export function memberSettingsLink(membership: { id: string }) {
+	return settingsLink({ kind: "member", membership: membership.id });
+}
+
+/** The page beneath the settings, with them closed. */
+export function closeSettingsLink() {
 	return linkOptions({
-		from: "/$workspace",
-		to: "./settings/members/$membership",
-		params: { membership: membership.id },
+		to: ".",
+		search: (search: SettingsSearch) => withoutSettings(search),
 	});
 }

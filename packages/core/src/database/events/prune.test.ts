@@ -12,7 +12,7 @@ const A_DAY = Duration.days(1);
  * pruning layer over it running on a test clock that outlives the layer's
  * scope, so a case can move time on after the scope has closed.
  */
-async function sweeping(prune: (sweepNumber: number) => Promise<number> = async () => 0) {
+async function sweeping(prune: (sweepNumber: number) => Promise<number>) {
 	const cutoffs: Date[] = [];
 	const waiting: Array<{ count: number; resolve: () => void }> = [];
 	const store: EventStore.Interface = {
@@ -52,8 +52,11 @@ async function sweeping(prune: (sweepNumber: number) => Promise<number> = async 
 }
 
 describe("pruning", () => {
-	it("sweeps what is over a week old once on start and again each day, until the scope closes", async () => {
-		const pruning = await sweeping();
+	it("sweeps what is over a week old on start and daily after a failed sweep, until the scope closes", async () => {
+		const pruning = await sweeping(async (sweepNumber) => {
+			if (sweepNumber === 1) throw new Error("connection lost");
+			return 0;
+		});
 		try {
 			await pruning.started(1);
 			await pruning.settled();
@@ -95,24 +98,6 @@ describe("pruning", () => {
 			expect(pruning.cutoffs).toHaveLength(1);
 		} finally {
 			blocked.resolve(0);
-			await pruning.dispose();
-		}
-	});
-
-	it("sweeps again the next day after a store that throws, so a failed sweep cannot take the API down", async () => {
-		const pruning = await sweeping(async (sweepNumber) => {
-			if (sweepNumber === 1) throw new Error("connection lost");
-			return 0;
-		});
-		try {
-			await pruning.started(1);
-			await pruning.settled();
-
-			await pruning.passes(A_DAY);
-			await pruning.started(2);
-
-			expect(pruning.cutoffs).toHaveLength(2);
-		} finally {
 			await pruning.dispose();
 		}
 	});

@@ -29,7 +29,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useBots, useCreateBot, useEnsureAssistant, useModels } from "@/lib/bots.ts";
+import { ownAssistants, useBots, useCreateBot, useModels } from "@/lib/bots.ts";
 import { useStartInterview } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { modelName, useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
@@ -116,16 +116,18 @@ function WorkspaceSetupSteps({ session, workspace, onAddress, onCancel }: Worksp
 	const [chosen, setChosen] = useState<Step>();
 	// The Personal Assistant the workspace made for its maker, which the model step sets up,
 	// and the first bot they make here, a public one of the workspace's.
-	const assistant = bots?.find((bot) => bot.assistant);
+	const [assistant] = ownAssistants(bots);
 	const firstBot = bots?.find(
 		(bot) => !bot.assistant && bot.createdBy !== null && bot.createdBy.id === session.member?.id,
 	);
-	const assistantHasModel =
-		models.data?.models.some((model) => model.modelId === assistant?.model) ?? false;
+	const offered = models.data?.models ?? [];
+	// Without an assistant, as for a maker who deleted theirs, a model the workspace offers will do.
+	const firstModel = assistant ? assistant.model : (offered[0]?.modelId ?? null);
+	const hasModel = offered.some((model) => model.modelId === firstModel);
 	// Coming back part way through picks up where the workspace says it got to.
 	const inferred: Step = !workspace
 		? "workspace"
-		: !assistantHasModel
+		: !hasModel
 			? "model"
 			: firstBot
 				? "invite"
@@ -176,21 +178,15 @@ function WorkspaceSetupSteps({ session, workspace, onAddress, onCancel }: Worksp
 				/>
 			) : step === "model" ? (
 				<ModelStep bot={assistant} onContinue={() => setChosen("bot")} />
-			) : !workspace || !assistant ? (
-				<AssistantMissing modelId={models.data?.models[0]?.modelId} />
-			) : step === "bot" ? (
-				<BotStep
-					model={assistant.model ?? null}
-					made={firstBot}
-					onCreated={() => setChosen("invite")}
-				/>
+			) : !workspace ? null : step === "bot" ? (
+				<BotStep model={firstModel ?? null} made={firstBot} onCreated={() => setChosen("invite")} />
 			) : step === "invite" ? (
 				<InviteMembersStep workspaceId={workspace.id} onContinue={() => setChosen("ready")} />
 			) : firstBot ? (
 				<ReadyStep workspace={workspace} bot={firstBot} />
 			) : (
 				<BotStep
-					model={assistant.model ?? null}
+					model={firstModel ?? null}
 					made={undefined}
 					onCreated={() => setChosen("invite")}
 				/>
@@ -818,31 +814,6 @@ function ReadyStep({ workspace, bot }: { workspace: { id: string; slug: string }
 				onClick={() => void finish()}
 			>
 				Start talking
-			</Button>
-		</>
-	);
-}
-
-/**
- * The workspace makes each member's Personal Assistant as they join, so this
- * is a recovery rather than a step: making it again, on the model just
- * connected.
- */
-function AssistantMissing({ modelId }: { modelId?: string }) {
-	const ensure = useEnsureAssistant();
-	return (
-		<>
-			<AuthHeading title="Your Personal Assistant is missing">
-				It is your first bot. Make it again to carry on.
-			</AuthHeading>
-			{ensure.error && <Alert>{failureMessage(ensure.error)}</Alert>}
-			<Button
-				size="lg"
-				className="w-full"
-				disabled={!modelId || ensure.isPending}
-				onClick={() => modelId && ensure.mutate(modelId)}
-			>
-				Make it
 			</Button>
 		</>
 	);

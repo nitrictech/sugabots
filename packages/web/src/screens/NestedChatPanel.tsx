@@ -2,7 +2,7 @@ import { Popover } from "@base-ui/react/popover";
 import type { BotParticipant, ChatHistoryEntry, Run } from "@sugabots/contracts";
 import { Braces, ExternalLink } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef } from "react";
-import { useAuthorLinks } from "@/lib/author-links.ts";
+import { useAuthorLinks } from "@/lib/author-links.tsx";
 import { useChatEvents, useChatNotices } from "@/lib/chat-events.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
 import { useChat } from "@/lib/chat-query.ts";
@@ -43,7 +43,7 @@ export function NestedChatPanel({
 	trailing: ReactNode;
 }) {
 	const query = useChat(nestedChatId);
-	const authorLinkOf = useAuthorLinks("Chat");
+	const authorLinkOf = useAuthorLinks();
 	useChatEvents(nestedChatId);
 	const notices = useChatNotices(nestedChatId);
 	const heading = useRef<HTMLHeadingElement>(null);

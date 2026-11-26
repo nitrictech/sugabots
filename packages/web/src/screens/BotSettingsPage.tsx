@@ -14,7 +14,7 @@ import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, useRouter } from "@tanstack/react-router";
 import { ArrowUpRight, ChevronDown, Pencil } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
-import { useDeleteBot, useModels, useUpdateBot } from "@/lib/bots.ts";
+import { useDeleteBot, useModels, useUpdateBot, whoseBot } from "@/lib/bots.ts";
 import { characterCount } from "@/lib/character-count.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnectors } from "@/lib/connectors.ts";
@@ -88,8 +88,8 @@ function BotSettings({ bot }: { bot: Bot }) {
 	const save: Save = update.mutateAsync;
 	const savePending = update.isPending;
 	const may = bot.permissions;
-	// A Personal Assistant's instructions, model and tools are ours: its member changes its name and avatar, connectors and automations.
-	const fixed = bot.assistant;
+	// A Personal Assistant's instructions are ours, and it is always personal.
+	const assistant = bot.assistant;
 	const workspaceName = useWorkspace().workspace?.name ?? "the workspace";
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeleteBot();
@@ -116,7 +116,11 @@ function BotSettings({ bot }: { bot: Bot }) {
 				)
 			}
 			title={bot.name}
-			description={bot.description || undefined}
+			description={
+				may.talk || bot.visibility !== "personal"
+					? bot.description || undefined
+					: whoseBot(bot, bot.assistant ? "Personal Assistant" : "personal bot")
+			}
 		>
 			{update.error && <Alert>{failureMessage(update.error)}</Alert>}
 			{may.talk && (
@@ -131,45 +135,34 @@ function BotSettings({ bot }: { bot: Bot }) {
 							savePending={savePending}
 							onCommit={(name) => save({ name })}
 						/>
-						{!fixed && (
-							<>
-								<ProfileField
-									label="Description"
-									value={bot.description ?? ""}
-									placeholder="One line on what it's for"
-									maxLength={DESCRIPTION_MAX_LENGTH}
-									editable={may.update}
-									savePending={savePending}
-									onCommit={(description) => save({ description })}
-								/>
-								<VisibilityRow
-									bot={bot}
-									editable={may.update}
-									savePending={savePending}
-									save={save}
-								/>
-								<ModelRow
-									model={bot.model ?? null}
-									canChoose={may.update}
-									onChoose={(model) => {
-										void save({ model }).catch(() => {});
-									}}
-								/>
-								<AddedByRow bot={bot} />
-							</>
-						)}
+						<ProfileField
+							label="Description"
+							value={bot.description ?? ""}
+							placeholder="One line on what it's for"
+							maxLength={DESCRIPTION_MAX_LENGTH}
+							editable={may.update}
+							savePending={savePending}
+							onCommit={(description) => save({ description })}
+						/>
+						{!assistant && <VisibilityRow bot={bot} />}
+						<ModelRow
+							model={bot.model ?? null}
+							canChoose={may.update}
+							onChoose={(model) => {
+								void save({ model }).catch(() => {});
+							}}
+						/>
+						{!assistant && <AddedByRow bot={bot} />}
 					</SettingsGroup>
-					{!fixed && (
+					{!assistant && (
 						<Instructions bot={bot} editable={may.update} save={save} savePending={savePending} />
 					)}
-					{!fixed && (
-						<BuiltInTools
-							bot={bot}
-							workspaceName={workspaceName}
-							canChange={may.update}
-							save={save}
-						/>
-					)}
+					<BuiltInTools
+						bot={bot}
+						workspaceName={workspaceName}
+						canChange={may.update}
+						save={save}
+					/>
 					<BotConnectors bot={bot} />
 					<BotAutomations bot={bot} />
 				</>
@@ -194,7 +187,7 @@ function BotSettings({ bot }: { bot: Bot }) {
 					/>
 				</SettingsGroup>
 			)}
-			{may.delete && !fixed && (
+			{may.delete && (
 				<SettingsDanger
 					label="Delete bot"
 					description="Its chats, automations and settings go with it."
@@ -745,47 +738,24 @@ function ToolRow({
 }
 
 /**
- * Whether everyone in the workspace sees the bot, or only its creator: a
- * toggle for whoever may change the bot, else what it is.
+ * Whether everyone in the workspace sees the bot, or only its creator. It is
+ * chosen when the bot is made and never changes, so there is no toggle.
  */
-function VisibilityRow({
-	bot,
-	editable,
-	savePending,
-	save,
-}: {
-	bot: Bot;
-	editable: boolean;
-	savePending: boolean;
-	save: Save;
-}) {
+function VisibilityRow({ bot }: { bot: Bot }) {
 	const isPublic = bot.visibility === "public";
 	const viewerId = useSession().member?.id;
 	const mine = bot.createdBy !== null && bot.createdBy.id === viewerId;
 	return (
 		<SettingsRow
-			label="Public"
+			label="Visibility"
 			sub={
 				isPublic
-					? "Everyone in the workspace can see it, talk to it and add it to projects. Making it personal takes it out of its projects"
+					? "Everyone in the workspace can see it, talk to it and add it to projects"
 					: mine
-						? "Only you can see it and talk to it"
+						? "Only you can see it and talk to it, and it works with your permissions"
 						: "Only the member who made it can see it and talk to it"
 			}
-			trailing={
-				editable ? (
-					<Toggle
-						checked={isPublic}
-						disabled={savePending}
-						label={isPublic ? "Make personal" : "Make public"}
-						onChange={(on) => {
-							void save({ visibility: on ? "public" : "personal" }).catch(() => {});
-						}}
-					/>
-				) : (
-					<SettingsValue>{isPublic ? "Public" : "Personal"}</SettingsValue>
-				)
-			}
+			trailing={<SettingsValue>{isPublic ? "Public" : "Personal"}</SettingsValue>}
 		/>
 	);
 }

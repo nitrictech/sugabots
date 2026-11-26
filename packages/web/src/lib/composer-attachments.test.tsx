@@ -5,75 +5,13 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { client } from "@/client.test-support.ts";
+import { FakeRequest, stubAttachmentUploads } from "@/lib/attachment-upload.test-support.ts";
 import { sendReadiness, useComposerAttachments } from "@/lib/composer-attachments.ts";
 
 vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const chatId = "0199a3a0-0000-7000-8000-0000000000e1";
 const fileId = "0199a3a0-0000-7000-8000-0000000000f1";
-
-/**
- * Stands in for the browser's XMLHttpRequest, the boundary uploads cross, so
- * a test says how far each upload has got and what the API answers.
- */
-class FakeRequest {
-	static made: FakeRequest[] = [];
-	method = "";
-	url = "";
-	withCredentials = false;
-	responseType = "";
-	status = 0;
-	response: unknown = null;
-	body: unknown;
-	aborted = false;
-	private readonly listeners = new Map<string, ((event?: unknown) => void)[]>();
-	private readonly uploadListeners = new Map<string, ((event: unknown) => void)[]>();
-	upload = {
-		addEventListener: (type: string, listener: (event: unknown) => void) => {
-			this.uploadListeners.set(type, [...(this.uploadListeners.get(type) ?? []), listener]);
-		},
-	};
-
-	open(method: string, url: string) {
-		this.method = method;
-		this.url = url;
-	}
-
-	addEventListener(type: string, listener: () => void) {
-		this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-	}
-
-	send(body: unknown) {
-		this.body = body;
-		FakeRequest.made.push(this);
-	}
-
-	abort() {
-		this.aborted = true;
-		this.emit("abort");
-	}
-
-	progress(loaded: number, total: number) {
-		for (const listener of this.uploadListeners.get("progress") ?? []) {
-			listener({ lengthComputable: true, loaded, total });
-		}
-	}
-
-	/** The connection drops before the API answers. */
-	fail() {
-		this.emit("error");
-	}
-
-	answer(status: number, response: unknown) {
-		this.status = status;
-		this.response = response;
-		this.emit("load");
-	}
-
-	private emit(type: string) {
-		for (const listener of this.listeners.get(type) ?? []) listener();
-	}
-}
 
 function pdf(name = "report.pdf"): File {
 	return new File(["%PDF"], name, { type: "application/pdf" });
@@ -100,8 +38,7 @@ async function settle() {
 }
 
 beforeEach(() => {
-	FakeRequest.made = [];
-	vi.stubGlobal("XMLHttpRequest", FakeRequest);
+	stubAttachmentUploads();
 	client.api.chats.removeFile.mockReturnValue(Effect.void);
 });
 

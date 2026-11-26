@@ -2,7 +2,6 @@ import { projectLinks } from "@sugabots/contracts/project-links";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Plus } from "lucide-react";
 import { useSignOut } from "@/lib/session.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { chooseWorkspace, useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { SettingsListGroups } from "@/screens/SettingsLayout.tsx";
 import { PageHeader } from "@/shell/Page.tsx";
@@ -12,13 +11,12 @@ import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 /**
  * Settings, as a phone's last tab, You: you first, on a card that opens your
  * own settings, then the list of settings, then any other workspace you belong to, help, and signing out.
- * Each leads to its page, whose Back returns here.
+ * Each opens its page of the settings over this one, whose Back returns here.
  */
 export function You() {
 	const signOut = useSignOut();
 	const { workspace } = useWorkspace();
 	const { data: workspaces } = useWorkspaces();
-	const settingsBack = useBackToHere("Settings");
 	if (!workspace) return null;
 	const others = (workspaces ?? []).filter((one) => one.id !== workspace.id);
 
@@ -29,7 +27,7 @@ export function You() {
 				data-scroll-restoration-id="settings-tab"
 				className="tab-bar-clearance flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-4 pt-1.5 pb-6 md:mx-auto md:w-full md:max-w-xl md:pt-6"
 			>
-				<SettingsListGroups linkState={settingsBack} />
+				<SettingsListGroups />
 				<SettingsGroup label={others.length > 0 ? "Other workspaces" : undefined} headingLevel={2}>
 					{others.map((other) => (
 						<SettingsRow

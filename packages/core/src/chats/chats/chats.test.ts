@@ -17,8 +17,6 @@ import {
 	chatParticipant,
 	event,
 	laneRequest,
-	member,
-	membership,
 	message,
 	messageReaction,
 	placedChat,
@@ -28,9 +26,14 @@ import {
 	type TurnStatus,
 	toolCall,
 	turn,
-	workspace,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import {
+	addTestMemberships,
+	createTestMember,
+	createTestWorkspace,
+	createWorkspaceFixture,
+} from "../../database/workspace.test-support.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { type AsMember, asMember } from "../../operations/chats/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
@@ -155,32 +158,23 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	beforeEach(async () => {
 		const suffix = crypto.randomUUID();
-		const [somebody, administrator] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Chat editor", email: `chat-${suffix}@example.com` },
-					{ name: "Chat admin", email: `chat-admin-${suffix}@example.com` },
-				])
-				.returning(),
+		const {
+			workspace: space,
+			members: { editor, administrator },
+		} = await createWorkspaceFixture(
+			{ name: "Chat workspace", slug: `chat-${suffix}` },
+			{
+				editor: { name: "Chat editor", email: `chat-${suffix}@example.com`, role: "editor" },
+				administrator: {
+					name: "Chat admin",
+					email: `chat-admin-${suffix}@example.com`,
+					role: "admin",
+				},
+			},
 		);
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: "Chat workspace", slug: `chat-${suffix}` })
-				.returning(),
-		);
-		if (!somebody || !administrator || !space)
-			throw new Error("Could not create chat test identity");
-		memberId = somebody.id;
+		memberId = editor.id;
 		administratorId = administrator.id;
 		workspaceId = space.id;
-		await onDatabase((db) =>
-			db.insert(membership).values([
-				{ workspaceId, memberId },
-				{ workspaceId, memberId: administrator.id, role: "admin" },
-			]),
-		);
 		chats = asMember(call, memberId);
 		automations = automationsAs(call, administrator.id);
 		runByHand = manualRunsAs(administrator.id);
@@ -245,19 +239,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			db.update(bot).set({ visibility: "personal" }).where(eq(bot.id, botId)),
 		);
 		const opened = await aChat();
-		const [otherEditor, stranger] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Another editor", email: `editor-${crypto.randomUUID()}@example.com` },
-					{ name: "Outside the workspace", email: `stranger-${crypto.randomUUID()}@example.com` },
-				])
-				.returning(),
+		const otherEditor = await createTestMember(
+			{ name: "Another editor" },
+			{ workspaceId, role: "editor" },
 		);
-		if (!otherEditor || !stranger) throw new Error("Could not create the members");
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId: otherEditor.id, role: "editor" }),
-		);
+		const stranger = await createTestMember({ name: "Outside the workspace" });
 		expect(await chats.get(opened.id)).toMatchObject({ chat: { id: opened.id } });
 		for (const memberId of [otherEditor.id, stranger.id]) {
 			await expect(asMember(call, memberId).get(opened.id)).rejects.toMatchObject({
@@ -1115,16 +1101,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		{
 			member: "a former member still in the chat",
 			prepareChat: async (chatId: string) => {
-				const [former] = await onDatabase((db) =>
-					db
-						.insert(member)
-						.values({
-							name: "Former teammate",
-							email: `former-${crypto.randomUUID()}@example.com`,
-						})
-						.returning(),
-				);
-				if (!former) throw new Error("Could not create the former member");
+				const former = await createTestMember({
+					name: "Former teammate",
+					email: `former-${crypto.randomUUID()}@example.com`,
+				});
 				await onDatabase((db) =>
 					db.insert(chatParticipant).values({ chatId, memberId: former.id }),
 				);
@@ -1440,13 +1420,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect.objectContaining({ messageId: asked.id, reactions: [] }),
 		]);
 
-		const [stranger] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Stranger", email: `stranger-${crypto.randomUUID()}@example.com` })
-				.returning(),
-		);
-		if (!stranger) throw new Error("Could not create a stranger");
+		const stranger = await createTestMember({
+			name: "Stranger",
+			email: `stranger-${crypto.randomUUID()}@example.com`,
+		});
 		const strangers = asMember(call, stranger.id).reactions;
 		await expect(strangers.add(asked.id, "👍🏽")).rejects.toMatchObject({ _tag: "ResourceHidden" });
 	});
@@ -1725,16 +1702,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				}),
 			]);
 			// Nor is it listed in another workspace the member is in.
-			const [elsewhere] = await onDatabase((db) =>
-				db
-					.insert(workspace)
-					.values({ name: "Elsewhere", slug: `elsewhere-${crypto.randomUUID()}` })
-					.returning(),
-			);
-			if (!elsewhere) throw new Error("fixture");
-			await onDatabase((db) =>
-				db.insert(membership).values({ workspaceId: elsewhere.id, memberId }),
-			);
+			const elsewhere = await createTestWorkspace({
+				name: "Elsewhere",
+				slug: `elsewhere-${crypto.randomUUID()}`,
+			});
+			await addTestMemberships({ workspaceId: elsewhere.id, memberId, role: "editor" });
 			expect((await chats.approvals(elsewhere.id)).answered).toEqual([]);
 		});
 

@@ -1,8 +1,9 @@
 import type { NewBot, SystemBotKey } from "@sugabots/contracts";
 import {
-	AssistantManaged,
-	AssistantVisibilityFixed,
+	AssistantHandleFixed,
+	AssistantInstructionsManaged,
 	EmptyBotUpdate,
+	PersonalVisibilityFixed,
 } from "@sugabots/contracts/errors/bots";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { ModelNotEnabled } from "@sugabots/contracts/errors/providers";
@@ -20,9 +21,7 @@ import {
 	membership,
 	modelProvider,
 	project,
-	projectBot,
 	providerModel,
-	workspace,
 	workspaceDefaultModel,
 } from "../../database/schema.ts";
 import {
@@ -34,6 +33,12 @@ import {
 	servedOnPostgres,
 	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
+import {
+	addTestMemberships,
+	createTestMember,
+	createTestWorkspace,
+	createWorkspaceFixture,
+} from "../../database/workspace.test-support.ts";
 import { remove } from "../../operations/bots/remove.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
 import type { MemberSession } from "../../principal.ts";
@@ -130,7 +135,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			remove: as("bots.remove"),
 			setPinned: ({ botId, pinned }: { botId: string; pinned: boolean }) =>
 				as(pinned ? "bots.pin" : "bots.unpin")({ botId }),
-			ensureAssistant: as("bots.ensureAssistant"),
+			createAssistant: as("bots.createAssistant"),
 			setSystemBotModel: ({
 				workspace,
 				key,
@@ -167,25 +172,16 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		destroyedComputers = [];
 		providerReachable = true;
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: stamp, slug: `models-${stamp}` })
-				.returning(),
+		const {
+			workspace: space,
+			members: { somebody },
+		} = await createWorkspaceFixture(
+			{ name: stamp, slug: `models-${stamp}` },
+			{ somebody: { name: "Ada", email: `ada-${stamp}@example.com`, role: "admin" } },
 		);
-		const [somebody] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
-				.returning(),
-		);
-		if (!space || !somebody) throw new Error("could not create the fixtures");
 		workspaceId = space.id;
 		creatorId = somebody.id;
 		administration = botsAs(creatorId);
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId: creatorId, role: "admin" }),
-		);
 		const [provider] = await onDatabase((db) =>
 			db
 				.insert(modelProvider)
@@ -331,19 +327,8 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			workspace: workspaceId,
 			bot: { name: "Triage", model: OFFERED },
 		});
-		const [viewer, stranger] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Lee", email: `lee-${crypto.randomUUID()}@example.com` },
-					{ name: "Kim", email: `kim-${crypto.randomUUID()}@example.com` },
-				])
-				.returning(),
-		);
-		if (!viewer || !stranger) throw new Error("could not create the members");
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId: viewer.id, role: "viewer" }),
-		);
+		const viewer = await createTestMember({ name: "Lee" }, { workspaceId, role: "viewer" });
+		const stranger = await createTestMember({ name: "Kim" });
 
 		await expect(
 			botsAs(viewer.id).create({
@@ -366,15 +351,9 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 
 	/** Lee, an editor in the workspace. */
 	const anEditor = async () => {
-		const [editor] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Lee", email: `lee-${crypto.randomUUID()}@example.com` })
-				.returning(),
-		);
-		if (!editor) throw new Error("could not create the editor");
-		await onDatabase((db) =>
-			db.insert(membership).values({ workspaceId, memberId: editor.id, role: "editor" }),
+		const editor = await createTestMember(
+			{ name: "Lee", email: `lee-${crypto.randomUUID()}@example.com` },
+			{ workspaceId, role: "editor" },
 		);
 		return editor.id;
 	};
@@ -460,48 +439,13 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		expect(await listedTo(administration, made.id)).toMatchObject({ pinned: true });
 	});
 
-	it("takes a bot made personal out of every project members made that it was in", async () => {
-		const made = await administration.create({
-			workspace: workspaceId,
-			bot: { name: "Triage", model: OFFERED },
-		});
-		const launch = await onDatabase((db) =>
-			seedProject(db, { workspaceId, name: "Launch", slug: "launch" }),
-		);
-		if (!launch) throw new Error("could not create the project");
-		await onDatabase((db) =>
-			db.insert(projectBot).values({ workspaceId, projectId: launch.id, botId: made.id }),
-		);
-
-		await administration.update({ botId: made.id, changes: { visibility: "personal" } });
-
-		expect(
-			await onDatabase((db) =>
-				db
-					.select()
-					.from(projectBot)
-					.where(and(eq(projectBot.projectId, launch.id), eq(projectBot.botId, made.id))),
-			),
-		).toEqual([]);
-	});
-
 	describe("a Personal Assistant", () => {
-		it("is made once for the member who asks, and kept theirs alone", async () => {
-			const first = await administration.ensureAssistant({
-				workspace: workspaceId,
+		it("is made once for a member joining, and kept as it is when they are let in again", async () => {
+			const made = await assistants.provisionWithModel({
+				workspaceId,
+				memberId: creatorId,
 				model: OFFERED,
 			});
-			const again = await administration.ensureAssistant({ workspace: workspaceId });
-
-			expect(first).toMatchObject({ assistant: true, model: OFFERED });
-			expect(again.id).toBe(first.id);
-			await expect(
-				administration.update({ botId: first.id, changes: { visibility: "public" } }),
-			).rejects.toBeInstanceOf(AssistantVisibilityFixed);
-		});
-
-		it("keeps what its member changed when it is asked for again", async () => {
-			const made = await administration.ensureAssistant({ workspace: workspaceId, model: OFFERED });
 			await onDatabase((db) =>
 				db
 					.update(bot)
@@ -537,81 +481,75 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			expect(moved).toMatchObject({ id: unassigned.id, model: ALSO_OFFERED });
 		});
 
-		it("moves onto the model its member picks when it has none, as at workspace setup", async () => {
-			const unassigned = await administration.ensureAssistant({ workspace: workspaceId });
-			expect(unassigned.model).toBeNull();
-
-			const picked = await administration.ensureAssistant({
-				workspace: workspaceId,
-				model: ALSO_OFFERED,
-			});
-
-			expect(picked).toMatchObject({ id: unassigned.id, model: ALSO_OFFERED });
-		});
-
 		it("is given the workspace's default model when it has none", async () => {
-			const unassigned = await administration.ensureAssistant({ workspace: workspaceId });
+			const unassigned = await assistants.provision({ workspaceId, memberId: creatorId });
 			await onDatabase((db) =>
 				db.insert(workspaceDefaultModel).values({ workspaceId, modelId: OFFERED }),
 			);
 
-			const again = await administration.ensureAssistant({ workspace: workspaceId });
+			const again = await assistants.provision({ workspaceId, memberId: creatorId });
 
 			expect(again).toMatchObject({ id: unassigned.id, model: OFFERED });
 		});
 
 		it("is not made on a model the workspace does not offer", async () => {
 			await expect(
-				administration.ensureAssistant({ workspace: workspaceId, model: "switched-off" }),
+				assistants.provisionWithModel({ workspaceId, memberId: creatorId, model: "switched-off" }),
 			).rejects.toBeInstanceOf(ModelNotEnabled);
 		});
 
-		it("lets its member change only its name and look", async () => {
-			const assistant = await administration.ensureAssistant({
-				workspace: workspaceId,
-				model: OFFERED,
-			});
+		it("can't be made public", async () => {
+			const assistant = await administration.createAssistant({ workspace: workspaceId });
+
+			await expect(
+				administration.update({ botId: assistant.id, changes: { visibility: "public" } }),
+			).rejects.toBeInstanceOf(PersonalVisibilityFixed);
+		});
+
+		it("lets its member change all but its instructions, handle and visibility", async () => {
+			const assistant = await administration.createAssistant({ workspace: workspaceId });
 
 			expect(
 				await administration.update({
 					botId: assistant.id,
-					changes: { name: "Friday", color: "green", eyes: "square", shape: "circle" },
+					changes: {
+						name: "Friday",
+						color: "green",
+						description: "Mine",
+						model: ALSO_OFFERED,
+						disabledTools: ["automations"],
+						naturalBrowsing: true,
+					},
 				}),
-			).toMatchObject({ name: "Friday", color: "green" });
-			for (const changes of [
-				{ description: "Mine" },
-				{ handle: "friday" },
-				{ model: ALSO_OFFERED },
-				{ usesComputer: false },
-				{ disabledTools: ["automations"] },
-				{ name: "Saturday", naturalBrowsing: true },
-			]) {
+			).toMatchObject({
+				name: "Friday",
+				description: "Mine",
+				model: ALSO_OFFERED,
+				disabledTools: ["automations"],
+				naturalBrowsing: true,
+			});
+			const fixed = [
+				[{ handle: "friday" }, AssistantHandleFixed],
+				[{ instructions: "Be brief." }, AssistantInstructionsManaged],
+				[{ visibility: "public" }, PersonalVisibilityFixed],
+			] as const;
+			for (const [changes, refusal] of fixed) {
 				await expect(
 					administration.update({ botId: assistant.id, changes }),
-				).rejects.toBeInstanceOf(AssistantManaged);
+				).rejects.toBeInstanceOf(refusal);
 			}
 		});
 
-		it("is hidden from everybody but its somebody, an admin included", async () => {
-			const editorId = await anEditor();
-			const assistant = await botsAs(editorId).ensureAssistant({
-				workspace: workspaceId,
+		it("is shown to an admin as another member's personal bot is: listed, but neither talked to nor changed", async () => {
+			const assistant = await botsAs(await anEditor()).createAssistant({ workspace: workspaceId });
+
+			expect(await listedTo(administration, assistant.id)).toMatchObject({
+				assistant: true,
+				permissions: { talk: false },
 			});
-
-			expect(
-				(await administration.list({ workspace: workspaceId })).map(({ id }) => id),
-			).not.toContain(assistant.id);
-			await expect(administration.remove({ botId: assistant.id })).rejects.toBeInstanceOf(
-				ResourceHidden,
-			);
-		});
-
-		it("is never deleted, even by its member", async () => {
-			const assistant = await administration.ensureAssistant({ workspace: workspaceId });
-
-			await expect(administration.remove({ botId: assistant.id })).rejects.toBeInstanceOf(
-				ActionForbidden,
-			);
+			await expect(
+				administration.update({ botId: assistant.id, changes: { name: "Friday" } }),
+			).rejects.toBeInstanceOf(ResourceHidden);
 		});
 	});
 
@@ -638,18 +576,11 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 				workspace: workspaceId,
 				bot: { name: "Triage", model: OFFERED },
 			});
-			const [elsewhere] = await onDatabase((db) =>
-				db
-					.insert(workspace)
-					.values({ name: "Elsewhere", slug: `elsewhere-${crypto.randomUUID()}` })
-					.returning(),
-			);
-			if (!elsewhere) throw new Error("could not create the other workspace");
-			await onDatabase((db) =>
-				db
-					.insert(membership)
-					.values({ workspaceId: elsewhere.id, memberId: editorId, role: "editor" }),
-			);
+			const elsewhere = await createTestWorkspace({
+				name: "Elsewhere",
+				slug: `elsewhere-${crypto.randomUUID()}`,
+			});
+			await addTestMemberships({ workspaceId: elsewhere.id, memberId: editorId, role: "editor" });
 			await onDatabase((db) =>
 				db
 					.delete(membership)

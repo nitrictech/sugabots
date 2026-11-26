@@ -74,7 +74,7 @@ export function ChatFooter({
 				onSubmit={sending.submit}
 				submitLabel="Send message"
 				sending={sending.pending}
-				held={held}
+				held={held && <BotsWithoutModelNotice bots={withoutModel} />}
 				error={sending.error ?? (resolveFailed ? RESOLVE_FAILURE_MESSAGE : undefined)}
 				mentionable={mentionable}
 				replyingTo={
@@ -87,12 +87,7 @@ export function ChatFooter({
 					onClearInherited: recipients.clearAddressed,
 				}}
 				attachments={attachments}
-				notice={
-					<>
-						{held && <BotsWithoutModelNotice bots={withoutModel} />}
-						<ConnectorsNotice owner={chatLocation} />
-					</>
-				}
+				notice={<ConnectorsNotice owner={chatLocation} />}
 			/>
 			{/*
 			 * Always its height, so nothing moves as somebody starts or stops typing.

@@ -8,8 +8,9 @@ import { uuidSchema } from "./uuid.ts";
  * Bots: AI teammates, each with a name, handle, avatar, model and instructions.
  *
  * A bot belongs to its workspace. It is public, for everyone in the
- * workspace, or personal, for the member who made it; a Personal Assistant is
- * its member's alone. Public bots can be added to projects.
+ * workspace, or personal, for the member who made it, whose permissions it
+ * acts with. A Personal Assistant is a personal bot. Public bots can be added
+ * to projects.
  */
 
 /**
@@ -98,8 +99,10 @@ export const modelIdSchema = Schema.String.check(
 );
 
 /**
- * How a bot is addressed in a message: `@personal-assistant`. Lower case,
- * so that a mention typed by hand matches, and unique within the workspace.
+ * How a bot is addressed in a message: `@trip-planner`. Lower case, so that
+ * a mention typed by hand matches. Unique within the workspace, but for
+ * Personal Assistants', which are unique only among one member's:
+ * `@personal-assistant`, then `@personal-assistant-2`.
  */
 export const handleSchema = Schema.String.check(
 	Schema.isMinLength(1),
@@ -179,13 +182,12 @@ export const botSchema = Schema.Struct({
 	naturalBrowsing: Schema.optional(Schema.Boolean),
 	/** Who added it, by name: null when nobody did, or they are no longer in the workspace. */
 	createdBy: Schema.NullOr(namedMemberSchema),
-	/**
-	 * Whether everyone in the workspace sees it, or only its creator.
-	 * Meaningless when `assistant` is true: a Personal Assistant is neither
-	 * public nor personal, as only its member ever sees it.
-	 */
+	/** Whether everyone in the workspace sees it, or only its creator. */
 	visibility: botVisibilitySchema,
-	/** Whether it is the member's own Personal Assistant, which only they see. */
+	/**
+	 * Whether it is a Personal Assistant: a personal bot, always, whose
+	 * instructions Sugabots keeps. An administrator sees others' listed.
+	 */
 	assistant: Schema.Boolean,
 	/** Whether the member asking pinned it to their sidebar. */
 	pinned: Schema.Boolean,

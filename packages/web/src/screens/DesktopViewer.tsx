@@ -8,6 +8,7 @@ import { apiBaseUrl } from "@/lib/api-url.ts";
 import { useComputerAccess, useComputerGap } from "@/lib/computer-providers.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { API_DID_NOT_ANSWER } from "@/lib/failure.ts";
+import { settingsSectionLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
 import {
@@ -16,7 +17,6 @@ import {
 	type ResourceOwner,
 	resourcePermissions,
 } from "@/lib/resource-owner.tsx";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Stage } from "@/shell/Stage.tsx";
@@ -51,7 +51,6 @@ export function DesktopStage({
 	const access = useComputerAccess();
 	const missing = useComputerGap(owner);
 	const may = useWorkspacePermissions();
-	const backToChat = useBackToHere("Chat");
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	// For a phone's own view, which covers everything; a wider screen's `Stage` has its own.
 	const phoneKeys = usePanelKeys<HTMLElement>(onClose);
@@ -67,10 +66,7 @@ export function DesktopStage({
 							the whole workspace.
 							<span className="mt-5 flex justify-center">
 								<Link
-									from="/$workspace"
-									to="./settings/$section"
-									params={{ section: "computers" }}
-									state={backToChat}
+									{...settingsSectionLink("computers")}
 									className={buttonStyles({ size: "sm" })}
 								>
 									Set up computers

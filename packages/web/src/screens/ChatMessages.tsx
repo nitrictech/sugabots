@@ -10,12 +10,19 @@ import {
 	type Participant,
 	type ToolCallPart,
 } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { CornerUpLeft, Reply } from "lucide-react";
-import { type CSSProperties, Fragment, type ReactNode, useMemo, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	cloneElement,
+	Fragment,
+	type ReactNode,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { type ApprovalPermissions, mayAnswer } from "@/lib/approvals.ts";
-import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
+import type { AuthorLink, PagedAuthor } from "@/lib/author-links.tsx";
 import { type MarkedConnector, useMarkedConnectors } from "@/lib/connectors.ts";
 import { formatClockTime, formatDay, formatFullTimestamp } from "@/lib/list-time.ts";
 import { BROWSER_TOOL_PREFIX, splitToolKey } from "@/lib/tool-names.ts";
@@ -875,11 +882,10 @@ function AuthorName({
 	if (!link) {
 		return <span className={className}>{name}</span>;
 	}
-	return (
-		<Link {...link} className={cn(className, "rounded hover:underline focus-ring")}>
-			{name}
-		</Link>
-	);
+	return cloneElement(link, {
+		className: cn(className, "rounded hover:underline focus-ring"),
+		children: name,
+	} as Partial<unknown>);
 }
 
 /** The colours names are set in, each made to read in both themes. */

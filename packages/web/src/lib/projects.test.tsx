@@ -1,14 +1,6 @@
 import { testMember } from "@sugabots/contracts/testing";
-import { QueryClientProvider } from "@tanstack/react-query";
-import {
-	createMemoryHistory,
-	createRootRoute,
-	createRouter,
-	RouterProvider,
-} from "@tanstack/react-router";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { Effect } from "effect";
-import { type ReactNode, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { juno, projects, sam } from "@/api.test-support.tsx";
 import { client } from "@/client.test-support.ts";
@@ -17,7 +9,7 @@ import {
 	usePlaceProjectMember,
 	useProjectMembers,
 } from "@/lib/projects.ts";
-import { createQueryClient } from "@/lib/query.ts";
+import { InRoute } from "@/lib/route.test-support.tsx";
 
 vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
@@ -59,19 +51,3 @@ describe("a project's members and who reaches it", () => {
 		await waitFor(() => expect(result.current.reaching.data).toEqual(reachingAfter));
 	});
 });
-
-/** Renders `children` inside a route, where `useWorkspace` reads the workspace from. */
-function InRoute({ children }: { children: ReactNode }) {
-	const [queries] = useState(() => createQueryClient());
-	const [router] = useState(() =>
-		createRouter({
-			routeTree: createRootRoute({ component: () => children }),
-			history: createMemoryHistory(),
-		}),
-	);
-	return (
-		<QueryClientProvider client={queries}>
-			<RouterProvider router={router} />
-		</QueryClientProvider>
-	);
-}

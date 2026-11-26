@@ -9,13 +9,14 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { settingsSectionLink } from "@/lib/links.ts";
 import { useLivelinessChoice } from "@/lib/liveliness.tsx";
 import { SETTINGS_BESIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
+import { type SettingsLocation, sectionOf } from "@/lib/open-settings.ts";
 import { useProjects } from "@/lib/projects.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
 import { useSession, useSignOut, useUpdateName } from "@/lib/session.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
 	useDeleteWorkspace,
@@ -26,7 +27,6 @@ import {
 	useWorkspaceRole,
 	useWorkspaceTimeZone,
 } from "@/lib/workspace.ts";
-import type { WorkspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { MemberAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -52,19 +52,15 @@ import { WebSearchSettings } from "./WebSearchSettings.tsx";
 import { WorkspaceMemberSettings } from "./WorkspaceMemberSettings.tsx";
 
 export function WorkspaceSettings({
-	section,
-	selectedProviderId,
-	modelChoice,
-	selectedMembershipId,
+	page,
 }: {
-	section: WorkspaceSettingSection;
-	/** The provider open on the Models page. */
-	selectedProviderId?: string;
-	/** Which model the Models page shows the choice of instead: new bots' or the system bots'. */
-	modelChoice?: "default" | "system";
-	/** The membership open on the Members page. */
-	selectedMembershipId?: string;
+	/** The page open: a section, or one of a section's own pages; not the list of them. */
+	page: Exclude<SettingsLocation, { kind: "sections" }>;
 }) {
+	const section = sectionOf(page);
+	const selectedProviderId = page.kind === "provider" ? page.provider : undefined;
+	const modelChoice = page.kind === "model" ? page.choice : undefined;
+	const selectedMembershipId = page.kind === "member" ? page.membership : undefined;
 	const { workspace, isPending } = useWorkspace();
 	const session = useSession();
 	const may = useWorkspacePermissions();
@@ -290,7 +286,6 @@ function AccountSettings() {
 	const signOut = useSignOut();
 	const updateName = useUpdateName();
 	const openedFromCard = !useMediaQuery(SETTINGS_BESIDE);
-	const backToAccount = useBackToHere("You");
 	const signedIn = session.member;
 	if (!signedIn) return null;
 
@@ -329,14 +324,7 @@ function AccountSettings() {
 					<SettingsRow
 						label="Notifications"
 						chevron
-						render={
-							<Link
-								from="/$workspace"
-								to="./settings/$section"
-								params={{ section: "notifications" }}
-								state={backToAccount}
-							/>
-						}
+						render={<Link {...settingsSectionLink("notifications")} />}
 					/>
 				</SettingsGroup>
 			)}

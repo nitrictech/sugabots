@@ -64,6 +64,46 @@ function memoryStorage() {
 	};
 }
 
+async function signedInConnector(accessToken: string) {
+	const workspaceId = await seedWorkspace();
+	const memberId = await seedMember(workspaceId, "owner");
+	const bot = await seedBot(workspaceId, { createdById: memberId });
+	const projectId = await seedProject(workspaceId, { leadBotId: bot.id, members: [memberId] });
+	const store = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
+	const connector = await store.create(workspaceId, projectId, memberId, {
+		name: "OAuth connector",
+		url: serverUrl,
+		auth: "oauth",
+	});
+	const record: OAuthRecord = {
+		clientInformation: { client_id: "client-1" },
+		authorizationServer: {
+			issuer: origin,
+			authorizationServerUrl: origin,
+			tokenEndpoint: `${origin}/token`,
+		},
+		tokens: { access_token: accessToken, refresh_token: "refresh-1", token_type: "Bearer" },
+	};
+	await store.saveOauthRecord(workspaceId, connector.id, record, {
+		kind: "signIn",
+		signedInById: memberId,
+		version: null,
+	});
+	return { workspaceId, connector, store, record };
+}
+
+function clientsThrough(upstream: EgressHttpClient) {
+	return runOnPostgres(
+		Effect.flatMap(ConnectorSignIn.Service, (signIn) => signIn.clients).pipe(
+			Effect.provide(
+				ConnectorSignIn.layer.pipe(
+					Layer.provide(unimplemented(Egress.Service, { oauth: upstream })),
+				),
+			),
+		),
+	);
+}
+
 describe.skipIf(!process.env.DATABASE_URL)("refreshing a stored connector", () => {
 	afterAll(closeDatabase);
 
@@ -72,44 +112,13 @@ describe.skipIf(!process.env.DATABASE_URL)("refreshing a stored connector", () =
 		["network error", () => Promise.reject(new TypeError("fetch failed"))],
 		["HTTP 503", () => Promise.resolve(new Response(null, { status: 503 }))],
 	] as const)("keeps the stored sign-in after a refresh %s", async (message, exchange) => {
-		const workspaceId = await seedWorkspace();
-		const memberId = await seedMember(workspaceId, "owner");
-		const bot = await seedBot(workspaceId, { createdById: memberId });
-		const projectId = await seedProject(workspaceId, { leadBotId: bot.id, members: [memberId] });
-		const store = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
-		const connector = await store.create(workspaceId, projectId, memberId, {
-			name: "OAuth connector",
-			url: serverUrl,
-			auth: "oauth",
-		});
-		const record: OAuthRecord = {
-			clientInformation: { client_id: "client-1" },
-			authorizationServer: {
-				issuer: origin,
-				authorizationServerUrl: origin,
-				tokenEndpoint: `${origin}/token`,
-			},
-			tokens: { access_token: "expired", refresh_token: "refresh-1", token_type: "Bearer" },
-		};
-		await store.saveOauthRecord(workspaceId, connector.id, record, {
-			kind: "signIn",
-			signedInById: memberId,
-			version: null,
-		});
+		const { workspaceId, connector, store, record } = await signedInConnector("expired");
 		const tokenEndpoint = vi.fn(exchange);
 		const upstream: EgressHttpClient = (input, init) => {
 			const request = new Request(input, init);
 			return request.url === `${origin}/token` ? tokenEndpoint() : fetch(request);
 		};
-		const clients = await runOnPostgres(
-			Effect.flatMap(ConnectorSignIn.Service, (signIn) => signIn.clients).pipe(
-				Effect.provide(
-					ConnectorSignIn.layer.pipe(
-						Layer.provide(unimplemented(Egress.Service, { oauth: upstream })),
-					),
-				),
-			),
-		);
+		const clients = await clientsThrough(upstream);
 		const outcome = clients.for(workspaceId, connector.id, serverUrl).fetch(serverUrl);
 		await expect(outcome).rejects.toThrow(
 			message === "AbortError" ? "Stopped" : message === "network error" ? "fetch failed" : message,
@@ -119,30 +128,7 @@ describe.skipIf(!process.env.DATABASE_URL)("refreshing a stored connector", () =
 	});
 
 	it("uses credentials refreshed by another turn while an MCP session waits for approval", async () => {
-		const workspaceId = await seedWorkspace();
-		const memberId = await seedMember(workspaceId, "owner");
-		const bot = await seedBot(workspaceId, { createdById: memberId });
-		const projectId = await seedProject(workspaceId, { leadBotId: bot.id, members: [memberId] });
-		const store = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
-		const connector = await store.create(workspaceId, projectId, memberId, {
-			name: "OAuth connector",
-			url: serverUrl,
-			auth: "oauth",
-		});
-		await store.saveOauthRecord(
-			workspaceId,
-			connector.id,
-			{
-				clientInformation: { client_id: "client-1" },
-				authorizationServer: {
-					issuer: origin,
-					authorizationServerUrl: origin,
-					tokenEndpoint: `${origin}/token`,
-				},
-				tokens: { access_token: "before-wait", refresh_token: "refresh-1", token_type: "Bearer" },
-			},
-			{ kind: "signIn", signedInById: memberId, version: null },
-		);
+		const { workspaceId, connector } = await signedInConnector("before-wait");
 		let expired = false;
 		const requests: (string | null)[] = [];
 		const tokenEndpoint = vi.fn(() =>
@@ -163,15 +149,7 @@ describe.skipIf(!process.env.DATABASE_URL)("refreshing a stored connector", () =
 			}
 			return fetch(request);
 		};
-		const clients = await runOnPostgres(
-			Effect.flatMap(ConnectorSignIn.Service, (signIn) => signIn.clients).pipe(
-				Effect.provide(
-					ConnectorSignIn.layer.pipe(
-						Layer.provide(unimplemented(Egress.Service, { oauth: upstream })),
-					),
-				),
-			),
-		);
+		const clients = await clientsThrough(upstream);
 		const target = () => ({
 			url: serverUrl,
 			headers: {},
@@ -200,30 +178,7 @@ describe.skipIf(!process.env.DATABASE_URL)("refreshing a stored connector", () =
 	});
 
 	it("coalesces refresh exchanges from concurrent callers before the provider rotates the token", async () => {
-		const workspaceId = await seedWorkspace();
-		const memberId = await seedMember(workspaceId, "owner");
-		const bot = await seedBot(workspaceId, { createdById: memberId });
-		const projectId = await seedProject(workspaceId, { leadBotId: bot.id, members: [memberId] });
-		const store = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
-		const connector = await store.create(workspaceId, projectId, memberId, {
-			name: "OAuth connector",
-			url: serverUrl,
-			auth: "oauth",
-		});
-		await store.saveOauthRecord(
-			workspaceId,
-			connector.id,
-			{
-				clientInformation: { client_id: "client-1" },
-				authorizationServer: {
-					issuer: origin,
-					authorizationServerUrl: origin,
-					tokenEndpoint: `${origin}/token`,
-				},
-				tokens: { access_token: "expired", refresh_token: "refresh-1", token_type: "Bearer" },
-			},
-			{ kind: "signIn", signedInById: memberId, version: null },
-		);
+		const { workspaceId, connector, store } = await signedInConnector("expired");
 		const rotating = Promise.withResolvers<void>();
 		const rotated = Promise.withResolvers<void>();
 		const bothRejected = Promise.withResolvers<void>();
@@ -248,17 +203,7 @@ describe.skipIf(!process.env.DATABASE_URL)("refreshing a stored connector", () =
 			}
 			return fetch(request);
 		};
-		const newCaller = () =>
-			runOnPostgres(
-				Effect.flatMap(ConnectorSignIn.Service, (signIn) => signIn.clients).pipe(
-					Effect.provide(
-						ConnectorSignIn.layer.pipe(
-							Layer.provide(unimplemented(Egress.Service, { oauth: upstream })),
-						),
-					),
-				),
-			);
-		const [first, second] = await Promise.all([newCaller(), newCaller()]);
+		const [first, second] = await Promise.all([clientsThrough(upstream), clientsThrough(upstream)]);
 		const list = (clients: typeof first) =>
 			listServerTools(
 				{

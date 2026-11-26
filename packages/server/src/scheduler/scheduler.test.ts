@@ -328,6 +328,81 @@ describe("the scheduler, against Postgres", () => {
 		).toEqual([]);
 	});
 
+	it("finishes a member's removal only once every one of their Personal Assistants' computers is gone", async () => {
+		const { workspaceId, ownerId, adminId } = await projectWithAdmin();
+		const [adminMembership] = await onDatabase((db) =>
+			db
+				.select()
+				.from(membership)
+				.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, adminId))),
+		);
+		if (!adminMembership) throw new Error("Expected the administrator’s membership");
+		const first = await seedBot(workspaceId, { assistantOf: adminId, visibility: "personal" });
+		const second = await seedBot(workspaceId, { assistantOf: adminId, visibility: "personal" });
+		const firstComputer = await seedComputer(workspaceId, first.defaultProject);
+		const secondComputer = await seedComputer(workspaceId, second.defaultProject);
+		// The first assistant's computer is already gone at the provider; the second's
+		// provider can't be reached until it can.
+		let secondReachable = false;
+		const provider = createServer((incoming, response) => {
+			const gone = incoming.url?.includes(first.defaultProject) || secondReachable;
+			response
+				.writeHead(gone ? 404 : 503, { "content-type": "application/json" })
+				.end(
+					JSON.stringify(
+						gone ? { code: "NOT_FOUND", message: "No such computer" } : { message: "Unavailable" },
+					),
+				);
+		});
+		await new Promise<void>((listen) => provider.listen(0, "127.0.0.1", listen));
+		onTestFinished(() => void provider.close());
+		const { port } = provider.address() as AddressInfo;
+		const apiKeyEncrypted = await runOnPostgres(
+			Effect.map(Secrets.Service, (secrets) => secrets.encrypt("api-key")),
+		);
+		await onDatabase((db) =>
+			db
+				.update(computerProvider)
+				.set({
+					apiKeyEncrypted,
+					settings: {
+						builtIn: "opensandbox",
+						serverUrl: `http://127.0.0.1:${port}`,
+						image: "debian",
+					},
+				})
+				.where(eq(computerProvider.workspaceId, workspaceId)),
+		);
+		const operations = await operationsForTests({ egress: localComputerEgress });
+		const owner = await principals(await authenticators()).member(ownerId);
+		const removing = operations["workspaces.removeMembership"](
+			owner,
+			{ workspace: workspaceId, membershipId: adminMembership.id },
+			request(),
+		);
+		expect(await runOnPostgres(removing)).toEqual({ cleanupPending: true });
+		const computersLeft = () =>
+			onDatabase((db) =>
+				db
+					.select({ id: computer.id })
+					.from(computer)
+					.where(inArray(computer.id, [firstComputer, secondComputer])),
+			).then((rows) => rows.map(({ id }) => id));
+		const membershipLeft = () =>
+			onDatabase((db) => db.select().from(membership).where(eq(membership.id, adminMembership.id)));
+
+		const scheduler = await makeScheduler(operations);
+		const now = Date.now();
+		await clockAt(new Date(now))(scheduler.finishDeletions);
+		expect(await computersLeft()).toEqual([secondComputer]);
+		expect(await membershipLeft()).toMatchObject([{ leaving: true }]);
+
+		secondReachable = true;
+		await clockAt(new Date(now + 60 * 60 * 1000))(scheduler.finishDeletions);
+		expect(await computersLeft()).toEqual([]);
+		expect(await membershipLeft()).toEqual([]);
+	});
+
 	it.each(["is removed", "leaves"] as const)(
 		"revokes access while a member %s during a computer provider outage",
 		async (departure) => {
@@ -342,9 +417,11 @@ describe("the scheduler, against Postgres", () => {
 					.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, adminId))),
 			);
 			if (!adminMembership) throw new Error("Expected the administrator’s membership");
+			// Two Personal Assistants, the newer with a computer: the departure
+			// waits for every one of them, not just the first.
+			await seedBot(workspaceId, { assistantOf: adminId, visibility: "personal" });
 			const assistant = await seedBot(workspaceId, {
 				assistantOf: adminId,
-				createdById: adminId,
 				visibility: "personal",
 			});
 			const personal = await seedBot(workspaceId, { createdById: adminId, visibility: "personal" });

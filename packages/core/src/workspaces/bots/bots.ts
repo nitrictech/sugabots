@@ -2,13 +2,13 @@ export * as Bots from "./bots.ts";
 
 import type { Bot, BotUpdate, NewBot, SystemBot, SystemBotKey } from "@sugabots/contracts";
 import {
+	AssistantHandleFixed,
 	AssistantInstructionsManaged,
-	AssistantManaged,
-	AssistantVisibilityFixed,
 	type BotGone,
 	type BotHandleReserved,
 	type BotNameTaken,
 	EmptyBotUpdate,
+	PersonalVisibilityFixed,
 	type SystemBotImmutable,
 	SystemBotMissing,
 } from "@sugabots/contracts/errors/bots";
@@ -40,13 +40,14 @@ import { reachChanged } from "../../streams/reach-changes.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
 import { ProjectStore } from "../projects/project-store.ts";
+import { changesPersonal } from "./bot.ts";
 import { memberFacingBot, systemBots, visibleMemberFacingBots } from "./bot-reads.ts";
 import { BotStore } from "./bot-store.ts";
 import { PersonalAssistants } from "./personal-assistants.ts";
 
 /**
  * A workspace's bots, for operations that have proved what each call needs:
- * those members make, each member's Personal Assistant, and the system bots
+ * those members make, each member's Personal Assistants, and the system bots
  * it sets up once. Each method takes the workspace and the bot from its
  * proofs, and returns bots as the member acting sees them, permissions and
  * all. Whatever a bot runs on has to be a model the workspace offers.
@@ -60,8 +61,8 @@ export interface Interface {
 		bot: NewBot,
 	) => Effect.Effect<Bot, ModelNotEnabled | BotNameTaken | BotHandleReserved | ResourceHidden>;
 	/**
-	 * Changes the bot. A Personal Assistant's member changes only its name and
-	 * avatar; a bot managing itself in its own chats, only its instructions and
+	 * Changes the bot. A Personal Assistant's member changes all but its
+	 * instructions, handle and visibility; a bot managing itself in its own chats, only its instructions and
 	 * description, which its interview writes. Changes to visibility and
 	 * computer use require `canChangeReach`, proved under its workspace's lock.
 	 */
@@ -78,10 +79,9 @@ export interface Interface {
 		| BotHandleReserved
 		| BotGone
 		| SystemBotImmutable
-		| LeadsProjects
-		| AssistantVisibilityFixed
+		| PersonalVisibilityFixed
 		| AssistantInstructionsManaged
-		| AssistantManaged
+		| AssistantHandleFixed
 		| ResourceHidden
 	>;
 	/**
@@ -109,16 +109,14 @@ export interface Interface {
 		approved: Approved<P, X, [B], "bots.pin" | "bots.unpin">,
 	) => Effect.Effect<Bot, ResourceHidden | FenceRefusal>;
 	/**
-	 * The member's Personal Assistant, made on `model` when they have none. An
-	 * existing one moves onto `model` when it has no model or runs on one the
-	 * workspace no longer offers, so a model its member chose stays. Without
-	 * `model`, one with no model is given the workspace's default.
+	 * Another Personal Assistant for the member, whatever their role, on the
+	 * workspace's default model. Joining a workspace gives them their first; this
+	 * is the only other way one is made.
 	 */
-	readonly ensureAssistant: <P, W>(
+	readonly createAssistant: <P, W>(
 		isMember: IsMember<P>,
 		canRead: CanReadWorkspace<P, W>,
-		model: string | undefined,
-	) => Effect.Effect<Bot, ModelNotEnabled | ResourceHidden>;
+	) => Effect.Effect<Bot, ResourceHidden>;
 	/** The workspace's system bots, with the model each runs on. */
 	readonly systemBots: <P, W>(canRead: CanReadWorkspace<P, W>) => Effect.Effect<SystemBot[]>;
 	/** Points a system bot at a model the workspace offers. */
@@ -186,14 +184,17 @@ export const make = Effect.gen(function* () {
 					) {
 						return yield* new ActionForbidden({ proof: "CanManageBot" });
 					}
-					if (facts.assistantOf !== null) yield* requireAssistantAvatarOnly(changes);
+					if (changesPersonal(facts.visibility, changes.visibility)) {
+						return yield* new PersonalVisibilityFixed();
+					}
+					if (facts.assistantOf !== null) yield* refuseAssistantsFixedFields(changes);
 					// A cleared model names none to check.
 					if (changes.model != null) {
 						yield* modelProviders.requireEnabled(workspace, changes.model);
 					}
 					const updated = yield* transaction(
 						Effect.gen(function* () {
-							const row = yield* store.update(workspace, facts.id, changes, actor.memberId);
+							const row = yield* store.update(workspace, facts.id, changes);
 							// Who reaches a bot, and whether its desktop may stay open, follow its
 							// visibility and computer use, so streams and desktop viewers prove again.
 							if (changesReach) {
@@ -242,12 +243,10 @@ export const make = Effect.gen(function* () {
 					const saved = yield* transaction(
 						Effect.gen(function* () {
 							yield* holdTurnOf(approved.principal.value);
-							return yield* store.update(
-								workspace,
-								facts.id,
-								{ instructions: written.instructions, description: written.description },
-								actor.memberId,
-							);
+							return yield* store.update(workspace, facts.id, {
+								instructions: written.instructions,
+								description: written.description,
+							});
 						}),
 					).pipe(
 						// Only a change of name, handle or visibility refuses these.
@@ -255,7 +254,7 @@ export const make = Effect.gen(function* () {
 							BotNameTaken: Effect.die,
 							BotHandleReserved: Effect.die,
 							SystemBotImmutable: Effect.die,
-							LeadsProjects: Effect.die,
+							PersonalVisibilityFixed: Effect.die,
 						}),
 					);
 					return yield* shown(saved.id, actor);
@@ -282,20 +281,22 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		ensureAssistant: (isMember, canRead, model) =>
+		createAssistant: (isMember, canRead) =>
 			operation(
-				"ensureAssistant",
-				Effect.gen(function* () {
-					const member = {
-						workspaceId: canRead.inWorkspace.workspace.value,
-						memberId: isMember.member,
-					};
-					const assistant =
-						model === undefined
-							? yield* personalAssistants.provision(member)
-							: yield* personalAssistants.provisionWithModel({ ...member, model });
-					return yield* shown(assistant.id, canRead.actor);
-				}),
+				"createAssistant",
+				transaction(
+					Effect.gen(function* () {
+						const workspaceId = canRead.inWorkspace.workspace.value;
+						const assistant = yield* personalAssistants.add({
+							workspaceId,
+							memberId: isMember.member,
+						});
+						yield* outbox.publish([
+							reachChanged(workspaceId, { kind: "bot", botId: assistant.id }),
+						]);
+						return yield* shown(assistant.id, canRead.actor);
+					}),
+				),
 			),
 
 		systemBots: (canRead) =>
@@ -334,14 +335,6 @@ const INTERVIEW_WRITTEN_FIELDS: ReadonlySet<keyof BotUpdate> = new Set([
 	"description",
 ]);
 
-/** What a Personal Assistant's member may change of it: its name and its avatar. */
-const ASSISTANT_NAME_AND_AVATAR_FIELDS: ReadonlySet<keyof BotUpdate> = new Set([
-	"name",
-	"color",
-	"eyes",
-	"shape",
-]);
-
 /** The fields `changes` sets. */
 function changedFields(changes: BotUpdate): (keyof BotUpdate)[] {
 	return (Object.keys(changes) as (keyof BotUpdate)[]).filter(
@@ -350,18 +343,15 @@ function changedFields(changes: BotUpdate): (keyof BotUpdate)[] {
 }
 
 /**
- * Refuses `changes` to a Personal Assistant that change more than its name and avatar:
- * Sugabots manages the rest of it. Its connectors are changed apart.
+ * Refuses `changes` to what a Personal Assistant keeps whoever manages it: its
+ * instructions, which are Sugabots', and its handle, which tells it apart from
+ * its member's others. That it is personal, as every bot that is, never changes.
  */
-const requireAssistantAvatarOnly = (changes: BotUpdate) =>
+const refuseAssistantsFixedFields = (changes: BotUpdate) =>
 	Effect.gen(function* () {
 		const changed = changedFields(changes);
-		// A Personal Assistant is always its member's alone.
-		if (changed.includes("visibility")) return yield* new AssistantVisibilityFixed();
-		// What a Personal Assistant is told is Sugabots', not its member's.
 		if (changed.includes("instructions")) return yield* new AssistantInstructionsManaged();
-		if (changed.some((field) => !ASSISTANT_NAME_AND_AVATAR_FIELDS.has(field)))
-			return yield* new AssistantManaged();
+		if (changed.includes("handle")) return yield* new AssistantHandleFixed();
 	});
 
 /**

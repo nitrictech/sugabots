@@ -180,20 +180,12 @@ describe("what the API tells a member agrees with what its operations let them d
 			}
 		});
 
-		it("shows an admin no other member's Personal Assistant, which every operation hides", async () => {
+		it("shows an admin another member's Personal Assistant as their personal bot, which they may only restrict", async () => {
 			const admin = await as.member(a.admin);
-			expect(await told(admin, a.assistant)).toBeUndefined();
-			expect(await tried(admin, a.assistant, a.ed)).toEqual({
-				update: false,
-				talk: false,
-				readHistory: false,
-				resolveChats: false,
-				manageConnectors: false,
-				manageComputer: false,
-				manageAutomations: false,
-				pauseAutomations: false,
-				delete: false,
-			});
+			const assistant = await seedBot(a.workspace, { assistantOf: a.erin, visibility: "personal" });
+			const shown = await told(admin, assistant);
+			expect(shown).toMatchObject({ talk: false, update: false, delete: true });
+			expect(shown).toEqual(await tried(admin, assistant, a.erin));
 		});
 	});
 

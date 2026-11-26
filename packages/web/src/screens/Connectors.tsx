@@ -1,9 +1,17 @@
+import { Plus } from "lucide-react";
+import { useState } from "react";
 import { useConnectors } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { ownerName, type ResourceOwner, resourceProjectId } from "@/lib/resource-owner.tsx";
+import {
+	ownerName,
+	type ResourceOwner,
+	resourcePermissions,
+	resourceProjectId,
+} from "@/lib/resource-owner.tsx";
 import { OwnerCrumb, OwnerPageCrumb } from "@/shell/BotCrumb.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsPage } from "@/ui/settings-page.tsx";
 import { ConnectorPage } from "./ConnectorPage.tsx";
 import { ConnectorsSettings, ProjectBotsConnectors } from "./ConnectorsSettings.tsx";
@@ -33,10 +41,28 @@ export function ConnectorsPage({
 }
 
 function ConnectorList({ owner, signInError }: { owner: ResourceOwner; signInError?: string }) {
+	const [adding, setAdding] = useState(false);
+	const canManage = resourcePermissions(owner).manageConnectors;
 	return (
-		<Page title="Connectors" parent={<OwnerCrumb owner={owner} />} place={{ kind: "owner", owner }}>
+		<Page
+			title="Connectors"
+			parent={<OwnerCrumb owner={owner} />}
+			place={{ kind: "owner", owner }}
+			actions={
+				canManage && (
+					<IconButton label="Add connector" variant="bar" onClick={() => setAdding(true)}>
+						<Plus size={16} strokeWidth={1.75} />
+					</IconButton>
+				)
+			}
+		>
 			<SettingsPage>
-				<ConnectorsSettings owner={owner} signInError={signInError} />
+				<ConnectorsSettings
+					owner={owner}
+					signInError={signInError}
+					adding={adding}
+					onAddingChange={setAdding}
+				/>
 				{"project" in owner && <ProjectBotsConnectors project={owner.project} />}
 			</SettingsPage>
 		</Page>

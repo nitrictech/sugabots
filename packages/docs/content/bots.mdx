@@ -16,9 +16,12 @@ Owners, admins and editors can make bots. You choose:
   pairs of eyes and 16 colours.
 - **Name**: what members call it. Its handle comes from the name, so
   "Trip Planner" is `@trip-planner`. Names and handles are unique across the
-  workspace.
-- **Public** or **personal**: who can talk to it. See
-  [below](#public-and-personal).
+  workspace, but for Personal Assistants': yours are `@personal-assistant`,
+  then `@personal-assistant-2` and so on, as everyone else's are, and no other
+  bot may take those. A Personal Assistant you make after deleting one may take
+  its handle, so an old link to the deleted one opens the new one.
+- **Public** or **personal**: who can talk to it. You choose once: it can't be
+  changed afterwards. See [below](#public-and-personal).
 
 A new bot starts on the workspace's [default model](/docs/models#default-model).
 If there's none, connect one in **Settings → Models** first. Bots can't think
@@ -34,12 +37,16 @@ changes its own instructions only in its own chats, and only once you approve.
 - A **public** bot is for everyone in the workspace. Anyone can find it, talk to
   it, and see its chats and files. Only public bots can be added to
   [projects](/docs/projects).
-- A **personal** bot is for its creator alone. Nobody else can talk to it or see
-  its chats. The owner and admins see that it exists, but not its chats.
+- A **personal** bot is for its creator alone, and works with their permissions:
+  it can reach whatever they can, in every project they're in, and asks them
+  before it changes anything. Nobody else can talk to it or see its chats, and
+  it can't be shared or added to projects. The owner and admins see that it
+  exists, but not its chats, and can only delete it or switch off its
+  automations and connectors.
 
-Making a bot personal takes it out of every project members made that it was in.
-A bot that [leads](/docs/projects#lead-bot) such a project can't be made personal
-until another bot leads it.
+Whether a bot is personal is chosen when it's made, and never changes: a public
+bot can't be made personal, and a personal bot can't be made public, since its
+chats hold what it found with your permissions.
 
 ## What a bot has
 
@@ -61,7 +68,6 @@ Its creator, the owner and admins can change a bot's settings:
 | Model | What it thinks with. Each bot can use a different one |
 | Instructions | How it should work. It follows these in every chat and project |
 | Tools | Which built-in tools it may use |
-| Visibility | Public or personal |
 
 <Tip title="Writing instructions">
 
@@ -85,28 +91,34 @@ Never book anything without asking first.
 ## Your sidebar
 
 The sidebar shows the bots you've pinned, under your
-[Personal Assistant](#your-personal-assistant). The rest of the workspace's
-bots are a browse away. Pin or unpin any bot you can see.
+[Personal Assistants](#personal-assistants). The rest of the workspace's
+bots are a browse away. Pin or unpin any bot you can see, but your Personal
+Assistants, which always sit at the top.
 
-## Your Personal Assistant
+## Personal Assistants
 
-Everyone has a **Personal Assistant**, made for them when they join, and always
-first in their sidebar. Only you can talk to yours or see its chats, admins
-included.
+A **Personal Assistant** is a [personal bot](#public-and-personal) that knows
+the workspace. Everyone is given one when they join, and anyone can make more
+under **Bots**, say one for each part of their work. Your Personal Assistants
+are always first in your sidebar, oldest first, and the workspace opens on the
+oldest; if you have none, it offers to make you one. Only you can talk to yours or see their chats,
+admins included.
 
 It knows the workspace: the projects, the bots you can reach and what each is
 for, and what is waiting on you, such as unread mentions,
 approvals and failing automations. Ask it what needs you, or how something in
 Sugabots works. It points you to the right bot, and starts a chat with it for
 you when you agree. It can also make a project, join one, add a bot to a
-project or pin a bot for you: each waits for your approval before it happens. You can change
-its name and avatar, add connectors to it, and manage its automations, which only you
-can see, run or answer. Its instructions are looked after by Sugabots, so you can't
-edit them.
+project or pin a bot for you: each waits for your approval before it happens, as
+any change a personal bot makes does. You manage it as any personal bot of
+yours, whatever your role: its name, avatar, model and tools, its connectors, and its automations,
+which only you can see, run or answer. Its instructions are looked after by
+Sugabots, so you can't edit them, and it keeps its handle and stays personal.
 
 ## Remove a bot
 
 **Delete bot** is at the bottom of its settings. Its chats, files, automations
 and connectors go with it, and that can't be undone. Its creator, the owner and
 admins can delete it, once another bot leads each project members made that it
-leads. A Personal Assistant can't be deleted.
+leads. Delete your last Personal Assistant and you have none until you make
+another.

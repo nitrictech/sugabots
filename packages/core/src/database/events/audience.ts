@@ -54,8 +54,8 @@ export const forWorkspace = <Event extends StreamEvent>(event: Event): Event =>
 /**
  * Who hears a change of who reaches what: a membership is seen by everyone in
  * the workspace, a project's members and bots by those who reach it, a bot by
- * those who reach it. Those who stopped reaching it are not told, but their
- * streams prove again on it all the same.
+ * those who reach it, or did until its deletion began. Others who stopped
+ * reaching it are not told, but their streams prove again on it all the same.
  */
 export function ofReachChange(about: ReachChange): Group {
 	switch (about.kind) {

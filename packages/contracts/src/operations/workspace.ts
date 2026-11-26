@@ -145,7 +145,7 @@ export const workspaceContracts = {
 	}),
 	"workspaces.removeMembership": OperationContract.make("workspaces.removeMembership", {
 		description:
-			"Remove a member from the workspace immediately, revoke their sessions and connector sign-ins, and queue any remaining Personal Assistant computer cleanup. Only the owner removes an admin, and nobody removes the owner.",
+			"Remove a member from the workspace immediately, revoke their sessions and connector sign-ins, and queue any remaining cleanup of their Personal Assistants' computers. Only the owner removes an admin, and nobody removes the owner.",
 		input: aMembership,
 		output: membershipDepartureSchema,
 		errors: [...workspaceRefusals, SubscriptionInUse],
@@ -164,7 +164,7 @@ export const workspaceContracts = {
 	}),
 	"workspaces.leave": OperationContract.make("workspaces.leave", {
 		description:
-			"Leave the workspace immediately. This ends your sessions and connector sign-ins and queues any remaining Personal Assistant computer cleanup. The owner stays until they hand it over.",
+			"Leave the workspace immediately. This ends your sessions and connector sign-ins and queues any remaining cleanup of your Personal Assistants' computers. The owner stays until they hand it over.",
 		input: aWorkspace,
 		output: membershipDepartureSchema,
 		errors: [...workspaceRefusals, OwnerStays, SubscriptionInUse],

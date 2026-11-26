@@ -1,13 +1,8 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
 import { Effect, Layer } from "effect";
-import {
-	bot as botTable,
-	member,
-	membership,
-	projectMember,
-	workspace,
-} from "../../../database/schema.ts";
+import { bot as botTable, projectMember } from "../../../database/schema.ts";
 import { onDatabase, runOnPostgres } from "../../../database/testing.ts";
+import { createWorkspaceFixture } from "../../../database/workspace.test-support.ts";
 import { type CallOperation, servedOperations } from "../../../operations/testing.ts";
 import type { Principal } from "../../../principal.ts";
 import { authenticators, principals } from "../../../proofs/world.test-support.ts";
@@ -175,29 +170,17 @@ export const reachingGitHub = (github: typeof fetch, publicUrl: string) =>
 /** A workspace with an admin, an editor, a project the editor is in, and a public bot. */
 export async function workspaceWithProject(label: string) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-	const [space] = await onDatabase((db) =>
-		db
-			.insert(workspace)
-			.values({ name: `${label} ${suffix}`, slug: `${label.toLowerCase()}-${suffix}` })
-			.returning(),
+	const {
+		workspace: space,
+		members: { admin, editor },
+	} = await createWorkspaceFixture(
+		{ name: `${label} ${suffix}`, slug: `${label.toLowerCase()}-${suffix}` },
+		{
+			admin: { name: "Ada", email: `${label}-ada-${suffix}@example.com`, role: "admin" },
+			editor: { name: "Kim", email: `${label}-kim-${suffix}@example.com`, role: "editor" },
+		},
 	);
-	const [admin, editor] = await onDatabase((db) =>
-		db
-			.insert(member)
-			.values([
-				{ name: "Ada", email: `${label}-ada-${suffix}@example.com` },
-				{ name: "Kim", email: `${label}-kim-${suffix}@example.com` },
-			])
-			.returning(),
-	);
-	if (!space || !admin || !editor) throw new Error("fixture");
 	const workspaceId = space.id;
-	await onDatabase((db) =>
-		db.insert(membership).values([
-			{ workspaceId, memberId: admin.id, role: "admin" },
-			{ workspaceId, memberId: editor.id, role: "editor" },
-		]),
-	);
 	const shared = await onDatabase((db) =>
 		seedProject(db, {
 			workspaceId,

@@ -1,5 +1,5 @@
 import type { Bot, NamedMember, SystemBot } from "@sugabots/contracts";
-import { and, asc, eq, isNotNull, isNull, or } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { Effect } from "effect";
 import { reachesBotFor } from "../../authorization/access.ts";
 import { type Actor, managesEveryBot } from "../../authorization/permissions.ts";
@@ -10,8 +10,8 @@ import { SYSTEM_BOTS } from "./system-bots.ts";
 
 /**
  * The bots in a workspace that `actor` sees, by name: those they reach, and,
- * for an administrator, every personal bot too, which they see listed but
- * can't open. Each says whether `actor` pinned it. System bots are not here.
+ * for an administrator, every personal bot too, Personal Assistants included,
+ * which they see listed but can't open. Each says whether `actor` pinned it. System bots are not here.
  */
 export const visibleMemberFacingBots = (workspaceId: string, actor: Actor) =>
 	query((db) =>
@@ -22,9 +22,7 @@ export const visibleMemberFacingBots = (workspaceId: string, actor: Actor) =>
 				and(
 					eq(bot.workspaceId, workspaceId),
 					isNull(bot.systemBotKey),
-					managesEveryBot(actor)
-						? or(isNull(bot.assistantOf), eq(bot.assistantOf, actor.memberId))
-						: reachesBotFor(bot.id, actor.memberId),
+					managesEveryBot(actor) ? undefined : reachesBotFor(bot.id, actor.memberId),
 				),
 			)
 			.orderBy(asc(bot.name)),

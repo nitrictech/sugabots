@@ -1,17 +1,14 @@
 import type { Project } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
-import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { projectLink } from "@/lib/links.ts";
 import { useJoinProject, useProjects } from "@/lib/projects.ts";
-import { useWorkspacePermissions } from "@/lib/workspace.ts";
-import { NewProjectDialog } from "@/shell/NewProject.tsx";
+import { useNewProject } from "@/shell/NewProject.tsx";
 import { DirectoryBody, Page } from "@/shell/Page.tsx";
 import { PrivateMark, ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
-import { Dialog } from "@/ui/dialog.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
@@ -23,10 +20,9 @@ import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
  */
 export function ProjectsDirectory() {
 	const { data: projects, isPending, error } = useProjects();
-	const may = useWorkspacePermissions();
+	const newProject = useNewProject();
 	const join = useJoinProject();
 	const navigate = useNavigate();
-	const [creating, setCreating] = useState(false);
 	const yours = projects?.filter((project) => project.isMember) ?? [];
 	const others = projects?.filter((project) => !project.isMember) ?? [];
 	return (
@@ -34,8 +30,8 @@ export function ProjectsDirectory() {
 			title="Projects"
 			place={{ kind: "tab" }}
 			actions={
-				may.createProjects && (
-					<IconButton label="New project" variant="bar" onClick={() => setCreating(true)}>
+				newProject.start && (
+					<IconButton label="New project" variant="bar" onClick={newProject.start}>
 						<Plus size={16} strokeWidth={1.75} />
 					</IconButton>
 				)
@@ -46,7 +42,7 @@ export function ProjectsDirectory() {
 				{join.error && <Alert>{failureMessage(join.error)}</Alert>}
 				{!isPending && projects?.length === 0 && (
 					<EmptyState title="No projects yet">
-						{may.createProjects
+						{newProject.start
 							? "Make the first one with the + above."
 							: "Ask someone in the workspace to make one."}
 					</EmptyState>
@@ -79,14 +75,7 @@ export function ProjectsDirectory() {
 					</SettingsGroup>
 				)}
 			</DirectoryBody>
-			<Dialog open={creating} onOpenChange={setCreating}>
-				<NewProjectDialog
-					onCreated={async (project) => {
-						setCreating(false);
-						await navigate(projectLink(project));
-					}}
-				/>
-			</Dialog>
+			{newProject.dialog}
 		</Page>
 	);
 }

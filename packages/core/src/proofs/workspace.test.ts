@@ -465,13 +465,18 @@ describe("the workspace and who is in it", () => {
 			);
 		});
 
-		it("keeps a bot to its bounds, and a run, a webhook call and system work to what they name", async () => {
+		it("keeps a bot to its bounds, a personal bot to its creator's, and a run, a webhook call and system work to what they name", async () => {
 			const { a } = world;
 			expect(await projectsReached(await as.botFor(a.ed, a.pub.id, a.chat))).toEqual([a.project]);
-			const assistantReach = await projectsReached(
-				await as.botFor(a.ed, a.assistant.id, a.assistantChat),
-			);
-			expect(assistantReach).toEqual(await projectsReached(await as.member(a.ed)));
+			const edsReach = await projectsReached(await as.member(a.ed));
+			for (const [botId, chatId] of [
+				[a.assistant.id, a.assistantChat],
+				[a.personal.id, a.personalChat],
+			] as const) {
+				expect(await projectsReached(await as.botFor(a.ed, botId, chatId)), botId).toEqual(
+					edsReach,
+				);
+			}
 			const { principal: run } = await as.run(a.workspace, a.project, a.pub.id);
 			expect(await projectsReached(run)).toEqual([a.project]);
 			expect(await projectsReached(await as.webhook(a.workspace, a.project))).toEqual([]);

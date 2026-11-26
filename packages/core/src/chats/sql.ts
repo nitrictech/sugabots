@@ -459,7 +459,7 @@ export const turn = pgTable(
 		/**
 		 * The member the turn acts for, worked out once, as it is made (see
 		 * `askerColumns`): who wrote the message it answers, or when a bot's turn
-		 * wrote it, that turn's asker; for a Personal Assistant's run, its member.
+		 * wrote it, that turn's asker; for a personal bot's run, its creator.
 		 * None for another run's turn, and for one whose message comes back to
 		 * nobody.
 		 */

@@ -4,13 +4,7 @@ import { ComputerSignIn } from "@sugabots/core/computers/computer-sign-in";
 import { Computers } from "@sugabots/core/computers/computers";
 import { ProjectComputers } from "@sugabots/core/computers/project-computers";
 import { Database, layer as databaseLayer, query } from "@sugabots/core/database/database";
-import {
-	computer,
-	computerLease,
-	member,
-	project,
-	workspace,
-} from "@sugabots/core/database/schema";
+import { computer, computerLease, project } from "@sugabots/core/database/schema";
 import {
 	closeDatabase,
 	holdTransaction,
@@ -19,6 +13,10 @@ import {
 	type TestInfrastructure,
 	waitUntilWaitingOnLocks,
 } from "@sugabots/core/database/testing";
+import {
+	createTestMember,
+	createTestWorkspace,
+} from "@sugabots/core/database/workspace.test-support";
 import { Operations } from "@sugabots/core/operations/registry";
 import { scheduledWorkOperations } from "@sugabots/core/operations/scheduled-work";
 import { Egress } from "@sugabots/core/providers/network/egress";
@@ -240,19 +238,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			afterQuery = undefined;
 			afterTransaction = undefined;
 			const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-			const [space] = await onDatabase((db) =>
-				db
-					.insert(workspace)
-					.values({ name: `Pausing ${suffix}`, slug: `pausing-${suffix}` })
-					.returning(),
-			);
-			const [owner] = await onDatabase((db) =>
-				db
-					.insert(member)
-					.values({ name: "Sam", email: `pausing-${suffix}@example.com` })
-					.returning(),
-			);
-			if (!space || !owner) throw new Error("fixture");
+			const space = await createTestWorkspace({
+				name: `Pausing ${suffix}`,
+				slug: `pausing-${suffix}`,
+			});
+			const owner = await createTestMember({ name: "Sam", email: `pausing-${suffix}@example.com` });
 			const made = await onDatabase((db) =>
 				seedProject(db, { workspaceId: space.id, name: "Launch", slug: "launch" }),
 			);

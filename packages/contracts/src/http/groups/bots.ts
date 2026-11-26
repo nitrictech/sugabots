@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
-import { botSchema, botUpdateSchema, modelIdSchema, newBotSchema } from "../../bots.ts";
+import { botSchema, botUpdateSchema, newBotSchema } from "../../bots.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict, refused } from "../errors.ts";
@@ -40,11 +40,10 @@ export class BotsApi extends HttpApiGroup.make("bots")
 			success: botSchema,
 			error: refused,
 		}),
-		/** The caller's Personal Assistant, made on `model` when they have none yet. */
-		HttpApiEndpoint.post("ensureAssistant", "/workspaces/:workspace/assistant", {
+		/** A Personal Assistant for the caller, besides any they have. */
+		HttpApiEndpoint.post("createAssistant", "/workspaces/:workspace/assistants", {
 			params: { workspace: workspaceIdOrSlugSchema },
-			payload: Schema.Struct({ model: Schema.optional(modelIdSchema) }),
-			success: botSchema,
+			success: botSchema.pipe(HttpApiSchema.status(201)),
 			error: refused,
 		}),
 	)

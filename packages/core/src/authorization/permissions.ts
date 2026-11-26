@@ -19,8 +19,8 @@ import { WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
  *   exception: it follows its bot (see `mayInProject`).
  * - **Bot actions** concern a bot, and what its default project holds, as
  *   that project's actions are decided. They are answered from the caller's
- *   role and the bot's visibility, creator and member, if it is a Personal
- *   Assistant.
+ *   role and the bot's visibility and creator, and whether it is their own
+ *   Personal Assistant, which they manage and run whatever their role.
  *
  * Every permission here is asked for somewhere.
  *
@@ -148,7 +148,10 @@ export interface ProjectFacts {
 export interface BotFacts {
 	visibility: "public" | "personal";
 	createdById: string | null;
-	/** The member whose Personal Assistant it is; null for any other bot. */
+	/**
+	 * On a Personal Assistant: the member it is for, who made it. Null for any
+	 * other bot. Whose it is, as for any bot, is `createdById`'s to say.
+	 */
 	assistantOf: string | null;
 }
 
@@ -303,27 +306,14 @@ const BOT_MANAGER_GRANTS = new Set<BotPermission>([
 	"computer.manage",
 ]);
 
-/**
- * What a member may do with their own Personal Assistant besides use it,
- * whatever their role: change its name, avatar and connectors, and manage and
- * run its automations. An action it takes for them still runs with their own
- * permissions, so a viewer's assistant can't make a project for them.
- * Sugabots manages the rest of it.
- */
-const ASSISTANT_OWNER_GRANTS = new Set<BotPermission>([
-	"bot.update",
-	"automation.manage",
-	"automation.run",
-]);
-
 function isAdministrator(role: WorkspaceRole | undefined): boolean {
 	return role === "owner" || role === "admin";
 }
 
 /**
  * Whether the caller manages every bot in the workspace, those somebody else
- * made and keeps personal included, though not another member's Personal
- * Assistant: what lists every such bot for them to manage.
+ * made and keeps personal included: what lists every such bot for them to
+ * manage.
  */
 export function managesEveryBot(actor: Actor): boolean {
 	return isAdministrator(actor.workspaceRole);
@@ -364,33 +354,50 @@ export function mayInProject(
 }
 
 /**
- * Whether the caller reaches the bot: its member for a Personal Assistant,
- * its creator for a personal bot, and anyone in the workspace for a public one.
+ * The member a personal bot, a Personal Assistant included, is for: its
+ * creator, the only one who reaches it and whose permissions it acts with.
+ * Null for a public bot, and for a personal bot whose creator's account is
+ * gone, which nobody reaches.
+ */
+export function personalBotCreator(
+	bot: Pick<BotFacts, "visibility" | "createdById">,
+): string | null {
+	return bot.visibility === "personal" ? bot.createdById : null;
+}
+
+/**
+ * Whether the caller reaches the bot: its creator for a personal bot, and
+ * anyone in the workspace for a public one.
  */
 export function reachesBot(actor: Actor, bot: BotFacts): boolean {
 	if (!actor.workspaceRole) return false;
-	if (bot.assistantOf !== null) return bot.assistantOf === actor.memberId;
-	if (bot.visibility === "personal") return bot.createdById === actor.memberId;
+	if (bot.visibility === "personal") return personalBotCreator(bot) === actor.memberId;
 	return true;
 }
 
 /**
  * Whether the caller may take a bot-addressed action. Using a bot takes
  * reach; changing it takes being its creator or an administrator, who may
- * change a personal bot they don't reach. Nobody but its member changes a
- * Personal Assistant or its automations, and nobody deletes one.
+ * change a personal bot they don't reach.
  */
 export function mayOnBot(actor: Actor, permission: BotPermission, bot: BotFacts): boolean {
-	const role = actor.workspaceRole;
+	const role = roleOnBot(actor, bot);
 	if (!role) return false;
-	if (bot.assistantOf !== null) {
-		if (bot.assistantOf !== actor.memberId) return false;
-		return botTalkerGrants(role).has(permission) || ASSISTANT_OWNER_GRANTS.has(permission);
-	}
 	const manages =
 		role !== "viewer" && (managesEveryBot(actor) || bot.createdById === actor.memberId);
 	if (manages && BOT_MANAGER_GRANTS.has(permission)) return true;
 	return reachesBot(actor, bot) && botTalkerGrants(role).has(permission);
+}
+
+/**
+ * The role whose grants decide what `actor` may do with the bot: their own,
+ * but on their own Personal Assistant at least an editor's, as a member
+ * manages and runs their assistants whatever their role. Anything the
+ * assistant does for them elsewhere still has only their own role.
+ */
+function roleOnBot(actor: Actor, bot: BotFacts): WorkspaceRole | undefined {
+	const ownAssistant = bot.assistantOf !== null && bot.createdById === actor.memberId;
+	return ownAssistant && actor.workspaceRole === "viewer" ? "editor" : actor.workspaceRole;
 }
 
 /** The roles holding a workspace permission. */

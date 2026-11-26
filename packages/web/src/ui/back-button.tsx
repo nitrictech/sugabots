@@ -1,5 +1,5 @@
 import type { useRender } from "@base-ui/react/use-render";
-import { useCanGoBack, useRouter } from "@tanstack/react-router";
+import { deepEqual, useCanGoBack, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronLeft } from "lucide-react";
 import { cloneElement, isValidElement, type MouseEvent, type ReactElement } from "react";
@@ -71,11 +71,15 @@ export function useLeave() {
 		if (behind && isHome(behind)) router.history.back();
 		else toHome();
 	};
-	/** `leaveFor` the page at `href`, such as the list a deleted thing was in. */
+	/**
+	 * `leaveFor` the page at `href`, such as the list a deleted thing was in:
+	 * the same path, and the same search, which names a page open over it, such as settings.
+	 */
 	const leaveForPage = (href: string) => {
-		const { pathname } = new URL(href, window.location.origin);
+		const { pathname, search } = new URL(href, window.location.origin);
+		const searchOfPage = router.options.parseSearch(search);
 		leaveFor(
-			(page) => page.pathname === pathname,
+			(page) => page.pathname === pathname && deepEqual(page.search, searchOfPage),
 			() => void router.navigate({ href, replace: true }),
 		);
 	};

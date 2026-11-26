@@ -47,12 +47,13 @@ import type { ChatColumns } from "./reach-set.ts";
  *
  * 1. `computerRequest`: a request to change a computer, such as a host
  *    request: those who may manage the computer's project.
- * 2. `assistant`: a Personal Assistant's call, or one in its runs: only its member.
+ * 2. `personalBot`: a personal bot's call, or one in its runs: only its
+ *    creator, whose permissions it acts with.
  * 3. `run`: a call in an automation's run: admins and the managers of the
  *    run's bot, among those who reach its chat.
  * 4. `asker`: any other turn's call, a helper's included: its asker.
  */
-export type ApproverRule = "computerRequest" | "assistant" | "run" | "asker";
+export type ApproverRule = "computerRequest" | "personalBot" | "run" | "asker";
 
 /**
  * A call that waits for approval, or one a turn would make: the turn making
@@ -253,11 +254,12 @@ export const approvalAudience = Effect.fn("Approvers.approvalAudience")(function
 	const member = sql`audience.member_id`;
 	const role = sql`audience.role`;
 	const administers = sql<boolean>`${role} in ('owner', 'admin')`;
-	const managesBot = (bot: SQL) => sql<boolean>`case
-		when ${bot}.assistant_of is not null then ${bot}.assistant_of = ${member}
-		else ${role} <> 'viewer' and
-			(${bot}.created_by_id = ${member} or (${administers} and ${bot}.visibility <> 'personal'))
-	end`;
+	// What `managesBot` decides for one bot: a member manages their own Personal
+	// Assistants whatever their role.
+	const managesBot = (
+		bot: SQL,
+	) => sql<boolean>`((${bot}.assistant_of is not null and ${bot}.created_by_id = ${member}) or (${role} <> 'viewer' and
+		(${bot}.created_by_id = ${member} or (${administers} and ${bot}.visibility <> 'personal'))))`;
 	const reachesChat = reachesChatFor(APPROVER_CHAT, member);
 	const managesComputer = sql<boolean>`computer_project.id is not null and case
 		when computer_project.default_of_bot_id is not null then ${managesBot(sql`computer_bot`)}
@@ -326,7 +328,7 @@ const APPROVER_CHAT: ChatColumns = {
 function approverRule(computerRequest: SQL<boolean>): SQL<ApproverRule> {
 	return sql<ApproverRule>`case
 		when ${computerRequest} then 'computerRequest'
-		when approver_bot.assistant_of is not null then 'assistant'
+		when approver_bot.visibility = 'personal' then 'personalBot'
 		when approver_asked.automation and approver_run.id is not null then 'run'
 		else 'asker'
 	end`;
@@ -358,7 +360,7 @@ function decidesByRule(
 ): SQL<boolean> {
 	return sql<boolean>`case ${rule}
 		when 'computerRequest' then ${standing.managesComputer}
-		when 'assistant' then approver_bot.assistant_of = ${standing.member}
+		when 'personalBot' then approver_bot.created_by_id = ${standing.member}
 		when 'run' then ${standing.managesRun} and ${standing.reachesChat}
 		else approver_asked.member_id = ${standing.member}
 	end`;

@@ -8,9 +8,8 @@ import { meetBot } from "./meet-bot.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
 /**
- * P is one of the bot B's managers: its creator, unless now a viewer; an
- * admin, for a bot that isn't personal; for a Personal Assistant, only its
- * member. It needs no reach: someone who neither manages nor reaches B gets
+ * P is one of the bot B's managers: its creator, unless now a viewer and B
+ * isn't their Personal Assistant, and an admin, for a bot that isn't personal. It needs no reach: someone who neither manages nor reaches B gets
  * `ResourceHidden`, and someone who reaches it without managing it
  * `ActionForbidden`. A bot acting for its asker gets it only in member bounds,
  * or in its own chats for its own bot; a run never does.

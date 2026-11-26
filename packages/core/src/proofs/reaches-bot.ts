@@ -8,8 +8,8 @@ import { meetBot } from "./meet-bot.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
 /**
- * P may see and talk to the bot B. A member reaches a public bot, a personal
- * bot they made and their own Personal Assistant. A bot acting for its asker
+ * P may see and talk to the bot B. A member reaches a public bot and a
+ * personal bot they made, their Personal Assistants included. A bot acting for its asker
  * reaches its own bot or one within its bounds, that its asker reaches; a run,
  * its own bot or one of its project's. No other principal reaches a bot, and
  * nobody reaches a system bot.

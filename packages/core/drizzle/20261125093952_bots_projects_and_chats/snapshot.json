@@ -1555,19 +1555,20 @@
         "index",
         "public",
         "agent",
-        "agent_assistant_idx"
+        "agent_assistant_handle_idx"
       ],
       "writes": [
-        "s|idx|public.agent_assistant_idx",
-        "n|idx|public.agent_assistant_idx",
-        "e|idx|public.agent_assistant_idx",
-        "n|rel|public.agent_assistant_idx"
+        "s|idx|public.agent_assistant_handle_idx",
+        "n|idx|public.agent_assistant_handle_idx",
+        "e|idx|public.agent_assistant_handle_idx",
+        "n|rel|public.agent_assistant_handle_idx"
       ],
       "reads": [
         "n|tbl|public.agent",
         "n|sch|public",
         "n|col|public.agent.workspace_id",
-        "n|col|public.agent.assistant_of"
+        "n|col|public.agent.assistant_of",
+        "n|col|public.agent.handle"
       ]
     },
     {
@@ -4666,15 +4667,15 @@
         "index",
         "public",
         "bot",
-        "agent_assistant_idx"
+        "agent_assistant_handle_idx"
       ],
       "writes": [
-        "s|idx|public.agent_assistant_idx",
-        "n|idx|public.agent_assistant_idx",
-        "n|rel|public.agent_assistant_idx",
-        "s|idx|public.bot_assistant_idx",
-        "n|idx|public.bot_assistant_idx",
-        "n|rel|public.bot_assistant_idx"
+        "s|idx|public.agent_assistant_handle_idx",
+        "n|idx|public.agent_assistant_handle_idx",
+        "n|rel|public.agent_assistant_handle_idx",
+        "s|idx|public.bot_assistant_handle_idx",
+        "n|idx|public.bot_assistant_handle_idx",
+        "n|rel|public.bot_assistant_handle_idx"
       ],
       "reads": [
         "e|tbl|public.bot",
@@ -14854,6 +14855,27 @@
         "n|tbl|public.notification_delivery",
         "n|sch|public"
       ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "bot"
+      ],
+      "writes": [
+        "s|ck|public.bot.bot_personal_assistant_check",
+        "n|ck|public.bot.bot_personal_assistant_check",
+        "e|ck|public.bot.bot_personal_assistant_check",
+        "n|con|public.bot.bot_personal_assistant_check"
+      ],
+      "reads": [
+        "n|tbl|public.bot",
+        "n|sch|public",
+        "n|col|public.bot.assistant_of",
+        "n|col|public.bot.visibility",
+        "n|col|public.bot.created_by_id"
+      ]
     }
   ],
   "deltas": [
@@ -15852,7 +15874,7 @@
       "row": {
         "schema": "public",
         "table": "agent",
-        "name": "agent_assistant_idx",
+        "name": "agent_assistant_handle_idx",
         "nameExplicit": true,
         "columns": [
           {
@@ -15864,6 +15886,13 @@
           },
           {
             "value": "assistant_of",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "handle",
             "isExpression": false,
             "asc": true,
             "nullsFirst": false,
@@ -17892,9 +17921,9 @@
     },
     {
       "op": "rename",
-      "key": "indexes\u0000[\"public\",\"agent_assistant_idx\"]",
+      "key": "indexes\u0000[\"public\",\"agent_assistant_handle_idx\"]",
       "set": {
-        "name": "bot_assistant_idx"
+        "name": "bot_assistant_handle_idx"
       }
     },
     {
@@ -24200,6 +24229,16 @@
         "generated": null,
         "identity": null,
         "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "bot",
+        "name": "bot_personal_assistant_check",
+        "value": "\"assistant_of\" is null or (\"visibility\" = 'personal' and (\"created_by_id\" is null or \"created_by_id\" = \"assistant_of\"))",
+        "entityType": "checks"
       }
     }
   ]

@@ -7,13 +7,17 @@ import {
 	type ProjectVisibility,
 	slugify,
 } from "@sugabots/contracts";
-import { type FormEvent, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { projectLink } from "@/lib/links.ts";
 import { useCreateProject, useProjects } from "@/lib/projects.ts";
+import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { ProjectColourPicker } from "@/shell/AvatarPicker.tsx";
 import { LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
+import { Dialog } from "@/ui/dialog.tsx";
 import {
 	DialogForm,
 	DialogFormBody,
@@ -126,4 +130,28 @@ export function NewProjectDialog({
 			/>
 		</DialogForm>
 	);
+}
+
+/**
+ * What starts a project, absent where the viewer may not make one, and the
+ * dialog that makes it, which must be rendered for it to open. It opens the
+ * project once it is made.
+ */
+export function useNewProject(): { start?: () => void; dialog: ReactNode } {
+	const [creating, setCreating] = useState(false);
+	const navigate = useNavigate();
+	const may = useWorkspacePermissions();
+	return {
+		start: may.createProjects ? () => setCreating(true) : undefined,
+		dialog: (
+			<Dialog open={creating} onOpenChange={setCreating}>
+				<NewProjectDialog
+					onCreated={async (project) => {
+						setCreating(false);
+						await navigate(projectLink(project));
+					}}
+				/>
+			</Dialog>
+		),
+	};
 }

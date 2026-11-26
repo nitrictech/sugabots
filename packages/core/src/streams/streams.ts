@@ -426,7 +426,7 @@ export const make = Effect.gen(function* () {
 					);
 					const bots = yield* query((db) =>
 						db
-							.select({ id: bot.id, reached: reach.reachesBot(bot.id) })
+							.select({ id: bot.id, reached: reach.hearsAboutBot(bot.id) })
 							.from(bot)
 							.where(eq(bot.workspaceId, workspace)),
 					);

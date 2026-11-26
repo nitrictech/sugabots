@@ -54,7 +54,7 @@ export interface TurnSetting {
 		readonly acceptsImages: boolean;
 		/** What it is told to be: its own instructions, or for a Personal Assistant, Sugabots'. */
 		readonly instructions: string;
-		/** On a Personal Assistant: the one member it works for. */
+		/** On a Personal Assistant: the member it is for, who made it. */
 		readonly assistantOf: string | null;
 		/** Whether everyone in the workspace reaches it, or only its creator. */
 		readonly visibility: BotVisibility;

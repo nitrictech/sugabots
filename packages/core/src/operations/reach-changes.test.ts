@@ -518,16 +518,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				]);
 			});
 
-			it("a bot made personal, and a bot deleted", async () => {
+			it("a bot deleted", async () => {
 				const staff = await staffed();
 				const ed = await signedIn.member(staff.ed);
 				const spare = await seedBot(staff.workspaceId, { createdById: staff.ed });
 
-				expect(
-					await waitsForLock(staff.workspaceId, () =>
-						call(ed, "bots.update", { botId: spare.id, changes: { visibility: "personal" } }),
-					),
-				).toBe("ok");
 				expect(
 					await waitsForLock(staff.workspaceId, () => call(ed, "bots.remove", { botId: spare.id })),
 				).toBe("ok");

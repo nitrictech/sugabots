@@ -30,7 +30,6 @@ import {
 	bot,
 	chat,
 	connector,
-	member,
 	membership,
 	message,
 	placedChat,
@@ -47,6 +46,7 @@ import {
 	runOnPostgres,
 	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
+import { createTestMember } from "../../database/workspace.test-support.ts";
 import { Email } from "../../email/email.ts";
 import { asMember } from "../../operations/chats/testing.ts";
 import { layer as operationsLayer } from "../../operations/layer.ts";
@@ -854,22 +854,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			{ projectId: ownProjectId },
 			{ name: "Nightly", instructions: "Run nightly.", triggers: [{ kind: "webhook" }] },
 		);
-		const [editor, viewer] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Editor", email: `editor-${crypto.randomUUID()}@example.com` },
-					{ name: "Viewer", email: `viewer-${crypto.randomUUID()}@example.com` },
-				])
-				.returning(),
-		);
-		if (!editor || !viewer) throw new Error("Could not create the members");
-		await onDatabase((db) =>
-			db.insert(membership).values([
-				{ workspaceId, memberId: editor.id, role: "editor" },
-				{ workspaceId, memberId: viewer.id, role: "viewer" },
-			]),
-		);
+		const editor = await createTestMember({ name: "Editor" }, { workspaceId, role: "editor" });
+		const viewer = await createTestMember({ name: "Viewer" }, { workspaceId, role: "viewer" });
 		const automation = { projectId: ownProjectId, automationId: created.automation.id };
 
 		await expect(
@@ -1405,15 +1391,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 	describe("who reaches an automation", () => {
 		/** A member with `role` in the workspace. */
 		const somebody = async (role: "admin" | "editor") => {
-			const [somebody] = await onDatabase((db) =>
-				db
-					.insert(member)
-					.values({ name: role, email: `${role}-${crypto.randomUUID()}@example.com` })
-					.returning(),
-			);
-			if (!somebody) throw new Error("Could not create the member");
-			await onDatabase((db) =>
-				db.insert(membership).values({ workspaceId, memberId: somebody.id, role }),
+			const somebody = await createTestMember(
+				{ name: role, email: `${role}-${crypto.randomUUID()}@example.com` },
+				{ workspaceId, role },
 			);
 			return somebody.id;
 		};

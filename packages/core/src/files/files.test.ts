@@ -16,23 +16,20 @@ import {
 	bot,
 	file,
 	fileVersion,
-	member,
-	membership,
 	message,
 	projectBot,
 	projectMember,
 	toolCall,
 	turn,
-	workspace,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { createWorkspaceFixture } from "../database/workspace.test-support.ts";
 import { asMember } from "../operations/chats/testing.ts";
 import type { Operations } from "../operations/registry.ts";
 import { type CallOperation, operationsForTests, servedOperations } from "../operations/testing.ts";
 import { Secrets } from "../secrets/secrets.ts";
 import { ServerSettings } from "../server-settings/server-settings.ts";
 import { defaultProjectOf } from "../workspaces/projects/project-reads.ts";
-import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { ChatFileStore } from "./chat-file-store.ts";
 import { Files } from "./files.ts";
 import { FilePages } from "./pages.ts";
@@ -276,38 +273,23 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Files ${stamp}`, slug: `files-${stamp}` })
-				.returning(),
+		const {
+			workspace: space,
+			members: { editor, outsider, admin },
+			project: room,
+		} = await createWorkspaceFixture(
+			{ name: `Files ${stamp}`, slug: `files-${stamp}` },
+			{
+				editor: { name: "Kim", email: `kim-${stamp}@example.com`, role: "editor" },
+				outsider: { name: "Ola", email: `ola-${stamp}@example.com`, role: "editor" },
+				admin: { name: "Ada", email: `ada-${stamp}@example.com`, role: "admin" },
+			},
+			() => ({ project: { name: "Planning", slug: `planning-${stamp}` } }),
 		);
-		const [editor, outsider, admin] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Kim", email: `kim-${stamp}@example.com` },
-					{ name: "Ola", email: `ola-${stamp}@example.com` },
-					{ name: "Ada", email: `ada-${stamp}@example.com` },
-				])
-				.returning(),
-		);
-		if (!space || !editor || !outsider || !admin) throw new Error("fixture");
 		const workspaceId = space.id;
 		editorId = editor.id;
 		outsiderId = outsider.id;
 		adminId = admin.id;
-		await onDatabase((db) =>
-			db.insert(membership).values([
-				{ workspaceId, memberId: editorId, role: "editor" },
-				{ workspaceId, memberId: outsiderId, role: "editor" },
-				{ workspaceId, memberId: adminId, role: "admin" },
-			]),
-		);
-		const room = await onDatabase((db) =>
-			seedProject(db, { workspaceId, name: "Planning", slug: `planning-${stamp}` }),
-		);
-		if (!room) throw new Error("fixture");
 		projectId = room.id;
 		await onDatabase((db) =>
 			db.insert(projectMember).values({ workspaceId, projectId, memberId: editorId }),

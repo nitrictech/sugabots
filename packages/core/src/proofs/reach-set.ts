@@ -1,5 +1,10 @@
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
-import { reachesBotFor, reachesChatFor, reachesProjectFor } from "../authorization/access.ts";
+import {
+	reachedBotUntilDeletionFor,
+	reachesBotFor,
+	reachesChatFor,
+	reachesProjectFor,
+} from "../authorization/access.ts";
 import { bot, project, projectBot } from "../database/schema.ts";
 import { outerColumn } from "../database/sql.ts";
 import type { Principal } from "../principal.ts";
@@ -31,6 +36,11 @@ export interface ReachSet<P, W> extends Proof<"ReachSet", [P, W]> {
 	readonly reachesChat: (chat: ChatColumns) => SQL<boolean>;
 	/** SQL for "P reaches this bot of W", given the column naming it. */
 	readonly reachesBot: (botId: SQLWrapper) => SQL<boolean>;
+	/**
+	 * SQL for "P hears about this bot of W": reaches it, or, as a member, did
+	 * until its deletion began, so a stream tells them it is going.
+	 */
+	readonly hearsAboutBot: (botId: SQLWrapper) => SQL<boolean>;
 }
 
 const ReachSetProof = defineProof("ReachSet");
@@ -46,12 +56,16 @@ const projectInWorkspace = (projectId: SQLWrapper, workspaceId: string) =>
 
 /**
  * SQL for "the bot `botId` reaches the project `projectId` names": one it is
- * in or leads, or its own default project; a Personal Assistant, whatever its
- * member reaches, so only acting for `askerId`.
+ * in or leads, or its own default project; a personal bot, whatever its
+ * creator reaches, so only acting for `askerId`.
  */
 const botReachesProject = (projectId: SQLWrapper, botId: string, askerId: string | null) =>
 	sql<boolean>`(not ${botRemovalStarted(sql`${botId}::uuid`)} and (
-		exists (select 1 from ${bot} as reach_set_assistant where reach_set_assistant.id = ${botId}::uuid and reach_set_assistant.assistant_of = ${askerId}::uuid)
+		exists (
+			select 1 from ${bot} as reach_set_personal
+			where reach_set_personal.id = ${botId}::uuid and reach_set_personal.visibility = 'personal'
+				and reach_set_personal.created_by_id = ${askerId}::uuid
+		)
 		or exists (
 			select 1 from ${project} as reach_set_led
 			where reach_set_led.id = ${outerColumn(projectId)}
@@ -167,5 +181,13 @@ export const proveReachSet = <P, W>(inWorkspace: InWorkspace<P, W>): ReachSet<P,
 			sql<boolean>`(${projectInWorkspace(chat.projectId, workspaceId)} and ${predicates.reachesChat(chat)})`,
 		reachesBot: (botId: SQLWrapper) =>
 			sql<boolean>`(${inWorkspaceBot(botId)} and ${predicates.reachesBot(botId)})`,
+		hearsAboutBot: (botId: SQLWrapper) => {
+			const principal = inWorkspace.principal.value;
+			const hears =
+				principal._tag === "MemberSession"
+					? reachedBotUntilDeletionFor(botId, principal.member)
+					: predicates.reachesBot(botId);
+			return sql<boolean>`(${inWorkspaceBot(botId)} and ${hears})`;
+		},
 	});
 };

@@ -15,6 +15,7 @@ import { connector, message, searchProvider, toolCall, turn } from "@sugabots/co
 import {
 	onDatabase,
 	onPostgres,
+	type Promised,
 	promising,
 	runOnPostgres,
 	type TestInfrastructure,
@@ -708,7 +709,15 @@ export async function botLoopOnPostgres(
 		return () => call(principal, "approvals.expire", { approvalId: parked.approvalId });
 	};
 
-	return { services, call, loopOver, runTurn, runWorkflow, expiryOf };
+	return {
+		services,
+		call,
+		loopOver,
+		runTurn,
+		runWorkflow,
+		expiryOf,
+		deliveredEvents: () => delivered.map(({ event }) => event),
+	};
 }
 
 /**
@@ -734,4 +743,15 @@ export async function resumeAt(
 		attempt: 0,
 		step,
 	});
+}
+
+export async function openTurnInChat(
+	chatId: string,
+	steps: Pick<Promised<TurnActivities["Service"]>, "open">,
+) {
+	const [run] = await runOnPostgres(runningTurns(chatId));
+	if (!run) throw new Error("no turn running");
+	const opened = await steps.open(run.request, 0);
+	if (opened._tag !== "Opened") throw new Error("the turn may not run");
+	return { run, opened };
 }

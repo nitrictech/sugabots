@@ -43,7 +43,7 @@ export class BotNameTaken
 	}
 }
 
-/** A handle no bot members make may take: `@here`, `@channel` and every Personal Assistant's. */
+/** A handle no bot members make may take: `@here`, `@channel` and those of Personal Assistants. */
 export class BotHandleReserved
 	extends Schema.TaggedError<BotHandleReserved>()("BotHandleReserved", { handle: Schema.String })
 	implements DomainError
@@ -56,7 +56,7 @@ export class BotHandleReserved
 	get userMessage() {
 		return isGroupMentionHandle(this.handle)
 			? userText`@${this.handle} mentions everyone, so it can't be a bot's handle`
-			: userText`@personal-assistant is every Personal Assistant's handle, so it can't be another bot's`;
+			: userText`Handles like @personal-assistant are kept for Personal Assistants, so this one can't be another bot's`;
 	}
 }
 
@@ -127,32 +127,39 @@ export class AssistantInstructionsManaged
 	}
 }
 
-/** Sugabots manages a Personal Assistant: its member changes only its name, its avatar and its connectors. */
-export class AssistantManaged
-	extends Schema.TaggedError<AssistantManaged>()("AssistantManaged", {})
+/**
+ * A Personal Assistant keeps the handle it was made with, which tells it apart
+ * from its member's others, as their addresses in the web app do.
+ */
+export class AssistantHandleFixed
+	extends Schema.TaggedError<AssistantHandleFixed>()("AssistantHandleFixed", {})
 	implements DomainError
 {
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return "Only a Personal Assistant's name, avatar and connectors can be changed";
+		return "A Personal Assistant's handle can't change";
 	}
 	get userMessage() {
-		return userText`Only a Personal Assistant's name, avatar and connectors can be changed`;
+		return userText`A Personal Assistant keeps the handle it was made with`;
 	}
 }
 
-/** A Personal Assistant is only ever its member's, so it can't be made public. */
-export class AssistantVisibilityFixed
-	extends Schema.TaggedError<AssistantVisibilityFixed>()("AssistantVisibilityFixed", {})
+/**
+ * Whether a bot is personal is chosen when it is made and never changes: no
+ * bot becomes personal, and a personal bot, whose chats hold what its creator
+ * reaches across the workspace, is never shared.
+ */
+export class PersonalVisibilityFixed
+	extends Schema.TaggedError<PersonalVisibilityFixed>()("PersonalVisibilityFixed", {})
 	implements DomainError
 {
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return "A Personal Assistant's visibility can't change";
+		return "A bot can't become personal, and a personal bot can't stop being personal";
 	}
 	get userMessage() {
-		return userText`A Personal Assistant is only ever yours`;
+		return userText`Whether a bot is personal is chosen when it's made, and can't be changed`;
 	}
 }

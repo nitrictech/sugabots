@@ -631,15 +631,15 @@ export const botDeletionMistakes = underWorkspaceLock(principal, "workspace", (l
 			// @ts-expect-error TS2345 [Argument of type 'CanManageBot<NameA, NameB>' is not assignable to parameter of type 'CanManageBot<P, NameB> | CanRestrictBot<P, NameB>']
 			yield* proveCanDeleteBot(lock, managedOutside);
 
-			// A bot made personal with no proof made under its workspace's lock.
+			// A bot's computer use changed with no proof made under its workspace's lock.
 			// @ts-expect-error TS2741 [required in type 'CanChangeBotReach<P, NameB>']
-			yield* botsService.update(canManage, { visibility: "personal" }, canManage);
+			yield* botsService.update(canManage, { usesComputer: true }, canManage);
 
 			yield* botsService.beginRemoval(yield* proveCanDeleteBot(lock, canManage));
 			yield* botsService.beginRemoval(yield* proveCanDeleteBot(lock, canRestrict));
 			yield* botsService.update(
 				canManage,
-				{ visibility: "personal" },
+				{ usesComputer: true },
 				yield* proveCanChangeBotReach(lock, canManage),
 			);
 		}),

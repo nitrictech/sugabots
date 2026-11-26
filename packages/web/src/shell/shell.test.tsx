@@ -31,6 +31,7 @@ import {
 	personalAssistant,
 	projects,
 	sam,
+	settingsOpenIn,
 	systemBots,
 	TestApp,
 	triager,
@@ -511,6 +512,32 @@ describe("the sidebar", () => {
 		).toEqual(names);
 	});
 
+	it("lists every one of your Personal Assistants first, oldest first, and nobody else's", async () => {
+		const newer = {
+			...personalAssistant,
+			id: "0199a3a0-0000-7000-8000-0000000000c1",
+			defaultProjectId: "0199a3a0-0000-7000-8000-0000000002c1",
+			name: "Personal Assistant 2",
+			handle: "personal-assistant-2",
+			createdAt: "2026-10-01T00:00:00.000Z",
+		};
+		const someoneElses = {
+			...personalAssistant,
+			id: "0199a3a0-0000-7000-8000-0000000000c2",
+			defaultProjectId: "0199a3a0-0000-7000-8000-0000000002c2",
+			name: "Ada's assistant",
+			permissions: { ...personalAssistant.permissions, talk: false },
+		};
+		client.api.bots.list.mockReturnValue(Effect.succeed([newer, someoneElses, personalAssistant]));
+		mount("/suga/projects");
+
+		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+		await within(sidebar).findByRole("link", { name: newer.name });
+		const [first, second] = within(sidebar).getAllByRole("link");
+		expect([first?.textContent, second?.textContent]).toEqual([personalAssistant.name, newer.name]);
+		expect(within(sidebar).queryByRole("link", { name: someoneElses.name })).toBeNull();
+	});
+
 	it("says what waits in the Personal Assistant's row, as a bot's row does", async () => {
 		client.api.bots.list.mockReturnValue(Effect.succeed([linear, personalAssistant]));
 		client.api.chats.attentionMarks.mockReturnValue(
@@ -529,6 +556,27 @@ describe("the sidebar", () => {
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
 		await within(sidebar).findByRole("link", {
 			// A browser reads the space after the comma, which jsdom drops.
+			name: /^Personal Assistant,\s?2 unread messages, needs you$/,
+		});
+	});
+
+	it("says what waits in the Personal Assistant's row on a phone's Home too", async () => {
+		client.api.bots.list.mockReturnValue(Effect.succeed([linear, personalAssistant]));
+		client.api.chats.attentionMarks.mockReturnValue(
+			Effect.succeed({
+				projects: {
+					[personalAssistant.defaultProjectId]: {
+						unreadMessages: 2,
+						needsApproval: true,
+						failedAutomations: 0,
+					},
+				},
+			}),
+		);
+		mount("/suga/home");
+
+		const home = await screen.findByRole("region", { name: "Home" });
+		await within(home).findByRole("link", {
 			name: /^Personal Assistant,\s?2 unread messages, needs you$/,
 		});
 	});
@@ -564,31 +612,58 @@ describe("the sidebar", () => {
 		await screen.findByRole("group", { name: "Bots" });
 	});
 
-	it("makes your Personal Assistant when you have none", async () => {
-		client.api.bots.list.mockReturnValue(Effect.succeed(bots));
-		mount(linearPage);
-
-		await waitFor(() => expect(client.api.bots.ensureAssistant).toHaveBeenCalled());
-	});
-
-	it("asks once to make your Personal Assistant on the workspace's own page, which waits on it", async () => {
+	it("makes you no Personal Assistant unasked when you have none, and says so on the workspace's own page", async () => {
 		onWideScreen();
 		client.api.bots.list.mockReturnValue(Effect.succeed(bots));
 		mount("/suga");
 
-		await waitFor(() => expect(client.api.bots.ensureAssistant).toHaveBeenCalled());
-		await screen.findByRole("group", { name: "Bots" });
-		expect(client.api.bots.ensureAssistant).toHaveBeenCalledTimes(1);
+		await screen.findByText("You have no Personal Assistant");
+		const sidebar = screen.getByRole("navigation", { name: "Sidebar" });
+		expect(within(sidebar).queryByRole("link", { name: personalAssistant.name })).toBeNull();
+		expect(client.api.bots.createAssistant).not.toHaveBeenCalled();
 	});
 
-	it("says so on the workspace's own page when your Personal Assistant could not be made", async () => {
+	it("makes you a Personal Assistant from the workspace's own page when you ask, and opens it", async () => {
+		onWideScreen();
 		client.api.bots.list.mockReturnValue(Effect.succeed(bots));
-		client.api.bots.ensureAssistant.mockReturnValue(
+		client.api.bots.createAssistant.mockImplementation(() =>
+			Effect.sync(() => {
+				client.api.bots.list.mockReturnValue(Effect.succeed([...bots, personalAssistant]));
+				return personalAssistant;
+			}),
+		);
+		mount("/suga");
+
+		fireEvent.click(await screen.findByRole("button", { name: "Make a Personal Assistant" }));
+
+		const sidebar = screen.getByRole("navigation", { name: "Sidebar" });
+		const opened = await within(sidebar).findByRole("link", { name: personalAssistant.name });
+		expect(opened.getAttribute("aria-current")).toBe("page");
+		expect(client.api.bots.createAssistant).toHaveBeenCalledTimes(1);
+	});
+
+	it("offers to try again on the workspace's own page when your bots could not be read", async () => {
+		client.api.bots.list.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: userText`Nope` })),
 		);
 		mount("/suga");
 
 		await screen.findByText("Could not open your Personal Assistant");
+		client.api.bots.list.mockReturnValue(Effect.succeed([...bots, personalAssistant]));
+		fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+		await screen.findByLabelText(`Message ${personalAssistant.name}`);
+	});
+
+	it("says so on the workspace's own page when your Personal Assistant could not be made", async () => {
+		client.api.bots.list.mockReturnValue(Effect.succeed(bots));
+		client.api.bots.createAssistant.mockReturnValue(
+			Effect.fail(new InternalServerError({ message: userText`Nope` })),
+		);
+		mount("/suga");
+
+		fireEvent.click(await screen.findByRole("button", { name: "Make a Personal Assistant" }));
+
+		await screen.findByText("Nope");
 	});
 
 	it("narrows to a rail beside a project's own sidebar, and lists every project again away from it", async () => {
@@ -615,6 +690,26 @@ describe("the sidebar", () => {
 		await screen.findByRole("dialog", { name: "New bot" });
 	});
 
+	it("makes you a Personal Assistant from Bots when you have none, and opens it", async () => {
+		client.api.bots.list.mockReturnValue(Effect.succeed([]));
+		client.api.bots.createAssistant.mockImplementation(() => {
+			client.api.bots.list.mockReturnValue(Effect.succeed([personalAssistant]));
+			return Effect.succeed(personalAssistant);
+		});
+		const { router } = mount("/suga/bots");
+
+		const yours = await screen.findByRole("region", { name: "Yours" });
+		within(yours).getByText("You have no Personal Assistant");
+		fireEvent.click(within(yours).getByRole("button", { name: "New Personal Assistant" }));
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(`/suga/bots/${personalAssistant.handle}`),
+		);
+		await screen.findByRole("navigation", { name: `${personalAssistant.name}'s pages` });
+		await router.navigate({ to: "/$workspace/bots", params: { workspace: workspace.slug } });
+		await screen.findByText("No other bots yet");
+	});
+
 	it("opens your preferences from your menu", async () => {
 		mount(linearPage);
 
@@ -622,7 +717,7 @@ describe("the sidebar", () => {
 		fireEvent.click(await within(sidebar).findByRole("button", { name: /^Account:/ }));
 		expect(
 			(await screen.findByRole("menuitem", { name: "Preferences" })).getAttribute("href"),
-		).toBe("/suga/settings/account");
+		).toBe(`${linearPage}?settings=account`);
 	});
 });
 
@@ -660,6 +755,28 @@ describe("someone else's personal bot an administrator sees listed", () => {
 		expect(screen.queryByRole("button", { name: new RegExp(`Pin ${theirs.name}`) })).toBeNull();
 		expect(screen.getByRole("link", { name: theirs.name }).getAttribute("href")).toBe(
 			`/suga/bots/${theirs.handle}/settings`,
+		);
+	});
+
+	it("opens the selected member's Personal Assistant settings even when assistants share its handle", async () => {
+		const assistant = {
+			...theirs,
+			assistant: true,
+			name: "Juno's Personal Assistant",
+			handle: personalAssistant.handle,
+		};
+		client.api.bots.list.mockReturnValue(Effect.succeed([assistant, personalAssistant]));
+		mount("/suga/bots");
+
+		fireEvent.click(await screen.findByRole("link", { name: assistant.name }));
+
+		await screen.findByRole("heading", { name: assistant.name });
+		expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
+		fireEvent.click(screen.getByRole("link", { name: "Open connectors" }));
+		await waitFor(() =>
+			expect(client.api.connectors.list).toHaveBeenCalledWith({
+				params: { projectId: assistant.defaultProjectId },
+			}),
 		);
 	});
 });
@@ -901,21 +1018,44 @@ describe("a bot on a phone", () => {
 	});
 
 	it("offers an administrator a model for a Personal Assistant without one, not its settings", async () => {
+		client.api.modelProviders.listEnabledModels.mockReturnValue(
+			Effect.succeed({ models: [], defaultModel: null }),
+		);
 		client.api.bots.list.mockReturnValue(Effect.succeed([{ ...personalAssistant, model: null }]));
 		mount(`/suga/bots/${personalAssistant.handle}/new`);
 
 		const link = await screen.findByRole("link", { name: "Switch on a model" });
-		expect(link.getAttribute("href")).toBe("/suga/settings/providers");
+		expect(link.getAttribute("href")).toBe(
+			`/suga/bots/${personalAssistant.handle}/new?settings=providers`,
+		);
 		expect(screen.queryByRole("link", { name: "Choose a model" })).toBeNull();
 	});
 
 	it("tells an editor who cannot switch a model on who can, for their Personal Assistant", async () => {
 		apiAnswers({ role: "editor" });
+		client.api.modelProviders.listEnabledModels.mockReturnValue(
+			Effect.succeed({ models: [], defaultModel: null }),
+		);
 		client.api.bots.list.mockReturnValue(Effect.succeed([{ ...personalAssistant, model: null }]));
 		mount(`/suga/bots/${personalAssistant.handle}/new`);
 
 		await screen.findByText(/A workspace administrator switches on a model for it/);
 		expect(screen.queryByRole("link", { name: "Choose a model" })).toBeNull();
+	});
+
+	it("sends an editor to the model picker for their Personal Assistant when the workspace offers models", async () => {
+		apiAnswers({ role: "editor" });
+		client.api.bots.list.mockReturnValue(Effect.succeed([{ ...personalAssistant, model: null }]));
+		const { router } = mount(`/suga/bots/${personalAssistant.handle}/new`);
+
+		fireEvent.click(await screen.findByRole("link", { name: "Choose a model" }));
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(
+				`/suga/bots/${personalAssistant.handle}/settings`,
+			),
+		);
+		await screen.findByRole("button", { name: "Model: None chosen" });
 	});
 });
 
@@ -980,7 +1120,7 @@ describe("the settings navigation", () => {
 
 		fireEvent.click(within(you).getByRole("link", { name: "General" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/account"));
+		await waitFor(() => expect(settingsOpenIn(router)).toBe("account"));
 	});
 
 	it("shows the workspace's time zone under General", async () => {
@@ -1212,9 +1352,6 @@ describe("routes", () => {
 		);
 		client.api.modelProviders.discoverModels.mockReturnValue(Effect.void);
 		client.api.modelProviders.updateModel.mockReturnValue(Effect.void);
-		client.api.bots.ensureAssistant.mockReturnValue(
-			Effect.succeed({ ...personalAssistant, model: "mistral/large" }),
-		);
 		mount(`/workspace-setup?workspace=${workspace.slug}`);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Choose a provider" }));
@@ -1234,13 +1371,8 @@ describe("routes", () => {
 		fireEvent.click(screen.getByRole("radio", { name: "mistral/large" }));
 		fireEvent.click(next);
 
-		await waitFor(() =>
-			expect(client.api.bots.ensureAssistant).toHaveBeenCalledWith({
-				params: { workspace: workspace.id },
-				payload: { model: "mistral/large" },
-			}),
-		);
-		// The Personal Assistant's model is Sugabots' to set, not a change to the bot.
+		// Switching the first model on runs the Personal Assistant on it; nothing changes the bot itself.
+		await waitFor(() => expect(client.api.modelProviders.updateModel).toHaveBeenCalled());
 		expect(client.api.bots.update).not.toHaveBeenCalled();
 		expect(client.api.modelProviders.updateModel).toHaveBeenCalledWith({
 			params: { workspace: workspace.id, providerId: openrouter.id, modelId: large?.id },
@@ -1680,6 +1812,7 @@ describe("creating a bot", () => {
 describe("workspace settings", () => {
 	const [openai, anthropic] = modelProviders as [ModelProvider, ModelProvider];
 	const providerPage = (provider: { id: string }) => `/suga/settings/providers/${provider.id}`;
+	const providerSettings = (provider: { id: string }) => `providers/${provider.id}`;
 
 	it("lists a connected provider as Connected, and opens it", async () => {
 		const { router } = mount("/suga/settings/providers");
@@ -1689,7 +1822,7 @@ describe("workspace settings", () => {
 		expect(row.textContent).toContain("Connected");
 		fireEvent.click(row);
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(providerPage(anthropic)));
+		await waitFor(() => expect(settingsOpenIn(router)).toBe(providerSettings(anthropic)));
 		await screen.findByRole("heading", { name: "Anthropic" });
 	});
 
@@ -1744,10 +1877,8 @@ describe("workspace settings", () => {
 		client.api.systemBots.update.mockReturnValue(Effect.succeed(systemBots[0]));
 		const { router } = mount("/suga/settings/providers");
 
-		fireEvent.click(await screen.findByRole("link", { name: /Compaction/ }));
-		await waitFor(() =>
-			expect(router.state.location.pathname).toBe("/suga/settings/providers/system"),
-		);
+		fireEvent.click(await screen.findByRole("link", { name: /Default for system bots/ }));
+		await waitFor(() => expect(settingsOpenIn(router)).toBe("providers/system"));
 		fireEvent.click(await screen.findByRole("button", { name: "gpt-5" }));
 
 		await waitFor(() => {
@@ -1869,7 +2000,7 @@ describe("workspace settings", () => {
 				},
 			});
 		});
-		await waitFor(() => expect(router.state.location.pathname).toBe(providerPage(provider)));
+		await waitFor(() => expect(settingsOpenIn(router)).toBe(providerSettings(provider)));
 	});
 
 	it("offers the built-in providers, minus what is connected, and adds one by its key", async () => {
@@ -1977,7 +2108,7 @@ describe("workspace settings", () => {
 			}),
 		);
 		expect(client.api.modelProviders.remove).not.toHaveBeenCalled();
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/providers"));
+		await waitFor(() => expect(settingsOpenIn(router)).toBe("providers"));
 	});
 
 	it("replaces a key, and says where a provider test failed", async () => {
@@ -2027,7 +2158,8 @@ describe("workspace settings", () => {
 		return screen.findByRole("dialog", { name: "Invite members" });
 	};
 
-	const junoPage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d2";
+	const junoMembership = "0199a3a0-0000-7000-8000-0000000000d2";
+	const junoPage = `/suga/settings/members/${junoMembership}`;
 	const samPage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d1";
 
 	it("invites every address typed, with the role chosen", async () => {
@@ -2085,7 +2217,7 @@ describe("workspace settings", () => {
 		expect(screen.getByRole("link", { name: new RegExp(sam.name) }).textContent).toContain("(you)");
 		fireEvent.click(row);
 
-		await waitFor(() => expect(router.state.location.pathname).toBe(junoPage));
+		await waitFor(() => expect(settingsOpenIn(router)).toBe(`members/${junoMembership}`));
 		await screen.findByRole("heading", { name: juno.name });
 	});
 
@@ -2130,7 +2262,7 @@ describe("workspace settings", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Remove from workspace" }));
 
 		await screen.findByRole("heading", { name: `Remove ${juno.name}?` });
-		screen.getByText(/their Personal Assistant and its chats are deleted/);
+		screen.getByText(/their Personal Assistants and their chats are deleted/);
 		expect(client.api.workspaces.removeMembership).not.toHaveBeenCalled();
 
 		fireEvent.click(screen.getByRole("button", { name: "Remove" }));
@@ -2140,7 +2272,7 @@ describe("workspace settings", () => {
 				params: { workspace: workspace.id, membershipId: "0199a3a0-0000-7000-8000-0000000000d2" },
 			});
 		});
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/members"));
+		await waitFor(() => expect(settingsOpenIn(router)).toBe("members"));
 		const banner = /computer cleanup will finish in the background/;
 		await screen.findByText(banner);
 
@@ -2269,7 +2401,116 @@ describe("workspace settings", () => {
 	});
 });
 
+describe("settings, over the page they were opened on", () => {
+	/** The sidebar's own Settings, at its foot, rather than the bot's among its pages. */
+	function settingsInSidebar(sidebar: HTMLElement): HTMLElement {
+		const pages = within(sidebar).getByRole("navigation", { name: `${linear.name}'s pages` });
+		const gear = within(sidebar)
+			.getAllByRole("link", { name: "Settings" })
+			.find((link) => !pages.contains(link));
+		if (!gear) throw new Error("No Settings at the sidebar's foot");
+		return gear;
+	}
+
+	interface Opened {
+		router: ReturnType<typeof mount>["router"];
+		dialog: HTMLElement;
+	}
+
+	/** A bot's page, wide, and the parts of it that settings must leave as they are. */
+	async function openBotPage() {
+		onWideScreen();
+		const { router } = mount(linearPage);
+		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+		const botPages = await within(sidebar).findByRole("navigation", {
+			name: `${linear.name}'s pages`,
+		});
+		return { router, composer, sidebar, botPages };
+	}
+
+	it("opens over a bot's page, keeping the page and the bot's sidebar beneath, with Settings shaded", async () => {
+		const { router, composer, sidebar, botPages } = await openBotPage();
+
+		fireEvent.click(settingsInSidebar(sidebar));
+
+		await screen.findByRole("dialog", { name: "Settings" });
+		expect(router.state.location.pathname).toBe(linearPage);
+		// The same elements, not the page drawn again or the workspace's sidebar in its place.
+		expect(screen.getByLabelText(`Message ${linear.name}`)).toBe(composer);
+		expect(within(sidebar).getByRole("navigation", { name: `${linear.name}'s pages` })).toBe(
+			botPages,
+		);
+		expect(settingsInSidebar(sidebar).getAttribute("aria-current")).toBe("page");
+	});
+
+	it.each([
+		[
+			"the ×",
+			({ dialog }: Opened) =>
+				fireEvent.click(within(dialog).getByRole("link", { name: "Close settings" })),
+		],
+		["Escape", () => fireEvent.keyDown(document, { key: "Escape" })],
+		["the browser's Back", ({ router }: Opened) => router.history.back()],
+	])("closes by %s onto the page as it was", async (_way, close) => {
+		const { router, composer, sidebar } = await openBotPage();
+		fireEvent.click(settingsInSidebar(sidebar));
+		const dialog = await screen.findByRole("dialog", { name: "Settings" });
+
+		close({ router, dialog });
+
+		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull());
+		expect(router.state.location.href).toBe(linearPage);
+		expect(screen.getByLabelText(`Message ${linear.name}`)).toBe(composer);
+	});
+
+	it("moves between sections and into a member's page over the same page, and closes onto it", async () => {
+		const { router, composer, sidebar } = await openBotPage();
+		fireEvent.click(settingsInSidebar(sidebar));
+		const navigation = await screen.findByRole("navigation", { name: "Settings" });
+
+		fireEvent.click(await within(navigation).findByRole("link", { name: /^Members/ }));
+		const dialog = await screen.findByRole("dialog", { name: "Settings" });
+		fireEvent.click(await within(dialog).findByRole("link", { name: new RegExp(juno.name) }));
+		await within(dialog).findByRole("heading", { name: juno.name });
+		expect(router.state.location.pathname).toBe(linearPage);
+		expect(screen.getByLabelText(`Message ${linear.name}`)).toBe(composer);
+
+		fireEvent.click(within(dialog).getByRole("link", { name: "Close settings" }));
+
+		await waitFor(() => expect(router.state.location.href).toBe(linearPage));
+		expect(screen.getByLabelText(`Message ${linear.name}`)).toBe(composer);
+		// Back past every page of the settings, so the browser's Back leaves the bot's page too.
+		expect(router.history.canGoBack()).toBe(false);
+	});
+
+	it.each([
+		["wide, over the workspace's home", onWideScreen, "/suga?settings=members"],
+		["on a phone, over You", () => {}, "/suga/you?settings=members"],
+	])("opens a section from its old address, %s", async (_where, screenSize, address) => {
+		screenSize();
+		const { router } = mount("/suga/settings/members");
+
+		await screen.findByRole("heading", { name: "Members", level: 2 });
+		expect(router.state.location.href).toBe(address);
+	});
+});
+
 describe("settings on a phone", () => {
+	it("opens a section from You, and goes back to You", async () => {
+		const { router } = mount("/suga/you");
+		const you = await screen.findByRole("region", { name: "Settings" });
+
+		fireEvent.click(await within(you).findByRole("link", { name: /^Members/ }));
+		await screen.findByRole("heading", { name: "Members", level: 2 });
+		expect(router.state.location.href).toBe("/suga/you?settings=members");
+		fireEvent.click(within(screen.getByRole("main")).getByRole("link", { name: "Back" }));
+
+		await screen.findByRole("region", { name: "Settings" });
+		expect(router.state.location.href).toBe("/suga/you");
+		expect(router.history.canGoBack()).toBe(false);
+	});
+
 	it("opens the You tab's Settings: you first, then the workspace's sections", async () => {
 		mount("/suga/settings");
 
@@ -2279,15 +2520,15 @@ describe("settings on a phone", () => {
 			(await within(settings).findByRole("link", { name: new RegExp(sam.name) })).getAttribute(
 				"href",
 			),
-		).toBe("/suga/settings/account");
+		).toBe("/suga/you?settings=account");
 		expect(within(settings).getByRole("link", { name: "General" }).getAttribute("href")).toBe(
-			"/suga/settings/general",
+			"/suga/you?settings=general",
 		);
 		expect(
 			within(settings)
 				.getByRole("link", { name: /^Members/ })
 				.getAttribute("href"),
-		).toBe("/suga/settings/members");
+		).toBe("/suga/you?settings=members");
 	});
 
 	it("lists Notifications under your account, and leads from it back there", async () => {
@@ -2296,8 +2537,8 @@ describe("settings on a phone", () => {
 		const account = await screen.findByRole("main");
 		expect(
 			(await within(account).findByRole("link", { name: "Notifications" })).getAttribute("href"),
-		).toBe("/suga/settings/notifications");
-		expect(within(account).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
+		).toBe("/suga/you?settings=notifications");
+		expect(within(account).getByRole("link", { name: "Back" }).getAttribute("href")).toBe(
 			"/suga/you",
 		);
 		cleanup();
@@ -2306,17 +2547,15 @@ describe("settings on a phone", () => {
 		const notifications = await screen.findByRole("main");
 		expect(
 			(await within(notifications).findByRole("link", { name: "You" })).getAttribute("href"),
-		).toBe("/suga/settings/account");
+		).toBe("/suga/you?settings=account");
 	});
 
-	it("opens General by name, with the way back to Settings", async () => {
+	it("opens General by name, with the way back to You", async () => {
 		mount("/suga/settings/general");
 
 		await screen.findByText("Time zone");
 		const page = screen.getByRole("main");
-		expect(within(page).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
-			"/suga/you",
-		);
+		expect(within(page).getByRole("link", { name: "Back" }).getAttribute("href")).toBe("/suga/you");
 	});
 });
 

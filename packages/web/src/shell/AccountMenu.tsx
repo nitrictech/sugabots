@@ -1,7 +1,7 @@
 import type { Workspace } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { Check, LogOut, Plus, UserPlus, UserRound } from "lucide-react";
-import type { useBackToHere } from "@/lib/settings-back.tsx";
+import { settingsSectionLink } from "@/lib/links.ts";
 import { chooseWorkspace } from "@/lib/workspace.ts";
 import { MemberAvatar } from "@/ui/avatar.tsx";
 import {
@@ -29,15 +29,12 @@ export function AccountMenu({
 	signedIn,
 	current,
 	workspaces,
-	settingsBack,
 	onSignOut,
 }: {
 	signedIn: { name: string; email: string; image?: string | null };
 	current: Workspace;
 	/** Every workspace you belong to, `current` among them. */
 	workspaces: readonly Workspace[];
-	/** History state for the settings links, so their Back returns to the page they left. */
-	settingsBack?: ReturnType<typeof useBackToHere>;
 	onSignOut: () => void;
 }) {
 	return (
@@ -65,15 +62,7 @@ export function AccountMenu({
 						<WorkspaceRow workspace={current} />
 					</DropdownMenuSubTrigger>
 					<DropdownMenuContent side="right" align="end" className="w-58">
-						<DropdownMenuItem
-							render={
-								<Link
-									to="/$workspace/settings/$section"
-									params={{ workspace: current.slug, section: "members" }}
-									state={settingsBack}
-								/>
-							}
-						>
+						<DropdownMenuItem render={<Link {...settingsSectionLink("members")} />}>
 							<UserPlus />
 							Invite members
 						</DropdownMenuItem>
@@ -106,15 +95,7 @@ export function AccountMenu({
 					</DropdownMenuContent>
 				</DropdownMenuSub>
 				<DropdownMenuSeparator />
-				<DropdownMenuItem
-					render={
-						<Link
-							to="/$workspace/settings/$section"
-							params={{ workspace: current.slug, section: "account" }}
-							state={settingsBack}
-						/>
-					}
-				>
+				<DropdownMenuItem render={<Link {...settingsSectionLink("account")} />}>
 					<UserRound />
 					Preferences
 				</DropdownMenuItem>

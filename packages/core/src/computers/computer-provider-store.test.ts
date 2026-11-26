@@ -1,8 +1,9 @@
 import type { NewComputerProvider } from "@sugabots/contracts";
-import { Effect, Exit } from "effect";
+import { Effect, Exit, Redacted } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { computerDestruction, member, workspace } from "../database/schema.ts";
+import { computerDestruction } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { createTestMember, createTestWorkspace } from "../database/workspace.test-support.ts";
 import { toComputerProvider } from "./computer-provider-reads.ts";
 import { ComputerProviderStore } from "./computer-provider-store.ts";
 import { Computers } from "./computers.ts";
@@ -28,19 +29,14 @@ describe.skipIf(!process.env.DATABASE_URL)("computer providers, against Postgres
 
 	beforeEach(async () => {
 		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Providers ${suffix}`, slug: `providers-${suffix}` })
-				.returning(),
-		);
-		const [somebody] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values({ name: "Sam", email: `providers-${suffix}@example.com` })
-				.returning(),
-		);
-		if (!space || !somebody) throw new Error("fixture");
+		const space = await createTestWorkspace({
+			name: `Providers ${suffix}`,
+			slug: `providers-${suffix}`,
+		});
+		const somebody = await createTestMember({
+			name: "Sam",
+			email: `providers-${suffix}@example.com`,
+		});
 		workspaceId = space.id;
 		createdById = somebody.id;
 	});
@@ -148,8 +144,9 @@ describe.skipIf(!process.env.DATABASE_URL)("computer providers, against Postgres
 				sandboxUrl: "https://computers.e2b.example.com",
 			},
 		});
+		const replacementKey = "another key";
 		const rotated = await runOnPostgres(
-			providers.update(workspaceId, provider.id, { apiKey: "another key" }),
+			providers.update(workspaceId, provider.id, { apiKey: replacementKey }),
 		);
 
 		for (const refused of [keyTaken, moved]) {
@@ -161,7 +158,8 @@ describe.skipIf(!process.env.DATABASE_URL)("computer providers, against Postgres
 			);
 		}
 		expect(rotated?.enabled).toBe(true);
-		expect((await runOnPostgres(providers.access(workspaceId, provider.id)))?.access).toBeDefined();
+		const configured = await runOnPostgres(providers.access(workspaceId, provider.id));
+		expect(configured && Redacted.value(configured.access.apiKey)).toBe(replacementKey);
 	});
 
 	it("forgets its template build once the template is another", async () => {

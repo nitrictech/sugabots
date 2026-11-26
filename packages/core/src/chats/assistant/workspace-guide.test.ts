@@ -5,17 +5,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { seedProjectChat } from "../../authentication/seed.test-support.ts";
 import {
 	automation,
-	member,
-	membership,
 	message,
 	modelProvider,
 	project,
 	projectMember,
 	providerModel,
 	readCursor,
-	workspace,
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
+import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
@@ -45,32 +43,20 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's workspace gui
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [made] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Guide ${stamp}`, slug: `guide-${stamp}` })
-				.returning(),
+		const {
+			workspace: made,
+			members: { ada, samRow },
+		} = await createWorkspaceFixture(
+			{ name: `Guide ${stamp}`, slug: `guide-${stamp}` },
+			{
+				ada: { name: "Ada", email: `ada-${stamp}@example.com`, role: "editor" },
+				samRow: { name: "Sam", email: `sam-${stamp}@example.com`, role: "editor" },
+			},
 		);
-		const [ada, samRow] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Ada", email: `ada-${stamp}@example.com` },
-					{ name: "Sam", email: `sam-${stamp}@example.com` },
-				])
-				.returning(),
-		);
-		if (!made || !ada || !samRow) throw new Error("fixture");
 		workspaceId = made.id;
 		workspaceSlug = made.slug;
 		adaId = ada.id;
 		samId = samRow.id;
-		await onDatabase((db) =>
-			db.insert(membership).values([
-				{ workspaceId, memberId: adaId, role: "editor" },
-				{ workspaceId, memberId: samId, role: "editor" },
-			]),
-		);
 		const [provider] = await onDatabase((db) =>
 			db
 				.insert(modelProvider)
@@ -99,13 +85,13 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's workspace gui
 	const botsAs = (memberId: string) => ({
 		create: async ({ workspace, bot }: { workspace: string; bot: NewBot }) =>
 			callOperation(await signedIn.member(memberId), "bots.create", { workspace, ...bot }),
-		ensureAssistant: async (input: InputOf<"bots.ensureAssistant">) =>
-			callOperation(await signedIn.member(memberId), "bots.ensureAssistant", input),
+		createAssistant: async (input: InputOf<"bots.createAssistant">) =>
+			callOperation(await signedIn.member(memberId), "bots.createAssistant", input),
 	});
 
 	/** The guide Sam's Personal Assistant reads in a chat of its own, for Sam. */
 	const guideForSam = async () => {
-		const assistant = await botsAs(samId).ensureAssistant({ workspace: workspaceId });
+		const assistant = await botsAs(samId).createAssistant({ workspace: workspaceId });
 		const own = await runOnPostgres(defaultProjectOf(assistant.id));
 		const chat = await seedProjectChat(workspaceId, own, samId);
 		return callOperation(await signedIn.botFor(samId, assistant.id, chat), "workspaces.guide", {});
@@ -230,7 +216,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's workspace gui
 		await anAutomation(own, "Paused by hand", "paused", "failed");
 		await anAutomation(own, "Fine", "enabled", "completed");
 		await anAutomation(launch.id, "Launch report", "enabled", "failed");
-		const assistant = await botsAs(samId).ensureAssistant({ workspace: workspaceId });
+		const assistant = await botsAs(samId).createAssistant({ workspace: workspaceId });
 		const assistantProject = await runOnPostgres(defaultProjectOf(assistant.id));
 		await anAutomation(assistantProject, "Morning brief", "enabled", "failed");
 		// Sam isn't in the project, so its automations aren't theirs to hear about.

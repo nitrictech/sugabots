@@ -7,8 +7,9 @@ import type {
 import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, revenue } from "@/shell/story-fixtures.test-support.ts";
-import { appHandlers, StoryApp, storyChatFor, storyWorkspace } from "@/story-app.test-support.tsx";
+import { storyApproval } from "@/shell/approval-story.test-support.ts";
+import { revenue } from "@/shell/story-fixtures.test-support.ts";
+import { appHandlers, StoryApp, storyWorkspace } from "@/story-app.test-support.tsx";
 
 /*
  * One approval request in full, beside the Approvals list: what it would do,
@@ -25,33 +26,19 @@ function request(
 	status: ToolCallPart["status"],
 	approval: ToolCallPart["approval"],
 ): ApprovalRequest {
-	return {
-		call: {
-			type: "tool_call",
-			id: `0199a3a0-0000-7000-8000-0000000008${id}`,
-			tool: "stripe__send_quote",
-			input: { customer: "Acme Retail", plan: "Annual tier", total: "$43,200 a year" },
-			output: null,
-			status,
-			error: null,
-			atOffset: 0,
-			startedAt: ASKED_AT,
-			finishedAt: null,
-			approval,
-		},
-		bot: {
-			kind: "bot",
-			id: growthDesk.id,
-			name: growthDesk.name,
-			handle: growthDesk.handle,
-			color: growthDesk.color,
-			eyes: growthDesk.eyes,
-			shape: "circle",
-		},
-		projectId: revenue.id,
-		chatId: storyChatFor(growthDesk).id,
-		rootChatId: storyChatFor(growthDesk).id,
-	};
+	return storyApproval({
+		type: "tool_call",
+		id: `0199a3a0-0000-7000-8000-0000000008${id}`,
+		tool: "stripe__send_quote",
+		input: { customer: "Acme Retail", plan: "Annual tier", total: "$43,200 a year" },
+		output: null,
+		status,
+		error: null,
+		atOffset: 0,
+		startedAt: ASKED_AT,
+		finishedAt: null,
+		approval,
+	});
 }
 
 const pending = {

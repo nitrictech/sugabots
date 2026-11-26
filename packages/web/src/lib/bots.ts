@@ -3,14 +3,13 @@ import {
 	queryOptions,
 	skipToken,
 	useMutation,
-	useMutationState,
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
 import { Effect } from "effect";
-import { useEffect, useRef } from "react";
 import { client } from "@/api.ts";
 import { projectChatsKey } from "@/lib/chats.ts";
+import { botRouteAddress } from "@/lib/links.ts";
 import { projectsQuery } from "@/lib/projects.ts";
 import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
@@ -20,8 +19,9 @@ import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
  * One query for the whole roster, which the sidebar lists and every bot route
  * resolves its handle out of.
  *
- * The API scopes it: every public bot, your own personal ones and your
- * Personal Assistant; an administrator also sees others' personal bots listed.
+ * The API scopes it: every public bot and your own personal ones, your
+ * Personal Assistants included; an administrator also sees others' personal
+ * bots listed, their Personal Assistants included.
  */
 export function useBots(): {
 	bots: readonly Bot[] | undefined;
@@ -54,28 +54,32 @@ export function botsQuery(workspaceId: string | undefined) {
 }
 
 /**
- * The handle every Personal Assistant shares, each member's own; the
- * workspace's other bots' handles are unique.
+ * Whether `bot` is one of the member's own Personal Assistants, rather than
+ * another member's, which an administrator sees listed but can't talk to.
  */
-const ASSISTANT_HANDLE = "personal-assistant";
-
-/**
- * The bot an address names by its handle. `personal-assistant` names the
- * member's own Personal Assistant, never someone else's.
- */
-export function findBot(bots: readonly Bot[] | undefined, handle: string): Bot | undefined {
-	if (handle === ASSISTANT_HANDLE) return bots?.find((one) => one.assistant);
-	return bots?.find((one) => one.handle === handle);
+export function isOwnAssistant(bot: Bot): boolean {
+	return bot.assistant && bot.permissions.talk;
 }
 
-/** The bot at `handle`, once the roster has loaded. */
-export function useBotWithHandle(handle: string): {
+/**
+ * The bot an address names by its handle. Every member's Personal Assistants
+ * share handles such as `personal-assistant`, so one of those names the
+ * member's own, never someone else's; the workspace's other bots' handles are
+ * unique.
+ */
+export function findBot(bots: readonly Bot[] | undefined, address: string): Bot | undefined {
+	const ownAssistant = bots?.find((one) => isOwnAssistant(one) && one.handle === address);
+	return ownAssistant ?? bots?.find((one) => botRouteAddress(one) === address);
+}
+
+/** The bot at `address`, once the roster has loaded. */
+export function useBotAtAddress(address: string): {
 	bot: Bot | undefined;
 	isPending: boolean;
 	error: unknown;
 } {
 	const { bots, isPending, error } = useBots();
-	return { bot: findBot(bots, handle), isPending, error };
+	return { bot: findBot(bots, address), isPending, error };
 }
 
 /** The bot with `botId`, or `undefined` until the roster has it. */
@@ -84,64 +88,26 @@ export function useBot(botId: string | null | undefined): Bot | undefined {
 	return botId ? bots?.find((one) => one.id === botId) : undefined;
 }
 
-/** The member's own Personal Assistant, once the roster has it. */
-export function useAssistant(): Bot | undefined {
-	return useBots().bots?.find((one) => one.assistant);
+/** The member's own Personal Assistants among `bots`, oldest first. */
+export function ownAssistants(bots: readonly Bot[] | undefined): readonly Bot[] {
+	return (bots ?? [])
+		.filter(isOwnAssistant)
+		.toSorted(
+			(one, other) =>
+				(one.createdAt ?? "").localeCompare(other.createdAt ?? "") ||
+				one.id.localeCompare(other.id),
+		);
 }
 
-/**
- * Makes sure the member has a Personal Assistant, made on `model` when one is
- * given, and puts it in the roster.
- */
-export function useEnsureAssistant() {
+/** Makes the member another Personal Assistant, and puts it in the roster. */
+export function useCreateAssistant() {
 	const invalidate = useInvalidateBots();
 	const workspaceId = useRequiredWorkspaceId();
 	return useMutation({
-		mutationKey: ensureAssistantKey(useWorkspace().workspace?.id),
-		mutationFn: (model?: string) =>
-			Effect.runPromise(
-				client.api.bots.ensureAssistant({
-					params: { workspace: workspaceId() },
-					payload: model === undefined ? {} : { model },
-				}),
-			),
+		mutationFn: () =>
+			Effect.runPromise(client.api.bots.createAssistant({ params: { workspace: workspaceId() } })),
 		onSuccess: invalidate,
 	});
-}
-
-/** The mutations that make the member's Personal Assistant in `workspaceId`. */
-function ensureAssistantKey(workspaceId: string | undefined) {
-	return ["ensure-assistant", workspaceId];
-}
-
-/**
- * Makes the member's Personal Assistant, once for each workspace, when its
- * roster has loaded without one. For the workspace's shell alone, so a page
- * however it is reached has one made, and only one request asks;
- * `useEnsuringAssistantFailed` tells a page how it went.
- */
-export function useEnsuredAssistant(): void {
-	const workspaceId = useWorkspace().workspace?.id;
-	const { isPending, error } = useBots();
-	const assistant = useAssistant();
-	const missing = !isPending && !error && !assistant;
-	const { mutate } = useEnsureAssistant();
-	const ensuredIn = useRef<string | undefined>(undefined);
-	useEffect(() => {
-		if (!missing || !workspaceId || ensuredIn.current === workspaceId) return;
-		ensuredIn.current = workspaceId;
-		mutate(undefined);
-	}, [missing, workspaceId, mutate]);
-}
-
-/** Whether making the member's Personal Assistant in the workspace last failed. */
-export function useEnsuringAssistantFailed(): boolean {
-	const workspaceId = useWorkspace().workspace?.id;
-	const statuses = useMutationState({
-		filters: { mutationKey: ensureAssistantKey(workspaceId) },
-		select: (mutation) => mutation.state.status,
-	});
-	return statuses.at(-1) === "error";
 }
 
 /** Pins a bot to the member's sidebar, or unpins it. */
@@ -233,13 +199,6 @@ export function useUpdateBot(botId: string) {
 				roster?.map((bot) => (bot.id === botId ? before : bot)),
 			);
 		},
-		onSuccess: (bot, input) => {
-			// Whoever reaches the bot reaches its default project, and making a bot
-			// public or personal changes who that is.
-			if (input.visibility !== undefined) {
-				void queries.invalidateQueries({ queryKey: ["project-members", bot.defaultProjectId] });
-			}
-		},
 		// Not awaited: the save's outcome should not wait on the roster refetch.
 		onSettled: () => {
 			if (othersPending()) return;
@@ -272,4 +231,13 @@ function useInvalidateBots(): () => Promise<void> {
 			queries.invalidateQueries({ queryKey: projectsQuery(workspaceId).queryKey }),
 		]);
 	};
+}
+
+/**
+ * Whose `kind` of bot someone else's personal bot is, by its creator's name,
+ * so an admin can tell apart bots that share one, as every member's first
+ * Personal Assistant does.
+ */
+export function whoseBot(bot: Bot, kind: string): string {
+	return bot.createdBy ? `${bot.createdBy.name}'s ${kind}` : `Someone else's ${kind}`;
 }

@@ -5,8 +5,9 @@ import { type Context, Effect, Layer, Schema } from "effect";
 import { TurnAuthentication } from "../../authentication/turn.ts";
 import { query } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
-import { bot, connector, member, membership, workspace } from "../../database/schema.ts";
+import { bot, connector } from "../../database/schema.ts";
 import { onDatabase, runOnPostgres, type TestInfrastructure } from "../../database/testing.ts";
+import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
 import type { AsMember } from "../../operations/chats/testing.ts";
 import { askForApprovals } from "../../operations/turns/ask-for-approvals.ts";
 import { asRunningTurn } from "../../operations/turns/running-turn.ts";
@@ -308,24 +309,15 @@ export async function aChatAwaitingReply(
 	chatsAs: (memberId: string) => Pick<AsMember, "startProjectChat">,
 ) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-	const [created] = await onDatabase((db) =>
-		db
-			.insert(workspace)
-			.values({ name: `Turns ${suffix}`, slug: `turns-${suffix}` })
-			.returning(),
+	const {
+		workspace: created,
+		members: { admin },
+	} = await createWorkspaceFixture(
+		{ name: `Turns ${suffix}`, slug: `turns-${suffix}` },
+		{ admin: { name: "Sam", email: `turns-${suffix}@example.com`, role: "admin" } },
 	);
-	const [admin] = await onDatabase((db) =>
-		db
-			.insert(member)
-			.values({ name: "Sam", email: `turns-${suffix}@example.com` })
-			.returning(),
-	);
-	if (!created || !admin) throw new Error("fixture");
 	const workspaceId = created.id;
 	const adminId = admin.id;
-	await onDatabase((db) =>
-		db.insert(membership).values({ workspaceId, memberId: adminId, role: "admin" }),
-	);
 	const [chatBot] = await onDatabase((db) =>
 		db
 			.insert(bot)

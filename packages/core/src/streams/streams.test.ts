@@ -371,6 +371,40 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			expect(await nextType(erin)).toBe("chat.changed");
 		});
 
+		it("tells the member when they make a Personal Assistant", async () => {
+			const world = await staffed();
+			const ed = await signedIn.member(world.ed);
+			const roster = await following(ed, "events.followWorkspace", { workspace: world.workspace });
+			const made = await call(ed, "bots.createAssistant", { workspace: world.workspace });
+			const sentinel = streamEvent("chat.changed", { chatId: world.chat });
+			await commit(workspaceStream(world.workspace), Audience.forWorkspace(sentinel));
+
+			const heard = await roster.next();
+			expect(heard !== "ended" && heard.event).toEqual(
+				streamEvent("reach.changed", { about: { kind: "bot", botId: made.id } }),
+			);
+		});
+
+		it("tells a member when their Personal Assistant is deleted, though they no longer reach it, and nobody who never reached it", async () => {
+			const world = await staffed();
+			const ed = await signedIn.member(world.ed);
+			const made = await call(ed, "bots.createAssistant", { workspace: world.workspace });
+			const roster = await following(ed, "events.followWorkspace", { workspace: world.workspace });
+			const erin = await following(await signedIn.member(world.erin), "events.followWorkspace", {
+				workspace: world.workspace,
+			});
+			await call(await signedIn.member(world.admin), "bots.remove", { botId: made.id });
+			const sentinel = streamEvent("chat.changed", { chatId: world.chat });
+			await commit(workspaceStream(world.workspace), Audience.forWorkspace(sentinel));
+
+			const heard = await roster.next();
+			expect(heard !== "ended" && heard.event).toEqual(
+				streamEvent("reach.changed", { about: { kind: "bot", botId: made.id } }),
+			);
+			const erinHeard = await erin.next();
+			expect(erinHeard !== "ended" && erinHeard.event).toEqual(sentinel);
+		});
+
 		it("proves again when a role changes, and sends what the new role reaches", async () => {
 			const world = await staffed();
 			const erin = await following(await signedIn.member(world.erin), "events.followWorkspace", {
@@ -590,20 +624,6 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			);
 			const next = await workspace.next();
 			expect(next !== "ended" && next.event.chatId).toBe("after");
-		});
-
-		it("ends a bot's chat's stream when the bot stops being public", async () => {
-			const world = await staffed();
-			const erin = await following(await signedIn.member(world.erin), "events.followChat", {
-				chatId: world.spareChat,
-			});
-
-			await call(await signedIn.member(world.ed), "bots.update", {
-				botId: world.spare.id,
-				changes: { visibility: "personal" },
-			});
-
-			expect(await nextType(erin)).toBe("ended");
 		});
 
 		it("ends only the departing workspace's streams while computer cleanup is pending", async () => {

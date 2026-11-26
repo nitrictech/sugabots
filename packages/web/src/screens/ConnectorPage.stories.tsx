@@ -1,4 +1,4 @@
-import type { ConnectorAccess, ConnectorTool, ConnectorUpdate } from "@sugabots/contracts";
+import type { ConnectorUpdate } from "@sugabots/contracts";
 import { listedConnector, type TestConnector } from "@sugabots/contracts/testing";
 import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
@@ -10,6 +10,7 @@ import {
 	StoryApp,
 	storyProjects,
 } from "../story-app.test-support.tsx";
+import { storyConnector } from "./connector-story.test-support.ts";
 
 /*
  * One connector on its own page under its project: who connected it and what
@@ -18,49 +19,7 @@ import {
 
 const API = import.meta.env.VITE_API_URL as string;
 
-/** A connector whose tools are all at `access`. */
-function connector(
-	n: number,
-	{
-		access = "allow",
-		tools = [
-			{ name: "list_issues", description: "List issues", readOnly: true, destructive: false },
-			{ name: "create_issue", description: "Open an issue", readOnly: false, destructive: false },
-		],
-		...over
-	}: Partial<Omit<TestConnector, "tools">> &
-		Pick<TestConnector, "name" | "handle" | "url"> & {
-			access?: ConnectorAccess;
-			tools?: ConnectorTool[];
-		},
-): TestConnector {
-	return {
-		id: `0199a3a0-0000-7000-8000-0000000009${String(n).padStart(2, "0")}`,
-		workspaceId: revenue.workspaceId,
-		projectId: revenue.id,
-		kind: "mcp",
-		auth: "header",
-		signedIn: true,
-		signInExpired: false,
-		secretHeader: "Authorization",
-		hasSecret: true,
-		appSettingsUrl: null,
-		status: "connected",
-		tools: tools.map((tool) => ({ ...tool, access })),
-		lastTestError: null,
-		connectedBy: {
-			id: "0199a3a0-0000-7000-8000-000000000009",
-			name: "Rowan Ellis",
-			email: "rowan@example.com",
-			image: null,
-		},
-		signedInAs: null,
-		createdAt: "2026-09-01T00:00:00.000Z",
-		...over,
-	};
-}
-
-const linear = connector(1, {
+const linear = storyConnector("0901", {
 	name: "Linear",
 	handle: "linear",
 	url: "https://mcp.linear.app/mcp",
@@ -105,7 +64,7 @@ const linearCustom: TestConnector = {
 		access: tool.destructive ? "off" : tool.readOnly ? "allow" : "ask",
 	})),
 };
-const stripe = connector(2, {
+const stripe = storyConnector("0902", {
 	name: "Stripe",
 	handle: "stripe",
 	url: "https://mcp.stripe.com",
@@ -113,7 +72,7 @@ const stripe = connector(2, {
 	lastTestError:
 		"The server didn't accept the access token or secret. Check that it hasn't expired and was copied in full (HTTP 401)",
 });
-const notion = connector(3, {
+const notion = storyConnector("0903", {
 	name: "Notion",
 	handle: "notion",
 	url: "https://mcp.notion.com/mcp",
@@ -126,7 +85,7 @@ const notion = connector(3, {
 	status: "missing_key",
 	tools: [],
 });
-const asana = connector(9, {
+const asana = storyConnector("0909", {
 	name: "Asana",
 	handle: "asana",
 	url: "https://mcp.asana.com/sse",
@@ -136,7 +95,7 @@ const asana = connector(9, {
 	secretHeader: null,
 	hasSecret: false,
 });
-const github = connector(4, {
+const github = storyConnector("0904", {
 	name: "GitHub",
 	handle: "github",
 	url: "https://api.githubcopilot.com/mcp/",
@@ -149,7 +108,7 @@ const github = connector(4, {
 	})),
 });
 
-const posthog = connector(5, {
+const posthog = storyConnector("0905", {
 	name: "PostHog",
 	handle: "posthog",
 	url: "https://mcp.posthog.com/mcp",
@@ -162,7 +121,7 @@ const posthog = connector(5, {
 });
 
 /** The project's own GitHub app's connector: installed on acme, then waiting on its install. */
-const gitHubApp = connector(6, {
+const gitHubApp = storyConnector("0906", {
 	name: "GitHub",
 	handle: "github-app",
 	url: "https://github.com/acme",
@@ -172,7 +131,7 @@ const gitHubApp = connector(6, {
 	appSettingsUrl: "https://github.com/organizations/acme/settings/apps/sugabots-revenue-09a7",
 	access: "ask",
 });
-const gitHubAppPending = connector(7, {
+const gitHubAppPending = storyConnector("0907", {
 	name: "GitHub",
 	handle: "github-app",
 	url: "https://github.com/apps/sugabots-revenue-09a7",
@@ -185,7 +144,7 @@ const gitHubAppPending = connector(7, {
 });
 
 /** An HTTP endpoint, its method tools at their defaults. */
-const alerts = connector(8, {
+const alerts = storyConnector("0908", {
 	name: "Alerts",
 	handle: "alerts",
 	url: "https://alerts.example.com/v2",

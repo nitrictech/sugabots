@@ -2,91 +2,22 @@ import { botParticipantOf, type Message, type MessageReplyTo } from "@sugabots/c
 import { InternalServerError } from "@sugabots/contracts/http";
 import { testMember } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
-import { QueryClientProvider } from "@tanstack/react-query";
-import {
-	createMemoryHistory,
-	createRootRoute,
-	createRouter,
-	RouterProvider,
-} from "@tanstack/react-router";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { Effect } from "effect";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { linear, pendingAnswer, sam, triager } from "@/api.test-support.tsx";
 import { client } from "@/client.test-support.ts";
+import { FakeRequest, stubAttachmentUploads } from "@/lib/attachment-upload.test-support.ts";
 import { useChatDraft, useReplyDraft } from "@/lib/chat-draft.ts";
 import { useComposerAttachments } from "@/lib/composer-attachments.ts";
-import { createQueryClient } from "@/lib/query.ts";
+import { InRoute } from "@/lib/route.test-support.tsx";
 import { useChatRecipients } from "./chat-recipients.ts";
 import { useMessageSending } from "./message-sending.ts";
 
 vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const chatId = "0199a3a0-0000-7000-8000-0000000000e1";
-
-/**
- * Stands in for the browser's XMLHttpRequest, the boundary uploads cross, so
- * a test says how far each upload has got and what the API answers.
- */
-class FakeRequest {
-	static made: FakeRequest[] = [];
-	method = "";
-	url = "";
-	withCredentials = false;
-	responseType = "";
-	status = 0;
-	response: unknown = null;
-	body: unknown;
-	aborted = false;
-	private readonly listeners = new Map<string, ((event?: unknown) => void)[]>();
-	private readonly uploadListeners = new Map<string, ((event: unknown) => void)[]>();
-	upload = {
-		addEventListener: (type: string, listener: (event: unknown) => void) => {
-			this.uploadListeners.set(type, [...(this.uploadListeners.get(type) ?? []), listener]);
-		},
-	};
-
-	open(method: string, url: string) {
-		this.method = method;
-		this.url = url;
-	}
-
-	addEventListener(type: string, listener: () => void) {
-		this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-	}
-
-	send(body: unknown) {
-		this.body = body;
-		FakeRequest.made.push(this);
-	}
-
-	abort() {
-		this.aborted = true;
-		this.emit("abort");
-	}
-
-	progress(loaded: number, total: number) {
-		for (const listener of this.uploadListeners.get("progress") ?? []) {
-			listener({ lengthComputable: true, loaded, total });
-		}
-	}
-
-	/** The connection drops before the API answers. */
-	fail() {
-		this.emit("error");
-	}
-
-	answer(status: number, response: unknown) {
-		this.status = status;
-		this.response = response;
-		this.emit("load");
-	}
-
-	private emit(type: string) {
-		for (const listener of this.listeners.get(type) ?? []) listener();
-	}
-}
 
 /** The project's bots, between which the member chooses who a message goes to. */
 const projectBots = [botParticipantOf(triager), botParticipantOf(linear)];
@@ -174,8 +105,7 @@ const quoted: MessageReplyTo = {
 
 beforeEach(() => {
 	localStorage.clear();
-	FakeRequest.made = [];
-	vi.stubGlobal("XMLHttpRequest", FakeRequest);
+	stubAttachmentUploads();
 	client.api.chats.removeFile.mockReturnValue(Effect.void);
 	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
@@ -355,19 +285,3 @@ describe("a message whose sending answers after the chat was left", () => {
 		expect(result.current.sending.error).toBeUndefined();
 	});
 });
-
-/** Renders `children` inside a route, where `useWorkspace` reads the workspace from. */
-function InRoute({ children }: { children: ReactNode }) {
-	const [queries] = useState(() => createQueryClient());
-	const [router] = useState(() =>
-		createRouter({
-			routeTree: createRootRoute({ component: () => children }),
-			history: createMemoryHistory(),
-		}),
-	);
-	return (
-		<QueryClientProvider client={queries}>
-			<RouterProvider router={router} />
-		</QueryClientProvider>
-	);
-}

@@ -6,7 +6,7 @@
 
 import { Bots } from "../../workspaces/bots/bots.ts";
 import { create } from "./create.ts";
-import { ensureAssistant } from "./ensure-assistant.ts";
+import { createAssistant } from "./create-assistant.ts";
 import { list } from "./list.ts";
 import { listSystemBots } from "./list-system-bots.ts";
 import { pin } from "./pin.ts";
@@ -24,7 +24,7 @@ export const botsOperations = {
 	"bots.remove": remove,
 	"bots.pin": pin,
 	"bots.unpin": unpin,
-	"bots.ensureAssistant": ensureAssistant,
+	"bots.createAssistant": createAssistant,
 	"systemBots.list": listSystemBots,
 	"systemBots.update": updateSystemBot,
 };

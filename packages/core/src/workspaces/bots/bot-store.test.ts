@@ -1,12 +1,15 @@
 import type { NewBot } from "@sugabots/contracts";
+import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { bot, member, membership, workspace } from "../../database/schema.ts";
+import { bot } from "../../database/schema.ts";
 import {
 	closeDatabase,
+	holdTransaction,
 	onDatabase,
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { BotStore } from "./bot-store.ts";
@@ -37,29 +40,19 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [space] = await onDatabase((db) =>
-			db.insert(workspace).values({ name: stamp, slug: stamp }).returning(),
+		const {
+			workspace: space,
+			members: { admin, editor },
+		} = await createWorkspaceFixture(
+			{ name: stamp, slug: stamp },
+			{
+				admin: { name: "Ada", email: `ada-${stamp}@example.com`, role: "admin" },
+				editor: { name: "Sam", email: `sam-${stamp}@example.com`, role: "editor" },
+			},
 		);
-		if (!space) throw new Error("workspace setup failed");
 		workspaceId = space.id;
-		const [admin, editor] = await onDatabase((db) =>
-			db
-				.insert(member)
-				.values([
-					{ name: "Ada", email: `ada-${stamp}@example.com` },
-					{ name: "Sam", email: `sam-${stamp}@example.com` },
-				])
-				.returning(),
-		);
-		if (!admin || !editor) throw new Error("member setup failed");
 		adminId = admin.id;
 		editorId = editor.id;
-		await onDatabase((db) =>
-			db.insert(membership).values([
-				{ workspaceId, memberId: adminId, role: "admin" },
-				{ workspaceId, memberId: editorId, role: "editor" },
-			]),
-		);
 	});
 
 	it("makes a bot public unless told otherwise, so everyone in the workspace sees it", async () => {
@@ -141,18 +134,42 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 		});
 		const sorter = await create(adminId, { name: "Sorter", model: "model" });
 		await expect(
-			repository.update(workspaceId, sorter.id, { handle: "channel" }, adminId),
+			repository.update(workspaceId, sorter.id, { handle: "channel" }),
 		).rejects.toMatchObject({ _tag: "BotHandleReserved", handle: "channel" });
 	});
 
-	it("keeps the Personal Assistant's handle for Personal Assistants, given or taken from the name", async () => {
+	it("keeps Personal Assistants' handles for Personal Assistants, given or taken from the name", async () => {
 		await expect(
 			create(adminId, { name: "Personal Assistant", model: "model" }),
 		).rejects.toMatchObject({ _tag: "BotHandleReserved", handle: "personal-assistant" });
+		await expect(
+			create(adminId, { name: "Personal Assistant 2", model: "model" }),
+		).rejects.toMatchObject({ _tag: "BotHandleReserved", handle: "personal-assistant-2" });
 		const sorter = await create(adminId, { name: "Sorter", model: "model" });
 		await expect(
-			repository.update(workspaceId, sorter.id, { handle: "personal-assistant" }, adminId),
+			repository.update(workspaceId, sorter.id, { handle: "personal-assistant" }),
 		).rejects.toMatchObject({ _tag: "BotHandleReserved", handle: "personal-assistant" });
+	});
+
+	it("never makes a bot personal, nor a personal one public, however it is asked", async () => {
+		const publicBot = await create(adminId, { name: "Sorter", model: "model" });
+		const personalBot = await create(adminId, {
+			name: "Diary",
+			model: "model",
+			visibility: "personal",
+		});
+
+		await expect(
+			repository.update(workspaceId, publicBot.id, { visibility: "personal" }),
+		).rejects.toBeInstanceOf(BotStore.PersonalVisibilityFixed);
+		await expect(
+			repository.update(workspaceId, personalBot.id, { visibility: "public" }),
+		).rejects.toBeInstanceOf(BotStore.PersonalVisibilityFixed);
+		expect(
+			await repository.update(workspaceId, publicBot.id, { visibility: "public" }),
+		).toMatchObject({
+			visibility: "public",
+		});
 	});
 
 	it("says which name a renaming clashes on", async () => {
@@ -160,7 +177,7 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 		const other = await create(adminId, { name: "Sorter", model: "model" });
 
 		await expect(
-			repository.update(workspaceId, other.id, { name: "Triage" }, adminId),
+			repository.update(workspaceId, other.id, { name: "Triage" }),
 		).rejects.toMatchObject({
 			_tag: "BotNameTaken",
 			field: "name",
@@ -174,7 +191,7 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 			model: "model",
 		});
 
-		const cleared = await repository.update(workspaceId, made.id, { model: null }, adminId);
+		const cleared = await repository.update(workspaceId, made.id, { model: null });
 
 		expect(cleared.model).toBeNull();
 		// Still listed: it simply cannot take a turn.
@@ -183,14 +200,86 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 	});
 
 	it("lets every member's Personal Assistant have the same name", async () => {
-		const admins = await repository.provisionPersonalAssistant({ workspaceId, memberId: adminId });
-		const editors = await repository.provisionPersonalAssistant({
-			workspaceId,
-			memberId: editorId,
-		});
+		const admins = await repository.ensurePersonalAssistant({ workspaceId, memberId: adminId });
+		const editors = await repository.ensurePersonalAssistant({ workspaceId, memberId: editorId });
 
 		expect(editors.name).toBe(admins.name);
 		expect(editors.id).not.toBe(admins.id);
+	});
+
+	it("makes a member one Personal Assistant when a second call asks while the first is making it", async () => {
+		const member = { workspaceId, memberId: editorId };
+		const first = holdTransaction(
+			Effect.flatMap(BotStore.Service, (bots) => bots.ensurePersonalAssistant(member)).pipe(
+				Effect.provide(BotStore.layer),
+			),
+		);
+		const made = await first.held;
+		const second = repository.ensurePersonalAssistant(member);
+		try {
+			// The second waits for the first to commit, or settles on its own;
+			// either way the first commits only once the second has asked.
+			await Promise.race([
+				first.waitForWaiters(1),
+				second.then(
+					() => undefined,
+					() => undefined,
+				),
+			]);
+		} finally {
+			await first.release();
+		}
+
+		expect((await second).id).toBe(made.id);
+	});
+
+	it("returns a member's oldest Personal Assistant once they have several", async () => {
+		const member = { workspaceId, memberId: editorId };
+		const oldest = await repository.ensurePersonalAssistant(member);
+		await repository.addPersonalAssistant(member);
+
+		expect((await repository.ensurePersonalAssistant(member)).id).toBe(oldest.id);
+	});
+
+	it("tells a member's Personal Assistants apart by the lowest number none of theirs has", async () => {
+		const add = () => repository.addPersonalAssistant({ workspaceId, memberId: editorId });
+		const first = await add();
+		const second = await add();
+		await repository.remove(workspaceId, first.id);
+		const third = await add();
+		const othersFirst = await repository.addPersonalAssistant({ workspaceId, memberId: adminId });
+
+		expect(
+			[first, second, third, othersFirst].map(({ name, handle }) => ({ name, handle })),
+		).toEqual([
+			{ name: "Personal Assistant", handle: "personal-assistant" },
+			{ name: "Personal Assistant 2", handle: "personal-assistant-2" },
+			{ name: "Personal Assistant", handle: "personal-assistant" },
+			{ name: "Personal Assistant", handle: "personal-assistant" },
+		]);
+	});
+
+	it("keeps an upgraded bot's handle addressable when making another Personal Assistant", async () => {
+		const [existing] = await onDatabase((db) =>
+			db
+				.insert(bot)
+				.values({
+					workspaceId,
+					name: "Guide",
+					handle: "personal-assistant-2",
+					color: "sky",
+					eyes: "pill",
+				})
+				.returning({ id: bot.id }),
+		);
+		const member = await signedIn.member(editorId);
+		await callOperation(member, "bots.createAssistant", { workspace: workspaceId });
+		const added = await callOperation(member, "bots.createAssistant", { workspace: workspaceId });
+
+		expect(added).toMatchObject({ name: "Personal Assistant 3", handle: "personal-assistant-3" });
+		expect(
+			(await visibleTo(editorId)).filter(({ handle }) => handle === "personal-assistant-2"),
+		).toEqual([expect.objectContaining({ id: existing?.id, name: "Guide" })]);
 	});
 
 	it("does not individually delete a system bot", async () => {
@@ -203,7 +292,7 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 	it("does not change a system bot as a bot members talk to", async () => {
 		const system = await placeCompaction();
 		await expect(
-			repository.update(workspaceId, system.id, { model: "another" }, adminId),
+			repository.update(workspaceId, system.id, { model: "another" }),
 		).rejects.toBeInstanceOf(BotStore.SystemBotImmutable);
 	});
 

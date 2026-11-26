@@ -349,12 +349,8 @@ export const personalAssistant: Bot = {
 	visibility: "personal",
 	assistant: true,
 	pinned: false,
-	// As the API answers: its member manages all but its computer, which Sugabots manages.
-	permissions: {
-		...MANAGER_OF_BOT,
-		delete: false,
-		resources: { ...MANAGER_OF_RESOURCES, manageComputer: false },
-	},
+	// As the API answers: its member manages it, as they do any personal bot of theirs.
+	permissions: { ...MANAGER_OF_BOT, resources: MANAGER_OF_RESOURCES },
 	createdAt: "2026-09-10T00:00:00.000Z",
 };
 
@@ -510,7 +506,6 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			personalAssistant,
 		]),
 	);
-	client.api.bots.ensureAssistant.mockReturnValue(Effect.succeed(personalAssistant));
 	client.api.systemBots.list.mockReturnValue(Effect.succeed(systemBots));
 	serveConnectors();
 	client.api.automations.list.mockReturnValue(Effect.succeed([]));
@@ -712,6 +707,11 @@ export function mount(
 	);
 
 	return { router, queries };
+}
+
+/** The page of the settings `router`'s address has open over its page, as `?settings=` writes it. */
+export function settingsOpenIn(router: ReturnType<typeof createAppRouter>): unknown {
+	return (router.state.location.search as { settings?: unknown }).settings;
 }
 
 /** The app as `main.tsx` mounts it, for a case that changes the session after mounting. */

@@ -3,6 +3,7 @@ import { BotHasNoModel } from "@sugabots/contracts/errors/chats";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import {
 	seedBot,
+	seedMember,
 	seedMessage,
 	seedProject,
 	seedProjectChat,
@@ -104,15 +105,33 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 		"the recipient's default project",
 		"the asker's Personal Assistant's default project",
 	])("starts a brief in %s only after its asker approves", async (destination) => {
+		const toAssistant = destination === "the asker's Personal Assistant's default project";
+		if (toAssistant) {
+			const other = await seedMember(workspaceId, "editor");
+			const otherAssistant = await seedBot(workspaceId, {
+				assistantOf: other,
+				visibility: "personal",
+			});
+			await onDatabase((db) =>
+				db
+					.update(bot)
+					.set({ handle: "personal-assistant-2", model: "m" })
+					.where(eq(bot.id, otherAssistant.id)),
+			);
+		}
 		const recipient = await seedBot(workspaceId, {
 			createdById: adminId,
-			...(destination === "the asker's Personal Assistant's default project" && {
+			...(toAssistant && {
 				assistantOf: adminId,
 				visibility: "personal" as const,
 			}),
 		});
 		const [target] = await onDatabase((db) =>
-			db.update(bot).set({ model: "m" }).where(eq(bot.id, recipient.id)).returning(),
+			db
+				.update(bot)
+				.set({ model: "m", ...(toAssistant && { handle: "personal-assistant-2" }) })
+				.where(eq(bot.id, recipient.id))
+				.returning(),
 		);
 		if (!target) throw new Error("No recipient bot");
 		let source = chatId;

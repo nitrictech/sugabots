@@ -6,8 +6,8 @@ import { defineProof, type Named, type Proof } from "./proof.ts";
 /**
  * P acts for one member on what is their own, such as the bots pinned in
  * their sidebar: a member signed in, for themselves, or a bot for its asker
- * in member bounds, which a Personal Assistant's own turns have and where its
- * member approves each change. No other principal changes a member's own
+ * in member bounds, which a personal bot's own turns have and where its
+ * creator approves each change. No other principal changes a member's own
  * things.
  */
 export interface ActsForMember<P> extends Proof<"ActsForMember", [P]> {

@@ -9,13 +9,14 @@
  * turn's asker. A message a bot wrote outside any turn, such as a brief, acts
  * for the member who started its chat, and so does an interview's turn, which
  * answers its own first reply. A run's own turns answer the message its
- * automation's trigger posted, and a Personal Assistant's act for its member.
+ * automation's trigger posted, and a personal bot's act for its creator.
  */
 
 import type { RunTriggerKind } from "@sugabots/contracts";
 import { eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
+import { personalBotCreator } from "../authorization/permissions.ts";
 import type { Executor } from "../database/database.ts";
 import {
 	automationRun,
@@ -42,8 +43,8 @@ export interface TurnFacts {
 	readonly project: string | null;
 	/** Whether the turn's chat is one of its bot's own chats, in the bot's default project. */
 	readonly inOwnChats: boolean;
-	/** On a Personal Assistant: its member. */
-	readonly assistantOf: string | null;
+	/** On a personal bot: its creator, whose permissions it acts with. */
+	readonly personalBotCreator: string | null;
 	/** The run whose chat the turn is in, if it is in one. */
 	readonly run: {
 		readonly run: string;
@@ -54,14 +55,14 @@ export interface TurnFacts {
 	} | null;
 	/** What the message the turn answers comes back to, followed back through the turns that wrote it. */
 	readonly askedBy: AskedBy;
-	/** Whether a Personal Assistant wrote the brief this turn answers. */
-	readonly briefedByAssistant: boolean;
+	/** Whether a personal bot wrote the brief this turn answers. */
+	readonly briefedByPersonalBot: boolean;
 	readonly briefTurnRule: BriefTurnRule | null;
 }
 
 /**
  * Who the message a turn answers comes from: a member; its automation's
- * trigger, with the member its run acts for, a Personal Assistant's; or
+ * trigger, with the member its run acts for, a personal bot's creator; or
  * neither, when the chain of turns behind it ends nowhere else.
  */
 type AskedBy =
@@ -86,12 +87,13 @@ export const turnFacts = (db: Executor, turnId: string) =>
 				workspace: placedChat.workspaceId,
 				project: placedChat.projectId,
 				defaultOfBot: project.defaultOfBotId,
-				assistantOf: bot.assistantOf,
+				visibility: bot.visibility,
+				createdBy: bot.createdById,
 				run: automationRun.id,
 				automation: automationRun.automationId,
 				runBot: automationRun.botId,
 				runStartedBy: automationRun.triggerKind,
-				triggerAuthorAssistantOf: triggerAuthorBot.assistantOf,
+				triggerAuthorVisibility: triggerAuthorBot.visibility,
 				briefTurnRule: triggerMessage.briefTurnRule,
 			})
 			.from(turn)
@@ -113,7 +115,10 @@ export const turnFacts = (db: Executor, turnId: string) =>
 			reason: row.reason,
 			project: row.project,
 			inOwnChats: row.defaultOfBot === row.bot,
-			assistantOf: row.assistantOf,
+			personalBotCreator: personalBotCreator({
+				visibility: row.visibility,
+				createdById: row.createdBy,
+			}),
 			run:
 				row.run && row.automation && row.runBot && row.runStartedBy
 					? {
@@ -124,7 +129,7 @@ export const turnFacts = (db: Executor, turnId: string) =>
 						}
 					: null,
 			askedBy: yield* askedByOf(db, turnId),
-			briefedByAssistant: row.reason === "brief" && row.triggerAuthorAssistantOf !== null,
+			briefedByPersonalBot: row.reason === "brief" && row.triggerAuthorVisibility === "personal",
 			briefTurnRule: row.reason === "brief" ? row.briefTurnRule : null,
 		};
 		return facts;
@@ -136,7 +141,8 @@ export function startedFromOutside(facts: TurnFacts) {
 
 export function hasMemberBounds(facts: TurnFacts, asker = askerOf(facts)) {
 	return (
-		facts.assistantOf === asker &&
+		facts.personalBotCreator !== null &&
+		facts.personalBotCreator === asker &&
 		facts.inOwnChats &&
 		(facts.reason !== "brief" || facts.briefTurnRule === "memberBounds") &&
 		!startedFromOutside(facts)
@@ -146,11 +152,11 @@ export function hasMemberBounds(facts: TurnFacts, asker = askerOf(facts)) {
 export function asksBeforeAllTools(facts: TurnFacts) {
 	return (
 		facts.briefTurnRule === "askBeforeAllTools" ||
-		(facts.assistantOf !== null && facts.inOwnChats && startedFromOutside(facts))
+		(facts.personalBotCreator !== null && facts.inOwnChats && startedFromOutside(facts))
 	);
 }
 
-/** The member a turn acts for: whoever asked it, or for a Personal Assistant's run, its member. */
+/** The member a turn acts for: whoever asked it, or for a personal bot's run, its creator. */
 export function askerOf(facts: TurnFacts): string | undefined {
 	return facts.askedBy.kind === "nobody" ? undefined : (facts.askedBy.member ?? undefined);
 }
@@ -186,7 +192,7 @@ export function askedBy(turnId: SQLWrapper): SQL {
  * chat `chatId` acts for: the member who wrote the message; when a bot's turn
  * wrote it, as a helper's question or a hand-back's, that turn's asker, or its
  * run; when its automation's trigger posted it, its run, with no member but a
- * Personal Assistant's, which acts for its member in its own chats. A bot's
+ * personal bot's, which acts for its creator in its own chats. A bot's
  * message no turn wrote, such as a brief, acts for the member who started its
  * chat, and so does an interview's turn, which answers its own first reply.
  *

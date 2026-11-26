@@ -94,23 +94,23 @@ export const You = meta.story({
 		await expect(await canvas.findByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
 		await expect(
 			await canvas.findByRole("link", { name: new RegExp(storyMember.name) }),
-		).toHaveAttribute("href", `/${storyWorkspace.slug}/settings/account`);
+		).toHaveAttribute("href", `/${storyWorkspace.slug}/you?settings=account`);
 		await expect(await canvas.findByRole("link", { name: "Computers" })).toHaveAttribute(
 			"href",
-			`/${storyWorkspace.slug}/settings/computers`,
+			`/${storyWorkspace.slug}/you?settings=computers`,
 		);
 		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeVisible();
 	},
 });
 
-/** Your account, opened from your card: your account and appearance, then Notifications. */
+/** Your account, opened from your card over You: your account and appearance, then Notifications. */
 export const Account = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/settings/account`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/you?settings=account`} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: storyMember.name })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Notifications" })).toHaveAttribute(
 			"href",
-			`/${storyWorkspace.slug}/settings/notifications`,
+			`/${storyWorkspace.slug}/you?settings=notifications`,
 		);
 	},
 });
