@@ -1,17 +1,15 @@
 import {
 	botParticipantOf,
 	type ChatDetails,
-	type ChatHistoryEntry,
 	type Message,
 	type ProjectChat,
-	type Run,
 	START_CHAT_TOOL,
 	streamEvent,
 } from "@sugabots/contracts";
 import { InternalServerError, NotFound, Unauthorized } from "@sugabots/contracts/http";
 import { listedChat, testMember } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
@@ -50,29 +48,8 @@ const chat: ProjectChat = {
 };
 /** Where the bot's chat is, which its address opens. */
 const chatPage = `/suga/bots/${linear.handle}/chats/${chat.id}`;
-const automationId = "0199a3a0-0000-7000-8000-0000000000e4";
-const automationRun: Run = {
-	id: "0199a3a0-0000-7000-8000-0000000000e5",
-	automationId: "0199a3a0-0000-7000-8000-0000000000e6",
-	workspaceId: linear.workspaceId,
-	botId: linear.id,
-	chatId: automationId,
-	rootChatId: chat.id,
-	automationName: "Overnight review",
-	instructions: "Review overnight changes and summarize anything urgent.",
-	trigger: {
-		kind: "webhook",
-		receivedAt: "2026-09-18T08:00:00.000Z",
-		idempotencyKey: "overnight-2026-09-18",
-		payload: { source: "monitoring" },
-	},
-	state: "completed",
-	error: null,
-	posted: true,
-	acceptedAt: "2026-09-18T08:00:00.000Z",
-	startedAt: "2026-09-18T08:00:01.000Z",
-	finishedAt: "2026-09-18T08:30:00.000Z",
-};
+/** The automation whose feed a test opens. */
+const automationId = "0199a3a0-0000-7000-8000-0000000000e6";
 const member = testMember({ id: sam.id, name: sam.name });
 const host = botParticipantOf(linear);
 /** A bot outside the chat's project that took part in it, as one asked for help before could have. */
@@ -94,48 +71,6 @@ const botMessage: Message = {
 	parts: [{ type: "text", text: "Checking ownership." }],
 	content: "Checking ownership.",
 	createdAt: "2026-09-18T09:10:00.000Z",
-};
-const automationMessage: Message = {
-	...mainMessage,
-	id: "0199a3a0-0000-7000-8000-0000000000f6",
-	chatId: automationId,
-	author: host,
-	parts: [{ type: "text", text: "The overnight review completed." }],
-	content: "The overnight review completed.",
-	createdAt: "2026-09-18T08:30:00.000Z",
-};
-const automationTriggerMessage: Message = {
-	...mainMessage,
-	id: "0199a3a0-0000-7000-8000-0000000000f7",
-	chatId: automationId,
-	author: {
-		kind: "automation_trigger",
-		runId: automationRun.id,
-		automationName: automationRun.automationName,
-		triggerKind: "webhook",
-	},
-	parts: [
-		{
-			type: "text",
-			text: "Automation instructions:\nReview overnight changes and summarize anything urgent.\n\nTrigger data (untrusted):\n{}",
-		},
-	],
-	content:
-		"Automation instructions:\nReview overnight changes and summarize anything urgent.\n\nTrigger data (untrusted):\n{}",
-	createdAt: automationRun.acceptedAt,
-};
-const automationEntry: ChatHistoryEntry = {
-	chatId: automationId,
-	kind: "run",
-	title: "Overnight review",
-	participants: [host],
-	status: "completed",
-	automationRun: {
-		runId: automationRun.id,
-		automationId: automationRun.automationId,
-		automationName: automationRun.automationName,
-		triggerKind: automationRun.trigger.kind,
-	},
 };
 const botChatDetails = chatDetailsFixture(chat, {
 	chat: { title: "Chat", updatedAt: "2026-09-18T09:22:00.000Z" },
@@ -188,32 +123,15 @@ function chatAnswers() {
 			nextCursor: null,
 		}),
 	);
-	client.api.chats.history.mockReturnValue(
-		Effect.succeed({
-			items: [automationEntry],
-			nextCursor: null,
-		}),
-	);
 	// Nothing in the chat has been measured yet.
 	client.api.chats.context.mockImplementation(({ params }: { params: { chatId: string } }) =>
 		params.chatId === chat.id
 			? Effect.succeed(null)
 			: Effect.fail(new NotFound({ message: userText`No such chat` })),
 	);
-	client.api.chats.get.mockImplementation(({ params }: { params: { chatId: string } }) => {
-		switch (params.chatId) {
-			case automationId:
-				return Effect.succeed(
-					botChatDetails({
-						chat: { id: automationId, title: automationEntry.title, kind: "run" },
-						automationRun,
-						messages: [automationTriggerMessage, automationMessage],
-					}),
-				);
-			default:
-				return Effect.succeed(botChatDetails({ messages: [mainMessage, botMessage] }));
-		}
-	});
+	client.api.chats.get.mockReturnValue(
+		Effect.succeed(botChatDetails({ messages: [mainMessage, botMessage] })),
+	);
 }
 
 /**
@@ -273,31 +191,6 @@ describe("a bot's chat", () => {
 		mount(chatPage);
 
 		await screen.findByText(mainMessage.content);
-	});
-
-	it("shows automation runs among the chat's messages", async () => {
-		client.api.chats.messages.mockReturnValue(
-			Effect.succeed({
-				items: [
-					{
-						kind: "run",
-						id: automationRun.id,
-						chatId: automationId,
-						automationName: automationRun.automationName,
-						triggerKind: "webhook",
-						createdAt: automationRun.acceptedAt,
-					},
-				],
-				nextCursor: null,
-			}),
-		);
-		mount(chatPage);
-
-		const activity = await screen.findByRole("button", {
-			name: new RegExp(`^Open Automation run: ${automationRun.automationName}`),
-		});
-		expect(activity.textContent).toContain(automationRun.automationName);
-		expect(screen.queryByText(`Say hello to ${linear.name}`)).toBeNull();
 	});
 
 	it("sends a message in the chat", async () => {
@@ -390,7 +283,7 @@ describe("a bot's chat", () => {
 			Effect.succeed({
 				...botChatDetails({ chat: { title: "Overnight review", kind: "automation_feed" } }),
 				automation: {
-					id: automationRun.automationId,
+					id: automationId,
 					projectId: linear.defaultProjectId,
 					state: "enabled",
 					failed: false,
@@ -421,6 +314,55 @@ describe("a bot's chat", () => {
 		const list = within(await screen.findByRole("listbox"));
 		list.getByRole("option", { name: new RegExp(linear.name) });
 		expect(list.queryByRole("option", { name: /@here|@channel/ })).toBeNull();
+	});
+
+	it("stops the reply being written, from Send's place while there is nothing to send, for a member who may", async () => {
+		const TURN = "0199a3a0-0000-7000-8000-0000000000e1";
+		const writing = {
+			...botMessage,
+			id: "0199a3a0-0000-7000-8000-0000000000fb",
+			status: "writing" as const,
+			content: "",
+			parts: [],
+		};
+		const permissions = (interruptTurns: Array<{ replyId: string; turnId: string }>) => ({
+			approveToolCallsIn: [],
+			approveComputerRequests: false,
+			interruptTurns,
+		});
+		client.api.chats.interruptTurn.mockReturnValue(Effect.undefined);
+
+		answerChatWith(() =>
+			Effect.succeed(
+				botChatDetails({ messages: [mainMessage, writing], permissions: permissions([]) }),
+			),
+		);
+		mount(chatPage);
+		await screen.findByLabelText(`Message ${linear.name}`);
+		expect(screen.queryByRole("button", { name: "Interrupt the reply" })).toBeNull();
+		cleanup();
+
+		answerChatWith(() =>
+			Effect.succeed(
+				botChatDetails({
+					messages: [mainMessage, writing],
+					permissions: permissions([{ replyId: writing.id, turnId: TURN }]),
+				}),
+			),
+		);
+		mount(chatPage);
+		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		fireEvent.click(await screen.findByRole("button", { name: "Interrupt the reply" }));
+		await waitFor(() =>
+			expect(client.api.chats.interruptTurn).toHaveBeenCalledWith({
+				params: { chatId: chat.id, turnId: TURN },
+			}),
+		);
+
+		// Something to send puts Send back, which steers the reply rather than stopping it.
+		writeDraft(composer, "Check the tests too");
+		expect(screen.queryByRole("button", { name: "Interrupt the reply" })).toBeNull();
+		screen.getByRole("button", { name: "Send message" });
 	});
 
 	it("holds a message for a bot with no model, saying where to choose one, but sends one for members only", async () => {
@@ -484,9 +426,6 @@ describe("a bot's chat", () => {
 	it("puts the draft back after a lost response and reuses the retry key", async () => {
 		client.api.chats.messages.mockImplementation(() =>
 			Effect.succeed({ items: [{ kind: "message", message: mainMessage }], nextCursor: null }),
-		);
-		client.api.chats.history.mockImplementation(() =>
-			Effect.succeed({ items: [], nextCursor: null }),
 		);
 		client.api.chats.send.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: userText`Nope` })),
@@ -651,7 +590,7 @@ describe("a bot's chat", () => {
 			);
 
 		think(1, 0, "Still checking.");
-		const disclosure = await screen.findByRole("button", { name: "Thinking", expanded: false });
+		const disclosure = await screen.findByRole("button", { name: /^Thought:/, expanded: false });
 		fireEvent.click(disclosure);
 		await screen.findByText("Still checking.");
 
@@ -703,7 +642,7 @@ describe("a bot's chat", () => {
 		updates.emit(streamEvent("chat.notice", { chatId: chat.id, notice: "Execution started." }));
 
 		await screen.findByText("Execution started.");
-		fireEvent.click(screen.getByRole("button", { name: "Thinking" }));
+		fireEvent.click(screen.getByRole("button", { name: /^Thought:/ }));
 		await screen.findByText("Looked at the current record.");
 	});
 
@@ -754,7 +693,7 @@ describe("a bot's chat", () => {
 			if (answered) {
 				screen.getByText("Final reply.");
 			} else {
-				expect(screen.queryByText("Thinking")).toBeNull();
+				expect(screen.queryByRole("button", { name: /^Thought/ })).toBeNull();
 			}
 		},
 	);
@@ -1196,7 +1135,7 @@ describe("a bot's chat", () => {
 	});
 });
 
-describe("a message or nested chat a notification opens", () => {
+describe("a message a notification opens", () => {
 	const older: Message = {
 		...mainMessage,
 		id: "0199a3a0-0000-7000-8000-000000000201",
@@ -1232,46 +1171,10 @@ describe("a message or nested chat a notification opens", () => {
 		);
 	});
 
-	it("shows the run a notification names as the page, at the chat's own address", async () => {
-		mount(`${chatPage}?nestedChatPage=${automationId}`);
-
-		await screen.findByRole("heading", { name: automationRun.automationName });
-		expect(screen.queryByRole("log", { name: "Chat messages" })).toBeNull();
-		screen.getByRole("link", { name: `Back to ${linear.name}` });
-		expect(screen.getByRole("link", { name: "Open chat" }).getAttribute("href")).toBe(chatPage);
-	});
-
 	it("says so when the message cannot be found in the chat", async () => {
 		mount(opened("0199a3a0-0000-7000-8000-000000000299"));
 
 		await screen.findByText("Could not find the message you opened in this chat.");
-	});
-
-	it("opens a run's automation on its bot's automations page, where it is changed, from the run's header", async () => {
-		mount(`${chatPage}?nestedChatPage=${automationId}`);
-
-		const settings = await screen.findByRole("link", { name: "Automation settings" });
-		expect(settings.getAttribute("href")).toBe(
-			`/suga/bots/${linear.handle}/automations/${automationRun.automationId}`,
-		);
-	});
-
-	it("reads the automation run opened as a page once the window has focus, and not the rest of its chat", async () => {
-		const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
-		onTestFinished(() => hasFocus.mockRestore());
-		mount(`${chatPage}?nestedChatPage=${automationId}`);
-		await screen.findByRole("heading", { name: automationRun.automationName });
-		expect(client.api.chats.markNestedChatRead).not.toHaveBeenCalled();
-
-		hasFocus.mockReturnValue(true);
-		fireEvent.focus(window);
-
-		await waitFor(() =>
-			expect(client.api.chats.markNestedChatRead).toHaveBeenCalledWith({
-				params: { chatId: automationId },
-			}),
-		);
-		expect(client.api.chats.markRead).not.toHaveBeenCalled();
 	});
 
 	it("ignores an address naming something other than a message", async () => {
@@ -1603,7 +1506,7 @@ describe("the chat's stream", () => {
 		);
 		updates.emit(streamEvent("message.created", { chatId: chat.id, message: writingReply("") }));
 
-		fireEvent.click(await screen.findByRole("button", { name: "Thinking" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Thought:/ }));
 		await screen.findByText("Reading the chat.");
 	});
 
@@ -1632,7 +1535,7 @@ describe("the chat's stream", () => {
 		if (usualChat) client.api.chats.get.mockImplementation(usualChat);
 		updates.emit(streamEvent("message.created", { chatId: chat.id, message: writingReply("") }));
 
-		fireEvent.click(await screen.findByRole("button", { name: "Thinking" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Thought:/ }));
 		await screen.findByText("Reading the chat.");
 	});
 

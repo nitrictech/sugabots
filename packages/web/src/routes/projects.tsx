@@ -24,6 +24,7 @@ import { useProjectRouteOwner } from "./owner.ts";
 import {
 	type ChatSearch,
 	decodeRouteId,
+	redirectRunPageAddress,
 	validateChatSearch,
 	validateFileSearch,
 } from "./search.ts";
@@ -166,6 +167,7 @@ export const projectChatRoute = createRoute({
 	path: "/$chat",
 	params: { parse: ({ chat }) => ({ chat: decodeRouteId(chat) }) },
 	validateSearch: (search: Record<string, unknown>) => validateChatSearch(search),
+	beforeLoad: redirectRunPageAddress,
 	// On every hover, not once per 30 s: the query cache, not the router,
 	// decides what of the chat is still fresh.
 	preloadStaleTime: 0,
@@ -193,7 +195,7 @@ export const projectChatRoute = createRoute({
  * One of the chats of the project at `projectSlug`, one of its
  * chats or automations' feeds, at its own address; see `RoutedChat`.
  */
-export function ProjectChatScreen({
+function ProjectChatScreen({
 	projectSlug,
 	chatId,
 	search,

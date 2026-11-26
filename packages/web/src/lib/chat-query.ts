@@ -179,9 +179,13 @@ export function useReviewToolCall(chatId: string | null) {
  * Interrupts the turn `turnId` in the chat: the step under way ends at once and
  * the turn ends with what it wrote. How it ends arrives on the chat's stream.
  */
-export function useInterruptTurn(chatId: string) {
+export function useInterruptTurns(chatId: string) {
 	return useMutation({
-		mutationFn: async (turnId: string) =>
-			Effect.runPromise(client.api.chats.interruptTurn({ params: { chatId, turnId } })),
+		mutationFn: async (turnIds: readonly string[]) =>
+			Promise.all(
+				turnIds.map((turnId) =>
+					Effect.runPromise(client.api.chats.interruptTurn({ params: { chatId, turnId } })),
+				),
+			),
 	});
 }

@@ -484,25 +484,6 @@
 				"ResourceHidden": 404
 			}
 		},
-		"chats.history": {
-			"route": "GET /chats/:chatId/history",
-			"answers": [
-				200
-			],
-			"params": {
-				"chatId": "string"
-			},
-			"query": {
-				"cursor": "optional string | null",
-				"limit": "optional string | null"
-			},
-			"body": {},
-			"errors": {
-				"BotCannotReach": 403,
-				"InvalidCursor": 400,
-				"ResourceHidden": 404
-			}
-		},
 		"chats.interruptTurn": {
 			"route": "POST /chats/:chatId/turns/:turnId/interrupt",
 			"answers": [

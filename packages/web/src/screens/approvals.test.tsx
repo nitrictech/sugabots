@@ -119,14 +119,14 @@ describe("Approvals", () => {
 		serveApprovals({ waiting: [inChat], answered: [] });
 		mount(`/suga/approvals/${inChat.call.id}`);
 		expect((await screen.findByRole("link", { name: "Open chat" })).getAttribute("href")).toBe(
-			`/suga/chats/${feed}?nestedChatPage=${run}`,
+			`/suga/chats/${feed}?runChat=${run}`,
 		);
 		cleanup();
 
 		serveApprovals({ waiting: [inProject], answered: [] });
 		mount(`/suga/approvals/${inProject.call.id}`);
 		expect((await screen.findByRole("link", { name: "Open chat" })).getAttribute("href")).toBe(
-			`/suga/projects/${project.slug}/${feed}?nestedChatPage=${run}`,
+			`/suga/projects/${project.slug}/${feed}?runChat=${run}`,
 		);
 	});
 });

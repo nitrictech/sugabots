@@ -498,13 +498,6 @@ export const automationListItemSchema = Schema.Union([
 	restrictableAutomationSchema,
 ]);
 
-export const listedRunSchema = Schema.Struct({
-	runId: uuidSchema,
-	automationId: uuidSchema,
-	automationName: automationNameSchema,
-	triggerKind: runTriggerKindSchema,
-});
-
 export const runPageQuerySchema = Schema.Struct({
 	cursor: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
 	limit: Schema.String.check(Schema.isPattern(/^\d+$/)).pipe(

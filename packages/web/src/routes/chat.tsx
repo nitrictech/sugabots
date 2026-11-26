@@ -1,21 +1,15 @@
 import type { CurrentUser } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
-import { cn } from "cn";
 import { MessageSquareOff } from "lucide-react";
 import { type ReactNode, Suspense } from "react";
 import type { ChatLocation } from "@/lib/chats.ts";
 import { matchesMedia, SIDE_BY_SIDE } from "@/lib/media.ts";
-import { ownerLinkOptions } from "@/lib/resource-owner.tsx";
 import { useSession } from "@/lib/session.ts";
-import { backToOwner } from "@/screens/ChatHeader.tsx";
 import type { StagedChange } from "@/screens/staged.ts";
-import { buttonStyles } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
-import { type ChatSearch, stagedOf, stagedSearchOf } from "./search.ts";
+import { type ChatSearch, focusOf, stagedOf, stagedSearchOf } from "./search.ts";
 
 export const ChatPage = lazyNamed(() => import("@/screens/ChatPage.tsx"), "ChatPage");
-const NestedChatPage = lazyNamed(() => import("@/screens/NestedChatPage.tsx"), "NestedChatPage");
 
 /**
  * Where a page opens its chat beside the sidebar. On a phone, touching
@@ -50,40 +44,18 @@ export function RoutedChat({
 	navigate: (change: SearchChange) => void;
 }) {
 	const searchProps = useChatSearchProps(search, navigate);
-	// A run a notification names is the page itself, with the way back to where it is.
-	if (search.nestedChatPage) {
-		return (
-			<NestedChatPage
-				chatLocation={found}
-				chatId={chatId}
-				nestedChatId={search.nestedChatPage}
-				back={backToOwner(found)}
-				trailing={
-					<Link
-						{...ownerLinkOptions(found, { page: "chat", chatId })}
-						className={cn(
-							buttonStyles({ variant: "secondary", size: "sm" }),
-							"shrink-0 max-md:hidden",
-						)}
-					>
-						Open chat
-					</Link>
-				}
-			/>
-		);
-	}
 	return <ChatPage chatLocation={found} chatId={chatId} signedIn={signedIn} {...searchProps} />;
 }
 
 /**
  * What a chat's address keeps open with it, as its page's props: the
- * message jumped to and what is open large, changed through `navigate`.
+ * run or message jumped to and what is open large, changed through `navigate`.
  */
 function useChatSearchProps(search: ChatSearch, navigate: (change: SearchChange) => void) {
 	const onStagedChange: StagedChange = (staged, how) =>
 		navigate({ search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }), ...how });
 	return {
-		focusMessageId: search.message,
+		focus: focusOf(search),
 		staged: stagedOf(search),
 		onStagedChange,
 	};

@@ -1,3 +1,4 @@
+import type { ChatMessageItem } from "@sugabots/contracts";
 import {
 	type RefObject,
 	type UIEvent,
@@ -14,6 +15,7 @@ import {
 	useFollowContentGrowth,
 	useSettledAtLatest,
 } from "@/lib/follow-latest.ts";
+import { messagesIn } from "./chat-items.ts";
 
 /**
  * How close to the foot of the log still counts as at the latest message, both
@@ -21,10 +23,18 @@ import {
  * a small nudge up is not taken as scrolling away.
  */
 const LATEST_IN_VIEW_TOLERANCE_PX = 48;
-/** How many older pages a jump to a message loads looking for it, before it gives up. */
+/** How many pages an automatic jump searches, including the newest page. */
 const MAX_PAGES_TO_FIND = 10;
-/** How long a message jumped to stays pointed out. */
+/** How long what was jumped to stays pointed out. */
 const POINTED_OUT_MS = 2000;
+
+/**
+ * A place in a chat's log to go to: a message, or an automation's run, by
+ * its chat, where its feed shows it, as its result or as how it went.
+ */
+export type ChatLogPoint =
+	| { kind: "message"; messageId: string }
+	| { kind: "run"; runChatId: string };
 
 /** The pages of a chat's messages, as far as positioning its log needs them. */
 interface MessagePages {
@@ -52,30 +62,36 @@ export interface ChatLogPosition {
 	loadOlder: () => Promise<void>;
 	/** Jumps to the message `messageId`, as a reply's quote asks. */
 	jumpTo: (messageId: string) => void;
-	/** The message just jumped to, pointed out for a moment. */
-	pointedOut: string | undefined;
-	/** Whether the message asked for could not be found, after loading as many older pages as it may. */
-	notFound: boolean;
+	/** What was just jumped to, pointed out for a moment. */
+	pointedOut: ChatLogPoint | undefined;
+	/** What was last jumped to, such as the run the chat was opened at. */
+	reached: ChatLogPoint | undefined;
+	/** Whether the point reached by the current jump is still in view. */
+	isReachedInView: () => boolean;
+	/** What could not be found after loading as many older pages as the search allows. */
+	missingPoint: ChatLogPoint | undefined;
 }
 
 /**
  * Keeps a chat's log at its latest message: opened there, and following each
- * new one while the viewer stays at the foot, until they scroll up or jump to
- * a message, the one the chat was opened at (`focusMessageId`) or one a quote
+ * new one while the viewer stays at the foot, until they scroll up or jump
+ * away: to what the chat was opened at (`focus`), or to a message a quote
  * asks for.
  */
 export function useChatLogPosition({
 	messages,
 	latestItemRevision,
-	shownMessageIds,
-	focusMessageId,
+	items,
+	focus,
+	logReady,
 }: {
 	messages: MessagePages;
 	/** Changes whenever the newest item does; see `chatItemRevision`. */
 	latestItemRevision: string;
-	/** The messages loaded, to tell whether one jumped to is among them. */
-	shownMessageIds: readonly string[];
-	focusMessageId: string | undefined;
+	/** The items loaded, to tell whether what is jumped to is among them. */
+	items: readonly ChatMessageItem[];
+	focus: ChatLogPoint | undefined;
+	logReady: boolean;
 }): ChatLogPosition {
 	const viewport = useRef<HTMLDivElement>(null);
 	const positionedAtLatest = useRef(false);
@@ -98,10 +114,12 @@ export function useChatLogPosition({
 
 	const loadOlder = () => loadOlderKeepingPlace(viewport.current, messages.fetchNextPage);
 
-	const [jumpTarget, jumpTo] = useJumpTarget(focusMessageId);
-	const jump = useJumpToMessage({
+	const settledAtLatest = useSettledAtLatest(viewport, followingLatest, !messages.isPending);
+	const [jumpTarget, jumpTo] = useJumpTarget(focus);
+	const jump = useJumpToPoint({
 		target: jumpTarget,
-		shown: shownMessageIds.some((id) => id === jumpTarget?.messageId),
+		shown: jumpTarget !== undefined && isLoaded(items, jumpTarget.point),
+		ready: logReady && settledAtLatest,
 		viewport,
 		older:
 			!messages.isSuccess || messages.isFetchingNextPage
@@ -111,16 +129,16 @@ export function useChatLogPosition({
 					: "none",
 		loadOlder,
 		pagesLoaded: messages.data?.pages.length ?? 0,
-		onJumped: () => {
+		onJumped: (element) => {
 			// Reading back from here: new messages no longer pull the chat to its foot.
 			followingLatest.current = false;
 			positionedAtLatest.current = true;
+			lastScrollTop.current = element.scrollTop;
+			setLatestInView(atLatest(element));
 		},
 	});
 
 	useFollowContentGrowth(viewport, followingLatest);
-	// Hidden on a phone until it is at the latest, rather than showing its top for a moment first.
-	const settledAtLatest = useSettledAtLatest(viewport, followingLatest, !messages.isPending);
 	const attachViewport = useCallback((element: HTMLDivElement | null) => {
 		viewport.current = element;
 		if (!element) return;
@@ -133,8 +151,7 @@ export function useChatLogPosition({
 
 	function onScroll(event: UIEvent<HTMLDivElement>) {
 		const element = event.currentTarget;
-		const atFoot =
-			element.scrollHeight - element.scrollTop - element.clientHeight < LATEST_IN_VIEW_TOLERANCE_PX;
+		const atFoot = atLatest(element);
 		if (atFoot) followingLatest.current = true;
 		else if (element.scrollTop < lastScrollTop.current) followingLatest.current = false;
 		lastScrollTop.current = element.scrollTop;
@@ -148,53 +165,105 @@ export function useChatLogPosition({
 		});
 	}
 
+	function isReachedInView() {
+		const element = viewport.current;
+		if (!element || !jump.reached) return false;
+		const row = elementOf(element, jump.reached);
+		if (!row || row.checkVisibility?.({ visibilityProperty: true }) === false) return false;
+		const frame = element.getBoundingClientRect();
+		const box = row.getBoundingClientRect();
+		return box.bottom >= frame.top && box.top <= frame.bottom;
+	}
+
 	return {
 		attachViewport,
 		onScroll,
-		latestInView,
+		latestInView: latestInView && (jumpTarget?.point.kind !== "run" || jump.reached !== undefined),
 		settledAtLatest,
 		scrollToLatest,
 		loadOlder,
 		jumpTo,
 		pointedOut: jump.pointedOut,
-		notFound: jump.notFound,
+		reached: jump.reached,
+		isReachedInView,
+		missingPoint: jump.missingPoint,
 	};
 }
 
-/** One request to go to a message. Asking again for the same message is a new request. */
+function atLatest(element: HTMLElement): boolean {
+	return (
+		element.scrollHeight - element.scrollTop - element.clientHeight < LATEST_IN_VIEW_TOLERANCE_PX
+	);
+}
+
+/** One request to go somewhere in the log. Asking again for the same place is a new request. */
 interface JumpTarget {
-	messageId: string;
+	point: ChatLogPoint;
 }
 
 /**
- * The message to go to: the one the chat was opened at, until a reply's quote
- * asks for another, and again whenever the chat is opened at a new one.
+ * Where to go: what the chat was opened at, until a reply's quote asks for
+ * a message, and again whenever the chat is opened at somewhere new.
  */
 function useJumpTarget(
-	focusMessageId: string | undefined,
+	focus: ChatLogPoint | undefined,
 ): [JumpTarget | undefined, (messageId: string) => void] {
-	const [target, setTarget] = useState(() => jumpTargetOf(focusMessageId));
-	const [openedAt, setOpenedAt] = useState(focusMessageId);
-	if (focusMessageId !== openedAt) {
-		setOpenedAt(focusMessageId);
-		setTarget(jumpTargetOf(focusMessageId));
+	const [target, setTarget] = useState(() => jumpTargetOf(focus));
+	const [openedAt, setOpenedAt] = useState(focus && pointKey(focus));
+	if ((focus && pointKey(focus)) !== openedAt) {
+		setOpenedAt(focus && pointKey(focus));
+		setTarget(jumpTargetOf(focus));
 	}
-	return [target, (messageId) => setTarget({ messageId })];
+	return [target, (messageId) => setTarget({ point: { kind: "message", messageId } })];
 }
 
-function jumpTargetOf(messageId: string | undefined): JumpTarget | undefined {
-	return messageId ? { messageId } : undefined;
+function jumpTargetOf(point: ChatLogPoint | undefined): JumpTarget | undefined {
+	return point ? { point } : undefined;
+}
+
+/** The same for the same place, so the address opening it again is not a new request. */
+function pointKey(point: ChatLogPoint): string {
+	return point.kind === "message" ? `message:${point.messageId}` : `run:${point.runChatId}`;
+}
+
+/** Whether `point` is among `items`: the message, or the run's result or the run itself. */
+function isLoaded(items: readonly ChatMessageItem[], point: ChatLogPoint): boolean {
+	if (point.kind === "message") {
+		return messagesIn(items).some((message) => message.id === point.messageId);
+	}
+	return items.some((item) =>
+		item.kind === "message"
+			? item.message.automationResultOf?.chatId === point.runChatId
+			: item.kind === "run" && item.chatId === point.runChatId,
+	);
 }
 
 /**
- * Jumps to the target's message once it is shown, loading older pages until it
- * is, up to a limit, then centres it, moves the focus to it, and points it out
- * for a moment. Each target is jumped to once. Returns the message pointed out,
- * if any, and whether the search gave up without finding it.
+ * The element the log draws `point` as: a message by its id; a run by its
+ * chat, on its result or on the line saying how it went.
  */
-function useJumpToMessage({
+function elementOf(viewport: HTMLElement, point: ChatLogPoint): HTMLElement | undefined {
+	if (point.kind === "message") {
+		return [...viewport.querySelectorAll<HTMLElement>("[data-message-id]")].find(
+			(candidate) => candidate.dataset.messageId === point.messageId,
+		);
+	}
+	return [...viewport.querySelectorAll<HTMLElement>("[data-run-chat-id]")].find(
+		(candidate) => candidate.dataset.runChatId === point.runChatId,
+	);
+}
+
+/**
+ * Jumps to the target once it is shown, loading older pages until it is, up
+ * to a limit, then centres it, moves the focus to it, and points it out for a
+ * moment. Each target is jumped to once. Returns what is pointed out, if
+ * anything, what was last reached, and whether the search gave up without
+ * finding it.
+ */
+function useJumpToPoint({
 	target,
 	shown,
+	ready,
 	viewport,
 	older,
 	loadOlder,
@@ -202,49 +271,61 @@ function useJumpToMessage({
 	onJumped,
 }: {
 	target: JumpTarget | undefined;
-	/** Whether the message is among those loaded. */
+	/** Whether the target is among the items loaded. */
 	shown: boolean;
+	ready: boolean;
 	viewport: RefObject<HTMLDivElement | null>;
 	/** Whether an older page can be loaded now, is on its way, or there is none. */
 	older: "available" | "loading" | "none";
 	loadOlder: () => Promise<void>;
 	pagesLoaded: number;
-	onJumped: () => void;
-}): { pointedOut: string | undefined; notFound: boolean } {
-	const jumped = useRef<JumpTarget>(undefined);
-	const [pointedOut, setPointedOut] = useState<string>();
+	onJumped: (element: HTMLElement) => void;
+}): {
+	pointedOut: ChatLogPoint | undefined;
+	reached: ChatLogPoint | undefined;
+	missingPoint: ChatLogPoint | undefined;
+} {
+	const [pointedOut, setPointedOut] = useState<ChatLogPoint>();
+	const [reached, setReached] = useState<JumpTarget>();
 	const loadOlderPage = useEffectEvent(() => void loadOlder());
 	const jumpedTo = useEffectEvent(onJumped);
-	const searchedEnough = pagesLoaded >= MAX_PAGES_TO_FIND;
 	useEffect(() => {
-		if (!target || jumped.current === target) return;
+		if (!target || reached === target) return;
 		if (!shown) {
-			if (older === "available" && !searchedEnough) loadOlderPage();
+			if (older === "available" && pagesLoaded < MAX_PAGES_TO_FIND) loadOlderPage();
 			return;
 		}
-		const row = [
-			...(viewport.current?.querySelectorAll<HTMLElement>("[data-message-id]") ?? []),
-		].find((candidate) => candidate.dataset.messageId === target.messageId);
-		if (!row) return;
-		jumped.current = target;
+		if (!ready) return;
 		// In the next frame, after the scroll event from the chat's first move to its
 		// foot, which would otherwise say the chat is following its latest again.
-		requestAnimationFrame(() => {
-			if (viewport.current) centreIn(viewport.current, row);
+		const frame = requestAnimationFrame(() => {
+			const element = viewport.current;
+			const row = element && elementOf(element, target.point);
+			if (!element || !row) return;
+			centreIn(element, row);
 			row.tabIndex = -1;
 			row.focus({ preventScroll: true });
-			jumpedTo();
+			jumpedTo(element);
+			setPointedOut(target.point);
+			setReached(target);
 		});
-		setPointedOut(target.messageId);
-	}, [target, shown, viewport, older, searchedEnough]);
+		return () => cancelAnimationFrame(frame);
+	}, [target, shown, ready, viewport, older, pagesLoaded, reached]);
 	useEffect(() => {
 		if (!pointedOut) return;
 		const fade = setTimeout(() => setPointedOut(undefined), POINTED_OUT_MS);
 		return () => clearTimeout(fade);
 	}, [pointedOut]);
-	const notFound =
-		target !== undefined && !shown && older !== "loading" && (older === "none" || searchedEnough);
-	return { pointedOut, notFound };
+	const searchedEnough = pagesLoaded >= MAX_PAGES_TO_FIND;
+	const missingPoint =
+		!shown && older !== "loading" && (older === "none" || searchedEnough)
+			? target?.point
+			: undefined;
+	return {
+		pointedOut,
+		reached: shown && reached === target ? reached?.point : undefined,
+		missingPoint,
+	};
 }
 
 /**

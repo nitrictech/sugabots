@@ -2,7 +2,6 @@ import { Effect, Schema } from "effect";
 import {
 	automationListStatusSchema,
 	automationStateSchema,
-	listedRunSchema,
 	runStateSchema,
 	runTriggerKindSchema,
 } from "./automations.ts";
@@ -277,6 +276,11 @@ const chatMessageItemSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("message"),
 		message: messageSchema,
+		/**
+		 * On a run's result in its automation's feed: the run's bot's reply in
+		 * the run's own chat, whose work shows over the result.
+		 */
+		runReply: Schema.optional(messageSchema),
 	}),
 	Schema.Struct({
 		kind: Schema.Literal("run"),
@@ -287,8 +291,8 @@ const chatMessageItemSchema = Schema.Union([
 		/** How far the run has got, and, once it failed, why, in words fit for members. */
 		state: runStateSchema,
 		error: Schema.NullOr(Schema.String),
-		/** What the run's bot last said in it, or null while it has said nothing. */
-		report: Schema.NullOr(Schema.String),
+		/** The run's bot's reply in the run's own chat, with the work it did, or null until it has begun one. */
+		reply: Schema.NullOr(messageSchema),
 		createdAt: isoTimestampSchema,
 	}),
 	/** In an automation's feed: the automation, by its id, paused itself after failing twice in a row. */
@@ -307,22 +311,3 @@ export const chatMessagesPageSchema = Schema.Struct({
 });
 
 export type ChatMessagesPage = typeof chatMessagesPageSchema.Type;
-
-/** A chat a chat lists among its messages and opens beside it: an automation's run. */
-const chatHistoryEntrySchema = Schema.Struct({
-	chatId: uuidSchema,
-	kind: Schema.Literal("run"),
-	title: Schema.String,
-	participants: Schema.mutable(Schema.Array(participantSchema)),
-	status: Schema.Literals(["queued", "running", "completed", "failed", "cancelled"]),
-	automationRun: Schema.NullOr(listedRunSchema),
-});
-
-export type ChatHistoryEntry = typeof chatHistoryEntrySchema.Type;
-
-export const chatHistoryPageSchema = Schema.Struct({
-	items: Schema.mutable(Schema.Array(chatHistoryEntrySchema)),
-	nextCursor: Schema.NullOr(Schema.String),
-});
-
-export type ChatHistoryPage = typeof chatHistoryPageSchema.Type;

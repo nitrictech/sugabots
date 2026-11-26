@@ -128,11 +128,13 @@ export const Thinking = meta.story({
 			"aria-busy",
 			"false",
 		);
-		const trigger = canvas.getByRole("button", { name: "Thinking", expanded: false });
-		await expect(canvas.queryByText(thinkingStep)).toBeNull();
+		const trigger = canvas.getByRole("button", { name: /^Thought:/, expanded: false });
 		trigger.focus();
 		await expect(trigger).toHaveFocus();
 		await userEvent.keyboard("{Enter}");
+		await waitFor(() =>
+			expect(canvas.getByRole("button", { name: "Thought", expanded: true })).toBeVisible(),
+		);
 		await waitFor(() => expect(canvas.getByText(thinkingStep)).toBeVisible());
 	},
 });
@@ -157,7 +159,7 @@ export const ThinkingWhileWriting = meta.story({
 	beforeEach: freezeWritingClock,
 	play: async ({ canvas, userEvent }) => {
 		await expect(canvas.getByText("Working for 12s")).toBeVisible();
-		await userEvent.click(canvas.getByRole("button", { name: "Thinking", expanded: false }));
+		await userEvent.click(canvas.getByRole("button", { name: /^Thought:/, expanded: false }));
 		await waitFor(() => expect(canvas.getByText(thinkingStep)).toBeVisible());
 	},
 });
@@ -165,7 +167,7 @@ export const ThinkingWhileWriting = meta.story({
 const secondThinkingStep = "Use the contract currency and check the total for each line item.";
 const thirdThinkingStep = "Check whether rounding changes the invoice total.";
 
-/** The disclosure keeps the thinking from each step in order. */
+/** Each step's thinking is a line of its own, in order. */
 export const ThinkingAcrossSteps = meta.story({
 	args: {
 		messages: [
@@ -179,11 +181,11 @@ export const ThinkingAcrossSteps = meta.story({
 			},
 		],
 	},
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Thinking", expanded: false }));
-		for (const text of [thinkingStep, secondThinkingStep, thirdThinkingStep]) {
-			await waitFor(() => expect(canvas.getByText(text)).toBeVisible());
-		}
+	play: async ({ canvas }) => {
+		const thoughts = canvas.getAllByRole("button", { name: /^Thought:/ });
+		await expect(thoughts.map((thought) => thought.textContent)).toEqual(
+			[thinkingStep, secondThinkingStep, thirdThinkingStep].map((text) => `Thought: ${text}`),
+		);
 	},
 });
 
@@ -207,75 +209,10 @@ export const LongThinking = meta.story({
 		],
 	},
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Thinking", expanded: false }));
+		await userEvent.click(canvas.getByRole("button", { name: /^Thought:/, expanded: false }));
 		await waitFor(() =>
 			expect(canvas.getByText(`Export: ${longExportName}`, { exact: false })).toBeVisible(),
 		);
-	},
-});
-
-const interruptible = {
-	approveComputerRequests: false,
-	approveToolCallsIn: [],
-	interruptTurns: [{ replyId: writingReply.id, turnId: "0199a3a0-0000-7000-8000-000000000321" }],
-};
-const interruptUrl = `${import.meta.env.VITE_API_URL}/chats/${writingReply.chatId}/turns/${interruptible.interruptTurns[0]?.turnId}/interrupt`;
-const interruptName = "Interrupt Issue Triager’s reply";
-
-/** The asker can interrupt a writing reply. The control stays disabled after acceptance. */
-export const MayInterrupt = meta.story({
-	parameters: writingStoryParameters,
-	args: { messages: [writingReply], approvalPermissions: interruptible },
-	beforeEach({ msw }) {
-		msw.use(http.post(interruptUrl, () => new HttpResponse(null, { status: 202 })));
-		return freezeWritingClock();
-	},
-	play: async ({ canvas, userEvent }) => {
-		const button = canvas.getByRole("button", { name: interruptName });
-		await userEvent.click(button);
-		await expect(await canvas.findByText("Interrupting…")).toHaveAttribute("role", "status");
-		await expect(button).toBeDisabled();
-		await expect(canvas.queryByRole("alert")).toBeNull();
-	},
-});
-
-/** A viewer without permission sees the reply while it is being written. */
-export const ViewerCannotInterrupt = meta.story({
-	parameters: writingStoryParameters,
-	beforeEach: freezeWritingClock,
-	args: {
-		viewerId: jay.id,
-		messages: [writingReply],
-		approvalPermissions: { ...interruptible, interruptTurns: [] },
-	},
-	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("article", { name: /^Issue Triager/, busy: true })).toBeVisible();
-		await expect(canvas.queryByRole("button", { name: /Interrupt/ })).toBeNull();
-	},
-});
-
-/** A refusal is announced beside the interrupt control, which remains available. */
-export const InterruptRefused = meta.story({
-	parameters: writingStoryParameters,
-	args: { messages: [writingReply], approvalPermissions: interruptible },
-	beforeEach({ msw }) {
-		msw.use(
-			http.post(interruptUrl, () =>
-				HttpResponse.json(
-					{ _tag: "Forbidden", message: "You may no longer interrupt this reply." },
-					{ status: 403 },
-				),
-			),
-		);
-		return freezeWritingClock();
-	},
-	play: async ({ canvas, userEvent }) => {
-		const button = canvas.getByRole("button", { name: interruptName });
-		await userEvent.click(button);
-		await expect(await canvas.findByRole("alert")).toHaveTextContent(
-			"You may no longer interrupt this reply.",
-		);
-		await expect(button).toBeEnabled();
 	},
 });
 

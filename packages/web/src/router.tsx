@@ -8,7 +8,7 @@ import { type Session, SessionContext } from "@/lib/session.ts";
 import { PageFailure } from "@/shell/PageFailure.tsx";
 import { approvalRoute, approvalsIndexRoute, approvalsRoute } from "./routes/approvals.tsx";
 import {
-	automationFeedRoute,
+	automationRoute,
 	automationsIndexRoute,
 	automationsRoute,
 	newAutomationRoute,
@@ -116,8 +116,7 @@ import { workspaceSetupRoute } from "./routes/workspace-setup.tsx";
  *
  * A bot's address uses its handle, unique in its workspace, rather than its
  * name, so renaming a bot keeps its links. An automation run has no address
- * of its own: its feed's address, or its automation's, names it as the page,
- * as `?nestedChatPage=`.
+ * of its own: its feed's address names it as `?runChat=`, to open the feed at it.
  *
  * Each area's routes and their pages are declared in a module of its own under
  * `routes/`; the tree below puts them together.
@@ -170,11 +169,7 @@ const routeTree = rootRoute.addChildren([
 			botConnectorRoute,
 			botSettingsRoute,
 			botComputerRoute,
-			automationsRoute.addChildren([
-				automationsIndexRoute,
-				newAutomationRoute,
-				automationFeedRoute,
-			]),
+			automationsRoute.addChildren([automationsIndexRoute, newAutomationRoute, automationRoute]),
 		]),
 	]),
 ]);
@@ -252,18 +247,12 @@ function isSettingsLocation(location: ParsedLocation): boolean {
 }
 
 /**
- * A page's depth, and more for what its address names in its search rather
- * than its path: a step while a run is open over it, as a notification or
- * its automation opens one, and the depth of any settings page open over it.
+ * A page's depth, and more for any settings page its search opens over it,
+ * rather than its path.
  */
 function locationDepth(location: ParsedLocation): number {
-	const search = location.search as { nestedChatPage?: unknown; settings?: unknown };
-	const settings = settingsLocationOf(search.settings);
-	return (
-		pageDepth(location.pathname) +
-		(search.nestedChatPage !== undefined ? 1 : 0) +
-		(settings ? settingsDepth(settings) : 0)
-	);
+	const settings = settingsLocationOf((location.search as { settings?: unknown }).settings);
+	return pageDepth(location.pathname) + (settings ? settingsDepth(settings) : 0);
 }
 
 /**

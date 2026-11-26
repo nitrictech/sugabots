@@ -281,13 +281,12 @@ async function applyChatEvent(
 	}
 	if (update.type === "ready" || update.type === "reset") {
 		// What was fetched before may be behind the stream, or the stream missed
-		// events: the chat as fetched now replaces it, its pages and runs are
-		// fetched again, and the events after this one wait until they have.
+		// events: the chat as fetched now replaces it, its pages are fetched
+		// again, and the events after this one wait until they have.
 		await Promise.all([
 			replaceChat(queries, chatId),
 			queries.invalidateQueries({ queryKey: ["chat-context", chatId] }),
 			queries.invalidateQueries({ queryKey: ["chat-messages", chatId] }),
-			queries.invalidateQueries({ queryKey: ["chat-history", chatId] }),
 		]);
 		addWaitingDeltas(queries, chatId, waiting);
 		return;
@@ -550,9 +549,6 @@ async function applyWorkspaceEvent(
 				queries.invalidateQueries({
 					queryKey: ["chat-messages", update.rootChatId],
 				}),
-				queries.invalidateQueries({
-					queryKey: ["chat-history", update.rootChatId],
-				}),
 				// Only a run being accepted or settled changes what an automation's feed shows beside it.
 				refreshAutomations(queries),
 				// A new message moves its chat up the list, changes its preview, and may leave it unread.
@@ -560,11 +556,8 @@ async function applyWorkspaceEvent(
 			]);
 			return;
 		case "chat.changed":
-			await Promise.all([
-				queries.invalidateQueries({ queryKey: ["chat-history"] }),
-				// A message, a reply, or an approval asked for may change how a chat stands in the lists.
-				refreshAfterChatChange(queries, workspaceId),
-			]);
+			// A message, a reply, or an approval asked for may change how a chat stands in the lists.
+			await refreshAfterChatChange(queries, workspaceId);
 			return;
 		case "reach.changed":
 			await refreshAfterReachChange(queries, workspaceId);
@@ -580,7 +573,6 @@ async function applyWorkspaceEvent(
 			// is fetched again.
 			await Promise.all([
 				queries.invalidateQueries({ queryKey: ["chat-messages"] }),
-				queries.invalidateQueries({ queryKey: ["chat-history"] }),
 				refreshAutomations(queries),
 				refreshAfterReachChange(queries, workspaceId),
 			]);

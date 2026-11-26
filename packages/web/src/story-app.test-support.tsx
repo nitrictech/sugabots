@@ -361,9 +361,6 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				nextCursor: null,
 			});
 		}),
-		http.get(api("/chats/:chatId/history"), () =>
-			HttpResponse.json({ items: [], nextCursor: null }),
-		),
 		http.get(api("/chats/:chatId/events"), quietStream),
 		http.post(api("/chats/:chatId/typing"), () => new HttpResponse(null, { status: 204 })),
 		// Nothing in a story's chats has been measured yet.

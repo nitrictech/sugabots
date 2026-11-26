@@ -223,7 +223,7 @@ function automationHandlers() {
 						triggerKind: "routine",
 						state: "completed",
 						error: null,
-						report: null,
+						reply: null,
 						createdAt: "2026-09-16T06:00:00.000Z",
 					},
 					posted(
@@ -248,7 +248,7 @@ function automationHandlers() {
 						triggerKind: "routine",
 						state: "failed",
 						error: "Gmail refused the connection: the token has expired.",
-						report: null,
+						reply: null,
 						createdAt: "2026-09-18T06:00:00.000Z",
 					},
 				],

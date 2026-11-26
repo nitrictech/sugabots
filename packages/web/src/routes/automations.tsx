@@ -1,6 +1,14 @@
-import { createRoute, Outlet, useMatch, useParams } from "@tanstack/react-router";
+import {
+	createRoute,
+	Navigate,
+	Outlet,
+	useLocation,
+	useMatch,
+	useParams,
+} from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { useOpenAutomationFeed } from "@/lib/chats.ts";
+import { useProjectChats } from "@/lib/chats.ts";
+import { chatLink } from "@/lib/links.ts";
 import {
 	type ResourceOwner,
 	resourcePermissions,
@@ -9,12 +17,11 @@ import {
 import { BotAutomationRestrictions } from "@/screens/BotRestrictions.tsx";
 import { AutomationsPage } from "@/shell/Automations.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
-import { BotChatScreen, botRoute } from "./bots.tsx";
-import { ChatPage } from "./chat.tsx";
+import { botRoute } from "./bots.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { useBotRouteOwner, useProjectRouteOwner } from "./owner.ts";
-import { ProjectChatScreen, projectRoute } from "./projects.tsx";
-import { type ChatSearch, decodeRouteId, validateChatSearch } from "./search.ts";
+import { projectRoute } from "./projects.tsx";
+import { decodeRouteId, legacyRunSearch } from "./search.ts";
 
 const AutomationSetup = lazyNamed(
 	() =>
@@ -28,8 +35,7 @@ const NewAutomation = lazyNamed(
 
 /*
  * A bot's automations and a project's, the same pages at each one's address:
- * listed as a page, which an automation, a run of one, or a new one takes the
- * place of.
+ * listed as a page, which an automation or a new one takes the place of.
  */
 
 /** The list, with what an address under it opens in its place as `children`. */
@@ -54,51 +60,42 @@ function OwnerAutomations({
 	);
 }
 
-/**
- * An automation's own page: how it is set up, under its breadcrumb. With
- * `?nestedChatPage=`, one of its runs instead, as the sidebar opens them.
- */
-function AutomationPage<Owner extends ResourceOwner>({
+/** An automation's own page: how it is set up, under its breadcrumb. */
+function AutomationPage({
 	owner,
 	automationId,
-	nestedChatPage,
-	feed,
 }: {
-	owner: Owner | undefined;
+	owner: ResourceOwner | undefined;
 	automationId: string;
-	nestedChatPage: string | undefined;
-	/** The automation's feed, open with the run as its page. */
-	feed: (owner: Owner, feedId: string) => ReactNode;
 }) {
+	const runSearch = useLocation({ select: (location) => legacyRunSearch(location.search) });
 	if (!owner) return null;
-	// A run is history, which somebody who manages the bot without reaching it does not read.
-	return nestedChatPage && resourcePermissions(owner).readHistory ? (
-		<AutomationFeed key={automationId} owner={owner} automationId={automationId} feed={feed} />
-	) : (
-		<AutomationSetup key={automationId} owner={owner} automationId={automationId} />
-	);
+	if (runSearch && resourcePermissions(owner).readHistory) {
+		return <LegacyRunRedirect owner={owner} automationId={automationId} search={runSearch} />;
+	}
+	return <AutomationSetup key={automationId} owner={owner} automationId={automationId} />;
 }
 
-/** The automation's feed, opened first when it has none, with the run `?nestedChatPage=` names as the page. */
-function AutomationFeed<Owner extends ResourceOwner>({
+function LegacyRunRedirect({
 	owner,
 	automationId,
-	feed,
+	search,
 }: {
-	owner: Owner;
+	owner: ResourceOwner;
 	automationId: string;
-	feed: (owner: Owner, feedId: string) => ReactNode;
+	search: { runChat: string };
 }) {
-	const opened = useOpenAutomationFeed(resourceProjectId(owner), automationId);
-	if (opened.isError) {
-		return (
-			<EmptyState title="Could not open this automation">
-				It may have been removed. Reload this page to try again.
-			</EmptyState>
-		);
-	}
-	if (!opened.data) return null;
-	return feed(owner, opened.data.id);
+	const listed = useProjectChats(resourceProjectId(owner));
+	if (listed.isPending) return null;
+	const feed = listed.data?.automations.find(
+		({ automation }) => automation.id === automationId,
+	)?.chat;
+	if (!feed) return <EmptyState title="Could not open this automation" />;
+	const destination =
+		"bot" in owner
+			? chatLink({ bot: owner.bot, chatId: feed.id }, search)
+			: chatLink({ project: owner.project, chatId: feed.id }, search);
+	return <Navigate {...destination} replace />;
 }
 
 /** A bot's automations, listed as a page. */
@@ -132,32 +129,16 @@ export const automationsIndexRoute = createRoute({
 	component: () => null,
 });
 
-export const automationFeedRoute = createRoute({
+export const automationRoute = createRoute({
 	getParentRoute: () => automationsRoute,
 	path: "/$automation",
 	params: { parse: ({ automation }) => ({ automation: decodeRouteId(automation) }) },
-	validateSearch: validateChatSearch,
-	loader: () => ChatPage.preload(),
-	component: () => {
-		const { automation } = automationFeedRoute.useParams();
-		const search = automationFeedRoute.useSearch();
-		const navigate = automationFeedRoute.useNavigate();
-		return (
-			<AutomationPage
-				owner={useBotRouteOwner()}
-				automationId={automation}
-				nestedChatPage={search.nestedChatPage}
-				feed={(owner, feedId) => (
-					<BotChatScreen
-						bot={owner.bot}
-						chatId={feedId}
-						search={search}
-						navigate={(change) => void navigate(change)}
-					/>
-				)}
-			/>
-		);
-	},
+	component: () => (
+		<AutomationPage
+			owner={useBotRouteOwner()}
+			automationId={automationRoute.useParams().automation}
+		/>
+	),
 });
 
 /** A project's automations, listed as a page, as a bot's are. */
@@ -193,26 +174,10 @@ export const projectAutomationRoute = createRoute({
 	getParentRoute: () => projectAutomationsRoute,
 	path: "/$automation",
 	params: { parse: ({ automation }) => ({ automation: decodeRouteId(automation) }) },
-	validateSearch: validateChatSearch,
-	loader: () => ChatPage.preload(),
-	component: () => {
-		const { automation } = projectAutomationRoute.useParams();
-		const search = projectAutomationRoute.useSearch();
-		const navigate = projectAutomationRoute.useNavigate();
-		return (
-			<AutomationPage
-				owner={useProjectRouteOwner()}
-				automationId={automation}
-				nestedChatPage={search.nestedChatPage}
-				feed={(owner, feedId) => (
-					<ProjectChatScreen
-						projectSlug={owner.project.slug}
-						chatId={feedId}
-						search={search satisfies ChatSearch}
-						navigate={(change) => void navigate(change)}
-					/>
-				)}
-			/>
-		);
-	},
+	component: () => (
+		<AutomationPage
+			owner={useProjectRouteOwner()}
+			automationId={projectAutomationRoute.useParams().automation}
+		/>
+	),
 });

@@ -32,11 +32,6 @@ export const relations = defineRelations(schema, (r) => ({
 			to: r.chatCompaction.chatId,
 		}),
 		bot: r.one.bot({ from: r.placedChat.botId, to: r.bot.id }),
-		// On a chat members open: every chat in it, its own included.
-		rootedChats: r.many.placedChat({
-			from: r.placedChat.id,
-			to: r.placedChat.rootChatId,
-		}),
 	},
 	bot: {
 		// None for a system bot.

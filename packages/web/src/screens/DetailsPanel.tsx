@@ -13,7 +13,6 @@ import { Link } from "@tanstack/react-router";
 import { FileText, Monitor, Pencil, RefreshCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAutomationActions, useAutomations } from "@/lib/automations.ts";
-import { useModelName } from "@/lib/bots.ts";
 import { useChatContext } from "@/lib/chat-query.ts";
 import { useComputerGap } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnectorActions, useConnectors } from "@/lib/connectors.ts";
@@ -32,6 +31,7 @@ import { Toggle } from "@/ui/toggle.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
 import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
+import { ModelName } from "./ModelName.tsx";
 import { ParticipantAvatar } from "./ParticipantAvatar.tsx";
 import { ProjectChatActions, type ProjectChatToChange } from "./ProjectChatMenu.tsx";
 import { Expandable, PanelSection, SidePanel } from "./SidePanel.tsx";
@@ -74,7 +74,6 @@ export function DetailsPanel({
 	onClose: () => void;
 }) {
 	const context = useChatContext(chatId).data;
-	const modelName = useModelName(bot.model ?? null);
 	return (
 		<SidePanel label="Details" onClose={onClose} headerless floating>
 			<div className={DETAILS_SCROLL}>
@@ -90,7 +89,7 @@ export function DetailsPanel({
 					<div className="flex min-w-0 flex-col gap-0.5 leading-snug">
 						<h3 className="m-0 truncate font-semibold text-foreground text-xl">{bot.name}</h3>
 						<p className="m-0 truncate text-sm text-subtle-foreground">
-							{modelName ?? "No model chosen"}
+							{bot.model ? <ModelName modelId={bot.model} /> : "No model chosen"}
 						</p>
 					</div>
 					<div className="flex justify-center gap-7 pt-2">

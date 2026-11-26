@@ -150,7 +150,7 @@ export const FollowsExpandedThinking = meta.story({
 		await waitFor(() => expect(distanceFromLatest(viewport)).toBeLessThan(2));
 		const heightWithThinkingClosed = viewport.scrollHeight;
 
-		await userEvent.click(canvas.getByText("Thinking"));
+		await userEvent.click(canvas.getByRole("button", { name: /^Thought:/ }));
 
 		await expect(canvas.getByText(thinking, { normalizer: (text) => text })).toBeVisible();
 		await waitFor(() => {
@@ -498,7 +498,7 @@ function failingAutomationHandlers() {
 		triggerKind: "routine",
 		state: "failed",
 		error: "Gmail refused the connection: the token has expired.",
-		report: null,
+		reply: null,
 		createdAt: at,
 	});
 	return [
@@ -554,6 +554,29 @@ export const FailingAutomation = meta.story({
 		).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "Details" }));
 		await expect(canvas.getByRole("switch", { name: "Automation on" })).not.toBeChecked();
+	},
+});
+
+/**
+ * A failed run opened from its notification: the automation's feed, scrolled
+ * to that run and pointed out, with the composer at its foot as in any chat.
+ */
+export const RunOpenedFromNotification = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...failingAutomationHandlers());
+	},
+	render: () => (
+		<StoryApp
+			path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/chats/${failingAutomation.feed}?runChat=${failingAutomation.runs[0]}`}
+		/>
+	),
+	play: async ({ canvas }) => {
+		const log = await canvas.findByRole("log", { name: "Chat messages" });
+		const [opened] = await within(log).findAllByRole("article", { name: /: Failed$/ });
+		await waitFor(() => expect(opened).toHaveFocus());
+		await expect(
+			canvas.getByLabelText(`Message ${growthDesk.name} about this automation`),
+		).toBeVisible();
 	},
 });
 
@@ -655,7 +678,8 @@ export const ChatStatuses = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}/files`} />,
 	play: async ({ canvas }) => {
 		const list = await canvas.findByRole("region", { name: "Chats" });
-		await expect(await within(list).findByText("Working 20m")).toBeVisible();
+		// Working counts in seconds, in the corner where the time was.
+		await expect(await within(list).findByText(/^Working 20m \d+s$/)).toBeVisible();
 		await expect(within(list).getByText("Waiting 2m")).toBeVisible();
 		await expect(
 			within(within(list).getByRole("link", { name: /^Weekly revenue report/ })).getByText(

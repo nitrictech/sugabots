@@ -203,8 +203,8 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * Open chat: the chat a request was asked in, or, for one an automation's run
- * asked, that run as the page of its automation's feed. A project's chat
- * links once `project` is known; a request outside any chat has none.
+ * asked, its automation's feed at that run. A project's chat links once
+ * `project` is known; a request outside any chat has none.
  */
 export function RequestChatLink({
 	request,
@@ -222,7 +222,7 @@ export function RequestChatLink({
 		<ChatLink
 			project={project ?? null}
 			chatId={request.rootChatId}
-			search={request.chatId === request.rootChatId ? {} : { nestedChatPage: request.chatId }}
+			search={request.chatId === request.rootChatId ? {} : { runChat: request.chatId }}
 			className={className}
 		>
 			Open chat

@@ -15,6 +15,7 @@ import {
 	placeBot,
 	useChatMessages,
 	useMarkReadWhileSeen,
+	useMarkRunReadWhileSeen,
 	useOptimisticChatItems,
 } from "@/lib/chats.ts";
 import { useComposerAttachments } from "@/lib/composer-attachments.ts";
@@ -34,14 +35,13 @@ import { ChatNotices } from "./ChatNotices.tsx";
 import { ChatTimeline } from "./ChatTimeline.tsx";
 import { chatItemRevision, mergeChatItems, messagesIn, sendingIds } from "./chat-items.ts";
 import { leadOf } from "./chat-location.ts";
-import { useChatLogPosition } from "./chat-log-position.ts";
+import { type ChatLogPoint, useChatLogPosition } from "./chat-log-position.ts";
 import { choosesBotsIn, draftAudience, useChatRecipients } from "./chat-recipients.ts";
 import { useChatResolved } from "./chat-resolved.ts";
 import { FileDropTarget } from "./FileDropTarget.tsx";
 import { useListedProjectChat } from "./listed-project-chat.ts";
 import { mentionableIn } from "./mentions.tsx";
 import { useMessageSending } from "./message-sending.ts";
-import { useRunOpening } from "./run-opening.ts";
 import type { Staged, StagedChange } from "./staged.ts";
 
 /** The narrowest the chat may be dragged beside what is staged large. */
@@ -55,7 +55,7 @@ export function ChatPane({
 	chatLocation,
 	chatId,
 	signedIn,
-	focusMessageId,
+	focus,
 	place,
 	staged,
 	onStagedChange,
@@ -65,8 +65,8 @@ export function ChatPane({
 	/** The chat shown. */
 	chatId: string;
 	signedIn: CurrentUser;
-	/** A message to jump to and point out, such as the mention it was opened from. */
-	focusMessageId?: string;
+	/** What to jump to and point out, such as the mention or the run it was opened at. */
+	focus?: ChatLogPoint;
 	place: ChatPlace;
 	/** Open large beside the chat, in place of any sidebar. */
 	staged?: Staged;
@@ -105,18 +105,19 @@ export function ChatPane({
 	const items = mergeChatItems(messages.items, optimistic, details?.messages ?? []);
 	const shownMessages = messagesIn(items);
 
-	const openRun = useRunOpening({
-		items,
-		owner: chatLocation,
-		feedOfAutomationId: details?.automation?.id,
-	});
 	const position = useChatLogPosition({
 		messages,
 		latestItemRevision: chatItemRevision(items.at(-1)),
-		shownMessageIds: shownMessages.map((message) => message.id),
-		focusMessageId,
+		items,
+		focus,
+		logReady: details !== undefined && (!bot || host !== undefined),
 	});
 	useMarkReadWhileSeen(chatId, items.at(-1), position.latestInView);
+	// A run jumped to is in view, and read, though the rest of its feed may not be.
+	useMarkRunReadWhileSeen(
+		position.reached?.kind === "run" ? position.reached.runChatId : undefined,
+		position.isReachedInView,
+	);
 	const recipients = useChatRecipients({
 		memberId: signedIn.id,
 		chatId,
@@ -276,6 +277,7 @@ export function ChatPane({
 							items={items}
 							details={details}
 							host={host}
+							lead={leadOf(chatLocation, details)}
 							chatId={chatId}
 							signedIn={signedIn}
 							mentionable={mentionable}
@@ -283,15 +285,16 @@ export function ChatPane({
 							viewerWriting={draft.trim() !== ""}
 							pointedOut={position.pointedOut}
 							previews={!staged}
-							onOpenRun={openRun}
 							onOpenFile={openFile}
 							onOpenDesktop={openDesktop}
 							onReply={replyTo}
 							onJumpToMessage={position.jumpTo}
 						/>
-						{position.notFound && (
+						{position.missingPoint && (
 							<p role="status" className="m-0 px-5 py-2 text-center text-muted-foreground text-xs">
-								Could not find the message you opened in this chat.
+								{position.missingPoint.kind === "run"
+									? "Could not find this run in the feed."
+									: "Could not find the message you opened in this chat."}
 							</p>
 						)}
 						<ChatNotices notices={notices} />

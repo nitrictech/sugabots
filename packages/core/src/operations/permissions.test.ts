@@ -672,10 +672,6 @@ const rows: {
 		input: async (fixture) => ({ ...(await freshChat(fixture)), limit: 10 }),
 		outcomes: readsJ,
 	},
-	"chats.history": {
-		input: async (fixture) => ({ ...(await freshChat(fixture)), limit: 10 }),
-		outcomes: readsJ,
-	},
 	"chats.get": {
 		input: async (fixture) => ({ ...(await freshChat(fixture)), limit: 10 }),
 		outcomes: readsJ,

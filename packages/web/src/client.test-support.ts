@@ -129,7 +129,6 @@ export const client = {
 			setResolved: vi.fn(),
 			interruptTurn: vi.fn(),
 			messages: vi.fn(),
-			history: vi.fn(),
 			send: vi.fn(),
 			removeFile: vi.fn(),
 			get: vi.fn(),

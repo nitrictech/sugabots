@@ -528,7 +528,6 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	);
 	client.api.chats.startInterview.mockReturnValue(Effect.succeed(null));
 	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
-	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.chats.get.mockImplementation(({ params }: { params: { chatId: string } }) => {
 		const bot = reachable.find((one) => chatWith(one).id === params.chatId);
 		return bot

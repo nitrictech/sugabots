@@ -29,6 +29,7 @@ import { useBotRouteOwner } from "./owner.ts";
 import {
 	type ChatSearch,
 	decodeRouteId,
+	redirectRunPageAddress,
 	validateChatSearch,
 	validateFileSearch,
 } from "./search.ts";
@@ -152,6 +153,7 @@ export const chatRoute = createRoute({
 	path: "/chats/$chat",
 	params: { parse: ({ chat }) => ({ chat: decodeRouteId(chat) }) },
 	validateSearch: (search: Record<string, unknown>) => validateChatSearch(search),
+	beforeLoad: redirectRunPageAddress,
 	preloadStaleTime: 0,
 	loader: ({ context, params }) => {
 		prefetchChat(context.queries, params.chat);
@@ -174,7 +176,7 @@ export const chatRoute = createRoute({
 });
 
 /** One of the bot `bot`'s chats or automations' feeds at its own address; see `RoutedChat`. */
-export function BotChatScreen({
+function BotChatScreen({
 	bot,
 	chatId,
 	search,
@@ -232,6 +234,7 @@ export const chatByIdRoute = createRoute({
 	path: "/chats/$chat",
 	params: { parse: ({ chat }) => ({ chat: decodeRouteId(chat) }) },
 	validateSearch: (search: Record<string, unknown>) => validateChatSearch(search),
+	beforeLoad: redirectRunPageAddress,
 	component: () => {
 		const { chat } = chatByIdRoute.useParams();
 		const search = useSearch({ strict: false }) as ChatSearch;

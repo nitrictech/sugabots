@@ -9,7 +9,6 @@ import { Schema, Stream } from "effect";
 import {
 	attentionCountsSchema,
 	attentionMarksSchema,
-	chatHistoryPageSchema,
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
 	projectChatListSchema,
@@ -288,16 +287,6 @@ export const chatReadsContracts = {
 		errors: [...reachRefusals, InvalidCursor],
 		changes: false,
 		http: { kind: "offered", method: "GET", path: "/chats/:chatId/messages" },
-		botLoop: readInTurn,
-	}),
-	"chats.history": OperationContract.make("chats.history", {
-		description:
-			"A page of the automation runs listed in a chat, newest activity first, before the cursor given.",
-		input: Schema.Struct({ chatId: uuidOrStringSchema, ...chatPageQuerySchema.fields }),
-		output: chatHistoryPageSchema,
-		errors: [...reachRefusals, InvalidCursor],
-		changes: false,
-		http: { kind: "offered", method: "GET", path: "/chats/:chatId/history" },
 		botLoop: readInTurn,
 	}),
 	"chats.file": OperationContract.make("chats.file", {

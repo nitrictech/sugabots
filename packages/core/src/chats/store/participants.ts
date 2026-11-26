@@ -243,6 +243,19 @@ export const messageRelations = {
 	reactions: reactionColumns,
 } as const;
 
+/**
+ * A reply's turn, as `messageFromRelations` reads it. A failed reply's reason,
+ * and when it ended, live on its turn; so does which execution wrote it: a
+ * reply being written by its checkpoint's, an ended one by the turn's last.
+ */
+export const replyTurnRelation = {
+	columns: { error: true, finishedAt: true, executionNumber: true },
+	extras: {
+		execution: (row: { checkpoint: SQLWrapper }) =>
+			sql<number | null>`(${row.checkpoint} ->> 'execution')::int`,
+	},
+} as const;
+
 /** Who a member is, as read with {@link memberColumns}. */
 export type MemberIdentity = { id: string; name: string; email: string; image: string | null };
 type BotIdentity = Pick<schema.BotRow, "id" | "name" | "handle" | "color" | "eyes" | "shape">;

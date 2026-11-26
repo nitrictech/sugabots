@@ -27,13 +27,6 @@ import { type MarkedConnector, useMarkedConnectors } from "@/lib/connectors.ts";
 import { formatClockTime, formatDay, formatFullTimestamp } from "@/lib/list-time.ts";
 import { BROWSER_TOOL_PREFIX, splitToolKey } from "@/lib/tool-names.ts";
 import { BotAvatar, WatchingAvatar } from "@/shell/Bot.tsx";
-import {
-	ActivityCollapsible,
-	ActivityCollapsibleContent,
-	ActivityCollapsibleTrigger,
-	ActivityLine,
-	ActivityTitle,
-} from "@/ui/activity.tsx";
 import { MemberAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -51,7 +44,6 @@ import {
 } from "./chat-layout.ts";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { FileCards } from "./FileCards.tsx";
-import { InterruptTurnButton } from "./InterruptTurnButton.tsx";
 import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
 import { MessageMarkdown, writerOf } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
@@ -98,6 +90,7 @@ export function ChatMessages({
 	authorLinkOf,
 	onReply,
 	sideLinesOf,
+	workOf,
 	onJumpToMessage,
 	reacting,
 	fileUrlOf,
@@ -167,6 +160,11 @@ export function ChatMessages({
 	onReply?: (message: Message) => void;
 	/** The lines of the chats a bot's message started, drawn under it. */
 	sideLinesOf?: (message: Message) => ReactNode;
+	/**
+	 * The reply whose work shows over a message, where it isn't the message's
+	 * own: a run's result shows its run's. By default, each message's own.
+	 */
+	workOf?: (message: Message) => Message | undefined;
 	/** Goes to the message a reply quotes, from its quote. Without it, the quote is only read. */
 	onJumpToMessage?: (messageId: string) => void;
 	/**
@@ -252,6 +250,7 @@ export function ChatMessages({
 							authorLinkOf={authorLinkOf}
 							onReply={onReply}
 							sideLines={sideLinesOf?.(message)}
+							work={workOf?.(message)}
 							onJumpToMessage={onJumpToMessage}
 							reacting={reacting}
 							fileUrlOf={fileUrlOf}
@@ -261,14 +260,6 @@ export function ChatMessages({
 						/>
 						{typing && message.author.kind === "bot" && isTyping(message) && (
 							<TypingIndicator key={`${message.id}-typing`} typers={[message.author]} />
-						)}
-						{message.status === "writing" && message.author.kind === "bot" && (
-							<InterruptTurnFor
-								chatId={message.chatId}
-								replyId={message.id}
-								botName={message.author.name}
-								permissions={approvalPermissions}
-							/>
 						)}
 					</Fragment>
 				);
@@ -381,6 +372,7 @@ function ChatMessage({
 	authorLinkOf,
 	onReply,
 	sideLines,
+	work,
 	onJumpToMessage,
 	reacting,
 	fileUrlOf,
@@ -421,6 +413,8 @@ function ChatMessage({
 	authorLinkOf?: (author: PagedAuthor) => AuthorLink | undefined;
 	onReply?: (message: Message) => void;
 	sideLines?: ReactNode;
+	/** The reply whose work shows over it, where it isn't its own, as a run's result shows its run's. */
+	work?: Message;
 	onJumpToMessage?: (messageId: string) => void;
 	reacting?: Reacting;
 	/** Where a file attached to it is served. */
@@ -541,6 +535,8 @@ function ChatMessage({
 			aria-label={`${author.name}, ${messageStatus(message, { queued })}`}
 			aria-busy={message.status === "writing"}
 			data-message-id={message.id}
+			// A run's result is where its feed is opened at the run.
+			data-run-chat-id={message.automationResultOf?.chatId}
 			className={cn(
 				"group/message relative flex flex-col px-5 pb-0.5 transition-colors duration-700 motion-reduce:animate-none",
 				side === "mine" && "items-end",
@@ -579,28 +575,12 @@ function ChatMessage({
 					<div className="flex min-w-0 flex-col items-start gap-1.5">
 						{quote}
 						<WorkedFor
-							message={message}
+							message={work ?? message}
 							markedConnectors={markedConnectors}
 							fileNames={fileNames}
 							className="mb-1.5"
 						/>
 						{parts}
-						{message.thinking && message.thinking.length > 0 && (
-							<ActivityCollapsible>
-								<ActivityCollapsibleTrigger>
-									<ActivityLine>
-										<ActivityTitle>Thinking</ActivityTitle>
-									</ActivityLine>
-								</ActivityCollapsibleTrigger>
-								<ActivityCollapsibleContent className="space-y-2 text-sm">
-									{message.thinking.map(({ step, text }) => (
-										<p key={step} className="whitespace-pre-wrap">
-											{text}
-										</p>
-									))}
-								</ActivityCollapsibleContent>
-							</ActivityCollapsible>
-						)}
 						{fileList}
 						{previews &&
 							onOpenDesktop &&
@@ -957,21 +937,4 @@ function speakersIn(messages: readonly Message[]): string[] {
 			messages.flatMap((message) => (message.author.kind === "bot" ? [message.author.id] : [])),
 		),
 	];
-}
-
-/** The interrupt control under the reply `replyId` being written, when the member may interrupt its turn. */
-function InterruptTurnFor({
-	chatId,
-	replyId,
-	botName,
-	permissions,
-}: {
-	chatId: string;
-	replyId: string;
-	botName: string;
-	permissions: ApprovalPermissions | undefined;
-}) {
-	const interruptible = permissions?.interruptTurns.find((turn) => turn.replyId === replyId);
-	if (!interruptible) return null;
-	return <InterruptTurnButton chatId={chatId} turnId={interruptible.turnId} botName={botName} />;
 }

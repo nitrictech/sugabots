@@ -19,6 +19,7 @@ import { BotsWithoutModelNotice, useRequiredRepliers } from "./BotsWithoutModelN
 import { ChatComposer } from "./ChatComposer.tsx";
 import { backToOwner, PlainChatHeader } from "./ChatHeader.tsx";
 import { draftAudience } from "./chat-recipients.ts";
+import { ModelName } from "./ModelName.tsx";
 import { composerMentionable } from "./mentions.tsx";
 
 /**
@@ -54,7 +55,7 @@ export function NewChatPage({ owner }: { owner: ResourceOwner }) {
 			)
 		: [];
 	// The first message is a chat's like any other, so the floor's rule says who must reply to it.
-	const { withoutModel, modelName } = useRequiredRepliers(
+	const { withoutModel, model } = useRequiredRepliers(
 		draftAudience({
 			draft,
 			chatKind: "project_chat",
@@ -105,7 +106,7 @@ export function NewChatPage({ owner }: { owner: ResourceOwner }) {
 							label={`Message ${name}`}
 							placeholder={`Ask ${bot.name} to…`}
 							tall
-							model={modelName}
+							model={model && <ModelName modelId={model} />}
 							value={draft}
 							onValueChange={setDraft}
 							onSubmit={submit}

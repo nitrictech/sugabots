@@ -1,6 +1,6 @@
 import type { Message, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Wrench } from "lucide-react";
+import { Brain, Wrench } from "lucide-react";
 import { useId, useState } from "react";
 import type { MarkedConnector } from "@/lib/connectors.ts";
 import { useNow } from "@/lib/now.ts";
@@ -54,8 +54,9 @@ function DetailBlock({
 /**
  * How long a bot worked on a reply, as one line over it: "Working for 12s",
  * counting, while it does, and "Worked for 4m 1s" once it is done. Opening it
- * lists what the bot did on the way: what it said it was doing, then a line
- * for each tool source it used, which opens to its calls, each of which opens to what
+ * lists what the bot did on the way, step by step: what it thought, which
+ * opens to the whole thought; what it said it was doing; then a line for each
+ * tool source it used, which opens to its calls, each of which opens to what
  * came back. Every level sits flush with the one above.
  */
 export function WorkedFor({
@@ -78,10 +79,30 @@ export function WorkedFor({
 	const now = useNow(SECOND_MS, working);
 	const runs = toolStepRuns(message.parts);
 	const calls = runs.flatMap((run) => run.calls);
+	const thoughts = (message.thinking ?? []).toSorted((a, b) => a.step - b.step);
 	const label = waiting
 		? "Waiting for approval"
 		: workedForText(message, now, calls, markedConnectors);
-	if (!label) return null;
+	const thoughtFor = (step: number) =>
+		thoughts
+			.filter((thought) => thought.step === step)
+			.map((thought) => <Thought key={`thought@${thought.step}`} text={thought.text} />);
+	// With no time or calls to tell, there is nothing to open: its thoughts stand on their own.
+	if (!label) {
+		if (thoughts.length === 0) return null;
+		return (
+			<Activity className={cn("border-border border-b pb-2.5", className)}>
+				{thoughts.map((thought) => (
+					<Thought key={`thought@${thought.step}`} text={thought.text} />
+				))}
+			</Activity>
+		);
+	}
+	// A step's thought comes before the calls it made; a step that made none, as the last
+	// usually doesn't, thought after them all.
+	const laterThoughts = thoughts
+		.filter((thought) => thought.step >= runs.length)
+		.map((thought) => <Thought key={`thought@${thought.step}`} text={thought.text} />);
 	const line = (
 		<ActivityLine status={working ? "running" : undefined}>
 			<ActivityTitle className="tabular-nums">{label}</ActivityTitle>
@@ -89,7 +110,7 @@ export function WorkedFor({
 	);
 	return (
 		<Activity className={cn("border-border border-b pb-2.5", className)}>
-			{calls.length === 0 ? (
+			{calls.length === 0 && thoughts.length === 0 ? (
 				line
 			) : (
 				<ActivityCollapsible open={toggled ?? working} onOpenChange={setToggled}>
@@ -99,6 +120,7 @@ export function WorkedFor({
 							{runs.flatMap((run, index) => {
 								const sections = byToolSource(run.calls);
 								return [
+									...thoughtFor(index),
 									run.narration && (
 										<p
 											key={`narration@${run.calls[0]?.id}`}
@@ -120,11 +142,46 @@ export function WorkedFor({
 									)),
 								];
 							})}
+							{laterThoughts}
 						</Activity>
 					</ActivityCollapsibleContent>
 				</ActivityCollapsible>
 			)}
 		</Activity>
+	);
+}
+
+/**
+ * One step's thought, in a reply's work: shut, a brain and its first line,
+ * cut short; opened, "Thought" over the whole of it.
+ */
+function Thought({ text }: { text: string }) {
+	const [open, setOpen] = useState(false);
+	const firstLine = text.trim().split("\n", 1)[0];
+	return (
+		<ActivityCollapsible open={open} onOpenChange={setOpen}>
+			<ActivityCollapsibleTrigger>
+				<ActivityLine>
+					<ActivityIcon>
+						<Brain />
+					</ActivityIcon>
+					<ActivityTitle>
+						{open ? (
+							"Thought"
+						) : (
+							<>
+								{/* Read as what it is, not only as its first words. */}
+								<span className="sr-only">Thought: </span>
+								{firstLine}
+							</>
+						)}
+					</ActivityTitle>
+				</ActivityLine>
+			</ActivityCollapsibleTrigger>
+			<ActivityCollapsibleContent className={cn(FLUSH, "text-body-foreground text-sm")}>
+				<p className="m-0 whitespace-pre-wrap">{text}</p>
+			</ActivityCollapsibleContent>
+		</ActivityCollapsible>
 	);
 }
 

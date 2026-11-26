@@ -4,7 +4,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { type ComponentProps, type ReactElement, useCallback } from "react";
 import { useBot } from "@/lib/bots.ts";
 import {
-	botAutomationFeedLink,
+	botAutomationLink,
 	botAutomationsLink,
 	botComputerLink,
 	botConnectorLink,
@@ -16,7 +16,7 @@ import {
 	botNewChatLink,
 	botSettingsLink,
 	chatLink,
-	projectAutomationFeedLink,
+	projectAutomationLink,
 	projectAutomationsLink,
 	projectComputerLink,
 	projectConnectorLink,
@@ -68,14 +68,15 @@ export type OwnerPage =
 	/** On a phone, the bot's or project's chats and pages; wider, a bot's new chat or a project's newest. */
 	| { page: "home" }
 	| { page: "newChat" }
-	| { page: "chat"; chatId: string }
+	/** A chat, with `runChat`, one of the runs its automation's feed lists, in view. */
+	| { page: "chat"; chatId: string; runChat?: string }
 	| { page: "files" }
 	/** One file, at `version` when one is given, else its current one. */
 	| { page: "file"; fileId: string; version?: number }
 	| { page: "automations" }
 	| { page: "newAutomation" }
-	/** An automation's own page, or with `nestedChatPage` one of its runs. */
-	| { page: "automation"; automationId: string; nestedChatPage?: string }
+	/** An automation's own page, where it is set up. */
+	| { page: "automation"; automationId: string }
 	| { page: "connectors" }
 	| { page: "connector"; connectorId: string }
 	| { page: "computer" }
@@ -107,7 +108,7 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 			case "newChat":
 				return botNewChatLink(bot);
 			case "chat":
-				return chatLink({ bot, chatId: to.chatId });
+				return chatLink({ bot, chatId: to.chatId }, runChatSearch(to.runChat));
 			case "files":
 				return botFilesLink(bot);
 			case "file":
@@ -117,7 +118,7 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 			case "newAutomation":
 				return botNewAutomationLink(bot);
 			case "automation":
-				return botAutomationFeedLink(bot, to.automationId, nestedChatPageSearch(to.nestedChatPage));
+				return botAutomationLink(bot, to.automationId);
 			case "connectors":
 				return botConnectorsLink(bot);
 			case "connector":
@@ -135,7 +136,7 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 		case "newChat":
 			return projectNewChatLink(project);
 		case "chat":
-			return chatLink({ project, chatId: to.chatId });
+			return chatLink({ project, chatId: to.chatId }, runChatSearch(to.runChat));
 		case "files":
 			return projectFilesLink(project);
 		case "file":
@@ -145,11 +146,7 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 		case "newAutomation":
 			return projectNewAutomationLink(project);
 		case "automation":
-			return projectAutomationFeedLink(
-				project,
-				to.automationId,
-				nestedChatPageSearch(to.nestedChatPage),
-			);
+			return projectAutomationLink(project, to.automationId);
 		case "connectors":
 			return projectConnectorsLink(project);
 		case "connector":
@@ -166,9 +163,9 @@ export function ownerLink(owner: ResourceOwner, to: OwnerPage): ReactElement {
 	return <Link {...ownerLinkOptions(owner, to)} />;
 }
 
-/** A run named in an automation's address, or nothing, so a link with none adds no `?nestedChatPage=`. */
-function nestedChatPageSearch(nestedChatPage: string | undefined): { nestedChatPage?: string } {
-	return nestedChatPage === undefined ? {} : { nestedChatPage };
+/** A run named in its feed's address, or nothing, so a link with none adds no `?runChat=`. */
+function runChatSearch(runChat: string | undefined): { runChat?: string } {
+	return runChat === undefined ? {} : { runChat };
 }
 
 /** A file's version named in its address, or nothing, so a link to its current one adds no `?version=`. */

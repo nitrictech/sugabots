@@ -26,8 +26,9 @@ import {
 import { useSession } from "@/lib/session.ts";
 import { useHideSidebar } from "@/lib/sidebar-hidden.tsx";
 import { outcomeOf, RunStatus } from "@/screens/AutomationRun.tsx";
+import { AutomationTriggerIcon } from "@/screens/AutomationTriggerIcon.tsx";
 import { ParticipantFaces } from "@/screens/ParticipantFaces.tsx";
-import { AutomationTriggerIcon } from "@/screens/RunRow.tsx";
+import { formatElapsed } from "@/screens/tool-activity.ts";
 import { AttentionDot } from "@/ui/attention-dot.tsx";
 import { Button } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -67,8 +68,8 @@ export function OwnerWork({
 }) {
 	const memberId = useSession().member?.id;
 	const searching = search.trim() !== "";
-	// A run open as a page of its automation's, marked in the list.
-	const openRun = useSearch({ strict: false, select: (params) => params.nestedChatPage });
+	// The run its feed is open at, marked in the list.
+	const runInView = useSearch({ strict: false, select: (params) => params.runChat });
 	const { chats, runs } = work;
 	const needsYou = chats.filter((row) => needsViewer(row) && chatMatches(row, search));
 	const open = chats
@@ -138,7 +139,11 @@ export function OwnerWork({
 					>
 						{(run) => (
 							<li key={run.id}>
-								<RunEntry run={run} owner={owner} selected={run.chatId === openRun} />
+								<RunEntry
+									run={run}
+									owner={owner}
+									selected={run.rootChatId === selectedChatId && run.chatId === runInView}
+								/>
 							</li>
 						)}
 					</WorkSection>
@@ -350,6 +355,9 @@ function ChatEntry({
 			: members.map((member) => (member.id === memberId ? "You" : member.name)).join(", ");
 	const unread = row.unreadMessages > 0;
 	const movedAt = new Date(lastMovedAt(row));
+	// Working, it says so where the time is; waiting and replied go under the title.
+	const working = row.status?.kind === "working" ? row.status : undefined;
+	const statusBelow = working ? undefined : row.status;
 	return (
 		// The row is its link; Resolve sits over the link's corner, as a button can't be inside a link.
 		<div className="group/chat relative">
@@ -375,19 +383,30 @@ function ChatEntry({
 				<span className="order-1 flex h-5 min-w-0 items-center justify-between gap-2">
 					<MessageCount count={row.messageCount} />
 					{/* Its place goes to Resolve while the row is pointed at, so it is held as wide as Resolve. */}
-					<time
-						dateTime={movedAt.toISOString()}
-						className={cn(
-							"flex h-5 min-w-17 shrink-0 items-center justify-end text-subtle-foreground text-xs tabular-nums",
-							mayResolve && HIDE_TIME_WHEN_ACTION_VISIBLE,
-						)}
-					>
-						{formatListTime(movedAt, new Date())}
-					</time>
+					{working ? (
+						<span
+							className={cn(
+								"flex h-5 min-w-17 shrink-0 items-center justify-end",
+								mayResolve && HIDE_TIME_WHEN_ACTION_VISIBLE,
+							)}
+						>
+							<ChatStatusLabel status={working} />
+						</span>
+					) : (
+						<time
+							dateTime={movedAt.toISOString()}
+							className={cn(
+								"flex h-5 min-w-17 shrink-0 items-center justify-end text-subtle-foreground text-xs tabular-nums",
+								mayResolve && HIDE_TIME_WHEN_ACTION_VISIBLE,
+							)}
+						>
+							{formatListTime(movedAt, new Date())}
+						</time>
+					)}
 				</span>
 				{/* Who is talking, by their names, for whoever can't see the faces. */}
 				<span className="sr-only">{talking}</span>
-				{(row.status || members.length > 0) && (
+				{(statusBelow || members.length > 0) && (
 					<span className="order-3 flex h-4 min-w-0 items-center justify-between gap-1.5">
 						{members.length > 0 && (
 							<span aria-hidden className="flex shrink-0">
@@ -399,9 +418,9 @@ function ChatEntry({
 								/>
 							</span>
 						)}
-						{row.status && (
+						{statusBelow && (
 							<span className="ml-auto flex min-w-0">
-								<ChatStatusLabel status={row.status} />
+								<ChatStatusLabel status={statusBelow} />
 							</span>
 						)}
 					</span>
@@ -508,7 +527,7 @@ function ResolvedEntry({
 
 /**
  * One run of the automations: how it went and when, and its automation's
- * name. It opens as a page of its automation's.
+ * name. It opens its automation's feed at the run.
  */
 function RunEntry({ run, owner, selected }: { run: Run; owner: ResourceOwner; selected: boolean }) {
 	const hideSidebar = useHideSidebar();
@@ -516,7 +535,7 @@ function RunEntry({ run, owner, selected }: { run: Run; owner: ResourceOwner; se
 	return (
 		<OwnerLink
 			owner={owner}
-			to={{ page: "automation", automationId: run.automationId, nestedChatPage: run.chatId }}
+			to={{ page: "chat", chatId: run.rootChatId, runChat: run.chatId }}
 			aria-current={selected ? "page" : undefined}
 			onDoubleClick={hideSidebar}
 			className={cn(
@@ -555,10 +574,10 @@ function chatMatches(row: ListedChat, search: string): boolean {
 }
 
 /**
- * What a chat's bots are doing, as its row says it: "Working 20m" with a
- * spinner while a turn works on a reply, "Waiting 2m" with a clock while one
- * waits on an approval, each counting up a minute at a time; or a green
- * Replied once a bot finished a reply the viewer has not read.
+ * What a chat's bots are doing, as its row says it: "Working 12s" with a
+ * spinner while a turn works on a reply, counting up each second; "Waiting
+ * 2m" with a clock while one waits on an approval, counting up each minute;
+ * or a green Replied once a bot finished a reply the viewer has not read.
  */
 function ChatStatusLabel({ status }: { status: ChatStatus }) {
 	const label = "flex min-w-0 items-center gap-1 text-xs tabular-nums";
@@ -568,7 +587,7 @@ function ChatStatusLabel({ status }: { status: ChatStatus }) {
 				<span className={cn(label, "text-working")}>
 					<LoaderCircle aria-hidden className="size-3 shrink-0 motion-safe:animate-spin" />
 					<span className="truncate">
-						Working <Elapsed since={status.since} />
+						Working <Elapsed since={status.since} inSeconds />
 					</span>
 				</span>
 			);
@@ -591,11 +610,17 @@ function ChatStatusLabel({ status }: { status: ChatStatus }) {
 	}
 }
 
-/** How long since `since`, an ISO time, as "20m", counting up while shown. */
-function Elapsed({ since }: { since: string }) {
-	const now = useNow(MINUTE_MS);
-	return <>{formatElapsedMinutes(now - Date.parse(since))}</>;
+/**
+ * How long since `since`, an ISO time, counting up while shown: as "20m", or
+ * `inSeconds` as "12s", then "1m 5s".
+ */
+function Elapsed({ since, inSeconds = false }: { since: string; inSeconds?: boolean }) {
+	const now = useNow(inSeconds ? SECOND_MS : MINUTE_MS);
+	const elapsedMs = now - Date.parse(since);
+	return <>{inSeconds ? formatElapsed(elapsedMs) : formatElapsedMinutes(elapsedMs)}</>;
 }
+
+const SECOND_MS = 1_000;
 
 const MINUTE_MS = 60_000;
 

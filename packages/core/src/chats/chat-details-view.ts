@@ -40,6 +40,7 @@ import {
 	memberJson,
 	messageFromRelations,
 	messageRelations,
+	replyTurnRelation,
 	toMember,
 	toParticipant,
 } from "./store/participants.ts";
@@ -214,18 +215,7 @@ const loadChat = Effect.fn("ChatDetailsView.loadChat")(function* (
 						RAW: (row) => earlierThan(row.createdAt, row.id, before),
 					},
 				}),
-				with: {
-					...messageRelations,
-					// A failed reply's reason, and when it ended, live on its turn; so
-					// does which execution wrote it: a reply being written by its
-					// checkpoint's, an ended one by the turn's last.
-					turn: {
-						columns: { error: true, finishedAt: true, executionNumber: true },
-						extras: {
-							execution: (row) => sql<number | null>`(${row.checkpoint} ->> 'execution')::int`,
-						},
-					},
-				},
+				with: { ...messageRelations, turn: replyTurnRelation },
 			},
 		},
 	});

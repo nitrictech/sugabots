@@ -290,7 +290,6 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect((await chats.messages(started.chat.id))?.items.map((item) => item.kind)).toEqual([
 			"message",
 		]);
-		expect((await chats.history(started.chat.id))?.items).toHaveLength(0);
 		const listed = await chats.chats(botProjectId);
 		expect(listed.chats).toEqual([
 			{
@@ -1626,25 +1625,6 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(secondPage?.nextCursor).toBeNull();
 	});
 
-	it("reports each run the chat lists with its own status and automation", async () => {
-		const automation = await createAutomation("Overnight review", "Review overnight changes.");
-		const accepted = await automation.run();
-		const current = await automation.openFeed();
-		const items = (await chats.history(current.id))?.items ?? [];
-		const entry = (chatId: string) => items.find((item) => item.chatId === chatId);
-		expect(items).toHaveLength(1);
-		expect(entry(accepted.chatId)).toMatchObject({
-			kind: "run",
-			status: "queued",
-			automationRun: {
-				runId: accepted.runId,
-				automationId: automation.automationId,
-				automationName: "Overnight review",
-				triggerKind: "manual",
-			},
-		});
-	});
-
 	describe("the approvals and mentions waiting for a member across a workspace", () => {
 		/** The run completes, posting `content` as its result in the automation's feed. */
 		const runPosts = async (run: { runId: string; chatId: string }, content: string) => {
@@ -1802,26 +1782,58 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect(await unreadForYou()).toBe(1);
 		});
 
-		it("shows what an automation run said in the automation's feed", async () => {
+		it("shows each run in its automation's feed with its own bot's reply, not a helper's, over its result once posted", async () => {
 			const created = await automations.create(
 				{ projectId: botProjectId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
-			const accepted = await runByHand({
-				projectId: botProjectId,
-				automationId: created.automation.id,
-				requestId: crypto.randomUUID(),
-			});
-			await botWrites(accepted.chatId, "Two PRs merged.\nThe release branch is green.", 1);
+			const runAutomation = () =>
+				runByHand({
+					projectId: botProjectId,
+					automationId: created.automation.id,
+					requestId: crypto.randomUUID(),
+				});
+			const unposted = await runAutomation();
+			const posted = await runAutomation();
+			await botWrites(unposted.chatId, "Two PRs merged.\nThe release branch is green.", 1);
+			// A helper the run's bot asked answers in the run's chat after it.
+			await onDatabase((db) =>
+				db.insert(message).values({
+					chatId: unposted.chatId,
+					authorBotId: recipientBotId,
+					status: "complete",
+					parts: [{ type: "text", text: "Billing is unchanged." }],
+					content: "Billing is unchanged.",
+					createdAt: new Date(Date.now() + 2_000),
+				}),
+			);
+			await botWrites(posted.chatId, "Posted the summary.", 1);
+			await runPosts(posted, "All green overnight.");
 			const feed = (await chats.chats(botProjectId)).automations[0]?.chat;
 
-			expect((await chats.messages(feed?.id ?? ""))?.items).toEqual([
-				expect.objectContaining({
-					kind: "run",
-					chatId: accepted.chatId,
-					report: "Two PRs merged.\nThe release branch is green.",
-				}),
-			]);
+			// The result's time is the database's, so the two may come in either order.
+			const items = (await chats.messages(feed?.id ?? ""))?.items;
+			expect(items).toHaveLength(2);
+			expect(items).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						kind: "run",
+						chatId: unposted.chatId,
+						reply: expect.objectContaining({
+							chatId: unposted.chatId,
+							content: "Two PRs merged.\nThe release branch is green.",
+						}),
+					}),
+					{
+						kind: "message",
+						message: expect.objectContaining({ content: "All green overnight." }),
+						runReply: expect.objectContaining({
+							chatId: posted.chatId,
+							content: "Posted the summary.",
+						}),
+					},
+				]),
+			);
 		});
 
 		it("makes a run opened while it ran news again once it posts its result", async () => {

@@ -8,7 +8,7 @@ import type {
 } from "@sugabots/contracts";
 import { testMember } from "@sugabots/contracts/testing";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { linear } from "@/api.test-support.tsx";
@@ -105,7 +105,6 @@ function show(
 	over: {
 		canApprove?: boolean;
 		participants?: BotParticipant[];
-		interruptTurns?: Array<{ replyId: string; turnId: string }>;
 	} = {},
 ) {
 	const queryClient = createQueryClient();
@@ -127,7 +126,7 @@ function show(
 				approvalPermissions={{
 					approveToolCallsIn: (over.canApprove ?? true) ? shown.map((message) => message.id) : [],
 					approveComputerRequests: over.canApprove ?? true,
-					interruptTurns: over.interruptTurns ?? [],
+					interruptTurns: [],
 				}}
 			/>
 		</QueryClientProvider>
@@ -322,24 +321,6 @@ describe("a reply still being written", () => {
 		update([reply([{ ...search, status: "completed", finishedAt: search.startedAt }, answer])]);
 		expect(screen.queryByRole("status")).toBeNull();
 		expect(screen.getByRole("article").textContent).toContain("Here are the 2 issues in Cycle 33.");
-	});
-
-	it("offers to interrupt a reply being written only to a member who may interrupt its turn", async () => {
-		const TURN = "0199a3a0-0000-7000-8000-0000000000e1";
-		const writing = reply([{ type: "text", text: "Let me look" }], { status: "writing" });
-		client.api.chats.interruptTurn.mockReturnValue(Effect.undefined);
-
-		show([writing]);
-		expect(screen.queryByRole("button", { name: "Interrupt Linear Handler’s reply" })).toBeNull();
-		cleanup();
-
-		show([writing], { interruptTurns: [{ replyId: writing.id, turnId: TURN }] });
-		fireEvent.click(screen.getByRole("button", { name: "Interrupt Linear Handler’s reply" }));
-		await waitFor(() =>
-			expect(client.api.chats.interruptTurn).toHaveBeenCalledWith({
-				params: { chatId: CHAT, turnId: TURN },
-			}),
-		);
 	});
 
 	it("shows the text a reply is still writing after it shares a file", () => {

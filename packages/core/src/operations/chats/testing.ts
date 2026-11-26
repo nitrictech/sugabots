@@ -71,8 +71,6 @@ export function asMember(call: CallOperation, memberId: string) {
 		approvals: (workspace: string) => as("chats.approvals", { workspace }),
 		messages: (chatId: string, page: ChatPageQuery = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
 			as("chats.messages", { chatId, ...page }),
-		history: (chatId: string, page: ChatPageQuery = { limit: DEFAULT_CHAT_PAGE_LIMIT }) =>
-			as("chats.history", { chatId, ...page }),
 		get: (chatId: string, history: ChatHistoryQuery = { limit: DEFAULT_CHAT_HISTORY_LIMIT }) =>
 			as("chats.get", { chatId, ...history }),
 		context: (chatId: string) => as("chats.context", { chatId }),

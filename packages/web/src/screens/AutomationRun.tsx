@@ -1,15 +1,16 @@
-import type {
-	BotParticipant,
-	ChatDetails,
-	ChatMessageItem,
-	Participant,
-	Run,
+import {
+	type BotParticipant,
+	type ChatDetails,
+	type ChatMessageItem,
+	type Participant,
+	textWithoutNarration,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { useState } from "react";
 import { nextRunWords, useAutomations } from "@/lib/automations.ts";
 import { useAutomationControls } from "@/lib/chats.ts";
+import { useMarkedConnectors } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { formatClockTime, formatDay } from "@/lib/list-time.ts";
 import { useOwnerOfProject } from "@/lib/owner-of-project.ts";
@@ -21,6 +22,7 @@ import { LabelledRule } from "@/ui/labelled-rule.tsx";
 import { TitleTag } from "@/ui/title-tag.tsx";
 import { TypingDots } from "@/ui/typing-dots.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
+import { WorkedFor } from "./ToolLine.tsx";
 
 /*
  * An automation's feed reads as its runs, one after another: a line naming
@@ -109,8 +111,9 @@ export function NextRunDivider({
 }
 
 /**
- * A run that posted no result, drawn as its bot's message: what the bot last
- * said in it, or, when it said nothing, how it went and, when it failed, why.
+ * A run that posted no result, drawn as its bot's message: the work its reply
+ * did, as a chat's reply shows it, then what the reply said, or, when it said
+ * nothing, how it went and, when it failed, why.
  * A run that completed and said something needs no word on how it went, and
  * one that completed saying nothing had nothing to report. The latest
  * failure, while the automation is still failing, offers to run it again or to
@@ -122,6 +125,7 @@ export function RunMessage({
 	automation,
 	chatId,
 	latest,
+	highlighted = false,
 	mentionable,
 }: {
 	item: RunItem;
@@ -130,11 +134,14 @@ export function RunMessage({
 	chatId: string;
 	/** The newest failure while the automation is still failing, which may be retried. */
 	latest: boolean;
+	/** Pointed out for a moment, as a run jumped to is. */
+	highlighted?: boolean;
 	/** Who the report may mention, drawn as chips. */
 	mentionable: Participant[];
 }) {
 	const controls = useAutomationControls(chatId, automation);
 	const owner = useOwnerOfProject(automation.projectId);
+	const markedConnectorsOf = useMarkedConnectors([bot.id], automation.projectId);
 	const mayRun = owner !== undefined && resourcePermissions(owner).runAutomations;
 	const [retryFailure, setRetryFailure] = useState<unknown>();
 	const outcome = outcomeOf(item.state, false);
@@ -146,11 +153,18 @@ export function RunMessage({
 			setRetryFailure(failure);
 		}
 	}
-	const report = item.state === "completed" ? item.report : null;
+	// Only what the bot said after its last tool call, as a posted result would be.
+	const report =
+		(item.state === "completed" && item.reply && textWithoutNarration(item.reply.parts)) || null;
 	return (
 		<article
 			aria-label={`${item.automationName}: ${RUN_OUTCOME_LABELS[outcome]}`}
-			className="flex gap-3.5 px-5 pt-3.5 pb-0.5"
+			data-run-chat-id={item.chatId}
+			className={cn(
+				"flex gap-3.5 px-5 pt-3.5 pb-0.5 transition-colors duration-700",
+				// Lifted on a soft card, as a bot's message pointed out is.
+				highlighted && "rounded-xl bg-chip",
+			)}
 		>
 			<span aria-hidden className="mt-0.5 flex w-9 shrink-0 justify-center">
 				<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={36} />
@@ -164,6 +178,14 @@ export function RunMessage({
 					</span>
 					{!report && <RunStatus outcome={outcome} />}
 				</div>
+				{item.reply && (
+					<WorkedFor
+						message={item.reply}
+						markedConnectors={markedConnectorsOf(bot.id)}
+						fileNames={NO_FILE_NAMES}
+						className="mt-1.5 mb-1.5"
+					/>
+				)}
 				{report ? (
 					<div className="min-w-0 self-stretch break-words text-sm text-body-foreground leading-normal">
 						<MessageMarkdown text={report} mentionable={mentionable} writer="bot" />
@@ -201,42 +223,5 @@ export function RunMessage({
 	);
 }
 
-/**
- * A failed run, at the top of its own chat, drawn as it is in its automation's
- * feed: its bot's message saying why, offering to run it again while it is
- * the automation's latest run.
- */
-export function FailedRunMessage({
-	run,
-	projectId,
-	bot,
-}: {
-	run: Run;
-	/** The project the automation belongs to, whose run it is. */
-	projectId: string;
-	bot: BotParticipant;
-}) {
-	const automation = { id: run.automationId, projectId };
-	const latestRunId = useAutomations(projectId).data?.find((one) => one.id === run.automationId)
-		?.status?.latestRun?.id;
-	return (
-		<RunMessage
-			item={{
-				kind: "run",
-				id: run.id,
-				chatId: run.chatId,
-				automationName: run.automationName,
-				triggerKind: run.trigger.kind,
-				state: run.state,
-				error: run.error,
-				report: null,
-				createdAt: run.acceptedAt,
-			}}
-			bot={bot}
-			automation={automation}
-			chatId={run.rootChatId}
-			latest={latestRunId === run.id}
-			mentionable={[]}
-		/>
-	);
-}
+/** The run's files aren't loaded with its feed, so a call reading one names it by its id. */
+const NO_FILE_NAMES: ReadonlyMap<string, string> = new Map();

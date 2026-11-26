@@ -799,6 +799,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 					automationName: expect.any(String),
 				},
 			}),
+			runReply: expect.objectContaining({ chatId: accepted.chatId }),
 		});
 		expect(inFeed).toMatchObject({
 			message: {

@@ -179,7 +179,7 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 						place,
 						place.rootChatId,
 						automationResult
-							? { nestedChatPage: automationResult.chatId }
+							? { runChat: automationResult.chatId }
 							: { message: written.messageId },
 					),
 					chatId: place.rootChatId,
@@ -383,9 +383,7 @@ export const forAutomationRun = Effect.fn("Notifications.forAutomationRun")(func
 						? (run.error ?? `${run.botName}'s run didn't finish.`)
 						: `${run.botName} finished the run.`,
 					tag: `automation:${settled.chatId}`,
-					path: chatPath(place, settled.rootChatId, {
-						nestedChatPage: settled.chatId,
-					}),
+					path: chatPath(place, settled.rootChatId, { runChat: settled.chatId }),
 					chatId: settled.rootChatId,
 				},
 			}),

@@ -42,7 +42,6 @@ import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 const PAGE_SIZE = 30;
-const RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS = 1_000;
 
 /*
  * The keys of the queries below. Each takes its scope from the widest part to
@@ -61,7 +60,6 @@ const workspaceApprovalsKey = (...scope: [workspaceId?: string]) => [
 	...scope,
 ];
 const chatMessagesKey = (...scope: [chatId?: string]) => ["chat-messages", ...scope];
-const chatHistoryKey = (...scope: [chatId?: string]) => ["chat-history", ...scope];
 const optimisticMessagesKey = (chatId: string | undefined) => ["optimistic-messages", chatId];
 const automationFeedKey = (workspaceId: string | undefined, automationId: string) => [
 	"automation-feed",
@@ -206,11 +204,11 @@ function useMarkChatRead(chatId: string | undefined) {
 }
 
 /**
- * Marks one automation run read, by its own chat, while the
- * window has focus, without reading the rest of the chat it is in.
- * Checks when the nested chat opens and when the window gains focus.
+ * Marks an automation run read, by its own chat `runChatId`, while the window
+ * has focus and `isInView` reports the run is visible. Checks when
+ * `runChatId` is first given and each time the window gains focus.
  */
-export function useMarkNestedChatReadWhileSeen(nestedChatId: string) {
+export function useMarkRunReadWhileSeen(runChatId: string | undefined, isInView: () => boolean) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	const { mutate } = useMutation({
@@ -218,7 +216,9 @@ export function useMarkNestedChatReadWhileSeen(nestedChatId: string) {
 			Effect.runPromise(client.api.chats.markNestedChatRead({ params: { chatId } })),
 		onSuccess: () => refreshListsAndAttention(queries, workspaceId),
 	});
-	useWhileFocused(nestedChatId, () => mutate(nestedChatId));
+	useWhileFocused(runChatId, () => {
+		if (runChatId && isInView()) mutate(runChatId);
+	});
 }
 
 /**
@@ -437,7 +437,6 @@ export function useOpenAutomationFeed(projectId: string | undefined, automationI
  */
 export function prefetchChat(queries: QueryClient, chatId: string): void {
 	void queries.prefetchInfiniteQuery(chatMessagesQuery(chatId));
-	void queries.prefetchInfiniteQuery(chatHistoryQuery(chatId));
 	void queries.prefetchQuery(chatQuery(chatId));
 }
 
@@ -449,31 +448,6 @@ function chatMessagesQuery(chatId: string | undefined) {
 			? ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
 					Effect.runPromise(
 						client.api.chats.messages({
-							params: { chatId },
-							query: { limit: PAGE_SIZE, cursor: pageParam },
-						}),
-						{ signal },
-					)
-			: skipToken,
-		initialPageParam: undefined as string | undefined,
-		getNextPageParam: (page) => page?.nextCursor ?? undefined,
-	});
-}
-
-/** The automation runs the chat lists, a page at a time, newest activity first. */
-function chatHistoryQuery(chatId: string | undefined) {
-	return infiniteQueryOptions({
-		queryKey: chatHistoryKey(chatId),
-		refetchInterval: (current) =>
-			current.state.data?.pages.some((page) =>
-				page?.items.some((entry) => entry.status === "queued" || entry.status === "running"),
-			)
-				? RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS
-				: false,
-		queryFn: chatId
-			? ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
-					Effect.runPromise(
-						client.api.chats.history({
 							params: { chatId },
 							query: { limit: PAGE_SIZE, cursor: pageParam },
 						}),
@@ -521,14 +495,6 @@ export function useChatMessages(chatId: string | undefined) {
 		.reverse()
 		.flatMap((page) => page?.items ?? []);
 	return { ...query, items: items ?? [] };
-}
-
-export function useChatHistory(chatId: string | undefined) {
-	const query = useInfiniteQuery(chatHistoryQuery(chatId));
-	return {
-		...query,
-		entries: query.data?.pages.flatMap((page) => page?.items ?? []) ?? [],
-	};
 }
 
 /**
@@ -584,7 +550,6 @@ export function useSendMessage(chatId: string, signedIn: CurrentUser) {
 			);
 			await Promise.all([
 				queries.invalidateQueries({ queryKey: chatMessagesKey(chatId) }),
-				queries.invalidateQueries({ queryKey: chatHistoryKey(chatId) }),
 				queries.invalidateQueries({ queryKey: chatQuery(chatId).queryKey }),
 				queries.invalidateQueries({ queryKey: projectChatsKey(workspaceId) }),
 			]);

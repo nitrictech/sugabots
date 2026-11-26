@@ -1,22 +1,23 @@
 import {
 	botParticipantOf,
 	type ChatDetails,
+	type ChatMessageItem,
 	type Message,
 	type ProjectChat,
 	type Run,
-	streamEvent,
 } from "@sugabots/contracts";
 import { Conflict } from "@sugabots/contracts/http";
 import { listedChat, type TestConnector, testMember } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
 	apiAnswers,
 	bots,
-	controlledEventStream,
+	linear,
 	mount,
+	onWideScreen,
 	projects,
 	sam,
 	serveConnectors,
@@ -118,11 +119,6 @@ const projectChatDetails = chatDetailsFixture(chat, {
 	projectBots: [leadParticipant, otherParticipant],
 	membersReachingProject: [robin],
 });
-const runDetails = projectChatDetails({
-	chat: { id: runChatId, rootChatId: feedId, title: run.automationName, kind: "run" },
-	automationRun: run,
-});
-
 const chats: Record<string, ChatDetails> = {
 	[chatId]: projectChatDetails({ messages: [result] }),
 	[feedId]: projectChatDetails({
@@ -135,11 +131,7 @@ const chats: Record<string, ChatDetails> = {
 			pausedAfterFailures: false,
 		},
 	}),
-	[runChatId]: runDetails,
 };
-
-/** The automation's own page, among the project's automations. */
-const automationPage = `/suga/projects/${project.slug}/automations/${automationId}`;
 
 beforeEach(() => {
 	apiAnswers();
@@ -356,6 +348,70 @@ describe("a project's new chat", () => {
 
 describe("a project's automation feed, at its own address", () => {
 	const feedPage = `/suga/projects/${project.slug}/${feedId}`;
+	const botFeedPage = `/suga/bots/${linear.handle}/chats/${feedId}`;
+
+	it.each([
+		{
+			source: `/suga/projects/${project.slug}/automations/${automationId}`,
+			owner: "project",
+		},
+		{
+			source: `/suga/bots/${linear.handle}/automations/${automationId}`,
+			owner: "bot",
+		},
+		{ source: feedPage, owner: "project" },
+		{ source: botFeedPage, owner: "bot" },
+		{ source: `/suga/chats/${feedId}`, owner: "bot" },
+	])("opens the run from a legacy link at $source", async ({ source, owner }) => {
+		const bot = owner === "bot" ? linear : undefined;
+		const projectId = bot?.defaultProjectId ?? project.id;
+		const botId = bot?.id ?? null;
+		const author = bot ? botParticipantOf(bot) : leadParticipant;
+		const destination = bot ? botFeedPage : feedPage;
+		client.api.chats.projectChats.mockReturnValue(
+			Effect.succeed({
+				chats: [],
+				automations: [
+					{
+						automation: {
+							id: automationId,
+							name: run.automationName,
+							state: "enabled",
+							pausedAfterFailures: false,
+						},
+						chat: {
+							...chat,
+							kind: "automation_feed",
+							id: feedId,
+							projectId,
+							botId,
+							automationId,
+						},
+						mentionsYou: false,
+						status: { failing: false, latestRun: null },
+					},
+				],
+			}),
+		);
+		const details = chats[feedId] as ChatDetails;
+		client.api.chats.get.mockReturnValue(
+			Effect.succeed({
+				...details,
+				chat: { ...details.chat, projectId, botId },
+				participants: [author],
+				projectBots: [author],
+				automation: details.automation && { ...details.automation, projectId },
+			}),
+		);
+		serveFeed([{ ...ranResult, author }]);
+		const { router } = mount(`${source}?nestedChatPage=${runChatId}`);
+
+		await waitFor(() =>
+			expect(router.state.location.href).toBe(`${destination}?runChat=${runChatId}`),
+		);
+		const posted = (await screen.findByText(ranResult.content)).closest("article");
+		await waitFor(() => expect(document.activeElement).toBe(posted));
+	});
 
 	it("shows its feed under the project's automations, run by the project's lead", async () => {
 		mount(feedPage);
@@ -377,91 +433,161 @@ describe("a project's automation feed, at its own address", () => {
 		await screen.findByText(`${lead.name} won't reply.`);
 	});
 
-	it("leads from a run's page to the automation's settings among the project's", async () => {
-		mount(`${feedPage}?nestedChatPage=${runChatId}`);
+	it("opens at the run a link names, loading older runs until it is there, and points it out", async () => {
+		serveFeed([earlierRunsResult], [ranResult]);
+		mount(`${feedPage}?runChat=${runChatId}`);
 
-		const settings = await screen.findByRole("link", { name: "Automation settings" });
-		expect(settings.getAttribute("href")).toBe(automationPage);
+		const posted = (await screen.findByText(ranResult.content)).closest("article");
+		await waitFor(() => {
+			expect(document.activeElement).toBe(posted);
+			expect(posted?.classList.contains("bg-chip")).toBe(true);
+		});
+		expect(screen.queryByRole("heading", { name: run.automationName })).toBeNull();
+		await screen.findByLabelText(`Message ${lead.name} about this automation`);
 	});
 
-	it("downloads a file a run's reply attached from the run, where it is kept", async () => {
-		const fileId = "0199a3a0-0000-7000-8000-0000000003f2";
-		const report: Message = {
-			...result,
-			id: "0199a3a0-0000-7000-8000-0000000003f3",
-			chatId: runChatId,
-			parts: [
-				{ type: "text", text: "Prices are unchanged." },
-				{ type: "file", id: fileId, name: "prices.csv", contentType: "text/csv", size: 512 },
-			],
-		};
-		const ranWithReport: ChatDetails = {
-			...runDetails,
-			messages: [report],
-		};
-		client.api.chats.get.mockImplementation(({ params }: { params: { chatId: string } }) =>
-			Effect.succeed(params.chatId === runChatId ? ranWithReport : chats[params.chatId]),
-		);
-		client.api.chats.messages.mockImplementation(({ params }: { params: { chatId: string } }) =>
-			Effect.succeed({
-				items: (params.chatId === runChatId ? [report] : []).map((message) => ({
-					kind: "message" as const,
-					message,
-				})),
-				nextCursor: null,
+	it("shows the work a run did over its result, as a chat shows a reply's", async () => {
+		serveFeed([{ kind: "message", message: ranResult, runReply: ranResultsReply }]);
+		mount(feedPage);
+
+		const posted = (await screen.findByText(ranResult.content)).closest("article") as HTMLElement;
+		fireEvent.click(within(posted).getByRole("button", { name: "Worked for 2m 0s" }));
+
+		await within(posted).findByText("Checking this week's price list.");
+	});
+
+	it("reads the run it opens at once the window has focus", async () => {
+		const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+		onTestFinished(() => hasFocus.mockRestore());
+		serveFeed([ranResult]);
+		mount(`${feedPage}?runChat=${runChatId}`);
+		const posted = (await screen.findByText(ranResult.content)).closest("article");
+		await waitFor(() => expect(document.activeElement).toBe(posted));
+		expect(client.api.chats.markNestedChatRead).not.toHaveBeenCalled();
+
+		hasFocus.mockReturnValue(true);
+		fireEvent.focus(window);
+
+		await waitFor(() =>
+			expect(client.api.chats.markNestedChatRead).toHaveBeenCalledWith({
+				params: { chatId: runChatId },
 			}),
 		);
-		mount(`${feedPage}?nestedChatPage=${runChatId}`);
-
-		const download = await screen.findByRole("link", { name: "Download prices.csv" });
-		expect(download.getAttribute("href")).toContain(`/chats/${runChatId}/files/${fileId}`);
 	});
 
-	it("keeps the run's earlier messages, once loaded, when its stream starts over", async () => {
-		const earlier: Message = {
-			...result,
-			id: "0199a3a0-0000-7000-8000-0000000003f4",
-			chatId: runChatId,
-			parts: [{ type: "text", text: "Checked last week's prices first." }],
-			content: "Checked last week's prices first.",
-			createdAt: "2026-09-18T07:00:00.000Z",
-		};
-		const runPage = (query?: { cursor?: string }): ChatDetails =>
-			query?.cursor
-				? { ...runDetails, messages: [earlier], olderMessagesCursor: null }
-				: {
-						...runDetails,
-						messages: [{ ...result, chatId: runChatId }],
-						olderMessagesCursor: "before-the-result",
-					};
-		client.api.chats.get.mockImplementation(
-			({ params, query }: { params: { chatId: string }; query?: { cursor?: string } }) =>
-				Effect.succeed(params.chatId === runChatId ? runPage(query) : chats[params.chatId]),
-		);
-		const runEvents = controlledEventStream();
-		const usual = client.events.chat.getMockImplementation();
-		client.events.chat.mockImplementation((chatId: string) =>
-			chatId === runChatId ? runEvents.stream : usual?.(chatId),
-		);
-		mount(`${feedPage}?nestedChatPage=${runChatId}`);
-		fireEvent.click(await screen.findByRole("button", { name: "Load older messages" }));
-		await screen.findByText("Checked last week's prices first.");
+	it("does not read a run that is outside the viewport when the window regains focus", async () => {
+		const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+		onTestFinished(() => hasFocus.mockRestore());
+		serveFeed([ranResult]);
+		mount(`${feedPage}?runChat=${runChatId}`);
+		const posted = (await screen.findByText(ranResult.content)).closest("article");
+		await waitFor(() => expect(document.activeElement).toBe(posted));
+		if (!posted) throw new Error("The result is missing its message");
+		const bounds = vi
+			.spyOn(posted, "getBoundingClientRect")
+			.mockReturnValue(new DOMRect(0, -200, 100, 50));
+		onTestFinished(() => bounds.mockRestore());
 
-		runEvents.emit(streamEvent("reset"));
+		hasFocus.mockReturnValue(true);
+		await act(async () => fireEvent.focus(window));
+
+		expect(client.api.chats.markNestedChatRead).not.toHaveBeenCalled();
+	});
+
+	it("marks an older run read after focusing it, without reading the feed on the way there", async () => {
+		const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+		onTestFinished(() => hasFocus.mockRestore());
+		const focusedWhenRead: (Element | null)[] = [];
+		const focusedWhenFeedRead: (Element | null)[] = [];
+		client.api.chats.markNestedChatRead.mockImplementation(() => {
+			focusedWhenRead.push(document.activeElement);
+			return Effect.undefined;
+		});
+		client.api.chats.markRead.mockImplementation(() => {
+			focusedWhenFeedRead.push(document.activeElement);
+			return Effect.undefined;
+		});
+		serveFeed([earlierRunsResult], [ranResult]);
+		mount(`${feedPage}?runChat=${runChatId}`);
+
+		const posted = (await screen.findByText(ranResult.content)).closest("article");
+		await waitFor(() => expect(client.api.chats.markNestedChatRead).toHaveBeenCalledOnce());
+		expect(focusedWhenRead).toEqual([posted]);
+		expect(focusedWhenFeedRead.every((focused) => focused === posted)).toBe(true);
+	});
+
+	it("leaves the previous run unread when an unfocused window follows a link to a missing run", async () => {
+		const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+		onTestFinished(() => hasFocus.mockRestore());
+		serveFeed([ranResult]);
+		const { router } = mount(`${feedPage}?runChat=${runChatId}`);
+		const first = (await screen.findByText(ranResult.content)).closest("article");
+		await waitFor(() => expect(document.activeElement).toBe(first));
+
+		const otherRunChatId = earlierRunsResult.automationResultOf?.chatId;
+		await act(() => router.history.push(`${feedPage}?runChat=${otherRunChatId}`));
+		await screen.findByText("Could not find this run in the feed.");
+		hasFocus.mockReturnValue(true);
+		await act(async () => fireEvent.focus(window));
+
+		expect(client.api.chats.markNestedChatRead).not.toHaveBeenCalled();
+	});
+
+	it("stops loading older pages when a run is beyond the automatic search limit", async () => {
+		const newerPages = Array.from({ length: 10 }, (_, page) => [
+			{
+				...result,
+				chatId: feedId,
+				id: `0199a3a0-0000-7000-8000-${String(page).padStart(12, "0")}`,
+			},
+		]);
+		serveFeed(...newerPages, [ranResult]);
+		mount(`${feedPage}?runChat=${runChatId}`);
+
+		await screen.findByText("Could not find this run in the feed.");
+		expect(screen.queryByText(ranResult.content)).toBeNull();
+		const loadOlder = screen.getByRole("button", { name: "Load older messages" });
+		fireEvent.click(loadOlder);
+		await screen.findByText(ranResult.content);
+	});
+
+	it("leaves the feed unread if a run link exhausts the search before reaching the run", async () => {
+		const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+		onTestFinished(() => hasFocus.mockRestore());
+		serveFeed([earlierRunsResult]);
+		mount(`${feedPage}?runChat=${runChatId}`);
+
+		await screen.findByText("Could not find this run in the feed.");
+		expect(client.api.chats.markRead).not.toHaveBeenCalled();
+		expect(client.api.chats.markNestedChatRead).not.toHaveBeenCalled();
+	});
+
+	it("opens a run from the project's sidebar in its feed, at the run, marked as the one open", async () => {
+		onWideScreen();
+		client.api.automations.projectRuns.mockReturnValue(
+			Effect.succeed({ items: [run], nextCursor: null }),
+		);
+		serveFeed([ranResult]);
+		const { router } = mount(`/suga/projects/${project.slug}/${chatId}`);
+
+		const runLinkName = new RegExp(run.automationName);
+		const unopened = await screen.findByRole("link", { name: runLinkName });
+		expect(unopened.classList.contains("bg-row-selected")).toBe(false);
+		fireEvent.click(unopened);
+
 		await waitFor(() =>
-			expect(
-				client.api.chats.get.mock.calls.filter(
-					([request]) => (request as { params: { chatId: string } }).params.chatId === runChatId,
-				).length,
-			).toBeGreaterThan(2),
+			expect(router.state.location.href).toBe(`${feedPage}?runChat=${runChatId}`),
 		);
-
-		screen.getByText("Checked last week's prices first.");
+		const posted = (await screen.findByText(ranResult.content)).closest("article");
+		await waitFor(() => expect(document.activeElement).toBe(posted));
+		const opened = screen.getByRole("link", { name: runLinkName });
+		expect(opened.getAttribute("aria-current")).toBe("page");
+		expect(opened.classList.contains("bg-row-selected")).toBe(true);
 	});
 
-	it("sends a failed run's page to the project's connectors, not its lead bot's", async () => {
+	it("sends a failed run in the feed to the project's connectors, not its lead bot's", async () => {
 		serveFailedRun();
-		mount(`${feedPage}?nestedChatPage=${runChatId}`);
+		mount(`${feedPage}?runChat=${runChatId}`);
 
 		const fix = await screen.findByRole("link", { name: "Fix connector" });
 		expect(fix.getAttribute("href")).toBe(`/suga/projects/${project.slug}/connectors`);
@@ -470,7 +596,7 @@ describe("a project's automation feed, at its own address", () => {
 	it("offers no Retry on a failed run to a viewer, who may not run it", async () => {
 		apiAnswers({ role: "viewer" });
 		serveFailedRun();
-		mount(`${feedPage}?nestedChatPage=${runChatId}`);
+		mount(feedPage);
 
 		await screen.findByRole("link", { name: "Fix connector" });
 		expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
@@ -481,7 +607,7 @@ describe("a project's automation feed, at its own address", () => {
 		client.api.automations.run.mockReturnValue(
 			Effect.fail(new Conflict({ message: userText`The automation is already running.` })),
 		);
-		mount(`${feedPage}?nestedChatPage=${runChatId}`);
+		mount(feedPage);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
 
@@ -490,6 +616,87 @@ describe("a project's automation feed, at its own address", () => {
 		);
 	});
 });
+
+/** The run's result, as its automation's feed shows it. */
+const ranResult: Message = {
+	...result,
+	id: "0199a3a0-0000-7000-8000-0000000003f6",
+	chatId: feedId,
+	parts: [{ type: "text", text: "Prices are unchanged this week." }],
+	content: "Prices are unchanged this week.",
+	automationResultOf: {
+		runId: run.id,
+		chatId: runChatId,
+		automationId,
+		automationName: run.automationName,
+	},
+};
+
+/** The reply in the run's own chat that posted `ranResult`, with what it did on the way. */
+const ranResultsReply: Message = {
+	...ranResult,
+	id: "0199a3a0-0000-7000-8000-0000000003fa",
+	chatId: runChatId,
+	parts: [
+		{ type: "text", text: "Checking this week's price list." },
+		{
+			type: "tool_call",
+			id: "0199a3a0-0000-7000-8000-0000000003fb",
+			tool: "web_search",
+			input: { query: "competitor prices" },
+			output: { results: [] },
+			status: "completed",
+			error: null,
+			approval: null,
+			atOffset: "Checking this week's price list.".length,
+			startedAt: at,
+			finishedAt: at,
+		},
+		{ type: "text", text: "Posted the week's prices." },
+	],
+	content: "Checking this week's price list.Posted the week's prices.",
+	automationResultOf: undefined,
+	createdAt: at,
+	finishedAt: "2026-09-18T08:02:00.000Z",
+};
+
+/** An earlier run's result, newer in the feed than `ranResult` when served after it. */
+const earlierRunsResult: Message = {
+	...ranResult,
+	id: "0199a3a0-0000-7000-8000-0000000003f7",
+	parts: [{ type: "text", text: "Two competitors cut their prices." }],
+	content: "Two competitors cut their prices.",
+	createdAt: "2026-09-25T08:00:00.000Z",
+	automationResultOf: {
+		runId: "0199a3a0-0000-7000-8000-0000000003f8",
+		chatId: "0199a3a0-0000-7000-8000-0000000003f9",
+		automationId,
+		automationName: run.automationName,
+	},
+};
+
+/**
+ * Serves the feed's items a page at a time, newest first: `pages[0]` first,
+ * and each later page when the one before it is loaded past.
+ */
+function serveFeed(...pages: (ChatMessageItem | Message)[][]) {
+	const items = pages.map((page) =>
+		page.map(
+			(item): ChatMessageItem => ("kind" in item ? item : { kind: "message", message: item }),
+		),
+	);
+	const usual = client.api.chats.messages.getMockImplementation();
+	client.api.chats.messages.mockImplementation(
+		(request: { params: { chatId: string }; query?: { cursor?: string } }) => {
+			if (request.params.chatId !== feedId) return usual?.(request);
+			const index = request.query?.cursor ? Number(request.query.cursor) : 0;
+			return Effect.succeed({
+				items: items[index] ?? [],
+				nextCursor: index + 1 < items.length ? String(index + 1) : null,
+			});
+		},
+	);
+}
 
 /**
  * Serves the run as one that failed, the automation's latest, where Retry and
@@ -533,9 +740,26 @@ function serveFailedRun() {
 			},
 		]),
 	);
-	client.api.chats.get.mockImplementation(({ params }: { params: { chatId: string } }) =>
-		Effect.succeed(
-			params.chatId === runChatId ? { ...runDetails, automationRun: failed } : chats[params.chatId],
-		),
-	);
+	serveFeed([
+		{
+			kind: "run",
+			id: failed.id,
+			chatId: failed.chatId,
+			automationName: failed.automationName,
+			triggerKind: failed.trigger.kind,
+			state: failed.state,
+			error: failed.error,
+			reply: null,
+			createdAt: failed.acceptedAt,
+		},
+	]);
+	// Retry and Fix connector are offered while the automation is failing.
+	client.api.chats.get.mockImplementation(({ params }: { params: { chatId: string } }) => {
+		const details = chats[params.chatId];
+		return Effect.succeed(
+			params.chatId === feedId && details?.automation
+				? { ...details, automation: { ...details.automation, failed: true } }
+				: details,
+		);
+	});
 }

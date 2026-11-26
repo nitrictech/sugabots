@@ -108,7 +108,6 @@ beforeEach(() => {
 	stubAttachmentUploads();
 	client.api.chats.removeFile.mockReturnValue(Effect.void);
 	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
-	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 });
 
 afterEach(() => {

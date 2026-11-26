@@ -169,21 +169,12 @@ export function botNewAutomationLink(bot: BotRef) {
 	});
 }
 
-/**
- * An automation's own page, where it is set up; its feed, where its runs post,
- * is opened first when it has none yet. With `nestedChatPage`, one of its runs, by
- * the run's chat, is the page instead.
- */
-export function botAutomationFeedLink(
-	bot: BotRef,
-	automationId: string,
-	search: { nestedChatPage?: string } = {},
-) {
+/** An automation's own page, where it is set up. */
+export function botAutomationLink(bot: BotRef, automationId: string) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/automations/$automation",
 		params: { bot: botRouteAddress(bot), automation: automationId },
-		search,
 	});
 }
 
@@ -205,17 +196,12 @@ export function projectNewAutomationLink(project: ProjectRef) {
 	});
 }
 
-/** One of a project's automations, as `botAutomationFeedLink` is a bot's. */
-export function projectAutomationFeedLink(
-	project: ProjectRef,
-	automationId: string,
-	search: { nestedChatPage?: string } = {},
-) {
+/** One of a project's automations, as `botAutomationLink` is a bot's. */
+export function projectAutomationLink(project: ProjectRef, automationId: string) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./projects/$project/automations/$automation",
 		params: { project: project.slug, automation: automationId },
-		search,
 	});
 }
 
@@ -255,9 +241,9 @@ export function projectConnectorLink(project: ProjectRef, connector: Pick<Connec
 	});
 }
 
-/** What a chat's address opens with it: one of its runs as the page, or a file open large. */
+/** What a chat's address opens with it: one of its runs, by the run's chat, in view, or a file open large. */
 export interface ChatLinkSearch {
-	nestedChatPage?: string;
+	runChat?: string;
 	file?: string;
 }
 
@@ -294,8 +280,8 @@ export function chatByIdLink(chatId: string, search: ChatLinkSearch = {}) {
 
 /**
  * A chat where it belongs: a project's chat, or a bot's chat, with
- * `nestedChatPage` as the page, or `file` open large. Called with either, it
- * is either; a caller holding one or the other branches.
+ * `runChat` in view, or `file` open large. Called with either place, it is
+ * either; a caller holding one or the other branches.
  */
 export function chatLink(
 	place: { project: ProjectRef; chatId: string },

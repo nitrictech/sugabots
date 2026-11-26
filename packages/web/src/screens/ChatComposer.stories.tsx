@@ -302,6 +302,30 @@ export const Sending = meta.story({
 	},
 });
 
+/** While a bot replies, the stop button stands in Send's place until there is something to send. */
+export const WhileABotReplies = meta.story({
+	args: {
+		interrupt: { label: "Interrupt the reply", pending: false, onInterrupt: fn() },
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Interrupt the reply" }));
+		await expect(args.interrupt?.onInterrupt).toHaveBeenCalled();
+		await userEvent.type(canvas.getByRole("textbox"), "Check the tests too");
+		await expect(canvas.queryByRole("button", { name: "Interrupt the reply" })).toBeNull();
+		await expect(canvas.getByRole("button", { name: "Send message" })).toBeVisible();
+	},
+});
+
+/** Once asked to stop, the stop button waits, disabled, for the replies to end. */
+export const Interrupting = meta.story({
+	args: {
+		interrupt: { label: "Interrupt the reply", pending: true, onInterrupt: fn() },
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("button", { name: "Interrupt the reply" })).toBeDisabled();
+	},
+});
+
 /** SendFailed preserves the draft and exposes the error beside the retry action. */
 export const SendFailed = meta.story({
 	args: { value: "Please summarise the feedback.", error: "Could not send. Try again." },

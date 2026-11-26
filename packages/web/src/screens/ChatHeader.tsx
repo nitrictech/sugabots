@@ -3,7 +3,6 @@ import { useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import { CircleCheck, Monitor, PanelRight, RefreshCcw, RotateCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { useModelName } from "@/lib/bots.ts";
 import { botLink, projectLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { ownerLinkOptions, type ResourceOwner } from "@/lib/resource-owner.tsx";
@@ -25,6 +24,7 @@ import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { CHAT_HEADER_CONTAINER, ChatComputer } from "./ComputerButton.tsx";
 import { ComputerSheet } from "./ComputerSheet.tsx";
+import { ModelName } from "./ModelName.tsx";
 import { ParticipantFaces } from "./ParticipantFaces.tsx";
 
 /** Where a page's Back on a phone returns to: the list it covers, or for a chat, where it lives. */
@@ -103,7 +103,6 @@ export function ChatHeader({
 	onOpenDesktop: () => void;
 }) {
 	const name = title ?? bot.name;
-	const modelName = useModelName(bot.model ?? null);
 	const openDetails = details && (() => details.onChange(!details.open));
 	// A phone shows the computer in a sheet first, from which it opens full screen.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
@@ -125,13 +124,23 @@ export function ChatHeader({
 							/>
 						}
 						title={bot.name}
-						sub={modelName ?? undefined}
+						sub={bot.model ? <ModelName modelId={bot.model} /> : undefined}
 						onClick={openDetails}
 					/>
 				) : (
 					<HeaderBadge
 						title={title}
-						sub={`in ${modelName ? `${bot.name} · ${modelName}` : bot.name}`}
+						sub={
+							<>
+								in {bot.name}
+								{bot.model && (
+									<>
+										{" · "}
+										<ModelName modelId={bot.model} />
+									</>
+								)}
+							</>
+						}
 						onClick={openDetails}
 					/>
 				)
@@ -304,7 +313,7 @@ function HeaderBadge({
 }: {
 	face?: ReactNode;
 	title: string;
-	sub?: string;
+	sub?: ReactNode;
 	onClick?: () => void;
 }) {
 	const content = (

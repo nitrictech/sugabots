@@ -18,7 +18,6 @@ import { context } from "./context.ts";
 import { fileVersion } from "./file-version.ts";
 import { fileVersions } from "./file-versions.ts";
 import { get } from "./get.ts";
-import { history } from "./history.ts";
 import { listFilesInProject } from "./list-files-in-project.ts";
 import { messages } from "./messages.ts";
 import { pageAddress } from "./page-address.ts";
@@ -39,7 +38,6 @@ export const chatReadsOperations = {
 	"chats.attentionMarks": attentionMarks,
 	"chats.approvals": approvals,
 	"chats.messages": messages,
-	"chats.history": history,
 	"chats.file": chatFile,
 	"chats.get": get,
 	"chats.context": context,

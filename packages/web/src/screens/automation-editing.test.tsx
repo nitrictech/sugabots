@@ -75,7 +75,7 @@ beforeEach(() => {
 });
 
 /** An automation's own page, where it is set up. */
-const nestedChatPage = (one: BotsAutomation) =>
+const automationPage = (one: BotsAutomation) =>
 	`/suga/bots/${one.bot.handle}/automations/${one.automation.id}`;
 /** An automation being made, under the triager's automations. */
 const newPage = `/suga/bots/${triager.handle}/automations/new`;
@@ -147,7 +147,7 @@ function serveAutomation(one: BotsAutomation, others: readonly Automation[] = []
 /** Opens `one`'s own page, where it is set up. */
 async function openPanel(one: BotsAutomation, others: readonly Automation[] = []) {
 	serveAutomation(one, others);
-	const { router } = mount(nestedChatPage(one));
+	const { router } = mount(automationPage(one));
 	const panel = await showPanel();
 	await within(panel).findByRole("heading", { name: one.automation.name });
 	return { router, panel };
@@ -371,7 +371,7 @@ describe("a bot's automations", () => {
 			),
 		);
 		// Made, it opens its feed; its panel beside it has the address and the secret.
-		await waitFor(() => expect(router.state.location.pathname).toBe(nestedChatPage(webhook)));
+		await waitFor(() => expect(router.state.location.pathname).toBe(automationPage(webhook)));
 		const panel = await showPanel();
 		fireEvent.click(await within(panel).findByRole("button", { name: /^Webhook/ }));
 		await screen.findByText(new RegExp(`/webhooks/triggers/${webhook.automation.id}$`));
@@ -733,7 +733,7 @@ describe("a bot's automations", () => {
 				},
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe(nestedChatPage(secondCopy)));
+		await waitFor(() => expect(router.state.location.pathname).toBe(automationPage(secondCopy)));
 	});
 
 	it("turns an automation back on from its panel", async () => {
@@ -999,7 +999,7 @@ describe("a bot's automations", () => {
 				secrets: [],
 			}),
 		);
-		mount(nestedChatPage(morningBrief));
+		mount(automationPage(morningBrief));
 		const off = await screen.findByRole("switch", { name: `Pause ${name}` });
 		expect(off).toHaveProperty("disabled", false);
 		expect(screen.queryByLabelText("Instructions")).toBeNull();

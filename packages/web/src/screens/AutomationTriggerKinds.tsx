@@ -20,7 +20,7 @@ import {
 } from "@/ui/dialog-form.tsx";
 import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SettingsGroup, SettingsRow, SettingsRowIcon } from "@/ui/settings-page.tsx";
-import { AutomationTriggerIcon } from "./RunRow.tsx";
+import { AutomationTriggerIcon } from "./AutomationTriggerIcon.tsx";
 
 /*
  * The kinds of trigger an automation may have: Sugabots' own, and those of the

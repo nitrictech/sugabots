@@ -6,8 +6,6 @@ import type {
 	AttentionCounts,
 	AttentionMark,
 	AttentionMarks,
-	ChatHistoryEntry,
-	ChatHistoryPage,
 	ChatMessageItem,
 	ChatMessagesPage,
 	ChatPageQuery,
@@ -28,7 +26,6 @@ import {
 	and,
 	asc,
 	count,
-	type DBQueryConfig,
 	desc,
 	eq,
 	getColumns,
@@ -45,7 +42,6 @@ import {
 import { alias } from "drizzle-orm/pg-core";
 import { Context, DateTime, Effect, Layer } from "effect";
 import { type Database, type Executor, query, serviceOperations } from "../../database/database.ts";
-import type { relations } from "../../database/relations.ts";
 import type * as schema from "../../database/schema.ts";
 import {
 	automation,
@@ -89,12 +85,11 @@ import {
 } from "../cursor.ts";
 import {
 	authorRow,
-	botColumns,
-	memberColumns,
 	messageFromRelations,
 	messageRelations,
 	namedMemberColumns,
 	recentParticipantsOf,
+	replyTurnRelation,
 	toParticipant,
 } from "../store/participants.ts";
 import { toToolCallPart } from "../store/tool-calls.ts";
@@ -162,11 +157,6 @@ export interface Interface {
 		reach: ReachesChat<P, C>,
 		page: ChatPageQuery,
 	) => Effect.Effect<ChatMessagesPage, ResourceHidden | InvalidCursor>;
-	/** A page of the chats opened beside the chat, newest activity first. */
-	readonly history: <P, C>(
-		reach: ReachesChat<P, C>,
-		page: ChatPageQuery,
-	) => Effect.Effect<ChatHistoryPage, ResourceHidden | InvalidCursor>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/ChatView") {
@@ -321,21 +311,6 @@ export const make = Effect.gen(function* () {
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "chat" });
 					return toMessagesPage(row, page.limit);
-				}),
-			),
-
-		history: (reach, page) =>
-			operation(
-				"history",
-				Effect.gen(function* () {
-					const chatId = reach.chat.value;
-					yield* Effect.annotateCurrentSpan("chat.id", chatId);
-					const before = page.cursor ? yield* parseCursor(page.cursor) : undefined;
-					const row = yield* query((db) =>
-						loadHistory(db, { chatId, workspaceId: reach.workspace }, page.limit, before),
-					);
-					if (!row) return yield* new ResourceHidden({ resource: "chat" });
-					return toHistoryPage(row, page.limit);
 				}),
 			),
 	});
@@ -868,25 +843,6 @@ interface AttentionScope {
 	since: Date;
 }
 
-/** The newest finished reply with words in it a bot wrote in `chatId`, or null when it has written none. */
-function lastReplyIn(db: Executor, chatId: SQLWrapper): SQL<Reply | null> {
-	const reply = alias(message, "last_reply");
-	const latest = db
-		.select({ reply: sql`json_build_object('content', ${reply.content}, 'parts', ${reply.parts})` })
-		.from(reply)
-		.where(
-			and(
-				sql`${reply.chatId} = ${chatId}`,
-				sql`${reply.authorBotId} is not null`,
-				ne(reply.content, ""),
-				ne(reply.status, "writing"),
-			),
-		)
-		.orderBy(desc(reply.createdAt))
-		.limit(1);
-	return sql<Reply | null>`(${latest})`;
-}
-
 /** What a message says, as a preview reads it. */
 interface Reply {
 	content: string;
@@ -1267,10 +1223,7 @@ const loadMessagesPage = Effect.fn("ChatView.loadMessagesPage")(function* (
 			state: true,
 			error: true,
 		},
-		extras: {
-			report: (row) => lastReplyIn(db, row.chatId),
-			posted: (row) => resultPosted(sql`${row.id}`),
-		},
+		extras: { posted: (row) => resultPosted(sql`${row.id}`) },
 	});
 	const pauseAt = sql<Date | null>`coalesce(
 		${automation.pausedAfterFailuresAt},
@@ -1285,7 +1238,37 @@ const loadMessagesPage = Effect.fn("ChatView.loadMessagesPage")(function* (
 	const pausedAfterFailures = paused?.at
 		? { automationId: paused.automationId, at: paused.at }
 		: null;
-	return { ...chat, automationRuns, pausedAfterFailures };
+	const runChatIds = [
+		...automationRuns.filter((run) => !run.posted).map((run) => run.chatId),
+		...chat.messages.flatMap((stored) =>
+			stored.automationRun ? [stored.automationRun.chatId] : [],
+		),
+	];
+	const runChats =
+		runChatIds.length === 0
+			? []
+			: yield* db.query.placedChat.findMany({
+					// Only runs nested under this chat, its automation's feed: a result posted
+					// in a project's chat shows no run's work there.
+					where: { id: { in: runChatIds }, rootChatId: chatId, kind: "run" },
+					columns: { id: true },
+					with: {
+						messages: {
+							// The run's own bot's: a helper it asked writes its reply here too, as its own work.
+							where: {
+								RAW: (reply) =>
+									sql`${reply.authorBotId} = (select ${automationRun.botId} from ${automationRun} where ${automationRun.chatId} = ${reply.chatId})`,
+							},
+							orderBy: { createdAt: "desc", id: "desc" },
+							limit: 1,
+							with: { ...messageRelations, turn: replyTurnRelation },
+						},
+					},
+				});
+	const runReplies = new Map(
+		runChats.flatMap(({ id, messages: [reply] }) => (reply ? [[id, reply] as const] : [])),
+	);
+	return { ...chat, automationRuns, pausedAfterFailures, runReplies };
 });
 
 type LoadedMessagesPage = NonNullable<Effect.Success<ReturnType<typeof loadMessagesPage>>>;
@@ -1305,11 +1288,23 @@ function pausedCandidate(automationId: string, at: Date) {
 
 /** The sources merged newest first, cut to the page, and put back in reading order. */
 function toMessagesPage(row: LoadedMessagesPage, limit: number) {
+	/** The reply of the run whose own chat is `runChatId`, once its bot has begun one. */
+	const runReplyIn = (runChatId: string) => {
+		const stored = row.runReplies.get(runChatId);
+		return stored && messageFromRelations(stored, stored.turn);
+	};
 	const candidates = [
 		...row.messages.map((stored) => ({
 			id: stored.id,
 			createdAt: stored.createdAt,
-			item: (): ChatMessageItem => ({ kind: "message", message: messageFromRelations(stored) }),
+			item: (): ChatMessageItem => {
+				const runReply = stored.automationRun && runReplyIn(stored.automationRun.chatId);
+				return {
+					kind: "message",
+					message: messageFromRelations(stored),
+					...(runReply && { runReply }),
+				};
+			},
 		})),
 		...(row.pausedAfterFailures
 			? [pausedCandidate(row.pausedAfterFailures.automationId, row.pausedAfterFailures.at)]
@@ -1328,8 +1323,7 @@ function toMessagesPage(row: LoadedMessagesPage, limit: number) {
 					triggerKind: run.triggerKind,
 					state: run.state,
 					error: run.error,
-					// Only what the bot said after its last tool call, as a posted result would be.
-					report: run.report && (textWithoutNarration(run.report.parts) || null),
+					reply: runReplyIn(run.chatId) ?? null,
 					createdAt: run.acceptedAt.toISOString(),
 				}),
 			})),
@@ -1345,84 +1339,6 @@ function toMessagesPage(row: LoadedMessagesPage, limit: number) {
 		nextCursor:
 			candidates.length > limit && oldest
 				? encodeCursor({ at: oldest.createdAt, id: oldest.id })
-				: null,
-	};
-}
-
-/**
- * A page of the chats opened beside the chat `inChat.chatId`, in its
- * workspace, one statement: its automation runs, each newest activity first
- * and one more than the page. Nothing when it is not a chat members open.
- */
-const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
-	db: Executor,
-	inChat: { chatId: string; workspaceId: string },
-	limit: number,
-	before: CursorPoint | undefined,
-) {
-	const items = {
-		limit: limit + 1,
-		orderBy: { updatedAt: "desc", id: "desc" },
-		where: {
-			kind: "run",
-			...(before && { RAW: (row) => earlierThan(row.updatedAt, row.id, before) }),
-		},
-		with: {
-			participants: {
-				columns: {},
-				orderBy: { createdAt: "asc", id: "asc" },
-				with: { member: memberColumns, bot: botColumns },
-			},
-			automationRun: {
-				columns: { id: true, automationId: true, automationName: true, trigger: true, state: true },
-			},
-		},
-	} satisfies DBQueryConfig<"many", typeof relations, (typeof relations)["placedChat"]>;
-	return yield* db.query.placedChat.findFirst({
-		where: {
-			id: inChat.chatId,
-			workspaceId: inChat.workspaceId,
-			kind: { in: [...OPENABLE_CHAT_KINDS] },
-		},
-		columns: { id: true },
-		with: { rootedChats: items },
-	});
-});
-
-type HistoryRow = NonNullable<Effect.Success<ReturnType<typeof loadHistory>>>;
-
-/** The runs, loaded newest activity first, cut to the page. */
-function toHistoryPage(row: HistoryRow, limit: number) {
-	const rooted = row.rootedChats;
-	const page = rooted.slice(0, limit);
-	// Every run's chat has its run's row.
-	const items = page.flatMap(({ automationRun: run, ...side }): ChatHistoryEntry[] =>
-		run
-			? [
-					{
-						chatId: side.id,
-						kind: "run",
-						title: side.title,
-						participants: side.participants.map(({ member: somebody, bot: participant }) =>
-							toParticipant(authorRow(somebody, participant)),
-						),
-						status: run.state,
-						automationRun: {
-							runId: run.id,
-							automationId: run.automationId,
-							automationName: run.automationName,
-							triggerKind: run.trigger.kind,
-						},
-					},
-				]
-			: [],
-	);
-	const oldest = page.at(-1);
-	return {
-		items,
-		nextCursor:
-			rooted.length > limit && oldest
-				? encodeCursor({ at: oldest.updatedAt, id: oldest.id })
 				: null,
 	};
 }

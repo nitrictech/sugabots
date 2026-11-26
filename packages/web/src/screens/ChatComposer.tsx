@@ -8,7 +8,7 @@ import {
 } from "@sugabots/contracts";
 import { type Emoji, emojiNamed, findByShortcode } from "@sugabots/emoji";
 import { cn } from "cn";
-import { ArrowUp, AtSign, Paperclip, Plus, X } from "lucide-react";
+import { ArrowUp, AtSign, Paperclip, Plus, Square, X } from "lucide-react";
 import {
 	type KeyboardEvent,
 	type ReactNode,
@@ -166,13 +166,14 @@ export function ChatComposer({
 	attachments,
 	notice,
 	held,
+	interrupt,
 }: {
 	/** Names the box for assistive technology, and is its placeholder unless `placeholder` says otherwise. */
 	label: string;
 	/** What the empty box says, when that is not its name. */
 	placeholder?: string;
-	/** The model of the bot the message goes to, named by Send while nothing holds the message back. */
-	model?: string;
+	/** The model of the bot the message goes to, shown by Send while nothing holds the message back. */
+	model?: ReactNode;
 	/** As a page's one box to start from, as a bot's page has it: the draft over its buttons, a few lines tall. */
 	tall?: boolean;
 	value: string;
@@ -208,6 +209,11 @@ export function ChatComposer({
 	 * there is one.
 	 */
 	held?: ReactNode;
+	/**
+	 * Stops the replies being written that the member may stop. While there is
+	 * nothing to send, its button stands in Send's place.
+	 */
+	interrupt?: { label: string; pending: boolean; onInterrupt: () => void };
 }) {
 	const attachedFiles = attachments?.items ?? [];
 	const id = useId();
@@ -441,6 +447,17 @@ export function ChatComposer({
 					onAttach={attachments?.attach}
 					onMention={startMention}
 				/>
+				{value.trim() === "" && attachedFiles.length === 0 && interrupt && (
+					<button
+						type="button"
+						aria-label={interrupt.label}
+						disabled={interrupt.pending}
+						onClick={interrupt.onInterrupt}
+						className="focus-ring order-4 ml-auto grid size-7.5 shrink-0 place-items-center rounded-lg bg-destructive text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-60 max-md:order-3 max-md:size-9 max-md:rounded-full motion-safe:animate-rise"
+					>
+						<Square size={11} strokeWidth={0} fill="currentColor" className="max-md:size-3" />
+					</button>
+				)}
 				{(value.trim() !== "" || attachedFiles.length > 0) && (
 					<button
 						type="submit"

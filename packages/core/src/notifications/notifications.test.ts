@@ -996,6 +996,14 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				.returning(),
 		);
 		if (!defined) throw new Error("Could not create the automation");
+		const feed = await onDatabase((db) =>
+			seedChat(db, {
+				workspaceId,
+				kind: "automation_feed",
+				automationId: defined.id,
+				title: defined.name,
+			}),
+		);
 		const requestId = crypto.randomUUID();
 		const run = await onDatabase((db) =>
 			seedChat(db, {
@@ -1024,40 +1032,47 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				},
 			}),
 		);
-		return run.id;
+		return { chatId: run.id, rootChatId: feed.id, automationId: defined.id };
 	};
 
-	const runSettled = (chatId: string) =>
-		ChatEvent.RunSettled({
-			workspaceId,
-			rootChatId: chatId,
-			chatId,
-		});
+	const runSettled = ({ chatId, rootChatId }: { chatId: string; rootChatId: string }) =>
+		ChatEvent.RunSettled({ workspaceId, chatId, rootChatId });
 
-	it("tells the member who made an automation and the one who ran it when a run fails, and not when it finishes", async () => {
-		const failedRun = await automationRunElsewhere(
-			{ state: "failed", error: userText`The calendar could not be read.` },
-			members.bob.id,
-		);
-		const finishedRun = await automationRunElsewhere(
-			{ state: "completed" },
-			members.bob.id,
-			"Briefing",
-		);
+	it.each(["bot", "project"] as const)(
+		"links a failed %s run to its feed for the members who made and ran it",
+		async (owner) => {
+			const inProjectId = owner === "project" ? projectId : undefined;
+			const failedRun = await automationRunElsewhere(
+				{ state: "failed", error: userText`The calendar could not be read.` },
+				members.bob.id,
+				"Digest",
+				inProjectId,
+			);
+			const finishedRun = await automationRunElsewhere(
+				{ state: "completed" },
+				members.bob.id,
+				"Briefing",
+				inProjectId,
+			);
 
-		await emit(runSettled(failedRun), runSettled(finishedRun));
+			await emit(runSettled(failedRun), runSettled(finishedRun));
 
-		const failure = {
-			title: "Digest failed",
-			body: "The calendar could not be read.",
-			tag: `automation:${failedRun}`,
-			path: `/${workspaceSlug}/chats/${failedRun}?nestedChatPage=${failedRun}`,
-			chatId: failedRun,
-		};
-		expect(sentTo(members.bob.id)).toEqual([failure]);
-		expect(sentTo(members.ada.id)).toEqual([failure]);
-		expect(sentTo(members.cy.id)).toEqual([]);
-	});
+			const { chatId: runChat, rootChatId: feed } = failedRun;
+			const failure = {
+				title: "Digest failed",
+				body: "The calendar could not be read.",
+				tag: `automation:${runChat}`,
+				path:
+					owner === "project"
+						? `/${workspaceSlug}/projects/${projectSlug}/${feed}?runChat=${runChat}`
+						: `/${workspaceSlug}/chats/${feed}?runChat=${runChat}`,
+				chatId: feed,
+			};
+			expect(sentTo(members.bob.id)).toEqual([failure]);
+			expect(sentTo(members.ada.id)).toEqual([failure]);
+			expect(sentTo(members.cy.id)).toEqual([]);
+		},
+	);
 
 	it("tells somebody of every run of their automation when they chose to", async () => {
 		const run = await automationRunElsewhere({ state: "completed" }, members.bob.id);
@@ -1074,7 +1089,11 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	});
 
 	it("tells those an automation's result mentions in its automation's feed", async () => {
-		const runChat = await automationRunElsewhere({ state: "completed" }, members.bob.id);
+		const {
+			chatId: runChat,
+			rootChatId: feed,
+			automationId,
+		} = await automationRunElsewhere({ state: "completed" }, members.bob.id);
 		const [run] = await onDatabase((db) =>
 			db
 				.select({ id: automationRun.id, automationId: automationRun.automationId })
@@ -1082,14 +1101,6 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				.where(eq(automationRun.chatId, runChat)),
 		);
 		if (!run) throw new Error("fixture");
-		const { id: feed } = await onDatabase((db) =>
-			seedChat(db, {
-				workspaceId,
-				kind: "automation_feed",
-				automationId: run.automationId,
-				title: "Digest",
-			}),
-		);
 		await chooseLevel(members.cy.id, "all");
 		const content = `@${handleFromName(members.ada.name)} the calendar needs reconnecting.`;
 		const resultPosted = async (chatId: string) => {
@@ -1124,7 +1135,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 					automationResultOf: {
 						runId: run.id,
 						chatId: runChat,
-						automationId: run.automationId,
+						automationId,
 						automationName: "Digest",
 					},
 				} as Message,
@@ -1139,7 +1150,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				title: "Scout mentioned you in Digest",
 				body: content,
 				tag: chatNotificationTag(feed),
-				path: `/${workspaceSlug}/chats/${feed}?nestedChatPage=${runChat}`,
+				path: `/${workspaceSlug}/chats/${feed}?runChat=${runChat}`,
 				chatId: feed,
 			},
 		]);
@@ -1386,7 +1397,12 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await onDatabase((db) =>
 			db.update(membership).set({ role: "admin" }).where(eq(membership.memberId, members.cy.id)),
 		);
-		const runChat = await automationRunElsewhere(undefined, members.bob.id, "Digest", projectId);
+		const { chatId: runChat } = await automationRunElsewhere(
+			undefined,
+			members.bob.id,
+			"Digest",
+			projectId,
+		);
 		const [run] = await onDatabase((db) =>
 			db
 				.select({ id: automationRun.id })

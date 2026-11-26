@@ -25,8 +25,15 @@ export function mergeChatItems(
 	for (const item of pageItems) {
 		items.set(chatItemId(item), item);
 	}
-	for (const message of liveMessages)
-		items.set(`message:${message.id}`, { kind: "message", message });
+	for (const message of liveMessages) {
+		const key = `message:${message.id}`;
+		const paged = items.get(key);
+		// A run's result keeps its run's reply, which only a page carries.
+		items.set(
+			key,
+			paged?.kind === "message" ? { ...paged, message } : { kind: "message", message },
+		);
+	}
 	const saved = new Set(messagesIn([...items.values()]).map(messageKey));
 	for (const item of optimistic) {
 		if (item.kind === "message" && !saved.has(messageKey(item.message))) {

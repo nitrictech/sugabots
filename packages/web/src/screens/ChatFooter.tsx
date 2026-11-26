@@ -1,12 +1,15 @@
 import type { ChatDetails, CurrentUser, MessageReplyTo } from "@sugabots/contracts";
 import { type Dispatch, type SetStateAction, useMemo } from "react";
+import { useInterruptTurns } from "@/lib/chat-query.ts";
 import type { ChatLocation } from "@/lib/chats.ts";
 import type { ComposerAttachments } from "@/lib/composer-attachments.ts";
+import { failureMessage } from "@/lib/failure.ts";
 import { listNames } from "@/lib/name-list.ts";
 import { BotsWithoutModelNotice, useRequiredRepliers } from "./BotsWithoutModelNotice.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { ConnectorsNotice } from "./ConnectorsNotice.tsx";
 import type { ChatRecipients, DraftAudience } from "./chat-recipients.ts";
+import { ModelName } from "./ModelName.tsx";
 import { composerMentionable } from "./mentions.tsx";
 import type { MessageSending } from "./message-sending.ts";
 import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx";
@@ -57,25 +60,44 @@ export function ChatFooter({
 	resolveFailed: boolean;
 	typers: readonly Typer[];
 }) {
-	const { withoutModel, modelName } = useRequiredRepliers(audience.floor);
+	const { withoutModel, model } = useRequiredRepliers(audience.floor);
 	const mentionable = useMemo(
 		() => composerMentionable(details, signedIn, details.chat.kind),
 		[details, signedIn],
 	);
 	const held = withoutModel.length > 0;
 	const hint = held ? undefined : replyHint(audience);
+	const interrupt = useInterruptTurns(details.chat.id);
+	const interruptible = (details.permissions?.interruptTurns ?? []).map(({ turnId }) => turnId);
+	// Stopped already, until the replies end: the turns stay listed for the moment they take to.
+	const stopping =
+		interrupt.isPending ||
+		(interrupt.isSuccess && interruptible.every((turnId) => interrupt.variables?.includes(turnId)));
 	return (
 		<div className="mx-auto w-full max-w-200 shrink-0 px-4 max-md:pb-tab-bar md:px-5">
 			<ChatComposer
 				label={composerLabel({ audience, automation: !!details.automation, chatName })}
-				model={modelName}
+				model={model && <ModelName modelId={model} />}
 				value={draft}
 				onValueChange={onDraftChange}
 				onSubmit={sending.submit}
 				submitLabel="Send message"
 				sending={sending.pending}
 				held={held && <BotsWithoutModelNotice bots={withoutModel} />}
-				error={sending.error ?? (resolveFailed ? RESOLVE_FAILURE_MESSAGE : undefined)}
+				error={
+					sending.error ??
+					(interrupt.isError ? failureMessage(interrupt.error) : undefined) ??
+					(resolveFailed ? RESOLVE_FAILURE_MESSAGE : undefined)
+				}
+				interrupt={
+					interruptible.length > 0
+						? {
+								label: interruptible.length === 1 ? "Interrupt the reply" : "Interrupt the replies",
+								pending: stopping,
+								onInterrupt: () => interrupt.mutate(interruptible),
+							}
+						: undefined
+				}
 				mentionable={mentionable}
 				replyingTo={
 					replyingTo && { message: replyingTo, onCancel: () => onReplyingToChange(undefined) }

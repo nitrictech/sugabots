@@ -1,6 +1,8 @@
 import { uuidOrStringSchema, uuidSchema } from "@sugabots/contracts/uuid";
+import { type ParsedLocation, redirect } from "@tanstack/react-router";
 import { Schema } from "effect";
 import type { AutomationsView } from "@/screens/AutomationsStage.tsx";
+import type { ChatLogPoint } from "@/screens/chat-log-position.ts";
 import type { Staged } from "@/screens/staged.ts";
 
 /** A route parameter naming something by id, with a UUID lowercased as the API returns it. */
@@ -48,8 +50,8 @@ export interface ChatSearch {
 	automations?: string;
 	/** A message to jump to in the chat, such as the mention a notification is about. */
 	message?: string;
-	/** An automation run shown as the page itself, in place of the chat. */
-	nestedChatPage?: string;
+	/** An automation's run to jump to in its feed, by the run's chat, as a notification or the sidebar opens it. */
+	runChat?: string;
 }
 
 export const validateChatSearch = (search: Record<string, unknown>): ChatSearch => {
@@ -57,7 +59,7 @@ export const validateChatSearch = (search: Record<string, unknown>): ChatSearch 
 	const automations = parseAutomationsView(search.automations);
 	return {
 		...idParam(search, "message"),
-		...idParam(search, "nestedChatPage"),
+		...idParam(search, "runChat"),
 		...(file
 			? { file, ...validateFileSearch(search) }
 			: search.desktop === true
@@ -67,6 +69,37 @@ export const validateChatSearch = (search: Record<string, unknown>): ChatSearch 
 					: {}),
 	};
 };
+
+/** Where in the chat its address opens it: at a run, or at a message. */
+export const focusOf = (search: ChatSearch): ChatLogPoint | undefined =>
+	search.runChat
+		? { kind: "run", runChatId: search.runChat }
+		: search.message
+			? { kind: "message", messageId: search.message }
+			: undefined;
+
+export function legacyRunSearch(search: Record<string, unknown>) {
+	const { nestedChatPage, ...rest } = search;
+	if (typeof nestedChatPage !== "string") return;
+	return { ...rest, runChat: decodeRouteId(nestedChatPage) };
+}
+
+/**
+ * Before a run opened in its feed it opened as a page of its own, named in its
+ * feed's address as `?nestedChatPage=`, and emails and push notifications
+ * already sent still link that way: such an address goes on, in its place, to
+ * the feed with the run named as `?runChat=`.
+ */
+export function redirectRunPageAddress({ location }: { location: ParsedLocation }): void {
+	const search = legacyRunSearch(location.search);
+	if (!search) return;
+	throw redirect({
+		to: location.pathname,
+		search,
+		hash: location.hash,
+		replace: true,
+	});
+}
 
 /** How the address says which of a project's automations are open beside its chat. */
 const ALL_AUTOMATIONS = "all";
