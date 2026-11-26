@@ -15,6 +15,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { asItReadsNow, proposedChangeOf, slidesOf } from "@/lib/deck.ts";
+import { Kbd } from "@/ui/kbd.tsx";
 import { SlideDrawing } from "./slide-drawing.tsx";
 
 /**
@@ -125,9 +126,7 @@ export function DeckPresent({
 				>
 					<X aria-hidden size={14} />
 					Exit
-					<kbd className="rounded-xs border border-border-dashed px-1.5 py-0.5 font-sans text-3xs text-muted-foreground">
-						Esc
-					</kbd>
+					<Kbd>Esc</Kbd>
 				</button>
 			</div>
 		</div>,

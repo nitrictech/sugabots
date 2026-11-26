@@ -6,6 +6,15 @@ interface ImportMetaEnv {
 	readonly VITE_API_URL?: string;
 }
 
+/**
+ * The Clipboard API's option to `read`, which TypeScript's DOM types lack:
+ * the formats, such as `text/html`, to hand over as copied rather than
+ * cleaned. A browser without it ignores it.
+ */
+interface Clipboard {
+	read(formats?: { unsanitized?: string[] }): Promise<ClipboardItems>;
+}
+
 /** The parts of noVNC's client the desktop viewer uses; noVNC ships no types. */
 declare module "@novnc/novnc" {
 	export default class RFB extends EventTarget {

@@ -2,12 +2,14 @@ import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { cn } from "cn";
 import { Check, ChevronRight } from "lucide-react";
+import type { ComponentProps } from "react";
+import { Kbd } from "./kbd.tsx";
 
 /*
  * A menu that floats over the page, drawn as the design draws every popover: a
  * raised panel edged in a strong hairline with a soft shadow, and rows the size
  * of a settings row's text. It opens from a trigger, or as a context menu where the
- * pointer is right-clicked; both hold the same items.
+ * pointer is right-clicked, or at a place it is given; all hold the same items.
  */
 
 const popupClassName =
@@ -50,7 +52,7 @@ function DropdownMenuContent({
 }
 
 const itemClassName =
-	"relative flex min-h-9 cursor-pointer select-none items-center gap-2.5 rounded-tail px-2.5 py-2 text-sm outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
+	"relative flex min-h-9 cursor-pointer select-none items-center gap-2.5 rounded-tail px-2.5 py-2 text-sm outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 group-data-[density=compact]/menu:min-h-7 group-data-[density=compact]/menu:py-1 group-data-[density=compact]/menu:text-xs";
 
 function DropdownMenuItem({
 	className,
@@ -134,7 +136,24 @@ function DropdownMenuSeparator({ className, ...props }: MenuPrimitive.Separator.
 	return (
 		<MenuPrimitive.Separator
 			data-slot="dropdown-menu-separator"
-			className={cn("-mx-1 my-1 h-px bg-border", className)}
+			className={cn(
+				"-mx-1 my-1 h-px bg-border group-data-[density=compact]/menu:my-0.75",
+				className,
+			)}
+			{...props}
+		/>
+	);
+}
+
+/** The keys that do what an item does, at the item's end, such as Ctrl+C beside Copy. */
+function DropdownMenuShortcut({ className, ...props }: ComponentProps<typeof Kbd>) {
+	return (
+		<Kbd
+			data-slot="dropdown-menu-shortcut"
+			className={cn(
+				"ml-auto group-data-[density=compact]/menu:px-1 group-data-[density=compact]/menu:py-px",
+				className,
+			)}
 			{...props}
 		/>
 	);
@@ -176,13 +195,29 @@ function ContextMenuTrigger({ ...props }: ContextMenuPrimitive.Trigger.Props) {
 	return <ContextMenuPrimitive.Trigger data-slot="context-menu-trigger" {...props} />;
 }
 
-function ContextMenuContent({ className, ...props }: ContextMenuPrimitive.Popup.Props) {
+/**
+ * The context menu's items, at the pointer that opened it, or at `anchor`, an
+ * element or a place in the window, for a menu opened another way, as from
+ * the keyboard. With `density` set to `compact`, its rows are shorter and
+ * their text smaller, for a menu opened over work in progress, which it
+ * should cover little of.
+ */
+function ContextMenuContent({
+	anchor,
+	density = "default",
+	className,
+	...props
+}: ContextMenuPrimitive.Popup.Props &
+	Pick<ContextMenuPrimitive.Positioner.Props, "anchor"> & {
+		density?: "default" | "compact";
+	}) {
 	return (
 		<ContextMenuPrimitive.Portal>
-			<ContextMenuPrimitive.Positioner className="isolate z-50 outline-none">
+			<ContextMenuPrimitive.Positioner anchor={anchor} className="isolate z-50 outline-none">
 				<ContextMenuPrimitive.Popup
 					data-slot="context-menu-content"
-					className={cn(popupClassName, className)}
+					data-density={density}
+					className={cn(popupClassName, "group/menu", className)}
 					{...props}
 				/>
 			</ContextMenuPrimitive.Positioner>
@@ -202,6 +237,7 @@ export {
 	DropdownMenuRadioGroup,
 	DropdownMenuRadioItem,
 	DropdownMenuSeparator,
+	DropdownMenuShortcut,
 	DropdownMenuSub,
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,

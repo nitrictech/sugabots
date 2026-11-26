@@ -1,6 +1,7 @@
 import { Popover } from "@base-ui/react/popover";
 import { SLIDE_LAYOUTS, type SlideLayout } from "@sugabots/contracts/slides-markdown";
 import { cn } from "cn";
+import { RotateCcw } from "lucide-react";
 import { type CSSProperties, type ReactNode, useState } from "react";
 import { LAYOUT_NAMES } from "@/lib/deck.ts";
 
@@ -10,12 +11,15 @@ import { LAYOUT_NAMES } from "@/lib/deck.ts";
  * slide's layout is chosen, under `heading` "New slide", and how a slide's
  * is changed, under "Change layout", with the `current` one ringed. While
  * `unavailable` says why no layout can be chosen, it says that instead.
+ * Given `onReset`, it ends with a row that puts the slide's boxes back where
+ * its layout places them, even while no layout can be chosen.
  */
 export function LayoutPicker({
 	heading,
 	current,
 	unavailable,
 	onPick,
+	onReset,
 	label,
 	className,
 	children,
@@ -24,6 +28,8 @@ export function LayoutPicker({
 	current?: SlideLayout;
 	unavailable?: string;
 	onPick: (layout: SlideLayout) => void;
+	/** Resets the slide's layout, for a slide laid out by hand; `undefined` offers no reset. */
+	onReset?: () => void;
 	/** Names the button for assistive technology, when its own words don't. */
 	label?: string;
 	/** The button's classes. */
@@ -65,6 +71,27 @@ export function LayoutPicker({
 									</button>
 								))}
 							</div>
+						)}
+						{onReset && (
+							<>
+								<hr className="-mx-2.5 border-border" />
+								<button
+									type="button"
+									onClick={() => {
+										setOpen(false);
+										onReset();
+									}}
+									className="focus-ring flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left text-xs transition-colors hover:bg-hover"
+								>
+									<RotateCcw aria-hidden size={16} className="shrink-0 text-soft-foreground" />
+									<span className="flex flex-col gap-0.5">
+										<span className="text-foreground">Reset layout</span>
+										<span className="text-subtle-foreground">
+											Put every box back where this layout places it.
+										</span>
+									</span>
+								</button>
+							</>
 						)}
 					</Popover.Popup>
 				</Popover.Positioner>

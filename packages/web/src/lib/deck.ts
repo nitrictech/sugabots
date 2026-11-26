@@ -79,6 +79,14 @@ export function slideIndexAt(deck: Node, pos: number): number {
 	return Math.min(deck.resolve(pos).index(0), deck.childCount - 1);
 }
 
+/** The index of the box on the slide at `slideIndex` that holds `pos`, if one does. */
+export function boxAt(deck: Node, pos: number, slideIndex: number): number | undefined {
+	const place = deck.resolve(pos);
+	// A deck holds slides, which hold their frame, which holds the boxes.
+	if (place.depth < 3 || place.index(0) !== slideIndex) return undefined;
+	return place.node(2).type.name === SLIDE_BODY ? place.index(2) : undefined;
+}
+
 /** Whether somebody proposes adding the slide, or removing it. */
 export function proposedChangeOf(slide: Node): "adding" | "removing" | undefined {
 	if (slide.marks.some((mark) => mark.type.name === SUGGESTED_INSERTION)) return "adding";

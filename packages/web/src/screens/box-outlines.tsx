@@ -1,10 +1,8 @@
-import { isRemovedBox, placementOf, SLIDE_BODY } from "@sugabots/contracts/live-slides";
+import { isRemovedBox, placementOf } from "@sugabots/contracts/live-slides";
 import { type Frame, SLIDE_HEIGHT, SLIDE_WIDTH } from "@sugabots/contracts/slides-markdown";
-import type { Node } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { type Editor, useEditorState } from "@tiptap/react";
-import { Trash2 } from "lucide-react";
 import {
 	type CSSProperties,
 	type FocusEvent,
@@ -31,22 +29,9 @@ import {
 	sameFrame,
 	snapLinesAround,
 } from "@/lib/box-frames.ts";
-import {
-	type BoxRemovalBlocked,
-	boxRemovalBlocked,
-	type PlacedSlide,
-	placeBox,
-	removeBox,
-	slidesOf,
-} from "@/lib/deck.ts";
+import { boxAt, type PlacedSlide, placeBox, removeBox, slidesOf } from "@/lib/deck.ts";
 import { type FollowedNode, whereFollowedNodeIs } from "@/lib/followed-node.ts";
 import { IS_MAC } from "@/lib/platform.ts";
-import {
-	ContextMenu,
-	ContextMenuContent,
-	ContextMenuTrigger,
-	DropdownMenuItem,
-} from "@/ui/dropdown-menu.tsx";
 import { BOX_NAMES, drawnSlideBody, previewingBoxes, withoutBoxesPreview } from "./deck-stage.ts";
 import { rolesOfBoxes } from "./slide-drawing.tsx";
 
@@ -60,10 +45,10 @@ import { rolesOfBoxes } from "./slide-drawing.tsx";
  * and dragging inside it selects its words, as ever. With its outline
  * focused, by a click or by Tab, the arrow keys move it, Delete or Backspace
  * removes it from the slide, one box a press however long the key is held,
- * and Escape goes back to its words; right-clicking its outline offers to
- * remove it too, where right-clicking its words still opens the browser's own
- * menu. The outline is outside the editor, so it passes the editor's keys for
- * undo and redo to the editor.
+ * and Escape goes back to its words. The slide's menu, right-clicking its
+ * outline or its words, offers to remove it too (see `slide-menu.tsx`), and
+ * the box stays outlined while the menu is open for it. The outline is outside
+ * the editor, so it passes the editor's keys for undo and redo to the editor.
  *
  * A drag is drawn as it goes, in this editor only, and written to the deck
  * once, when it ends, so it is one change to undo, and one for the others to
@@ -99,14 +84,16 @@ const ARROWS: Partial<Record<string, Shift>> = {
 /** The keys an outline says it acts on, for assistive technology: the arrows, and the keys that remove its box. */
 const OUTLINE_KEYS = [...Object.keys(ARROWS), "Delete", "Backspace"].join(" ");
 
-/** The key that removes a box, as the menu offering to remove it names it: Delete, or on a Mac the ⌫ key, which is Backspace. */
-const REMOVE_KEY = IS_MAC ? "⌫" : "Del";
+/** Carries the place on its slide of the box an outline is drawn for, by which `outlinedBoxOf` finds it. */
+const OUTLINED_BOX_ATTRIBUTE = "data-outlined-box";
 
-/** Why a box can't be removed now, as the menu offering to remove it says it. */
-const REMOVAL_BLOCKED_WORDS: Record<BoxRemovalBlocked, string> = {
-	suggesting: "Turn off Suggesting to delete a box.",
-	suggestionPending: "Accept or undo the suggestions in this box to delete it.",
-};
+/** The place on the slide of the box whose outline holds `element`, if an outline does. */
+export function outlinedBoxOf(element: Element): number | undefined {
+	const place = element
+		.closest(`[${OUTLINED_BOX_ATTRIBUTE}]`)
+		?.getAttribute(OUTLINED_BOX_ATTRIBUTE);
+	return place === null || place === undefined ? undefined : Number(place);
+}
 
 /**
  * The outlines of the boxes of `slide`, the slide on the stage, drawn over it
@@ -120,12 +107,15 @@ export function BoxOutlines({
 	slide,
 	followed,
 	stage,
+	menuFor,
 }: {
 	editor: Editor;
 	slide: PlacedSlide;
 	/** `slide`, followed through anybody's changes (see `followNode`). */
 	followed: FollowedNode;
 	stage: RefObject<HTMLElement | null>;
+	/** The box, by its place on the slide, that the slide's menu is open for, which is the one being edited until it closes. */
+	menuFor: number | undefined;
 }) {
 	const drawn = useDrawnSlide(editor.view, slide, stage);
 	const holdingCaret = useEditorState({
@@ -136,8 +126,6 @@ export function BoxOutlines({
 	const stageFocused = useFocusWithin(stage);
 	// The box whose outline, or one of whose handles, has the focus.
 	const [focused, setFocused] = useState<number>();
-	// The box whose outline's menu is open, which is the one being edited until it closes.
-	const [menuFor, setMenuFor] = useState<number>();
 	const [hovered, setHovered] = useState<number>();
 	const overlay = useRef<HTMLDivElement>(null);
 	const roles = rolesOfBoxes(slide.node);
@@ -147,15 +135,6 @@ export function BoxOutlines({
 		.children.map((box, index) => roles[index] !== undefined && !isRemovedBox(box));
 	const { drag, startDrag } = useBoxDrag(editor, slide, followed, outlined);
 	const frames = drag?.moved?.frames ?? placementOf(slide.node) ?? drawn?.frames;
-	const removalBlocked = useEditorState({
-		editor,
-		selector: ({ editor: current }) =>
-			slide.node.child(0).children.map((box) => boxRemovalBlocked(current.state, box)),
-		equalityFn: (before, after) =>
-			after !== null &&
-			before.length === after.length &&
-			before.every((reason, index) => reason === after[index]),
-	});
 
 	const hover = useEffectEvent((event: globalThis.PointerEvent) => {
 		// The box being dragged stays the one outlined, wherever the pointer goes.
@@ -184,17 +163,13 @@ export function BoxOutlines({
 		withOutline(focused) ??
 		(stageFocused ? withOutline(holdingCaret) : undefined);
 
-	// An outline, or its menu, can lose the focus without a blur, as when the outline goes with its
-	// box: what says it has the focus is then let go, and the focus, unless something else has
-	// taken it, goes back to the slide's words rather than nowhere.
+	// An outline can lose the focus without a blur, as when it goes with its box: what says it has
+	// the focus is then let go, and the focus, unless something else has taken it, goes back to the
+	// slide's words rather than nowhere.
 	useEffect(() => {
-		const menuGone = menuFor !== undefined && !outlined[menuFor];
-		const menuOpen = menuFor !== undefined && !menuGone;
-		const focusGone =
-			focused !== undefined && !menuOpen && !overlay.current?.contains(document.activeElement);
-		if (menuGone) setMenuFor(undefined);
-		if (focusGone) setFocused(undefined);
-		if ((menuGone || focusGone) && nothingFocused()) editor.view.focus();
+		if (focused === undefined || overlay.current?.contains(document.activeElement)) return;
+		setFocused(undefined);
+		if (nothingFocused()) editor.view.focus();
 	});
 	// Going, as when the stage comes to show another slide, the outlines give the focus they
 	// have to the slide's words, while they still have it.
@@ -280,25 +255,20 @@ export function BoxOutlines({
 			{frames.map((frame, index) => {
 				const role = roles[index];
 				if (!role || !outlined[index] || (index !== editing && index !== hovered)) return null;
-				const blocked = removalBlocked[index];
 				return (
 					<BoxOutline
 						// A box has no lasting id, so its place is its key, which keeps a drag's element through a drag.
 						// biome-ignore lint/suspicious/noArrayIndexKey: see above.
 						key={index}
+						box={index}
 						frame={frame}
 						name={BOX_NAMES[role]}
 						editing={index === editing}
-						removalBlocked={blocked && REMOVAL_BLOCKED_WORDS[blocked]}
 						onFocusChange={(focusing) =>
 							setFocused((now) => (focusing ? index : now === index ? undefined : now))
 						}
-						onMenuChange={(open) =>
-							setMenuFor((now) => (open ? index : now === index ? undefined : now))
-						}
 						onDragStart={(event, handle) => startDrag(event, index, handle)}
 						onKeyDown={(event, handle) => actOnKey(event, index, handle)}
-						onRemove={() => remove(index)}
 					/>
 				);
 			})}
@@ -438,34 +408,28 @@ function useBoxDrag(
 
 /**
  * One box's outline: the band along it that moves the box, and, while it is
- * being edited, the handles that resize it. Right-clicking either opens a
- * menu offering to remove the box.
+ * being edited, the handles that resize it.
  */
 function BoxOutline({
+	box,
 	frame,
 	name,
 	editing,
-	removalBlocked,
 	onFocusChange,
-	onMenuChange,
 	onDragStart,
 	onKeyDown,
-	onRemove,
 }: {
+	/** The box, by its place on the slide. */
+	box: number;
 	frame: Frame;
 	/** What the box is called, as `BOX_NAMES` says it. */
 	name: string;
 	editing: boolean;
-	/** Why the box can't be removed now, in words, or `undefined` when it can. */
-	removalBlocked: string | undefined;
 	/** Told when its band or one of its handles takes the focus, and when the focus leaves all of them. */
 	onFocusChange: (focused: boolean) => void;
-	/** Told when its menu opens and when it closes. */
-	onMenuChange: (open: boolean) => void;
 	/** Told of a press on its band, to move it, or on one of its handles, to resize it from there. */
 	onDragStart: (event: PointerEvent<HTMLElement>, handle: Handle | undefined) => void;
 	onKeyDown: (event: KeyboardEvent<HTMLElement>, handle: Handle | undefined) => void;
-	onRemove: () => void;
 }) {
 	const outline = useRef<HTMLDivElement>(null);
 	const focusing = {
@@ -478,59 +442,39 @@ function BoxOutline({
 		},
 	};
 	return (
-		<ContextMenu onOpenChange={onMenuChange}>
-			{/* Only the band and the handles take the pointer, so right-clicking the box's words opens the browser's menu. */}
-			<ContextMenuTrigger
-				ref={outline}
-				className="box-frame"
-				data-editing={editing ? "" : undefined}
-				style={frameStyle(frame)}
-			>
-				<button
-					type="button"
-					className="box-move"
-					aria-label={`Move ${name}`}
-					aria-keyshortcuts={OUTLINE_KEYS}
-					onPointerDown={(event) => onDragStart(event, undefined)}
-					onKeyDown={(event) => onKeyDown(event, undefined)}
-					{...focusing}
-				/>
-				{editing &&
-					HANDLES.map((handle) => (
-						<button
-							key={handle}
-							type="button"
-							className="box-handle"
-							aria-label={`Resize ${name} from the ${HANDLE_PLACES[handle].words}`}
-							aria-keyshortcuts={OUTLINE_KEYS}
-							style={HANDLE_PLACES[handle].style}
-							onPointerDown={(event) => onDragStart(event, handle)}
-							onKeyDown={(event) => onKeyDown(event, handle)}
-							{...focusing}
-						>
-							<span aria-hidden />
-						</button>
-					))}
-			</ContextMenuTrigger>
-			<ContextMenuContent className="max-w-64">
-				<DropdownMenuItem
-					variant="destructive"
-					disabled={removalBlocked !== undefined}
-					onClick={onRemove}
-				>
-					<Trash2 aria-hidden />
-					<span className="flex flex-col">
-						Delete
-						{removalBlocked && (
-							<span className="text-xs text-muted-foreground">{removalBlocked}</span>
-						)}
-					</span>
-					<kbd className="ml-auto rounded-xs border border-border-dashed px-1.5 py-0.5 font-sans text-3xs text-muted-foreground">
-						{REMOVE_KEY}
-					</kbd>
-				</DropdownMenuItem>
-			</ContextMenuContent>
-		</ContextMenu>
+		<div
+			ref={outline}
+			className="box-frame"
+			data-editing={editing ? "" : undefined}
+			{...{ [OUTLINED_BOX_ATTRIBUTE]: box }}
+			style={frameStyle(frame)}
+		>
+			<button
+				type="button"
+				className="box-move"
+				aria-label={`Move ${name}`}
+				aria-keyshortcuts={OUTLINE_KEYS}
+				onPointerDown={(event) => onDragStart(event, undefined)}
+				onKeyDown={(event) => onKeyDown(event, undefined)}
+				{...focusing}
+			/>
+			{editing &&
+				HANDLES.map((handle) => (
+					<button
+						key={handle}
+						type="button"
+						className="box-handle"
+						aria-label={`Resize ${name} from the ${HANDLE_PLACES[handle].words}`}
+						aria-keyshortcuts={OUTLINE_KEYS}
+						style={HANDLE_PLACES[handle].style}
+						onPointerDown={(event) => onDragStart(event, handle)}
+						onKeyDown={(event) => onKeyDown(event, handle)}
+						{...focusing}
+					>
+						<span aria-hidden />
+					</button>
+				))}
+		</div>
 	);
 }
 
@@ -661,14 +605,6 @@ const sameDrawnSlide = (one: DrawnSlide, other: DrawnSlide) =>
 		const twin = other.frames[index];
 		return twin !== undefined && sameFrame(frame, twin);
 	});
-
-/** The index of the box on the slide at `slideIndex` that holds `pos`, if one does. */
-function boxAt(deck: Node, pos: number, slideIndex: number): number | undefined {
-	const place = deck.resolve(pos);
-	// A deck holds slides, which hold their frame, which holds the boxes.
-	if (place.depth < 3 || place.index(0) !== slideIndex) return undefined;
-	return place.node(2).type.name === SLIDE_BODY ? place.index(2) : undefined;
-}
 
 /**
  * The last of `frames`, the one drawn over any before it, whose box or band

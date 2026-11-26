@@ -6,7 +6,7 @@ import type { SlideLayout } from "@sugabots/contracts/slides-markdown";
 import { DOMSerializer } from "@tiptap/pm/model";
 import type { Transaction } from "@tiptap/pm/state";
 import { type Editor, useEditorState } from "@tiptap/react";
-import { ChevronDown, ChevronLeft, ChevronRight, LayoutTemplate, RotateCcw, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, LayoutTemplate, X } from "lucide-react";
 import {
 	type ReactNode,
 	type RefObject,
@@ -49,7 +49,6 @@ import {
 	pendingSuggestions,
 	settlingSuggestion,
 } from "@/lib/suggestions.ts";
-import { Button } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { BoxOutlines } from "./box-outlines.tsx";
 import { DeckPresent } from "./DeckPresent.tsx";
@@ -81,6 +80,7 @@ import {
 } from "./live-editor-overlays.tsx";
 import { SlideStrip } from "./SlideStrip.tsx";
 import { fitSlideText } from "./slide-drawing.tsx";
+import { useSlideMenu } from "./slide-menu.tsx";
 
 /** Starts presenting the deck being edited. */
 export type Present = () => void;
@@ -305,10 +305,12 @@ function DeckView({
 	const pageWidth = useWidth(page);
 	const beside = pending.length > 0 && pageWidth >= CARDS_BESIDE_MIN_PAGE_PX;
 	const sideBySide = useMediaQuery(SIDE_BY_SIDE);
-	if (!shown) return null;
 	const editable = !outOfDate;
 	// From Tailwind's `md`, as the strip's slides are dragged, and not while a suggestion may change which boxes the slide has.
-	const boxesMovable = editable && sideBySide && !boxesWaitOnSuggestion(shown.node);
+	const boxesMovable =
+		shown !== undefined && editable && sideBySide && !boxesWaitOnSuggestion(shown.node);
+	const slideMenu = useSlideMenu(editor, { slide: shown, editable, boxesEditable: boxesMovable });
+	if (!shown) return null;
 	const change = (transaction: Transaction | undefined) => {
 		if (transaction) dispatchAsOneChange(editor, transaction, as.name);
 	};
@@ -331,6 +333,10 @@ function DeckView({
 		if (!window.matchMedia(COARSE_POINTER).matches) editor.view.focus();
 		page.current?.scrollTo({ top: 0 });
 	}
+	function resetShownLayout() {
+		const resetting = resetLayout(editor.state, current);
+		if (resetting) editor.view.dispatch(resetting);
+	}
 	return (
 		<>
 			<EditorBar
@@ -345,12 +351,12 @@ function DeckView({
 			{outOfDate && <OutOfDateNotice noun="deck" />}
 			{importNotice}
 			{images.notice && (
-				<Notice>
-					<span className="min-w-0 flex-1">{images.notice}</span>
-					<IconButton label="Dismiss" onClick={images.dismiss}>
-						<X aria-hidden />
-					</IconButton>
-				</Notice>
+				<DismissibleNotice onDismiss={images.dismiss}>{images.notice}</DismissibleNotice>
+			)}
+			{slideMenu.notice && (
+				<DismissibleNotice onDismiss={slideMenu.dismissNotice}>
+					{slideMenu.notice}
+				</DismissibleNotice>
 			)}
 			<div className="flex min-h-0 flex-1 max-md:flex-col-reverse">
 				<SlideStrip
@@ -391,6 +397,7 @@ function DeckView({
 										onPick={(layout: SlideLayout) =>
 											change(changeLayout(editor.state, current, layout))
 										}
+										onReset={laidOutByHand(shown.node) ? resetShownLayout : undefined}
 										className="focus-ring inline-flex h-8 min-w-0 items-center gap-1.5 rounded-sm px-2 text-soft-foreground text-xs transition-colors hover:bg-hover data-popup-open:bg-hover max-md:h-11 max-md:text-sm"
 									>
 										<LayoutTemplate aria-hidden size={16} strokeWidth={1.75} />
@@ -399,25 +406,10 @@ function DeckView({
 										<ChevronDown aria-hidden size={12} className="text-subtle-foreground" />
 									</LayoutPicker>
 								)}
-								{editable && (
-									<Button
-										variant="ghost"
-										size="sm"
-										disabled={!laidOutByHand(shown.node)}
-										onClick={() => {
-											const resetting = resetLayout(editor.state, current);
-											if (resetting) editor.view.dispatch(resetting);
-										}}
-										className="h-8 rounded-sm px-2 max-md:h-11 max-md:text-sm"
-									>
-										<RotateCcw aria-hidden />
-										Reset layout
-									</Button>
-								)}
 								<span className="flex-1" />
 								<SlidePager current={current} total={slides.length} onSelect={select} />
 							</div>
-							<div ref={frame} className="relative">
+							<div ref={frame} className="relative" {...slideMenu.stageProps}>
 								<LiveDocumentText
 									editor={editor}
 									ref={text}
@@ -434,6 +426,7 @@ function DeckView({
 										slide={shown}
 										followed={deck.followed}
 										stage={frame}
+										menuFor={slideMenu.box}
 									/>
 								)}
 							</div>
@@ -484,11 +477,30 @@ function DeckView({
 				/>
 			)}
 			{images.picker}
+			{slideMenu.menu}
 		</>
 	);
 }
 
 const COARSE_POINTER = "(pointer: coarse)";
+
+/** Something the person should know about the deck, across the top of it until they dismiss it. */
+function DismissibleNotice({
+	onDismiss,
+	children,
+}: {
+	onDismiss: () => void;
+	children: ReactNode;
+}) {
+	return (
+		<Notice>
+			<span className="min-w-0 flex-1">{children}</span>
+			<IconButton label="Dismiss" onClick={onDismiss}>
+				<X aria-hidden />
+			</IconButton>
+		</Notice>
+	);
+}
 
 /**
  * Which slide is on the stage, written "2 / 3" and read out as "Slide 2 of
