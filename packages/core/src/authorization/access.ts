@@ -1,5 +1,4 @@
-import type { WorkspaceRole } from "@sugabots/contracts";
-import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import { inArray, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { bot, botMember, membership, project, projectMember } from "../database/schema.ts";
 import { outerColumn } from "../database/sql.ts";
 import { rolesGrantedInProject } from "./permissions.ts";
@@ -33,7 +32,7 @@ export function reachesProjectFor(
 		where reach_project.id = ${outerColumn(projectId)}
 			and not reach_project.deleting
 			and case when reach_project.default_of_bot_id is null
-				then ${roleIsOneOf(ROLES_READING_PROJECTS)} and exists (
+				then ${inArray(sql`reach_membership.role`, ROLES_READING_PROJECTS)} and exists (
 					select 1
 					from ${projectMember} as reach_project_member
 					where reach_project_member.project_id = reach_project.id
@@ -170,11 +169,3 @@ export function reachesChatFor(row: ChatReachColumns, memberId: string | SQLWrap
 /** Roles that reach a project once they have been added to it. */
 const ROLES_READING_PROJECTS = rolesGrantedInProject("project.read");
 
-/** `false` rather than an empty `in ()`, which is not valid SQL. */
-function roleIsOneOf(roles: readonly WorkspaceRole[]): SQL {
-	if (roles.length === 0) return sql`false`;
-	return sql`reach_membership.role in (${sql.join(
-		roles.map((role) => sql`${role}`),
-		sql`, `,
-	)})`;
-}
