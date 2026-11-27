@@ -455,6 +455,25 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await approved(other, toolCallOf(allowed), always, input)).toBe("ApprovalNeeded");
 		});
 
+		it("takes the allowed arguments as the same whatever order their keys come in", async () => {
+			const { a } = world;
+			const edsBot = await as.botFor(a.ed, a.pub.id, a.chat);
+			// Two keys a locale's collation ranks equal, which the database keeps in its own order.
+			const combining = "á";
+			const precomposed = "á";
+			const allowed = await seedApprovalCall(edsBot, {
+				status: "allowed",
+				decidedBy: a.ed,
+				input: { [precomposed]: 2, [combining]: 1 },
+			});
+			const asked = Object.fromEntries<unknown>([
+				[combining, 1],
+				[precomposed, 2],
+			]) as InputOf<"web.search">;
+
+			expect(await decidedBy(edsBot, toolCallOf(allowed), always, asked)).toBe(a.ed);
+		});
+
 		it("follows a connector tool's access as it stands: Allow runs, Ask waits, Off refuses", async () => {
 			const { a } = world;
 			const edsBot = await as.botFor(a.ed, a.pub.id, a.chat);

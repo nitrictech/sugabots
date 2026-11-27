@@ -30,7 +30,7 @@ import { ChatEvents } from "../../chat-events.ts";
 import { ChatEvent, type ToolCallChange } from "../../events.ts";
 import { toToolCallPart } from "../../store/tool-calls.ts";
 import { withImagesCounted } from "../../tools/images.ts";
-import { decodeRecordedBuiltInInput } from "../../tools/recorded-input.ts";
+import { asRecordedJson, sameRecordedInput } from "../../tools/recorded-input.ts";
 import {
 	type FencedProof,
 	type FenceRefusal,
@@ -242,7 +242,7 @@ export const make = Effect.gen(function* () {
 									atOffset: input.atOffset,
 									writeOrDelete: input.writeOrDelete,
 									...bindingColumns(input.binding),
-									executionInput: executionJson(input.input),
+									executionInput: asRecordedJson(input.input),
 									sentInExecution: runsTurn.execution,
 									startedAt,
 								})
@@ -399,7 +399,7 @@ export const make = Effect.gen(function* () {
 													approvalAskedAt: askedAt,
 													...bindingColumns(approval.binding),
 													input: boundedJson(approval.input),
-													executionInput: executionJson(approval.input),
+													executionInput: asRecordedJson(approval.input),
 													status: "awaiting_approval" as const,
 													writeOrDelete: approval.writeOrDelete,
 													atOffset: approval.atOffset,
@@ -755,11 +755,6 @@ function boundedJson(value: unknown): JsonValue {
 	};
 }
 
-/** The complete input, as JSON keeps it, for running the call exactly as it was approved. */
-function executionJson(value: unknown): JsonValue {
-	return JSON.parse(JSON.stringify(value ?? null));
-}
-
 export const replayWrittenFile = (fence: FencedProof, toolCallId: string) =>
 	Effect.gen(function* () {
 		const { receipt } = yield* fileWriteCall(fence, toolCallId, false);
@@ -875,15 +870,9 @@ export function sameCallAsSent(
 }
 
 function sameExecutionInput(row: ToolCallRow, input: unknown): boolean {
-	const current = executionJson(input);
-	if (isDeepStrictEqual(row.executionInput, current)) return true;
-	return (
-		row.connectorId === null &&
-		isDeepStrictEqual(
-			executionJson(decodeRecordedBuiltInInput(row.tool, row.executionInput)),
-			current,
-		)
-	);
+	return sameRecordedInput(row.tool, row.executionInput, input, {
+		builtIn: row.connectorId === null,
+	});
 }
 
 /** How a binding is stored on the call: a built-in tool's leaves the connector's columns empty. */

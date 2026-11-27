@@ -15,7 +15,7 @@ import {
 	type TurnFacts,
 	turnFacts,
 } from "../authentication/turn-facts.ts";
-import { decodeRecordedBuiltInInput } from "../chats/tools/recorded-input.ts";
+import { sameRecordedInput } from "../chats/tools/recorded-input.ts";
 import { query } from "../database/database.ts";
 import { toolCall } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
@@ -262,8 +262,9 @@ const proveApproval = <
 				decision.connectorRevision !== connectorUse.reach.revision ||
 				decision.remoteToolName !== connectorUse.tool ||
 				(connectorUse.writeOrDelete && !decision.writeOrDelete) ||
-				canonicalJson(decision.executionInput ?? decision.input) !==
-					canonicalJson(argumentsToApprove))
+				!sameRecordedInput(name, decision.executionInput ?? decision.input, argumentsToApprove, {
+					builtIn: false,
+				}))
 		)
 			return yield* new ApprovalRefused();
 		if (
@@ -278,7 +279,9 @@ const proveApproval = <
 		if (need === "nothing" && !decision?.status) return approved(null, decision?.sdkToolCallId);
 		if (
 			decision?.status === "allowed" &&
-			!sameInputAsRecorded(name, decision.executionInput ?? decision.input, argumentsToApprove)
+			!sameRecordedInput(name, decision.executionInput ?? decision.input, argumentsToApprove, {
+				builtIn: true,
+			})
 		) {
 			return yield* new ApprovalRefused();
 		}
@@ -340,18 +343,6 @@ function matchesApprovalTargets(
 }
 
 /**
- * Whether a built-in tool's call `input` is the one recorded: as stored, or as
- * the tool's contract decodes the stored arguments now.
- */
-function sameInputAsRecorded(tool: string, recorded: unknown, input: unknown): boolean {
-	const asked = canonicalJson(input);
-	return (
-		canonicalJson(recorded) === asked ||
-		canonicalJson(decodeRecordedBuiltInInput(tool, recorded)) === asked
-	);
-}
-
-/**
  * What a call needs, by its rule and the turn's: a personal bot's calls that
  * change anything, since it acts across everything its creator reaches, and
  * every call in its runs that came from outside, wait for its creator. An exposed tool may add its own approval rule, and a
@@ -377,13 +368,4 @@ export function approvalNeed(
 	)
 		return "approver";
 	return rule.approval.kind === "always" || connectorUse?.access === "ask" ? "approver" : "nothing";
-}
-
-/** JSON with every object's keys in order, so equal values compare equal however they were written. */
-function canonicalJson(value: unknown): string {
-	return JSON.stringify(value, (_key, nested: unknown) =>
-		nested !== null && typeof nested === "object" && !Array.isArray(nested)
-			? Object.fromEntries(Object.entries(nested).sort(([a], [b]) => a.localeCompare(b)))
-			: nested,
-	);
 }
