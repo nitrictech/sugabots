@@ -52,7 +52,7 @@ import type { ChatColumns } from "./reach-set.ts";
  *    creator, whose permissions it acts with.
  * 3. `run`: a call in an automation's run: admins and the managers of the
  *    run's bot, among those who reach its chat.
- * 4. `asker`: any other turn's call, a helper's included: its asker.
+ * 4. `asker`: any other turn's call, a helper's included: its asker, while they reach the chat.
  */
 export type ApproverRule = "computerRequest" | "personalBot" | "run" | "asker";
 
@@ -365,7 +365,7 @@ function decidesByRule(
 		when 'computerRequest' then ${standing.managesComputer}
 		when 'personalBot' then approver_bot.created_by_id = ${standing.member}
 		when 'run' then ${standing.managesRun} and ${standing.reachesChat}
-		else approver_turn.asker_id = ${standing.member}
+		else approver_turn.asker_id = ${standing.member} and ${standing.reachesChat}
 	end`;
 }
 

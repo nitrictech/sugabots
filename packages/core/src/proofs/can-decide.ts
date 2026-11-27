@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import { turnFacts } from "../authentication/turn-facts.ts";
 import { approversOf } from "../chats/tools/approvers.ts";
 import { query } from "../database/database.ts";
-import { chat, membership, toolCall } from "../database/schema.ts";
+import { chat, membership, toolCall, workspace } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
 import { type ApproverRule, approverFacts } from "./approvers.ts";
@@ -44,6 +44,10 @@ export const proveCanDecide = <P, X>(isMember: IsMember<P>, callId: Named<X, str
 						.from(toolCall)
 						.innerJoin(chat, eq(chat.id, toolCall.chatId))
 						.innerJoin(
+							workspace,
+							and(eq(workspace.id, chat.workspaceId), eq(workspace.deleting, false)),
+						)
+						.innerJoin(
 							membership,
 							and(
 								eq(membership.workspaceId, chat.workspaceId),
@@ -77,23 +81,3 @@ export const proveCanDecide = <P, X>(isMember: IsMember<P>, callId: Named<X, str
 		});
 		return proof;
 	});
-
-export const workspaceOfApproval = <P>(isMember: IsMember<P>, id: string) =>
-	isUuid(id)
-		? query((db) =>
-				db
-					.select({ workspace: chat.workspaceId })
-					.from(toolCall)
-					.innerJoin(chat, eq(chat.id, toolCall.chatId))
-					.innerJoin(
-						membership,
-						and(
-							eq(membership.workspaceId, chat.workspaceId),
-							eq(membership.memberId, isMember.member),
-							eq(membership.leaving, false),
-						),
-					)
-					.where(eq(toolCall.id, id))
-					.limit(1),
-			).pipe(Effect.map(([row]) => row?.workspace))
-		: Effect.succeed(undefined);
