@@ -77,8 +77,9 @@ const call = (
 
 /**
  * BuiltInTools: each of the product's own tools by its family's icon, a file
- * for the file tools and a terminal for a command, and the wrench only for one
- * in no family.
+ * for the file tools, the computer for copying to it and a terminal for a
+ * command, the Sugabots mark for the workspace's own, and the wrench only for
+ * one in no family.
  */
 export const BuiltInTools = meta.story({
 	args: {
@@ -102,6 +103,8 @@ export const BuiltInTools = meta.story({
 				),
 				call("24", "file_edit", { fileId: "f" }, { title: "Postgres job queues" }),
 				call("25", "read_docs", { page: "automations" }),
+				call("27", "copy_file_to_computer", {}),
+				call("28", "create_project", { name: "Exports" }),
 				call("26", "a_tool_with_no_icon", {}),
 			],
 		},
@@ -113,6 +116,7 @@ export const BuiltInTools = meta.story({
 		await expect((await lineOf(/^Ran/)).querySelector(".lucide-square-terminal")).not.toBeNull();
 		await expect((await lineOf(/^Created/)).querySelector(".lucide-file-text")).not.toBeNull();
 		await expect((await lineOf(/^Edited/)).querySelector(".lucide-file-text")).not.toBeNull();
+		await expect((await lineOf(/^Copied/)).querySelector(".lucide-monitor")).not.toBeNull();
 		await expect(
 			(await lineOf(/^A tool with no icon/)).querySelector(".lucide-wrench"),
 		).not.toBeNull();
