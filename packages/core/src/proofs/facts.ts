@@ -649,11 +649,11 @@ export const captureTurnAdmission = (db: Executor, facts: TurnFacts) =>
 					},
 				]),
 			),
-			...(briefRecipients.length > 0 && {
-				briefRecipientBotIds: briefRecipients.flatMap(({ id }) => (id === null ? [] : [id])),
-			}),
 		};
-		return admission;
+		return {
+			admission,
+			briefRecipientBotIds: briefRecipients.flatMap(({ id }) => (id === null ? [] : [id])),
+		};
 	});
 
 /** The member and bot a principal stands for, whose places a reach query loads. */

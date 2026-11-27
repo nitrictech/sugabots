@@ -163,7 +163,7 @@ const wasBriefRecipient = (turnId: string, botId: string) =>
 	query((db) =>
 		db
 			.select({
-				admitted: sql<boolean | null>`${storedTurn.admission} -> 'briefRecipientBotIds' ? ${botId}`,
+				admitted: sql<boolean | null>`${botId}::uuid = any(${storedTurn.briefRecipientBotIds})`,
 			})
 			.from(storedTurn)
 			.where(eq(storedTurn.id, turnId)),

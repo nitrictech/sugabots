@@ -480,6 +480,7 @@ export const turn = pgTable(
 		 */
 		executionNumber: integer("execution_number").notNull().default(0),
 		admission: jsonb("admission").$type<StoredTurnAdmission>(),
+		briefRecipientBotIds: uuid("brief_recipient_bot_ids").array(),
 		status: text("status").$type<TurnStatus>().notNull(),
 		model: text("model").notNull(),
 		contextTokens: integer("context_tokens"),

@@ -15582,6 +15582,24 @@
         "n|tbl|public.connector",
         "n|sch|public"
       ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "turn",
+        "brief_recipient_bot_ids"
+      ],
+      "writes": [
+        "s|col|public.turn.brief_recipient_bot_ids",
+        "n|col|public.turn.brief_recipient_bot_ids",
+        "e|col|public.turn.brief_recipient_bot_ids"
+      ],
+      "reads": [
+        "n|tbl|public.turn",
+        "n|sch|public"
+      ]
     }
   ],
   "deltas": [
@@ -25929,6 +25947,22 @@
         "typeSchema": null,
         "notNull": false,
         "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "turn",
+        "name": "brief_recipient_bot_ids",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 1,
         "default": null,
         "generated": null,
         "identity": null,

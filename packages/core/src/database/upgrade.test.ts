@@ -856,11 +856,19 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			const columns = await upgraded.rows<{ table_name: string; column_name: string }>(
 				`select table_name, column_name from information_schema.columns
 				 where table_schema = 'public'
-				   and ((table_name = 'turn' and column_name = 'admission')
-				     or (table_name = 'project_bot_connector' and column_name = 'turned_on_by_id'))`,
+				   and ((table_name = 'turn' and column_name in ('admission', 'brief_recipient_bot_ids'))
+				     or (table_name = 'project_bot_connector' and column_name = 'turned_on_by_id'))
+				 order by table_name, column_name`,
 			);
-			expect(columns).toEqual([{ table_name: "turn", column_name: "admission" }]);
-			expect(await upgraded.rows("select id from turn where admission is not null")).toEqual([]);
+			expect(columns).toEqual([
+				{ table_name: "turn", column_name: "admission" },
+				{ table_name: "turn", column_name: "brief_recipient_bot_ids" },
+			]);
+			expect(
+				await upgraded.rows(
+					"select id from turn where admission is not null or brief_recipient_bot_ids is not null",
+				),
+			).toEqual([]);
 		});
 
 		it("leaves legacy connectors' tool fingerprints unset until a test lists their tools", async () => {

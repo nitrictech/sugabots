@@ -3424,3 +3424,5 @@ ALTER TABLE "event_retention" DROP COLUMN "singleton";--> statement-breakpoint
 ALTER TABLE "event_retention" ADD PRIMARY KEY ("stream");
 --> statement-breakpoint
 ALTER TABLE "connector" ADD COLUMN "tool_definitions_fingerprint" text;
+--> statement-breakpoint
+ALTER TABLE "turn" ADD COLUMN "brief_recipient_bot_ids" uuid[];

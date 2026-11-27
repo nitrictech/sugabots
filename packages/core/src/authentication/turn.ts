@@ -5,12 +5,7 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { Context, Effect, ErrorReporter, Layer, Schema } from "effect";
 import { query, serviceOperations } from "../database/database.ts";
 import { ACTIVE_TURN_STATUSES, turn } from "../database/schema.ts";
-import {
-	type AutomationRun,
-	authenticated,
-	type BotForAsker,
-	type StoredTurnAdmission,
-} from "../principal.ts";
+import { type AutomationRun, authenticated, type BotForAsker } from "../principal.ts";
 import { captureTurnAdmission } from "../proofs/facts.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { freezeAdmission } from "./turn-admission.ts";
@@ -62,13 +57,13 @@ export const make = Effect.gen(function* () {
 					}
 					const mayResume =
 						(ACTIVE_TURN_STATUSES as readonly string[]).includes(facts.status) || facts.retrying;
-					const admission =
+					const captured =
 						mayResume && !facts.hasAdmission
 							? yield* query((db) => captureTurnAdmission(db, facts))
 							: null;
 					const execution =
-						mayResume && (facts.hasAdmission || admission)
-							? yield* newExecution(facts.turn, admission)
+						mayResume && (facts.hasAdmission || captured)
+							? yield* newExecution(facts.turn, captured)
 							: { executionNumber: 0, admission: null };
 					const asker = askerOf(facts);
 					if (asker !== undefined) {
@@ -107,15 +102,21 @@ export const layerNoDeps = processLayer(Layer.effect(Service, make));
  * Raises the turn `turnId`'s execution number and returns it: the number of
  * the execution being authenticated, which every older one no longer is.
  */
-const newExecution = (turnId: string, admission: StoredTurnAdmission | null) =>
+const newExecution = (
+	turnId: string,
+	captured: Effect.Success<ReturnType<typeof captureTurnAdmission>>,
+) =>
 	Effect.flatMap(
 		query((db) =>
 			db
 				.update(turn)
 				.set({
 					executionNumber: sql`${turn.executionNumber} + 1`,
-					...(admission && {
-						admission: sql`coalesce(${turn.admission}, ${JSON.stringify(admission)}::jsonb)`,
+					...(captured && {
+						admission: sql`coalesce(${turn.admission}, ${JSON.stringify(captured.admission)}::jsonb)`,
+						briefRecipientBotIds: sql`case when ${turn.admission} is null
+							then ${sql.param(captured.briefRecipientBotIds.length > 0 ? captured.briefRecipientBotIds : null)}::uuid[]
+							else ${turn.briefRecipientBotIds} end`,
 					}),
 				})
 				.where(
@@ -126,9 +127,7 @@ const newExecution = (turnId: string, admission: StoredTurnAdmission | null) =>
 				)
 				.returning({
 					executionNumber: turn.executionNumber,
-					admission: sql<Omit<StoredTurnAdmission, "briefRecipientBotIds"> | null>`
-						${turn.admission} - 'briefRecipientBotIds'
-					`,
+					admission: turn.admission,
 				}),
 		),
 		([raised]) =>

@@ -360,7 +360,7 @@ export const make = Effect.gen(function* () {
 						retrying: false,
 						retryAt: null,
 						...(active ? {} : { checkpoint: null }),
-						...(!active && !recorded.retrying && { admission: null }),
+						...(!active && !recorded.retrying && { admission: null, briefRecipientBotIds: null }),
 						...recorded,
 					})
 					.where(eq(turn.id, turnId)),

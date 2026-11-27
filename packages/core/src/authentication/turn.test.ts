@@ -93,7 +93,7 @@ describe("TurnAuthentication", () => {
 		expect(principal.admission?.projects[otherProject]).toBeUndefined();
 	});
 
-	it("keeps a mention turn's project facts small in a workspace with 5,000 other bots", async () => {
+	it("keeps the admission read on resume small in a workspace with 5,000 other bots", async () => {
 		const workspaceId = await seedWorkspace();
 		const asker = await seedMember(workspaceId, "editor");
 		const lead = await seedBot(workspaceId);
@@ -110,14 +110,18 @@ describe("TurnAuthentication", () => {
 		const resumed = await asBotForAsker(turnId);
 		const [size] = await onDatabase((db) =>
 			db
-				.select({ bytes: sql<number>`octet_length(${turn.admission}::text)` })
+				.select({
+					bytes: sql<number>`octet_length(${turn.admission}::text)`,
+					briefRecipients: sql<number>`cardinality(${turn.briefRecipientBotIds})`,
+				})
 				.from(turn)
 				.where(eq(turn.id, turnId)),
 		);
 		expect(Object.keys(admitted.admission?.projects ?? {})).toHaveLength(1);
 		expect(admitted.admission?.projects[lead.defaultProject]).toBeDefined();
 		expect(resumed.admission).toEqual(admitted.admission);
-		expect(size?.bytes).toBeLessThan(205_000);
+		expect(size?.bytes).toBeLessThan(10_000);
+		expect(size?.briefRecipients).toBe(5_000);
 	});
 
 	it("stores only reached projects for a personal bot acting in member bounds", async () => {

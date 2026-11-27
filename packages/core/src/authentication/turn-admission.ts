@@ -37,9 +37,7 @@ export const refreshTurnAdmission = (principal: Principal) =>
 		});
 	});
 
-export function freezeAdmission(
-	admission: Omit<StoredTurnAdmission, "briefRecipientBotIds"> | null,
-): TurnAdmission | null {
+export function freezeAdmission(admission: StoredTurnAdmission | null): TurnAdmission | null {
 	if (!admission) return null;
 	const { projectGrants, ...captured } = admission;
 	const projects = projectGrants ? { ...captured.projects, ...projectGrants } : captured.projects;

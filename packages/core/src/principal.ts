@@ -20,7 +20,6 @@ export interface TurnAdmission {
 
 export interface StoredTurnAdmission extends TurnAdmission {
 	readonly projectGrants?: TurnAdmission["projects"];
-	readonly briefRecipientBotIds?: readonly string[];
 }
 
 export interface AdmittedProject {
