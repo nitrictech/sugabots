@@ -1529,17 +1529,17 @@ ALTER TABLE "project" ADD CONSTRAINT "project_default_of_bot_id_bot_id_fkey" FOR
 ALTER TABLE "message_reaction" ADD CONSTRAINT "message_reaction_one_reactor" CHECK (num_nonnulls("user_id", "bot_id") = 1);--> statement-breakpoint
 ALTER TABLE "project" ADD CONSTRAINT "project_default_led_by_its_bot" CHECK ("default_of_bot_id" is null or "lead_bot_id" = "default_of_bot_id");--> statement-breakpoint
 -- Each project is led by the first public bot added to it that is still there.
-UPDATE "project" AS p SET "lead_bot_id" = (
-	SELECT pb."bot_id"
+UPDATE "project" AS p SET "lead_bot_id" = leads."bot_id"
+FROM (
+	SELECT DISTINCT ON (pb."project_id") pb."project_id", pb."bot_id"
 	FROM "project_bot" pb
 	INNER JOIN "bot" b ON b."id" = pb."bot_id"
-	WHERE pb."project_id" = p."id"
-		AND b."visibility" = 'public'
+	WHERE b."visibility" = 'public'
 		AND b."system_bot_key" IS NULL
 		AND b."assistant_of" IS NULL
-	ORDER BY pb."created_at", pb."bot_id"
-	LIMIT 1
-);--> statement-breakpoint
+	ORDER BY pb."project_id", pb."created_at", pb."bot_id"
+) AS leads
+WHERE p."id" = leads."project_id";--> statement-breakpoint
 -- A project with no bot that could lead it, such as a `shared` `pod` people
 -- talked in without bots, is led by a bot made for it, one per workspace,
 -- with no model, so it answers nobody: those chats go on as they were until

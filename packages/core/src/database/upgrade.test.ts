@@ -1662,7 +1662,7 @@ it.skipIf(!process.env.DATABASE_URL)(
 );
 
 it.skipIf(!process.env.DATABASE_URL)(
-	"assigns leads across workspaces with no bots without rescanning all projects for each workspace",
+	"assigns existing and fallback leads without rescanning bots or projects for each project",
 	async () => {
 		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", "project_leads");
 		const migration = await readFile(
@@ -1680,22 +1680,50 @@ it.skipIf(!process.env.DATABASE_URL)(
 						select 'Workspace ' || ordinal, 'workspace-' || ordinal
 						from generate_series(1, $1::integer) as ordinal
 						returning id
+					), pods as (
+						insert into pod (workspace_id, kind, name, slug)
+						select workspaces.id, 'shared', projects.name, projects.slug
+						from workspaces cross join (values ('Notes', 'notes'), ('Plans', 'plans'), ('Garden', 'garden')) as projects(name, slug)
+						returning id, workspace_id, slug
 					)
-					insert into pod (workspace_id, kind, name, slug)
-					select workspaces.id, 'shared', projects.name, projects.slug
-					from workspaces cross join (values ('Notes', 'notes'), ('Plans', 'plans')) as projects(name, slug)`,
+					insert into agent (id, workspace_id, pod_id, name, handle, color, face, created_at)
+					select ('0000000' || priority || substr(md5(id::text), 9))::uuid, workspace_id, id, name, handle, 'sky',
+						'dot', '2026-10-01'::timestamptz + (creation_order * interval '1 second')
+					from pods cross join (values
+						(1, 2, 'Later', 'later'),
+						(2, 1, 'First', 'first'),
+						(3, 1, 'Tied', 'tied')
+					) as bots(priority, creation_order, name, handle)
+					where slug = 'garden'`,
 					[workspaceCount],
 				);
 				await client.query("begin");
 				try {
 					await client.query(migration);
 					const {
-						rows: [stats],
-					} = await client.query<{ read: string }>(
-						`select seq_tup_read + idx_tup_fetch as read
-						from pg_stat_xact_user_tables where schemaname = 'public' and relname = 'project'`,
+						rows: [locks],
+					} = await client.query<{ count: number }>(`
+						select count(*)::integer from pg_locks
+						where pid = pg_backend_pid() and locktype = 'advisory'
+					`);
+					expect(locks?.count).toBe(0);
+					const { rows: reads } = await client.query<{ relname: string; read: string }>(
+						`select relname, seq_tup_read + idx_tup_fetch as read
+						from pg_stat_xact_user_tables
+						where schemaname = 'public' and relname in ('bot', 'project') order by relname`,
 					);
-					expect(Number(stats?.read)).toBeLessThan(workspaceCount * 100);
+					expect(reads.map(({ relname }) => relname)).toEqual(["bot", "project"]);
+					for (const { read } of reads) {
+						expect(Number(read)).toBeLessThan(workspaceCount * 150);
+					}
+					const {
+						rows: [existingLeads],
+					} = await client.query<{ count: number }>(`
+						select count(*)::integer
+						from project p join bot b on b.id = p.lead_bot_id
+						where p.slug = 'garden' and b.handle = 'first'
+					`);
+					expect(existingLeads?.count).toBe(workspaceCount);
 					const {
 						rows: [coverage],
 					} = await client.query<{ workspaces: number }>(`
@@ -1705,7 +1733,7 @@ it.skipIf(!process.env.DATABASE_URL)(
 							from project p
 							join project_bot pb on pb.project_id = p.id and pb.bot_id = p.lead_bot_id
 							join bot b on b.id = p.lead_bot_id and b.workspace_id = p.workspace_id
-							where p.default_of_bot_id is null and b.model is null
+							where p.default_of_bot_id is null and b.handle = 'lead' and b.model is null
 							group by p.workspace_id
 							having count(*) = 2 and count(distinct b.id) = 1
 						) as led
