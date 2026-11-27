@@ -258,6 +258,7 @@ export const botRecord = (db: Executor, botId: string, who?: { readonly member?:
 				deleting: project.deleting,
 			})
 			.from(bot)
+			.innerJoin(workspace, and(eq(workspace.id, bot.workspaceId), eq(workspace.deleting, false)))
 			.leftJoin(
 				project,
 				and(eq(project.defaultOfBotId, bot.id), eq(project.workspaceId, bot.workspaceId)),

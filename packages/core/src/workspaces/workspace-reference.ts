@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../database/database.ts";
-import { bot, invitation, placedChat, project, workspace } from "../database/schema.ts";
+import { bot, invitation, project, workspace } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 
 /**
@@ -65,21 +65,6 @@ export const workspaceOfBot = (botId: string) =>
 	isUuid(botId)
 		? query((db) =>
 				db.select({ workspace: bot.workspaceId }).from(bot).where(eq(bot.id, botId)).limit(1),
-			).pipe(Effect.map(([found]) => found?.workspace))
-		: Effect.succeed(undefined);
-
-/**
- * The workspace of the chat `chatId`, if there is one: whose lock a read of
- * the chat shares while it proves reach and reads.
- */
-export const workspaceOfChat = (chatId: string) =>
-	isUuid(chatId)
-		? query((db) =>
-				db
-					.select({ workspace: placedChat.workspaceId })
-					.from(placedChat)
-					.where(eq(placedChat.id, chatId))
-					.limit(1),
 			).pipe(Effect.map(([found]) => found?.workspace))
 		: Effect.succeed(undefined);
 
