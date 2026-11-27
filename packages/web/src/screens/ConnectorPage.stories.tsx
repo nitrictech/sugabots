@@ -246,6 +246,32 @@ export const KeepingItWorking = meta.story({
 	},
 });
 
+/** A connector changed during Test. The member can test the new settings. */
+export const SupersededTest = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.post(`${API}/projects/:projectId/connectors/:connectorId/test`, () =>
+				HttpResponse.json({
+					superseded: true,
+					reachable: false,
+					latencyMs: 80,
+					error: "The connector changed while the test was running. Test it again.",
+				}),
+			),
+		);
+	},
+	play: async ({ canvas }) => {
+		const test = await canvas.findByRole("button", { name: "Test connector" });
+		await userEvent.click(test);
+		const note = await canvas.findByText(
+			"The connector changed while the test was running. Test it again.",
+		);
+		await expect(note).toHaveRole("status");
+		await expect(canvas.queryByRole("link", { name: "How to fix this" })).not.toBeInTheDocument();
+		await expect(test).toBeEnabled();
+	},
+});
+
 /** A whole kind at once: Allowed for changes moves every change still asking, and leaves the one set apart off. */
 export const SettingAKind = meta.story({
 	play: async ({ canvas }) => {

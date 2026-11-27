@@ -339,6 +339,10 @@ function TestConnector({ connector, projectId }: { connector: Connector; project
 			</Button>
 			{actions.test.isPending ? (
 				<span className="text-subtle-foreground">Checking…</span>
+			) : checked?.superseded ? (
+				<span role="status" className="min-w-0 text-xs text-muted-foreground">
+					{checked.error ?? "Test the connector again."}
+				</span>
 			) : reachable === true ? (
 				<SettingsTestOutcome good>
 					{connector.kind === "http"

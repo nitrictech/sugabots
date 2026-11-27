@@ -606,6 +606,7 @@ const botProjectsShowingAddresses = <P, J>(
 
 function supersededTest(latencyMs: number): ConnectorTestResult {
 	return {
+		superseded: true,
 		reachable: false,
 		latencyMs,
 		error: userText`The connector changed while the test was running. Test it again.`,

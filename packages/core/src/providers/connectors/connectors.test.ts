@@ -360,6 +360,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 			}
 
 			expect(await test).toMatchObject({
+				superseded: true,
 				reachable: false,
 				error: "The connector changed while the test was running. Test it again.",
 			});

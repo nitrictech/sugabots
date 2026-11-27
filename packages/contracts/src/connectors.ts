@@ -319,6 +319,8 @@ export type ConnectorUpdate = typeof connectorUpdateSchema.Type;
 
 export const connectorTestResultSchema = Schema.Struct({
 	...providerTestResultSchema.fields,
+	/** The connector changed before this Test could be recorded. */
+	superseded: Schema.optional(Schema.Literal(true)),
 	/** How many tools the server listed, when it answered. */
 	tools: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 });
