@@ -154,9 +154,7 @@ export const layerNoDeps = processLayer(Layer.effect(Service, make));
  * `Service`. Needs the chat services a turn reports to, and the services
  * that start and signal turns, which the bot loop provides.
  */
-export const layer = layerNoDeps.pipe(
-	Layer.provide(Layer.mergeAll(TurnStore.layer, ToolCallStore.layer)),
-);
+export const layer = layerNoDeps.pipe(Layer.provide(TurnStore.layer));
 
 export {
 	ToolApprovalConflict,
@@ -272,14 +270,12 @@ export class Controls extends Context.Service<Controls, ControlsInterface>()(
 	declare readonly [Tier]: "process";
 }
 
-const internals = Layer.mergeAll(TurnStore.layer, ToolCallStore.layer);
-
 /**
  * `Controls`, which the approvals operations are built from. Needs the chat
  * services a turn reports to, and the services that signal turns.
  */
 export const controlsLayer = processLayer(Layer.effect(Controls, makeControls)).pipe(
-	Layer.provide(internals),
+	Layer.provide(Layer.mergeAll(TurnStore.layer, ToolCallStore.layer)),
 );
 
 /** Re-sends cancels lost between their commit and their signal (see `resendLostCancels`). */
