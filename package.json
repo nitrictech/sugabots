@@ -23,7 +23,7 @@
 	"scripts": {
 		"prepare": "effect-tsgo patch --typescript --no-oxlint",
 		"check": "bun run lint && bun run typecheck && bun run test",
-		"lint": "biome ci . && node lint/check-glossary.ts && node lint/check-package-boundaries.ts && node lint/check-proof-boundaries.ts && node lint/check-service-tiers.ts && node lint/check-type-mistakes.ts && node lint/check-tailwind-values.ts",
+		"lint": "biome ci . && node lint/check-glossary.ts && bun --bun depcruise packages --config .dependency-cruiser.cjs && node lint/check-proof-boundaries.ts && node lint/check-service-tiers.ts && node lint/check-type-mistakes.ts && node lint/check-tailwind-values.ts",
 		"glossary:report": "node lint/check-glossary.ts --report",
 		"format": "biome check --write .",
 		"typecheck": "tsc --noEmit && bun run --filter '*' typecheck",
@@ -43,10 +43,13 @@
 		"build:computer": "docker build -t ghcr.io/nitrictech/sugabots-sandbox:latest -t sugabots-computer:dev docker/computer && node packages/core/src/chats/tools/browser/list-tools.ts && biome format --write packages/core/src/chats/tools/browser/playwright-tools.json"
 	},
 	"devDependencies": {
+		"@babel/core": "7.29.13",
+		"@babel/preset-typescript": "7.29.7",
 		"@biomejs/biome": "2.5.12",
 		"@effect/tsgo": "^0.69.0",
 		"@types/node": "^26.6.6",
 		"@vitejs/plugin-react": "^6.3.0",
+		"dependency-cruiser": "18.7.2",
 		"drizzle-kit": "1.0.0-rc.5",
 		"oxc-parser": "0.127.0",
 		"portless": "^0.17.0",

@@ -222,8 +222,8 @@ const BANNED_SYNONYMS: readonly CheckedWord[] = [
 		plural: "presets",
 		bannedFor: "Built-in connector",
 		replacement: "built-in connector",
-		// Others' presets: Biome's rules and ffmpeg's encoder speed.
-		otherMeanings: /"preset": "recommended"|"-preset",/g,
+		// Others' presets: Biome's rules, ffmpeg's encoder speed and Babel's.
+		otherMeanings: /"preset": "recommended"|"-preset",|@babel\/preset-typescript|"presets"/g,
 	},
 	{
 		word: "catalog entry",
