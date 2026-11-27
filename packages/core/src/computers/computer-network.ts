@@ -14,6 +14,7 @@ import { computersContracts } from "@sugabots/contracts/operations/computers";
 import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer, Option, Schema } from "effect";
+import { turnFacts } from "../authentication/turn-facts.ts";
 import { afterCommit, query, serviceOperations } from "../database/database.ts";
 import {
 	allowedHost,
@@ -24,7 +25,7 @@ import {
 } from "../database/schema.ts";
 import type { Approved } from "../proofs/approved.ts";
 import type { CanDecide } from "../proofs/can-decide.ts";
-import type { CanUseChatComputer } from "../proofs/can-use-computer.ts";
+import { type CanUseChatComputer, turnUsesComputer } from "../proofs/can-use-computer.ts";
 import type { IsMember } from "../proofs/is-member.ts";
 import type { CanChangeAllowedHosts } from "../proofs/project-permissions.ts";
 import type { ReachesProject } from "../proofs/reaches-project.ts";
@@ -347,6 +348,7 @@ export const make = Effect.gen(function* () {
 					const [call] = yield* query((db) =>
 						db
 							.select({
+								turn: toolCall.turnId,
 								tool: toolCall.tool,
 								input: toolCall.input,
 								workspaceId: projectTable.workspaceId,
@@ -367,6 +369,15 @@ export const make = Effect.gen(function* () {
 					// Blocked while the request waited for its answer.
 					if ((yield* blockFor(project.workspaceId, host)) !== undefined) return;
 					if (TRUSTED_HOSTS.includes(host)) return;
+					// The bot that asked may have lost its computer while the request waited,
+					// such as by its computer use being turned off.
+					const stillUsesComputer = yield* query((db) =>
+						Effect.gen(function* () {
+							const facts = yield* turnFacts(db, call.turn);
+							return facts !== undefined && (yield* turnUsesComputer(db, facts, projectId));
+						}),
+					);
+					if (!stillUsesComputer) return;
 					yield* query((db) =>
 						db
 							.insert(projectAllowedHost)

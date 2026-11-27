@@ -27,8 +27,17 @@ export interface ApprovalCheck {
 	readonly kind: "approvalCheck";
 }
 
+/**
+ * What a tool call's names and ids stood for as its approval was asked, by a
+ * name its operation gives each: an id, or null where it stood for nothing yet,
+ * such as a computer not made yet.
+ */
+export type ResolvedTargets = { readonly [name: string]: string | null };
+
 interface ApprovalCheckDetails {
 	readonly computerProjectId?: string;
+	/** What the call's names and ids stand for now, which its approval covers. */
+	readonly resolvedTargets?: ResolvedTargets;
 	readonly connectorAccess?: "allow" | "ask";
 	readonly writeOrDelete: boolean;
 }

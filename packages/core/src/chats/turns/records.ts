@@ -570,6 +570,7 @@ export const make = Effect.gen(function* () {
 							input: approval.input,
 							...(approval.reason === undefined ? {} : { reason: approval.reason }),
 							computerProjectId: approval.computerProjectId,
+							resolvedTargets: approval.resolvedTargets,
 							connectorAccess: approval.connectorAccess,
 							binding: approval.binding,
 							writeOrDelete: approval.writeOrDelete,

@@ -9,7 +9,7 @@ import {
 	type Approved,
 	approvalRule,
 	type OrdinaryApproval,
-	proveApproved,
+	proveApprovedAsResolved,
 } from "../../proofs/approved.ts";
 import { type CanUseChatComputer, proveCanUseChatComputer } from "../../proofs/can-use-computer.ts";
 import { named } from "../../proofs/proof.ts";
@@ -27,7 +27,8 @@ type ComputerOperation =
  * A bot's work on its computer: the computer of the project its turn's chat
  * is in. Each call proves the bot may use it, as `CanUseChatComputer`
  * decides, and that the call may run under the tool and turn's approval rules
- * before it does `work`.
+ * before it does `work`. An approval covers the computer the project had when
+ * it was given, not one made since in its place.
  * Any principal but a bot in a turn reaches no computer this way.
  */
 const usingComputer = <N extends ComputerOperation, A, E, R>(
@@ -54,7 +55,14 @@ const usingComputer = <N extends ComputerOperation, A, E, R>(
 					const canUse = yield* proveCanUseChatComputer(principal, chat);
 					const computers = yield* TurnComputers.Service;
 					yield* computers.requireComputer(canUse);
-					const approved = yield* proveApproved(principal, call, rule, approvedInput, chat);
+					const approved = yield* proveApprovedAsResolved(
+						principal,
+						call,
+						rule,
+						approvedInput,
+						{ computer: canUse.computer },
+						chat,
+					);
 					return yield* work(canUse, approved);
 				}),
 		);

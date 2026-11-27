@@ -3064,6 +3064,7 @@ WHERE EXISTS (SELECT 1 FROM "message" WHERE "message"."id" = t.trigger_message_i
 ALTER TABLE "tool_call" ADD COLUMN "approval_computer_project_id" uuid;--> statement-breakpoint
 ALTER TABLE "tool_call" ADD COLUMN "approval_connector_access" text;--> statement-breakpoint
 ALTER TABLE "tool_call" ADD COLUMN "approval_asked_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "tool_call" ADD COLUMN "approval_resolved_targets" jsonb;--> statement-breakpoint
 CREATE INDEX "tool_call_pending_approval_age_idx" ON "tool_call" (coalesce("approval_asked_at", "started_at")) WHERE "approval_status" = 'pending';
 --> statement-breakpoint
 UPDATE "tool_call" AS call

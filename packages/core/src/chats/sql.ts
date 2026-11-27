@@ -34,6 +34,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
+import type { ResolvedTargets } from "../operations/operation.ts";
 import { bot, member, project, workspace } from "../workspaces/sql.ts";
 
 /**
@@ -703,6 +704,13 @@ export const toolCall = pgTable(
 		approvalComputerProjectId: uuid("approval_computer_project_id"),
 		approvalConnectorAccess: text("approval_connector_access").$type<"allow" | "ask">(),
 		approvalAskedAt: timestamp("approval_asked_at", { withTimezone: true }),
+		/**
+		 * What the call's names and ids stood for when its approval was asked,
+		 * such as the bot a brief's handle named or the computer a command runs
+		 * on, by name; an allowed call whose names now stand for others needs
+		 * approving again. Null for a call whose tool resolves nothing.
+		 */
+		approvalResolvedTargets: jsonb("approval_resolved_targets").$type<ResolvedTargets>(),
 		decidedById: uuid("decided_by_id").references(() => member.id, { onDelete: "set null" }),
 		decidedAt: timestamp("decided_at", { withTimezone: true }),
 		connectorId: uuid("connector_id"),

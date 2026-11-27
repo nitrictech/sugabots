@@ -3,7 +3,7 @@ import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { chatsContracts } from "@sugabots/contracts/operations/chats";
 import { Effect } from "effect";
 import { Chats } from "../../chats/chats/chats.ts";
-import { approvalRule, proveApproved } from "../../proofs/approved.ts";
+import { approvalRule, proveApprovedAsResolved } from "../../proofs/approved.ts";
 import { briefRecipient, proveMayBrief } from "../../proofs/may-brief.ts";
 import { named } from "../../proofs/proof.ts";
 import { defineOperation } from "../operation.ts";
@@ -24,11 +24,14 @@ export const startBriefedChat = defineOperation(
 					Effect.gen(function* () {
 						const mayBrief = yield* proveMayBrief(principal, bot);
 						if (recipient.model === null) return yield* new BotHasNoModel();
-						const approved = yield* proveApproved(
+						// The handle is resolved again on each call, so an approval covers
+						// the bot it named, and the project it chose, when it was given.
+						const approved = yield* proveApprovedAsResolved(
 							principal,
 							call,
 							approvalRule("chats.startBriefedChat"),
 							approvedInput,
+							{ bot: mayBrief.bot.value, project: mayBrief.project },
 							bot,
 						);
 						return { chat: yield* chats.startBriefedChat(mayBrief, input, approved) };

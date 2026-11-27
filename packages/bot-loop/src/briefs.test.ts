@@ -225,6 +225,48 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 		expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(started.id);
 	});
 
+	it("asks again when the brief's handle names another bot by the time it runs", async () => {
+		const [approvedBot, otherBot] = await Promise.all([
+			seedBot(workspaceId, { createdById: adminId }),
+			seedBot(workspaceId, { createdById: adminId }),
+		]);
+		await onDatabase((db) =>
+			db.update(bot).set({ model: "m", handle: "report-writer" }).where(eq(bot.id, approvedBot.id)),
+		);
+		await onDatabase((db) => db.update(bot).set({ model: "m" }).where(eq(bot.id, otherBot.id)));
+		const input = { title: "Draft the report", brief: "Summarize it.", with: "@report-writer" };
+		const { model } = scriptedSteps(
+			{ calls: [{ toolCallId: "brief", toolName: START_CHAT_TOOL, input }] },
+			{ text: ["Started."] },
+		);
+		const ran = await loop.runTurn(chatId, { model });
+		const [parked] = await callsOf(ran.turnId);
+		if (!parked) throw new Error("No call parked");
+		await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
+
+		// The handle moves to another bot after its asker allowed the brief.
+		await onDatabase((db) =>
+			db.update(bot).set({ handle: "report-writer-old" }).where(eq(bot.id, approvedBot.id)),
+		);
+		await onDatabase((db) =>
+			db.update(bot).set({ handle: "report-writer" }).where(eq(bot.id, otherBot.id)),
+		);
+		const principal = await ran.authentication.authenticate(ran.turnId);
+		await ran.steps.step(ran.run.request, principal, { turnId: ran.turnId, attempt: 0, step: 1 });
+
+		expect(
+			await onDatabase((db) =>
+				db
+					.select()
+					.from(placedChat)
+					.where(and(eq(placedChat.workspaceId, workspaceId), eq(placedChat.title, input.title))),
+			),
+		).toEqual([]);
+		expect(await callsOf(ran.turnId)).toMatchObject([
+			{ tool: START_CHAT_TOOL, approvalStatus: "pending" },
+		]);
+	});
+
 	it.each(["unknown", "missing a model"])(
 		"refuses a brief without waiting when the recipient is %s",
 		async (recipient) => {

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { connectorToolKey } from "@sugabots/contracts";
 import { ApprovalNeeded, ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import {
@@ -19,7 +20,7 @@ import { sameRecordedInput } from "../chats/tools/recorded-input.ts";
 import { query } from "../database/database.ts";
 import { toolCall } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
-import { ApprovalCheckReached, type Call } from "../operations/operation.ts";
+import { ApprovalCheckReached, type Call, type ResolvedTargets } from "../operations/operation.ts";
 import type { Principal } from "../principal.ts";
 import { approverFacts } from "./approvers.ts";
 import type { CanUseChatComputer } from "./can-use-computer.ts";
@@ -129,6 +130,27 @@ export const proveApproved = <
 	...targets: NamedTargets<Targets>
 ) => proveApproval(principal, call, rule, input, targets);
 
+/**
+ * `proveApproved` for a call whose names and ids stood for `resolvedTargets`
+ * when it was checked: an approval given while they stood for others, such as
+ * a handle that named another bot, or another computer since replaced, no
+ * longer covers it, and the call waits for a fresh one.
+ */
+export const proveApprovedAsResolved = <
+	P,
+	X,
+	N extends Exclude<ApprovedOperation, "connectors.callTool">,
+	I,
+	const Targets extends [unknown, ...unknown[]],
+>(
+	principal: Named<P, Principal>,
+	call: Named<X, Call>,
+	rule: ApprovalRule<OrdinaryApproval, N>,
+	input: Named<I, InputOf<NoInfer<N>>>,
+	resolvedTargets: ResolvedTargets,
+	...targets: NamedTargets<Targets>
+) => proveApproval(principal, call, rule, input, targets, { resolvedTargets });
+
 export const proveComputerRequestApproved = <P, X, I, C>(
 	principal: Named<P, Principal>,
 	call: Named<X, Call>,
@@ -173,9 +195,11 @@ const proveApproval = <
 	{
 		connectorUse,
 		computerProjectId,
+		resolvedTargets,
 	}: {
 		connectorUse?: CanUseConnector<P, K>;
 		computerProjectId?: string;
+		resolvedTargets?: ResolvedTargets;
 	} = {},
 ) =>
 	Effect.gen(function* () {
@@ -227,6 +251,7 @@ const proveApproval = <
 			if (connectorUse?.access === "off") return yield* new ApprovalRefused();
 			return yield* ApprovalCheckReached.for({
 				...(computerProjectId && { computerProjectId }),
+				...(resolvedTargets && { resolvedTargets }),
 				...(connectorUse && { connectorAccess: connectorUse.access }),
 				writeOrDelete: connectorUse?.writeOrDelete ?? rule.changes,
 			});
@@ -243,6 +268,7 @@ const proveApproval = <
 				.select({
 					tool: toolCall.tool,
 					computerProjectId: toolCall.approvalComputerProjectId,
+					resolvedTargets: toolCall.approvalResolvedTargets,
 					accessAtApproval: toolCall.approvalConnectorAccess,
 					connectorId: toolCall.connectorId,
 					connectorRevision: toolCall.connectorRevision,
@@ -297,6 +323,7 @@ const proveApproval = <
 		if (
 			decision?.status !== "allowed" ||
 			!decision.decidedBy ||
+			!isDeepStrictEqual(decision.resolvedTargets ?? null, resolvedTargets ?? null) ||
 			(connectorUse?.access === "ask" && decision.accessAtApproval !== "ask")
 		) {
 			return yield* Effect.fail(new ApprovalNeeded());

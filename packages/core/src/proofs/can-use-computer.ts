@@ -1,7 +1,8 @@
 import { ActionForbidden, BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { query } from "../database/database.ts";
+import { askerOf, type TurnFacts } from "../authentication/turn-facts.ts";
+import { type Executor, query } from "../database/database.ts";
 import { computer, placedChat } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
@@ -13,6 +14,7 @@ import {
 	type ReachedAs,
 	type ReachFacts,
 	reachFacts,
+	turnReachesChat,
 	whoActs,
 } from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
@@ -109,6 +111,12 @@ export interface CanUseChatComputer<P, C> extends Proof<"CanUseChatComputer", [P
 	readonly workspace: string;
 	readonly project: string;
 	readonly bot: string;
+	/**
+	 * The project's computer as this was proved, or null before one is made.
+	 * Resetting a computer replaces it with another, so an approval to work
+	 * on one doesn't cover its replacement.
+	 */
+	readonly computer: string | null;
 	/** The turn working on it, and which execution of the turn: the step that opened the computer. */
 	readonly turn: string;
 	readonly executionNumber: number;
@@ -146,16 +154,46 @@ export const proveCanUseChatComputer = <P, C>(
 		if (!botUsesComputer(decision.as, facts)) {
 			return yield* Effect.fail(new ActionForbidden({ proof: "CanUseComputer" }));
 		}
+		const [made] = yield* query((db) =>
+			db
+				.select({ id: computer.id })
+				.from(computer)
+				.where(eq(computer.projectId, facts.project.id))
+				.limit(1),
+		);
 		const proof: CanUseChatComputer<P, C> = CanUseChatComputerProof.prove([principal, chatId], {
 			principal,
 			chat: chatId,
 			workspace: facts.project.workspace,
 			project: facts.project.id,
 			bot: acting.bot,
+			computer: made?.id ?? null,
 			turn: acting.turn,
 			executionNumber: acting.executionNumber,
 		});
 		return proof;
+	});
+
+/**
+ * Whether the turn `facts` describe may still work on the computer of the
+ * project `projectId`, as `proveCanUseChatComputer` would decide for its
+ * principal now: the project is its chat's, it still reaches the chat, its bot
+ * still has computer use on and, acting for an asker, the asker may still
+ * change things there.
+ */
+export const turnUsesComputer = (db: Executor, facts: TurnFacts, projectId: string) =>
+	Effect.gen(function* () {
+		if (facts.project !== projectId || !(yield* turnReachesChat(db, facts))) return false;
+		const asker = askerOf(facts);
+		const place = yield* reachFacts(db, projectId, {
+			...(asker && { member: asker }),
+			bot: facts.bot,
+		});
+		if (!place?.bot?.usesComputer) return false;
+		if (facts.askedBy.kind === "automation") return true;
+		return (
+			place.member !== undefined && mayInProjectAs(place.member, place.project, "project.change")
+		);
 	});
 
 /**

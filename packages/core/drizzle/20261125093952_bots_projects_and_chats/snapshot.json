@@ -15045,6 +15045,24 @@
         "e|col|public.bot.visibility"
       ],
       "sqlHash": "82dae31a68ce1df2"
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "tool_call",
+        "approval_resolved_targets"
+      ],
+      "writes": [
+        "s|col|public.tool_call.approval_resolved_targets",
+        "n|col|public.tool_call.approval_resolved_targets",
+        "e|col|public.tool_call.approval_resolved_targets"
+      ],
+      "reads": [
+        "n|tbl|public.tool_call",
+        "n|sch|public"
+      ]
     }
   ],
   "deltas": [
@@ -24671,6 +24689,22 @@
       "key": "checks\u0000[\"public\",\"bot\",\"bot_visibility_check\"]",
       "set": {
         "value": "\"visibility\" in ('public', 'private', 'personal')"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "tool_call",
+        "name": "approval_resolved_targets",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
       }
     }
   ]

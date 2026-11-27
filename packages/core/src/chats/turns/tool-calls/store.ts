@@ -24,6 +24,7 @@ import {
 	toolCall,
 	turn,
 } from "../../../database/schema.ts";
+import type { ResolvedTargets } from "../../../operations/operation.ts";
 import type { RunsTurn } from "../../../proofs/runs-turn.ts";
 import { processLayer, Tier } from "../../../tiers.ts";
 import { ChatEvents } from "../../chat-events.ts";
@@ -395,6 +396,7 @@ export const make = Effect.gen(function* () {
 													approvalStatus: "pending" as const,
 													approvalReason: approval.reason ?? null,
 													approvalComputerProjectId: approval.computerProjectId ?? null,
+													approvalResolvedTargets: approval.resolvedTargets ?? null,
 													approvalConnectorAccess: approval.connectorAccess ?? null,
 													approvalAskedAt: askedAt,
 													...bindingColumns(approval.binding),
@@ -427,6 +429,7 @@ export const make = Effect.gen(function* () {
 										approvalStatus: "pending",
 										approvalReason: approval.reason ?? null,
 										approvalComputerProjectId: approval.computerProjectId ?? null,
+										approvalResolvedTargets: approval.resolvedTargets ?? null,
 										approvalConnectorAccess: approval.connectorAccess ?? null,
 										approvalAskedAt: askedAt,
 										decidedById: null,
@@ -724,6 +727,7 @@ export interface PendingToolApproval {
 	input: unknown;
 	reason?: string;
 	computerProjectId?: string | undefined;
+	resolvedTargets?: ResolvedTargets | undefined;
 	connectorAccess?: "allow" | "ask" | undefined;
 	binding: ApprovalBinding;
 	/** Whether the tool may change something, as opposed to one the connector's `ask` holds back. */

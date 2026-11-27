@@ -370,6 +370,54 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(JSON.stringify(requests[1]?.continuationMessages)).toContain("denied");
 			});
 
+			it("asks again before running an approved command on a computer made since in its place", async () => {
+				await onDatabase((db) =>
+					db
+						.update(bot)
+						.set({ assistantOf: adminId, visibility: "personal" })
+						.where(eq(bot.id, botId)),
+				);
+				const projectId = await runOnPostgres(defaultProjectOf(botId));
+				const providerId = (
+					await runOnPostgres(
+						Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer).pipe(
+							Effect.flatMap((providers) => providers.enabled(workspaceId)),
+						),
+					)
+				)?.id;
+				if (!providerId) throw new Error("No provider");
+				const makeComputer = (name: string) =>
+					onDatabase((db) =>
+						db.insert(computer).values({
+							workspaceId,
+							projectId,
+							computerProviderId: providerId,
+							providerComputerId: Computers.ComputerId(name),
+							image: "sugabots-computer:dev",
+						}),
+					);
+				await makeComputer("first");
+				const { model } = calling("run_command", command);
+				const ran = await loop.runTurn(chatId, { model });
+				const [parked] = await callsOf(ran.turnId);
+				if (!parked) throw new Error("No command parked");
+				await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
+
+				// The computer is reset after the approval: a new one takes its place.
+				await onDatabase((db) => db.delete(computer).where(eq(computer.projectId, projectId)));
+				await makeComputer("replacement");
+				const principal = await ran.authentication.authenticate(ran.turnId);
+				const resumed = await ran.steps.step(ran.run.request, principal, {
+					turnId: ran.turnId,
+					attempt: 0,
+					step: 1,
+				});
+
+				const [reparked] = await callsOf(ran.turnId);
+				expect(reparked).toMatchObject({ id: parked.id, approvalStatus: "pending" });
+				expect(resumed).toMatchObject({ _tag: "Waiting" });
+			});
+
 			it("asks again when the approver loses authority before the turn resumes", async () => {
 				const asked = await anEditorsChat();
 				const nextApprover = await seedMember(workspaceId, "admin");
@@ -421,6 +469,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(await callsOf(ran.turnId)).toMatchObject([
 					{ status: "completed", decidedById: nextApprover },
 				]);
+			});
+
+			it("adds nothing when the bot that asked lost its computer use while the request waited", async () => {
+				const asked = await anEditorsChat();
+				const { model } = calling(HOST_REQUEST_TOOL, { host: "api.example.com" });
+				const ran = await loop.runTurn(asked.chatId, { model });
+				const [parked] = await callsOf(ran.turnId);
+				if (!parked) throw new Error("No call parked");
+
+				await setComputerUse(false);
+				await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
+
+				expect(await projectHosts()).toEqual([]);
 			});
 
 			it("adds nothing when the host is denied", async () => {

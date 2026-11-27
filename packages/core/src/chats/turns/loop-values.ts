@@ -128,6 +128,7 @@ const approvalAskedSchema = Schema.Struct({
 	writeOrDelete: Schema.Boolean,
 	reason: Schema.optional(Schema.String),
 	computerProjectId: Schema.optional(Schema.String),
+	resolvedTargets: Schema.optional(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
 	connectorAccess: Schema.optional(Schema.Literals(["allow", "ask"])),
 });
 export type ApprovalAsked = typeof approvalAskedSchema.Type;
