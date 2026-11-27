@@ -433,23 +433,20 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(await signIn(legacy.pods.notes)).toEqual(ComputerSignIn.NOT_SIGNED_IN);
 		});
 
-		it("keeps a bot-less personal pod's allowed host in the new Personal Assistant's default project", async () => {
+		it.each([
+			["ana.example.com", legacy.members.ana],
+			["sam.example.com", legacy.members.sam],
+		])("keeps %s in the new Personal Assistant's default project", async (host, owner) => {
 			expect(
 				await upgraded.rows(
 					`select host.host, host.added_by_id, bot.assistant_of
 					from project_allowed_host host
 					join project on project.id = host.project_id
 					join bot on bot.id = project.default_of_bot_id
-					where host.workspace_id = $1 and host.host = 'ana.example.com'`,
-					[legacy.workspace],
+					where host.workspace_id = $1 and host.host = $2`,
+					[legacy.workspace, host],
 				),
-			).toEqual([
-				{
-					host: "ana.example.com",
-					added_by_id: legacy.members.ana,
-					assistant_of: legacy.members.ana,
-				},
-			]);
+			).toEqual([{ host, added_by_id: owner, assistant_of: owner }]);
 		});
 
 		it("queues the computer of a personal pod with no bots to be destroyed at its provider", async () => {
@@ -709,6 +706,11 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			);
 			if (!anasAssistant?.default_of_bot_id)
 				throw new Error("Ana has no Personal Assistant for her file");
+			const samsAssistant = projects.find(
+				({ assistant_of }) => assistant_of === legacy.members.sam,
+			);
+			if (!samsAssistant?.default_of_bot_id)
+				throw new Error("Sam has no Personal Assistant for their allowed host");
 			const [notesLead] = await upgraded.rows<{ id: string }>(
 				"select lead_bot_id as id from project where id = $1",
 				[legacy.pods.notes],
@@ -723,6 +725,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				...reachedOnMain.filter(({ id }) => id !== migrationScale.orphanedCollaboration),
 				{ member: legacy.members.ana, kind: "bot", id: anasAssistant.default_of_bot_id },
 				{ member: legacy.members.sam, kind: "bot", id: anasAssistant.default_of_bot_id },
+				{ member: legacy.members.sam, kind: "bot", id: samsAssistant.default_of_bot_id },
 				{ member: legacy.members.sam, kind: "bot", id: legacy.bots.patsAssistant },
 				{ member: legacy.members.sam, kind: "bot", id: legacy.bots.helper },
 				{ member: legacy.members.sam, kind: "bot", id: legacy.bots.sketch },
@@ -753,7 +756,8 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 							reachedOnMain.some(
 								(row) => row.member === member && row.kind === "bot" && row.id === botId,
 							) ||
-							(botId === anasAssistant.default_of_bot_id && member === legacy.members.ana)
+							(botId === anasAssistant.default_of_bot_id && member === legacy.members.ana) ||
+							(botId === samsAssistant.default_of_bot_id && member === legacy.members.sam)
 						: reached("project", projectId);
 					const automations = await list(
 						call(principal, "automations.list", { projectId }),

@@ -472,8 +472,8 @@ FROM "thread" AS "main_chat"
 JOIN "pod" ON "pod"."id" = "main_chat"."pod_id"
 WHERE "main_chat"."main" AND "pod"."kind" = 'shared'
 	AND "artifact"."pod_id" = "pod"."id" AND "artifact"."created_in_thread_id" IS NULL;--> statement-breakpoint
--- Give an owner with no bot a Personal Assistant to keep the chats and files
--- only they reached. It has no model until they choose one.
+-- Give an owner with no bot a Personal Assistant to keep their chats, files
+-- and allowed hosts. It has no model until they choose one.
 INSERT INTO "agent" ("workspace_id", "pod_id", "name", "handle", "provisioned_key", "color", "face", "visibility", "assistant_of", "created_by_id")
 SELECT "pod"."workspace_id", "pod"."id", 'Personal Assistant', 'personal-assistant', 'personal-assistant',
 	'teal', 'arc', 'private', "pod"."owner_id", "pod"."owner_id"
@@ -489,6 +489,10 @@ WHERE "pod"."kind" = 'personal'
 		OR EXISTS (
 			SELECT 1 FROM "thread"
 			WHERE "thread"."pod_id" = "pod"."id" AND "thread"."type" = 'pod_chat'
+		)
+		OR EXISTS (
+			SELECT 1 FROM "sandbox_pod_allowed_host"
+			WHERE "sandbox_pod_allowed_host"."pod_id" = "pod"."id"
 		)
 	)
 	AND NOT EXISTS (
