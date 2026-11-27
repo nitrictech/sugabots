@@ -44,6 +44,16 @@ import { proveCanReachConnector } from "../proofs/can-use-connector.ts";
 import { proveCanRunAutomations } from "../proofs/project-permissions.ts";
 import { named } from "../proofs/proof.ts";
 import { proveReachesProject } from "../proofs/reaches-project.ts";
+import { encryptAppCredential } from "../providers/connectors/github/credential.ts";
+import {
+	egressToGitHub,
+	INSTALLATION_ID,
+	MANIFEST_CODE,
+	mintsTokens,
+	standInGitHub,
+	WEBHOOK_SECRET,
+} from "../providers/connectors/github/github.test-support.ts";
+import { GitHubSignIn } from "../providers/connectors/github/github-sign-in.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { Secrets } from "../secrets/secrets.ts";
 import { Streams } from "../streams/streams.ts";
@@ -98,6 +108,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 		let root: string;
 		let upgraded: Upgraded;
 		let submitted: SubmittedToMainsEngine;
+		const github = standInGitHub(mintsTokens);
 		/** The folders queued for deletion as the upgrade left them, before any case works the queue. */
 		let queuedByTheUpgrade: string[];
 		/** What each member reached on main, before the upgrade. */
@@ -111,6 +122,45 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			await migrateTo(url, LAST_MAIN_MIGRATION);
 			await withClient(url, async (client) => {
 				await client.query(legacyRows);
+				const converted = await github.fetch(
+					`https://api.github.com/app-manifests/${MANIFEST_CODE}/conversions`,
+				);
+				const app = (await converted.json()) as { id: number; slug: string; pem: string };
+				const credential = encryptAppCredential(
+					Secrets.fromKey(Buffer.alloc(32).toString("base64")),
+					{
+						privateKey: app.pem,
+						webhookSecret: WEBHOOK_SECRET,
+					},
+				);
+				await client.query(
+					`insert into connection (id, workspace_id, pod_id, name, handle, kind, url, settings,
+						app_credential_encrypted, created_by_id)
+						values ($1, $2, $3, 'GitHub', 'github', 'github', 'https://api.github.com', $4, $5, $6)`,
+					[
+						legacy.familyGitHubConnector,
+						legacy.workspace,
+						legacy.pods.family,
+						{
+							kind: "github",
+							appId: app.id,
+							slug: app.slug,
+							owner: { type: "Organization", login: "acme" },
+							installationId: INSTALLATION_ID,
+							account: "acme",
+							repositories: [
+								{
+									id: 101,
+									path: "acme/web",
+									addedById: legacy.members.sam,
+									addedAt: "2026-10-02T09:01:00Z",
+								},
+							],
+						},
+						credential,
+						legacy.members.sam,
+					],
+				);
 				await client.query(legacyMigrationScaleRows);
 				await client.query(legacySummaryRequest);
 				await client.query(legacySessions);
@@ -191,6 +241,32 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					default_of_bot_id: legacy.bots.helper,
 				},
 			]);
+		});
+
+		it("keeps the converted project's computer signed in to the shared GitHub repositories", async () => {
+			const signIn = (projectId: string) =>
+				upgraded.run(
+					ComputerSignIn.Service.use((signIns) =>
+						signIns.forProject({ workspaceId: legacy.workspace, projectId }),
+					).pipe(
+						Effect.provide(GitHubSignIn.layer.pipe(Layer.provide(egressToGitHub(github.fetch)))),
+					),
+				);
+
+			expect((await signIn(legacy.pods.family)).credentials).toEqual([
+				expect.objectContaining({
+					host: "github.com",
+					pathPrefix: "/acme/",
+					header: "Authorization",
+				}),
+			]);
+			expect(github.asked.filter(({ path }) => path.endsWith("/access_tokens"))).toEqual([
+				expect.objectContaining({
+					path: `/app/installations/${INSTALLATION_ID}/access_tokens`,
+					body: { repository_ids: [101], permissions: { contents: "read", metadata: "read" } },
+				}),
+			]);
+			expect(await signIn(legacy.pods.notes)).toEqual(ComputerSignIn.NOT_SIGNED_IN);
 		});
 
 		it("queues the computer of a personal pod with no bots to be destroyed at its provider", async () => {

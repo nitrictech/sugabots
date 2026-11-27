@@ -87,6 +87,7 @@ export const legacy = {
 		automation: "00000008-0000-4000-8000-000000000002",
 		trigger: "00000010-0000-4000-8000-000000000001",
 	},
+	familyGitHubConnector: "00000011-0000-4000-8000-000000000002",
 	/** The Notes pod's connection, which no bot had. */
 	notesConnection: "00000011-0000-4000-8000-000000000003",
 	/** Ana's file, in her personal pod, which had no bots and no chat left. */

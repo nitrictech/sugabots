@@ -15391,6 +15391,44 @@
         "n|col|public.project_chat.started_by_id"
       ],
       "sqlHash": "c2a24000589c0309"
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "project_bot_connector",
+        "computer_sign_in"
+      ],
+      "writes": [
+        "s|col|public.project_bot_connector.computer_sign_in",
+        "n|col|public.project_bot_connector.computer_sign_in",
+        "e|col|public.project_bot_connector.computer_sign_in"
+      ],
+      "reads": [
+        "n|tbl|public.project_bot_connector",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "project_bot_connector",
+        "project_bot_connector_computer_sign_in_idx"
+      ],
+      "writes": [
+        "s|idx|public.project_bot_connector_computer_sign_in_idx",
+        "n|idx|public.project_bot_connector_computer_sign_in_idx",
+        "e|idx|public.project_bot_connector_computer_sign_in_idx",
+        "n|rel|public.project_bot_connector_computer_sign_in_idx"
+      ],
+      "reads": [
+        "n|tbl|public.project_bot_connector",
+        "n|sch|public",
+        "n|col|public.project_bot_connector.project_id"
+      ]
     }
   ],
   "deltas": [
@@ -25499,6 +25537,46 @@
       "key": "columns\u0000[\"public\",\"project_chat\",\"started_by_id\"]",
       "set": {
         "notNull": false
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "computer_sign_in",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "project_bot_connector_computer_sign_in_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "project_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"computer_sign_in\"",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
       }
     }
   ]

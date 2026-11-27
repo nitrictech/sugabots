@@ -28,6 +28,7 @@ import { ConnectorStore, everyToolOff } from "../../providers/connectors/connect
 import type { ConnectorTarget } from "../../providers/connectors/connector-target.ts";
 import type { Connected } from "../../providers/connectors/github/connected.ts";
 import {
+	findGitHubConnectorForComputer,
 	GitHubConnectors,
 	gitHubConnectorForProject,
 } from "../../providers/connectors/github/github-connectors.ts";
@@ -267,8 +268,7 @@ export function from({
 	const failedAt = new Map<string, number>();
 
 	/**
-	 * The GitHub app's tools, and what the model is told of them. The computer
-	 * is signed in only to the app of the project the turn works in.
+	 * The GitHub app's tools, and whether its repositories can be read in the computer.
 	 */
 	const gitHubOffered = (connected: Connected | undefined, signsIn: boolean, turn: TurnSide) =>
 		Effect.gen(function* () {
@@ -296,7 +296,7 @@ export function from({
 			const reached: OwnedTarget[] = [];
 			const expired: ExpiredConnector[] = [];
 			const installedUrls: string[] = [];
-			const gitHub: { connected: Connected; projectId: string }[] = [];
+			const gitHub: Connected[] = [];
 			for (const projectId of projectIds) {
 				const found = yield* connectors.targetsForProject(workspaceId, projectId);
 				const app = github
@@ -330,7 +330,7 @@ export function from({
 				expired.push(...allowedExpired.map(({ handle }) => ({ handle, projectId })));
 				installedUrls.push(...found.installedUrls);
 				if (connected && isFree(connected.connector)) {
-					gitHub.push({ connected, projectId });
+					gitHub.push(connected);
 				}
 				for (const handle of [
 					...allowed.map(({ handle }) => handle),
@@ -362,12 +362,12 @@ export function from({
 				const endpointTools = reached
 					.filter((target) => target.kind === "http")
 					.map((target) => httpTools(target, httpClients.for({ baseUrl: target.url })));
-				const gitHub = yield* Effect.forEach(foundGitHub, (found) =>
-					gitHubOffered(
-						found.connected,
-						turn.computerSignsIn && found.projectId === projectId,
-						turn,
-					),
+				const computerGitHub =
+					turn.computerSignsIn && foundGitHub.length > 0
+						? yield* findGitHubConnectorForComputer({ workspaceId, projectId })
+						: undefined;
+				const gitHub = yield* Effect.forEach(foundGitHub, (connected) =>
+					gitHubOffered(connected, computerGitHub?.id === connected.connector.id, turn),
 				);
 				const ownTools = {
 					tools: Object.assign({}, ...endpointTools, ...gitHub.map(({ tools }) => tools)),

@@ -3289,12 +3289,15 @@ CREATE TABLE "project_bot_connector" (
 );
 --> statement-breakpoint
 CREATE INDEX "project_bot_connector_connector_id_idx" ON "project_bot_connector" ("connector_id");--> statement-breakpoint
+ALTER TABLE "project_bot_connector" ADD COLUMN "computer_sign_in" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "project_bot_connector_computer_sign_in_idx" ON "project_bot_connector" ("project_id") WHERE "computer_sign_in";--> statement-breakpoint
 ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_project_bot_fkey" FOREIGN KEY ("project_id","bot_id") REFERENCES "project_bot"("project_id","bot_id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_connector_workspace_fkey" FOREIGN KEY ("connector_id","workspace_id") REFERENCES "connector"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
 -- A `shared` `pod`'s bots used their own connectors in the `pod`, so each
--- stays on in the private project the `pod` became.
-INSERT INTO "project_bot_connector" ("workspace_id", "project_id", "bot_id", "connector_id", "address_revision")
-SELECT b."workspace_id", pb."project_id", b."id", c."id", c."address_revision"
+-- stays on in the private project the `pod` became. Its one GitHub app
+-- also keeps signing in the shared computer after the app moves to a bot.
+INSERT INTO "project_bot_connector" ("workspace_id", "project_id", "bot_id", "connector_id", "address_revision", "computer_sign_in")
+SELECT b."workspace_id", pb."project_id", b."id", c."id", c."address_revision", c."kind" = 'github'
 FROM "bot" b
 INNER JOIN "project_bot" pb ON pb."bot_id" = b."id"
 INNER JOIN "project" p ON p."id" = pb."project_id" AND p."default_of_bot_id" IS NULL

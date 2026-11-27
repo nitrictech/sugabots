@@ -19,12 +19,15 @@ import {
 } from "@sugabots/contracts/errors/connectors";
 import { and, eq } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
+import { ComputerSignIn } from "../../../computers/computer-sign-in.ts";
 import { query, serviceOperations } from "../../../database/database.ts";
 import {
 	type ConnectorRow,
 	connector,
 	type GitHubConnectorRepository,
 	type GitHubConnectorSettings,
+	project,
+	projectBotConnector,
 } from "../../../database/schema.ts";
 import type { ReachesEnabledConnector } from "../../../proofs/can-use-connector.ts";
 import type { CanManageProject, CanReadConnectors } from "../../../proofs/project-permissions.ts";
@@ -45,11 +48,11 @@ import { activityOf } from "./github-events.ts";
  * A project's GitHub app (see `github-app.ts`), installed on the account the
  * project works on: the repositories its bots work on there, read in its
  * computer and changed through the connector's tools, which are Sugabots'
- * own, and what happens there, which its app delivers. A project has at most
- * one, since its computer can be signed in to only one account at GitHub; a
- * bot's is its default project's. Each method an operation calls takes the
- * workspace and the project from its proof, and the connector it names only
- * from that project.
+ * own, and what happens there, which its app delivers. A computer signs in to one
+ * app. It uses the project's own app or the shared app kept for it by the
+ * upgrade. A bot's app is its default project's. Each method an operation calls
+ * takes the workspace and project from its proof, and the connector it names
+ * only from that project.
  */
 export interface Interface {
 	/** What the connector's app reaches, to choose the project's repositories from. */
@@ -83,8 +86,12 @@ export interface Interface {
 		target: ReachesConnector<P, J, K>,
 		repository: string,
 	) => Effect.Effect<ConnectorRepositories, NotGitHubConnector>;
-	/** The project's GitHub app used to sign in its computer. */
+	/** The GitHub app owned by the project. */
 	readonly forProject: (project: Project) => Effect.Effect<Connected | undefined>;
+	/** Read-only Git sign-in for the project's computer. */
+	readonly signInComputer: (
+		project: Project,
+	) => Effect.Effect<ComputerSignIn.SignedIn, GitHubRequestFailed>;
 	readonly forConnector: <P, K>(
 		reach: ReachesEnabledConnector<P, K>,
 	) => Effect.Effect<Connected | undefined>;
@@ -248,6 +255,18 @@ export const make = Effect.gen(function* () {
 		forProject: (project) =>
 			operation("forProject", Effect.map(gitHubConnectorForProject(project), connectedTo)),
 
+		signInComputer: (project) =>
+			operation(
+				"signInComputer",
+				Effect.gen(function* () {
+					const connected = connectedTo(yield* findGitHubConnectorForComputer(project));
+					if (!connected || connected.repositories.length === 0) {
+						return ComputerSignIn.NOT_SIGNED_IN;
+					}
+					return yield* connected.computerSignIn();
+				}),
+			),
+
 		forConnector: (reach) =>
 			operation(
 				"forConnector",
@@ -317,6 +336,44 @@ export const gitHubConnectorForProject = (project: Project) =>
 		),
 		([row]) => row,
 	);
+
+/** The app that can sign in this computer. An app the project owns takes precedence. */
+export const findGitHubConnectorForComputer = (target: Project) =>
+	Effect.gen(function* () {
+		const own = yield* gitHubConnectorForProject(target);
+		if (own) return own;
+		const [shared] = yield* query((db) =>
+			db
+				.select({ connector })
+				.from(projectBotConnector)
+				.innerJoin(
+					connector,
+					and(
+						eq(connector.id, projectBotConnector.connectorId),
+						eq(connector.workspaceId, projectBotConnector.workspaceId),
+						eq(connector.addressRevision, projectBotConnector.addressRevision),
+					),
+				)
+				.innerJoin(
+					project,
+					and(
+						eq(project.id, connector.projectId),
+						eq(project.defaultOfBotId, projectBotConnector.botId),
+						eq(project.deleting, false),
+					),
+				)
+				.where(
+					and(
+						eq(projectBotConnector.workspaceId, target.workspaceId),
+						eq(projectBotConnector.projectId, target.projectId),
+						projectBotConnector.computerSignIn,
+						eq(connector.kind, "github"),
+					),
+				)
+				.limit(1),
+		);
+		return shared?.connector;
+	});
 
 /** The project `reach` proved reached, by its workspace and its own id. */
 const projectIn = <J>(reach: { workspace: string; project: Named<J, string> }): Project => ({
