@@ -31,8 +31,6 @@ import {
 	notificationOverride,
 	notificationSettings,
 	pendingNotification,
-	placedChat,
-	workspace,
 } from "../database/schema.ts";
 import type { IsMember } from "../proofs/is-member.ts";
 import type { ReachesBot } from "../proofs/reaches-bot.ts";
@@ -130,28 +128,15 @@ export const make = Effect.gen(function* () {
 	 * may still be told it, and forgets them if not. Marking them sent and
 	 * storing their notifications, for the outbox to publish once the
 	 * transaction commits, happen in one transaction, so whichever process
-	 * marks one sent is the only one to publish it. The check holds a share of
-	 * the workspace's lock until then, so a change to who reaches what either
-	 * commits first, and keeps it from them, or after the notification is
-	 * stored for them. Each stored notification names its chat or approval, so
-	 * the member's stream checks again before it sends it.
+	 * marks one sent is the only one to publish it. Each stored notification
+	 * names its chat or approval so the member's stream can check its audience
+	 * again on replay.
 	 */
 	const sendIfStillTold = (delivery: DeliveryToSend, which: SQL | undefined) =>
 		transaction(
 			Effect.gen(function* () {
-				const audience = audienceOf(delivery);
-				const [placed] = yield* query((db) =>
-					db
-						.select({ workspaceId: placedChat.workspaceId })
-						.from(placedChat)
-						.where(eq(placedChat.id, delivery.chatId))
-						.limit(1),
-				);
-				if (placed) yield* shareWorkspaceLock(placed.workspaceId);
-				// A statement of its own, so it reads what a change that held the lock committed.
-				const told =
-					placed !== undefined &&
-					(yield* query((db) => mayStillBeTold(db, delivery.memberId, audience)));
+				const audience = deliveryAudience(delivery);
+				const told = yield* query((db) => mayStillBeTold(db, delivery.memberId, audience));
 				if (!told) {
 					yield* query((db) =>
 						db.delete(notificationDelivery).where(and(which, isNull(notificationDelivery.sentAt))),
@@ -678,20 +663,11 @@ const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 	}
 });
 
-const shareWorkspaceLock = (workspaceId: string) =>
-	query((db) =>
-		db
-			.select({ id: workspace.id })
-			.from(workspace)
-			.where(eq(workspace.id, workspaceId))
-			.for("share"),
-	);
-
 /**
  * Whom a delivery's notification is for: those who can still decide its
  * approval, or else those who reach the chat it shows or is about.
  */
-function audienceOf(delivery: DeliveryToSend): Audience.Group {
+function deliveryAudience(delivery: DeliveryToSend): Audience.Group {
 	const { approvalCallId, approvalId, notification } = delivery;
 	return approvalCallId && approvalId
 		? {
