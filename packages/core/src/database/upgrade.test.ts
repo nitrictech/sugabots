@@ -473,6 +473,25 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			).toEqual([{ name: "allowed_host" }, { name: "project_allowed_host" }]);
 		});
 
+		it("keeps the turn asker function without a turn asker trigger", async () => {
+			expect(
+				await upgraded.rows(`
+					select proname as name, oidvectortypes(proargtypes) as arguments
+					from pg_proc
+					where pronamespace = 'public'::regnamespace
+						and proname in ('turn_asker', 'set_turn_asker')
+				`),
+			).toEqual([{ name: "turn_asker", arguments: "uuid, uuid, uuid" }]);
+			expect(
+				await upgraded.rows(`
+					select trigger.tgname from pg_trigger trigger
+					join pg_proc called on called.oid = trigger.tgfoid
+					where trigger.tgrelid = 'public.turn'::regclass and not trigger.tgisinternal
+						and (trigger.tgname = 'turn_asker' or called.proname in ('turn_asker', 'set_turn_asker'))
+				`),
+			).toEqual([]);
+		});
+
 		it.each([
 			["ana.example.com", legacy.members.ana],
 			["sam.example.com", legacy.members.sam],
@@ -2427,19 +2446,6 @@ it.skipIf(!process.env.DATABASE_URL)(
 	},
 	UPGRADE_TIMEOUT_MS,
 );
-
-it("keeps the turn asker function without installing an insert trigger during the upgrade", async () => {
-	const migration = await readFile(
-		join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
-		"utf8",
-	);
-	expect(migration).not.toMatch(/create\s+trigger\s+"?turn_asker"?\s/i);
-	expect(migration).not.toContain("FUNCTION set_turn_asker(");
-	expect(migration).not.toContain("FUNCTION turn_asker(chat uuid, trigger_message uuid, OUT");
-	expect(migration).toContain(
-		"FUNCTION turn_asker(chat uuid, trigger_message uuid, answering_bot uuid,",
-	);
-});
 
 it.skipIf(!process.env.DATABASE_URL)(
 	"finds surviving folder and file destinations without repeatedly reading the removal list from disk",
