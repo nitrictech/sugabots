@@ -242,19 +242,28 @@ describe("following", () => {
 		expect(followed).toEqual([]);
 	});
 
-	it("passes the client's Last-Event-ID on as where to resume, and ignores one that isn't a sequence number", async () => {
+	it("round-trips an empty stream cursor and accepts a sequence number as a resume point", async () => {
 		const { app, followed } = server();
-		const resumed = await open(app, `/chats/${CHAT}/events`, { lastEventId: "41" });
-		const fromEmpty = await open(app, `/chats/${CHAT}/events`, { lastEventId: "-1" });
-		const fresh = await open(app, `/chats/${CHAT}/events`, { lastEventId: "nonsense" });
+		const path = `/chats/${CHAT}/events`;
+		const first = await open(app, path);
+		const cursor = `empty.0.${"a".repeat(64)}` as const;
+		await followed[0]?.yields({ seq: cursor, event: rawEvent("ready") });
+		const [ready] = await first.take(1);
+		expect(ready?.id).toBe(cursor);
+		await first.close();
+
+		const fromEmpty = await open(app, path, { lastEventId: ready?.id });
+		const resumed = await open(app, path, { lastEventId: "41" });
+		const fresh = await open(app, path, { lastEventId: "nonsense" });
 
 		expect(followed.map(({ input }) => input)).toEqual([
+			{ chatId: CHAT, since: undefined },
+			{ chatId: CHAT, since: cursor },
 			{ chatId: CHAT, since: 41 },
-			{ chatId: CHAT, since: -1 },
 			{ chatId: CHAT, since: undefined },
 		]);
-		await resumed.close();
 		await fromEmpty.close();
+		await resumed.close();
 		await fresh.close();
 	});
 });

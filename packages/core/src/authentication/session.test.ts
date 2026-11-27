@@ -215,7 +215,8 @@ describe("SessionAuthentication", () => {
 				}),
 		);
 		const cursor = (await store.latest([stream])).get(stream) ?? 0;
-		const replayed = async () => (await store.replay(stream, cursor, 3)).map(({ event }) => event);
+		const replayed = async () =>
+			(await store.replay(stream, EventStore.afterCursor(cursor), 3)).map(({ event }) => event);
 
 		try {
 			await expect(

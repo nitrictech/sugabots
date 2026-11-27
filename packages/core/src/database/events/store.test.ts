@@ -151,6 +151,15 @@ for (const { name, skip, make, backdate } of stores) {
 			).toBeUndefined();
 		});
 
+		it("refuses an empty stream's cursor on another empty stream", async () => {
+			const other: EventStream = `chat:${crypto.randomUUID()}`;
+			const cursor = (await store.latest([stream, other])).get(stream);
+			if (cursor === undefined) throw new Error("The stream has no cursor");
+
+			expect(await store.replayPage({ stream: other, cursor, controls: [] }, 10)).toBeUndefined();
+			expect(await store.replayPage({ stream, cursor, controls: [] }, 10)).toEqual([]);
+		});
+
 		it("starts a stream with nothing stored where every stream is, and resumes it from there", async () => {
 			const elsewhere = await append(`chat:${crypto.randomUUID()}`, rawEvent("message.created"));
 

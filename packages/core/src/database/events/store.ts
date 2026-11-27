@@ -1,6 +1,8 @@
 export * as EventStore from "./store.ts";
 
+import { createHash } from "node:crypto";
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
+import type { StreamCursor } from "@sugabots/contracts/operations/events";
 import { and, asc, eq, gt, gte, inArray, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { processLayer, Tier } from "../../tiers.ts";
@@ -37,7 +39,7 @@ export interface Interface {
 	latest(
 		streams: ReadonlyArray<EventStream>,
 		signal?: AbortSignal,
-	): Promise<Map<EventStream, number>>;
+	): Promise<Map<EventStream, StreamCursor>>;
 
 	/** replayPage reads a batch, or returns undefined if its starting position is no longer usable. */
 	replayPage(
@@ -104,12 +106,11 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 					);
 					if (!locks?.acquired) return undefined;
 					return yield* query((db) =>
-						db.execute<{ stream: EventStream; cursor: string | number }>(
-							sql`select stream, coalesce(
+						db.execute<{ stream: EventStream; seq: string | null; position: string }>(
+							sql`select stream,
 								(select max(${event.seq}) from ${event}
-									where ${event.stream} = wanted.stream and ${event.seq} >= (${retentionBoundary})),
-								-(${sequencePosition}) - 1
-							) as cursor
+									where ${event.stream} = wanted.stream and ${event.seq} >= (${retentionBoundary})) as seq,
+								(${sequencePosition}) as position
 							from (select distinct stream from unnest(${wanted}) as stream) as wanted`,
 							"objects",
 						),
@@ -127,12 +128,19 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 				}),
 				{ signal },
 			);
-			return new Map(rows.map(({ stream, cursor }) => [stream, Number(cursor)]));
+			return new Map(
+				rows.map(({ stream, seq, position }) => [
+					stream,
+					seq === null ? buildEmptyCursor(stream, Number(position)) : Number(seq),
+				]),
+			);
 		},
 
 		async replayPage(page, limit, signal) {
 			const feed =
 				"cursor" in page ? { stream: page.stream, since: afterCursor(page.cursor) } : page.feed;
+			if (!Number.isSafeInteger(feed.since)) return undefined;
+
 			const retained = sql`${feed.since} >= (${retentionBoundary}) and ${validReplayPosition(page)}`;
 			const rows = await run((db) => {
 				const batch = replayRows(db, [feed, ...page.controls], limit);
@@ -186,12 +194,13 @@ const retentionBoundary = sql`select coalesce((select pruned_through from ${even
 function validReplayPosition(page: ReplayPage) {
 	if ("feed" in page) return sql`true`;
 	const { stream, cursor } = page;
-	if (cursor >= 0) {
+	if (typeof cursor === "number") {
 		return sql`exists (
 			select 1 from ${event} where ${event.seq} = ${cursor} and ${event.stream} = ${stream}
 		)`;
 	}
 	const position = afterCursor(cursor);
+	if (cursor !== buildEmptyCursor(stream, position)) return sql`false`;
 	return sql`${position} <= (${sequencePosition}) and not exists (
 		select 1 from ${event} where ${event.stream} = ${stream}
 		and ${event.seq} between (${retentionBoundary}) and ${position}
@@ -241,8 +250,12 @@ function matchesFeed({ since, types }: Feed) {
 }
 
 /** afterCursor returns the sequence position to read after, including a cursor without a retained event. */
-export function afterCursor(cursor: number): number {
-	return cursor < 0 ? -cursor - 1 : cursor;
+export function afterCursor(cursor: StreamCursor): number {
+	return typeof cursor === "number" ? cursor : Number(cursor.split(".")[1]);
+}
+
+export function buildEmptyCursor(stream: EventStream, position: number): StreamCursor {
+	return `empty.${position}.${createHash("sha256").update(stream).digest("hex")}`;
 }
 
 /** A durable event as it was stored, with the `seq` clients resume from. */
@@ -265,7 +278,11 @@ export interface Feed {
 
 /** The client's cursor for the first page, or the stream's read position for later pages. */
 export type ReplayPage =
-	| { readonly stream: EventStream; readonly cursor: number; readonly controls: readonly Feed[] }
+	| {
+			readonly stream: EventStream;
+			readonly cursor: StreamCursor;
+			readonly controls: readonly Feed[];
+	  }
 	| { readonly feed: Feed; readonly controls: readonly Feed[] };
 
 function typesInFeed(types: readonly DurableEventType[] | undefined) {

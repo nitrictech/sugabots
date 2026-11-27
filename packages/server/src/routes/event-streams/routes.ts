@@ -2,9 +2,13 @@ import { IncomingMessage } from "node:http";
 import { Readable } from "node:stream";
 import type { StreamEvent } from "@sugabots/contracts";
 import { NotFound } from "@sugabots/contracts/http";
-import type { Delivery } from "@sugabots/contracts/operations/events";
+import {
+	type Delivery,
+	type StreamCursor,
+	streamCursorSchema,
+} from "@sugabots/contracts/operations/events";
 import type { Running } from "@sugabots/core/operations/operation";
-import { Context, Deferred, Duration, Effect, Exit, Schedule, Scope, Stream } from "effect";
+import { Context, Deferred, Duration, Effect, Exit, Schedule, Schema, Scope, Stream } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { longRunningCaller } from "../../auth/middleware.ts";
@@ -182,23 +186,18 @@ const respond = <E, R>(
 	});
 
 /** One event, as the wire format. */
-function frame(seq: number | undefined, event: StreamEvent): string {
+function frame(seq: StreamCursor | undefined, event: StreamEvent): string {
 	// An ephemeral event carries no id, so it does not move the client's resume
 	// point past a state change it never saw.
 	const id = seq === undefined ? "" : `id: ${seq}\n`;
 	return `${id}event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
-/**
- * `Last-Event-ID` is whatever the client sent, including nothing at all. Only a
- * whole number is a resume point; anything else starts a fresh stream,
- * which is the same thing a first connection to the stream gets.
- */
-function resumeFrom(header: string | undefined): number | undefined {
-	if (!header) {
-		return undefined;
-	}
+const isStreamCursor = Schema.is(streamCursorSchema);
 
+function resumeFrom(header: string | undefined): StreamCursor | undefined {
+	if (!header) return undefined;
 	const seq = Number(header);
-	return Number.isSafeInteger(seq) ? seq : undefined;
+	if (Number.isSafeInteger(seq)) return seq;
+	return isStreamCursor(header) ? header : undefined;
 }

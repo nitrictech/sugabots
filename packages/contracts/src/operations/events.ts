@@ -12,21 +12,21 @@ import { uuidOrStringSchema } from "../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../workspaces.ts";
 import { OperationContract } from "./operation.ts";
 
-/**
- * Where a client resumes a stream, its `Last-Event-ID`: the `seq` of the last
- * durable event it heard, or the cursor `ready` or `reset` gave it.
- * Left out, the stream starts with what
- * happens next.
- */
-const since = Schema.optional(Schema.Int);
+export const streamCursorSchema = Schema.Union([
+	Schema.Int,
+	Schema.TemplateLiteral(["empty.", Schema.Number, ".", Schema.String]).check(
+		Schema.isPattern(/^empty\.[0-9]{1,16}\.[a-f0-9]{64}$/),
+	),
+]);
 
-/**
- * One event as a stream yields it: a durable one with its `seq`, the id a
- * client resumes from, and an ephemeral one, such as a reply's text as it is
- * written, without.
- */
+export type StreamCursor = typeof streamCursorSchema.Type;
+
+/** Where a client resumes a stream. Without a cursor, it follows what happens next. */
+const since = Schema.optional(streamCursorSchema);
+
+/** A delivered event, with a cursor when a client can resume from it. */
 const deliverySchema = Schema.Struct({
-	seq: Schema.optional(Schema.Int),
+	seq: Schema.optional(streamCursorSchema),
 	event: streamEventSchema,
 });
 

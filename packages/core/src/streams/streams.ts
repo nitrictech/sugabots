@@ -9,7 +9,7 @@ import {
 	streamEvent,
 	workspaceStream,
 } from "@sugabots/contracts";
-import type { Delivery } from "@sugabots/contracts/operations/events";
+import type { Delivery, StreamCursor } from "@sugabots/contracts/operations/events";
 import { eq } from "drizzle-orm";
 import {
 	Cause,
@@ -169,8 +169,8 @@ export interface Following<E> {
 	/** Who follows it: the end or expiry of their session ends it. */
 	readonly principal: MemberSession;
 	readonly stream: EventStream;
-	/** The client's resume point: the `seq` of the last durable event it heard. */
-	readonly since: number | undefined;
+	/** The client's resume point, from a durable event, ready, or reset. */
+	readonly since: StreamCursor | undefined;
 	/**
 	 * The workspace whose changes of reach make it prove again, found before it
 	 * first proves; none for a member's own stream, which every proof lets

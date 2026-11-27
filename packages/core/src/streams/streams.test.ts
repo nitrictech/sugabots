@@ -368,7 +368,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			db
 				.update(event)
 				.set({ createdAt: new Date(0) })
-				.where(and(eq(event.stream, stream), gt(event.seq, since))),
+				.where(and(eq(event.stream, stream), gt(event.seq, EventStore.afterCursor(since)))),
 		);
 		await stored.prune(new Date(1));
 		const resumed = await follow(ed, "events.followChat", { chatId: world.chat, since });
@@ -618,7 +618,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		const stream = chatStream(world.chat);
 		await commit(stream, streamEvent("chat.changed", { chatId: world.chat }));
 		const latest = (await stored.latest([stream])).get(stream);
-		if (latest === undefined) throw new Error("The stream has no cursor");
+		if (typeof latest !== "number") throw new Error("The stream has no stored event");
 		const chat = await follow(ed, "events.followChat", { chatId: world.chat, since: latest + 1 });
 		onTestFinished(() => chat.close());
 

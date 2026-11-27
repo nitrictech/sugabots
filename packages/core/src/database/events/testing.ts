@@ -67,7 +67,7 @@ export function inMemoryEventStore({
 				streams.map((stream) => [
 					stream,
 					rows.findLast((row) => row.stream === stream && row.seq >= prunedThrough)?.seq ??
-						-next - 1,
+						EventStore.buildEmptyCursor(stream, next),
 				]),
 			);
 		},
@@ -82,8 +82,9 @@ export function inMemoryEventStore({
 			const position = EventStore.afterCursor(cursor);
 			if (position < prunedThrough) return undefined;
 			const retained =
-				cursor < 0
-					? position <= next &&
+				typeof cursor === "string"
+					? cursor === EventStore.buildEmptyCursor(stream, position) &&
+						position <= next &&
 						!rows.some(
 							(row) => row.stream === stream && row.seq >= prunedThrough && row.seq <= position,
 						)
