@@ -1629,6 +1629,67 @@ it.skipIf(!process.env.DATABASE_URL)(
 	UPGRADE_TIMEOUT_MS,
 );
 
+it.skipIf(!process.env.DATABASE_URL)(
+	"assigns leads across workspaces with no bots without rescanning all projects for each workspace",
+	async () => {
+		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", "project_leads");
+		const migration = await readFile(
+			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
+			"utf8",
+		);
+		const workspaceCount = 400;
+		try {
+			await recreateDatabase(url);
+			await migrateTo(url, LAST_MAIN_MIGRATION);
+			await withClient(url, async (client) => {
+				await client.query(
+					`with workspaces as (
+						insert into workspace (name, slug)
+						select 'Workspace ' || ordinal, 'workspace-' || ordinal
+						from generate_series(1, $1::integer) as ordinal
+						returning id
+					)
+					insert into pod (workspace_id, kind, name, slug)
+					select workspaces.id, 'shared', projects.name, projects.slug
+					from workspaces cross join (values ('Notes', 'notes'), ('Plans', 'plans')) as projects(name, slug)`,
+					[workspaceCount],
+				);
+				await client.query("begin");
+				try {
+					await client.query(migration);
+					const {
+						rows: [stats],
+					} = await client.query<{ read: string }>(
+						`select seq_tup_read + idx_tup_fetch as read
+						from pg_stat_xact_user_tables where schemaname = 'public' and relname = 'project'`,
+					);
+					expect(Number(stats?.read)).toBeLessThan(workspaceCount * 100);
+					const {
+						rows: [coverage],
+					} = await client.query<{ workspaces: number }>(`
+						select count(*)::integer as workspaces
+						from (
+							select p.workspace_id
+							from project p
+							join project_bot pb on pb.project_id = p.id and pb.bot_id = p.lead_bot_id
+							join bot b on b.id = p.lead_bot_id and b.workspace_id = p.workspace_id
+							where p.default_of_bot_id is null and b.model is null
+							group by p.workspace_id
+							having count(*) = 2 and count(distinct b.id) = 1
+						) as led
+					`);
+					expect(coverage?.workspaces).toBe(workspaceCount);
+				} finally {
+					await client.query("rollback");
+				}
+			});
+		} finally {
+			await dropDatabase(url);
+		}
+	},
+	UPGRADE_TIMEOUT_MS,
+);
+
 /** Migrates the database at `url` through `last`, as an installation of `main` was. */
 async function migrateTo(url: string, last: string) {
 	const folder = await mkdtemp(join(tmpdir(), "migrations-"));
@@ -1647,7 +1708,10 @@ async function migrateTo(url: string, last: string) {
 }
 
 /** This worker's database with `_upgrade_<store>` on the end of its name, so workers never share one. */
-function upgradeDatabaseUrl(workerUrl: string, store: Store | "cycle" | "bot_names"): string {
+function upgradeDatabaseUrl(
+	workerUrl: string,
+	store: Store | "cycle" | "bot_names" | "project_leads",
+): string {
 	if (!workerUrl) return "";
 	const parsed = new URL(workerUrl);
 	parsed.pathname = `${parsed.pathname}_upgrade_${store}`;

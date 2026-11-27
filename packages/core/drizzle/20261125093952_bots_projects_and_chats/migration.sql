@@ -1542,6 +1542,10 @@ DECLARE
 	suffix_number integer;
 	made uuid;
 BEGIN
+	CREATE TEMP TABLE "workspace_lead" (
+		"workspace_id" uuid PRIMARY KEY,
+		"bot_id" uuid NOT NULL
+	) ON COMMIT DROP;
 	FOR leaderless IN
 		SELECT DISTINCT "workspace_id" FROM "project" WHERE "lead_bot_id" IS NULL ORDER BY "workspace_id"
 	LOOP
@@ -1564,12 +1568,17 @@ BEGIN
 			'indigo', 'pill', 'public'
 		)
 		RETURNING "id" INTO made;
-		INSERT INTO "project_bot" ("workspace_id", "project_id", "bot_id")
-		SELECT "workspace_id", "id", made FROM "project"
-		WHERE "workspace_id" = leaderless.workspace_id AND "lead_bot_id" IS NULL;
-		UPDATE "project" SET "lead_bot_id" = made
-		WHERE "workspace_id" = leaderless.workspace_id AND "lead_bot_id" IS NULL;
+		INSERT INTO "workspace_lead" VALUES (leaderless.workspace_id, made);
 	END LOOP;
+	ANALYZE "workspace_lead";
+	WITH led_projects AS (
+		UPDATE "project" AS p SET "lead_bot_id" = lead."bot_id"
+		FROM "workspace_lead" AS lead
+		WHERE p."workspace_id" = lead."workspace_id" AND p."lead_bot_id" IS NULL
+		RETURNING p."workspace_id", p."id", p."lead_bot_id"
+	)
+	INSERT INTO "project_bot" ("workspace_id", "project_id", "bot_id")
+	SELECT "workspace_id", "id", "lead_bot_id" FROM led_projects;
 END $$;--> statement-breakpoint
 -- Nobody is a member of a default project, administrators included: whoever
 -- reaches its bot reaches it.
