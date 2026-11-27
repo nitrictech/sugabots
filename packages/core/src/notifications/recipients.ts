@@ -1,3 +1,4 @@
+import { readCurrentApproval } from "../chats/turns/tool-calls/pending-approval.ts";
 import {
 	type AutomationRunNotifications,
 	chatNotificationTag,
@@ -431,18 +432,8 @@ export const mayStillBeTold = Effect.fn("Notifications.mayStillBeTold")(function
 	audience: Audience.Group | undefined,
 ) {
 	if (audience?.kind === "approval") {
-		const [waiting] = yield* db
-			.select({ id: toolCall.id })
-			.from(toolCall)
-			.where(
-				and(
-					eq(toolCall.id, audience.toolCall),
-					eq(toolCall.approvalId, audience.approval),
-					eq(toolCall.approvalStatus, "pending"),
-				),
-			)
-			.limit(1);
-		if (!waiting) return false;
+		const approval = yield* readCurrentApproval(db, audience.toolCall, audience.approval);
+		if (!approval?.pending) return false;
 		const [approver] = yield* approvalAudience(db, [audience.toolCall], memberId);
 		return approver !== undefined && (approver.reachesChat || !audience.showsChat);
 	}
