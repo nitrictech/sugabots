@@ -94,10 +94,10 @@ export const readCommittedTransaction = <A, E, R>(body: Effect.Effect<A, E, R>) 
 
 /**
  * Runs `proveAndRead`, which proves reach to something in the workspace
- * `workspaceOf` finds and reads what it reaches, under a share of the
- * workspace's lock (see {@link underWorkspaceShare}), so no change to who
- * reaches what commits between the proof and the read. Nothing found is
- * hidden as `resource`.
+ * `workspaceOf` finds and reads or writes what it reaches, under a share of
+ * the workspace's lock (see {@link underWorkspaceShare}), so no change to who
+ * reaches what commits between the proof and the read or write. Nothing found
+ * is hidden as `resource`.
  */
 export const readingUnderWorkspaceShare = <A, E, R>(
 	workspaceOf: Effect.Effect<string | undefined, never, Database>,

@@ -32,6 +32,7 @@ import {
 	computer,
 	computerProvider,
 	membership,
+	message,
 	modelProvider,
 	project,
 	projectMember,
@@ -733,14 +734,27 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			);
 			await removing.held;
 
-			const reads = [
+			const calls = [
 				callOperation(viewer, "bots.listMembers", { botId: diary.id }),
 				callOperation(viewer, "chats.messages", { chatId, limit: 1 }),
+				callOperation(viewer, "projects.listBots", { projectId: closed.id }),
+				callOperation(viewer, "projects.listMembers", { projectId: closed.id }),
+				callOperation(viewer, "chats.send", {
+					chatId,
+					message: "Sent as I leave",
+					retryKey: crypto.randomUUID(),
+				}),
 			];
-			await waitUntilWaitingOnLocks(reads.length);
+			await waitUntilWaitingOnLocks(calls.length);
 			await removing.release();
 
-			for (const read of reads) await expect(read).rejects.toThrow(ResourceHidden);
+			for (const outcome of await Promise.allSettled(calls)) {
+				expect(outcome).toMatchObject({ status: "rejected", reason: expect.any(ResourceHidden) });
+			}
+			const sent = await onDatabase((db) =>
+				db.select({ id: message.id }).from(message).where(eq(message.chatId, chatId)),
+			);
+			expect(sent).toEqual([]);
 		});
 
 		it("lists an administrator of two workspaces only the projects of the one asked about", async () => {
