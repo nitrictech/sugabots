@@ -15600,6 +15600,46 @@
         "n|tbl|public.turn",
         "n|sch|public"
       ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "automation_trigger",
+        "legacy_bearer_secret_digest"
+      ],
+      "writes": [
+        "s|col|public.automation_trigger.legacy_bearer_secret_digest",
+        "n|col|public.automation_trigger.legacy_bearer_secret_digest",
+        "e|col|public.automation_trigger.legacy_bearer_secret_digest"
+      ],
+      "reads": [
+        "n|tbl|public.automation_trigger",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "automation_trigger"
+      ],
+      "writes": [
+        "s|ck|public.automation_trigger.automation_trigger_legacy_bearer_secret_valid",
+        "n|ck|public.automation_trigger.automation_trigger_legacy_bearer_secret_valid",
+        "e|ck|public.automation_trigger.automation_trigger_legacy_bearer_secret_valid",
+        "n|con|public.automation_trigger.automation_trigger_legacy_bearer_secret_valid"
+      ],
+      "reads": [
+        "n|tbl|public.automation_trigger",
+        "n|sch|public",
+        "n|col|public.automation_trigger.legacy_bearer_secret_digest",
+        "n|col|public.automation_trigger.secret_encrypted",
+        "n|col|public.automation_trigger.kind",
+        "n|col|public.automation_trigger.settings"
+      ]
     }
   ],
   "deltas": [
@@ -25983,6 +26023,32 @@
         "generated": null,
         "identity": null,
         "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "automation_trigger",
+        "name": "legacy_bearer_secret_digest",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "automation_trigger",
+        "name": "automation_trigger_legacy_bearer_secret_valid",
+        "value": "\"legacy_bearer_secret_digest\" is null or (\"secret_encrypted\" is null and \"kind\" = 'webhook' and \"settings\"->'auth'->>'kind' = 'bearer')",
+        "entityType": "checks"
       }
     }
   ]

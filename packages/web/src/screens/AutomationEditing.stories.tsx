@@ -87,6 +87,10 @@ const signups = placed(7, "New signup triage", linearHandler, {
 	deliveryIdHeader: null,
 	auth: { kind: "basic", username: "sugabots" },
 });
+const deployCheck = placed(19, "Deploy check", oncall, {
+	kind: "webhook",
+	auth: { kind: "bearer" },
+});
 const standups = placed(8, "Standup notes", oncall, {
 	kind: "routine",
 	schedule: {
@@ -468,6 +472,25 @@ export const Webhook = meta.story({
 		await expect(secret).toHaveValue("whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u");
 		await expect(secret).toHaveAttribute("type", "password");
 		await expect(dialog.getByRole("button", { name: "Copy signing secret" })).toBeInTheDocument();
+	},
+});
+
+/** A bearer webhook can be given a new secret after an upgrade. */
+export const LegacyBearerWebhook = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			...automationsAnswer([deployCheck]),
+			http.get(
+				`${API}/projects/:projectId/automations/${deployCheck.automation.id}/triggers/:triggerId/secret`,
+				() => HttpResponse.json({ kind: "legacy" }),
+			),
+		);
+	},
+	render: () => <StoryApp path={feedPath(deployCheck)} />,
+	play: async ({ canvas }) => {
+		const dialog = within(await openFirstTrigger(canvas));
+		await expect(await dialog.findByText(/Your existing bearer secret still works/)).toBeVisible();
+		await expect(dialog.getByLabelText("Token")).toHaveValue("");
 	},
 });
 

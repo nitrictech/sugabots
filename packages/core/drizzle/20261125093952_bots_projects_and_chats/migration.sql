@@ -1899,28 +1899,6 @@ left join "system_conversation" sc on sc.conversation_id = c.id);
 --> statement-breakpoint
 -- ## Fresh start requirements
 ALTER TABLE "automation_trigger" DROP CONSTRAINT "automation_trigger_secret_valid", ADD CONSTRAINT "automation_trigger_secret_valid" CHECK ("secret_encrypted" is null or "kind" = 'webhook');--> statement-breakpoint
--- A webhook trigger main kept only a digest of the secret for has lost its
--- secret with the digest, and a trigger with no secret answers anyone who has
--- its address. Its automation is paused, and its routines with it, and its
--- secret is one nobody knows: a placeholder no key opens, which the server
--- replaces with a random secret sealed under its own key when it starts (see
--- `WebhookAuthentication`). It refuses every caller until someone gives it a
--- new secret.
-UPDATE "automation" SET "state" = 'paused', "updated_at" = now()
-WHERE "state" = 'enabled' AND "id" IN (
-	SELECT "automation_id" FROM "automation_trigger"
-	WHERE "secret_digest" IS NOT NULL AND "secret_encrypted" IS NULL
-);--> statement-breakpoint
-UPDATE "automation_trigger" SET "next_scheduled_at" = NULL
-WHERE "next_scheduled_at" IS NOT NULL AND "automation_id" IN (
-	SELECT "automation_id" FROM "automation_trigger"
-	WHERE "secret_digest" IS NOT NULL AND "secret_encrypted" IS NULL
-);--> statement-breakpoint
-UPDATE "automation_trigger" SET "secret_encrypted" = 'unsealed', "secret_digest" = NULL
-WHERE "secret_digest" IS NOT NULL AND "secret_encrypted" IS NULL;--> statement-breakpoint
-
-ALTER TABLE "automation_trigger" DROP CONSTRAINT "automation_trigger_digest_valid";--> statement-breakpoint
-ALTER TABLE "automation_trigger" DROP COLUMN "secret_digest";--> statement-breakpoint
 -- A computer made before computers recorded their image was made from an
 -- image nobody knows now, so it counts as behind and is upgraded once idle.
 UPDATE "computer" SET "image" = 'unknown' WHERE "image" IS NULL;--> statement-breakpoint
@@ -3413,3 +3391,7 @@ SET "approval_closed_because" = CASE "error"
 END
 WHERE "approval_status" = 'denied' AND "decided_at" IS NULL AND "finished_at" IS NOT NULL
 	AND "error" IS NOT NULL;
+--> statement-breakpoint
+ALTER TABLE "automation_trigger" ADD COLUMN "legacy_bearer_secret_digest" text;--> statement-breakpoint
+UPDATE "automation_trigger" SET "legacy_bearer_secret_digest" = "secret_digest" WHERE "secret_digest" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "automation_trigger" DROP CONSTRAINT "automation_trigger_digest_valid", DROP COLUMN "secret_digest", ADD CONSTRAINT "automation_trigger_legacy_bearer_secret_valid" CHECK ("legacy_bearer_secret_digest" is null or ("secret_encrypted" is null and "kind" = 'webhook' and "settings"->'auth'->>'kind' = 'bearer'));

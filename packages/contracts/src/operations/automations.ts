@@ -306,6 +306,7 @@ export const automationsContracts = {
 			AutomationNotFound,
 			AutomationTriggerNotFound,
 			AutomationTriggerKindChanged,
+			AutomationTriggerRejected,
 			...webhookSettingRefusals,
 		],
 		changes: true,
@@ -330,7 +331,8 @@ export const automationsContracts = {
 		botLoop: setUpInSettings,
 	}),
 	"automations.getSecret": OperationContract.make("automations.getSecret", {
-		description: "A webhook trigger's current secret, or that it has none.",
+		description:
+			"A webhook trigger's current secret, or whether it uses a legacy secret or has none.",
 		input: Schema.Struct(aTrigger),
 		output: automationCurrentSecretSchema,
 		errors: [...refusals, AutomationNotFound, AutomationTriggerNotFound, AutomationTriggerRejected],

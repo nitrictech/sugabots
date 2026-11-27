@@ -5,7 +5,11 @@ import { WebhookRefused } from "@sugabots/contracts/errors/automations";
 import { and, eq, isNull } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import { AutomationStore } from "../chats/automations/store.ts";
-import { type Delivery, deliveryAuthentic } from "../chats/automations/webhook-auth.ts";
+import {
+	type Delivery,
+	deliveryAuthentic,
+	verifyLegacyBearerSecret,
+} from "../chats/automations/webhook-auth.ts";
 import { query, serviceOperations } from "../database/database.ts";
 import { automation, automationTrigger, connector } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
@@ -67,6 +71,7 @@ export const make = Effect.gen(function* () {
 					automation: automation.id,
 					settings: automationTrigger.settings,
 					secret: automationTrigger.secretEncrypted,
+					legacyBearerSecretDigest: automationTrigger.legacyBearerSecretDigest,
 				})
 				.from(automationTrigger)
 				.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
@@ -88,15 +93,20 @@ export const make = Effect.gen(function* () {
 					const found = isUuid(triggerId) ? yield* webhookTrigger(triggerId) : undefined;
 					if (found?.settings.kind !== "webhook") return yield* new WebhookRefused();
 					if (found.secret === AutomationStore.UNSEALED_SECRET) return yield* new WebhookRefused();
-					// Left without a secret on purpose, so its address alone calls it.
+					const { secret, legacyBearerSecretDigest } = found;
 					const authentic =
-						found.secret === null ||
-						deliveryAuthentic(
-							found.settings.auth,
-							secrets.decrypt(found.secret),
-							delivery,
-							yield* DateTime.nowAsDate,
-						);
+						secret !== null
+							? deliveryAuthentic(
+									found.settings.auth,
+									secrets.decrypt(secret),
+									delivery,
+									yield* DateTime.nowAsDate,
+								)
+							: legacyBearerSecretDigest === null ||
+								(yield* Effect.tryPromise({
+									try: () => verifyLegacyBearerSecret(legacyBearerSecretDigest, delivery.headers),
+									catch: () => new WebhookRefused(),
+								}));
 					if (!authentic) return yield* new WebhookRefused();
 					return authenticated.webhookCall({
 						workspace: found.workspace,

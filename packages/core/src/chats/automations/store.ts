@@ -357,7 +357,7 @@ export const make = Effect.gen(function* () {
 					query((db) =>
 						db
 							.update(automationTrigger)
-							.set({ secretEncrypted: encrypted })
+							.set({ secretEncrypted: encrypted, legacyBearerSecretDigest: null })
 							.where(and(ofAutomation(scope, triggerId), eq(automationTrigger.kind, "webhook")))
 							.returning({ id: automationTrigger.id }),
 					),
@@ -573,7 +573,7 @@ export type Definition = Pick<schema.AutomationRow, "name" | "instructions" | "s
 /** What one of an automation's triggers is, and what it keeps beside that: a webhook's secret, a routine's next time. */
 export type TriggerValues = Pick<
 	schema.AutomationTriggerRow,
-	"settings" | "secretEncrypted" | "nextScheduledAt"
+	"settings" | "secretEncrypted" | "legacyBearerSecretDigest" | "nextScheduledAt"
 >;
 
 /** The trigger `triggerId`, when it is one of the automation `scope` names, which hasn't been removed. */

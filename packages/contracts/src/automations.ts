@@ -562,6 +562,7 @@ export const automationSecretSchema = Schema.Struct({ secret: Schema.NullOr(Sche
  */
 export const automationCurrentSecretSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("set"), secret: Schema.String }),
+	Schema.Struct({ kind: Schema.Literal("legacy") }),
 	Schema.Struct({ kind: Schema.Literal("none") }),
 ]);
 export type AutomationCurrentSecret = typeof automationCurrentSecretSchema.Type;

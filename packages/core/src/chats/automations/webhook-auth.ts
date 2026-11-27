@@ -1,4 +1,5 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 import {
 	WEBHOOK_SECRET_PREFIXES,
 	type WebhookAuth,
@@ -119,6 +120,19 @@ const AUTOMATIC_DELIVERY_ID_HEADERS = [
 	"svix-id",
 	"webhook-id",
 ];
+
+const deriveLegacySecret = promisify(scrypt);
+
+export async function verifyLegacyBearerSecret(encoded: string, headers: Delivery["headers"]) {
+	const presented = presentedSecret({ kind: "bearer" }, headers);
+	const [algorithm, saltText, digestText] = encoded.split(":");
+	if (presented === undefined || algorithm !== "scrypt" || !saltText || !digestText) return false;
+	const salt = Buffer.from(saltText, "base64url");
+	const expected = Buffer.from(digestText, "base64url");
+	if (salt.length === 0 || expected.length === 0) return false;
+	const actual = (await deriveLegacySecret(presented, salt, expected.length)) as Buffer;
+	return timingSafeEqual(actual, expected);
+}
 
 /**
  * Automatic detection checks the headers and body in the same order for every

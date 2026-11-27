@@ -115,6 +115,7 @@ export const automationTrigger = pgTable(
 		nextScheduledAt: timestamp("next_scheduled_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
+		legacyBearerSecretDigest: text("legacy_bearer_secret_digest"),
 	},
 	(table) => [
 		foreignKey({
@@ -125,6 +126,10 @@ export const automationTrigger = pgTable(
 		check(
 			"automation_trigger_secret_valid",
 			sql`${table.secretEncrypted} is null or ${table.kind} = 'webhook'`,
+		),
+		check(
+			"automation_trigger_legacy_bearer_secret_valid",
+			sql`${table.legacyBearerSecretDigest} is null or (${table.secretEncrypted} is null and ${table.kind} = 'webhook' and ${table.settings}->'auth'->>'kind' = 'bearer')`,
 		),
 		check(
 			"automation_trigger_routine_valid",

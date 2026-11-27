@@ -184,6 +184,7 @@ export interface Interface {
 		| AutomationNotFound
 		| AutomationTriggerNotFound
 		| AutomationTriggerKindChanged
+		| AutomationTriggerRejected
 		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
 		| WebhookDeliveryIdHeaderRejected

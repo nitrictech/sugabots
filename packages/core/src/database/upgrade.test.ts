@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, scryptSync } from "node:crypto";
 import { mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -252,6 +252,12 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				await client.query("update routine_trigger set secret_encrypted = $1 where id = $2", [
 					cipher.encrypt(legacy.automaticGitHubWebhook.secret),
 					legacy.automaticGitHubWebhook.trigger,
+				]);
+				const salt = Buffer.from("deploy-webhook-test-salt");
+				const digest = scryptSync(legacy.digestOnlyWebhook.secret, salt, 32);
+				await client.query("update routine_trigger set secret_digest = $1 where id = $2", [
+					`scrypt:${salt.toString("base64url")}:${digest.toString("base64url")}`,
+					legacy.digestOnlyWebhook.trigger,
 				]);
 				await client.query(
 					`insert into connection (id, workspace_id, pod_id, name, handle, kind, url, auth_kind,
@@ -1517,38 +1523,58 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			}
 		});
 
-		it("pauses a webhook trigger's automation that kept only its secret's digest, and refuses every delivery to it", async () => {
-			const { trigger } = legacy.digestOnlyWebhook;
-			const secrets = Secrets.fromKey(Buffer.alloc(32, 7).toString("base64"));
-			const delivered = (authorization: string | undefined) =>
-				upgraded.run(
-					Effect.gen(function* () {
-						const webhooks = yield* WebhookAuthentication.Service;
-						return yield* Effect.flip(
-							webhooks.trigger(trigger, {
-								headers: { authorization },
-								body: new TextEncoder().encode("{}"),
-								payload: {},
-							}),
-						);
-					}).pipe(
-						Effect.provide(WebhookAuthentication.layer),
-						Effect.provideService(Secrets.Service, secrets),
-					),
+		it("keeps a legacy bearer webhook and its automation's routine working until the secret is replaced", async () => {
+			const {
+				automation: automationId,
+				trigger: triggerId,
+				routine,
+				secret,
+			} = legacy.digestOnlyWebhook;
+			const call = await servedOperations({ runOn: upgraded.run });
+			const webhooks = await upgraded.run(
+				Effect.provide(WebhookAuthentication.Service, WebhookAuthentication.layer),
+			);
+			const deliver = async (authorization?: string) => {
+				const headers: Record<string, string> = authorization ? { authorization } : {};
+				const payload = {};
+				const principal = await upgraded.run(
+					webhooks.trigger(triggerId, { headers, payload, body: new TextEncoder().encode("{}") }),
 				);
-
-			const refusals = [await delivered(undefined), await delivered("Bearer guessed")];
-			const [stored] = await upgraded.rows<{ state: string; secret: string }>(
-				`select automation.state, automation_trigger.secret_encrypted as secret
+				return call(principal, "automations.webhook", { triggerId, headers, payload });
+			};
+			const [stored] = await upgraded.rows<{
+				state: string;
+				project_id: string;
+				next_scheduled_at: Date;
+			}>(
+				`select automation.state, automation.project_id, automation_trigger.next_scheduled_at
 				 from automation join automation_trigger on automation_trigger.automation_id = automation.id
 				 where automation_trigger.id = $1`,
-				[trigger],
+				[routine],
 			);
+			expect(stored?.state).toBe("enabled");
+			expect(stored?.next_scheduled_at).toEqual(new Date("2026-10-10T09:00:00Z"));
+			if (!stored) throw new Error("The routine was lost in the upgrade");
 
-			for (const refused of refusals) expect(refused).toBeInstanceOf(WebhookRefused);
-			expect(stored?.state).toBe("paused");
-			// A secret nobody knows, sealed under the server's key once it started.
-			expect(() => secrets.decrypt(stored?.secret ?? "")).not.toThrow();
+			await expect(deliver()).rejects.toBeInstanceOf(WebhookRefused);
+			await expect(deliver("Bearer guessed")).rejects.toBeInstanceOf(WebhookRefused);
+			const accepted = { runId: expect.any(String), duplicate: false };
+			await expect(deliver(`Bearer ${secret}`)).resolves.toEqual(accepted);
+
+			const member = await upgraded.signIn(legacy.members.sam);
+			const address = { projectId: stored.project_id, automationId, triggerId };
+			await expect(call(member, "automations.getSecret", address)).resolves.toEqual({
+				kind: "legacy",
+			});
+			await call(member, "automations.updateTrigger", {
+				...address,
+				trigger: { kind: "webhook", filter: [] },
+			});
+			await expect(deliver(`Bearer ${secret}`)).resolves.toEqual(accepted);
+			const replacement = await call(member, "automations.rotateSecret", address);
+			expect(replacement.secret).toEqual(expect.any(String));
+			await expect(deliver(`Bearer ${secret}`)).rejects.toBeInstanceOf(WebhookRefused);
+			await expect(deliver(`Bearer ${replacement.secret}`)).resolves.toEqual(accepted);
 		});
 
 		it("deduplicates deliveries to a webhook that used automatic detection on main", async () => {

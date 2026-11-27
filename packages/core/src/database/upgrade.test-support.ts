@@ -90,6 +90,8 @@ export const legacy = {
 	digestOnlyWebhook: {
 		automation: "00000008-0000-4000-8000-000000000002",
 		trigger: "00000010-0000-4000-8000-000000000001",
+		routine: "00000010-0000-4000-8000-000000000022",
+		secret: "deploy-webhook-test-secret",
 	},
 	automaticWebhookTrigger: "00000010-0000-4000-8000-000000000020",
 	automaticGitHubWebhook: {
@@ -432,6 +434,8 @@ INSERT INTO "routine" ("id", "workspace_id", "agent_id", "name", "instructions")
  ('00000008-0000-4000-8000-000000000002', '0000000a-0000-4000-8000-000000000001', '0000000c-0000-4000-8000-000000000001', 'Deploy check', 'Check the deploy');
 INSERT INTO "routine_trigger" ("id", "workspace_id", "routine_id", "settings", "secret_digest") VALUES
  ('00000010-0000-4000-8000-000000000001', '0000000a-0000-4000-8000-000000000001', '00000008-0000-4000-8000-000000000002', '{"kind":"webhook","auth":{"kind":"bearer"},"deliveryIdHeader":null}', 'a2f1c0ffee5a2f1c0ffee5a2f1c0ffee5a2f1c0ffee5a2f1c0ffee5a2f1c0ff');
+INSERT INTO "routine_trigger" ("id", "workspace_id", "routine_id", "settings", "next_scheduled_at") VALUES
+ ('${legacy.digestOnlyWebhook.routine}', '${legacy.workspace}', '${legacy.digestOnlyWebhook.automation}', '{"kind":"cron","schedule":{"repeat":"cron","expression":"0 9 * * *"},"timezone":"UTC"}', '2026-10-10 09:00Z');
 INSERT INTO "routine" ("id", "workspace_id", "agent_id", "name", "instructions", "state") VALUES
  ('00000008-0000-4000-8000-000000000020', '0000000a-0000-4000-8000-000000000001', '0000000c-0000-4000-8000-000000000001', 'New orders', 'Review the order', 'enabled');
 INSERT INTO "routine_trigger" ("id", "workspace_id", "routine_id", "settings") VALUES

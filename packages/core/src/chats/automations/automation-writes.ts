@@ -128,6 +128,7 @@ export const makeAutomationWrites = Effect.gen(function* () {
 								filter: checked.filter,
 							},
 							secretEncrypted: checked.secretEncrypted,
+							legacyBearerSecretDigest: checked.legacyBearerSecretDigest,
 							nextScheduledAt: null,
 						},
 						secret: checked.secret,
@@ -355,6 +356,15 @@ export const makeAutomationWrites = Effect.gen(function* () {
 					const current = yield* automationIn(scope);
 					const trigger = yield* triggerIn(scope, triggerId);
 					if (trigger.kind !== input.kind) return yield* new AutomationTriggerKindChanged();
+					if (
+						input.kind === "webhook" &&
+						input.auth !== undefined &&
+						input.auth.kind !== "bearer" &&
+						input.secret === undefined &&
+						trigger.legacyBearerSecretDigest !== null
+					) {
+						return yield* new AutomationTriggerRejected();
+					}
 					const written = yield* triggerValues(
 						{ id: scope.projectId, workspaceId: scope.workspaceId },
 						input,
@@ -396,6 +406,7 @@ export const makeAutomationWrites = Effect.gen(function* () {
 				yield* automationIn(scope);
 				const trigger = yield* triggerIn(scope, triggerId);
 				if (trigger.settings.kind !== "webhook") return yield* new AutomationTriggerRejected();
+				if (trigger.legacyBearerSecretDigest !== null) return { kind: "legacy" as const };
 				if (trigger.secretEncrypted === null) return { kind: "none" as const };
 				return { kind: "set" as const, secret: secrets.decrypt(trigger.secretEncrypted) };
 			}),
@@ -469,7 +480,7 @@ interface Written {
 	secret: string | null;
 }
 
-const NO_SECRET = { secretEncrypted: null } as const;
+const NO_SECRET = { secretEncrypted: null, legacyBearerSecretDigest: null } as const;
 
 /** The secrets made for `triggers`, written in the same order as `written`. */
 function secretsMade(
@@ -557,11 +568,9 @@ const DEFAULT_WEBHOOK_AUTH: WebhookAuth = { kind: "bearer" };
  * How a webhook trigger written as `input` checks its callers, and which of
  * their calls it runs, given how it did before (`current`, absent for a new
  * one). The filter is kept unless one is brought, and none is `undefined`.
- * The secret, or the lack of one, is kept whatever the auth becomes, unless
- * one is brought; a null one leaves it without. A new webhook without one
- * brought gets one made, which is returned. A secret
- * brought for a generic webhook must be long enough to be hard to guess; a
- * source's is whatever the source made.
+ * An edit keeps the current secret unless it supplies a replacement. A null
+ * secret opens the webhook. A new webhook without a supplied secret gets one
+ * generated for it. A source's secret can be as long as the source makes it.
  */
 function webhookCheck(
 	secrets: Secrets.Interface,
@@ -573,6 +582,7 @@ function webhookCheck(
 		deliveryIdHeader: string | null | undefined;
 		filter: readonly WebhookFilterTest[] | undefined;
 		secretEncrypted: string | null;
+		legacyBearerSecretDigest: string | null;
 		secret: string | null;
 	},
 	WebhookSecretTooShort | WebhookDeliveryIdHeaderRejected
@@ -606,6 +616,7 @@ function webhookCheck(
 			deliveryIdHeader,
 			filter,
 			secretEncrypted: current.secretEncrypted,
+			legacyBearerSecretDigest: current.legacyBearerSecretDigest,
 			secret: null,
 		});
 	}
@@ -614,7 +625,7 @@ function webhookCheck(
 			auth,
 			deliveryIdHeader,
 			filter,
-			secretEncrypted: null,
+			...NO_SECRET,
 			secret: null,
 		});
 	}
@@ -624,6 +635,7 @@ function webhookCheck(
 		deliveryIdHeader,
 		filter,
 		secretEncrypted: secrets.encrypt(secret),
+		legacyBearerSecretDigest: null,
 		secret,
 	});
 }

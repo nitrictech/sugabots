@@ -254,6 +254,7 @@
 				"AutomationRepositoryNotConnected": 400,
 				"AutomationTriggerKindChanged": 400,
 				"AutomationTriggerNotFound": 404,
+				"AutomationTriggerRejected": 400,
 				"BotCannotReach": 403,
 				"InvalidRoutineSchedule": 400,
 				"ResourceHidden": 404,

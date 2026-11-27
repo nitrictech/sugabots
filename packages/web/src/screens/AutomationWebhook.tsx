@@ -1,5 +1,6 @@
 import {
 	AUTOMATIC_DELIVERY_ID,
+	type AutomationCurrentSecret,
 	DEFAULT_DELIVERY_ID_HEADER,
 	MIN_WEBHOOK_SECRET_CHARACTERS,
 	WEBHOOK_SECRET_PREFIXES,
@@ -242,7 +243,7 @@ export function WebhookGroups({
 					}
 					savingDeliveryId={savingDeliveryId}
 					onChangeDeliveryIdHeader={onChangeDeliveryIdHeader}
-					savedSecret={saved.kind === "set" ? saved.secret : ""}
+					saved={saved}
 				/>
 			) : (
 				<SettingsGroup note={authNote(auth)}>
@@ -509,7 +510,7 @@ function SecretGroup({
 	deliveryIdHeader,
 	savingDeliveryId,
 	onChangeDeliveryIdHeader,
-	savedSecret,
+	saved,
 }: {
 	address: TriggerAddress;
 	auth: WebhookAuth;
@@ -517,10 +518,10 @@ function SecretGroup({
 	deliveryIdHeader: WebhookDeliveryIdHeaderInput;
 	savingDeliveryId: boolean;
 	onChangeDeliveryIdHeader: (deliveryIdHeader: WebhookDeliveryIdHeaderInput) => Promise<unknown>;
-	/** Blank when the automation has none. */
-	savedSecret: string;
+	saved: AutomationCurrentSecret;
 }) {
 	const actions = useAutomationActions();
+	const savedSecret = saved.kind === "set" ? saved.secret : "";
 	const { draft, fieldProps } = useCommittedDraft(
 		savedSecret,
 		(secret) => {
@@ -532,7 +533,15 @@ function SecretGroup({
 	);
 
 	return (
-		<SettingsGroup note={savedSecret !== "" ? authNote(auth) : NO_SECRET_NOTE}>
+		<SettingsGroup
+			note={
+				saved.kind === "legacy"
+					? "Your existing bearer secret still works. Enter a new secret to replace it before changing authentication."
+					: saved.kind === "set"
+						? authNote(auth)
+						: NO_SECRET_NOTE
+			}
+		>
 			<AuthRows
 				auth={auth}
 				onChange={onChangeAuth}
