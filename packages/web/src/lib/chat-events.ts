@@ -584,10 +584,10 @@ async function applyWorkspaceEvent(
 
 /**
  * Fetches again what a change of who reaches what may have changed: who
- * reaches a project, bot or the workspace, or what someone's role lets them
- * do there, changes what the lists show, what the member may do in the
- * workspace, and whose turns each member may interrupt in a chat. A stream
- * that lost what it follows ends on its own.
+ * reaches a project, bot or the workspace, such as a private bot's members,
+ * or what someone's role lets them do there, changes what the lists show,
+ * what the member may do in the workspace, and whose turns each member may
+ * interrupt in a chat. A stream that lost what it follows ends on its own.
  */
 function refreshAfterReachChange(queries: QueryClient, workspaceId: string) {
 	return Promise.all([
@@ -596,6 +596,7 @@ function refreshAfterReachChange(queries: QueryClient, workspaceId: string) {
 		queries.invalidateQueries({ queryKey: ["project-members"] }),
 		queries.invalidateQueries({ queryKey: ["project-bots"] }),
 		queries.invalidateQueries({ queryKey: ["bots"] }),
+		queries.invalidateQueries({ queryKey: ["bot-members"] }),
 		queries.invalidateQueries({ queryKey: ["workspaces"] }),
 		queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
 		refreshAfterChatChange(queries, workspaceId),

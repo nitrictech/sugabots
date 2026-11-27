@@ -1,4 +1,4 @@
-import { type Project, streamEvent } from "@sugabots/contracts";
+import { type Bot, type BotMember, type Project, streamEvent } from "@sugabots/contracts";
 import { NotFound, Unauthorized } from "@sugabots/contracts/http";
 import { userText } from "@sugabots/errors";
 import { screen, waitFor } from "@testing-library/react";
@@ -6,7 +6,9 @@ import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	apiAnswers,
+	bots,
 	controlledEventStream,
+	linear,
 	mount,
 	projects,
 	sam,
@@ -96,6 +98,30 @@ describe("the workspace's stream", () => {
 		});
 		return refuse;
 	}
+
+	it("shows a private bot's members as they are once who reaches what changes", async () => {
+		const updates = controlledEventStream();
+		client.events.workspace.mockReturnValue(updates.stream);
+		const diary: Bot = { ...linear, visibility: "private" };
+		client.api.bots.list.mockReturnValue(
+			Effect.succeed(bots.map((bot) => (bot.id === diary.id ? diary : bot))),
+		);
+		const robin: BotMember = {
+			memberId: "0199a3a0-0000-7000-8000-0000000000c9",
+			name: "Robin",
+			email: "robin@example.com",
+			image: null,
+			removable: true,
+		};
+		client.api.bots.listMembers.mockReturnValue(Effect.succeed([robin]));
+		mount(`/suga/bots/${diary.handle}/settings`);
+		await screen.findByText("Robin");
+
+		client.api.bots.listMembers.mockReturnValue(Effect.succeed([]));
+		updates.emit(streamEvent("reach.changed", { about: { kind: "workspace" } }));
+
+		await waitFor(() => expect(screen.queryByText("Robin")).toBeNull());
+	});
 
 	it("asks again which workspaces and projects the member reaches once it says they reach it no more", async () => {
 		const refuse = refusableWorkspaceStream();
