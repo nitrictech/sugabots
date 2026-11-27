@@ -102,6 +102,9 @@ const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), "../../drizzle"
  */
 const UPGRADE_TIMEOUT_MS = 120_000;
 
+const WAITING_TURN = "00000002-0000-4000-8000-000000000107";
+const WAITING_REPLY = "00000001-0000-4000-8000-00000000010b";
+
 type Store = "postgres" | "filesystem";
 
 describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"])(
@@ -167,6 +170,27 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				await client.query(legacyMigrationScaleRows);
 				await client.query(legacySummaryRequest);
 				await client.query(legacyFacilitationRequest);
+				await client.query(
+					`insert into turn (id, thread_id, agent_id, trigger_message_id, status, model, reason, checkpoint, started_at)
+					values ($1, $2, $3, $4, 'waiting', 'm', 'mention', $5, now())`,
+					[
+						WAITING_TURN,
+						legacy.threads.trip,
+						legacy.bots.budget,
+						legacy.tripMessages.asked,
+						{ approvals: [{ connectionId: legacy.familyGitHubConnector, connectionRevision: 1 }] },
+					],
+				);
+				await client.query(
+					`insert into message (id, thread_id, author_agent_id, turn_id, kind, status, parts, content)
+					values ($1, $2, $3, $4, 'text', 'streaming', '[]', '')`,
+					[WAITING_REPLY, legacy.threads.trip, legacy.bots.budget, WAITING_TURN],
+				);
+				await client.query(
+					`insert into tool_call (thread_id, message_id, turn_id, tool, input, status, approval_status, connection_id, at_offset)
+					values ($1, $2, $3, 'github__open_issue', '{}', 'awaiting_approval', 'pending', $4, 0)`,
+					[legacy.threads.trip, WAITING_REPLY, WAITING_TURN, legacy.familyGitHubConnector],
+				);
 				await client.query(legacySessions);
 				reachedOnMain = (await client.query<Reached>(REACHED_ON_MAIN)).rows;
 				legacyConnectors = (await client.query("select id, pod_id, handle from connection")).rows;
@@ -1018,6 +1042,28 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			);
 			expect(usage.systemBots).toEqual({ usd: 0.375, unknownCostRequests: 0 });
 			expect(usage.usd).toBe(0.875);
+		});
+
+		it("cancels waiting turns, replies and approvals when discarding their checkpoints", async () => {
+			expect(
+				await upgraded.rows(
+					`select turn.status, turn.end_requested, turn.checkpoint, message.status as reply_status,
+					tool_call.status as call_status, tool_call.approval_status, tool_call.error
+					from turn join message on message.turn_id = turn.id
+					join tool_call on tool_call.turn_id = turn.id where turn.id = $1`,
+					[WAITING_TURN],
+				),
+			).toEqual([
+				{
+					status: "cancelled",
+					end_requested: "interrupted",
+					checkpoint: null,
+					reply_status: "cancelled",
+					call_status: "failed",
+					approval_status: "denied",
+					error: "Turn cancelled",
+				},
+			]);
 		});
 
 		it("serves every file's bytes from where the file is read now", async () => {

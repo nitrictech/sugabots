@@ -118,60 +118,6 @@ SELECT
 FROM "connection"
 JOIN "agent" ON "agent"."pod_id" = "connection"."pod_id" AND "agent"."id" IS DISTINCT FROM "connection"."agent_id"
 WHERE "connection"."kind" <> 'github';--> statement-breakpoint
--- A turn waiting for approvals is bound to the connections it asked to call,
--- by id. A bot that got a copy has its calls bound to the copy instead, which
--- is the same connection at the same revision, so they still run once allowed.
-UPDATE "tool_call" SET "connection_id" = "copy"."id"
-FROM "turn", "connection" AS "original", "connection" AS "copy"
-WHERE "turn"."id" = "tool_call"."turn_id" AND "turn"."status" = 'waiting'
-	AND "tool_call"."status" = 'awaiting_approval'
-	AND "original"."id" = "tool_call"."connection_id"
-	AND "original"."agent_id" IS DISTINCT FROM "turn"."agent_id"
-	AND "copy"."agent_id" = "turn"."agent_id" AND "copy"."pod_id" = "original"."pod_id"
-	AND "copy"."handle" = "original"."handle"
-	AND "copy"."configuration_revision" = "tool_call"."connection_revision";--> statement-breakpoint
-UPDATE "turn" SET "checkpoint" = jsonb_set("checkpoint", '{approvals}', (
-	SELECT jsonb_agg(
-		CASE WHEN "copy"."id" IS NULL THEN "element"."binding"
-			ELSE jsonb_set("element"."binding", '{connectionId}', to_jsonb("copy"."id"::text)) END
-		ORDER BY "element"."position"
-	)
-	FROM jsonb_array_elements("turn"."checkpoint"->'approvals') WITH ORDINALITY AS "element"("binding", "position")
-	LEFT JOIN "connection" AS "original" ON "original"."id"::text = "element"."binding"->>'connectionId'
-		AND "original"."agent_id" IS DISTINCT FROM "turn"."agent_id"
-	LEFT JOIN "connection" AS "copy" ON "copy"."agent_id" = "turn"."agent_id"
-		AND "copy"."pod_id" = "original"."pod_id" AND "copy"."handle" = "original"."handle"
-		AND "copy"."configuration_revision" = ("element"."binding"->>'connectionRevision')::integer
-))
-WHERE "status" = 'waiting' AND jsonb_array_length(coalesce("checkpoint"->'approvals', '[]'::jsonb)) > 0;--> statement-breakpoint
--- A waiting turn still bound to a connection its bot no longer has, such as
--- another bot's GitHub app, could only fail once its calls were allowed. It is
--- cancelled now, its calls not run, saying why; the turns' cancel sweep tells
--- its workflow, which then stops waiting.
-WITH "stranded" AS (
-	SELECT "turn"."id" FROM "turn"
-	WHERE "turn"."status" = 'waiting' AND EXISTS (
-		SELECT 1 FROM jsonb_array_elements(coalesce("turn"."checkpoint"->'approvals', '[]'::jsonb)) AS "binding"
-		WHERE "binding" ? 'connectionId' AND NOT EXISTS (
-			SELECT 1 FROM "connection"
-			WHERE "connection"."id"::text = "binding"->>'connectionId' AND "connection"."agent_id" = "turn"."agent_id"
-		)
-	)
-), "abandoned_calls" AS (
-	UPDATE "tool_call" SET
-		"status" = 'failed',
-		"approval_status" = CASE WHEN "approval_status" = 'pending' THEN 'denied' ELSE "approval_status" END,
-		"error" = 'This bot lost its connector during the upgrade. Set up the connector for this bot, then ask again.',
-		"finished_at" = now(),
-		"updated_at" = now()
-	WHERE "turn_id" IN (SELECT "id" FROM "stranded") AND "status" IN ('running', 'awaiting_approval')
-), "cancelled_replies" AS (
-	UPDATE "message" SET "status" = 'cancelled'
-	WHERE "turn_id" IN (SELECT "id" FROM "stranded")
-)
-UPDATE "turn" SET "status" = 'cancelled', "cancel_requested" = true, "checkpoint" = NULL,
-	"finished_at" = now(), "updated_at" = now()
-WHERE "id" IN (SELECT "id" FROM "stranded");--> statement-breakpoint
 -- Copied OAuth tokens would refresh each other away, so every OAuth connection
 -- signs in again, the kept one too.
 UPDATE "connection" SET "oauth_encrypted" = NULL, "oauth_state" = NULL WHERE "auth_kind" = 'oauth';--> statement-breakpoint
@@ -2556,24 +2502,32 @@ DELETE FROM "lane" WHERE "subject" IN (SELECT "chat_id"::text FROM "collaboratio
 DELETE FROM "lane_request" WHERE "lane_key" IN (
 	SELECT "key" FROM "lane" WHERE "subject" IN (SELECT "chat_id"::text FROM "collaboration_move")
 );--> statement-breakpoint
--- The work still going on there ends, as cancelling a turn ends it: its
--- unfinished tool calls fail, a pending approval is denied, and its reply stops.
+-- The new bot loop can't resume these checkpoints. End each active turn, its
+-- unfinished calls and its reply. Also end any unfinished work in chats being
+-- folded into their parent. Waiting workflows are stopped by the cancel sweep.
 UPDATE "tool_call" SET
 	"status" = 'failed',
 	"approval_status" = CASE WHEN "approval_status" = 'pending' THEN 'denied' ELSE "approval_status" END,
 	"error" = 'Turn cancelled',
 	"finished_at" = now()
-WHERE "chat_id" IN (SELECT "chat_id" FROM "collaboration_move")
-	AND "status" IN ('running', 'awaiting_approval');--> statement-breakpoint
+WHERE "status" IN ('running', 'awaiting_approval') AND (
+	"turn_id" IN (SELECT "id" FROM "turn" WHERE "status" IN ('running', 'waiting'))
+	OR "chat_id" IN (SELECT "chat_id" FROM "collaboration_move")
+);--> statement-breakpoint
 UPDATE "message" SET "status" = 'cancelled'
-WHERE "chat_id" IN (SELECT "chat_id" FROM "collaboration_move") AND "status" = 'writing';--> statement-breakpoint
+WHERE "status" = 'writing' AND (
+	"turn_id" IN (SELECT "id" FROM "turn" WHERE "status" IN ('running', 'waiting'))
+	OR "chat_id" IN (SELECT "chat_id" FROM "collaboration_move")
+);--> statement-breakpoint
 UPDATE "turn" SET
 	"status" = 'cancelled',
 	"interrupt_requested" = true,
 	"checkpoint" = NULL,
 	"finished_at" = now()
-WHERE "chat_id" IN (SELECT "chat_id" FROM "collaboration_move")
-	AND "status" IN ('running', 'waiting');--> statement-breakpoint
+WHERE "status" IN ('running', 'waiting');--> statement-breakpoint
+-- A failed turn waiting to run again starts from nothing, so discard any
+-- checkpoint left by a turn that already ended.
+UPDATE "turn" SET "checkpoint" = NULL WHERE "checkpoint" IS NOT NULL;--> statement-breakpoint
 UPDATE "message" SET "chat_id" = moved."target_chat_id"
 FROM "collaboration_move" moved WHERE "message"."chat_id" = moved."chat_id";--> statement-breakpoint
 UPDATE "turn" SET "chat_id" = moved."target_chat_id"
@@ -2772,32 +2726,6 @@ ALTER TABLE "connector" ADD COLUMN "enabled" boolean DEFAULT true NOT NULL;
 -- A turn takes one model request a step, and records which step made each of
 -- its tool calls. Calls made before have none.
 ALTER TABLE "tool_call" ADD COLUMN "step" integer;--> statement-breakpoint
--- A turn running or waiting now kept a checkpoint the bot loop can no longer
--- carry on from, so it ends as cancelled, as cancelling a turn ends it: its
--- unfinished tool calls fail, a pending approval is denied, and its reply
--- stops. Its workflow, once it resumes, finds the turn ended and frees its
--- lane; one waiting for approvals is told to stop by the sweep for lost
--- cancels, as the turn is marked as asked to stop.
-UPDATE "tool_call" SET
-	"status" = 'failed',
-	"approval_status" = CASE WHEN "approval_status" = 'pending' THEN 'denied' ELSE "approval_status" END,
-	"error" = 'Turn cancelled',
-	"finished_at" = now()
-WHERE "status" IN ('running', 'awaiting_approval')
-	AND "turn_id" IN (SELECT "id" FROM "turn" WHERE "status" IN ('running', 'waiting'));--> statement-breakpoint
-UPDATE "message" SET "status" = 'cancelled'
-WHERE "status" = 'writing'
-	AND "turn_id" IN (SELECT "id" FROM "turn" WHERE "status" IN ('running', 'waiting'));--> statement-breakpoint
-UPDATE "turn" SET
-	"status" = 'cancelled',
-	"interrupt_requested" = true,
-	"checkpoint" = NULL,
-	"finished_at" = now()
-WHERE "status" IN ('running', 'waiting');--> statement-breakpoint
--- A failed turn waiting to run again starts from nothing, so its old
--- checkpoint goes too.
-UPDATE "turn" SET "checkpoint" = NULL WHERE "checkpoint" IS NOT NULL;
---> statement-breakpoint
 -- ## Turns carry an execution number
 -- Each turn counts its executions: its authenticator raises the number each
 -- time the turn starts or resumes, and the bot loop's writes for an older
