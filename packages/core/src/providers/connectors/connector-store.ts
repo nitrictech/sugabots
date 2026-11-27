@@ -498,14 +498,7 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.map(([row]) => row)),
 			),
 
-		setOnInProject: ({
-			workspaceId,
-			projectId,
-			botId,
-			connectorId,
-			on,
-			addressRevision,
-		}) =>
+		setOnInProject: ({ workspaceId, projectId, botId, connectorId, on, addressRevision }) =>
 			operation(
 				"setOnInProject",
 				transaction(
