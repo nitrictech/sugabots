@@ -309,7 +309,7 @@ const written = (tool: string, file: ListedWrittenFile): ToolCallPart => ({
 
 /**
  * Under a bot's tool line, a file its reply wrote, read from the call's
- * result and fetched at that version: only its name until it is expanded.
+ * result and fetched at that version: its start over the line naming it.
  */
 export const InAChat = meta.story({
 	beforeEach({ msw }) {
@@ -326,29 +326,22 @@ export const InAChat = meta.story({
 			</div>
 		</QueryPreview>
 	),
-	play: async ({ canvas, userEvent }) => {
+	play: async ({ canvas }) => {
 		await expect(canvas.getByText("Document by Growth Desk")).toBeVisible();
-		await expect(canvas.queryByRole("heading", { name: "Goals" })).toBeNull();
-		await userEvent.click(canvas.getByRole("button", { name: "Preview Q4 outreach plan" }));
 		await expect(await canvas.findByRole("heading", { name: "Goals" })).toBeVisible();
 	},
 });
 
-/**
- * On a phone, where a card is too narrow for its name and its buttons in one
- * row, the buttons drop below the name, which shows whole.
- */
+/** On a phone, the card fits the screen, with who made it whole on its line. */
 export const InAChatOnAPhone = meta.story({
 	beforeEach: InAChat.input.beforeEach,
 	render: InAChat.input.render,
 	globals: { viewport: { value: "mobile1" } },
 	play: async ({ canvas }) => {
 		const maker = canvas.getByText("Document by Growth Desk");
-		const open = canvas.getByRole("button", { name: "Open Q4 outreach plan" });
+		const card = canvas.getByRole("article", { name: "Q4 outreach plan" });
 		await expect(maker.scrollWidth).toBeLessThanOrEqual(maker.clientWidth);
-		await expect(open.getBoundingClientRect().top).toBeGreaterThan(
-			maker.getBoundingClientRect().bottom,
-		);
+		await expect(card.getBoundingClientRect().right).toBeLessThanOrEqual(window.innerWidth);
 	},
 });
 
@@ -368,8 +361,8 @@ const asWritten = (summary: ListedWrittenFile, title = summary.title): FileAsWri
 });
 
 /**
- * A document's card expands to show its start, and opens it large from its
- * Open, or from anywhere on what it shows.
+ * A document's card shows its start, and opens it large from its line, or
+ * from anywhere on what it shows.
  */
 export const InlineDocument = meta.story({
 	args: { onOpen: fn() },
@@ -384,14 +377,12 @@ export const InlineDocument = meta.story({
 		</div>
 	),
 	play: async ({ args, canvas, userEvent }) => {
-		const preview = canvas.getByRole("button", { name: "Preview Q4 outreach plan" });
-		await expect(preview).toHaveAttribute("aria-expanded", "false");
-		await userEvent.click(preview);
-		await expect(preview).toHaveAttribute("aria-expanded", "true");
-		await expect(canvas.getByRole("heading", { name: "Goals" })).toBeVisible();
-		const opens = canvas.getAllByRole("button", { name: "Open Q4 outreach plan" });
-		await userEvent.click(opens[0] as HTMLElement);
-		await expect(args.onOpen).toHaveBeenCalled();
+		const goals = canvas.getByRole("heading", { name: "Goals" });
+		await expect(goals).toBeVisible();
+		await userEvent.click(canvas.getByRole("button", { name: "Open Q4 outreach plan" }));
+		await expect(args.onOpen).toHaveBeenCalledTimes(1);
+		await userEvent.click(goals);
+		await expect(args.onOpen).toHaveBeenCalledTimes(2);
 	},
 });
 
@@ -413,7 +404,7 @@ export const InlineDeleted = meta.story({
 	},
 });
 
-/** A card whose file could not be loaded still says what it is and opens it, with nothing to expand. */
+/** A card whose file could not be loaded still says what it is and opens it, with nothing to preview. */
 export const InlineFailed = meta.story({
 	render: () => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
@@ -422,7 +413,29 @@ export const InlineFailed = meta.story({
 	),
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("button", { name: "Open Q4 outreach plan" })).toBeVisible();
-		await expect(canvas.queryByRole("button", { name: "Preview Q4 outreach plan" })).toBeNull();
+		await expect(canvas.queryByRole("heading", { name: "Goals" })).toBeNull();
+	},
+});
+
+/** While a file is open large beside the chat, its card is only its line, which still opens it. */
+export const LineOnly = meta.story({
+	args: { onOpen: fn() },
+	render: ({ onOpen }) => (
+		<div className="w-full max-w-155 p-6 pl-12.5">
+			<FileCardView
+				file={asWritten(plan)}
+				botName={writer.name}
+				content={planContent}
+				preview={false}
+				onOpen={onOpen}
+			/>
+		</div>
+	),
+	play: async ({ args, canvas, userEvent }) => {
+		await expect(canvas.getByText("Document by Growth Desk")).toBeVisible();
+		await expect(canvas.queryByRole("heading", { name: "Goals" })).toBeNull();
+		await userEvent.click(canvas.getByRole("button", { name: "Open Q4 outreach plan" }));
+		await expect(args.onOpen).toHaveBeenCalled();
 	},
 });
 
@@ -454,7 +467,7 @@ stages.forEach(([name, deals], index) => {
 </script>
 </body></html>`;
 
-/** A page a reply wrote, running in place under a header that says which bot made it. */
+/** A page a reply wrote, running in place over the line that says which bot made it. */
 export const InlinePage = meta.story({
 	render: () => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
@@ -466,9 +479,8 @@ export const InlinePage = meta.story({
 			/>
 		</div>
 	),
-	play: async ({ canvas, userEvent }) => {
+	play: async ({ canvas }) => {
 		await expect(canvas.getByText("Page by Growth Desk")).toBeVisible();
-		await userEvent.click(canvas.getByRole("button", { name: "Preview Pipeline by stage" }));
 		await expect(canvas.getByTitle("Pipeline by stage").getAttribute("srcdoc")).toContain(
 			"--primary:",
 		);
@@ -508,8 +520,7 @@ export const InlinePageLoading = meta.story({
 			/>
 		</div>
 	),
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Preview Pipeline by stage" }));
+	play: async ({ canvas }) => {
 		await expect(canvas.getByText("Loading…")).toBeVisible();
 	},
 });
@@ -519,23 +530,27 @@ const tallPage = `<!doctype html><html><body style="padding: 16px">${Array.from(
 	(_, row) => `<p style="margin: 0 0 12px">Row ${row + 1}</p>`,
 ).join("")}</body></html>`;
 
-/** A page taller than the frame: clipped, shown all, then clipped again. */
+/** A page taller than its preview: cut off and faded, and opened large to be seen whole. */
 export const InlinePageTall = meta.story({
-	render: () => (
+	args: { onOpen: fn() },
+	render: ({ onOpen }) => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<FileCardView
 				file={asWritten(dashboard, "Every deal")}
 				botName={writer.name}
 				content={tallPage}
-				onOpen={fn()}
+				onOpen={onOpen}
 			/>
 		</div>
 	),
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Preview Every deal" }));
-		await userEvent.click(await canvas.findByRole("button", { name: "Show all" }));
-		await userEvent.click(await canvas.findByRole("button", { name: "Show less" }));
-		await expect(await canvas.findByRole("button", { name: "Show all" })).toBeVisible();
+	play: async ({ args, canvas, userEvent }) => {
+		const frame = await canvas.findByTitle("Every deal");
+		await waitFor(() => expect(frame.getBoundingClientRect().height).toBeGreaterThan(400));
+		await expect(
+			canvas.getByRole("article", { name: "Every deal" }).getBoundingClientRect().height,
+		).toBeLessThan(300);
+		await userEvent.click(canvas.getByRole("button", { name: "Open Every deal" }));
+		await expect(args.onOpen).toHaveBeenCalled();
 	},
 });
 
@@ -574,8 +589,7 @@ export const PageFromContentOrigin = meta.story({
 			</div>
 		</ContentOriginPreview>
 	),
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Preview Pipeline by stage" }));
+	play: async ({ canvas }) => {
 		const frame = await canvas.findByTitle("Pipeline by stage");
 		await waitFor(() =>
 			expect(frame.getAttribute("src")).toMatch(
@@ -594,8 +608,7 @@ export const PageWithoutContentOrigin = meta.story({
 		msw.use(pageAddress(null));
 	},
 	render: PageFromContentOrigin.input.render,
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Preview Pipeline by stage" }));
+	play: async ({ canvas }) => {
 		const frame = await canvas.findByTitle("Pipeline by stage");
 		await waitFor(() => expect(frame.getAttribute("srcdoc")).toContain(PAGE_CONTENT_POLICY));
 		await expect(frame).not.toHaveAttribute("src");
@@ -620,7 +633,6 @@ export const PageAddressFailed = meta.story({
 	},
 	render: PageFromContentOrigin.input.render,
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Preview Pipeline by stage" }));
 		await expect(await canvas.findByRole("alert")).toHaveTextContent(
 			"This page couldn't be loaded.",
 		);
