@@ -1,7 +1,6 @@
 import { SugabotsIcon } from "@sugabots/avatars";
 import { type MessagePart, messagePreview, type ToolCallPart } from "@sugabots/contracts";
 import {
-	AppWindow,
 	BookOpen,
 	FileText,
 	Globe,
@@ -156,12 +155,13 @@ export type StepIcon = ComponentType<{ strokeWidth?: number }>;
  * in no family has the wrench.
  */
 export function stepIcon(call: ToolCallPart): StepIcon {
-	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return AppWindow;
+	// The bot's browser runs on the project's computer, whose desktop shows it.
+	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return Monitor;
 	if (call.tool.startsWith(FILE_TOOL_PREFIX)) return FileText;
 	return TOOL_FAMILIES.find((family) => family.tools.includes(call.tool))?.icon ?? Wrench;
 }
 
-/** The product's own tools by family, beyond those whose names give theirs (the browser's and the file tools). */
+/** The product's own tools by family, beyond those whose names give theirs (the browser tools and the file tools). */
 const TOOL_FAMILIES: readonly { icon: StepIcon; tools: readonly string[] }[] = [
 	// The computer's files, and the chat's, are files too.
 	{ icon: FileText, tools: ["read_file", "write_file", "share_file", "read_chat_file"] },
