@@ -229,7 +229,7 @@ export const ANetworkRequestNotYours = meta.story({
 	args: { ...ANetworkRequest.input.args, canApprove: false },
 	play: async ({ canvas }) => {
 		await expect(
-			canvas.getByText("Waiting for someone who manages this computer to answer this."),
+			canvas.getByText("Waiting for someone who can add an allowed host to answer this."),
 		).toBeInTheDocument();
 	},
 });

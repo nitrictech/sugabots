@@ -42,11 +42,12 @@ There are four. Pick one to see what it can do.
 <RoleMatrix />
 
 Everyone can talk to the workspace's public bots and find its public projects.
-A personal bot, Personal Assistants included, is for its creator alone, and a
-private project for the members in it. The owner and admins are in every project
-members made, and see that personal bots exist, but not their chats. Everyone,
-viewers included, makes, manages and deletes their own Personal Assistants, and
-runs their automations.
+Private bots and private projects are for their members. The workspace's owner
+and admins are members of every private bot and every project members made.
+They can see that personal bots exist. Only the creator can talk to a personal
+bot and read its chats. Everyone, including viewers, can make Personal
+Assistants and manage, delete and start automation runs for their own personal
+bots.
 
 Each workspace has exactly one owner: whoever created it. The owner can do
 everything an admin can, and is the only one who can make someone an admin, stop
@@ -58,6 +59,12 @@ Open a member in **Settings → Members** to change their role or remove them.
 Removing someone takes away their access to the workspace and every project in
 it. Their Personal Assistants and their chats are deleted, but the projects and
 other bots they made stay, and their personal bots' automations are switched off.
+
+Sugabots checks a member's access when a request, bot reply or automation run
+starts. If the member loses access after it starts, the work can finish, even
+if the bot was waiting for approval. New requests, replies, runs and approval
+decisions use the member's current access. If access was lost, open event streams and desktop viewers close when they
+next check it.
 
 The owner can't be removed or lose their role, and can't leave. To hand the
 workspace on, the owner opens another member in **Settings → Members** and makes

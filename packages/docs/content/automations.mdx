@@ -17,16 +17,17 @@ leads, so they run on its own computer with its own connectors. They're in the
 bot's **Automations**.
 
 Whoever may change the project makes and changes its automations, and switches
-them on or off: for the own automations of a bot members made, its creator, the
-owner and admins; for a project members made, the owner and admins. Anyone in the
-project, or who can talk to the bot, can see them and, except viewers, choose
-**Start a run**.
+them on or off. The workspace's owner and admins do this for projects members
+made and for public and private bots. The bot's creator can also manage its
+automations if they can talk to it and have a role other than viewer. Anyone
+in the project or who can talk to the bot can see its automations and runs.
+The owner, admins and editors can choose **Start a run** there.
 
 A [personal bot](/docs/bots#public-private-and-personal)'s automations, a
 [Personal Assistant](/docs/bots#personal-assistants)'s included, are its
-creator's: only they see them and answer the approvals their runs ask for. The
-owner and admins can only switch them off. A viewer manages and runs their own
-Personal Assistants' automations, but not those of another personal bot they made. A run on a routine, or one started by
+creator's to manage and run, whatever their role. Only the creator can read
+the runs and answer their ordinary tool approvals. The owner and admins can
+pause these automations. A run on a routine, or one started by
 hand, works with the creator's permissions, as the bot does, and asks before it
 changes anything. A run a webhook or GitHub event started works only in the
 bot's own chats and files and with its own connectors, and asks before every
@@ -35,9 +36,7 @@ tool call.
 ## Who runs it
 
 Each run is done by the project's lead bot when it starts. Choose another lead,
-and the next run is that bot's. Whoever made the bot doing a run answers the
-approvals it asks for, if they're in the project and not a viewer, as do the
-owner and admins; see [who can answer](/docs/tools-and-approvals#who-can-answer).
+and the next run is that bot's. The bot that starts a run keeps working on it.
 
 ## Make an automation
 
@@ -226,7 +225,5 @@ Each run has a chat of its own with everything the bot did, and shows in the
 automation feed as a line like "Morning inbox sweep ran". A posted
 result links back to its run, under the message. A run that fails or is
 stopped posts nothing; its line says what happened. If a run needs an
-[approval](/docs/tools-and-approvals), only whoever manages the bot doing the
-run, and can see its chat, can answer it: the bot's creator, if they're in the
-project and not a viewer, the owner or an admin; for a personal bot, its
-creator alone, even a viewer. See [who can answer](/docs/tools-and-approvals#who-can-answer).
+[approval](/docs/tools-and-approvals), who can answer depends on the tool and
+the bot that made the call. See [who can answer](/docs/tools-and-approvals#who-can-answer).

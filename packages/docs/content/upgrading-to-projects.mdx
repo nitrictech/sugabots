@@ -27,16 +27,17 @@ update so far, so plan for it.
 
 - **Shared pods become private projects** with the same members. Each bot of
   a shared pod becomes a private bot whose members are exactly the pod's
-  members, and stays in the project. A bot's creator who had left the pod
-  isn't one of its members. Nobody gains access to anything they couldn't
-  reach before.
+  members, and stays in the project. Its own chats, files, connectors and
+  automations stay with the bot. A creator who was outside the pod at the time
+  of the upgrade stays outside the bot and cannot manage it. The workspace's
+  owner or an admin can add them back.
 - **Each project has a lead bot that answers its chats.** In a pod's chats,
   bots only answered when someone mentioned them or replied to them. Now a
   message that mentions no bot and replies to none goes to the project's lead
-  bot. A shared
-  pod's lead is the first of its bots added to it. A pod with no bots gets a
-  lead with no model, which answers nobody until someone gives it a model or
-  chooses another lead.
+  bot. The first bot created in a shared pod becomes its project's lead.
+  Projects from pods with no bots share a new lead bot per workspace. It has
+  no model, so it answers only after an owner or admin gives it one. They can
+  also choose a different lead in each project's settings.
 - **Pod members can run its bots' automations by hand.** A shared pod's
   members become members of its bots, and anyone who reaches a bot, but a
   viewer, may start its automations by hand, paused ones included. Before,
@@ -46,8 +47,9 @@ update so far, so plan for it.
   owners' and admins' lists of bots. Admins still can't talk to them or read
   their chats and files.
 - **Each bot gets its own connectors.** A pod's connectors are copied to each
-  of its bots. A shared pod with no bots keeps its connectors in the project it
-  becomes. Sign-ins can't be shared between copies, so **every OAuth
+  of its bots. The upgrade turns on the shared pod's bots' own connectors in
+  the project the pod becomes. A shared pod with no bots keeps its connectors
+  in that project. Sign-ins can't be shared between copies, so **every OAuth
   connector has to sign in again**: once for each bot it was copied to, and
   once in each project that kept one. Connectors that use an API key or no
   sign-in keep working.
@@ -88,11 +90,12 @@ update so far, so plan for it.
   gave out, under `/api/hooks/`, still reach their triggers and GitHub apps.
   So do the setup addresses each GitHub app was made with. You don't need to
   change them where they're configured.
-- **Files and computers.** Every file keeps its contents, and every computer
-  keeps its machine and its work, but a personal pod's with no bots (see
-  above). A personal pod with no bots left gives its files to a new Personal
-  Assistant for its owner, with no model until they choose one, so only they
-  reach them. Files kept on disk move to their new folders when the server
-  starts.
+- **Files and computers.** Files outside direct messages keep their contents.
+  A shared pod's computer stays with the project it becomes. A personal pod's
+  computer goes to its oldest bot other than a Personal Assistant, or to the
+  Personal Assistant if it is the only bot. A personal pod with no bots gives
+  its files to a new Personal Assistant for its owner, with no model until they
+  choose one. Only they can see those files. Files kept on disk move to their
+  new folders when the server starts.
 - **Old docs links.** Links to renamed docs pages, such as `/docs/pods`,
   redirect to the page that replaced them.

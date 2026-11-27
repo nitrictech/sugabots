@@ -346,6 +346,6 @@ component barrel.
 
 ### Storybook versions
 
-Storybook packages are pinned to `11.0.0-alpha.1` because stable 10.6's Vitest
+Storybook packages are pinned to `11.0.0-alpha.6` because stable 10.6's Vitest
 addon supports only Vitest 3 and 4, and this repo uses Vitest 5. Upgrade all
 Storybook packages together.

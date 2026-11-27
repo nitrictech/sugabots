@@ -59,24 +59,26 @@ Set the tool's access and pick what the bot wants to do. A read and a change are
 
 ## Who can answer
 
-A waiting call shows in the chat with **Allow** and **Deny**. Allow lets that
-one call run. There's no "always allow": the next call asks again.
+If you can answer a waiting call, you'll see **Allow** and **Deny**. Allow
+applies to that call and the details shown. If the input is too large to show in full, Sugabots
+refuses the call.
 
-- **Anyone who can talk to the bot**, except viewers, can answer approvals in
-  its chats. In a project, anyone in it except viewers can answer.
-- **Viewers** see "Waiting for someone with permission to answer this," except
-  in their own personal bots' chats, such as their Personal Assistants', where
-  they answer its approvals. Only its creator answers a personal bot's.
-- **Only those who manage the bot doing the run, and can see the chat**, can
-  answer approvals raised by an [automation](/docs/automations) run: the bot's
-  creator, the owner and admins; for a personal bot, its creator alone,
-  viewers included. A bot's own automations are run by that bot, and a
-  project's by its [lead bot](/docs/projects#lead-bot) when the run started, so
-  whoever made the lead bot answers its runs' approvals in a project they're
-  in. Viewers can't, even for a bot they made. An admin can't see a personal
-  bot's chats, so can't answer its automation's approvals.
-- **Only those who manage the computer, and can see the chat**, can
-  allow it to reach an internet address it couldn't before: for a bot's own
-  computer, the bot's creator, the owner and admins, and a viewer for their own
-  Personal Assistant; for a [project's computer](/docs/projects#computer), the owner and admins. An admin
-  can't see a personal bot's chats, so can't answer a request raised in one.
+The first rule that applies decides who can answer:
+
+1. **Requests to add an allowed host.** The workspace's owner and admins
+   answer for projects members made. For a public or private bot's own
+   computer, its creator can also answer if they can talk to the bot and have
+   a role other than viewer. Only the creator answers for their own personal
+   bot's computer, whatever their role. Approval adds an allowed host for the
+   project, even if the computer is replaced. If the approver cannot open the
+   chat, they see the host requested in the approval.
+2. **Other calls by a personal bot.** Only its creator can answer, including
+   for calls it makes during an automation run.
+3. **Other calls made by an automation.** The workspace's owner and admins
+   can answer if they can read the run's chat. The creator of the bot doing
+   the run can also answer if they can manage that bot and read the run's chat.
+4. **Other calls in a chat.** Only the member whose message the bot is
+   answering can decide, including when the bot has asked another bot for help.
+
+Sugabots checks who can answer when they submit their decision. When the
+call starts, the current tool, connector and computer settings still apply.

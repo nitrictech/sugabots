@@ -264,7 +264,7 @@ export const automationsContracts = {
 	}),
 	"automations.run": OperationContract.make("automations.run", {
 		description:
-			"Run an automation now, outside its routines and triggers. Asking again with the same request id returns that run.",
+			"Start a run by hand, even if the automation is paused. The workspace's owner, admins and editors can start runs in projects they belong to and for bots they can talk to. Viewers can start runs for their own personal bots. Asking again with the same request id returns that run.",
 		input: Schema.Struct({ ...anAutomation, ...manualAutomationRunSchema.fields }),
 		output: acceptedRunSchema,
 		errors: [...refusals, AutomationNotFound, AutomationTriggerConflict, AutomationTriggerRejected],

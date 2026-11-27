@@ -23,14 +23,15 @@ When you make a project, you choose who can find it:
 The owner and admins are in every project members made, public or private.
 
 A project with a [private bot](/docs/bots#public-private-and-personal) in it
-stays private until the bot leaves it.
+stays private until every private bot leaves it. If a private bot leads the
+project, choose another lead before removing it.
 
 ## Make a project
 
 Owners, admins and editors can make projects from the project directory. Give
 it a name like "Support", a line saying what it's for, choose its lead bot, and
-choose public or private. You're the first member in it, and the lead bot its first
-bot.
+choose public or private. You join the project when you create it, and the
+lead is its first bot.
 
 The sidebar lists the projects you're in, one row each, as it lists bots.
 Choose one to open it: its own sidebar takes the place of the list, with its
@@ -86,7 +87,7 @@ The project's own sidebar lists its chats, the most recently active first,
 and can search them or show only some. Opening the project opens its newest
 chat, or, while it has none, starts one.
 
-Anyone in a chat can mark it resolved once its work is finished, which
+Anyone in the project except viewers can mark a chat resolved once its work is finished, which
 moves it to the Resolved list at the foot, where it can be reopened. The
 owner and admins can rename a chat.
 
@@ -104,21 +105,21 @@ when idle. A bot working in this project's chats uses this computer, not its own
 so everything done for the project stays on the project's machine. Each bot
 keeps a home folder of its own there, and each chat a folder of its own.
 
-A bot uses a computer only if its creator or an admin let it, in the bot's
-settings, and only while the workspace has a computer provider set up.
+The bot's creator, the workspace's owner or an admin turns on **Computer use**
+in the bot's settings. The workspace also needs an enabled computer provider,
+which its owner and admins configure.
 
 Everyone in the project can see how its computer stands and watch a bot's
 desktop on it, and anyone but viewers can click and type there. The owner and
 admins, who can change the project, choose which internet addresses its
-computer may reach beyond the workspace's, reset or upgrade it, and allow its
-bots' requests to reach more.
+computer may reach beyond the workspace's, reset or upgrade it, and approve requests to add to the project's allowed hosts.
 
 ## Connectors
 
 A project has its own [connectors](/docs/connectors): the services and APIs its
 bots work with, and at most one GitHub app. A bot working in the project's
 chats uses the project's connectors, and those of its own that the
-project's managers have [turned on](/docs/connectors#a-bots-own-connectors-in-a-project)
+workspace's owner and admins have [turned on](/docs/connectors#a-bots-own-connectors-in-a-project)
 there; where both have one with the same name, the project's is used. The owner and admins add and manage
 them, and everyone in the project can see which ones it has.
 

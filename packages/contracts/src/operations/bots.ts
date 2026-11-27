@@ -101,7 +101,7 @@ export const botsContracts = {
 	}),
 	"bots.create": OperationContract.make("bots.create", {
 		description:
-			"Make a bot on a model the workspace offers, pinned for you. Without instructions it starts by interviewing you to write them.",
+			"Make a public, private or personal bot on a model the workspace offers, pinned for you. The workspace's owner, admins and editors can do this. Without instructions the bot starts by interviewing you to write them.",
 		input: Schema.Struct({ workspace: workspaceIdOrSlugSchema, ...newBotSchema.fields }),
 		output: botSchema,
 		errors: [...refusals, ModelNotEnabled, BotNameTaken, BotHandleReserved],
@@ -111,7 +111,7 @@ export const botsContracts = {
 	}),
 	"bots.update": OperationContract.make("bots.update", {
 		description:
-			"Change a bot you manage: its name, handle, avatar, description, instructions, model, tools, computer use, or whether it is public or private. A bot made private leaves every public project, once each it leads has another lead. Whether a bot is personal is chosen when it is made and never changes. Of a Personal Assistant, all but its instructions and handle.",
+			"Change a bot you manage: its name, handle, avatar, description, instructions, model, tools, computer use, or whether it is public or private. A bot made private leaves every public project, once each it leads has another lead. Making a bot public clears its member list. Whether a bot is personal is chosen when it is made and never changes. Of a Personal Assistant, all but its instructions and handle.",
 		input: Schema.Struct({ botId: uuidSchema, changes: botUpdateSchema }),
 		output: botSchema,
 		errors: [

@@ -146,7 +146,7 @@ WITH "stranded" AS (
 	UPDATE "tool_call" SET
 		"status" = 'failed',
 		"approval_status" = CASE WHEN "approval_status" = 'pending' THEN 'denied' ELSE "approval_status" END,
-		"error" = 'Not run: when channels replaced pods, this connection went to another bot. Ask again once this bot has a connection of its own.',
+		"error" = 'This bot lost its connector during the upgrade. Set up the connector for this bot, then ask again.',
 		"finished_at" = now(),
 		"updated_at" = now()
 	WHERE "turn_id" IN (SELECT "id" FROM "stranded") AND "status" IN ('running', 'awaiting_approval')
@@ -1599,7 +1599,7 @@ BEGIN
 			leaderless.workspace_id,
 			CASE WHEN suffix_number = 1 THEN 'Lead' ELSE 'Lead ' || suffix_number END,
 			CASE WHEN suffix_number = 1 THEN 'lead' ELSE 'lead-' || suffix_number END,
-			'Leads the projects that had no bots when they were made. Give it a model, or choose another lead in each project''s settings.',
+			'Leads projects that had no bots at the time of the upgrade. Give it a model so it can reply, or choose another lead in each project''s settings.',
 			'indigo', 'pill', 'public'
 		)
 		RETURNING "id" INTO made;

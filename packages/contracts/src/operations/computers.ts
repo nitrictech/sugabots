@@ -625,7 +625,7 @@ export const computersContracts = {
 	}),
 	"computers.requestHost": OperationContract.make("computers.requestHost", {
 		description:
-			"Ask for your computer to be allowed to connect to a host it can't reach. Someone who manages this computer decides, and your reply waits until they have; once allowed, your computer reaches the host. Ask only for a host the chat needs, by its name, and use a wildcard such as *.example.com only when the chat needs many of a domain's subdomains. A host the workspace has blocked is refused at once.",
+			"Ask to add a host to this project's allowed hosts. The workspace's owner or an admin decides for a project members made, and whoever can change the bot's settings decides for its own computer. Your reply waits for the decision. Ask only for a host the chat needs, by name. Use a wildcard such as *.example.com only when the chat needs many subdomains. A host the workspace has blocked is refused at once.",
 		input: Schema.Struct({
 			host: computerHostSchema.annotate({
 				description:

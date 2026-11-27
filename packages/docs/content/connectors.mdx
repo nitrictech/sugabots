@@ -25,23 +25,22 @@ those of its own the project has turned on.
 
 ## A bot's own connectors in a project
 
-A bot's own connectors are off in every project it's added to until someone
-who manages that project turns them on there. While one is on, the bot can
-send that connector what it reads in the project's chats, so whoever manages
-the project decides where its work may go, not whoever set the bot up.
+A bot's own connectors start off in each project it's added to. The workspace's
+owner and admins can turn on each connector for that project. While it's on, the
+bot can send the connector what it reads in the project's chats.
 
 Open the project's **Connectors**. Under **Its bots' own**, each bot lists its
-connectors and whether each is on. Those who manage the project, and those who
-can see the bot's own connectors, also see the address each sends data to.
+connectors and whether each is on. The workspace's owner and admins and anyone who can
+see the bot's own connectors also see where each connector sends data.
 Turn one on to let the bot use it in the project's chats, or off to stop it.
 While it's on, the bot uses it for anyone who talks to it in the project's
 chats, including members who can't open the bot's own chats.
 
-If someone changes a connector's address, it turns off in every project until
-someone who manages each project turns it on again, even if the address later
-changes back. Turning one on is refused if its address changed after you
-opened the page, so a connector never starts sending a project's work
-somewhere its manager didn't see.
+Changing a connector's address or server turns it off in every project it was
+turned on for, even if the address later changes back. The workspace's owner
+and admins can check the new address and turn it on again for each project. If
+the address changed after you opened the page, check the new address before
+trying again.
 
 ## Who manages them
 
@@ -49,9 +48,12 @@ Whoever may change a project adds and manages its connectors, signs them in
 and chooses their tools' access: in a project members made, the owner and
 admins. Everyone in the project can see which connectors it has.
 
-A bot's own connectors are managed by its creator, the owner and admins, and
-anyone who can talk to the bot can see them. You can also add connectors to
-your own [Personal Assistants](/docs/bots#personal-assistants).
+Anyone who can talk to a bot can see its own connectors. For public or private
+bots, the workspace's owner and admins can manage them, as can the bot's creator
+if they can talk to it and have a role other than viewer. You manage connectors
+for your own personal bots whatever your role, including your
+[Personal Assistants](/docs/bots#personal-assistants). The owner and admins can
+switch off another member's personal bot's connectors.
 
 ## Add one
 
@@ -136,9 +138,10 @@ The project's [automations](/docs/automations) can then start on GitHub
 events, and its [computer](/docs/projects#computer) is signed in to read those repositories.
 A project has at most one GitHub app, since its computer can be signed in to
 only one account there. A bot working in a project's chat uses the project's
-GitHub app; when the project has none, it uses its own, but the project's
-computer isn't signed in to that app's repositories, so only public ones can be
-cloned there.
+GitHub app. If the project has none, the bot can use its own GitHub app if
+it's [turned on for that project](#a-bots-own-connectors-in-a-project). The
+project's computer is signed in only to repositories from the project's own
+GitHub app.
 
 ## Look after it
 

@@ -13,7 +13,7 @@ import { OperationContract } from "./operation.ts";
 export const approvalsContracts = {
 	"approvals.decide": OperationContract.make("approvals.decide", {
 		description:
-			"Allow or deny a tool call waiting for your approval, as its approver: for a request to change a computer, someone who manages its project; for a personal bot's call, its creator; for an automation's run, an admin or a manager of its bot; otherwise the member the turn acts for.",
+			"Allow or deny the exact tool call shown. For a host request, the workspace's owner and admins decide for a project members made. In a bot's default project, whoever can change the bot's settings decides. For other calls from a personal bot, its creator decides. For other calls made by an automation, the workspace's owner and admins and the bot's creator who can manage it may decide if they can read the run's chat. For other calls, the member whose message the bot is answering decides.",
 		input: Schema.Struct({
 			toolCallId: uuidOrStringSchema,
 			/**

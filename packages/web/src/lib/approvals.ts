@@ -22,6 +22,6 @@ export function mayAnswer(
 /** Who a member who may not answer `call` is waiting for. */
 export function awaitedApprovers(call: ToolCallPart) {
 	return call.approval?.approvers === "computer-managers"
-		? "Waiting for someone who manages this computer to answer this."
+		? "Waiting for someone who can add an allowed host to answer this."
 		: "Waiting for someone with permission to answer this.";
 }

@@ -88,8 +88,8 @@ Bots run code, use software and browse the web on a computer of their own, or th
 - **Usage and costs**: see what every bot and model costs, day by day.
 - **Web search**: bots search the web and read pages, through Exa, Brave Search,
   Tavily or your own SearXNG server.
-- **Roles**: owners, admins, editors and viewers, with public and personal bots, and public and private projects
-  deciding who sees what.
+- **Roles**: owners, admins, editors and viewers, with public, private and personal bots,
+  and public and private projects.
 - **Personal Assistant**: everyone gets an assistant of their own that nobody
   else can talk to, admins included.
 - **Bots set their own routines**: ask a bot to "check in with me every morning

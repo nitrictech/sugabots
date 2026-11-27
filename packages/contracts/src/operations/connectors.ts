@@ -151,7 +151,7 @@ export const connectorsContracts = {
 	}),
 	"connectors.setOnInProject": OperationContract.make("connectors.setOnInProject", {
 		description:
-			"Turn one of a project bot's own connectors on or off in the project. Turning it on is refused once its address has changed since the manager saw it. A bot uses it in the project's chats only while it is on.",
+			"Let the workspace's owner or an admin turn one of a bot's own connectors on or off in a project. If its address has changed since they saw it, they must review the new address before turning it on. Anyone who can talk to the bot in the project can use it while it is on.",
 		input: Schema.Struct({
 			projectId: uuidSchema,
 			connectorId: uuidSchema,

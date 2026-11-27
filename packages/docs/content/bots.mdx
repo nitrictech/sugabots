@@ -10,7 +10,8 @@ in a hidden project of its own, which it leads alone, so they work just as a
 
 ## Make a bot
 
-Owners, admins and editors can make bots. You choose:
+Owners, admins and editors can make bots. Every member can make a
+[Personal Assistant](#personal-assistants). When you make a bot, you choose:
 
 - **Shape**, **Eyes** and **Colour**: its avatar. There are 21 shapes, five
   pairs of eyes and 16 colours.
@@ -45,18 +46,22 @@ changes its own instructions only in its own chats, and only once you approve.
   private bot, and the owner and admins stay members of every one. It can be
   added to [private projects](/docs/projects#public-and-private) only, where
   everyone in the project can talk to it in the project's chats, but not in
-  the bot's own chats unless they're its members too.
+  the bot's own chats unless they're its members too. If you made a bot before
+  the upgrade to projects, [check the membership exception](/docs/upgrading-to-projects#what-changes).
 - A **personal** bot is for its creator alone, and works with their permissions:
   it can reach whatever they can, in every project they're in, and asks them
   before it changes anything. Nobody else can talk to it or see its chats, and
   it can't be shared or added to projects. You manage your own personal bots,
-  whatever your role. The owner and admins see that it exists, but not its
-  chats, and can only delete it or switch off its automations and connectors.
+  whatever your role. The workspace's owner and admins can see that it exists,
+  delete it or switch off its automations and connectors. Only you can read its
+  chats.
 
-Its creator, the owner and admins can make a public bot private, or a private
-bot public, in its settings. A bot made private leaves every public project
-it's in, so if it leads one, choose another lead bot there first. A bot made
-public is open to everyone in the workspace, with its chats and files.
+The workspace's owner and admins can switch a bot between public and private
+in its settings. So can its creator if they can talk to the bot and have a role
+other than viewer. A bot made private stays in its private projects and leaves
+every public project. If it leads one, choose another lead bot there first.
+Making a bot public opens its chats and files to the workspace and clears its
+member list.
 
 Whether a bot is personal is chosen when it's made, and never changes: a public
 or private bot can't be made personal, and a personal bot can't be made public
@@ -69,12 +74,14 @@ or private, since its chats hold what it found with your permissions.
 | Chats | Its chats, each about one piece of work. See [Chats](/docs/chats) |
 | Files | Files uploaded or made in its chats |
 | Computer | Its own machine, where it runs commands and keeps files in its chats. It sleeps when idle. In a project's chats it uses the [project's computer](/docs/projects#computer) instead |
-| Connectors | The services and APIs it works with, and its own GitHub app. In a project's chats it uses the [project's](/docs/projects#connectors) instead, and those of its own that the project's managers have [turned on there](/docs/connectors#a-bots-own-connectors-in-a-project). See [Connectors](/docs/connectors) |
+| Connectors | The services and APIs it works with, and its own GitHub app. In a project's chats it uses the [project's connectors](/docs/projects#connectors) plus any of its own that the workspace's owner and admins have [turned on there](/docs/connectors#a-bots-own-connectors-in-a-project). See [Connectors](/docs/connectors) |
 | Automations | Work it does on its own, on a routine, such as every weekday at 9, or when something triggers it. See [Automations](/docs/automations) |
 
 ## Tell it what to do
 
-Its creator, the owner and admins can change a bot's settings:
+You can change your personal bot's settings whatever your role. For a public or
+private bot, the workspace's owner and admins can change its settings, as can
+its creator if they can talk to it and have a role other than viewer.
 
 | Setting | What it's for |
 | --- | --- |
@@ -82,7 +89,7 @@ Its creator, the owner and admins can change a bot's settings:
 | Model | What it thinks with. Each bot can use a different one |
 | Instructions | How it should work. It follows these in every chat and project |
 | Tools | Which built-in tools it may use |
-| Computer use | Whether it may run commands and browse on a computer. It's off until its creator or an admin turns it on, and works only while an admin has a computer provider enabled for the workspace |
+| Computer use | Whether it may run commands and browse on a computer. The bot's creator, the workspace's owner or an admin can turn it on in the bot's settings. It works while the workspace has an enabled computer provider |
 
 <Tip title="Writing instructions">
 
@@ -127,7 +134,7 @@ you when you agree. It can also make a project, join one, add a bot to a
 project or pin a bot for you: each waits for your approval before it happens, as
 any change a personal bot makes does. You manage it as any personal bot of
 yours, whatever your role: its name, avatar, model and tools, its connectors, and its automations,
-which only you can see, run or answer. Its instructions are looked after by
+whose runs only you can read and start. Its instructions are looked after by
 Sugabots, so you can't edit them, and it keeps its handle and stays personal.
 
 ## Remove a bot

@@ -760,7 +760,7 @@ const VISIBILITY_SWITCHES = {
 	private: {
 		label: "Make private",
 		description:
-			"Only its creator, admins and the members you add will see it and its chats and files. It will leave every public project it's in. If it leads one, choose another lead bot there first.",
+			"Its creator, the workspace's owner and admins, and any members you add can see it and its chats and files. It stays in its private projects. It will leave every public project it's in. If it leads one, choose another lead bot there first.",
 	},
 } as const;
 
