@@ -1,10 +1,10 @@
 export * as WorkspaceGuide from "./workspace-guide.ts";
 
 import type { WorkspaceGuide as Guide } from "@sugabots/contracts/workspace-guide";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { type Executor, query, serviceOperations } from "../../database/database.ts";
-import { automation, bot, project } from "../../database/schema.ts";
+import { automation, project } from "../../database/schema.ts";
 import type { Approved } from "../../proofs/approved.ts";
 import type { ReachSet } from "../../proofs/reach-set.ts";
 import type { CanReadWorkspace } from "../../proofs/workspace-permissions.ts";
@@ -18,7 +18,7 @@ import {
 } from "../../server-settings/web-app-paths.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { Bots } from "../../workspaces/bots/bots.ts";
-import { Projects } from "../../workspaces/projects/projects.ts";
+import { projectsListedTo } from "../../workspaces/projects/project-reads.ts";
 import { workspaceSlugOf } from "../../workspaces/workspace-reference.ts";
 import { automationFailing } from "../automations/execution.ts";
 import { ChatView } from "../chats/chat-view.ts";
@@ -48,7 +48,6 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("WorkspaceGuide");
-	const projects = yield* Projects.Service;
 	const bots = yield* Bots.Service;
 	const view = yield* ChatView.Service;
 	const { webAppUrl } = yield* ServerSettings.Service;
@@ -63,41 +62,33 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const workspaceId = reach.workspace.value;
 					const workspaceSlug = yield* workspaceSlugOf(workspaceId);
-					const listedProjects = yield* projects.list(canRead);
+					const listedProjects = yield* projectsListedTo(workspaceId, canRead.actor.memberId);
 					// The member's own Personal Assistant is among the bots they reach, but is
 					// no bot to suggest to them: it is only named for its failing automations.
 					// Nor is a bot they see but can't talk to, as an admin sees others'
 					// personal bots.
 					const reachedBots = yield* bots.list(canRead);
 					const workspaceBots = reachedBots.filter((bot) => !bot.assistant && bot.permissions.talk);
-					// A private project's members talk to its lead there, a private bot
-					// included, without reaching it, so its handle is read for them here.
-					const leadHandles = yield* query((db) =>
-						leadHandlesOf(
-							db,
-							listedProjects.map((listed) => listed.leadBotId),
-						),
-					);
-					const leadHandleOf = (botId: string) => {
-						const handle = leadHandles.get(botId);
-						if (!handle) throw new Error("A project's lead bot is gone");
-						return `@${handle}`;
-					};
 					const failing = yield* query((db) => failingAutomationsByProject(db, workspaceId, reach));
 					const unreadMentions = yield* view.unreadMentions(canRead, reach, LISTED_ITEMS);
 					const approvals = yield* view.approvals(canRead, reach);
 					return {
 						workspaceId,
-						projects: listedProjects.map((listed) => ({
-							id: listed.id,
-							name: listed.name,
-							address: listed.slug,
-							link: linkTo(projectPath(workspaceSlug, listed.slug)),
-							description: listed.description,
-							private: listed.visibility === "private",
-							youAreIn: listed.isMember,
-							lead: leadHandleOf(listed.leadBotId),
-						})),
+						projects: listedProjects.map(({ project: listed, leadHandle }) => {
+							// A private project's members talk to its lead there, a private bot
+							// included, without reaching it, so its handle is read with the project.
+							if (!leadHandle) throw new Error("A project's lead bot is gone");
+							return {
+								id: listed.id,
+								name: listed.name,
+								address: listed.slug,
+								link: linkTo(projectPath(workspaceSlug, listed.slug)),
+								description: listed.description,
+								private: listed.visibility === "private",
+								youAreIn: listed.isMember,
+								lead: `@${leadHandle}`,
+							};
+						}),
 						bots: workspaceBots.map((bot) => ({
 							id: bot.id,
 							name: bot.name,
@@ -135,7 +126,9 @@ export const make = Effect.gen(function* () {
 											},
 										];
 									}
-									const inProject = listedProjects.find((one) => one.id === projectId);
+									const inProject = listedProjects.find(
+										({ project }) => project.id === projectId,
+									)?.project;
 									return inProject
 										? [
 												{
@@ -158,7 +151,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(Layer.provide([Projects.layer, Bots.layer, ChatView.layer]));
+export const layer = layerNoDeps.pipe(Layer.provide([Bots.layer, ChatView.layer]));
 
 type FailingAutomations = Guide["waitingOnYou"]["failingAutomations"][number];
 
@@ -192,15 +185,3 @@ const failingAutomationsByProject = <P, W>(
 			),
 		)
 		.groupBy(project.id, project.defaultOfBotId);
-
-/** The handles of the bots `botIds`, by id. */
-const leadHandlesOf = (db: Executor, botIds: readonly string[]) =>
-	Effect.map(
-		botIds.length === 0
-			? Effect.succeed([])
-			: db
-					.select({ id: bot.id, handle: bot.handle })
-					.from(bot)
-					.where(inArray(bot.id, [...botIds])),
-		(rows) => new Map(rows.map((row) => [row.id, row.handle])),
-	);

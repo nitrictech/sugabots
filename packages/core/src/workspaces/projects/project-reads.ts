@@ -109,15 +109,22 @@ export const defaultProjectOf = (botId: string) =>
 
 /**
  * The projects of the workspace `workspaceId` that `memberId` is in, and the
- * public ones they could join, by name, as they see them. Each says how many
- * members and bots are in it where they may list them, as its own lists would.
+ * public ones they could join, by name, as they see them, each with its lead's
+ * handle, read with it. Each says how many members and bots are in it where
+ * they may list them, as its own lists would.
  */
 export const projectsListedTo = (workspaceId: string, memberId: string) =>
 	Effect.gen(function* () {
 		const rows = yield* query((db) =>
 			db
-				.select({ project, role: membership.role, projectMemberId: projectMember.id })
+				.select({
+					project,
+					role: membership.role,
+					projectMemberId: projectMember.id,
+					leadHandle: bot.handle,
+				})
 				.from(project)
+				.leftJoin(bot, eq(bot.id, project.leadBotId))
 				.leftJoin(
 					membership,
 					and(
@@ -147,14 +154,16 @@ export const projectsListedTo = (workspaceId: string, memberId: string) =>
 			return {
 				row: row.project,
 				place,
+				leadHandle: row.leadHandle,
 				reaches: memberReaches(place, projectFactsOf(row.project)),
 			};
 		});
 		const headcountOf = yield* projectHeadcounts(
 			listed.filter(({ reaches }) => reaches).map(({ row }) => row.id),
 		);
-		return listed.map(({ row, place, reaches }): Project => {
+		return listed.map(({ row, place, leadHandle, reaches }) => {
 			const seen = projectSeenAs(row, place);
-			return reaches ? { ...seen, ...headcountOf(seen.id) } : seen;
+			const project: Project = reaches ? { ...seen, ...headcountOf(seen.id) } : seen;
+			return { project, leadHandle };
 		});
 	});

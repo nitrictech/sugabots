@@ -51,7 +51,7 @@ import type {
 } from "../../proofs/workspace-permissions.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
-import { botReachNarrowed, reachChanged } from "../../streams/reach-changes.ts";
+import { reachChanged, reachNarrowed } from "../../streams/reach-changes.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { refuseWhileLeading } from "../projects/project-leads.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
@@ -254,7 +254,7 @@ export const make = Effect.gen(function* () {
 							if (changesReach) {
 								yield* outbox.publish([
 									row.visibility === "private" && facts.visibility !== "private"
-										? botReachNarrowed(workspace)
+										? reachNarrowed(workspace)
 										: reachChanged(workspace, { kind: "bot", botId: row.id }),
 									...left.map((projectId) =>
 										reachChanged(workspace, { kind: "project", projectId }),
@@ -292,7 +292,7 @@ export const make = Effect.gen(function* () {
 					const outcome = yield* store.removeMember(workspace, bot.value, member.value);
 					switch (outcome) {
 						case "removed":
-							return yield* outbox.publish([botReachNarrowed(workspace)]);
+							return yield* outbox.publish([reachNarrowed(workspace)]);
 						case "administrator":
 							return yield* new AdministratorInEveryPrivateBot();
 						case "creator":

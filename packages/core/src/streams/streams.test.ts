@@ -461,6 +461,27 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			}
 		});
 
+		it("tells everyone that a project was made private, naming it to nobody", async () => {
+			const world = await staffed();
+			const open = await seedProject(world.workspace, {
+				leadBotId: world.pub.id,
+				visibility: "public",
+			});
+			const erin = await following(await signedIn.member(world.erin), "events.followWorkspace", {
+				workspace: world.workspace,
+			});
+
+			await call(await signedIn.member(world.admin), "projects.update", {
+				projectId: open,
+				changes: { visibility: "private" },
+			});
+
+			const heard = await erin.next();
+			expect(heard !== "ended" && heard.event).toEqual(
+				streamEvent("reach.changed", { about: { kind: "workspace" } }),
+			);
+		});
+
 		it("proves again when a role changes, and sends what the new role reaches", async () => {
 			const world = await staffed();
 			const erin = await following(await signedIn.member(world.erin), "events.followWorkspace", {
@@ -730,8 +751,12 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			});
 
 			expect(await nextType(chat)).toBe("ended");
-			// Vi, still in J, is told its members changed; Ed, who no longer reaches it, isn't.
-			expect(await nextType(vi)).toBe("reach.changed");
+			// Both are told, naming no project, so Ed's lists drop J too.
+			const unnamed = streamEvent("reach.changed", { about: { kind: "workspace" } });
+			for (const follower of [vi, workspace]) {
+				const heard = await follower.next();
+				expect(heard !== "ended" && heard.event).toEqual(unnamed);
+			}
 			await commit(
 				workspaceStream(world.workspace),
 				Audience.forChat(world.chat, streamEvent("chat.changed", { chatId: world.chat })),

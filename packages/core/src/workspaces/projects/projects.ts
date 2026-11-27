@@ -43,7 +43,7 @@ import type { ReachesBot } from "../../proofs/reaches-bot.ts";
 import type { ReachesProject } from "../../proofs/reaches-project.ts";
 import type { HoldsWorkspaceLock } from "../../proofs/workspace-lock.ts";
 import type { CanCreateProjects, CanReadWorkspace } from "../../proofs/workspace-permissions.ts";
-import { reachChanged } from "../../streams/reach-changes.ts";
+import { reachChanged, reachNarrowed } from "../../streams/reach-changes.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { projectBots } from "../bots/bot-reads.ts";
 import { newProjectSlug, projectSeenAs } from "./project.ts";
@@ -182,7 +182,7 @@ export const make = Effect.gen(function* () {
 			const outcome = yield* store.removeMember(reach.workspace, reach.project.value, memberId);
 			switch (outcome) {
 				case "removed":
-					return yield* membersChanged(reach);
+					return yield* outbox.publish([reachNarrowed(reach.workspace)]);
 				case "administrator":
 					return yield* new AdministratorInEveryProject();
 				case "not_a_member":
@@ -194,7 +194,10 @@ export const make = Effect.gen(function* () {
 		list: (canRead) =>
 			operation(
 				"list",
-				projectsListedTo(canRead.inWorkspace.workspace.value, canRead.actor.memberId),
+				Effect.map(
+					projectsListedTo(canRead.inWorkspace.workspace.value, canRead.actor.memberId),
+					(listed) => listed.map(({ project }) => project),
+				),
 			),
 
 		create: (lock, canCreate, lead, approved) =>
@@ -239,8 +242,13 @@ export const make = Effect.gen(function* () {
 						reach.project.value,
 						leadBotId === undefined ? changes : { ...changes, leadBotId },
 					);
-					// A new lead becomes one of its bots.
-					if (leadBotId !== undefined) yield* membersChanged(reach);
+					// Made private, it leaves out whoever isn't in it, who must hear it too; a
+					// new lead becomes one of its bots.
+					if (changes.visibility !== undefined) {
+						yield* outbox.publish([reachNarrowed(reach.workspace)]);
+					} else if (leadBotId !== undefined) {
+						yield* membersChanged(reach);
+					}
 					return projectSeenAs(updated, member);
 				}),
 			),

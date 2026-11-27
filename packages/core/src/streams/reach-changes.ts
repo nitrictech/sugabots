@@ -17,11 +17,11 @@ export const reachChanged = (workspaceId: string, about: ReachChange): PendingEv
 });
 
 /**
- * The event that records a change to who reaches a bot that may leave some
- * members out, as making it private or taking a member out of it does. Sent
- * to everyone in the workspace, so those who no longer reach it hear it too
- * and drop it from what they see, and so it names no bot: a private bot's id
- * is for those who reach it.
+ * The event that records a change that may leave some members out of a bot or
+ * project they reached, as making a bot private or taking a member out of a
+ * bot or project does. Sent to everyone in the workspace, so those who no
+ * longer reach it hear it too and drop it from what they see, and so it names
+ * nothing: a private bot's or project's id is for those who reach it.
  */
-export const botReachNarrowed = (workspaceId: string): PendingEvent =>
+export const reachNarrowed = (workspaceId: string): PendingEvent =>
 	reachChanged(workspaceId, { kind: "workspace" });
