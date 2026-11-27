@@ -134,7 +134,8 @@ export function FileCardView({
 		<article
 			aria-label={file.title}
 			className={cn(
-				"flex min-w-0 flex-col rounded-bubble border border-border bg-card",
+				// Pointing anywhere on it, its preview included, shades its line, which says it opens.
+				"group/card flex min-w-0 flex-col rounded-bubble border border-border bg-card",
 				CARD_WIDTH,
 			)}
 		>
@@ -168,7 +169,7 @@ export function FileCardView({
 				onClick={onOpen}
 				aria-label={`Open ${file.title}`}
 				className={cn(
-					"group/line focus-ring flex min-w-0 items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-hover",
+					"focus-ring flex min-w-0 items-center gap-3 px-3.5 py-3 text-left transition-colors group-hover/card:bg-hover",
 					previewed ? "rounded-b-bubble" : "rounded-bubble",
 				)}
 			>
@@ -183,7 +184,7 @@ export function FileCardView({
 				</span>
 				<ChevronRight
 					aria-hidden
-					className="size-4 shrink-0 text-subtle-foreground transition group-hover/line:translate-x-0.5 group-hover/line:text-foreground motion-reduce:transition-none"
+					className="size-4 shrink-0 text-subtle-foreground transition group-hover/card:translate-x-0.5 group-hover/card:text-foreground motion-reduce:transition-none"
 				/>
 			</button>
 		</article>
