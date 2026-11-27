@@ -693,7 +693,7 @@ export const projectAutomationsServiceMistakes = named(
 			yield* automationsService.create(canManage, member, settings);
 
 			// An automation run with the proof that its project may be managed, not that a run may be started there.
-			// @ts-expect-error TS2345 [Argument of type 'CanManageProject<NameA, NameB>' is not assignable to parameter of type 'CanRunAutomations<NameA, NameB>']
+			// @ts-expect-error TS2741 [Property 'mayResumeAfterFailures' is missing in type 'CanManageProject<NameA, NameB>']
 			yield* automationsService.run(canManage, automation, target, "request");
 
 			// An automation changed at will by an admin who may only switch it off.

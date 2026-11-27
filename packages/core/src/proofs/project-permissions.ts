@@ -123,6 +123,7 @@ export interface CanLeaveProject<P, J> extends Proof<"CanLeaveProject", [P, J]> 
  * manual run is somebody's.
  */
 export interface CanRunAutomations<P, J> extends Proof<"CanRunAutomations", [P, J]> {
+	readonly mayResumeAfterFailures: boolean;
 	readonly reach: ReachesProject<P, J>;
 	/** The member the run is started for, whom it records: a member signed in, or a bot's asker. */
 	readonly member: MemberPlace;
@@ -382,7 +383,11 @@ export const proveCanRunAutomations = <P, J>(
 	}
 	const proof: CanRunAutomations<P, J> = CanRunAutomationsProof.prove(
 		[reach.principal, reach.project],
-		{ reach, member },
+		{
+			reach,
+			member,
+			mayResumeAfterFailures: mayInProjectAs(member, reach.facts, "automation.manage"),
+		},
 	);
 	return Effect.succeed(proof);
 };

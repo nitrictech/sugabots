@@ -8,9 +8,10 @@ import {
 	seedMember,
 	seedProject,
 	seedProjectChat,
+	seedRoutine,
 	seedWebhookTrigger,
 } from "../../authentication/seed.test-support.ts";
-import { projectBot } from "../../database/schema.ts";
+import { automation, automationTrigger, projectBot } from "../../database/schema.ts";
 import { closeDatabase, onDatabase } from "../../database/testing.ts";
 import type { Principal } from "../../principal.ts";
 import {
@@ -91,6 +92,46 @@ describe("the automations operations, beyond who may call them", () => {
 	});
 
 	describe("managing a project's automations", () => {
+		it("lets an editor run a self-paused automation and only a manager resume its routines", async () => {
+			const projectId = a.project;
+			const automationId = await seedAutomation(a.workspace, projectId, { state: "paused" });
+			const triggerId = await seedRoutine(automationId, a.workspace, 3_600);
+			await onDatabase((db) =>
+				db
+					.update(automation)
+					.set({ pausedAfterFailuresAt: new Date() })
+					.where(eq(automation.id, automationId)),
+			);
+			await onDatabase((db) =>
+				db
+					.update(automationTrigger)
+					.set({ nextScheduledAt: null })
+					.where(eq(automationTrigger.id, triggerId)),
+			);
+			const schedule = () =>
+				onDatabase((db) =>
+					db
+						.select({ state: automation.state, next: automationTrigger.nextScheduledAt })
+						.from(automation)
+						.innerJoin(automationTrigger, eq(automationTrigger.automationId, automation.id))
+						.where(eq(automationTrigger.id, triggerId)),
+				);
+			const start = (member: Principal) =>
+				call(member, "automations.run", {
+					projectId,
+					automationId,
+					requestId: crypto.randomUUID(),
+				});
+
+			const manual = await start(who.ed);
+			expect(manual).toMatchObject({ duplicate: false });
+			expect(await schedule()).toEqual([{ state: "paused", next: null }]);
+
+			const resumed = await start(who.admin);
+			expect(resumed).toMatchObject({ duplicate: false });
+			expect(await schedule()).toEqual([{ state: "enabled", next: expect.any(Date) }]);
+		});
+
 		it("lets an admin only switch off a personal bot's automations, which they can't otherwise reach", async () => {
 			const automation = await anAutomation(a.personal.defaultProject);
 

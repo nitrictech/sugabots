@@ -638,9 +638,8 @@ export function useSetResolved(chatId: string) {
 }
 
 /**
- * What an automation's feed does with its automation: run it again, which
- * turns on one that paused itself after failing, pause or resume it, and
- * rename it.
+ * What an automation's feed does with its automation: run it again, pause
+ * or resume it, and rename it.
  * `pending` is shared by every control of the automation on screen, so none
  * starts another change while one is on its way. The feed is fetched again
  * after each; the automation's own actions refresh the lists it is in.

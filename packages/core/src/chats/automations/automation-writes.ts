@@ -434,6 +434,7 @@ export const makeAutomationWrites = Effect.gen(function* () {
 			scope: Scope,
 			requestedByMemberId: string,
 			requestId: string,
+			mayResumeAfterFailures: boolean,
 		): Effect.Effect<
 			AcceptedRun,
 			AutomationNotFound | AutomationTriggerConflict | AutomationTriggerRejected,
@@ -452,8 +453,7 @@ export const makeAutomationWrites = Effect.gen(function* () {
 							requestedByMemberId,
 						},
 					});
-					if (accepted.duplicate) return accepted;
-					// Running one that paused itself after failing is trying again: it is turned back on.
+					if (accepted.duplicate || !mayResumeAfterFailures) return accepted;
 					if (yield* store.resumeAfterFailures(scope.automationId)) {
 						// A routine it was saved with is one that has a next time.
 						yield* Effect.orDie(reschedule(scope.automationId, "enabled"));

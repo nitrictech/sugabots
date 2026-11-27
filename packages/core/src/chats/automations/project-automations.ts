@@ -378,6 +378,7 @@ export const make = Effect.gen(function* () {
 					scopeOf(target, automation.value),
 					canRun.member.actor.memberId,
 					requestId,
+					canRun.mayResumeAfterFailures,
 				),
 			),
 
