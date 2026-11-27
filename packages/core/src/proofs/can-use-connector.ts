@@ -187,6 +187,7 @@ export const checkConnectorApprovalPermission = (
 			(call.writeOrDelete && !mayInProjectAs(place.member, place.project, "project.change"))
 		)
 			return yield* new ActionForbidden({ proof: "CanDecide" });
+		return undefined;
 	});
 
 const connectorPlaces = (
