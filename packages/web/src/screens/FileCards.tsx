@@ -7,12 +7,13 @@ import {
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { cn } from "cn";
-import { ChevronDown, ChevronUp, Maximize2 } from "lucide-react";
+import { ChevronRight, Download } from "lucide-react";
 import { useState } from "react";
 import { useFile } from "@/lib/files.ts";
 import { Button } from "@/ui/button.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { IconTile } from "@/ui/icon-tile.tsx";
-import { FILE_KINDS, OutsideRunPageNote } from "./file-kinds.tsx";
+import { downloadWrittenFile, FILE_KINDS, OutsideRunPageNote } from "./file-kinds.tsx";
 
 /** A file as a message shows it: at the version written. */
 export type FileAsWritten = Omit<WrittenFilePart, "type">;
@@ -76,14 +77,15 @@ function FileCard({
 	);
 }
 
-/** A card showing only its header. */
-const COLLAPSED_WIDTH = "max-w-140";
+/** How wide a card stands when it has no preview to show, as a document's does. */
+const PLAIN_WIDTH = "max-w-115";
 
 /**
- * A file among the messages: a header that says which bot made it, so a
- * page is never taken for the app's own screens (a page can draw anything, a
- * sign-in form included). The header expands to show its content as its kind
- * shows it in place, and has a way to open it large.
+ * A file among the messages: a preview of its content on top, as its kind
+ * shows it in place, over a line that says which bot made it, so a page is
+ * never taken for the app's own screens (a page can draw anything, a
+ * sign-in form included), and opens it large. A page from outside the run
+ * loads only once asked.
  */
 export function FileCardView({
 	file,
@@ -95,94 +97,112 @@ export function FileCardView({
 	file: FileAsWritten;
 	botName: string;
 	/**
-	 * Still loading while absent. Only the header is shown if it could not be
+	 * Still loading while absent. Only its line is shown if it could not be
 	 * loaded, and only its name, not to be opened, once it has been deleted.
 	 */
 	content: string | "failed" | "deleted" | undefined;
 	outsideRun?: WrittenFile["outsideRun"];
 	onOpen: () => void;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	const [pageLoaded, setPageLoaded] = useState(false);
 	const kind = FILE_KINDS[file.kind];
 	const outsidePage = file.kind === "html" ? outsideRun : undefined;
-	const expandable = content !== "failed";
-	const previewLabel = outsidePage ? "Load page" : "Preview";
-	const showsContent = expandable && expanded;
 	if (content === "deleted") {
 		return (
 			<article
 				aria-label={file.title}
 				className={cn(
-					"flex items-center gap-2.5 rounded-xl border border-border border-dashed px-3 py-2.5",
-					COLLAPSED_WIDTH,
+					"flex items-center gap-3 rounded-bubble border border-border border-dashed px-3.5 py-3",
+					PLAIN_WIDTH,
 				)}
 			>
 				<IconTile size="md" tone="faded">
 					<kind.Icon strokeWidth={2} />
 				</IconTile>
-				<span className="flex min-w-0 flex-1 flex-col gap-px">
-					<span className="truncate font-medium text-muted-foreground text-xs line-through">
+				<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+					<span className="truncate font-medium text-muted-foreground text-sm leading-snug line-through">
 						{file.title}
 					</span>
-					<span className="truncate text-xs text-subtle-foreground">
+					<span className="truncate text-subtle-foreground text-xs leading-snug">
 						{kind.label} by {botName}, deleted
 					</span>
 				</span>
 			</article>
 		);
 	}
+	const previewed = content !== "failed";
+	const loaded = previewed ? content : undefined;
 	return (
 		<article
 			aria-label={file.title}
 			className={cn(
-				"overflow-hidden rounded-xl border border-border bg-panel",
-				showsContent ? kind.cardWidth : COLLAPSED_WIDTH,
+				"flex min-w-0 flex-col rounded-bubble border border-border bg-card",
+				previewed ? kind.cardWidth : PLAIN_WIDTH,
 			)}
 		>
-			<div
-				className={cn(
-					"flex flex-wrap items-center gap-2.5 px-3 py-2.5",
-					showsContent && "border-border border-b",
-				)}
-			>
-				<IconTile size="sm">
-					<kind.Icon strokeWidth={2} />
-				</IconTile>
-				<span className="flex min-w-card-name flex-1 flex-col gap-px">
-					<span className="truncate font-medium text-foreground text-xs">{file.title}</span>
-					<span className="truncate text-xs text-muted-foreground">
-						{kind.label} by {botName}
-					</span>
-					{outsidePage && <OutsideRunPageNote source={outsidePage} />}
-				</span>
-				<div className="ml-auto flex gap-2.5">
-					{expandable && (
-						<Button
-							variant="ghost"
-							size="sm"
-							aria-expanded={expanded}
-							aria-label={`${expanded ? "Hide" : previewLabel} ${file.title}`}
-							onClick={() => setExpanded(!expanded)}
-							className="border border-border-strong text-foreground"
-						>
-							{expanded ? <ChevronUp aria-hidden /> : <ChevronDown aria-hidden />}
-							{expanded ? "Hide" : previewLabel}
-						</Button>
+			{previewed && (
+				// Clipped here rather than by the card, so the line's focus ring shows whole.
+				<div className="min-w-0 overflow-hidden rounded-t-bubble border-border border-b">
+					{outsidePage && !pageLoaded ? (
+						<div className="flex flex-col items-start gap-2.5 px-4 py-3.5">
+							<OutsideRunPageNote source={outsidePage} />
+							<Button
+								variant="secondary"
+								size="sm"
+								aria-label={`Load page ${file.title}`}
+								onClick={() => setPageLoaded(true)}
+							>
+								Load page
+							</Button>
+						</div>
+					) : (
+						<kind.Inline
+							title={file.title}
+							content={content}
+							at={{ fileId: file.fileId, version: file.version }}
+							onOpen={onOpen}
+						/>
 					)}
-					<Button variant="secondary" size="sm" aria-label={`Open ${file.title}`} onClick={onOpen}>
-						<Maximize2 aria-hidden />
-						Open
-					</Button>
 				</div>
-			</div>
-			{showsContent && (
-				<kind.Inline
-					title={file.title}
-					content={content}
-					at={{ fileId: file.fileId, version: file.version }}
-					onOpen={onOpen}
-				/>
 			)}
+			{/* The line opens the file; Download sits over its end, as a button can't be inside a button. */}
+			<div className="relative flex min-w-0 items-center gap-3 px-3.5 py-3">
+				<button
+					type="button"
+					onClick={onOpen}
+					aria-label={`Open ${file.title}`}
+					className={cn(
+						"focus-ring absolute inset-0 transition-colors hover:bg-row-hover",
+						previewed ? "rounded-b-bubble" : "rounded-bubble",
+					)}
+				/>
+				<span className="pointer-events-none relative flex min-w-0 flex-1 items-center gap-3">
+					<IconTile size="md" tone="tile">
+						<kind.Icon strokeWidth={2} />
+					</IconTile>
+					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+						<span className="truncate font-medium text-sm leading-snug">{file.title}</span>
+						<span className="truncate text-muted-foreground text-xs leading-snug">
+							{kind.label} by {botName}
+						</span>
+					</span>
+				</span>
+				{loaded !== undefined && (
+					<IconButton
+						label={`Download ${file.title}`}
+						onClick={() =>
+							downloadWrittenFile({ kind: file.kind, title: file.title, content: loaded })
+						}
+						className="relative"
+					>
+						<Download aria-hidden />
+					</IconButton>
+				)}
+				<ChevronRight
+					aria-hidden
+					className="pointer-events-none relative size-4 shrink-0 text-subtle-foreground"
+				/>
+			</div>
 		</article>
 	);
 }

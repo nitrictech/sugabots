@@ -350,7 +350,7 @@ function tractionResult(parts: MessagePart[]): Message {
 export const AutomationResultWithFile = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${import.meta.env.VITE_API_URL}/projects/:projectId/files/:fileId/versions/4`, () =>
+			http.get(`${import.meta.env.VITE_API_URL}/files/:fileId/versions/4`, () =>
 				HttpResponse.json(tractionReport),
 			),
 		);

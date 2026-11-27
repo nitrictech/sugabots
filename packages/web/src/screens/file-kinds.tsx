@@ -19,7 +19,7 @@ interface WrittenFileKindView {
 	Icon: LucideIcon;
 	/** How Download saves it: as `type`, ending in `.extension`, holding `contentOf` its content. */
 	file: { extension: string; type: string; contentOf: (content: string) => string };
-	/** How wide its card among the messages may grow once expanded, as a Tailwind class. */
+	/** How wide its card among the messages may grow with its preview, as a Tailwind class. */
 	cardWidth: string;
 	/** Its content, version `at`, in a card among the messages; `undefined` while it loads. */
 	Inline: (props: {
@@ -65,13 +65,34 @@ export function LoadOutsideRunPage({
 	);
 }
 
+/** Saves the file as shown, as a file named after its title. */
+export function downloadWrittenFile(file: Pick<WrittenFile, "kind" | "title" | "content">) {
+	const { extension, type, contentOf } = FILE_KINDS[file.kind].file;
+	const url = URL.createObjectURL(new Blob([contentOf(file.content)], { type }));
+	const link = document.createElement("a");
+	link.href = url;
+	link.download = fileNameFor(file.title, extension);
+	link.click();
+	// Safari reads the file after `click` returns, so it is let go of later, not at once.
+	setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_READ_MS);
+}
+
+/** Long enough for any browser to have read a downloaded file before it is let go of. */
+const DOWNLOAD_READ_MS = 60_000;
+
+/** `title` as a file name ending in `.extension`, without the characters file systems refuse. */
+function fileNameFor(title: string, extension: string): string {
+	const name = title.replace(/[\\/:*?"<>|]+/g, "-").trim();
+	return name.toLowerCase().endsWith(`.${extension}`) ? name : `${name}.${extension}`;
+}
+
 export const FILE_KINDS: Record<WrittenFileKind, WrittenFileKindView> = {
 	markdown: {
 		label: FILE_KIND_LABELS.markdown,
 		Icon: FileText,
 		file: { ...FILE_KIND_DOWNLOADS.markdown, contentOf: (content) => content },
-		// A preview, not the document: wide enough for its tables.
-		cardWidth: "max-w-160",
+		// A preview, not the document: its start, at a reading width.
+		cardWidth: "max-w-115",
 		Inline: DocumentPreview,
 		Full: ({ content }) => (
 			<div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-list">
@@ -86,8 +107,8 @@ export const FILE_KINDS: Record<WrittenFileKind, WrittenFileKindView> = {
 		Icon: PanelsTopLeft,
 		// Opened from disk, the page still can't reach the network, as in the app's frame.
 		file: { ...FILE_KIND_DOWNLOADS.html, contentOf: withContentPolicy },
-		// The page itself, running: as much room as the reply's text has.
-		cardWidth: "max-w-none",
+		// The page itself, running: room for a chart or a form.
+		cardWidth: "max-w-160",
 		Inline: LivePage,
 		Full: ({ title, content, at }) => (
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border">
@@ -97,9 +118,12 @@ export const FILE_KINDS: Record<WrittenFileKind, WrittenFileKindView> = {
 	},
 };
 
-/** The start of a document, faded out, opening it in full when clicked. */
+/**
+ * The start of a document, faded out, opening it in full when clicked. The
+ * card's own line opens it for the keyboard, so this is for a pointer alone,
+ * and a screen reader reads the start as it is.
+ */
 function DocumentPreview({
-	title,
 	content,
 	onOpen,
 }: {
@@ -109,14 +133,13 @@ function DocumentPreview({
 }) {
 	if (content === undefined) return <InlineLoading />;
 	return (
-		<button
-			type="button"
+		// biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: a wider place for a pointer to open the file, which the card's line opens for the keyboard.
+		<div
 			onClick={onOpen}
-			aria-label={`Open ${title}`}
-			className="focus-ring relative block max-h-42 w-full cursor-zoom-in overflow-hidden px-3.5 py-2 text-left text-xs mask-b-from-60%"
+			className="relative max-h-42 w-full cursor-zoom-in overflow-hidden px-4 pt-3 text-xs mask-b-from-60%"
 		>
 			<MessageMarkdown text={content} mentionable={[]} writer="bot" />
-		</button>
+		</div>
 	);
 }
 
@@ -158,7 +181,7 @@ function LivePage({
 					className={cn(
 						"flex justify-center pb-3",
 						!expanded &&
-							"absolute inset-x-0 bottom-0 bg-gradient-to-t from-panel to-transparent pt-10",
+							"absolute inset-x-0 bottom-0 bg-gradient-to-t from-card to-transparent pt-10",
 					)}
 				>
 					<Button

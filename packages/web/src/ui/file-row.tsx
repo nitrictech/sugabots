@@ -9,9 +9,9 @@ const LOOKS = {
 		text: "leading-snug",
 		title: "text-xs",
 	},
-	/** Bordered on its own, among a message's words. */
+	/** On its own among a message's words, framed as a file a bot writes is. */
 	card: {
-		row: "gap-2.5 rounded-lg border border-border bg-card py-2 pr-3 pl-2.5",
+		row: "gap-2.5 rounded-bubble border border-border bg-card py-2 pr-3 pl-2.5",
 		text: "gap-px",
 		title: "text-sm",
 	},
