@@ -60,7 +60,10 @@ import {
 
 const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), "../../drizzle");
 
-/** How long migrating a database from nothing, twice over, may take. */
+/**
+ * How long migrating a database from nothing, twice over, may take, and how
+ * long dropping it may take while the rest of the suite loads the server.
+ */
 const UPGRADE_TIMEOUT_MS = 120_000;
 
 type Store = "postgres" | "filesystem";
@@ -96,7 +99,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			await upgraded?.dispose();
 			await dropDatabase(url);
 			await rm(root, { recursive: true, force: true });
-		});
+		}, UPGRADE_TIMEOUT_MS);
 
 		it("keeps every computer at its provider, with its work, where its pod's work went", async () => {
 			const computers = await upgraded.rows<{
