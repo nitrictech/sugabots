@@ -3271,13 +3271,32 @@ CREATE INDEX "turn_end_requested_idx" ON "turn" ("status","finished_at") WHERE "
 -- resetting a password, or with its member), stores `session.ended` on the
 -- member's stream in the same transaction, and notifies every process's event
 -- relay, which Postgres sends once it commits.
+--
+-- Each stream is locked, as the event outbox locks it, so its events keep one
+-- order. A transaction takes its streams' locks in one order, by name, and
+-- lists them in its `sugabots.locked_streams` setting, as the outbox does too:
+-- locking a stream that sorts before one it already holds fails at once,
+-- rather than waiting on a transaction that may be waiting on this one.
 CREATE FUNCTION publish_ended_sessions() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
 	stored record;
+	locked text[] := coalesce(string_to_array(nullif(current_setting('sugabots.locked_streams', true), ''), ','), '{}');
+	to_lock text[];
+	next_stream text;
 BEGIN
-	-- Each stream is locked, in order, as the event outbox locks it, so its events keep one order.
-	PERFORM pg_advisory_xact_lock(hashtextextended(streams.stream, 0))
-	FROM (SELECT DISTINCT 'member:' || "member_id"::text AS stream FROM ended_sessions ORDER BY 1) AS streams;
+	SELECT coalesce(array_agg(ended.stream ORDER BY ended.stream COLLATE "C"), '{}') INTO to_lock
+	FROM (SELECT DISTINCT 'member:' || "member_id"::text AS stream FROM ended_sessions) AS ended
+	WHERE NOT ended.stream = ANY (locked);
+	IF to_lock[1] COLLATE "C" < (SELECT max(held COLLATE "C") FROM unnest(locked) AS held) THEN
+		RAISE EXCEPTION 'Locking event stream % after % would take a transaction''s stream locks out of order',
+			to_lock[1], (SELECT max(held COLLATE "C") FROM unnest(locked) AS held);
+	END IF;
+	FOREACH next_stream IN ARRAY to_lock LOOP
+		PERFORM pg_advisory_xact_lock(hashtextextended(next_stream, 0));
+	END LOOP;
+	IF cardinality(to_lock) > 0 THEN
+		PERFORM set_config('sugabots.locked_streams', array_to_string(locked || to_lock, ','), true);
+	END IF;
 	FOR stored IN
 		INSERT INTO "event" ("stream", "type", "payload")
 		SELECT 'member:' || "member_id"::text, 'session.ended',

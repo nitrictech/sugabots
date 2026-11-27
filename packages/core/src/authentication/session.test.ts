@@ -3,7 +3,9 @@ import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { query, transaction } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
+import { EventOutbox } from "../database/events/outbox.ts";
 import { postgresEventRelay } from "../database/events/relay.ts";
 import { EventStore } from "../database/events/store.ts";
 import { session } from "../database/schema.ts";
@@ -199,5 +201,39 @@ describe("SessionAuthentication", () => {
 			stop.abort();
 			await bus.close();
 		}
+	});
+
+	it("takes a transaction's event stream locks in one order, failing at once out of order", async () => {
+		const [first, second] = (
+			await Promise.all([seedMember(workspaceId, "editor"), seedMember(workspaceId, "editor")])
+		).toSorted((a, b) => (memberStream(a) < memberStream(b) ? -1 : 1));
+		if (!first || !second) throw new Error("no members");
+		const endingSecond = await seedSession(second);
+		const endingFirst = await seedSession(first);
+		const outbox = EventOutbox.make.pipe(
+			Effect.provideService(EventBus.Service, {
+				...EventBus.inProcess({ store: await runOnPostgres(EventStore.make) }),
+				publishCommitted: async () => undefined,
+			}),
+		);
+		const endThenTell = (ending: string, toldMember: string) =>
+			Effect.flatMap(outbox, (outbox) =>
+				transaction(
+					Effect.gen(function* () {
+						yield* query((db) => db.delete(session).where(eq(session.id, ending)));
+						yield* outbox.publish([
+							{
+								stream: memberStream(toldMember),
+								event: streamEvent("approvals.changed", { toolCallId: crypto.randomUUID() }),
+							},
+						]);
+					}),
+				),
+			);
+
+		await expect(runOnPostgres(endThenTell(endingSecond.id, first))).rejects.toThrow(
+			/out of order/,
+		);
+		await runOnPostgres(endThenTell(endingFirst.id, second));
 	});
 });

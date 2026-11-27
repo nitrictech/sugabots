@@ -63,16 +63,43 @@ export interface CommittedEvent extends PendingEvent {
  * The lock is what gives a stream's events one order: without it two
  * transactions could take sequence numbers in one order and commit in the
  * other, and a client resuming from the lower id would miss the higher one.
- * Every event of a transaction comes through here at once, and its streams
- * are locked in sorted order, so two transactions touching the same streams
- * cannot deadlock.
+ *
+ * Every transaction takes its streams' locks in one order, by name, so two
+ * transactions touching the same streams cannot deadlock. The locks are also
+ * taken by the trigger that stores `session.ended` when a session is deleted,
+ * and both record what they locked in the transaction's `LOCKED_STREAMS`
+ * setting. Locking a stream that sorts before one the transaction already
+ * holds fails at once, rather than waiting on a transaction that may be
+ * waiting on this one.
  */
 const appendEvents = Effect.fn("EventOutbox.appendEvents")(function* (
 	db: Executor,
 	pending: readonly PendingEvent[],
 ) {
-	for (const stream of [...new Set(pending.map(({ stream }) => stream))].sort()) {
+	const [setting] = yield* db.execute<{ locked: string | null }>(
+		sql`select current_setting(${LOCKED_STREAMS}, true) as locked`,
+		"objects",
+	);
+	const locked = setting?.locked ? setting.locked.split(",") : [];
+	const toLock = [...new Set(pending.map(({ stream }) => stream))]
+		.filter((stream) => !locked.includes(stream))
+		.sort();
+	const lastLocked = locked.toSorted().at(-1);
+	const [firstToLock] = toLock;
+	if (firstToLock !== undefined && lastLocked !== undefined && firstToLock < lastLocked) {
+		return yield* Effect.die(
+			new Error(
+				`Locking event stream ${firstToLock} after ${lastLocked} would take a transaction's stream locks out of order`,
+			),
+		);
+	}
+	for (const stream of toLock) {
 		yield* db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${stream}, 0))`);
+	}
+	if (toLock.length > 0) {
+		yield* db.execute(
+			sql`select set_config(${LOCKED_STREAMS}, ${[...locked, ...toLock].join(",")}, true)`,
+		);
 	}
 
 	if (pending.length === 0) return [];
@@ -93,3 +120,6 @@ const appendEvents = Effect.fn("EventOutbox.appendEvents")(function* (
 		return { ...pendingEvent, seq: row.seq };
 	});
 });
+
+/** The transaction-local setting listing the event streams the transaction has locked. */
+const LOCKED_STREAMS = "sugabots.locked_streams";
