@@ -1068,7 +1068,26 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			const signedOut = await signedIn.member(world.ed);
 			const own = await followingOnTestClock(signedOut, "events.followOwn", {});
 
-			await onDatabase((db) => db.delete(session).where(eq(session.id, signedOut.session)));
+			await runOnPostgres(
+				transaction(
+					Effect.gen(function* () {
+						yield* query((db) => db.delete(session).where(eq(session.id, signedOut.session)));
+						const deleted = yield* query((db) =>
+							db
+								.delete(event)
+								.where(
+									and(
+										eq(event.stream, memberStream(signedOut.member)),
+										eq(event.type, "session.ended"),
+										sql`${event.payload}->>'sessionId' = ${signedOut.session}`,
+									),
+								)
+								.returning({ seq: event.seq }),
+						);
+						expect(deleted).toHaveLength(1);
+					}),
+				),
+			);
 
 			await watcherSleeps.waitForInitialSleeps();
 			await Effect.runPromise(clock.adjust(Duration.toMillis(catchUp) / 2));
