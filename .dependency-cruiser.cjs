@@ -1,12 +1,7 @@
 /**
- * Which packages each package may import, checked by `bun run lint`.
- *
- * From the bottom: `errors` and `workflow` import no package of ours;
- * `contracts` only `errors`; `core` the shared packages beneath it; the bot
- * loop core; the server the bot loop and core; and the web app only the SDK,
- * the contracts and the packages that draw. Core starts turns without knowing
- * the bot loop: it declares the services that start and signal turns, and the
- * server provides them from `@sugabots/bot-loop`.
+ * Which packages each package may import, from `lint/package-layers.ts`,
+ * checked by `bun run lint`, which runs this under Bun so it can read
+ * TypeScript.
  *
  * The check only sees imports. It misses two kinds of edge between packages,
  * both allowed today, so check them by hand when changing these rules:
@@ -15,33 +10,12 @@
  * - A `declare module` that adds to another package's types, as
  *   `packages/server/src/auth/middleware.ts` does to the contracts' middleware.
  */
-
-/** Packages the web app, the website and other front ends may share with anything. */
-const drawing = ["avatars", "emoji", "provider-logos", "docs"];
+const { mayDependOn } = require("./lint/package-layers.ts");
 
 /** The stored events, which the server's composition root builds the event bus over. */
 const eventStore = "packages/core/src/database/events/store\\.ts";
 
-/** Each package, and the packages of ours it may import. */
-const mayImport = {
-	errors: [],
-	workflow: [],
-	accounting: [],
-	emoji: [],
-	contracts: ["errors", "emoji"],
-	avatars: ["contracts"],
-	docs: ["contracts"],
-	"provider-logos": ["contracts"],
-	core: ["accounting", "avatars", "contracts", "docs", "errors", "workflow"],
-	"bot-loop": ["contracts", "core", "errors", "workflow"],
-	server: ["bot-loop", "contracts", "core", "errors", "workflow"],
-	demo: ["contracts", "core", "errors", "server"],
-	sdk: ["contracts", "errors"],
-	web: ["sdk", "contracts", "errors", ...drawing],
-	website: ["contracts", ...drawing],
-};
-
-const packageRules = Object.entries(mayImport).map(([name, allowed]) => ({
+const packageRules = Object.entries(mayDependOn).map(([name, allowed]) => ({
 	name: `${name}-imports-only-its-layers`,
 	comment: `${name} may import ${allowed.length > 0 ? allowed.join(", ") : "no package of ours"}.`,
 	severity: "error",
