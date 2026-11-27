@@ -93,7 +93,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 						<div className="flex min-w-0 flex-col max-md:flex-col-reverse max-md:gap-1">
 							<span className="truncate text-muted-foreground text-xs max-md:whitespace-normal max-md:text-sm">
 								{hostRequest?.description ?? `${bot.name} wants to use ${toolSourceName}`}
-								<span className="md:hidden"> · {askedIn}</span>
+								<span className="ms-3 md:hidden">{askedIn}</span>
 							</span>
 							<h1 className="m-0 truncate font-bold text-xl text-foreground leading-tight tracking-normal max-md:whitespace-normal max-md:font-semibold">
 								{action}

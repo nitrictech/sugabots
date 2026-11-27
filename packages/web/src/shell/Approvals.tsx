@@ -10,6 +10,7 @@ import { FoldedRequest } from "@/screens/ToolApprovalCard.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ListTime, Page } from "@/shell/Page.tsx";
 import { ConnectorMark } from "@/ui/connector-mark.tsx";
+import { SpacedText } from "@/ui/spaced-text.tsx";
 
 /** How many answered requests show before Show older. */
 const ANSWERED_SHOWN = 10;
@@ -149,7 +150,11 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 						{action}
 					</h3>
 					<span className="text-subtle-foreground text-xs">
-						{hostRequest ? `${hostRequest.description} · ${asked}` : `${bot.name} asked ${asked}`}
+						{hostRequest ? (
+							<SpacedText parts={[hostRequest.description, asked]} />
+						) : (
+							`${bot.name} asked ${asked}`
+						)}
 					</span>
 				</div>
 				<ChevronRight

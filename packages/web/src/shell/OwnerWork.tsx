@@ -34,6 +34,7 @@ import { Button } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { matchesSearch } from "@/ui/search-field.tsx";
 import { sidebarRow } from "@/ui/sidebar-row.ts";
+import { SpacedText } from "@/ui/spaced-text.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
 const HIDE_TIME_WHEN_ACTION_VISIBLE =
@@ -470,9 +471,7 @@ function ResolvedEntry({
 		.map((member) => (member.id === memberId ? "You" : member.name))
 		.join(", ");
 	const movedAt = new Date(lastMovedAt(row));
-	const about = [talking, countOf(row.messageCount, "message", "messages")]
-		.filter(Boolean)
-		.join(" · ");
+	const about = <SpacedText parts={[talking, countOf(row.messageCount, "message", "messages")]} />;
 	return (
 		<div className="group/chat relative">
 			<Tooltip label={about} side="right" align="start">

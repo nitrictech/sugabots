@@ -22,6 +22,7 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
+import { SpacedText } from "@/ui/spaced-text.tsx";
 import { CHAT_HEADER_CONTAINER, ChatComputer } from "./ComputerButton.tsx";
 import { ComputerSheet } from "./ComputerSheet.tsx";
 import { ModelName } from "./ModelName.tsx";
@@ -131,15 +132,9 @@ export function ChatHeader({
 					<HeaderBadge
 						title={title}
 						sub={
-							<>
-								in {bot.name}
-								{bot.model && (
-									<>
-										{" · "}
-										<ModelName modelId={bot.model} />
-									</>
-								)}
-							</>
+							<SpacedText
+								parts={[`in ${bot.name}`, bot.model && <ModelName modelId={bot.model} />]}
+							/>
 						}
 						onClick={openDetails}
 					/>

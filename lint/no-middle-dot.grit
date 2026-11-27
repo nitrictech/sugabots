@@ -1,0 +1,13 @@
+language js(typescript)
+
+// The app's text never uses a middle dot as a separator. Short facts on one line are
+// separated with space or layout instead, such as `SpacedText`.
+or {
+	JsStringLiteralExpression(),
+	JsxString(),
+	JsxText(),
+	JsTemplateChunkElement()
+} as $text where {
+	$text <: r"[\s\S]*·[\s\S]*",
+	register_diagnostic(span=$text, message="Don't put a middle dot in the app's text. Separate the parts with space or layout, such as `SpacedText` from `@/ui/spaced-text.tsx`.")
+}

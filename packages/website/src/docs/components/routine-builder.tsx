@@ -120,7 +120,8 @@ export function RoutineBuilder() {
 				<div className="flex flex-col">
 					<span className="font-bold">Morning inbox sweep</span>
 					<span className="text-sm text-muted-foreground">
-						{bot.name} · {describeRoutine(repeat, pickedDays, hour)}
+						{bot.name}
+						<span className="ms-3">{describeRoutine(repeat, pickedDays, hour)}</span>
 					</span>
 				</div>
 			</div>

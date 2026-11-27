@@ -18,6 +18,7 @@ import { Alert } from "@/ui/alert.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
+import { SpacedText } from "@/ui/spaced-text.tsx";
 
 /**
  * Every bot the member reaches: their Personal Assistants, oldest first, if
@@ -136,18 +137,18 @@ function BotRow({
 					? usable
 						? "Your Personal Assistant"
 						: whoseBot(bot, "Personal Assistant")
-					: [
-							bot.visibility === "personal"
-								? usable
-									? "Personal"
-									: whoseBot(bot, "personal bot")
-								: bot.visibility === "private"
-									? "Private"
-									: null,
-							bot.description,
-						]
-							.filter(Boolean)
-							.join(" · ") || undefined
+					: (bot.visibility !== "public" || bot.description) && (
+							<SpacedText
+								parts={[
+									bot.visibility === "personal"
+										? usable
+											? "Personal"
+											: whoseBot(bot, "personal bot")
+										: bot.visibility === "private" && "Private",
+									bot.description,
+								]}
+							/>
+						)
 			}
 			trailing={
 				!usable ? null : onPin ? (

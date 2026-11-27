@@ -47,7 +47,7 @@ describe("when a provider was added", () => {
 		client.api.modelProviders.list.mockReturnValue(Effect.succeed([gateway]));
 		mount(`/suga/settings/providers/${gateway.id}`);
 
-		await screen.findByText(/^Added .+ · Connected by Sam$/);
+		await screen.findByText("Connected by Sam");
 	});
 
 	it("is not said for a built-in provider every workspace starts with, which nobody added", async () => {

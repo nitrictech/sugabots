@@ -50,6 +50,7 @@ import {
 	SettingsRow,
 	SettingsRowIcon,
 } from "@/ui/settings-page.tsx";
+import { SpacedText } from "@/ui/spaced-text.tsx";
 import { GitHubConnectStep } from "./GitHubConnect.tsx";
 import { accessSummaryText } from "./tool-access.tsx";
 
@@ -189,7 +190,7 @@ function BotConnectors({ bot }: { bot: Bot }) {
 							<span className="flex min-w-0 flex-col leading-snug">
 								<span className="truncate text-sm text-foreground">{connector.name}</span>
 								<span className="text-pretty text-subtle-foreground text-xs">
-									{lineFor(connector)}
+									<SpacedText parts={connectorLineParts(connector)} />
 								</span>
 							</span>
 						</div>
@@ -223,13 +224,7 @@ function botConnectorsLine(connectors: readonly Connector[]): ReactNode {
 			attention
 		</span>
 	);
-	return (
-		<>
-			{listNames(fine.map((one) => one.name))}
-			{fine.length > 0 && needs && " · "}
-			{needs}
-		</>
-	);
+	return <SpacedText parts={[listNames(fine.map((one) => one.name)), needs]} />;
 }
 
 /** How many of a bot's connectors its row shows the marks of. */
@@ -239,13 +234,13 @@ const MARKS_SHOWN = 4;
  * What a connector's line says under its name: what it needs, or what its
  * tools are set to and who it signs in as.
  */
-function lineFor(connector: Connector): string {
+function connectorLineParts(connector: Connector): readonly string[] {
 	if (connector.signInExpired)
-		return "Sign-in expired. Bots can't use it until someone signs in again";
-	if (!connector.signedIn) return "Not signed in yet";
-	if (connector.status === "error") return connector.lastTestError ?? "The last check failed";
+		return ["Sign-in expired. Bots can't use it until someone signs in again"];
+	if (!connector.signedIn) return ["Not signed in yet"];
+	if (connector.status === "error") return [connector.lastTestError ?? "The last check failed"];
 	const access = accessSummaryText(connector.toolCounts) ?? "No tools found yet";
-	return connector.signedInAs ? `${access} · Signed in as ${connector.signedInAs.name}` : access;
+	return connector.signedInAs ? [access, `Signed in as ${connector.signedInAs.name}`] : [access];
 }
 
 function ConnectorRow({
@@ -269,7 +264,7 @@ function ConnectorRow({
 		connector.auth === "oauth"
 			? actions.signIn.mutate({ connectorId: connector.id })
 			: void navigateToOwnerPage(owner, page);
-	const line = error ? failureMessage(error) : lineFor(connector);
+	const line = error ? [failureMessage(error)] : connectorLineParts(connector);
 
 	return (
 		<article
@@ -280,7 +275,7 @@ function ConnectorRow({
 			<OwnerLink
 				owner={owner}
 				to={page}
-				aria-label={`${connector.name}, ${line}. Open tools`}
+				aria-label={`${connector.name}, ${line.join(", ")}. Open tools`}
 				className="focus-ring flex min-w-0 flex-1 items-center gap-3.5 rounded-lg text-left after:absolute after:inset-0"
 			>
 				<ConnectorMark markId={connectorMarkFor(connector)} name={connector.name} size="tile" />
@@ -292,7 +287,7 @@ function ConnectorRow({
 							failing || error ? "line-clamp-2 text-destructive-text" : "text-subtle-foreground",
 						)}
 					>
-						{line}
+						<SpacedText parts={line} />
 					</span>
 				</span>
 			</OwnerLink>

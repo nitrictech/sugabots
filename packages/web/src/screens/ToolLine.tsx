@@ -230,7 +230,7 @@ function byToolSource(calls: readonly ToolCallPart[]): ToolCallPart[][] {
 
 /**
  * Calls a bot made one after another in one tool source, as one line saying so:
- * "Used HubSpot for 4s · 3 steps". Opened, the calls, in a list that scrolls
+ * "Used HubSpot for 4s, 3 steps". Opened, the calls, in a list that scrolls
  * once it is long. A single call needs no summary, so is shown as itself.
  */
 function ToolSourceSection({

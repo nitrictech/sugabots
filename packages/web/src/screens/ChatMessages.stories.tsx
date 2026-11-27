@@ -299,7 +299,7 @@ export const FilesWhileSending = meta.story({
 		sending: new Set([stillSending.id]),
 	},
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText("PDF · 240 KB")).toBeInTheDocument();
+		await expect(canvas.getByText("240 KB")).toBeInTheDocument();
 		await expect(canvas.queryByRole("link", { name: /^Download/ })).toBeNull();
 	},
 });

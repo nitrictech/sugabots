@@ -341,6 +341,10 @@
 			"plugins": ["./lint/no-module-state.grit"]
 		},
 		{
+			"includes": ["packages/web/src/**", "packages/website/src/**"],
+			"plugins": ["./lint/no-middle-dot.grit"]
+		},
+		{
 			"includes": [
 				"packages/contracts/src/**",
 				"packages/sdk/src/**",

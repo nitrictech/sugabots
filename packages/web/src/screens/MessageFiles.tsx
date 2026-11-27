@@ -16,6 +16,7 @@ import { FileRow } from "@/ui/file-row.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 import { IconTile } from "@/ui/icon-tile.tsx";
 import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
+import { SpacedText } from "@/ui/spaced-text.tsx";
 
 /**
  * Where an attached file is served, or undefined while it can't be yet, as
@@ -304,7 +305,7 @@ function FileChip({ file, url }: { file: FilePart; url: string | undefined }) {
 				</IconTile>
 			}
 			title={<MiddleTruncated text={file.name} />}
-			subtitle={`${extension ? `${extension} · ` : ""}${fileSizeLabel(file.size)}`}
+			subtitle={<SpacedText parts={[extension, fileSizeLabel(file.size)]} />}
 			trailing={url && <DownloadButton file={file} url={url} size="lg" />}
 		/>
 	);

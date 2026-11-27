@@ -27,6 +27,7 @@ import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
+import { SpacedText } from "@/ui/spaced-text.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
 import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
@@ -194,7 +195,7 @@ export function ProjectDetails({
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
 						<h3 className="m-0 truncate font-semibold text-foreground text-xl">{name}</h3>
 						<p className="m-0 truncate text-sm text-subtle-foreground">
-							{project.name} · {projectHeadcount({ members, bots })}
+							<SpacedText parts={[project.name, projectHeadcount({ members, bots })]} />
 						</p>
 					</div>
 					{toChange && (

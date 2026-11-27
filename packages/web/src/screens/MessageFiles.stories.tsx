@@ -158,8 +158,10 @@ export const UnavailableImages = meta.story({
 export const FilesOnly = meta.story({
 	args: { files: [pipeline, brandGuide] },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText("CSV · 18 KB")).toBeVisible();
-		await expect(canvas.getByText("KEY · 8.5 MB")).toBeVisible();
+		await expect(canvas.getByText("CSV")).toBeVisible();
+		await expect(canvas.getByText("18 KB")).toBeVisible();
+		await expect(canvas.getByText("KEY")).toBeVisible();
+		await expect(canvas.getByText("8.5 MB")).toBeVisible();
 	},
 });
 

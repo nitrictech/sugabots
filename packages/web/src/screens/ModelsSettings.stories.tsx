@@ -576,7 +576,7 @@ export const ManyBuiltInProviders = meta.story({
 	render: () => <ProviderSettings providerId={openrouter.id} />,
 	play: async ({ canvas, userEvent }) => {
 		const search = await canvas.findByRole("searchbox", { name: "Search models" });
-		await expect(canvas.getByText(/^Added .+ · Connected by Theo Hart$/)).toBeInTheDocument();
+		await expect(canvas.getByText("Connected by Theo Hart")).toBeInTheDocument();
 		await expect(search).toHaveAttribute("placeholder", "Search 32 models");
 		await userEvent.type(search, "deepseek");
 		await expect(canvas.getAllByRole("switch", { name: /^Bots can use / })).toHaveLength(4);

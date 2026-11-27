@@ -173,7 +173,7 @@ describe("a bot's Connectors page", () => {
 		mount(connectorsPage);
 		await showConnectors();
 		const row = await screen.findByRole("article", { name: "Wiki" });
-		within(row).getByText(/· Signed in as Kim$/);
+		within(row).getByText("Signed in as Kim");
 		expect(within(account).queryByRole("button", { name: "Sign in" })).toBeNull();
 		cleanup();
 

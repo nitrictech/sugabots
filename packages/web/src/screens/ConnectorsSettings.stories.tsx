@@ -148,10 +148,10 @@ export const States = meta.story({
 		).toBeInTheDocument();
 		// What its tools may do is said, and set inside the connector, not here.
 		await expect(within(github).queryByRole("button")).toBeNull();
+		const linear = canvas.getByRole("article", { name: "Linear" });
+		await expect(within(linear).getByText("Every tool runs without asking")).toBeInTheDocument();
 		await expect(
-			within(canvas.getByRole("article", { name: "Linear" })).getByText(
-				"Every tool runs without asking · Signed in as Rowan Alexandria Ellis",
-			),
+			within(linear).getByText("Signed in as Rowan Alexandria Ellis"),
 		).toBeInTheDocument();
 		await expect(
 			within(canvas.getByRole("article", { name: "Sentry" })).getByText("Every tool asks first"),

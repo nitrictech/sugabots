@@ -87,6 +87,7 @@ import {
 	SettingsRowIcon,
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
+import { SpacedText } from "@/ui/spaced-text.tsx";
 import { TitleTag } from "@/ui/title-tag.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -430,14 +431,16 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 			backOnWide
 			hero={<ProviderTile name={provider.name} builtIn={provider.builtIn} size={44} />}
 			title={provider.name}
-			description={[
-				// A built-in provider every workspace starts with was seeded, not added: its date is when the
-				// workspace got it, not when anybody connected it.
-				!seeded && `Added ${formatTimeAfterVerb(new Date(provider.createdAt), new Date())}`,
-				provider.connectedBy && `Connected by ${provider.connectedBy.name}`,
-			]
-				.filter(Boolean)
-				.join(" · ")}
+			description={
+				<SpacedText
+					parts={[
+						// A built-in provider every workspace starts with was seeded, not added: its date is when the
+						// workspace got it, not when anybody connected it.
+						!seeded && `Added ${formatTimeAfterVerb(new Date(provider.createdAt), new Date())}`,
+						provider.connectedBy && `Connected by ${provider.connectedBy.name}`,
+					]}
+				/>
+			}
 		>
 			<SettingsGroup
 				note={
