@@ -102,6 +102,13 @@ export const DEFAULT_DELIVERY_ID_HEADER = "Idempotency-Key";
 /** The header holding a generic webhook's delivery ID, or null when every call runs. */
 const webhookDeliveryIdHeaderSchema = Schema.NullOr(webhookHeaderSchema);
 
+export const AUTOMATIC_DELIVERY_ID = { kind: "automatic" } as const;
+const webhookDeliveryIdHeaderInputSchema = Schema.Union([
+	webhookDeliveryIdHeaderSchema,
+	Schema.Struct({ kind: Schema.Literal(AUTOMATIC_DELIVERY_ID.kind) }),
+]);
+export type WebhookDeliveryIdHeaderInput = typeof webhookDeliveryIdHeaderInputSchema.Type;
+
 /**
  * A test of a webhook call's JSON body: the text at `path`, keys joined by
  * dots, is one of `oneOf`. Arrays on the way are searched, so
@@ -298,13 +305,14 @@ export type Automation = typeof automationSchema.Type;
  * one is made when it first needs one or its auth kind changes, and is
  * returned then. Without `deliveryIdHeader`, a new trigger reads
  * `DEFAULT_DELIVERY_ID_HEADER` and an edited trigger keeps its current one.
+ * `{ kind: "automatic" }` checks common delivery ID headers and body fields.
  * Without `filter`, a new trigger runs every call and an edited trigger
  * keeps its current filter; an empty array removes it.
  */
 const webhookTriggerInputSchema = Schema.Struct({
 	kind: Schema.Literal("webhook"),
 	auth: Schema.optional(webhookAuthSchema),
-	deliveryIdHeader: Schema.optional(webhookDeliveryIdHeaderSchema),
+	deliveryIdHeader: Schema.optional(webhookDeliveryIdHeaderInputSchema),
 	filter: Schema.optional(webhookFilterSchema),
 	secret: Schema.optional(Schema.NullOr(webhookSecretSchema)),
 	schedule: Schema.optional(Schema.Never),

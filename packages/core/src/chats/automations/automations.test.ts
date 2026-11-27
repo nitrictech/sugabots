@@ -837,6 +837,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		const again = await send({ "x-request-id": "req-1" });
 		expect(again).toMatchObject({ run: { duplicate: false } });
 		expect(runIdOf(again)).not.toBe(runIdOf(first));
+
+		await automations.updateTrigger(addressed, {
+			kind: "webhook",
+			deliveryIdHeader: { kind: "automatic" },
+		});
+		const detected = await send({ "svix-id": "svix-1" });
+		expect(detected).toMatchObject({ run: { duplicate: false } });
+		expect(await send({ "svix-id": "svix-1" })).toMatchObject({
+			run: { duplicate: true, runId: runIdOf(detected) },
+		});
 	});
 
 	it("refuses a wrong webhook secret without waiting on the automation's other triggers", async () => {

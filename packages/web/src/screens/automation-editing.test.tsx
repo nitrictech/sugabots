@@ -459,8 +459,13 @@ describe("a bot's automations", () => {
 			auth: { kind: "bearer" },
 			deliveryIdHeader: "Idempotency-Key",
 		});
+		const saved = Promise.withResolvers<{ automation: Automation; secrets: [] }>();
+		client.api.automations.updateTrigger.mockReturnValueOnce(Effect.promise(() => saved.promise));
 		client.api.automations.updateTrigger.mockReturnValue(
-			Effect.succeed({ automation: webhook.automation, secrets: [] }),
+			Effect.succeed({
+				automation: webhook.automation,
+				secrets: [],
+			}),
 		);
 		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
@@ -476,6 +481,9 @@ describe("a bot's automations", () => {
 				payload: { trigger: { kind: "webhook", deliveryIdHeader: "X-Request-Id" } },
 			}),
 		);
+		await waitFor(() => expect((field() as HTMLInputElement).disabled).toBe(true));
+		saved.resolve({ automation: webhook.automation, secrets: [] });
+		await waitFor(() => expect((field() as HTMLInputElement).disabled).toBe(false));
 
 		fireEvent.change(field(), { target: { value: "" } });
 		fireEvent.blur(field());
@@ -582,11 +590,10 @@ describe("a bot's automations", () => {
 		);
 	});
 
-	it("keeps a webhook's filter in a copy of its automation", async () => {
+	it("keeps a webhook's automatic delivery ID detection and filter in a copy", async () => {
 		const filter = [{ path: "type", oneOf: ["Issue"] }];
 		const webhook = withTrigger(morningBrief, {
 			kind: "webhook",
-			deliveryIdHeader: null,
 			auth: { kind: "linear" },
 			filter,
 		});
@@ -603,7 +610,12 @@ describe("a bot's automations", () => {
 				expect.objectContaining({
 					payload: expect.objectContaining({
 						triggers: [
-							{ kind: "webhook", auth: { kind: "linear" }, deliveryIdHeader: null, filter },
+							{
+								kind: "webhook",
+								auth: { kind: "linear" },
+								deliveryIdHeader: { kind: "automatic" },
+								filter,
+							},
 						],
 					}),
 				}),

@@ -1,4 +1,8 @@
-import type { AutomationTrigger, AutomationTriggerInput } from "@sugabots/contracts";
+import {
+	AUTOMATIC_DELIVERY_ID,
+	type AutomationTrigger,
+	type AutomationTriggerInput,
+} from "@sugabots/contracts";
 import { type ReactNode, useState } from "react";
 import type { TriggerKind } from "@/lib/automation-trigger-words.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -105,7 +109,7 @@ export function buildTriggerDraft(trigger: AutomationTriggerInput): TriggerDraft
 					auth: trigger.auth ?? NEW_WEBHOOK.auth,
 					deliveryIdHeader:
 						trigger.deliveryIdHeader === undefined
-							? NEW_WEBHOOK.deliveryIdHeader
+							? AUTOMATIC_DELIVERY_ID
 							: trigger.deliveryIdHeader,
 					secret: trigger.secret ?? "",
 					filter: trigger.filter ?? [],

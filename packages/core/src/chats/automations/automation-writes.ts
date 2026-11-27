@@ -579,12 +579,15 @@ function webhookCheck(
 > {
 	const currentSettings = current?.settings.kind === "webhook" ? current.settings : undefined;
 	const auth = input.auth ?? currentSettings?.auth ?? DEFAULT_WEBHOOK_AUTH;
+	const requestedHeader = input.deliveryIdHeader;
 	const deliveryIdHeader =
-		input.deliveryIdHeader !== undefined
-			? input.deliveryIdHeader
-			: currentSettings
+		requestedHeader === undefined
+			? currentSettings
 				? currentSettings.deliveryIdHeader
-				: DEFAULT_DELIVERY_ID_HEADER;
+				: DEFAULT_DELIVERY_ID_HEADER
+			: typeof requestedHeader === "object" && requestedHeader !== null
+				? undefined
+				: requestedHeader;
 	const deliveryHeader = deliveryIdHeader?.toLowerCase();
 	if (
 		deliveryHeader === "authorization" ||

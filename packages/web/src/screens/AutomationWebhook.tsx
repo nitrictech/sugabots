@@ -1,10 +1,12 @@
 import {
+	AUTOMATIC_DELIVERY_ID,
 	DEFAULT_DELIVERY_ID_HEADER,
 	MIN_WEBHOOK_SECRET_CHARACTERS,
 	WEBHOOK_SECRET_PREFIXES,
 	WEBHOOK_SOURCES,
 	type WebhookAuth,
 	type WebhookAuthKind,
+	type WebhookDeliveryIdHeaderInput,
 	type WebhookFilterTest,
 	type WebhookSource,
 	webhookSecretLongEnough,
@@ -87,8 +89,7 @@ function secretLabel(auth: WebhookAuth): string {
 /** A webhook automation being made: how it will check callers, and its secret. */
 export interface WebhookDraft {
 	auth: WebhookAuth;
-	/** Where a generic webhook's delivery id is, or null for none. */
-	deliveryIdHeader: string | null;
+	deliveryIdHeader: WebhookDeliveryIdHeaderInput;
 	/** Blank for none, so the address alone runs it. */
 	secret: string;
 	/** What a call must meet to run it; none runs every call. */
@@ -167,7 +168,9 @@ export function NewWebhookGroups({
 					auth={draft.auth}
 					onChange={changeAuth}
 					deliveryIdHeader={draft.deliveryIdHeader}
-					onChangeDeliveryIdHeader={(deliveryIdHeader) => onChange({ ...draft, deliveryIdHeader })}
+					onChangeDeliveryIdHeader={async (deliveryIdHeader) =>
+						onChange({ ...draft, deliveryIdHeader })
+					}
 				/>
 				<SecretField
 					auth={draft.auth}
@@ -199,6 +202,7 @@ export function WebhookGroups({
 	filter,
 	onChangeAuth,
 	deliveryIdHeader,
+	savingDeliveryId,
 	onChangeDeliveryIdHeader,
 	onChangeFilter,
 }: {
@@ -208,7 +212,8 @@ export function WebhookGroups({
 	filter: readonly WebhookFilterTest[];
 	onChangeAuth: (auth: WebhookAuth) => void;
 	deliveryIdHeader: string | null | undefined;
-	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
+	savingDeliveryId: boolean;
+	onChangeDeliveryIdHeader: (deliveryIdHeader: WebhookDeliveryIdHeaderInput) => Promise<unknown>;
 	onChangeFilter: (filter: WebhookFilterTest[]) => Promise<unknown>;
 }) {
 	const { automation, owner } = placed;
@@ -232,7 +237,10 @@ export function WebhookGroups({
 					address={address}
 					auth={auth}
 					onChangeAuth={onChangeAuth}
-					deliveryIdHeader={deliveryIdHeader}
+					deliveryIdHeader={
+						deliveryIdHeader === undefined ? AUTOMATIC_DELIVERY_ID : deliveryIdHeader
+					}
+					savingDeliveryId={savingDeliveryId}
 					onChangeDeliveryIdHeader={onChangeDeliveryIdHeader}
 					savedSecret={saved.kind === "set" ? saved.secret : ""}
 				/>
@@ -241,7 +249,10 @@ export function WebhookGroups({
 					<AuthRows
 						auth={auth}
 						onChange={onChangeAuth}
-						deliveryIdHeader={deliveryIdHeader}
+						deliveryIdHeader={
+							deliveryIdHeader === undefined ? AUTOMATIC_DELIVERY_ID : deliveryIdHeader
+						}
+						savingDeliveryId={savingDeliveryId}
 						onChangeDeliveryIdHeader={onChangeDeliveryIdHeader}
 					/>
 					<SettingsControlRow label={secretLabel(auth)}>
@@ -270,12 +281,14 @@ function AuthRows({
 	auth,
 	onChange,
 	deliveryIdHeader,
+	savingDeliveryId,
 	onChangeDeliveryIdHeader,
 }: {
 	auth: WebhookAuth;
 	onChange: (auth: WebhookAuth) => void;
-	deliveryIdHeader: string | null | undefined;
-	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
+	deliveryIdHeader: WebhookDeliveryIdHeaderInput;
+	savingDeliveryId?: boolean;
+	onChangeDeliveryIdHeader: (deliveryIdHeader: WebhookDeliveryIdHeaderInput) => Promise<unknown>;
 }) {
 	return (
 		<>
@@ -321,31 +334,74 @@ function AuthRows({
 					onCommit={(username) => onChange({ ...auth, username })}
 				/>
 			)}
-			{!isSource(auth.kind) &&
-				(deliveryIdHeader === undefined ? (
-					<SettingsMenuRow
-						label="Delivery ID"
-						value="automatic"
-						options={[
-							{ value: "automatic", label: "Automatic detection" },
-							{ value: "header", label: "Use a header" },
-							{ value: "none", label: "Every call runs" },
-						]}
-						onChange={(choice) => {
-							if (choice === "header") onChangeDeliveryIdHeader(DEFAULT_DELIVERY_ID_HEADER);
-							if (choice === "none") onChangeDeliveryIdHeader(null);
-						}}
-					/>
-				) : (
-					<CommittedFieldRow
-						key={deliveryIdHeader}
-						label="Delivery ID header"
-						value={deliveryIdHeader ?? ""}
-						placeholder="None: every call runs"
-						allowEmpty
-						onCommit={(header) => onChangeDeliveryIdHeader(header === "" ? null : header)}
-					/>
-				))}
+			<DeliveryIdRows
+				knownSource={isSource(auth.kind)}
+				deliveryIdHeader={deliveryIdHeader}
+				pending={savingDeliveryId}
+				onChange={onChangeDeliveryIdHeader}
+			/>
+		</>
+	);
+}
+
+const AUTOMATIC_DELIVERY_ID_OPTION = { value: "automatic", label: "Automatic detection" } as const;
+const GENERIC_DELIVERY_ID_OPTIONS = [
+	AUTOMATIC_DELIVERY_ID_OPTION,
+	{ value: "header", label: "Use a header" },
+	{ value: "none", label: "Every call runs" },
+] as const;
+const SOURCE_DELIVERY_ID_OPTIONS = [
+	AUTOMATIC_DELIVERY_ID_OPTION,
+	{ value: "none", label: "Use the source’s delivery ID" },
+] as const;
+
+function DeliveryIdRows({
+	knownSource,
+	deliveryIdHeader,
+	pending,
+	onChange,
+}: {
+	knownSource: boolean;
+	deliveryIdHeader: WebhookDeliveryIdHeaderInput;
+	pending?: boolean;
+	onChange: (deliveryIdHeader: WebhookDeliveryIdHeaderInput) => Promise<unknown>;
+}) {
+	const header = typeof deliveryIdHeader === "string" ? deliveryIdHeader : null;
+	const choice =
+		deliveryIdHeader !== null && header === null
+			? "automatic"
+			: knownSource || header === null
+				? "none"
+				: "header";
+	return (
+		<>
+			<SettingsMenuRow
+				label="Delivery ID"
+				value={choice}
+				options={knownSource ? SOURCE_DELIVERY_ID_OPTIONS : GENERIC_DELIVERY_ID_OPTIONS}
+				disabled={pending}
+				onChange={(next) => {
+					const result = onChange(
+						next === "automatic"
+							? AUTOMATIC_DELIVERY_ID
+							: next === "header"
+								? DEFAULT_DELIVERY_ID_HEADER
+								: null,
+					);
+					void result.catch(() => {});
+				}}
+			/>
+			{!knownSource && header !== null && (
+				<CommittedFieldRow
+					key={header}
+					label="Delivery ID header"
+					value={header}
+					placeholder={DEFAULT_DELIVERY_ID_HEADER}
+					allowEmpty
+					pending={pending}
+					onCommit={(value) => onChange(value === "" ? null : value)}
+				/>
+			)}
 		</>
 	);
 }
@@ -412,21 +468,24 @@ function CommittedFieldRow({
 	value,
 	placeholder,
 	allowEmpty = false,
+	pending,
 	onCommit,
 }: {
 	label: string;
 	value: string;
 	placeholder: string;
 	allowEmpty?: boolean;
-	onCommit: (value: string) => void;
+	pending?: boolean;
+	onCommit: (value: string) => unknown;
 }) {
-	const { fieldProps } = useCommittedDraft(value, onCommit, { allowEmpty });
+	const { fieldProps } = useCommittedDraft(value, onCommit, { allowEmpty, pending });
 	const id = useId();
 	return (
 		<SettingsControlRow label={label} htmlFor={id}>
 			<input
 				id={id}
 				{...fieldProps}
+				disabled={pending}
 				autoComplete="off"
 				spellCheck={false}
 				placeholder={placeholder}
@@ -448,14 +507,16 @@ function SecretGroup({
 	auth,
 	onChangeAuth,
 	deliveryIdHeader,
+	savingDeliveryId,
 	onChangeDeliveryIdHeader,
 	savedSecret,
 }: {
 	address: TriggerAddress;
 	auth: WebhookAuth;
 	onChangeAuth: (auth: WebhookAuth) => void;
-	deliveryIdHeader: string | null | undefined;
-	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
+	deliveryIdHeader: WebhookDeliveryIdHeaderInput;
+	savingDeliveryId: boolean;
+	onChangeDeliveryIdHeader: (deliveryIdHeader: WebhookDeliveryIdHeaderInput) => Promise<unknown>;
 	/** Blank when the automation has none. */
 	savedSecret: string;
 }) {
@@ -476,6 +537,7 @@ function SecretGroup({
 				auth={auth}
 				onChange={onChangeAuth}
 				deliveryIdHeader={deliveryIdHeader}
+				savingDeliveryId={savingDeliveryId}
 				onChangeDeliveryIdHeader={onChangeDeliveryIdHeader}
 			/>
 			<SecretField

@@ -1,4 +1,5 @@
 import {
+	AUTOMATIC_DELIVERY_ID,
 	type Automation,
 	type AutomationTrigger,
 	type AutomationTriggerInput,
@@ -219,7 +220,8 @@ function copiedTrigger(trigger: AutomationTrigger): AutomationTriggerInput {
 			return {
 				kind: "webhook",
 				auth: trigger.auth,
-				deliveryIdHeader: trigger.deliveryIdHeader,
+				deliveryIdHeader:
+					trigger.deliveryIdHeader === undefined ? AUTOMATIC_DELIVERY_ID : trigger.deliveryIdHeader,
 				filter: trigger.filter,
 			};
 		case "github":

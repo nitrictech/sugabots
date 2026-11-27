@@ -462,18 +462,21 @@ export function SettingsMenuRow<Value extends string>({
 	options,
 	value,
 	mark,
+	disabled,
 	onChange,
 }: {
 	label: string;
 	options: readonly { value: Value; label: string }[];
 	value: Value;
 	mark?: (value: Value) => ReactNode;
+	disabled?: boolean;
 	onChange: (value: Value) => void;
 }) {
 	const current = options.find((option) => option.value === value);
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
+				disabled={disabled}
 				aria-label={`${label}: ${current?.label ?? value}`}
 				className={cn(
 					SETTINGS_ROW,

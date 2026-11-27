@@ -311,6 +311,7 @@ export function AutomationPanel({
 							<AutomationTriggerDialog
 								placed={{ automation, owner }}
 								opened={dialog}
+								actions={actions}
 								done={close}
 							/>
 						)}
@@ -485,14 +486,15 @@ function InlineInstructions({
 function AutomationTriggerDialog({
 	placed,
 	opened,
+	actions,
 	done,
 }: {
 	placed: PlacedAutomation;
 	opened: Extract<PanelDialog, { kind: "trigger" | "new_trigger" }>;
+	actions: ReturnType<typeof useAutomationActions>;
 	done: () => void;
 }) {
 	const { automation, owner } = placed;
-	const actions = useAutomationActions();
 	const addressed = { projectId: automation.projectId, automationId: automation.id };
 	const editing =
 		opened.kind === "trigger"
@@ -522,8 +524,9 @@ function AutomationTriggerDialog({
 								})
 							}
 							deliveryIdHeader={editing.deliveryIdHeader}
+							savingDeliveryId={actions.updateTrigger.isPending}
 							onChangeDeliveryIdHeader={(deliveryIdHeader) =>
-								actions.updateTrigger.mutate({
+								actions.updateTrigger.mutateAsync({
 									...addressed,
 									triggerId: editing.id,
 									json: { kind: "webhook", deliveryIdHeader },

@@ -460,7 +460,9 @@ export const Webhook = meta.story({
 			await dialog.findByText(new RegExp(`/webhooks/triggers/${incidentIntake.automation.id}$`)),
 		).toBeInTheDocument();
 		await expect(dialog.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
-		await expect(dialog.getByLabelText("Delivery ID header")).toBeInTheDocument();
+		await expect(
+			dialog.getByRole("button", { name: "Delivery ID: Every call runs" }),
+		).toBeInTheDocument();
 		await expect(dialog.getByLabelText("Header")).toHaveValue("X-Signature");
 		const secret = await dialog.findByLabelText("Signing secret");
 		await expect(secret).toHaveValue("whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u");
@@ -469,7 +471,7 @@ export const Webhook = meta.story({
 	},
 });
 
-/** A webhook using automatic detection can switch to a header or run every call. */
+/** A webhook can switch among automatic detection, a named header, and running every call. */
 export const DeliveryIdHeader = meta.story({
 	beforeEach({ msw }) {
 		let automation: Automation = {
@@ -487,11 +489,23 @@ export const DeliveryIdHeader = meta.story({
 				async ({ request, params }) => {
 					const { trigger: input } = (await request.json()) as { trigger: AutomationTriggerInput };
 					if (input.kind !== "webhook") return HttpResponse.json({}, { status: 400 });
+					const { deliveryIdHeader, ...settings } = input;
 					automation = {
 						...automation,
 						triggers: automation.triggers.map((trigger) =>
 							trigger.kind === "webhook" && trigger.id === params.triggerId
-								? { ...trigger, ...input }
+								? {
+										...trigger,
+										...settings,
+										deliveryIdHeader:
+											deliveryIdHeader === undefined
+												? trigger.deliveryIdHeader
+												: typeof deliveryIdHeader === "string"
+													? deliveryIdHeader
+													: deliveryIdHeader === null
+														? null
+														: undefined,
+									}
 								: trigger,
 						),
 					};
@@ -508,9 +522,16 @@ export const DeliveryIdHeader = meta.story({
 		await userEvent.click(dialog.getByRole("button", { name: "Delivery ID: Automatic detection" }));
 		await userEvent.click(await screen.findByRole("menuitemradio", { name: "Use a header" }));
 		const field = await dialog.findByLabelText("Delivery ID header");
+		await waitFor(() => expect(field).toBeEnabled());
 		await expect(field).toHaveValue("Idempotency-Key");
 		await userEvent.clear(field);
 		await userEvent.type(field, "X-Request-Id{Enter}");
+		await waitFor(async () => {
+			const saved = dialog.getByLabelText("Delivery ID header");
+			await expect(saved).not.toBe(field);
+			await expect(saved).toBeEnabled();
+			await expect(saved).toHaveValue("X-Request-Id");
+		});
 		await userEvent.keyboard("{Escape}");
 		const updated = within(await openFirstTrigger(canvas));
 		await updated.findByLabelText("Signing secret");
@@ -519,11 +540,22 @@ export const DeliveryIdHeader = meta.story({
 		);
 		await userEvent.clear(updated.getByLabelText("Delivery ID header"));
 		await userEvent.tab();
-		await expect(updated.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
+		const everyCall = await updated.findByRole("button", { name: "Delivery ID: Every call runs" });
+		await waitFor(() => expect(everyCall).toBeEnabled());
+		await userEvent.click(everyCall);
+		await userEvent.click(
+			await screen.findByRole("menuitemradio", { name: "Automatic detection" }),
+		);
+		const automatic = await updated.findByRole("button", {
+			name: "Delivery ID: Automatic detection",
+		});
+		await waitFor(() => expect(automatic).toBeEnabled());
 		await userEvent.keyboard("{Escape}");
 		const reopened = within(await openFirstTrigger(canvas));
 		await reopened.findByLabelText("Signing secret");
-		await waitFor(() => expect(reopened.getByLabelText("Delivery ID header")).toHaveValue(""));
+		await expect(
+			reopened.getByRole("button", { name: "Delivery ID: Automatic detection" }),
+		).toBeInTheDocument();
 	},
 });
 
