@@ -2739,11 +2739,15 @@ WHERE "message"."parts" @> '[{"type": "collaboration"}]'
 	AND NOT EXISTS (SELECT 1 FROM "tool_call" WHERE "tool_call"."message_id" = "message"."id");--> statement-breakpoint
 -- The other asking replies without their collaboration cards, the text on
 -- either side of a card joined again.
-WITH kept AS (
-	SELECT "message"."id" AS "message_id", element.part, element.position
-	FROM "message", jsonb_array_elements("message"."parts") WITH ORDINALITY AS element(part, position)
-	WHERE "message"."parts" @> '[{"type": "collaboration"}]'
-		AND element.part->>'type' <> 'collaboration'
+WITH affected AS MATERIALIZED (
+	SELECT "id", "parts"
+	FROM "message"
+	WHERE "parts" @> '[{"type": "collaboration"}]'
+), kept AS (
+	SELECT affected."id" AS "message_id", element.part, element.position
+	FROM affected
+	LEFT JOIN LATERAL jsonb_array_elements(affected."parts") WITH ORDINALITY AS element(part, position)
+		ON element.part->>'type' <> 'collaboration'
 ), starts AS (
 	SELECT kept.*,
 		CASE WHEN kept.part->>'type' = 'text' AND lag(kept.part->>'type') OVER in_order = 'text' THEN 0 ELSE 1 END AS starts_run
@@ -2761,12 +2765,15 @@ WITH kept AS (
 		END AS part
 	FROM runs
 	GROUP BY runs."message_id", runs.run
+), replacements AS (
+	SELECT joined."message_id",
+		coalesce(jsonb_agg(joined.part ORDER BY joined.run) FILTER (WHERE joined.part IS NOT NULL), '[]'::jsonb) AS parts
+	FROM joined
+	GROUP BY joined."message_id"
 )
-UPDATE "message" SET "parts" = coalesce(
-	(SELECT jsonb_agg(joined.part ORDER BY joined.run) FROM joined WHERE joined."message_id" = "message"."id"),
-	'[]'::jsonb
-)
-WHERE "message"."parts" @> '[{"type": "collaboration"}]';--> statement-breakpoint
+UPDATE "message" SET "parts" = replacements.parts
+FROM replacements
+WHERE "message"."id" = replacements."message_id";--> statement-breakpoint
 -- The asking bot's turn after its helpers have answered is a hand-back, where
 -- it was resumed once its collaboration ended. Turns asked for and not yet
 -- finished carry their reason too.

@@ -2668,6 +2668,10 @@ it.skipIf(!process.env.DATABASE_URL)(
 			.slice(migration.indexOf("-- A finished asking reply"))
 			.split("--> statement-breakpoint")[0];
 		if (cleanup === undefined) throw new Error("The migration has no collaboration cleanup");
+		const rewrite = migration
+			.slice(migration.indexOf("-- The other asking replies"))
+			.split("--> statement-breakpoint")[0];
+		if (!rewrite) throw new Error("The migration has no collaboration reply rewrite");
 		await withClient(process.env.DATABASE_URL ?? "", async (client) => {
 			await client.query("begin");
 			try {
@@ -2684,6 +2688,11 @@ it.skipIf(!process.env.DATABASE_URL)(
 					insert into message (id, parts, status)
 					select md5('reply' || ordinal)::uuid, '[{"type":"collaboration"}]', 'complete'
 					from generate_series(1, 3000) ordinal;
+					insert into message (id, parts, status) values (
+						md5('reply3001')::uuid,
+						'[{"type":"text","text":"Before "},{"type":"collaboration"},{"type":"text","text":"after"}]',
+						'complete'
+					);
 					insert into lane (payload)
 					values (jsonb_build_object('triggerMessageId', md5('reply1')::uuid)),
 						(jsonb_build_object('sourceMessageId', md5('reply2')::uuid)), (null);
@@ -2706,6 +2715,18 @@ it.skipIf(!process.env.DATABASE_URL)(
 				);
 				expect(kept).toEqual([{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }, { ordinal: 4 }]);
 				expect(discardedPairs).toBeLessThan(10_000);
+				await client.query(rewrite);
+				const { rows: rewritten } = await client.query(`
+				select ordinal, parts from (values (1), (2), (3), (4), (3001)) as replies(ordinal)
+				join message on id = md5('reply' || ordinal)::uuid order by ordinal
+			`);
+				expect(rewritten).toEqual([
+					{ ordinal: 1, parts: [] },
+					{ ordinal: 2, parts: [] },
+					{ ordinal: 3, parts: [] },
+					{ ordinal: 4, parts: [] },
+					{ ordinal: 3001, parts: [{ type: "text", text: "Before after" }] },
+				]);
 			} finally {
 				await client.query("rollback");
 			}
