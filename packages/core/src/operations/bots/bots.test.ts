@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedBot, seedMember, unique } from "../../authentication/seed.test-support.ts";
 import { query } from "../../database/database.ts";
-import { bot, membership, modelProvider, providerModel } from "../../database/schema.ts";
+import { bot, membership, modelProvider, project, providerModel } from "../../database/schema.ts";
 import { closeDatabase, holdTransaction, onDatabase } from "../../database/testing.ts";
 import type { Principal } from "../../principal.ts";
 import {
@@ -118,6 +118,23 @@ describe("the bots operations, beyond who may call them", () => {
 				});
 			}
 		}
+	});
+
+	it("refuses settings changes once deletion starts and lets the creator finish deletion", async () => {
+		const deleting = await seedBot(a.workspace, { createdById: a.ed });
+		await onDatabase((db) =>
+			db.update(project).set({ deleting: true }).where(eq(project.id, deleting.defaultProject)),
+		);
+
+		for (const changes of [{ name: "Renamed" }, { visibility: "private" as const }]) {
+			expect(
+				await operationOutcome(call, who.ed, "bots.update", { botId: deleting.id, changes }),
+			).toBe("ResourceHidden");
+		}
+		await call(who.ed, "bots.remove", { botId: deleting.id });
+		expect(await onDatabase((db) => db.select().from(bot).where(eq(bot.id, deleting.id)))).toEqual(
+			[],
+		);
 	});
 
 	it("deletes a member's Personal Assistant for them, as a bot, leaving them in the workspace with their others", async () => {

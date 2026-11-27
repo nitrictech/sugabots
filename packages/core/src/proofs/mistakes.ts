@@ -633,12 +633,7 @@ export const botDeletionMistakes = underWorkspaceLock(principal, "workspace", (l
 	named(otherPrincipal, "bot", (other, bot) =>
 		Effect.gen(function* () {
 			const canManage = yield* proveCanManageBot(lock.principal, bot);
-			const canRestrict = yield* proveCanRestrictBot(lock.principal, bot);
 			const managedOutside = yield* proveCanManageBot(other, bot);
-
-			// A bot deleted with an authority proved for a principal named outside the lock.
-			// @ts-expect-error TS2345 [Argument of type 'CanManageBot<NameA, NameB>' is not assignable to parameter of type 'CanManageBot<P, NameB> | CanRestrictBot<P, NameB>']
-			yield* proveCanDeleteBot(lock, managedOutside);
 
 			// A bot's computer use changed with a reach proof for a principal named outside the lock.
 			// @ts-expect-error TS2345 [Argument of type 'CanManageBot<NameA, NameB>' is not assignable to parameter of type 'CanManageBot<P, NameB>']
@@ -646,8 +641,7 @@ export const botDeletionMistakes = underWorkspaceLock(principal, "workspace", (l
 				usesComputer: true,
 			});
 
-			yield* botsService.beginRemoval(yield* proveCanDeleteBot(lock, canManage));
-			yield* botsService.beginRemoval(yield* proveCanDeleteBot(lock, canRestrict));
+			yield* botsService.beginRemoval(yield* proveCanDeleteBot(lock, bot));
 			yield* botsService.update(yield* proveCanChangeBotReach(lock, canManage), {
 				usesComputer: true,
 			});

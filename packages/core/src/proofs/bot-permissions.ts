@@ -1,15 +1,15 @@
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { Effect } from "effect";
 import { type Actor, mayOnBot } from "../authorization/permissions.ts";
-import type { CanManageBot } from "./can-manage-bot.ts";
-import type { CanRestrictBot } from "./can-restrict-bot.ts";
+import { type CanManageBot, checkBotManagement } from "./can-manage-bot.ts";
+import { proveCanRestrictBot } from "./can-restrict-bot.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 import type { ReachesBot } from "./reaches-bot.ts";
 import type { HoldsWorkspaceLock } from "./workspace-lock.ts";
 
 /**
- * What P may do to a bot it manages, restricts or reaches. Each is a pure
- * function of `CanManageBot`, `CanRestrictBot` or `ReachesBot`, with no query.
+ * What P may do to a bot it manages, restricts or reaches. Each is proved
+ * under the workspace lock.
  */
 
 /**
@@ -17,7 +17,7 @@ import type { HoldsWorkspaceLock } from "./workspace-lock.ts";
  * an admin restricting it without reaching it, a Personal Assistant included.
  * A bot in its own chats changes only its interview-written settings, so it
  * deletes nothing. Deleting it changes who reaches what, so it is proved
- * under B's workspace's lock, from an authority proved there too.
+ * under B's workspace's lock, including when deletion has already started.
  */
 export interface CanDeleteBot<P, B> extends Proof<"CanDeleteBot", [P, B]> {
 	readonly bot: Named<B, string>;
@@ -87,21 +87,28 @@ export const proveCanChangeBotReach = <P, W, B>(
 	return Effect.succeed(proof);
 };
 
-export const proveCanDeleteBot = <P, W, B>(
-	lock: HoldsWorkspaceLock<P, W>,
-	authority: CanManageBot<P, B> | CanRestrictBot<P, B>,
-): Effect.Effect<CanDeleteBot<P, B>, ActionForbidden | ResourceHidden> => {
-	if (authority.workspace !== lock.workspace.value) {
-		return Effect.fail(new ResourceHidden({ resource: "bot" }));
-	}
-	const inOwnChats = authority.kind === "CanManageBot" && authority.inOwnChats;
-	if (inOwnChats) {
-		return Effect.fail(new ActionForbidden({ proof: "CanDeleteBot" }));
-	}
-	const proof: CanDeleteBot<P, B> = CanDeleteBotProof.prove([authority.principal, authority.bot], {
-		bot: authority.bot,
-		workspace: authority.workspace,
-		actor: authority.actor,
+export const proveCanDeleteBot = <P, W, B>(lock: HoldsWorkspaceLock<P, W>, bot: Named<B, string>) =>
+	Effect.gen(function* () {
+		const { principal } = lock;
+		const { actor, facts, inOwnChats } = yield* checkBotManagement(
+			principal.value,
+			bot.value,
+			"deletion",
+		).pipe(
+			Effect.catch(() =>
+				proveCanRestrictBot(principal, bot).pipe(
+					Effect.map(({ facts, actor }) => ({ facts, actor, inOwnChats: false })),
+				),
+			),
+		);
+		if (facts.workspace !== lock.workspace.value) {
+			return yield* new ResourceHidden({ resource: "bot" });
+		}
+		if (inOwnChats) return yield* new ActionForbidden({ proof: "CanDeleteBot" });
+		const proof: CanDeleteBot<P, B> = CanDeleteBotProof.prove([principal, bot], {
+			bot,
+			workspace: facts.workspace,
+			actor,
+		});
+		return proof;
 	});
-	return Effect.succeed(proof);
-};

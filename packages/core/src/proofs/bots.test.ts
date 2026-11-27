@@ -165,13 +165,7 @@ describe("managing, restricting and briefing bots", () => {
 		const deletes = (principal: Principal, botId: string) =>
 			outcome(
 				underWorkspaceLock(principal, a.workspace, (lock) =>
-					named(botId, (bot) =>
-						proveCanManageBot(lock.principal, bot).pipe(
-							Effect.catch(() => proveCanRestrictBot(lock.principal, bot)),
-							Effect.flatMap((authority) => proveCanDeleteBot(lock, authority)),
-							Effect.asVoid,
-						),
-					),
+					named(botId, (bot) => proveCanDeleteBot(lock, bot).pipe(Effect.asVoid)),
 				),
 			);
 
