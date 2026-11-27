@@ -56,10 +56,11 @@ export interface ServerSession {
 		input: unknown,
 		options: ToolExecutionOptions<unknown>,
 	): Promise<unknown>;
-	close(): Promise<void>;
+	close(signal?: AbortSignal): Promise<void>;
 }
 
 const SERVER_TIMEOUT_MS = 15_000;
+export const SERVER_CLOSE_TIMEOUT_MS = 2_000;
 
 /** The JSON-RPC error a server answers with when it does not speak the protocol version asked for. */
 const UNSUPPORTED_PROTOCOL_VERSION = -32022;
@@ -69,6 +70,9 @@ export async function connectServer(
 	target: ServerTarget,
 	fetch: EgressHttpClient,
 ): Promise<ServerSession> {
+	const send = target.oauth?.fetch ?? fetch;
+	let closeSignal: AbortSignal | undefined;
+	let closeError: { cause: unknown } | undefined;
 	const open = (protocolVersionDiscovery: boolean) =>
 		createMCPClient({
 			clientName: "sugabots",
@@ -77,7 +81,17 @@ export async function connectServer(
 				type: "http",
 				url: target.url,
 				headers: target.headers,
-				fetch: target.oauth?.fetch ?? fetch,
+				fetch: async (input, init) => {
+					if (init?.method !== "DELETE" || !closeSignal) return send(input, init);
+					// The SDK's client.close() takes no signal and suppresses DELETE errors.
+					const signal = init.signal ? AbortSignal.any([init.signal, closeSignal]) : closeSignal;
+					try {
+						return await send(input, { ...init, signal });
+					} catch (cause) {
+						closeError = { cause };
+						throw cause;
+					}
+				},
 			},
 			initializationOptions: { timeout: SERVER_TIMEOUT_MS },
 			protocolVersionDiscovery,
@@ -134,7 +148,11 @@ export async function connectServer(
 				return { isError: true, content: [{ type: "text", text }] };
 			}
 		},
-		close: () => client.close().catch(() => undefined),
+		close: async (signal = AbortSignal.timeout(SERVER_CLOSE_TIMEOUT_MS)) => {
+			closeSignal = signal;
+			await client.close();
+			if (closeError) throw closeError.cause;
+		},
 	};
 }
 
@@ -153,7 +171,7 @@ export async function listServerTools(
 				definitions: definitions.tools,
 			};
 		} finally {
-			await session.close();
+			await session.close().catch(() => undefined);
 		}
 	} catch (cause) {
 		return { ok: false, reason: describe(cause, target), cause };

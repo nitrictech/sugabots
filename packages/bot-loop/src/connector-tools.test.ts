@@ -303,6 +303,92 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			},
 		);
 
+		it("records Allow while the MCP server is still closing the decision's session", async () => {
+			await onDatabase((db) =>
+				db
+					.update(connector)
+					.set({ handle: "wiki", toolAccess: { wipe: "ask" } })
+					.where(eq(connector.id, connectorId)),
+			);
+			const deleteStarted = Promise.withResolvers<void>();
+			const finishDelete = Promise.withResolvers<Response>();
+			const deleteAborted = vi.fn();
+			let sessions = 0;
+			const fetchMcp: typeof fetch = async (input, init) => {
+				const request = new Request(input, init);
+				if (request.method === "GET") return new Response(null, { status: 405 });
+				if (request.method === "DELETE") {
+					if (request.headers.get("mcp-session-id") !== "session-2")
+						return new Response(null, { status: 204 });
+					request.signal.addEventListener(
+						"abort",
+						() => {
+							deleteAborted();
+							finishDelete.reject(request.signal.reason);
+						},
+						{ once: true },
+					);
+					deleteStarted.resolve();
+					return finishDelete.promise;
+				}
+				const { id, method } = (await request.json()) as { id?: number; method: string };
+				if (method === "initialize") {
+					return Response.json(
+						{
+							jsonrpc: "2.0",
+							id,
+							result: {
+								protocolVersion: "2025-11-25",
+								serverInfo: { name: "Wiki", version: "1" },
+								capabilities: { tools: {} },
+							},
+						},
+						{ headers: { "mcp-session-id": `session-${++sessions}` } },
+					);
+				}
+				if (method === "tools/list") {
+					return Response.json({
+						jsonrpc: "2.0",
+						id,
+						result: { tools: [{ name: "wipe", inputSchema: { type: "object" } }] },
+					});
+				}
+				if (id === undefined) return new Response(null, { status: 202 });
+				return Response.json({
+					jsonrpc: "2.0",
+					id,
+					error: { code: -32601, message: "Method not found" },
+				});
+			};
+			const connectorTools = ConnectorCatalog.from({
+				connectors: await runOnPostgres(
+					ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
+				),
+				httpClients: { for: () => fetchMcp },
+			});
+			const { model } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
+			const ran = await loop.runTurn(chatId, { model, connectorTools });
+			const [parked] = await callsOf(ran.turnId);
+			if (!parked) throw new Error("No connector call parked");
+			expect(parked).toMatchObject({ connectorId, approvalStatus: "pending" });
+			const admin = asMember(await loop.callWithConnectorCatalog(connectorTools), adminId);
+			const decision = admin.decide({ toolCallId: parked.id, decision: "allow_once" });
+			try {
+				await Promise.race([deleteStarted.promise, decision]);
+				await vi.waitFor(
+					async () => {
+						expect(await callsOf(ran.turnId)).toMatchObject([{ approvalStatus: "allowed" }]);
+					},
+					{ timeout: 1_000 },
+				);
+				await decision;
+				await vi.waitFor(() => expect(deleteAborted).toHaveBeenCalledOnce(), { timeout: 3_000 });
+			} finally {
+				finishDelete.resolve(new Response(null, { status: 204 }));
+				await decision;
+			}
+		}, 8_000);
+
 		it.each(["keeps the augmentation", "lists its own upload"] as const)(
 			"checks an approved connector augmentation again when the server %s",
 			async (change) => {

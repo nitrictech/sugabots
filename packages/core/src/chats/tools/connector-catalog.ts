@@ -40,6 +40,7 @@ import {
 } from "../../providers/connectors/github/github-connectors.ts";
 import {
 	connectServer,
+	SERVER_CLOSE_TIMEOUT_MS,
 	type ServerListing,
 	type ServerSession,
 } from "../../providers/connectors/mcp.ts";
@@ -407,14 +408,19 @@ export function from({
 				if (!target || target.configurationRevision !== reach.revision) return false;
 				const providers = oauth ? yield* oauth.clients : undefined;
 				const listed = yield* Effect.result(
-					Effect.tryPromise(async () => {
-						const session = await openSession(reach.workspace, target, providers);
-						try {
-							return await session.list();
-						} finally {
-							await session.close();
-						}
-					}),
+					Effect.acquireUseRelease(
+						Effect.tryPromise(() => openSession(reach.workspace, target, providers)),
+						(session) => Effect.tryPromise(() => session.list()),
+						(session) =>
+							Effect.tryPromise((signal) => session.close(signal)).pipe(
+								Effect.timeout(Duration.millis(SERVER_CLOSE_TIMEOUT_MS)),
+								Effect.catch((cause) =>
+									Effect.logWarning("The connector's approval session failed to close", cause),
+								),
+								Effect.forkDetach({ uninterruptible: false }),
+								Effect.asVoid,
+							),
+					),
 				);
 				if (listed._tag === "Failure") {
 					yield* Effect.logWarning(

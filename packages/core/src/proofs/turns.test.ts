@@ -722,6 +722,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 				forTurn: () =>
 					Effect.succeed({
 						tools,
+						refreshForApproval: new Map(),
 						unavailable: [],
 						signInExpired: [],
 						instructions: {},
@@ -976,6 +977,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 				forTurn: () =>
 					Effect.succeed({
 						tools,
+						refreshForApproval: new Map(),
 						unavailable: [],
 						signInExpired: [],
 						instructions: {},
