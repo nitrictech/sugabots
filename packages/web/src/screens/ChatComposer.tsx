@@ -649,7 +649,7 @@ function AttachButton({
 					label="Add"
 					side="top"
 					render={<DropdownMenuTrigger />}
-					className="order-1 size-8 data-popup-open:bg-hover data-popup-open:text-foreground max-md:size-9 [&_svg]:size-5 max-md:[&_svg]:size-5"
+					className="order-1 size-8 data-popup-open:bg-hover data-popup-open:text-foreground max-md:size-9 [&_svg]:size-5"
 				>
 					<Plus aria-hidden strokeWidth={2} />
 				</IconButton>

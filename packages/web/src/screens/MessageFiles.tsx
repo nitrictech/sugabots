@@ -84,7 +84,7 @@ function ImageGrid({ images, urlOf }: { images: readonly FilePart[]; urlOf: File
 				<ul
 					className={cn(
 						"m-0 grid w-full list-none gap-1 p-0",
-						images.length === 2 ? "max-w-80 grid-cols-2" : "max-w-lg grid-cols-3",
+						images.length === 2 ? "max-w-80 grid-cols-2" : "max-w-image-grid-3 grid-cols-3",
 					)}
 				>
 					{images.map((file) => (

@@ -16,8 +16,8 @@ import { CloseButton } from "@/ui/close-button.tsx";
 import { DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
 
 const widths = {
-	compact: "max-w-md sm:max-w-md",
-	default: "max-w-md sm:max-w-md",
+	compact: "max-w-dialog-compact sm:max-w-dialog-compact",
+	default: "max-w-dialog sm:max-w-dialog",
 	/** For writing at length, such as an automation's instructions. */
 	wide: "max-w-2xl sm:max-w-2xl",
 } as const;

@@ -181,7 +181,7 @@ export function AttachmentChip({
 		<li
 			title={status ? `${file.name}\n${status}` : file.name}
 			className={cn(
-				"group relative block size-20 shrink-0 overflow-hidden rounded-lg border has-focus-visible:border-primary-tint-border max-sm:size-20",
+				"group relative block size-20 shrink-0 overflow-hidden rounded-lg border has-focus-visible:border-primary-tint-border max-sm:size-attachment-tile-phone",
 				failed ? "border-destructive/50 bg-destructive-hover" : "border-border-strong bg-chip",
 			)}
 		>

@@ -9,14 +9,14 @@ const PALETTE_COLOUR =
 const BRACKETED_PROPERTY = /^\[(?:--)?[a-z][\w-]*:/i;
 const BRACKETED_VALUE = /^-?[a-z][\w-]*[-/]\[/i;
 
-// Tailwind accepts any multiple of its spacing unit, such as `px-2.75` or `mt-13`, but
+// Tailwind accepts any multiple of its spacing unit, such as `px-2.75`, `mt-13` or `leading-5.5`, but
 // the design keeps to the steps of its default theme. The web package owns Tailwind.
 const { spacing } = createRequire(new URL("../packages/web/package.json", import.meta.url))(
 	"tailwindcss/defaultTheme",
 ) as { spacing: Record<string, string> };
 const SPACING_STEPS = new Set(Object.keys(spacing));
 const SPACING_UTILITY =
-	/^-?(?:[pm][xytrblse]?|gap(?:-[xy])?|space-[xy]|inset(?:-[xy])?|top|right|bottom|left|start|end|(?:min-|max-)?[wh]|size|translate-[xy]|scroll-[mp][xytrblse]?|basis|indent)-(\d+(?:\.\d+)?)$/;
+	/^-?(?:[pm][xytrblse]?|gap(?:-[xy])?|space-[xy]|inset(?:-[xy])?|top|right|bottom|left|start|end|(?:min-|max-)?[wh]|size|translate-[xy]|scroll-[mp][xytrblse]?|basis|indent|leading)-(\d+(?:\.\d+)?)$/;
 
 // In an inline style, a fixed length in one of these has a utility to use instead.
 const STYLE_LENGTH_PROPERTIES = new Set([

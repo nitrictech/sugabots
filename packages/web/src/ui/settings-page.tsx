@@ -38,12 +38,12 @@ const PANEL_BACK_BAR =
  * pushes it down. It takes no room of its own.
  */
 const PHONE_ACTION_ROW =
-	"pointer-events-none sticky top-safe-or-3 z-20 -mt-12 flex h-14 shrink-0 justify-end px-4";
+	"pointer-events-none sticky top-safe-or-3 z-20 flex overlay-back-bar shrink-0 justify-end px-4";
 
 const PANEL_BACK_LINK =
 	"focus-ring inline-flex min-h-8 min-w-0 items-center gap-1 rounded-md font-medium text-sm text-link";
 
-const PAGE_TITLE = "m-0 font-semibold text-base text-foreground leading-7.5 tracking-tight";
+const PAGE_TITLE = "m-0 font-semibold text-base text-foreground leading-8 tracking-tight";
 
 /** A settings page: its title and what it is for, then its groups. */
 export function SettingsPage({

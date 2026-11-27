@@ -50,9 +50,9 @@ it("finds animation utilities from plugins that the web stylesheet does not load
 	expect(tokens("packages/website/src/control.tsx")).toEqual([]);
 });
 
-it("finds spacing and sizes off the default theme's steps", () => {
+it("finds spacing, sizes and line heights off the default theme's steps", () => {
 	const source =
-		'"px-2.75 size-7.25 max-md:py-1.25 mt-13 -mt-13 w-70 max-w-105 px-2.5 size-7 mt-12 w-72 w-1/3 max-w-md w-px top-1/2"';
+		'"px-2.75 size-7.25 max-md:py-1.25 mt-13 -mt-13 w-70 max-w-105 px-2.5 size-7 mt-12 w-72 w-1/3 max-w-md w-px top-1/2 leading-5.5 leading-13 leading-6 leading-none"';
 	expect(tailwindValueViolations("spacing.tsx", source).map(({ token }) => token)).toEqual([
 		"px-2.75",
 		"size-7.25",
@@ -61,6 +61,8 @@ it("finds spacing and sizes off the default theme's steps", () => {
 		"-mt-13",
 		"w-70",
 		"max-w-105",
+		"leading-5.5",
+		"leading-13",
 	]);
 });
 

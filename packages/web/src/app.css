@@ -888,6 +888,30 @@
 	}
 }
 
+/* Widths the design names, as `max-w-dialog` and the like. */
+@theme {
+	--container-dialog-compact: 420px;
+	--container-dialog: 460px;
+	/* Three image tiles across, each as wide as one of two in a 320px row. */
+	--container-image-grid-3: 482px;
+}
+
+/*
+ * A page's phone action row is pulled up level with Back by the Back bar's
+ * height under its top padding (the 44px Back and the 8px under it), and is
+ * that tall, so it lines up with Back and takes no room of its own.
+ */
+@utility overlay-back-bar {
+	margin-top: -52px;
+	height: 52px;
+}
+
+/* An attachment tile on a phone, small enough for four across. */
+@utility size-attachment-tile-phone {
+	width: 72px;
+	height: 72px;
+}
+
 /*
  * Sizes that depend on the page at runtime, such as the space a phone's tabs
  * take or a pane the viewer resizes, which no standard utility can express.
