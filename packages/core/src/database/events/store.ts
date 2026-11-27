@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
 import type { StreamCursor } from "@sugabots/contracts/operations/events";
 import { and, asc, gt, gte, inArray, lte, or, sql } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Random } from "effect";
 import { processLayer, Tier } from "../../tiers.ts";
 import {
 	type Database,
@@ -117,7 +117,8 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 						const starts = yield* attempt;
 						if (starts !== undefined) return starts;
 						// The attempt has returned its connection and released any locks it took.
-						yield* Effect.sleep("25 millis");
+						const retryAfterMillis = yield* Random.nextIntBetween(100, 250);
+						yield* Effect.sleep(retryAfterMillis);
 					}
 				}),
 				{ signal },

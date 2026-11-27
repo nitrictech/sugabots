@@ -388,6 +388,47 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		expect(await nextType(reconnected)).toBe("chat.changed");
 	});
 
+	it("refuses a stream the member cannot reach before requesting cursors", async () => {
+		const world = await staffed();
+		await takeEdOut(world);
+		let snapshots = 0;
+		const followWithSnapshot = await observeStartupSnapshot(() => {
+			snapshots += 1;
+		});
+		const principal = await signedIn.member(world.ed);
+		await expect(
+			followWithSnapshot(principal, "events.followChat", { chatId: world.chat }),
+		).rejects.toMatchObject({ _tag: "ResourceHidden" });
+		expect(snapshots).toBe(0);
+	});
+
+	it("ends a reconnect while the writer still holds the stream lock", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		const stream = chatStream(world.chat);
+		const since = (await stored.latest([stream])).get(stream);
+		const writer = holdStreamWriter(stream);
+		try {
+			await writer.held;
+			const outcome = await Promise.race([
+				follow(ed, "events.followChat", { chatId: world.chat, since }).then(async (opened) => {
+					try {
+						return await opened.next();
+					} finally {
+						await opened.close();
+					}
+				}),
+				new Promise((resolve) => {
+					const timer = setTimeout(() => resolve("still waiting"), 3_000);
+					onTestFinished(() => clearTimeout(timer));
+				}),
+			]);
+			expect(outcome).toBe("ended");
+		} finally {
+			await writer.release();
+		}
+	});
+
 	it("leaves the only pool slot available while stream startup waits for a writer", async () => {
 		const world = await staffed();
 		const ed = await signedIn.member(world.ed);
@@ -451,6 +492,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		const runOn = effectRunner(runtime);
 		const proving = Promise.withResolvers<void>();
 		const proved = Promise.withResolvers<void>();
+		let proofs = 0;
 		const abort = new AbortController();
 		const streams = await runOn(
 			Streams.make.pipe(
@@ -466,8 +508,10 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 					since,
 					workspace: world.workspace,
 					prove: Effect.promise(async () => {
-						proving.resolve();
-						await proved.promise;
+						if (++proofs === 2) {
+							proving.resolve();
+							await proved.promise;
+						}
 						return { kind: "chat", workspace: world.workspace, chat: world.chat } as const;
 					}),
 				}),
@@ -978,7 +1022,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			expect((await reader.read()).value?.event).toEqual(changed);
 			await commit(feed, Audience.forWorkspace(changed));
 			expect((await reader.read()).value?.event).toEqual(changed);
-			expect(proofs).toBe(3);
+			expect(proofs).toBe(4);
 		});
 
 		it("keeps ordered reach after an older watcher proof finishes", async () => {
@@ -1000,8 +1044,8 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				world,
 				Effect.promise(async () => {
 					proofs += 1;
-					if (proofs === 1) return hearing(true);
-					if (proofs === 2) {
+					if (proofs <= 2) return hearing(true);
+					if (proofs === 3) {
 						watching.resolve();
 						await finishWatching.promise;
 						watcherReturned.resolve();
@@ -1052,7 +1096,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				Effect.flatMap(
 					Effect.promise(async () => {
 						proofs += 1;
-						if (proofs === 1) return true;
+						if (proofs <= 2) return true;
 						provingAgain.resolve();
 						await refuse.promise;
 						return false;

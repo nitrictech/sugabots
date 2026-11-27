@@ -202,6 +202,8 @@ const READ_AHEAD = 16;
 /** How many stored events a stream, or a watcher, reads at a time. */
 const BATCH = 100;
 
+const SNAPSHOT_TIMEOUT = Duration.seconds(2);
+
 /**
  * How many events that aren't stored, such as a reply's text as it is written,
  * a stream holds for a client that isn't taking them; past that they are
@@ -232,6 +234,11 @@ export const make = Effect.gen(function* () {
 	const { catchUp } = yield* Timing;
 	const checkInterval = Duration.toMillis(catchUp) / 2;
 	const operation = yield* serviceOperations<Interface>("Streams");
+
+	const snapshot = (streams: readonly EventStream[]) =>
+		Effect.promise((signal) => store.latest(streams, signal)).pipe(
+			Effect.timeoutOrElse({ duration: SNAPSHOT_TIMEOUT, orElse: () => Effect.undefined }),
+		);
 
 	/**
 	 * Hands each delivery on `stream` to `heard` as the bus makes it, never
@@ -518,9 +525,12 @@ export const make = Effect.gen(function* () {
 						life.stop,
 					);
 				}
-				const starts = yield* Effect.promise((signal) =>
-					store.latest([stream, ...controlStreams], signal),
-				);
+				const endStream = () =>
+					Effect.as(life.end, { stream: Stream.empty, ended: Deferred.await(life.ended) });
+				const reached = yield* operation("follow", prove);
+				if (!listensWhereProved(reached, workspace)) return yield* endStream();
+				const starts = yield* snapshot([stream, ...controlStreams]);
+				if (starts === undefined) return yield* endStream();
 				const feeds = new Map(
 					[...starts].map(([stream, cursor]) => [stream, EventStore.afterCursor(cursor)]),
 				);
@@ -531,13 +541,12 @@ export const make = Effect.gen(function* () {
 					[...feeds]
 						.filter(([feed]) => feed !== stream)
 						.map(([stream, since]) => ({ stream, since, types: CONTROL_EVENT_TYPES }));
+				// Changes that committed before the snapshot may be behind its control cursors.
 				const first = yield* operation("follow", prove);
 				const outbox = yield* Queue.bounded<Delivery, Cause.Done>(READ_AHEAD);
 				const expiresAt = yield* operation("follow", expiryOf(principal));
-				if (expiresAt === undefined || !listensWhereProved(first, workspace)) {
-					yield* life.end;
-					return { stream: Stream.empty, ended: Deferred.await(life.ended) };
-				}
+				if (expiresAt === undefined || !listensWhereProved(first, workspace))
+					return yield* endStream();
 				const replay =
 					since === undefined
 						? undefined
@@ -643,8 +652,8 @@ export const make = Effect.gen(function* () {
 							),
 						);
 						if (!next) {
-							const starts = yield* Effect.promise((signal) => store.latest([stream], signal));
-							const cursor = starts.get(stream);
+							const starts = yield* snapshot([stream]);
+							const cursor = starts?.get(stream);
 							if (cursor === undefined || !(yield* proveForSending())) return false;
 							feeds.set(stream, EventStore.afterCursor(cursor));
 							yield* Queue.offer(outbox, { seq: cursor, event: streamEvent("reset") });
@@ -704,7 +713,12 @@ export const make = Effect.gen(function* () {
 					},
 					life.stop,
 				);
-				const starts = yield* Effect.promise((signal) => store.latest([reach, own], signal));
+				yield* operation("keep", prove);
+				const starts = yield* snapshot([reach, own]);
+				if (starts === undefined) {
+					yield* life.end;
+					return Effect.void;
+				}
 				const controls = new Map(
 					[...starts].map(([stream, cursor]) => [stream, EventStore.afterCursor(cursor)]),
 				);
