@@ -221,7 +221,7 @@ export function WebhookGroups({
 	const { automation, owner } = placed;
 	const canManage = resourcePermissions(owner).manageAutomations;
 	const address = { projectId: automation.projectId, automationId: automation.id, triggerId };
-	const { data: currentSecret, error } = useAutomationSecret({ ...address, canManage });
+	const { data: currentSecret, error, isPending } = useAutomationSecret({ ...address, canManage });
 	const restrictedNote =
 		isApiFailure(error) && error.error?._tag === "WebhookSecretRestricted"
 			? error.error.userMessage
@@ -235,7 +235,11 @@ export function WebhookGroups({
 					<code className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{url}</code>
 					<CopyIconButton label="Copy address" text={url} size="lg" />
 				</SettingsControlRow>
-				<SourceRow auth={auth} onChange={onChangeAuth} />
+				<SourceRow
+					auth={auth}
+					disabled={canManage && (isPending || saved?.kind === "legacy")}
+					onChange={onChangeAuth}
+				/>
 			</SettingsGroup>
 			{canManage && saved ? (
 				// Keyed by the saved secret, so the field starts again from a newly saved one.
@@ -256,6 +260,7 @@ export function WebhookGroups({
 				<SettingsGroup note={authNote(auth)}>
 					<AuthRows
 						auth={auth}
+						authChangeDisabled={canManage && isPending}
 						onChange={onChangeAuth}
 						deliveryIdHeader={
 							deliveryIdHeader === undefined ? AUTOMATIC_DELIVERY_ID : deliveryIdHeader
@@ -289,12 +294,14 @@ function webhookAddress(triggerId: string): string {
  */
 function AuthRows({
 	auth,
+	authChangeDisabled,
 	onChange,
 	deliveryIdHeader,
 	savingDeliveryId,
 	onChangeDeliveryIdHeader,
 }: {
 	auth: WebhookAuth;
+	authChangeDisabled?: boolean;
 	onChange: (auth: WebhookAuth) => void;
 	deliveryIdHeader: WebhookDeliveryIdHeaderInput;
 	savingDeliveryId?: boolean;
@@ -307,6 +314,7 @@ function AuthRows({
 					label="Auth"
 					options={WEBHOOK_AUTH_OPTIONS}
 					value={auth.kind}
+					disabled={authChangeDisabled}
 					onChange={(kind) => onChange(AUTH_DEFAULTS[kind])}
 				/>
 			)}
@@ -426,9 +434,11 @@ const SOURCE_OPTIONS = (Object.keys(WEBHOOK_SOURCE_LABELS) as WebhookSourceChoic
 /** Where the webhook comes from: a known source, each with its logo, or Generic for any other caller. */
 function SourceRow({
 	auth,
+	disabled,
 	onChange,
 }: {
 	auth: WebhookAuth;
+	disabled?: boolean;
 	onChange: (auth: WebhookAuth) => void;
 }) {
 	return (
@@ -437,6 +447,7 @@ function SourceRow({
 			options={SOURCE_OPTIONS}
 			value={chooseWebhookSource(auth)}
 			mark={(source) => <SourceMark source={source} />}
+			disabled={disabled}
 			onChange={(source) =>
 				onChange(source === "generic" ? DEFAULT_WEBHOOK_AUTH : { kind: source })
 			}
@@ -548,7 +559,7 @@ function SecretGroup({
 			note={
 				restrictedNote ??
 				(saved.kind === "legacy"
-					? "Your existing bearer secret still works. Enter a new secret to replace it before changing authentication."
+					? "Your existing bearer token still works. Enter a new token before changing authentication."
 					: saved.kind === "set"
 						? authNote(auth)
 						: NO_SECRET_NOTE)
@@ -556,6 +567,7 @@ function SecretGroup({
 		>
 			<AuthRows
 				auth={auth}
+				authChangeDisabled={saved.kind === "legacy"}
 				onChange={onChangeAuth}
 				deliveryIdHeader={deliveryIdHeader}
 				savingDeliveryId={savingDeliveryId}

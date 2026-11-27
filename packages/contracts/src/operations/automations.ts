@@ -333,7 +333,7 @@ export const automationsContracts = {
 	}),
 	"automations.getSecret": OperationContract.make("automations.getSecret", {
 		description:
-			"A webhook trigger's current secret, or whether it uses a legacy secret or has none.",
+			"A webhook trigger's current secret, or whether it has no secret or uses a secret kept from before the upgrade, which can't be shown.",
 		input: Schema.Struct(aTrigger),
 		output: automationCurrentSecretSchema,
 		errors: [

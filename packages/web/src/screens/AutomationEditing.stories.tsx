@@ -524,23 +524,32 @@ export const RestrictedMigratedWebhook = meta.story({
 	},
 });
 
-/** A bearer webhook can be given a new secret after an upgrade. */
+/** A bearer webhook needs a new token before its authentication can change. */
 export const LegacyBearerWebhook = meta.story({
 	beforeEach({ msw }) {
+		const secretPath = `${API}/projects/:projectId/automations/${deployCheck.automation.id}/triggers/:triggerId/secret`;
 		msw.use(
 			...automationsAnswer([deployCheck]),
-			http.get(
-				`${API}/projects/:projectId/automations/${deployCheck.automation.id}/triggers/:triggerId/secret`,
-				() => HttpResponse.json({ kind: "legacy" }),
-			),
+			http.get(secretPath, () => HttpResponse.json({ kind: "legacy" })),
+			http.post(secretPath, async ({ request }) => {
+				const { secret } = (await request.json()) as { secret: string };
+				return HttpResponse.json({ secret });
+			}),
 		);
 	},
 	render: () => <StoryApp path={feedPath(deployCheck)} />,
-	play: async ({ canvas }) => {
+	play: async ({ canvas, userEvent }) => {
 		const dialog = within(await openFirstTrigger(canvas));
-		const legacyNote = await dialog.findByText(/Your existing bearer secret still works/);
+		const legacyNote = await dialog.findByText(/Enter a new token before changing authentication/);
 		await waitFor(() => expect(legacyNote).toBeVisible());
-		await expect(dialog.getByLabelText("Token")).toHaveValue("");
+		await expect(dialog.getByRole("button", { name: "Auth: Bearer" })).toBeDisabled();
+		await expect(dialog.getByRole("button", { name: "Source: Generic" })).toBeDisabled();
+		const token = dialog.getByLabelText("Token");
+		await expect(token).toHaveValue("");
+		await userEvent.type(token, "whsec_R4fT2yH7pN1bG9vJ6kQ3");
+		await userEvent.tab();
+		await waitFor(() => expect(dialog.getByRole("button", { name: "Auth: Bearer" })).toBeEnabled());
+		await expect(dialog.getByRole("button", { name: "Source: Generic" })).toBeEnabled();
 	},
 });
 
@@ -658,7 +667,9 @@ export const SourceMenu = meta.story({
 	render: () => <StoryApp path={feedPath(incidentIntake)} />,
 	play: async ({ canvas, userEvent }) => {
 		const dialog = within(await openFirstTrigger(canvas));
-		await userEvent.click(await dialog.findByRole("button", { name: "Source: Generic" }));
+		const source = await dialog.findByRole("button", { name: "Source: Generic" });
+		await waitFor(() => expect(source).toBeEnabled());
+		await userEvent.click(source);
 		const menu = await screen.findByRole("menu");
 		for (const source of ["Generic", "GitHub", "Stripe", "Slack", "Linear"]) {
 			await expect(within(menu).getByRole("menuitemradio", { name: source })).toBeInTheDocument();
