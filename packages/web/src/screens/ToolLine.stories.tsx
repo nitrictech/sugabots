@@ -55,3 +55,66 @@ export const FailedCall = meta.story({
 		);
 	},
 });
+
+const call = (
+	suffix: string,
+	tool: string,
+	input: Record<string, unknown>,
+	output: Record<string, unknown> = {},
+) => ({
+	type: "tool_call" as const,
+	id: `0199a3a0-0000-7000-8000-0000000006${suffix}`,
+	tool,
+	input,
+	output,
+	status: "completed" as const,
+	error: null,
+	approval: null,
+	atOffset: 0,
+	startedAt: "2026-09-22T04:30:01.000Z",
+	finishedAt: "2026-09-22T04:30:02.000Z",
+});
+
+/**
+ * BuiltInTools: each of the product's own tools by an icon for what it does,
+ * a file for writing a file and a terminal for a command, and the wrench only
+ * for one it has none for.
+ */
+export const BuiltInTools = meta.story({
+	args: {
+		message: {
+			...message,
+			content: "",
+			parts: [
+				call("20", "run_command", { command: "npm test -- billing" }, { exitCode: 0 }),
+				call("21", "web_search", { query: "pg-boss vs graphile worker" }),
+				call(
+					"22",
+					"web_fetch",
+					{ url: "https://worker.graphile.org" },
+					{ title: "Graphile Worker" },
+				),
+				call(
+					"23",
+					"file_write",
+					{ title: "Postgres job queues" },
+					{ title: "Postgres job queues" },
+				),
+				call("24", "file_edit", { fileId: "f" }, { title: "Postgres job queues" }),
+				call("25", "read_docs", { page: "automations" }),
+				call("26", "a_tool_with_no_icon", {}),
+			],
+		},
+	},
+	play: async ({ canvas, canvasElement, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Worked for 3s" }));
+		const lineOf = async (text: RegExp) =>
+			(await canvas.findByRole("button", { name: text })).closest("[data-slot]") ?? canvasElement;
+		await expect((await lineOf(/^Ran/)).querySelector(".lucide-square-terminal")).not.toBeNull();
+		await expect((await lineOf(/^Created/)).querySelector(".lucide-file-plus")).not.toBeNull();
+		await expect((await lineOf(/^Edited/)).querySelector(".lucide-file-pen")).not.toBeNull();
+		await expect(
+			(await lineOf(/^A tool with no icon/)).querySelector(".lucide-wrench"),
+		).not.toBeNull();
+	},
+});

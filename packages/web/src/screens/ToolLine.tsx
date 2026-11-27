@@ -1,6 +1,6 @@
 import type { Message, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Brain, Wrench } from "lucide-react";
+import { Brain } from "lucide-react";
 import { useId, useState } from "react";
 import type { MarkedConnector } from "@/lib/connectors.ts";
 import { useNow } from "@/lib/now.ts";
@@ -23,6 +23,7 @@ import {
 	describeStep,
 	noteOf,
 	stepDetails,
+	stepIcon,
 	toolLineText,
 	toolSourceOf,
 	toolStepRuns,
@@ -293,12 +294,18 @@ function CallMark({ call, connector }: { call: ToolCallPart; connector?: MarkedC
 	return (
 		<ActivityIcon>
 			{splitToolKey(call.tool).handle === BUILT_IN_HANDLE ? (
-				<Wrench strokeWidth={1.75} />
+				<BuiltInToolIcon call={call} />
 			) : (
 				<ConnectorMark markId={connector?.markId} name={toolSourceOf(call, connector)} size="xs" />
 			)}
 		</ActivityIcon>
 	);
+}
+
+/** One of the product's own tools, by what it does. */
+function BuiltInToolIcon({ call }: { call: ToolCallPart }) {
+	const Icon = stepIcon(call);
+	return <Icon strokeWidth={1.75} />;
 }
 
 /** One call: its mark, what it did to what, and how it went; opened, what came back. */

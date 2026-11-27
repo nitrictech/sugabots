@@ -1,4 +1,28 @@
 import { type MessagePart, messagePreview, type ToolCallPart } from "@sugabots/contracts";
+import {
+	AppWindow,
+	BookOpen,
+	CircleCheck,
+	FileInput,
+	FileOutput,
+	FilePen,
+	FilePlus,
+	Files,
+	FileText,
+	FolderPlus,
+	Globe,
+	History,
+	type LucideIcon,
+	MessageSquarePlus,
+	PackageSearch,
+	ScrollText,
+	Search,
+	SquareTerminal,
+	StickyNote,
+	UserRound,
+	Wrench,
+	Zap,
+} from "lucide-react";
 import type { MarkedConnector } from "@/lib/connectors.ts";
 import { capitalise, countOf, listNames } from "@/lib/name-list.ts";
 import {
@@ -132,6 +156,47 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 	const subject = fileName(input.file) ?? SUBJECT_ARGUMENTS.map((key) => input[key]).find(isWords);
 	return { action, subject: name(subject) };
 }
+
+/**
+ * The icon a call to one of the product's own tools shows by its line, for
+ * what the tool does: a file for the file tools, a terminal for a command, a
+ * globe for a page or a host. A tool not listed has the wrench.
+ */
+export function stepIcon(call: ToolCallPart): LucideIcon {
+	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return AppWindow;
+	if (call.tool === "file_write") {
+		return asRecord(call.input).fileId === undefined ? FilePlus : FilePen;
+	}
+	return BUILT_IN_TOOL_ICONS[call.tool] ?? Wrench;
+}
+
+const BUILT_IN_TOOL_ICONS: Readonly<Record<string, LucideIcon>> = {
+	run_command: SquareTerminal,
+	read_file: FileText,
+	write_file: FilePen,
+	copy_file_to_computer: FileInput,
+	share_file: FileOutput,
+	read_chat_file: FileText,
+	file_list: Files,
+	file_read: FileText,
+	file_edit: FilePen,
+	web_search: Search,
+	web_fetch: Globe,
+	request_host: Globe,
+	tool_search: PackageSearch,
+	search_history: History,
+	read_docs: BookOpen,
+	workspace_guide: BookOpen,
+	list_automations: Zap,
+	create_automation: Zap,
+	update_automation: Zap,
+	mark_resolved: CircleCheck,
+	start_chat: MessageSquarePlus,
+	create_project: FolderPlus,
+	save_instructions: ScrollText,
+	list_notes: StickyNote,
+	workspace_role: UserRound,
+};
 
 /**
  * A call's input and output as its row shows them opened. Each is text when
