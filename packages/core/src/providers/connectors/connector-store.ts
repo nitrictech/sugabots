@@ -378,17 +378,20 @@ export const make = Effect.gen(function* () {
 						if (!settings) return undefined;
 						const before = settings.repositories;
 						const after = change(before);
-						const ids = (repositories: readonly GitHubConnectorRepository[]) =>
-							repositories
-								.map((one) => one.id)
-								.sort((a, b) => a - b)
-								.join();
+						const serializeRepositoryTargets = (
+							repositories: readonly GitHubConnectorRepository[],
+						) =>
+							JSON.stringify(
+								repositories
+									.map(({ id, path }) => ({ id, path }))
+									.sort((first, second) => first.id - second.id),
+							);
 						yield* query((db) =>
 							db
 								.update(connector)
 								.set({
 									settings: { ...settings, repositories: after },
-									...(ids(before) === ids(after)
+									...(serializeRepositoryTargets(before) === serializeRepositoryTargets(after)
 										? {}
 										: { configurationRevision: sql`${connector.configurationRevision} + 1` }),
 								})

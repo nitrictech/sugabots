@@ -617,9 +617,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			},
 		);
 
-		it.each(["repository", "default base branch"] as const)(
-			"asks again when the GitHub %s changes while an approval waits",
-			async (changed) => {
+		it.each([
+			{ change: "before Allow", name: "selected repositories swap paths before Allow" },
+			{ change: "after Allow", name: "selected repositories swap paths after Allow" },
+			{ change: "default base branch", name: "the default base branch changes after Allow" },
+		] as const)(
+			"does not send the original GitHub call after its target changes, when $name",
+			async ({ change }) => {
 				await onDatabase((db) =>
 					db.update(connector).set({ enabled: false }).where(eq(connector.id, connectorId)),
 				);
@@ -682,30 +686,48 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				).toHaveLength(readsBefore + 1);
 				const [parked] = await callsOf(ran.turnId);
 				if (!parked) throw new Error("No GitHub call parked");
-				await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
-				if (changed === "repository") {
-					swappedPaths = true;
-					await addRepository("acme/web");
-					expect((await installation())[0]?.configurationRevision).toBe(
-						before.configurationRevision,
-					);
-				} else {
-					defaultBase = "release";
-				}
 				const opened = () =>
 					github.asked.filter(
 						({ method, path }) => method === "POST" && path === "/repos/acme/web/pulls",
 					);
+				const refreshPaths = async () => {
+					swappedPaths = true;
+					await addRepository("acme/web");
+				};
+				const adminChat = chatsAs(adminId);
+				const allow = () => adminChat.decide({ toolCallId: parked.id, decision: "allow_once" });
+				if (change === "before Allow") {
+					await refreshPaths();
+					await expect(allow()).rejects.toMatchObject({
+						_tag: "ToolApprovalConflict",
+						reason: "connectorChanged",
+					});
+					expect(await callsOf(ran.turnId)).toMatchObject([
+						{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null },
+					]);
+					expect((await adminChat.approvals(workspaceId)).waiting).toEqual([]);
+					expect(opened()).toEqual([]);
+					return;
+				}
 
+				await allow();
+				if (change === "after Allow") {
+					await refreshPaths();
+					expect(await resumeAt(ran, 1)).toMatchObject({ _tag: "Finished" });
+					expect(opened()).toEqual([]);
+					expect(await callsOf(ran.turnId)).toMatchObject([{ id: parked.id, status: "failed" }]);
+					return;
+				}
+				defaultBase = "release";
 				expect(await resumeAt(ran, 1)).toMatchObject({ _tag: "Waiting" });
 				expect(opened()).toEqual([]);
-				const [fresh] = (await chatsAs(adminId).approvals(workspaceId)).waiting;
+				const [fresh] = (await adminChat.approvals(workspaceId)).waiting;
 				expect(fresh?.call.approval?.id).not.toBe(parked.approvalId);
 				expect(fresh?.call.approval).toMatchObject({
-					gitHub: { repositoryId: swappedPaths ? "102" : "101", baseBranch: defaultBase },
+					gitHub: { repositoryId: "101", baseBranch: defaultBase },
 				});
 				if (!fresh) throw new Error("No renewed GitHub approval");
-				await chatsAs(adminId).decide({ toolCallId: fresh.call.id, decision: "allow_once" });
+				await adminChat.decide({ toolCallId: fresh.call.id, decision: "allow_once" });
 				expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
 				expect(opened()).toMatchObject([{ body: { base: defaultBase } }]);
 			},
