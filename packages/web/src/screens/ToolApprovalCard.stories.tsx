@@ -229,7 +229,9 @@ export const ANetworkRequestNotYours = meta.story({
 	args: { ...ANetworkRequest.input.args, canApprove: false },
 	play: async ({ canvas }) => {
 		await expect(
-			canvas.getByText("Someone who manages this computer can decide."),
+			canvas.getByText(
+				"The workspace's owner or an admin can decide, or in a bot's own chats, whoever made the bot.",
+			),
 		).toBeInTheDocument();
 	},
 });

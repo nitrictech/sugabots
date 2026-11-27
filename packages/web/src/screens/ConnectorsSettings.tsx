@@ -99,7 +99,7 @@ export function ConnectorsSettings({
 					disabled={connectors.isFetching}
 					onClick={() => void connectors.refetch()}
 				>
-					Try again
+					{connectors.isFetching ? "Trying again…" : "Try again"}
 				</Button>
 			</div>
 		);

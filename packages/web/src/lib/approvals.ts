@@ -22,6 +22,6 @@ export function mayAnswer(
 /** Who a member who may not answer `call` is waiting for. */
 export function awaitedApprovers(call: ToolCallPart) {
 	return call.approval?.approvers === "computer-managers"
-		? "Someone who manages this computer can decide."
+		? "The workspace's owner or an admin can decide, or in a bot's own chats, whoever made the bot."
 		: "Waiting for someone with permission to answer this.";
 }

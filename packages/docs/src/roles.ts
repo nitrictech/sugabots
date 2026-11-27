@@ -68,7 +68,7 @@ export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Answer a request to add an allowed host",
 		roles: EVERYONE,
-		note: "Anyone for their own personal bots. Editors for public or private bots they made and can talk to. The owner and admins for public or private bots and projects members made",
+		note: "Anyone for their own personal bots. Editors, in the own chats of public or private bots they made and can talk to. The owner and admins for public or private bots and projects members made",
 	},
 	{
 		label: "Mark chats resolved and reopen them",
