@@ -1,6 +1,7 @@
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { computersContracts } from "@sugabots/contracts/operations/computers";
 import { Effect } from "effect";
+import { TurnComputers } from "../../chats/tools/computer/turn-computers.ts";
 import { ComputerNetwork } from "../../computers/computer-network.ts";
 import { proveComputerRequestApproved } from "../../proofs/approved.ts";
 import { proveCanUseChatComputer } from "../../proofs/can-use-computer.ts";
@@ -30,6 +31,8 @@ export const requestHost = defineOperation(
 				(principal, chat, call, approvedInput) =>
 					Effect.gen(function* () {
 						const canUse = yield* proveCanUseChatComputer(principal, chat);
+						const computers = yield* TurnComputers.Service;
+						yield* computers.checkStep(canUse);
 						yield* network.refuseBlocked(canUse, input.host);
 						const approved = yield* proveComputerRequestApproved(
 							principal,
