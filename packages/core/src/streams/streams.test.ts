@@ -247,7 +247,10 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		});
 		onTestFinished(() => chat.close());
 
-		expect(await chat.next()).toEqual({ seq: 0, event: streamEvent("ready") });
+		expect(await chat.next()).toEqual({
+			seq: await stored.latest(chatStream(world.chat)),
+			event: streamEvent("ready"),
+		});
 		const changed = streamEvent("chat.changed", { chatId: world.chat });
 		await commit(chatStream(world.chat), changed);
 		const next = await chat.next();
@@ -257,6 +260,9 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 	it("resumes from where ready said the stream starts, missing nothing stored while away", async () => {
 		const world = await staffed();
 		const ed = await signedIn.member(world.ed);
+		// Another stream's event: the chat's own stream starts after it.
+		await commit(workspaceStream(world.workspace), jChanged(world));
+		const elsewhere = await stored.latest(workspaceStream(world.workspace));
 		const first = await follow(ed, "events.followChat", { chatId: world.chat });
 		const ready = await first.next();
 		await first.close();
@@ -267,9 +273,27 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		const resumed = await follow(ed, "events.followChat", { chatId: world.chat, since });
 		onTestFinished(() => resumed.close());
 
-		expect(since).toBe(0);
+		expect(since).toBe(elsewhere);
 		const next = await resumed.next();
 		expect(next !== "ended" && next.event).toEqual(changed);
+	});
+
+	it("resets a stream that started empty once what was stored on it while away is pruned", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		await commit(workspaceStream(world.workspace), jChanged(world));
+		const first = await follow(ed, "events.followChat", { chatId: world.chat });
+		const ready = await first.next();
+		await first.close();
+		await commit(chatStream(world.chat), streamEvent("chat.changed", { chatId: world.chat }));
+		await stored.prune(new Date(Date.now() + 60_000));
+
+		const since = ready === "ended" ? undefined : ready.seq;
+		const resumed = await follow(ed, "events.followChat", { chatId: world.chat, since });
+		onTestFinished(() => resumed.close());
+
+		const next = await resumed.next();
+		expect(next !== "ended" && next.event).toEqual(streamEvent("reset"));
 	});
 
 	it("says where a reset stream starts, so a reconnect after it misses nothing", async () => {

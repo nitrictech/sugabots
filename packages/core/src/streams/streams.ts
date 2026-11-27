@@ -508,13 +508,8 @@ export const make = Effect.gen(function* () {
 				}
 				// Read from where the client left off, or what is stored next, and the
 				// control streams from now: listening began first, so nothing between is missed.
-				// 0 is the start `ready` or `reset` gave a stream with nothing stored:
-				// everything stored on it since is what the client missed. Unlike a
-				// stored `seq`, it can't show that some of that was pruned, which
-				// only a client away longer than events are kept could miss.
 				const resumes =
-					since !== undefined &&
-					(since === 0 || (yield* Effect.promise(() => store.has(stream, since))));
+					since !== undefined && (yield* Effect.promise(() => store.has(stream, since)));
 				const feeds = yield* latestOn([stream, ...controlStreams]);
 				if (resumes) feeds.set(stream, since);
 				const watcherControls = yield* latestOn(controlStreams);

@@ -141,8 +141,17 @@ for (const { name, skip, make, backdate } of stores) {
 
 			expect(await store.has(stream, seq)).toBe(true);
 			expect(await store.has(stream, seq + 1_000_000)).toBe(false);
-			// The row exists, but not on the stream the client is resuming.
-			expect(await store.has(`chat:${crypto.randomUUID()}`, seq)).toBe(false);
+			// Another stream's row, after events of the stream the client is resuming.
+			const elsewhere = await append(`chat:${crypto.randomUUID()}`, rawEvent("message.created"));
+			expect(await store.has(stream, elsewhere)).toBe(false);
+		});
+
+		it("starts a stream with nothing stored where every stream is, and resumes it from there", async () => {
+			const elsewhere = await append(`chat:${crypto.randomUUID()}`, rawEvent("message.created"));
+
+			expect(await store.latest(stream)).toBe(elsewhere);
+			await append(stream, rawEvent("message.created"));
+			expect(await store.has(stream, elsewhere)).toBe(true);
 		});
 
 		it("prunes what is older than the cutoff and keeps the rest", async () => {

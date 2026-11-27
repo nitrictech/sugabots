@@ -1,10 +1,17 @@
 export * as EventStore from "./store.ts";
 
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
-import { and, asc, count, eq, gt, inArray, lt, max, or } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, lt, lte, max, notExists, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Context, Effect, Layer } from "effect";
 import { processLayer, Tier } from "../../tiers.ts";
-import { type Database, type Executor, type QueryFailure, query } from "../database.ts";
+import {
+	type Database,
+	type Executor,
+	type QueryFailure,
+	query,
+	transaction,
+} from "../database.ts";
 import { event } from "../schema.ts";
 
 /**
@@ -30,16 +37,23 @@ export interface Interface {
 	 */
 	following(feeds: ReadonlyArray<Feed>, limit: number): Promise<StoredOn[]>;
 
-	/** The `seq` of the newest event on the stream, or 0 when it has none. */
+	/**
+	 * Where the stream is now: the `seq` of its newest event, or, when it has
+	 * none, of the newest event on any stream, after which everything stored on
+	 * it is new. 0 only while no event is stored at all.
+	 */
 	latest(stream: EventStream): Promise<number>;
 
 	/**
-	 * Whether the event a client claims to have last seen is still here.
+	 * Whether a client that last saw `seq` on the stream can resume after it:
+	 * the event at `seq` is still here, and is the stream's, or is where
+	 * `latest` put the stream while it had nothing stored.
 	 *
 	 * This is how a resume point is judged, rather than comparing it to the
 	 * oldest surviving `seq`: the sequence is global, so a stream's ids have
-	 * gaps that say nothing about what was pruned. If the row a client names is
-	 * gone, its history is broken and it needs a `reset`.
+	 * gaps that say nothing about what was pruned. Events are pruned oldest
+	 * first, so if the row a client names is gone, so may be what came after
+	 * it: its history is broken and it needs a `reset`.
 	 */
 	has(stream: EventStream, seq: number): Promise<boolean>;
 
@@ -103,21 +117,50 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 		},
 
 		async latest(stream) {
-			const [row] = await run((db) =>
-				db
-					.select({ seq: max(event.seq) })
-					.from(event)
-					.where(eq(event.stream, stream)),
+			const [row] = await Effect.runPromiseWith(context)(
+				transaction(
+					Effect.gen(function* () {
+						// Waits for any event being stored on the stream to commit: one stored
+						// next takes a `seq` above every event committed by then.
+						yield* query((db) =>
+							db.execute(sql`select lock_event_streams(array[${stream}]::text[])`, "objects"),
+						);
+						return yield* query((db) =>
+							db.execute<{ seq: string | number }>(
+								sql`select coalesce(
+									(select max(${event.seq}) from ${event} where ${event.stream} = ${stream}),
+									(select max(${event.seq}) from ${event}),
+									0
+								) as seq`,
+								"objects",
+							),
+						);
+					}),
+				),
 			);
-			return row?.seq ?? 0;
+			return Number(row?.seq ?? 0);
 		},
 
 		async has(stream, seq) {
+			const earlier = alias(event, "earlier");
 			const rows = await run((db) =>
 				db
 					.select({ seq: event.seq })
 					.from(event)
-					.where(and(eq(event.stream, stream), eq(event.seq, seq)))
+					.where(
+						and(
+							eq(event.seq, seq),
+							or(
+								eq(event.stream, stream),
+								notExists(
+									db
+										.select({ seq: earlier.seq })
+										.from(earlier)
+										.where(and(eq(earlier.stream, stream), lte(earlier.seq, seq))),
+								),
+							),
+						),
+					)
 					.limit(1),
 			);
 

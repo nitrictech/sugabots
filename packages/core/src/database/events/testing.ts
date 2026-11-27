@@ -58,11 +58,16 @@ export function inMemoryEventStore({
 		},
 
 		async latest(stream) {
-			return rows.filter((row) => row.stream === stream).at(-1)?.seq ?? 0;
+			return rows.filter((row) => row.stream === stream).at(-1)?.seq ?? rows.at(-1)?.seq ?? 0;
 		},
 
 		async has(stream, seq) {
-			return rows.some((row) => row.stream === stream && row.seq === seq);
+			const row = rows.find((candidate) => candidate.seq === seq);
+			if (!row) return false;
+			return (
+				row.stream === stream ||
+				!rows.some((earlier) => earlier.stream === stream && earlier.seq <= seq)
+			);
 		},
 
 		async prune(before) {

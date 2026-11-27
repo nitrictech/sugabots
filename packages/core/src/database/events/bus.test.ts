@@ -241,9 +241,10 @@ describe("resume", () => {
 
 	it("resets an id that was never on this stream", async () => {
 		const { events, commit } = bus();
+		await commit(STREAM, rawEvent("message.created"));
 		await commit("workspace:w1", rawEvent("chat.changed"));
 
-		const stream = take(events.subscribe(STREAM, { since: 1 }), 1);
+		const stream = take(events.subscribe(STREAM, { since: 2 }), 1);
 		expect(types(await stream)).toEqual(["reset"]);
 	});
 
