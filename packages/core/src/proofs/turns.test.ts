@@ -20,6 +20,7 @@ import {
 	setRole,
 } from "../authentication/seed.test-support.ts";
 import { turnFacts } from "../authentication/turn-facts.ts";
+import { reachesChatFor } from "../authorization/access.ts";
 import { offerAugmentationTools } from "../chats/tools/augmentations.ts";
 import { offeredTool } from "../chats/tools/connector-catalog.ts";
 import { Turns } from "../chats/turns/turns.ts";
@@ -30,6 +31,8 @@ import {
 	computer,
 	computerProvider,
 	connector,
+	project,
+	projectBot,
 	projectBotConnector,
 	projectMember,
 	toolCall,
@@ -51,7 +54,7 @@ import {
 	proveComputerUseApproved,
 	proveConnectorApproved,
 } from "./approved.ts";
-import { approvalAudience } from "./approvers.ts";
+import { approvalAudience, approvedCalls, approverStandingIn } from "./approvers.ts";
 import { proveCanDecide } from "./can-decide.ts";
 import { proveCanUseChatComputer } from "./can-use-computer.ts";
 import { proveCanUseConnector } from "./can-use-connector.ts";
@@ -353,6 +356,63 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await decides(await as.member(a.ed), callId)).toBe("ok");
 			expect(await decides(await as.member(a.quinn), callId)).toBe("ActionForbidden");
 			expect(await decides(await as.member(a.erin), callId)).toBe("ResourceHidden");
+		});
+
+		it("uses the same bot and project standing for decisions, lists and notifications", async () => {
+			const { a } = world;
+			const privateBot = await seedBot(a.workspace, {
+				createdById: a.quinn,
+				visibility: "private",
+				members: [a.quinn, a.ed],
+			});
+			await onDatabase((db) =>
+				db.insert(projectBot).values({
+					workspaceId: a.workspace,
+					projectId: a.project,
+					botId: privateBot.id,
+				}),
+			);
+			const { run, turnId } = await as.run(a.workspace, a.project, privateBot.id);
+			const runCall = await seedToolCall({ chat: run.chat, turn: turnId, bot: privateBot.id });
+			const computerCall = await seedToolCall(
+				{ chat: run.chat, turn: turnId, bot: privateBot.id },
+				{ tool: HOST_REQUEST_TOOL, computerProjectId: privateBot.defaultProject },
+			);
+			const projectCall = await seedToolCall(
+				{ chat: run.chat, turn: turnId, bot: privateBot.id },
+				{ tool: HOST_REQUEST_TOOL, computerProjectId: a.project },
+			);
+			const cases = [
+				{ call: runCall, expected: [a.quinn, a.admin, a.owner, a.otherAdmin] },
+				{ call: computerCall, expected: [a.quinn, a.admin, a.owner, a.otherAdmin] },
+				{ call: projectCall, expected: [a.admin, a.owner, a.otherAdmin] },
+			];
+
+			const expectApprovers = async (callId: string, expected: readonly string[]) => {
+				const audience = await onDatabase((db) => approvalAudience(db, [callId]));
+				expect(new Set(audience.map(({ memberId }) => memberId))).toEqual(new Set(expected));
+				for (const member of [a.quinn, a.ed, a.vi, a.erin, a.admin, a.owner, a.otherAdmin]) {
+					const shouldApprove = expected.includes(member);
+					expect((await decides(await as.member(member), callId)) === "ok").toBe(shouldApprove);
+					const listed = await onDatabase((db) =>
+						Effect.gen(function* () {
+							const standing = yield* approverStandingIn(db, a.workspace, member, (chat) =>
+								reachesChatFor(chat, member),
+							);
+							const calls = db.select().from(toolCall).where(eq(toolCall.id, callId));
+							return yield* db.execute(approvedCalls(standing, calls), "objects");
+						}),
+					);
+					expect(listed).toHaveLength(shouldApprove ? 1 : 0);
+				}
+			};
+			for (const { call, expected } of cases) await expectApprovers(call, expected);
+
+			await onDatabase((db) =>
+				db.update(project).set({ deleting: true }).where(eq(project.id, privateBot.defaultProject)),
+			);
+			await expectApprovers(runCall, [a.admin, a.owner, a.otherAdmin]);
+			await expectApprovers(computerCall, []);
 		});
 
 		it("lets only its creator decide a Personal Assistant's call", async () => {

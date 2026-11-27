@@ -344,7 +344,7 @@ export function memberReaches(place: MemberPlace | undefined, project: ProjectFa
 /** Whether `place`'s member may take `permission` in the project, by the grant tables. */
 export function mayInProjectAs(
 	place: MemberPlace,
-	project: ProjectFacts,
+	project: Pick<ProjectFacts, "defaultOf">,
 	permission: ProjectPermission,
 ): boolean {
 	return mayInProject(place.actor, permission, {
@@ -389,7 +389,10 @@ export function managesBot(actor: Actor, bot: BotFacts): boolean {
  * `project.update`, the owner and admins; in a bot's default project, the
  * bot's managers.
  */
-export function managesProject(place: MemberPlace, project: ProjectFacts): boolean {
+export function managesProject(
+	place: MemberPlace,
+	project: Pick<ProjectFacts, "defaultOf">,
+): boolean {
 	return project.defaultOf
 		? managesBot(place.actor, project.defaultOf)
 		: mayInProjectAs(place, project, "project.update");

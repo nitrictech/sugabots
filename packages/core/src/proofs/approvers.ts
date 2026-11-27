@@ -10,17 +10,16 @@
  * {@link ApproverStanding}.
  */
 
+import type { WorkspaceRole } from "@sugabots/contracts";
 import { inArray, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import type { TurnFacts } from "../authentication/turn-facts.ts";
-import { reachesChatFor } from "../authorization/access.ts";
-import { rolesGrantedInProject } from "../authorization/permissions.ts";
+import { isBotMember, reachesChatFor } from "../authorization/access.ts";
 import { COMPUTER_REQUEST_TOOLS } from "../chats/tools/approvers.ts";
 import { type Executor, query } from "../database/database.ts";
 import {
 	automationRun,
 	bot,
-	botMember,
 	membership,
 	placedChat,
 	project,
@@ -37,6 +36,7 @@ import {
 	managesBot,
 	managesProject,
 	memberReaches,
+	type ProjectFacts,
 	reachFacts,
 	reachFactsIn,
 	roleIn,
@@ -192,7 +192,10 @@ export const approverStandingWhere = (
 				? yield* managedComputerProjects(db, memberId, computerProjectId)
 				: [],
 			administers: place !== undefined && administers(place.actor),
-			managedBots: runBot && place && managesBot(place.actor, runBot) ? [runBot.id] : [],
+			managedBots:
+				runBot?.defaultProject && !runBot.deleting && place && managesBot(place.actor, runBot)
+					? [runBot.id]
+					: [],
 			reachesChat: () => sql<boolean>`${reachesChat}::boolean`,
 		};
 		return { standing, reachesChat };
@@ -251,38 +254,30 @@ export const approvalAudience = Effect.fn("Approvers.approvalAudience")(function
 ) {
 	if (callIds.length === 0) return [];
 	const member = sql`audience.member_id`;
-	const role = sql`audience.role`;
-	const administers = sql<boolean>`${role} in ('owner', 'admin')`;
-	// What `managesBot` decides for one bot: a member manages their own personal
-	// bots whatever their role, and a private bot they made while they are one
-	// of its members.
-	const createdAndReaches = (bot: SQL) => sql<boolean>`(${bot}.created_by_id = ${member} and
-		(${bot}.visibility <> 'private' or exists (
-			select 1 from ${botMember} as manager_bot_member
-			where manager_bot_member.bot_id = ${bot}.id and manager_bot_member.member_id = ${member}
-		)))`;
-	const managesBot = (
-		bot: SQL,
-	) => sql<boolean>`((${bot}.visibility = 'personal' and ${bot}.created_by_id = ${member}) or (${role} <> 'viewer' and
-		(${createdAndReaches(bot)} or (${administers} and ${bot}.visibility <> 'personal'))))`;
+	const rule = approverRule(asksToChangeComputer(sql`candidates.tool`));
 	const reachesChat = reachesChatFor(APPROVER_CHAT, member);
-	const managesComputer = sql<boolean>`computer_project.id is not null and case
-		when computer_project.default_of_bot_id is not null then ${managesBot(sql`computer_bot`)}
-		else ${role} in (${sql.join(
-			rolesGrantedInProject("project.update").map((role) => sql`${role}`),
-			sql`, `,
-		)})
-			and exists (
-				select 1 from ${projectMember} as computer_member
-				where computer_member.project_id = computer_project.id and computer_member.member_id = ${member}
-			)
-	end`;
 	type Call = Pick<typeof toolCall.$inferSelect, "id" | "tool" | "input" | "executionInput">;
-	const rows = yield* db.execute<Call & { memberId: string; reachesChat: boolean }>(
+	const rows = yield* db.execute<
+		Call & {
+			memberId: string;
+			role: WorkspaceRole;
+			rule: ApproverRule;
+			reachesChat: boolean;
+			runBot: ProjectFacts["defaultOf"];
+			computerBot: ProjectFacts["defaultOf"];
+			inComputerProject: boolean;
+		}
+	>(
 		sql`with candidates as (
 			select * from ${toolCall} where ${inArray(toolCall.id, callIds)}
 		)
-		select ${member} as "memberId", ${reachesChat} as "reachesChat",
+		select ${member} as "memberId", audience.role, ${rule} as rule, ${reachesChat} as "reachesChat",
+			${selectBotFacts(sql`run_bot`, member)} as "runBot",
+			${selectBotFacts(sql`computer_bot`, member)} as "computerBot",
+			exists (
+				select 1 from ${projectMember} as computer_member
+				where computer_member.project_id = computer_project.id and computer_member.member_id = ${member}
+			) as "inComputerProject",
 			candidates.id, candidates.tool, candidates.input, candidates.execution_input as "executionInput"
 		from candidates
 		inner join ${turn} as approver_turn on approver_turn.id = candidates.turn_id
@@ -297,21 +292,39 @@ export const approvalAudience = Effect.fn("Approvers.approvalAudience")(function
 		inner join ${membership} as audience on audience.workspace_id = audience_workspace.id and not audience.leaving
 			${recipientId === undefined ? sql`` : sql`and audience.member_id = ${recipientId}::uuid`}
 		left join ${automationRun} as approver_run on approver_run.chat_id = approver_turn.chat_id
-		left join ${bot} as run_bot on run_bot.id = approver_run.bot_id
+		left join ${project} as run_bot_project on run_bot_project.default_of_bot_id = approver_run.bot_id
+			and not run_bot_project.deleting
+		left join ${bot} as run_bot on run_bot.id = run_bot_project.default_of_bot_id
 		left join ${project} as computer_project on computer_project.id = candidates.approval_computer_project_id
 			and computer_project.workspace_id = audience_workspace.id and not computer_project.deleting
 		left join ${bot} as computer_bot on computer_bot.id = computer_project.default_of_bot_id
-		where ${decidesByRule(approverRule(asksToChangeComputer(sql`candidates.tool`)), {
+		where ${decidesByRule(rule, {
 			member,
-			managesComputer,
+			managesComputer: sql<boolean>`computer_project.id is not null`,
 			reachesChat,
-			managesRun: sql<boolean>`(${administers} or ${managesBot(sql`run_bot`)})`,
+			managesRun: sql<boolean>`true`,
 		})}
 		order by candidates.started_at, candidates.id`,
 		"objects",
 	);
 	const audience = new Map<string, { memberId: string; reachesChat: boolean; calls: Call[] }>();
-	for (const { memberId, reachesChat, ...call } of rows) {
+	for (const {
+		memberId,
+		role,
+		rule,
+		reachesChat,
+		runBot,
+		computerBot,
+		inComputerProject,
+		...call
+	} of rows) {
+		const actor = actorOf(memberId, role);
+		if (rule === "run" && !administers(actor) && !(runBot && managesBot(actor, runBot))) continue;
+		if (
+			rule === "computerRequest" &&
+			!managesProject({ actor, inProject: inComputerProject }, { defaultOf: computerBot })
+		)
+			continue;
 		const key = `${memberId}/${reachesChat}`;
 		const existing = audience.get(key);
 		if (existing) existing.calls.push(call);
@@ -319,6 +332,16 @@ export const approvalAudience = Effect.fn("Approvers.approvalAudience")(function
 	}
 	return Array.from(audience.values());
 });
+
+function selectBotFacts(bot: SQL, member: SQL): SQL {
+	return sql`case when ${bot}.id is not null then json_build_object(
+		'id', ${bot}.id,
+		'visibility', ${bot}.visibility,
+		'createdById', ${bot}.created_by_id,
+		'assistantOf', ${bot}.assistant_of,
+		'privateMemberId', case when ${isBotMember(sql`${bot}.id`, member)} then ${member} end
+	) end`;
+}
 
 /** The turn's chat, as the SQL in {@link fromApproverTurn} names it, for a reach rule to read. */
 const APPROVER_CHAT: ChatColumns = {
