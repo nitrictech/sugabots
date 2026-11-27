@@ -1,6 +1,7 @@
 export * as Files from "./files.ts";
 
 import {
+	type BuiltInToolKey,
 	type FileAuthor,
 	type FileWritten,
 	type ListedFile,
@@ -67,6 +68,7 @@ import type { ReachesChat } from "../proofs/reaches-chat.ts";
 import type { ReachesFile } from "../proofs/reaches-file.ts";
 import type { ReachesPage } from "../proofs/reaches-page.ts";
 import type { ReachesProject } from "../proofs/reaches-project.ts";
+import { toolSwitchFor } from "../proofs/tool-switches.ts";
 import { processLayer, Tier } from "../tiers.ts";
 
 /**
@@ -363,6 +365,8 @@ interface FileWriter {
 	readonly toolCallId: string;
 	/** The project the file is written in, where its turn's asker must still change things. */
 	readonly projectId: string;
+	/** The tool that writes it, which must still be on for the bot. */
+	readonly tool: BuiltInToolKey | undefined;
 }
 
 const fileWriter = <P, X, Target>(
@@ -376,14 +380,21 @@ const fileWriter = <P, X, Target>(
 		}
 		const call = approved.call.value;
 		if (call.kind !== "toolCall" || !isUuid(call.toolCall)) return yield* new ApprovalRefused();
-		return { principal, toolCallId: call.toolCall, projectId };
+		return {
+			principal,
+			toolCallId: call.toolCall,
+			projectId,
+			tool: toolSwitchFor(approved.operation),
+		};
 	});
 
-const fileWriteFence = ({ principal, projectId }: FileWriter) =>
-	executionFence(principal.turn, principal.executionNumber, {
-		project: projectId,
-		permission: "project.change",
-	});
+const fileWriteFence = ({ principal, projectId, tool }: FileWriter) =>
+	executionFence(
+		principal.turn,
+		principal.executionNumber,
+		{ project: projectId, permission: "project.change" },
+		tool,
+	);
 
 const replayFileWrite = (writer: FileWriter) =>
 	replayWrittenFile(fileWriteFence(writer), writer.toolCallId);

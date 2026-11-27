@@ -1,4 +1,5 @@
 import { MAX_FILE_CONTENT_CHARACTERS } from "@sugabots/contracts";
+import { ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { eq, inArray, like } from "drizzle-orm";
 import { Effect, Layer, Stream } from "effect";
@@ -10,6 +11,7 @@ import { askerColumns } from "../authentication/turn-facts.ts";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { BlobDeletions } from "../blob-store/deletions.ts";
 import { seedChat } from "../chats/seed.test-support.ts";
+import { query } from "../database/database.ts";
 import {
 	blob,
 	blobDeletion,
@@ -21,8 +23,15 @@ import {
 	projectMember,
 	toolCall,
 	turn,
+	workspace,
 } from "../database/schema.ts";
-import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import {
+	closeDatabase,
+	holdTransaction,
+	onDatabase,
+	runOnPostgres,
+	waitUntilWaitingOnLocks,
+} from "../database/testing.ts";
 import { createWorkspaceFixture } from "../database/workspace.test-support.ts";
 import { asMember } from "../operations/chats/testing.ts";
 import type { Operations } from "../operations/registry.ts";
@@ -398,6 +407,63 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			content: "# Three",
 			version: 3,
 		});
+	});
+
+	/** Switches the writing bot's built-in tools `tools` off. */
+	const switchOff = (...tools: string[]) =>
+		query((db) => db.update(bot).set({ disabledTools: tools }).where(eq(bot.id, by.botId)));
+
+	it("refuses its file tools to a bot once they are switched off, though the step offered them", async () => {
+		const made = await seed({ kind: "markdown", title: "Notes", content: "# One" });
+		const principal = await authenticate(turnId);
+		const edit = await allowedChange("files.edit", {
+			fileId: made.id,
+			baseVersion: 1,
+			oldText: "One",
+			newText: "Two",
+		});
+
+		await runOnPostgres(switchOff("file_list", "file_read", "file_edit"));
+
+		await expect(call(principal, "files.listWritten", {})).rejects.toBeInstanceOf(ApprovalRefused);
+		await expect(call(principal, "files.readWritten", { fileId: made.id })).rejects.toBeInstanceOf(
+			ApprovalRefused,
+		);
+		await expect(edit()).rejects.toBeInstanceOf(ApprovalRefused);
+		expect(await filesAs(editorId).get(made.id)).toMatchObject({ version: 1, content: "# One" });
+	});
+
+	it("writes nothing for a call whose tool is switched off while it waits to write", async () => {
+		const made = await seed({ kind: "markdown", title: "Notes", content: "# One" });
+		const edit = await allowedChange("files.edit", {
+			fileId: made.id,
+			baseVersion: 1,
+			oldText: "One",
+			newText: "Two",
+		});
+		// Holds the workspace's lock, as a change to who reaches what does, so
+		// the write waits at its fence, and switches the tool off meanwhile.
+		const switching = holdTransaction(
+			Effect.andThen(
+				query((db) =>
+					db
+						.select({ id: workspace.id })
+						.from(workspace)
+						.innerJoin(bot, eq(bot.workspaceId, workspace.id))
+						.where(eq(bot.id, by.botId))
+						.for("no key update", { of: workspace }),
+				),
+				switchOff("file_edit"),
+			),
+		);
+		await switching.held;
+
+		const editing = edit();
+		await waitUntilWaitingOnLocks(1);
+		await switching.release();
+
+		await expect(editing).rejects.toBeInstanceOf(ApprovalRefused);
+		expect(await filesAs(editorId).get(made.id)).toMatchObject({ version: 1, content: "# One" });
 	});
 
 	it("refuses a change based on an older version, and keeps the newer one", async () => {

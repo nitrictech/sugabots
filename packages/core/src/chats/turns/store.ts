@@ -1067,6 +1067,8 @@ export const make = Effect.gen(function* () {
 									Effect.catchTags({
 										TurnEnded: () => Effect.fail(new ReplyEnded()),
 										TurnExecutionSuperseded: () => Effect.fail(new ReplyEnded()),
+										// Sharing a file is no built-in tool, so no tool's switch is checked.
+										ApprovalRefused: Effect.die,
 									}),
 								);
 								const [running] = yield* query((db) =>

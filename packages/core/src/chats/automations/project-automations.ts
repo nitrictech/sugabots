@@ -47,6 +47,7 @@ import type {
 	CanSwitchOffAutomation,
 	ReachesProjectAutomation,
 } from "../../proofs/reaches-project-automation.ts";
+import { toolSwitchFor } from "../../proofs/tool-switches.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { ChatStore } from "../store/store.ts";
 import { holdTurnOf, type ToolWriteRefusal } from "../turns/turns.ts";
@@ -409,15 +410,19 @@ function projectOf<J>(reach: { workspace: string; project: Named<J, string> }) {
 	return { id: reach.project.value, workspaceId: reach.workspace };
 }
 
-/** The fence for an approved change to the project's automations, which needs its asker to manage the project still. */
+/**
+ * The fence for an approved change to the project's automations, which needs
+ * its asker to manage the project still, and the bot's automations still on.
+ */
 function holdApprovedTurn<P, J, X, Targets extends readonly unknown[]>(
 	canManage: CanManageProject<P, J>,
 	approved: Approved<P, X, Targets, "automations.createWithRoutine" | "automations.updateInChat">,
 ) {
-	return holdTurnOf(approved.principal.value, {
-		project: canManage.reach.project.value,
-		permission: "automation.manage",
-	});
+	return holdTurnOf(
+		approved.principal.value,
+		{ project: canManage.reach.project.value, permission: "automation.manage" },
+		toolSwitchFor(approved.operation),
+	);
 }
 
 /** A routine on the cron `expression`, in the time zone `timezone`. */

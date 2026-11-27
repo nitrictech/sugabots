@@ -1,4 +1,10 @@
-import { ActionForbidden, ResourceHidden, TurnEnded } from "@sugabots/contracts/errors/proofs";
+import type { BuiltInToolKey } from "@sugabots/contracts";
+import {
+	ActionForbidden,
+	type ApprovalRefused,
+	ResourceHidden,
+	TurnEnded,
+} from "@sugabots/contracts/errors/proofs";
 import { TurnExecutionSuperseded } from "@sugabots/contracts/errors/turns";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Effect } from "effect";
@@ -18,6 +24,7 @@ import {
 	turnChatPlace,
 } from "../../proofs/facts.ts";
 import type { RunsTurn } from "../../proofs/runs-turn.ts";
+import { toolIsOn, toolSwitchedOff } from "../../proofs/tool-switches.ts";
 import type { HoldsWorkspaceLock } from "../../proofs/workspace-lock.ts";
 
 /**
@@ -37,12 +44,14 @@ export const fenced = (proof: FencedProof) =>
 /**
  * A proof about one execution of a turn, whose writes the fence guards:
  * `RunsTurn`, or `EndsTurn` for the write that ends it. A tool's write may
- * also say what it needs of the turn's asker in a project (see
+ * also say what it needs of the turn's asker in a project, and the built-in
+ * tool whose switch must still be on for the turn's bot (see
  * `holdTurnForToolWrite`).
  */
 export type FencedProof = Pick<RunsTurn<unknown, unknown>, "execution"> & {
 	readonly turn: { readonly value: string };
 	readonly needs?: WriteNeeds | undefined;
+	readonly tool?: BuiltInToolKey | undefined;
 };
 
 /**
@@ -59,16 +68,19 @@ export type WriteNeeds =
  * The fence for the writes of the execution `execution` of the turn
  * `turnId`, for a tool that writes on its turn's behalf once its call is
  * recorded, outside the running turn's records: what it keeps passes the same
- * check the loop's own writes do, and what it `needs`.
+ * check the loop's own writes do, what it `needs`, and, for a built-in
+ * `tool`, that the tool is still on for the turn's bot.
  */
 export const executionFence = (
 	turnId: string,
 	execution: number,
 	needs?: WriteNeeds,
+	tool?: BuiltInToolKey,
 ): FencedProof => ({
 	turn: { value: turnId },
 	execution,
 	needs,
+	tool,
 });
 
 /** How the fence refuses a write: the turn ended, or a newer execution has taken it over. */
@@ -76,10 +88,11 @@ export type FenceRefusal = TurnEnded | TurnExecutionSuperseded;
 
 /**
  * How the fence refuses a tool's write (see `holdTurnForToolWrite`): as it
- * refuses any write, or because the member its turn acts for lost the chat
- * or project meanwhile, or the permission the write needs.
+ * refuses any write, because the member its turn acts for lost the chat or
+ * project meanwhile, or the permission the write needs, or because the
+ * write's tool was switched off for the bot.
  */
-export type ToolWriteRefusal = FenceRefusal | ResourceHidden | ActionForbidden;
+export type ToolWriteRefusal = FenceRefusal | ResourceHidden | ActionForbidden | ApprovalRefused;
 
 /**
  * Why the fence refused a write for `runsTurn`: the turn ended, or a newer
@@ -126,9 +139,10 @@ export const holdRunningTurn = (runsTurn: FencedProof, lock: "update" | "share")
  * what takes, so a removal or demotion either commits before it, and is seen,
  * or waits for the write. Under it, the turn must still reach its chat and,
  * for a write that `needs` it, its member must still reach the project and
- * hold the permission there, or still manage the bot: a call proved before
- * the change doesn't write after it. A run that acts for no member has
- * nothing of a member to lose.
+ * hold the permission there, or still manage the bot, and a built-in tool's
+ * write needs the tool still on for the bot: a call proved before the change
+ * doesn't write after it. A run that acts for no member has nothing of a
+ * member to lose.
  */
 export const holdTurnForToolWrite = (
 	proof: FencedProof,
@@ -149,12 +163,12 @@ export const holdTurnUnderWorkspaceLock = <P, W>(
 		: Effect.void;
 };
 
-/** The turn's fence, shared, and its asker's standing, under the workspace's lock. */
+/** The turn's fence, shared, its asker's standing and its tool's switch, under the workspace's lock. */
 const holdTurnAndStanding = (proof: FencedProof): Effect.Effect<void, ToolWriteRefusal, Database> =>
 	Effect.gen(function* () {
 		const [held] = yield* query((db) =>
 			db
-				.select({ id: turn.id })
+				.select({ id: turn.id, botId: turn.botId })
 				.from(turn)
 				.where(and(fenced(proof), isNull(turn.endRequested)))
 				.limit(1)
@@ -164,6 +178,10 @@ const holdTurnAndStanding = (proof: FencedProof): Effect.Effect<void, ToolWriteR
 		const standing = yield* query((db) => askerStanding(db, proof));
 		if (standing === "hidden") return yield* new ResourceHidden({ resource: "chat" });
 		if (standing === "forbidden") return yield* new ActionForbidden({ proof: "ToolWrite" });
+		const { tool } = proof;
+		if (tool && !(yield* query((db) => toolIsOn(db, held.botId, tool)))) {
+			return yield* toolSwitchedOff(tool);
+		}
 	});
 
 /**
@@ -215,10 +233,11 @@ const shareWorkspaceLockOf = (proof: FencedProof) =>
 /**
  * Holds the fence for tool writes (see `holdTurnForToolWrite`) of the turn
  * `principal` acts in, when it is a bot in a turn, so a write an operation
- * makes for a bot's tool call passes it, with what the write `needs`. A member
+ * makes for a bot's tool call passes it, with what the write `needs` and its
+ * built-in `tool`'s switch. A member
  * signed in has no turn to fence.
  */
-export const holdTurnOf = (principal: Principal, needs?: WriteNeeds) =>
+export const holdTurnOf = (principal: Principal, needs?: WriteNeeds, tool?: BuiltInToolKey) =>
 	principal._tag === "BotForAsker" || principal._tag === "AutomationRun"
-		? holdTurnForToolWrite(executionFence(principal.turn, principal.executionNumber, needs))
+		? holdTurnForToolWrite(executionFence(principal.turn, principal.executionNumber, needs, tool))
 		: Effect.void;

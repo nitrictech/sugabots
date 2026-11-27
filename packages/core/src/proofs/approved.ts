@@ -26,6 +26,7 @@ import { approverFacts } from "./approvers.ts";
 import type { CanUseChatComputer } from "./can-use-computer.ts";
 import type { CanUseConnector } from "./can-use-connector.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
+import { toolIsOn, toolSwitchedOff, toolSwitchFor } from "./tool-switches.ts";
 
 export type ApprovedOperation =
 	| BotLoopOperationName<typeof operationContracts>
@@ -284,6 +285,15 @@ const proveApproval = <
 			acting._tag !== "AutomationRun"
 		) {
 			return yield* new ApprovalRefused();
+		}
+		// A tool switched off since the step offered it does nothing, nor waits for approval.
+		const toolSwitch = toolSwitchFor(rule.operation);
+		if (
+			toolSwitch &&
+			acting._tag !== "MemberSession" &&
+			!(yield* query((db) => toolIsOn(db, acting.bot, toolSwitch)))
+		) {
+			return yield* toolSwitchedOff(toolSwitch);
 		}
 		if (call.kind === "approvalCheck") {
 			if (connectorUse?.access === "off") return yield* new ApprovalRefused();

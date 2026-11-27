@@ -1,5 +1,4 @@
-import { ApprovalRefused, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { AUTOMATIONS_TOOL_KEY } from "@sugabots/contracts/operations/automations";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { turnFacts } from "../authentication/turn-facts.ts";
@@ -34,7 +33,6 @@ export const automationProject = (principal: Principal, access: "read" | "change
 					projectSlug: project.slug,
 					workspaceSlug: workspace.slug,
 					timeZone: workspace.timeZone,
-					disabledTools: bot.disabledTools,
 				})
 				.from(placedChat)
 				.innerJoin(project, eq(project.id, placedChat.projectId))
@@ -51,7 +49,5 @@ export const automationProject = (principal: Principal, access: "read" | "change
 		) {
 			return yield* hidden;
 		}
-		if (place.disabledTools.includes(AUTOMATIONS_TOOL_KEY))
-			return yield* new ApprovalRefused({ reason: "automationsOff" });
 		return { ...place, botHandle: place.defaultOf === null ? null : place.botHandle };
 	});
