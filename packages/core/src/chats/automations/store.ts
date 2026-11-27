@@ -326,7 +326,7 @@ export const make = Effect.gen(function* () {
 					query((db) =>
 						db
 							.update(automationTrigger)
-							.set(values)
+							.set({ ...values, migratedGitHubConnectorId: null })
 							.where(ofAutomation(scope, triggerId))
 							.returning(),
 					),

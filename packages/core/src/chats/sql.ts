@@ -117,6 +117,7 @@ export const automationTrigger = pgTable(
 		updatedAt: updatedStamp("updated_at"),
 		legacyBearerSecretDigest: text("legacy_bearer_secret_digest"),
 		secretRestrictedToAdmins: boolean("secret_restricted_to_admins"),
+		migratedGitHubConnectorId: uuid("migrated_github_connector_id"),
 	},
 	(table) => [
 		foreignKey({

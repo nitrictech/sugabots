@@ -66,18 +66,13 @@ file backup.
   API key or no sign-in keep working.
 - **A shared pod's GitHub app stays with its converted project.** Every bot
   in that project can use its GitHub tools there, and the project's computer
-  keeps read-only Git sign-in to the selected repositories. The bots'
-  automations move to their own projects. Their GitHub triggers need a new app.
-  Set up a GitHub app for the bot, then point the trigger at a repository in
-  that app. Routines and other working triggers continue to run.
+  keeps read-only Git sign-in to the selected repositories.
 - **A personal pod's GitHub app goes with its computer.** The bot that gets the
   computer also gets the app, so Git on the computer keeps read-only sign-in
   to the selected repositories. If there is no computer, the upgrade chooses
   among the bots other than the Personal Assistant. It picks the oldest bot
   whose automations use the app, or the oldest bot if none do. The Personal
-  Assistant gets the app if it is the only bot. The other bots' GitHub triggers
-  need their own app and repository. Their routines and other working triggers
-  keep running.
+  Assistant gets the app if it is the only bot.
 - **Existing webhook secrets keep working.** A trigger with only a stored
   bearer digest can still verify calls. The digest cannot reveal the original
   secret. The workspace owner and admins can read encrypted webhook secrets
@@ -109,6 +104,13 @@ file backup.
 
 ## What keeps working
 
+- **Working GitHub triggers keep receiving events from their original app.**
+  There's no need to reconnect after the upgrade. When the app and the
+  automation move to different projects, delivery continues while every member
+  who can read the automation can also reach the app. Delivery stops if the
+  bot becomes public or has a member outside the app's project.
+  To edit a trigger that uses an app in another project, choose a repository
+  from the app in the automation's own project.
 - **Old webhook addresses.** Webhooks sent to the addresses older versions
   gave out, under `/api/hooks/`, still reach their triggers and GitHub apps.
   So do the setup addresses each GitHub app was made with. You don't need to

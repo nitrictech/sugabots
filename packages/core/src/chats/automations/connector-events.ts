@@ -1,8 +1,17 @@
 import type { AcceptedRun } from "@sugabots/contracts";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { DateTime, Effect } from "effect";
 import { query, serviceOperations } from "../../database/database.ts";
-import { automation, automationTrigger, connector } from "../../database/schema.ts";
+import {
+	automation,
+	automationTrigger,
+	bot,
+	botMember,
+	connector,
+	project,
+	projectMember,
+} from "../../database/schema.ts";
 import { makeAcceptTrigger } from "./acceptance.ts";
 import type { Automations } from "./automations.ts";
 
@@ -58,11 +67,37 @@ export const makeConnectorEvents = Effect.gen(function* () {
 	} satisfies Automations.ConnectorEventsInterface;
 });
 
-/**
- * The GitHub triggers of enabled automations run by `event` at `repository`,
- * through `connectorId`, while the connector still has the repository and
- * belongs to the automation's project.
- */
+const automationBot = alias(bot, "automation_bot");
+const appProject = alias(project, "app_project");
+const appBot = alias(bot, "app_bot");
+
+/** A migrated trigger can send repository activity only to members who can reach its app. */
+const canDeliverToMigratedTrigger = and(
+	eq(automationTrigger.migratedGitHubConnectorId, connector.id),
+	eq(appProject.deleting, false),
+	or(
+		and(
+			eq(automationBot.visibility, "personal"),
+			eq(appBot.visibility, "personal"),
+			eq(automationBot.createdById, appBot.createdById),
+		),
+		and(
+			isNull(appProject.defaultOfBotId),
+			eq(automationBot.visibility, "private"),
+			sql`not exists (
+				select 1 from ${botMember}
+				where ${botMember.botId} = ${automationBot.id}
+					and not exists (
+						select 1 from ${projectMember}
+						where ${projectMember.projectId} = ${appProject.id}
+							and ${projectMember.memberId} = ${botMember.memberId}
+					)
+			)`,
+		),
+	),
+);
+
+/** triggersFor finds enabled GitHub triggers for the app, repository and event in `on`. */
 const triggersFor = (on: {
 	workspaceId: string;
 	connectorId: string;
@@ -82,7 +117,6 @@ const triggersFor = (on: {
 				connector,
 				and(
 					eq(connector.id, on.connectorId),
-					eq(connector.projectId, automation.projectId),
 					eq(connector.workspaceId, automation.workspaceId),
 					sql`${connector.id}::text = ${automationTrigger.settings}->>'connectorId'`,
 					// GitHub's paths ignore case.
@@ -90,8 +124,13 @@ const triggersFor = (on: {
 						where lower(kept->>'path') = lower(${on.repository}))`,
 				),
 			)
+			.innerJoin(project, eq(project.id, automation.projectId))
+			.leftJoin(automationBot, eq(automationBot.id, project.defaultOfBotId))
+			.innerJoin(appProject, eq(appProject.id, connector.projectId))
+			.leftJoin(appBot, eq(appBot.id, appProject.defaultOfBotId))
 			.where(
 				and(
+					or(eq(connector.projectId, automation.projectId), canDeliverToMigratedTrigger),
 					eq(automation.workspaceId, on.workspaceId),
 					eq(automationTrigger.kind, "github"),
 					eq(automation.state, "enabled"),

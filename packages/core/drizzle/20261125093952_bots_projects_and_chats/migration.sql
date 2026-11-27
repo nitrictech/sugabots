@@ -106,8 +106,17 @@ WITH "keeper" AS (
 )
 UPDATE "connection" SET "agent_id" = "keeper"."agent_id"
 FROM "keeper" WHERE "connection"."id" = "keeper"."connection_id";--> statement-breakpoint
--- A GitHub trigger can run only from its automation's own project's app.
--- Keep its settings so a member can reconnect it if the app goes elsewhere.
+-- Keep each GitHub trigger tied to its pod's app when they move to different
+-- projects. Capture the pair before removing the pod ids.
+CREATE TEMP TABLE "migrated_github_trigger" ON COMMIT DROP AS
+SELECT trigger."id" AS "trigger_id", app."id" AS "connector_id"
+FROM "routine_trigger" AS trigger
+JOIN "routine" AS routine ON routine."id" = trigger."routine_id"
+JOIN "agent" AS agent ON agent."id" = routine."agent_id" AND agent."workspace_id" = routine."workspace_id"
+JOIN "connection" AS app ON app."id"::text = trigger."settings"->>'connectionId'
+	AND app."pod_id" = agent."pod_id" AND app."workspace_id" = agent."workspace_id"
+WHERE trigger."kind" = 'github' AND app."kind" = 'github'
+	AND routine."deleted_at" IS NULL AND app."agent_id" IS DISTINCT FROM agent."id";--> statement-breakpoint
 -- Only a connector that stays in one place keeps its OAuth sign-in.
 -- A sign-in under way has to start again.
 UPDATE "connection" SET "oauth_encrypted" = NULL, "oauth_state" = NULL
@@ -3402,4 +3411,8 @@ WHERE webhook."automation_id" = automation."id"
 	AND bot."visibility" = 'private'
 	AND webhook."kind" = 'webhook'
 	AND webhook."secret_encrypted" IS NOT NULL;--> statement-breakpoint
-ALTER TABLE "automation_trigger" DROP CONSTRAINT "automation_trigger_digest_valid", DROP COLUMN "secret_digest", ADD CONSTRAINT "automation_trigger_legacy_bearer_secret_valid" CHECK ("legacy_bearer_secret_digest" is null or ("secret_restricted_to_admins" is true and "secret_encrypted" is null and "kind" = 'webhook' and "settings"->'auth'->>'kind' is not distinct from 'bearer'));
+ALTER TABLE "automation_trigger" DROP CONSTRAINT "automation_trigger_digest_valid", DROP COLUMN "secret_digest", ADD CONSTRAINT "automation_trigger_legacy_bearer_secret_valid" CHECK ("legacy_bearer_secret_digest" is null or ("secret_restricted_to_admins" is true and "secret_encrypted" is null and "kind" = 'webhook' and "settings"->'auth'->>'kind' is not distinct from 'bearer'));--> statement-breakpoint
+ALTER TABLE "automation_trigger" ADD COLUMN "migrated_github_connector_id" uuid;--> statement-breakpoint
+UPDATE "automation_trigger" AS trigger SET "migrated_github_connector_id" = saved."connector_id"
+FROM "migrated_github_trigger" AS saved
+WHERE trigger."id" = saved."trigger_id";

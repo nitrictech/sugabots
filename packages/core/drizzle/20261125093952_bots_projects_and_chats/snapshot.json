@@ -15679,6 +15679,24 @@
         "n|sch|public",
         "n|col|public.message_reaction.message_id"
       ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "automation_trigger",
+        "migrated_github_connector_id"
+      ],
+      "writes": [
+        "s|col|public.automation_trigger.migrated_github_connector_id",
+        "n|col|public.automation_trigger.migrated_github_connector_id",
+        "e|col|public.automation_trigger.migrated_github_connector_id"
+      ],
+      "reads": [
+        "n|tbl|public.automation_trigger",
+        "n|sch|public"
+      ]
     }
   ],
   "deltas": [
@@ -26128,6 +26146,22 @@
         "method": "btree",
         "concurrently": false,
         "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "automation_trigger",
+        "name": "migrated_github_connector_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
       }
     }
   ]

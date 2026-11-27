@@ -32,7 +32,6 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Usage } from "../accounting/usage.ts";
 import { SessionAuthentication } from "../authentication/session.ts";
-import { webhookCallForTests } from "../authentication/testing.ts";
 import { TurnAuthentication } from "../authentication/turn.ts";
 import { askerColumns } from "../authentication/turn-facts.ts";
 import { WebhookAuthentication, WebhookRefused } from "../authentication/webhook.ts";
@@ -171,8 +170,10 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				await client.query(
 					`with added as (
 						insert into routine (workspace_id, agent_id, name, instructions, state)
-						select workspace_id, id, 'Triage issues', 'Triage new issues', 'enabled'
-						from agent where id = any($1) returning id, workspace_id
+						select workspace_id, id,
+							case when id = $3 then 'Review issues' else 'Triage issues' end,
+							'Triage new issues', 'enabled'
+						from agent where id = any($1) returning id, workspace_id, name
 					)
 					insert into routine_trigger (workspace_id, routine_id, settings, next_scheduled_at)
 					select workspace_id, id, settings, next_scheduled_at from added
@@ -180,15 +181,17 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 						($2::jsonb, null::timestamptz),
 						('{"kind":"cron","schedule":{"repeat":"cron","expression":"0 9 * * *"},"timezone":"UTC"}'::jsonb,
 							'2026-12-01 09:00Z'::timestamptz)
-					) as triggers(settings, next_scheduled_at)`,
+					) as triggers(settings, next_scheduled_at)
+					where name = 'Triage issues' or next_scheduled_at is null`,
 					[
-						[legacy.bots.planner, legacy.bots.budget],
+						[legacy.bots.planner, legacy.bots.budget, legacy.bots.hoe],
 						{
 							kind: "github",
 							connectionId: legacy.familyGitHubConnector,
 							repository: "acme/web",
 							events: ["issue_opened"],
 						},
+						legacy.bots.hoe,
 					],
 				);
 				await client.query(legacySummaryRequest);
@@ -419,68 +422,6 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					previousChatId,
 				]),
 			).toEqual([{ to_chat_id: legacy.threads.trip }]);
-		});
-
-		it("keeps the shared GitHub app in the converted project and leaves the affected bots' routines enabled", async () => {
-			expect(
-				await upgraded.rows("select project_id from connector where id = $1", [
-					legacy.familyGitHubConnector,
-				]),
-			).toEqual([{ project_id: legacy.pods.family }]);
-			expect(
-				await upgraded.rows(
-					`select automation.state, project.default_of_bot_id
-					 from automation_trigger join automation on automation.id = automation_trigger.automation_id
-					 join project on project.id = automation.project_id
-					 where automation_trigger.kind = 'github' and automation_trigger.settings->>'connectorId' = $1
-					 order by project.default_of_bot_id`,
-					[legacy.familyGitHubConnector],
-				),
-			).toEqual([
-				{ state: "enabled", default_of_bot_id: legacy.bots.planner },
-				{ state: "enabled", default_of_bot_id: legacy.bots.budget },
-			]);
-			expect(
-				await upgraded.rows(
-					`select next_scheduled_at, settings->'schedule' as schedule from automation_trigger
-					 join automation on automation.id = automation_trigger.automation_id
-					 where automation.name = 'Triage issues' and automation_trigger.kind = 'routine'`,
-				),
-			).toEqual([
-				{
-					next_scheduled_at: new Date("2026-12-01T09:00:00Z"),
-					schedule: { repeat: "cron", expression: "0 9 * * *" },
-				},
-				{
-					next_scheduled_at: new Date("2026-12-01T09:00:00Z"),
-					schedule: { repeat: "cron", expression: "0 9 * * *" },
-				},
-			]);
-
-			const body = JSON.stringify({
-				action: "opened",
-				repository: { full_name: "acme/web" },
-				sender: { login: "octocat" },
-				issue: { number: 3, title: "Login", html_url: "https://github.com/acme/web/issues/3" },
-			});
-			const connectorId = legacy.familyGitHubConnector;
-			const deliveryId = "new-issue-after-upgrade";
-			const principal = webhookCallForTests({
-				workspace: legacy.workspace,
-				source: { kind: "github", connector: connectorId, project: legacy.pods.family },
-			});
-			const call = await servedOperations({ runOn: upgraded.run });
-			expect(
-				await call(principal, "gitHubWebhooks.delivery", {
-					connectorId,
-					deliveryId,
-					event: "issues",
-					body,
-				}),
-			).toMatchObject({ activity: { event: "issue_opened", repository: "acme/web" } });
-			expect(
-				await upgraded.rows("select id from run where trigger_identity = $1", [deliveryId]),
-			).toEqual([]);
 		});
 
 		it("keeps the converted project's computer signed in to the shared GitHub repositories", async () => {
@@ -1243,6 +1184,91 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			);
 		});
 
+		it("keeps the shared GitHub app in its converted project and delivers to both bots' automations", async () => {
+			expect(
+				await upgraded.rows("select project_id from connector where id = $1", [
+					legacy.familyGitHubConnector,
+				]),
+			).toEqual([{ project_id: legacy.pods.family }]);
+			expect(
+				await upgraded.rows(
+					`select automation.state, project.default_of_bot_id
+					 from automation_trigger join automation on automation.id = automation_trigger.automation_id
+					 join project on project.id = automation.project_id
+					 where automation_trigger.kind = 'github' and automation.name = 'Triage issues'
+						and automation_trigger.settings->>'connectorId' = $1
+					 order by project.default_of_bot_id`,
+					[legacy.familyGitHubConnector],
+				),
+			).toEqual([
+				{ state: "enabled", default_of_bot_id: legacy.bots.planner },
+				{ state: "enabled", default_of_bot_id: legacy.bots.budget },
+			]);
+			expect(
+				await upgraded.rows(
+					`select next_scheduled_at, settings->'schedule' as schedule from automation_trigger
+					 join automation on automation.id = automation_trigger.automation_id
+					 where automation.name = 'Triage issues' and automation_trigger.kind = 'routine'`,
+				),
+			).toEqual([
+				{
+					next_scheduled_at: new Date("2026-12-01T09:00:00Z"),
+					schedule: { repeat: "cron", expression: "0 9 * * *" },
+				},
+				{
+					next_scheduled_at: new Date("2026-12-01T09:00:00Z"),
+					schedule: { repeat: "cron", expression: "0 9 * * *" },
+				},
+			]);
+
+			const deliveryId = "new-issue-after-upgrade";
+			await expect(
+				deliverGitHubIssue(upgraded, legacy.familyGitHubConnector, deliveryId),
+			).resolves.toMatchObject({ activity: { event: "issue_opened", repository: "acme/web" } });
+			expect(
+				await upgraded.rows("select bot_id from run where trigger_identity = $1 order by bot_id", [
+					deliveryId,
+				]),
+			).toEqual([{ bot_id: legacy.bots.planner }, { bot_id: legacy.bots.budget }]);
+		});
+
+		it("stops delivering to a bot that gains readers outside the GitHub app's project", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const { sam, pat, ana } = legacy.members;
+			const owner = await upgraded.signIn(sam);
+			const botId = legacy.bots.planner;
+			const projectId = legacy.pods.family;
+			const connectorId = legacy.familyGitHubConnector;
+			const deliver = async (deliveryId: string) => {
+				await deliverGitHubIssue(upgraded, connectorId, deliveryId);
+				return upgraded.rows("select bot_id from run where trigger_identity = $1", [deliveryId]);
+			};
+
+			await call(owner, "bots.addMember", { botId, memberId: ana });
+			try {
+				await expect(
+					call(await upgraded.signIn(ana), "connectors.get", { projectId, connectorId }),
+				).rejects.toBeInstanceOf(ResourceHidden);
+				expect(await deliver("bot-member-added")).toEqual([{ bot_id: legacy.bots.budget }]);
+			} finally {
+				await call(owner, "bots.removeMember", { botId, memberId: ana });
+			}
+
+			await call(owner, "projects.removeMember", { projectId, memberId: pat });
+			try {
+				expect(await deliver("app-project-member-removed")).toEqual([]);
+			} finally {
+				await call(owner, "projects.addMember", { projectId, memberId: pat });
+			}
+
+			await call(owner, "bots.update", { botId, changes: { visibility: "public" } });
+			try {
+				expect(await deliver("bot-made-public")).toEqual([{ bot_id: legacy.bots.budget }]);
+			} finally {
+				await call(owner, "bots.update", { botId, changes: { visibility: "private" } });
+			}
+		});
+
 		it("keeps both copies of an automation result and links the run from its feed", async () => {
 			expect(
 				await upgraded.rows(
@@ -1952,7 +1978,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 );
 
 it.skipIf(!process.env.DATABASE_URL)(
-	"keeps the existing computer signed in when a younger personal bot has the GitHub trigger",
+	"keeps the computer signed in and delivers to the younger personal bot's GitHub trigger",
 	async () => {
 		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", "personal_github");
 		const github = standInGitHub(mintsTokens);
@@ -2019,6 +2045,14 @@ it.skipIf(!process.env.DATABASE_URL)(
 					body: { repository_ids: [101], permissions: { contents: "read", metadata: "read" } },
 				}),
 			]);
+
+			const deliveryId = "personal-issue-after-upgrade";
+			await expect(deliverGitHubIssue(upgraded, connectorId, deliveryId)).resolves.toMatchObject({
+				activity: { event: "issue_opened", repository: "acme/web" },
+			});
+			expect(
+				await upgraded.rows("select bot_id from run where trigger_identity = $1", [deliveryId]),
+			).toEqual([{ bot_id: youngerBotId }]);
 
 			const call = await servedOperations({ runOn: upgraded.run });
 			const input = { projectId: computer.project_id, connectorId };
@@ -2420,6 +2454,31 @@ async function seedGitHubApp(
 			memberId,
 		],
 	);
+}
+
+async function deliverGitHubIssue(upgraded: Upgraded, connectorId: string, deliveryId: string) {
+	const body = JSON.stringify({
+		action: "opened",
+		repository: { full_name: "acme/web" },
+		sender: { login: "octocat" },
+		issue: { number: 3, title: "Login", html_url: "https://github.com/acme/web/issues/3" },
+	});
+	const signature = createHmac("sha256", WEBHOOK_SECRET).update(body).digest("hex");
+	const principal = await upgraded.run(
+		WebhookAuthentication.Service.use((webhooks) =>
+			webhooks.github(connectorId, {
+				body,
+				headers: { "x-hub-signature-256": `sha256=${signature}` },
+			}),
+		).pipe(Effect.provide(WebhookAuthentication.layer)),
+	);
+	const call = await servedOperations({ runOn: upgraded.run });
+	return call(principal, "gitHubWebhooks.delivery", {
+		connectorId,
+		deliveryId,
+		event: "issues",
+		body,
+	});
 }
 
 function readComputerSignIn(upgraded: Upgraded, projectId: string, github: typeof fetch) {
