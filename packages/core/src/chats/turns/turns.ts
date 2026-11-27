@@ -241,6 +241,7 @@ export type ApprovalCall = Pick<
 	| "connectorId"
 	| "connectorRevision"
 	| "remoteToolName"
+	| "approvalConnectorAccess"
 	| "approvalResolvedTargets"
 	| "writeOrDelete"
 >;

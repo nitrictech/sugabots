@@ -273,6 +273,44 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(run).not.toHaveBeenCalled();
 		});
 
+		it("closes a Personal Assistant's pending approval and wakes the turn when tool access changes from Allow to Ask", async () => {
+			await onDatabase((db) =>
+				db
+					.update(bot)
+					.set({ assistantOf: adminId, visibility: "personal" })
+					.where(eq(bot.id, botId)),
+			);
+			let access: "allow" | "ask" = "allow";
+			const execute = vi.fn(async () => ({ removed: true }));
+			const { model, requests } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
+			const workflow = await loop.runWorkflow(chatId, {
+				model,
+				connectorTools: { forTurn: (...args) => wiki(access, execute).forTurn(...args) },
+			});
+			await workflow.suspended();
+			const { turnId, parked } = await parkedCallOf(workflow.executionId);
+			expect(parked).toMatchObject({ approvalStatus: "pending", approvalConnectorAccess: "allow" });
+
+			access = "ask";
+			await onDatabase((db) =>
+				db
+					.update(connector)
+					.set({ toolAccess: { wipe: access } })
+					.where(eq(connector.id, connectorId)),
+			);
+			await expect(
+				chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
+			).rejects.toMatchObject({ _tag: "ToolApprovalConflict", reason: "connectorChanged" });
+			await workflow.completed();
+
+			const error = "This approval was closed because the connector or its tool settings changed.";
+			expect(await callsOf(turnId)).toMatchObject([
+				{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null, error },
+			]);
+			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
+			expect(execute).not.toHaveBeenCalled();
+		});
+
 		it("refuses a demoted asker's Allow for a pending connector write", async () => {
 			await setRole(workspaceId, adminId, "editor");
 			const execute = vi.fn(async () => ({ removed: true }));

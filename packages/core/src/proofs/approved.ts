@@ -27,7 +27,7 @@ import {
 } from "../operations/operation.ts";
 import type { Principal } from "../principal.ts";
 import type { CanUseChatComputer } from "./can-use-computer.ts";
-import type { CanUseConnector } from "./can-use-connector.ts";
+import { type CanUseConnector, connectorApprovalNeedsRefresh } from "./can-use-connector.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 import { toolIsOn, toolSwitchedOff, toolSwitchFor } from "./tool-switches.ts";
 
@@ -487,7 +487,7 @@ function decideRecordedCall<P, K>(
 		decision?.status !== "allowed" ||
 		!decision.decidedBy ||
 		!sameResolvedTargets(decision.resolvedTargets, resolvedTargets) ||
-		(connectorUse?.access === "ask" && decision.accessAtApproval !== "ask")
+		(connectorUse && connectorApprovalNeedsRefresh(connectorUse.access, decision.accessAtApproval))
 	) {
 		return "needed";
 	}

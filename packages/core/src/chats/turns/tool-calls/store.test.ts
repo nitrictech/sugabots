@@ -35,7 +35,7 @@ import { startBotChat } from "../../chats/testing.ts";
 import { chatServicesForTests, lanesForTests } from "../../testing.ts";
 import { recordedCallOf } from "../../tools/recorded-call.ts";
 import { releaseParkedLanes } from "../cancel-sweep.ts";
-import type { ApprovalBinding } from "../loop-values.ts";
+import type { ApprovalAsked, ApprovalBinding } from "../loop-values.ts";
 import { MISSING_APPROVAL_RECORD, TurnRecords } from "../records.ts";
 import { TurnSignals } from "../signals.ts";
 import {
@@ -139,20 +139,14 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		return row;
 	};
 
-	/** A call of the turn's step waiting for its approver, as the loop asks for one. */
-	interface AskedCall {
-		readonly toolCallId: string;
-		readonly tool: string;
-		readonly input: unknown;
-		readonly binding: ApprovalBinding;
-		readonly writeOrDelete: boolean;
-	}
+	type AskedCall = ApprovalAsked & { readonly toolCallId: string };
 
 	const askedCall = (overrides: Partial<AskedCall> = {}): AskedCall => ({
 		toolCallId: "sdk-create-1",
 		tool: "linear__create_issue",
 		input: { title: "Fix mobile navigation" },
 		binding: connectorBinding("create_issue"),
+		connectorAccess: "ask",
 		writeOrDelete: true,
 		...overrides,
 	});

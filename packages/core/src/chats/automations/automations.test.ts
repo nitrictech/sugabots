@@ -1668,6 +1668,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 						connectorRevision: 1,
 						remoteToolName: "create_issue",
 					},
+					connectorAccess: "ask",
 					writeOrDelete: true,
 				},
 			]),

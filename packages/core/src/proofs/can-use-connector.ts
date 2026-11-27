@@ -118,13 +118,28 @@ function enabledConnectorRows(db: Executor, acting: Principal, selected: SQL | u
 		.where(and(eq(connector.enabled, true), selected));
 }
 
-/** Reports why the current connector settings forbid the recorded call, if they do. */
-export const checkConnectorCallSettings = (call: {
-	readonly turnId: string;
-	readonly connectorId: string;
-	readonly connectorRevision: number | null;
-	readonly remoteToolName: string | null;
-}) =>
+type ConnectorApprovalAccess = Exclude<ConnectorAccess, "off"> | null;
+
+export function connectorApprovalNeedsRefresh(
+	currentAccess: ConnectorAccess,
+	accessAtApproval: ConnectorApprovalAccess,
+): boolean {
+	return currentAccess === "ask" && accessAtApproval !== "ask";
+}
+
+/** checkConnectorCallSettings reports whether the call or its pending approval has been superseded. */
+export const checkConnectorCallSettings = (
+	call: {
+		readonly turnId: string;
+		readonly connectorId: string;
+		readonly connectorRevision: number | null;
+		readonly remoteToolName: string | null;
+	},
+	approval?: {
+		readonly approvalConnectorAccess: ConnectorApprovalAccess;
+		readonly writeOrDelete: boolean;
+	},
+) =>
 	Effect.gen(function* () {
 		const { connectorRevision, remoteToolName } = call;
 		if (connectorRevision === null || remoteToolName === null) return "connectorChanged";
@@ -158,7 +173,13 @@ export const checkConnectorCallSettings = (call: {
 				.limit(1),
 		);
 		if (!current) return "connectorChanged";
-		return readToolSettings(current, remoteToolName).access === "off" ? "toolOff" : undefined;
+		const { access } = readToolSettings(current, remoteToolName, {
+			unlistedReadOnly: approval?.writeOrDelete === false ? true : null,
+		});
+		if (access === "off") return "toolOff";
+		return approval && connectorApprovalNeedsRefresh(access, approval.approvalConnectorAccess)
+			? "connectorChanged"
+			: undefined;
 	});
 
 export const checkConnectorApprovalPermission = (
@@ -356,7 +377,7 @@ function checkToolUse(
 > {
 	if (listed && (listed.revision !== row.configurationRevision || listed.described.name !== tool))
 		return Result.fail(new ResourceHidden({ resource: "connector" }));
-	const use = readToolSettings(row, tool, listed?.described);
+	const use = readToolSettings(row, tool, { listed: listed?.described });
 	if (use.writeOrDelete && !mayWrite)
 		return Result.fail(new ActionForbidden({ proof: "CanUseConnector" }));
 	return Result.succeed(use);
@@ -365,13 +386,16 @@ function checkToolUse(
 function readToolSettings(
 	row: Pick<ConnectorRow, keyof typeof connectorToolSettings>,
 	tool: string,
-	listed?: ListedTool["described"],
+	{
+		listed,
+		unlistedReadOnly = null,
+	}: { listed?: ListedTool["described"] | undefined; unlistedReadOnly?: true | null },
 ) {
 	const saved = toolsOf(row).find((described) => described.name === tool);
 	const described = (row.kind === "mcp" ? listed : undefined) ??
 		saved ?? {
 			name: tool,
-			readOnly: null,
+			readOnly: unlistedReadOnly,
 			destructive: null,
 		};
 	return {
