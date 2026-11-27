@@ -171,9 +171,8 @@ export const ContactCard = meta.story({
 		);
 		const computer = canvas.getByRole("switch", { name: "Turn on Computer" });
 		await expect(computer).toHaveAttribute("aria-checked", "false");
-		await userEvent.hover(computer);
-		// Said under its name, and again by the switch when pointed at.
-		await waitFor(() => expect(screen.getAllByText(/^Computers are off for /)).toHaveLength(2));
+		// Said under its name, and read with the switch.
+		await expect(computer).toHaveAccessibleDescription(/^Computers are off for /);
 	},
 });
 

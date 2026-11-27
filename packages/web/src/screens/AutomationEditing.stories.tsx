@@ -682,7 +682,12 @@ export const AsAnEditor = meta.story({
 		await expect(
 			await panel.findByRole("heading", { name: "Overnight outbound" }),
 		).toBeInTheDocument();
-		await expect(panel.getByRole("switch", { name: "Automation on" })).toBeDisabled();
+		const toggle = panel.getByRole("switch", { name: "Automation on" });
+		await expect(toggle).toBeDisabled();
+		// Why it is off is said in the panel, and read with the switch.
+		await expect(toggle).toHaveAccessibleDescription(
+			"Only someone who may change this automation can turn it on or off.",
+		);
 		await expect(panel.queryByRole("button", { name: "Start a run" })).toBeNull();
 		await expect(panel.queryByRole("button", { name: /^More for / })).toBeNull();
 		await expect(canvas.queryByRole("link", { name: "New automation" })).toBeNull();
