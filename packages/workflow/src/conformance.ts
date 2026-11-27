@@ -19,6 +19,10 @@ import {
 import { expect, it, onTestFinished } from "vitest";
 import { Activities } from "./activities.ts";
 
+const RESTART_BUDGET_MS = 20_000;
+const RESTART_TEST_TIMEOUT_MS = 30_000;
+const POLL_INTERVAL = Duration.millis(20);
+
 /**
  * The behaviour every engine must share, so that swapping engines is only
  * configuration. Each engine's tests call `conformance` with a way to build
@@ -122,29 +126,34 @@ export function conformance(options: {
 		expect(runs(key)).toEqual(["second", "first", "cleanup"]);
 	});
 
-	it.runIf(options.durable)("keeps a race's winner across an engine restart", async () => {
-		const key = crypto.randomUUID();
-		const executionId = await (async () => {
-			const harness = start(options.engine());
-			const id = await harness.run(Racing.execute({ key }, { discard: true }));
-			await harness.untilSuspended(id, Racing);
-			await harness.run(
-				DurableDeferred.succeed(Second, { token: racingToken(Second, id), value: "b" }),
+	it.runIf(options.durable)(
+		"keeps a race's winner across an engine restart",
+		{ timeout: RESTART_TEST_TIMEOUT_MS },
+		async () => {
+			const key = crypto.randomUUID();
+			const executionId = await (async () => {
+				const harness = start(options.engine());
+				const id = await harness.run(Racing.execute({ key }, { discard: true }));
+				await harness.untilSuspended(id, Racing);
+				await harness.run(
+					DurableDeferred.succeed(Second, { token: racingToken(Second, id), value: "b" }),
+				);
+				await harness.until(() => runs(key).includes("second"));
+				await harness.untilSuspended(id, Racing);
+				await harness.stop();
+				return id;
+			})();
+
+			const restarted = start(options.engine());
+			const result = await restarted.resultAfterRestart(
+				executionId,
+				Racing,
+				DurableDeferred.succeed(First, { token: racingToken(First, executionId), value: "a" }),
 			);
-			await harness.until(() => runs(key).includes("second"));
-			await harness.untilSuspended(id, Racing);
-			await harness.stop();
-			return id;
-		})();
-
-		const restarted = start(options.engine());
-		await restarted.run(
-			DurableDeferred.succeed(First, { token: racingToken(First, executionId), value: "a" }),
-		);
-
-		expect(await restarted.result(executionId, Racing)).toBe("second:b,first:a");
-		expect(runs(key)).toEqual(["second", "first", "cleanup"]);
-	});
+			expect(result).toBe("second:b,first:a");
+			expect(runs(key)).toEqual(["second", "first", "cleanup"]);
+		},
+	);
 
 	it("wakes for a deferred or a timer, whichever comes first", async () => {
 		const harness = start(options.engine());
@@ -177,22 +186,29 @@ export function conformance(options: {
 		expect(await harness.run(Flaky.execute({ key, failures: 2 }))).toBe(3);
 	});
 
-	it.runIf(options.durable)("resumes an execution after the engine restarts", async () => {
-		const key = crypto.randomUUID();
-		const executionId = await (async () => {
-			const harness = start(options.engine());
-			const id = await harness.run(Suspending.execute({ key }, { discard: true }));
-			await harness.untilSuspended(id);
-			await harness.stop();
-			return id;
-		})();
+	it.runIf(options.durable)(
+		"resumes an execution after the engine restarts",
+		{ timeout: RESTART_TEST_TIMEOUT_MS },
+		async () => {
+			const key = crypto.randomUUID();
+			const executionId = await (async () => {
+				const harness = start(options.engine());
+				const id = await harness.run(Suspending.execute({ key }, { discard: true }));
+				await harness.untilSuspended(id);
+				await harness.stop();
+				return id;
+			})();
 
-		const restarted = start(options.engine());
-		await restarted.run(DurableDeferred.succeed(Go, { token: goToken(executionId), value: "go" }));
-
-		expect(await restarted.result(executionId)).toBe("before:go:after");
-		expect(runs(key)).toEqual(["before", "after"]);
-	});
+			const restarted = start(options.engine());
+			const result = await restarted.resultAfterRestart(
+				executionId,
+				Suspending,
+				DurableDeferred.succeed(Go, { token: goToken(executionId), value: "go" }),
+			);
+			expect(result).toBe("before:go:after");
+			expect(runs(key)).toEqual(["before", "after"]);
+		},
+	);
 }
 
 /** What each execution's activities did, shared across engine restarts in one test process. */
@@ -391,26 +407,32 @@ export function start<R = never>(engine: Layer.Layer<WorkflowEngine.WorkflowEngi
 	const retried = <A>(attempt: Effect.Effect<A, unknown, WorkflowEngine.WorkflowEngine>) =>
 		run(
 			attempt.pipe(
-				Effect.retry({ times: 250, schedule: Schedule.spaced(Duration.millis(20)) }),
+				Effect.retry({ times: 250, schedule: Schedule.spaced(POLL_INTERVAL) }),
 				Effect.orDie,
 			),
 		);
+	const poll = <A>(
+		workflow: Workflows,
+		executionId: string,
+		done: (result: Option.Option<Workflow.Result<string, never>>) => A | undefined,
+	) =>
+		workflow
+			.poll(executionId)
+			.pipe(Effect.flatMap((result) => Effect.fromOption(Option.fromUndefinedOr(done(result)))));
 	const pollUntil = <A>(
 		workflow: Workflows,
 		executionId: string,
 		done: (result: Workflow.Result<string, never>) => A | undefined,
 	) =>
 		retried(
-			workflow
-				.poll(executionId)
-				.pipe(
-					Effect.flatMap((result) =>
-						Effect.fromOption(
-							Option.flatMap(result, (value) => Option.fromUndefinedOr(done(value))),
-						),
-					),
-				),
+			poll(workflow, executionId, (result) =>
+				Option.isSome(result) ? done(result.value) : undefined,
+			),
 		);
+	const readResult = (exit: Exit.Exit<string, never>) => {
+		if (Exit.isFailure(exit)) throw new Error(`Execution failed: ${String(exit.cause)}`);
+		return exit.value;
+	};
 	const completion = (executionId: string, workflow: Workflows = Suspending) =>
 		pollUntil(workflow, executionId, (result) =>
 			result._tag === "Complete" ? result.exit : undefined,
@@ -425,10 +447,39 @@ export function start<R = never>(engine: Layer.Layer<WorkflowEngine.WorkflowEngi
 		until: (check: () => boolean) =>
 			retried(Effect.suspend(() => (check() ? Effect.void : Effect.fail("not yet")))),
 		completion,
-		result: async (executionId: string, workflow: Workflows = Suspending) => {
-			const exit = await completion(executionId, workflow);
-			if (Exit.isFailure(exit)) throw new Error(`Execution failed: ${String(exit.cause)}`);
-			return exit.value;
+		result: async (executionId: string, workflow: Workflows = Suspending) =>
+			readResult(await completion(executionId, workflow)),
+		resultAfterRestart: async (
+			executionId: string,
+			workflow: Workflows,
+			deliver: Effect.Effect<unknown, never, WorkflowEngine.WorkflowEngine>,
+		) => {
+			const signal = AbortSignal.timeout(RESTART_BUDGET_MS);
+			let lastState = "starting engine";
+			const result = poll(workflow, executionId, (observed) => {
+				const state = Option.getOrUndefined(observed);
+				lastState = state?._tag ?? "poll returned no state";
+				return state?._tag === "Complete" ? state.exit : undefined;
+			}).pipe(Effect.retry(Schedule.spaced(POLL_INTERVAL)), Effect.orDie);
+			try {
+				return readResult(
+					await runtime.runPromise(
+						Effect.andThen(
+							Effect.sync(() => {
+								lastState = "delivering signal";
+							}),
+							deliver.pipe(Effect.andThen(result)),
+						),
+						{ signal },
+					),
+				);
+			} catch (cause) {
+				if (!signal.aborted) throw cause;
+				throw new Error(
+					`Execution ${executionId} did not finish within ${RESTART_BUDGET_MS} ms of restart (last state: ${lastState})`,
+					{ cause },
+				);
+			}
 		},
 		/** Stops the engine, as a process stopping does. */
 		stop: () => runtime.dispose(),
