@@ -2937,7 +2937,11 @@ it.skipIf(!process.env.DATABASE_URL)(
 
 interface ExecutionPlan {
 	readonly "Actual Loops": number;
+	readonly "Actual Rows"?: number;
+	readonly "Rows Removed by Filter"?: number;
+	readonly "Rows Removed by Index Recheck"?: number;
 	readonly "Rows Removed by Join Filter"?: number;
+	readonly "Parent Relationship"?: string;
 	readonly Plans?: readonly ExecutionPlan[];
 }
 
@@ -2948,11 +2952,20 @@ function countJoinFilterRows(plan: ExecutionPlan): number {
 	);
 }
 
-function countPlanNodeExecutions(plan: ExecutionPlan): number {
+function countPlanRows(plan: ExecutionPlan): number {
 	return (
-		plan["Actual Loops"] +
-		(plan.Plans ?? []).reduce((total, child) => total + countPlanNodeExecutions(child), 0)
+		((plan["Actual Rows"] ?? 0) +
+			(plan["Rows Removed by Filter"] ?? 0) +
+			(plan["Rows Removed by Index Recheck"] ?? 0) +
+			(plan["Rows Removed by Join Filter"] ?? 0)) *
+			plan["Actual Loops"] +
+		(plan.Plans ?? []).reduce((total, child) => total + countPlanRows(child), 0)
 	);
+}
+
+function countSubplanRows(plan: ExecutionPlan): number {
+	if (plan["Parent Relationship"] === "SubPlan") return countPlanRows(plan);
+	return (plan.Plans ?? []).reduce((total, child) => total + countSubplanRows(child), 0);
 }
 
 async function explainAnalyze(client: pg.Client, statement: string): Promise<ExecutionPlan> {
@@ -3060,7 +3073,7 @@ it.skipIf(!process.env.DATABASE_URL).each([
 						[replies],
 					);
 					expect(kept).toEqual([{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }, { ordinal: 4 }]);
-					const rewriteExecutions = countPlanNodeExecutions(await explainAnalyze(client, rewrite));
+					const rewritePlan = await explainAnalyze(client, rewrite);
 					const { rows: rewritten } = await client.query(
 						`
 						select count(*) filter (where parts = '[]')::int as "clearedReplies",
@@ -3080,9 +3093,15 @@ it.skipIf(!process.env.DATABASE_URL).each([
 						reactionReads,
 						"reaction rows read during cleanup, including cascades",
 					).toBeLessThan(reactions * 3);
-					expect(rewriteExecutions, "plan node executions during the reply rewrite").toBeLessThan(
-						replies * 6,
-					);
+					expect(
+						countPlanRows(rewritePlan),
+						"rows processed during the reply rewrite",
+					).toBeLessThan(reactions * 4 + replies * 30);
+					// A correlated rewrite can process few rows overall while repeating a subquery for each reply.
+					expect(
+						countSubplanRows(rewritePlan),
+						"rows processed by subqueries during the reply rewrite",
+					).toBeLessThan(replies);
 				} finally {
 					await client.query("rollback");
 				}
