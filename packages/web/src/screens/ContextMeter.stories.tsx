@@ -29,7 +29,7 @@ const meta = preview.meta({
 export const Filling = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toHaveAttribute(
-			"value",
+			"aria-valuenow",
 			"19",
 		);
 		await expect(canvas.queryByText(/tokens/)).toBeNull();
@@ -41,7 +41,7 @@ export const PastTheLine = meta.story({
 	args: { context: context(186_400) },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toHaveAttribute(
-			"value",
+			"aria-valuenow",
 			"73",
 		);
 	},
@@ -55,7 +55,7 @@ export const CompactedSinceMeasured = meta.story({
 	args: { context: context(186_400, "2026-09-28T09:06:00.000Z") },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toHaveAttribute(
-			"value",
+			"aria-valuenow",
 			"73",
 		);
 	},

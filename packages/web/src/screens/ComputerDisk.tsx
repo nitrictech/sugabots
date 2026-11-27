@@ -4,7 +4,7 @@ import {
 	computerDiskPercent,
 	formatDiskSize,
 } from "@sugabots/contracts";
-import { cn } from "cn";
+import { Meter } from "@/ui/meter.tsx";
 import { SettingsValue } from "@/ui/settings-page.tsx";
 
 /** The bar's colour at each level: red only once commands are about to fail. */
@@ -24,16 +24,12 @@ const PERCENT_COLORS = {
 export function DiskMeter({ disk, label }: { disk: ComputerDisk; label: string }) {
 	const percent = computerDiskPercent(disk);
 	return (
-		<>
-			{/* The native meter can't be styled across browsers, so it is read out and the bar drawn. */}
-			<meter className="sr-only" aria-label={label} min={0} max={100} value={percent} />
-			<span aria-hidden className="my-1.5 block h-1 rounded-full bg-chip-strong">
-				<span
-					className={cn("block h-full rounded-full", BAR_COLORS[computerDiskLevel(disk)])}
-					style={{ width: `${percent}%` }}
-				/>
-			</span>
-		</>
+		<Meter
+			aria-label={label}
+			value={percent}
+			className="my-1.5"
+			indicatorClassName={BAR_COLORS[computerDiskLevel(disk)]}
+		/>
 	);
 }
 

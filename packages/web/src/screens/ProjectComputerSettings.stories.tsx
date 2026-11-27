@@ -154,7 +154,10 @@ export const Disk = meta.story({
 	play: async ({ canvas }) => {
 		const disk = await canvas.findByRole("region", { name: "Disk" });
 		await expect(within(disk).getByText("6.2 GB of 20 GB used")).toBeVisible();
-		await expect(within(disk).getByRole("meter", { name: "Disk used" })).toHaveValue(31);
+		await expect(within(disk).getByRole("meter", { name: "Disk used" })).toHaveAttribute(
+			"aria-valuenow",
+			"31",
+		);
 		await expect(within(disk).getByText("Chat folders")).toBeVisible();
 		await expect(within(disk).getByText(builder?.name ?? "")).toBeVisible();
 		await expect(within(disk).getByText("Everything else")).toBeVisible();

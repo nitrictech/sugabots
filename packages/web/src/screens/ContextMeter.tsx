@@ -1,5 +1,6 @@
 import type { ChatContext } from "@sugabots/contracts";
 import { cn } from "cn";
+import { Meter } from "@/ui/meter.tsx";
 
 /** How much of the bot's short-term memory the chat fills, as a whole percentage. */
 export function usedPercentOf(context: ChatContext): number {
@@ -18,31 +19,16 @@ export function ContextMeter({ context }: { context: ChatContext }) {
 	const usedPercent = usedPercentOf(context);
 	const linePercent = Math.round((compactionLineTokens / windowTokens) * 100);
 	return (
-		<>
-			{/* The native meter can't be styled across browsers, so it is read out and the bar drawn. */}
-			<meter
-				className="sr-only"
-				aria-label="Short-term memory used"
-				min={0}
-				max={100}
-				value={usedPercent}
-			/>
-			<div
+		<Meter
+			aria-label="Short-term memory used"
+			value={usedPercent}
+			className={cn(compactedSinceMeasured && "opacity-40")}
+		>
+			<span
 				aria-hidden
-				className={cn(
-					"relative h-0.75 rounded-full bg-chip-strong",
-					compactedSinceMeasured && "opacity-40",
-				)}
-			>
-				<div
-					className="absolute inset-y-0 left-0 rounded-full bg-meter transition-all"
-					style={{ width: `${usedPercent}%` }}
-				/>
-				<div
-					className="absolute -top-0.75 h-2.25 w-px bg-muted-foreground"
-					style={{ left: `${linePercent}%` }}
-				/>
-			</div>
-		</>
+				className="absolute -top-0.5 h-2 w-px bg-muted-foreground"
+				style={{ left: `${linePercent}%` }}
+			/>
+		</Meter>
 	);
 }

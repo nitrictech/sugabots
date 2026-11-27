@@ -55,7 +55,10 @@ export const ProjectComputer = meta.story({
 	play: async ({ canvas }) => {
 		const page = within(await canvas.findByRole("region", { name: "Computers" }));
 		await expect(await page.findByText("Running")).toBeVisible();
-		await expect(page.getByRole("meter", { name: "Disk used" })).toHaveValue(20);
+		await expect(page.getByRole("meter", { name: "Disk used" })).toHaveAttribute(
+			"aria-valuenow",
+			"20",
+		);
 		await expect(await page.findByText("api.stripe.com")).toBeVisible();
 	},
 });

@@ -15,6 +15,7 @@ import { extensionOf, type FileLook, fileLookOf } from "@/lib/file-looks.ts";
 import { countOf, listNames } from "@/lib/name-list.ts";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
+import { Progress } from "@/ui/progress.tsx";
 
 /**
  * The files attached to the message being written, as thumbnails above its
@@ -350,18 +351,13 @@ function TypeBadge({ file, look }: { file: File; look: Exclude<FileLook, "image"
 }
 
 function UploadProgress({ name, fraction }: { name: string; fraction: number }) {
-	const percent = Math.round(fraction * 100);
 	return (
-		<span
-			role="progressbar"
+		<Progress
 			aria-label={`Uploading ${name}`}
-			aria-valuemin={0}
-			aria-valuemax={100}
-			aria-valuenow={percent}
-			className="absolute inset-x-0 bottom-0 z-2 h-0.75 bg-border-strong"
-		>
-			<span className="block h-full bg-meter transition-all" style={{ width: `${percent}%` }} />
-		</span>
+			value={Math.round(fraction * 100)}
+			className="absolute inset-x-0 bottom-0 z-2"
+			trackClassName="rounded-none bg-border-strong"
+		/>
 	);
 }
 
