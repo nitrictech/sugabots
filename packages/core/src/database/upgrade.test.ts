@@ -1338,6 +1338,58 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 );
 
 it.skipIf(!process.env.DATABASE_URL)(
+	"queues the GitHub app removed from a personal pod with only a Personal Assistant",
+	async () => {
+		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", "github_uninstall");
+		const connectorId = crypto.randomUUID();
+		const appId = 42;
+		const credential = "encrypted-test-credential";
+		await recreateDatabase(url);
+		try {
+			await migrateTo(url, LAST_MAIN_MIGRATION);
+			await withClient(url, async (client) => {
+				await client.query(legacyRows);
+				await client.query("delete from agent where id = $1", [legacy.bots.helper]);
+				await client.query(
+					`insert into connection (id, workspace_id, pod_id, name, handle, kind, url, settings,
+						app_credential_encrypted, created_by_id)
+						select $1, workspace_id, pod_id, 'GitHub', 'github', 'github', 'https://api.github.com', $2, $3, created_by_id
+						from agent where id = $4`,
+					[
+						connectorId,
+						{ kind: "github", appId, installationId: INSTALLATION_ID },
+						credential,
+						legacy.bots.patsAssistant,
+					],
+				);
+			});
+			await Effect.runPromise(applyMigrations.pipe(Effect.provide(poolAt(url))));
+			await withClient(url, async (client) => {
+				const removed = await client.query("select id from connector where id = $1", [connectorId]);
+				expect(removed.rows).toEqual([]);
+				const queued = await client.query(
+					`select workspace_id, connector_id, app_id::int, installation_id::int, app_credential_encrypted
+						from github_uninstall where connector_id = $1`,
+					[connectorId],
+				);
+				expect(queued.rows).toEqual([
+					{
+						workspace_id: legacy.workspace,
+						connector_id: connectorId,
+						app_id: appId,
+						installation_id: INSTALLATION_ID,
+						app_credential_encrypted: credential,
+					},
+				]);
+			});
+		} finally {
+			await dropDatabase(url);
+		}
+	},
+	UPGRADE_TIMEOUT_MS,
+);
+
+it.skipIf(!process.env.DATABASE_URL)(
 	"reports the ids in a collaboration cycle and rolls back",
 	async () => {
 		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", "cycle");
@@ -1871,7 +1923,7 @@ async function migrateTo(url: string, last: string) {
 /** This worker's database with `_upgrade_<store>` on the end of its name, so workers never share one. */
 function upgradeDatabaseUrl(
 	workerUrl: string,
-	store: Store | "cycle" | "bot_names" | "project_leads",
+	store: Store | "cycle" | "bot_names" | "project_leads" | "github_uninstall",
 ): string {
 	if (!workerUrl) return "";
 	const parsed = new URL(workerUrl);

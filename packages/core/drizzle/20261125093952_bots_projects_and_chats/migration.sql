@@ -121,7 +121,45 @@ WHERE "connection"."kind" <> 'github';--> statement-breakpoint
 -- Copied OAuth tokens would refresh each other away, so every OAuth connection
 -- signs in again, the kept one too.
 UPDATE "connection" SET "oauth_encrypted" = NULL, "oauth_state" = NULL WHERE "auth_kind" = 'oauth';--> statement-breakpoint
--- A `personal` `pod` with no bots leaves its connections nobody to belong to.
+CREATE TABLE "github_uninstall" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"workspace_id" uuid NOT NULL,
+	"connector_id" uuid NOT NULL,
+	"app_id" bigint NOT NULL,
+	"installation_id" bigint,
+	"app_credential_encrypted" text NOT NULL,
+	"attempts" integer DEFAULT 0 NOT NULL,
+	"next_attempt_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX "github_uninstall_due_idx" ON "github_uninstall" ("next_attempt_at","id");
+--> statement-breakpoint
+-- ## Deleted GitHub connectors uninstall
+-- A GitHub connector is the only record of its app's installation, and of the
+-- key that uninstalls it, so deleting one whose app was made, however it goes
+-- (on its own, or with its project, bot or workspace), queues the uninstall,
+-- which the scheduler makes at GitHub once it commits. Only the database sees
+-- every route. One with no installation recorded may still have been
+-- installed before GitHub sent its member back, so its uninstall names none,
+-- and GitHub is asked for the app's installations.
+CREATE FUNCTION queue_deleted_github_installations() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+	INSERT INTO "github_uninstall" ("workspace_id", "connector_id", "app_id", "installation_id", "app_credential_encrypted")
+	SELECT "workspace_id", "id", ("settings"->>'appId')::bigint, ("settings"->>'installationId')::bigint, "app_credential_encrypted"
+	FROM deleted_connectors
+	WHERE "kind" = 'github'
+		AND "app_credential_encrypted" IS NOT NULL;
+	RETURN NULL;
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER connector_github_uninstall
+AFTER DELETE ON "connection"
+REFERENCING OLD TABLE AS deleted_connectors
+FOR EACH STATEMENT EXECUTE FUNCTION queue_deleted_github_installations();
+--> statement-breakpoint
+-- A `personal` `pod` with no bot other than a Personal Assistant has no
+-- keeper for its original connections.
 -- A `shared` one's stay with their `pod`, which becomes a project under the
 -- same id and takes them over (see "Projects own resources" below), as its
 -- computer does.
@@ -2761,21 +2799,8 @@ WHERE "kind" = 'github'
 	AND "settings" ->> 'installationId' IS NOT NULL;
 --> statement-breakpoint
 -- ## Scheduled system work
-CREATE TABLE "github_uninstall" (
-	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
-	"workspace_id" uuid NOT NULL,
-	"connector_id" uuid NOT NULL,
-	"app_id" bigint NOT NULL,
-	"installation_id" bigint,
-	"app_credential_encrypted" text NOT NULL,
-	"attempts" integer DEFAULT 0 NOT NULL,
-	"next_attempt_at" timestamp with time zone DEFAULT now() NOT NULL
-);
---> statement-breakpoint
 ALTER TABLE "automation" ADD COLUMN "pause_after_failures_pending" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 CREATE INDEX "automation_pending_pause_idx" ON "automation" ("id") WHERE "pause_after_failures_pending";--> statement-breakpoint
-CREATE INDEX "github_uninstall_due_idx" ON "github_uninstall" ("next_attempt_at","id");
---> statement-breakpoint
 -- ## Message retries scoped
 ALTER TABLE "message" ADD COLUMN "retry_key" uuid;--> statement-breakpoint
 ALTER TABLE "project_chat" ADD COLUMN "start_retry_key" uuid;--> statement-breakpoint
@@ -3112,30 +3137,6 @@ ALTER TABLE "model_request" ADD COLUMN "by_personal_assistant" boolean DEFAULT f
 -- by a Personal Assistant still in the workspace was one.
 UPDATE "model_request" SET "by_personal_assistant" = true
 FROM "bot" WHERE "bot"."id" = "model_request"."bot_id" AND "bot"."assistant_of" IS NOT NULL;
---> statement-breakpoint
--- ## Deleted GitHub connectors uninstall
--- A GitHub connector is the only record of its app's installation, and of the
--- key that uninstalls it, so deleting one whose app was made, however it goes
--- (on its own, or with its project, bot or workspace), queues the uninstall,
--- which the scheduler makes at GitHub once it commits. Only the database sees
--- every route. One with no installation recorded may still have been
--- installed before GitHub sent its member back, so its uninstall names none,
--- and GitHub is asked for the app's installations.
-CREATE FUNCTION queue_deleted_github_installations() RETURNS trigger
-LANGUAGE plpgsql AS $$
-BEGIN
-	INSERT INTO "github_uninstall" ("workspace_id", "connector_id", "app_id", "installation_id", "app_credential_encrypted")
-	SELECT "workspace_id", "id", ("settings"->>'appId')::bigint, ("settings"->>'installationId')::bigint, "app_credential_encrypted"
-	FROM deleted_connectors
-	WHERE "kind" = 'github'
-		AND "app_credential_encrypted" IS NOT NULL;
-	RETURN NULL;
-END;
-$$;--> statement-breakpoint
-CREATE TRIGGER connector_github_uninstall
-AFTER DELETE ON "connector"
-REFERENCING OLD TABLE AS deleted_connectors
-FOR EACH STATEMENT EXECUTE FUNCTION queue_deleted_github_installations();
 --> statement-breakpoint
 -- ## Notifications outlive their process
 CREATE TABLE "pending_notification" (
