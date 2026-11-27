@@ -31,6 +31,7 @@ import { type Failed, failed } from "../failed.ts";
 import { MAX_IMAGE_BYTES, shownImageType } from "../images.ts";
 import { unreadableFileRefusal } from "../unreadable-file.ts";
 import { type Copy, copyIntoComputer, safeFileName } from "./attachments.ts";
+import { prepareFoldersCommand } from "./folders.ts";
 import {
 	type AttachToReply,
 	arrivalNote,
@@ -496,23 +497,7 @@ function openAsApproved(
 
 /** prepareFolders moves existing chat and bot folders into place on first use after an upgrade. */
 function prepareFolders(computer: Computers.Computer, place: Place, provider: string) {
-	const paths = [
-		{ folder: place.folder, oldParent: "/workspace/threads" },
-		{ folder: place.home, oldParent: "/workspace/agents" },
-	];
-	const script = paths
-		.flatMap(({ folder, oldParent }) => {
-			const parent = Computers.shellQuoted(posix.dirname(folder));
-			const old = Computers.shellQuoted(posix.join(oldParent, posix.basename(folder)));
-			const current = Computers.shellQuoted(folder);
-			return [
-				`mkdir -p ${parent} || exit 1`,
-				`if [ -d ${old} ]; then mv -n -- ${old} ${parent}/ || [ -d ${current} ] || exit 1; fi`,
-				`mkdir -p ${current} || exit 1`,
-			];
-		})
-		.join("\n");
-	return computer.exec(script, DIRECTORY_COMMAND).pipe(
+	return computer.exec(prepareFoldersCommand(place), DIRECTORY_COMMAND).pipe(
 		Effect.flatMap(({ exitCode, stderr }) =>
 			exitCode === 0
 				? Effect.void
