@@ -1,5 +1,4 @@
 import { handleFromName, type Message } from "@sugabots/contracts";
-import type { ApprovalBinding, TurnEnding } from "@sugabots/contracts/turns";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { type Context, Effect, Layer, Schema } from "effect";
 import { TurnAuthentication } from "../../authentication/turn.ts";
@@ -9,8 +8,7 @@ import { bot, connector } from "../../database/schema.ts";
 import { onDatabase, runOnPostgres, type TestInfrastructure } from "../../database/testing.ts";
 import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
 import type { AsMember } from "../../operations/chats/testing.ts";
-import { askForApprovals } from "../../operations/turns/ask-for-approvals.ts";
-import { asRunningTurn } from "../../operations/turns/running-turn.ts";
+import { askForApprovals, asRunningTurn } from "../../operations/running-turn.ts";
 import type { BotPrincipal } from "../../principal.ts";
 import type { RunsTurn } from "../../proofs/runs-turn.ts";
 import { Models } from "../../providers/models/models.ts";
@@ -21,6 +19,7 @@ import { startBotChat } from "../chats/testing.ts";
 import { lanesForTests } from "../testing.ts";
 import { turnWorkflowForTests } from "../turn-workflow.test-support.ts";
 import { type TurnContext, TurnExecution, type TurnRun } from "./execution.ts";
+import type { ApprovalBinding, TurnEnding } from "./loop-values.ts";
 import { TurnRecords } from "./records.ts";
 import { TURN_WORKFLOW, TurnRequest, TurnRequests, turnLane } from "./requests.ts";
 import { TurnRuns } from "./runs.ts";
@@ -176,14 +175,11 @@ export const runOver =
 			Effect.provideContext(effect, services) as Effect.Effect<A, E, TestInfrastructure>,
 		);
 
-/** Runs `use` with the proof that `turn`'s principal runs it, as the loop's own operations do. */
+/** Runs `use` with the proof that `turn`'s principal runs it, as `RunningTurn` does. */
 export const asTheLoop = <A, E, R>(
 	turn: OpenedTurnForTests,
 	use: <P, T>(runsTurn: RunsTurn<P, T>) => Effect.Effect<A, E, R>,
-) =>
-	asRunningTurn(turn.principal, { chatId: turn.run.request.chatId, turnId: turn.turnId }, use).pipe(
-		Effect.orDie,
-	);
+) => asRunningTurn(turn.principal, use).pipe(Effect.orDie);
 
 /** What the model is told for `turn`, as its step loads it. */
 export const contextOf = (turn: OpenedTurnForTests) =>
@@ -257,14 +253,7 @@ export const parkTurn = (
 	turn: OpenedTurnForTests,
 	approvals: Parameters<TurnRecords.Interface["askForApprovals"]>[2],
 	step = 0,
-) =>
-	askForApprovals
-		.run(
-			turn.principal,
-			{ chatId: turn.run.request.chatId, turnId: turn.turnId, step, approvals },
-			{ kind: "request", request: crypto.randomUUID() },
-		)
-		.pipe(Effect.orDie);
+) => askForApprovals(turn.principal, step, approvals).pipe(Effect.orDie);
 
 /**
  * Records that `turn`'s step `step` is sending a call to `tool`, as the loop

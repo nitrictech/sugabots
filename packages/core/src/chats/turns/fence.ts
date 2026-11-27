@@ -32,7 +32,7 @@ export type FencedProof = Pick<RunsTurn<unknown, unknown>, "execution"> & {
 /**
  * The fence for the writes of the execution `execution` of the turn
  * `turnId`, for a tool that writes on its turn's behalf once its call is
- * recorded, outside the loop's own operations: what it keeps passes the same
+ * recorded, outside the running turn's records: what it keeps passes the same
  * check the loop's own writes do.
  */
 export const executionFence = (turnId: string, execution: number): FencedProof => ({

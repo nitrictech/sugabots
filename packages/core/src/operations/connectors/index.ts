@@ -5,6 +5,7 @@
  */
 
 import { Layer } from "effect";
+import { Turns } from "../../chats/turns/turns.ts";
 import { Connectors } from "../../providers/connectors/connectors.ts";
 import { GitHubApps } from "../../providers/connectors/github/github-app.ts";
 import { GitHubConnectors } from "../../providers/connectors/github/github-connectors.ts";
@@ -58,4 +59,6 @@ export const connectorsLayer = Layer.mergeAll(
 	Connectors.layer,
 	GitHubApps.layer,
 	GitHubConnectors.layer,
+	// A connector's tool call that may change something marks its turn as having acted.
+	Turns.Records.layer,
 );

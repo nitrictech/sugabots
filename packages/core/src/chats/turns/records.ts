@@ -1,20 +1,6 @@
 export * as TurnRecords from "./records.ts";
 
 import { chatStream, streamEvent } from "@sugabots/contracts";
-import type {
-	ApprovalAsked,
-	ApprovalBinding,
-	CallPlan,
-	CallRecord,
-	DecidedStepApproval,
-	OfferedTool,
-	RequestedCall,
-	StepCall,
-	ToolResultOutput,
-	TurnEnding,
-	TurnEnvironment,
-	TurnSetting,
-} from "@sugabots/contracts/turns";
 import { type DomainError, type UserText, userText } from "@sugabots/errors";
 import { jsonSchema, type ModelMessage, type ToolResultPart, type ToolSet, tool } from "ai";
 import {
@@ -46,6 +32,20 @@ import { modelPrompt, steerPromptMessages } from "./context.ts";
 import { TurnExecution } from "./execution.ts";
 import { type FenceRefusal, holdRunningTurn } from "./fence.ts";
 import { logTurnDefect } from "./lifecycle.ts";
+import type {
+	ApprovalAsked,
+	ApprovalBinding,
+	CallPlan,
+	CallRecord,
+	DecidedStepApproval,
+	OfferedTool,
+	RequestedCall,
+	StepCall,
+	ToolResultOutput,
+	TurnEnding,
+	TurnEnvironment,
+	TurnSetting,
+} from "./loop-values.ts";
 import { type LostEnding, type ReplyDraft, type TurnCheckpoint, TurnStore } from "./store.ts";
 import { INTERRUPTED_CALL } from "./tool-calls/lifecycle.ts";
 import { sameCallAsSent, ToolCallStore } from "./tool-calls/store.ts";
@@ -55,8 +55,9 @@ import type { WorkAdmission } from "./work-admission.ts";
  * What the bot loop records of a turn while it runs, each part demanding
  * that the principal runs the turn (`RunsTurn`): loading the turn for a step,
  * the step's model request, its tool calls and their results, asking for
- * approvals, and ending the turn. The loop's own operations, `turns.*`, are
- * built from this; nothing else calls it.
+ * approvals, and ending the turn. `RunningTurn`, the loop's way into the turn
+ * it runs, is built from this; nothing else calls it but a connector's tool
+ * call, which marks the turn as having acted.
  */
 export interface Interface {
 	/**

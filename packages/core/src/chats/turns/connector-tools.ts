@@ -1,5 +1,4 @@
 import { type InputOf, operationContracts } from "@sugabots/contracts/operations";
-import type { ApprovalBinding } from "@sugabots/contracts/turns";
 import { userText } from "@sugabots/errors";
 import { jsonSchema, type Tool } from "ai";
 import { eq } from "drizzle-orm";
@@ -17,6 +16,7 @@ import { failed, ToolCallError } from "../tools/failed.ts";
 import { recordedCallOf } from "../tools/recorded-call.ts";
 import { connectorCallInput } from "../tools/tool-search/tool.ts";
 import { checkApproval } from "./approval-check.ts";
+import type { ApprovalBinding } from "./loop-values.ts";
 import { type RecordingOptions, recorded, ToolApprovalRequired } from "./tool-calls/recorded.ts";
 import type { ApprovalAsked, StepTurn } from "./tools.ts";
 

@@ -19,7 +19,6 @@ import type { OperationContract } from "./operation.ts";
 import { projectsContracts } from "./projects.ts";
 import { providersContracts } from "./providers.ts";
 import { scheduledWorkContracts } from "./scheduled-work.ts";
-import { turnsContracts } from "./turns.ts";
 import { webContracts } from "./web.ts";
 import { workspaceContracts } from "./workspace.ts";
 
@@ -40,7 +39,6 @@ export const operationContracts = checkExposure({
 	...webContracts,
 	...approvalsContracts,
 	...eventsContracts,
-	...turnsContracts,
 	...notificationsContracts,
 	...scheduledWorkContracts,
 });

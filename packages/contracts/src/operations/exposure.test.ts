@@ -33,9 +33,6 @@ const contracts = {
 			approval: { kind: "always", approvers: "turn" },
 		},
 	},
-	"turns.recordStep": {
-		botLoop: { kind: "calledByLoop" },
-	},
 	"events.followChat": {
 		botLoop: { kind: "heldBack", reason: "Stand-in: a bot reads events in its turn." },
 	},

@@ -14,7 +14,7 @@ import { type Abandonment, type NotRunnable, type TurnStanding, TurnStore } from
  * opening it for a run, before the loop can authenticate whom it acts for;
  * ending it when the workflow fails, or when it has nobody to act for; and,
  * once its lane is free, saying so. Everything the loop records while the
- * turn runs goes through its own operations instead.
+ * turn runs goes through `RunningTurn` instead.
  */
 export interface Interface {
 	/** Opens the turn for this run (see `TurnExecution.open`). */

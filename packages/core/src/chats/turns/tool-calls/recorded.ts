@@ -1,10 +1,10 @@
-import type { ApprovalAsked, CallRecord } from "@sugabots/contracts/turns";
 import { type UserText, userText } from "@sugabots/errors";
 import type { Tool } from "ai";
 import { Effect } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import { ToolCallError } from "../../tools/failed.ts";
 import { withRecordedCall } from "../../tools/recorded-call.ts";
+import type { ApprovalAsked, CallRecord } from "../loop-values.ts";
 import type { ToolCallRecorder } from "../tools.ts";
 import { APPROVAL_NO_LONGER_APPLIES, INTERRUPTED_CALL } from "./lifecycle.ts";
 import { forModel, type ResultFiles } from "./long-results.ts";

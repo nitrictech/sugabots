@@ -1,19 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { chatStream } from "@sugabots/contracts";
-import type { BotCannotReach, ResourceHidden, TurnEnded } from "@sugabots/contracts/errors/proofs";
-import type { TurnExecutionSuperseded } from "@sugabots/contracts/errors/turns";
-import type {
-	ApprovalAsked,
-	CallPlan,
-	RequestedCall,
-	StepCall,
-	ToolResultOutput,
-} from "@sugabots/contracts/turns";
 import { logTurnDefect, Turns, turnStoppedUnexpectedly } from "@sugabots/core/chats/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { Ids } from "@sugabots/core/ids/ids";
-import type { Call } from "@sugabots/core/operations/operation";
-import { makeOfferStepTools, Operations } from "@sugabots/core/operations/registry";
+import { RunningTurn } from "@sugabots/core/operations/running-turn";
 import type { BotPrincipal } from "@sugabots/core/principal";
 import { processLayer } from "@sugabots/core/tiers";
 import { type UserText, userText } from "@sugabots/errors";
@@ -28,9 +17,8 @@ import {
 
 /**
  * A turn's steps, for its workflow: each one model request and the tool
- * calls it makes. Everything a step records goes through the loop's own
- * operations, called for the turn's principal; the tools it offers are its
- * bot's, built by core as they always have been.
+ * calls it makes. Everything a step records goes through `RunningTurn`, for
+ * the turn's principal; the tools it offers are its bot's, built by core.
  */
 
 /** How many steps, so model requests, a turn may take in one run. */
@@ -68,28 +56,23 @@ const LOST_THE_CHAT = userText`This bot can no longer reach this chat, so it sto
 const NOBODY_TO_ACT_FOR = userText`This bot can't carry on here: the chat or the message it answers is gone`;
 
 /**
- * The refusals the loop's own operations make when the principal no longer
- * runs the turn: it ended, a newer execution took it over, or the principal
- * lost its chat.
+ * How the running turn's records refuse once the principal no longer runs the
+ * turn: it ended, a newer execution took it over, or the principal lost its chat.
  */
-type Refusal = TurnEnded | TurnExecutionSuperseded | ResourceHidden | BotCannotReach;
+type Refusal = RunningTurn.Refusal;
 
 const finished: StepOutcome = { _tag: "Finished" };
 const carryOn: StepOutcome = { _tag: "Continue" };
-
-/** One of the loop's own calls, which no stored decision approves. */
-const loopCall = (): Call => ({ kind: "request", request: randomUUID() });
 
 /** Builds the turn workflow's activities, with the step time limits from `timing`. */
 const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 	Layer.effect(
 		TurnActivities,
 		Effect.gen(function* () {
-			const operations = yield* Operations.Service;
+			const runningTurn = yield* RunningTurn.Service;
 			const ids = yield* Ids.Service;
 			const runs = yield* Turns.Runs.Service;
 			const tools = yield* Turns.Tools.Service;
-			const offerStepTools = yield* makeOfferStepTools;
 			const events = yield* EventBus.Service;
 
 			const runOf = (request: Turns.TurnRequests.TurnRequest) =>
@@ -101,10 +84,9 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 			 */
 			const endLost = (
 				principal: BotPrincipal,
-				turnId: string,
 				ending: { _tag: "Failed" | "LostReach"; userMessage: UserText },
 			) =>
-				operations["turns.endLost"](principal, { turnId, ending }, loopCall()).pipe(
+				runningTurn.endLost(principal, ending).pipe(
 					Effect.as(finished),
 					Effect.catch(
 						(refusal): Effect.Effect<StepResult> =>
@@ -143,7 +125,7 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 				});
 
 			/**
-			 * What becomes of a step the loop's own operations refused: one whose
+			 * What becomes of a step the running turn's records refused: one whose
 			 * turn ended is over, or runs again as `afterEnded` says; one a newer execution took over ends this
 			 * execution, recording nothing more; one whose principal lost the chat
 			 * ends the turn through `EndsTurn`.
@@ -160,33 +142,24 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 						return Effect.succeed({ _tag: "Superseded" });
 					case "ResourceHidden":
 					case "BotCannotReach":
-						return endLost(principal, turnId, { _tag: "LostReach", userMessage: LOST_THE_CHAT });
+						return endLost(principal, { _tag: "LostReach", userMessage: LOST_THE_CHAT });
 				}
 			};
 
 			/** Records a failed run, and says whether the turn runs again. */
 			const endFailed = (
 				principal: BotPrincipal,
-				turnId: string,
 				failure: { userMessage: UserText; mayRunAgain: boolean; after?: Duration.Duration },
 			) =>
 				Effect.map(
-					operations["turns.end"](
-						principal,
-						{
-							chatId: principal.chat,
-							turnId,
-							ending: {
-								kind: "failed",
-								userMessage: failure.userMessage,
-								mayRunAgain: failure.mayRunAgain,
-								...(failure.after === undefined
-									? {}
-									: { retryAfterMillis: Duration.toMillis(failure.after) }),
-							},
-						},
-						loopCall(),
-					),
+					runningTurn.end(principal, {
+						kind: "failed",
+						userMessage: failure.userMessage,
+						mayRunAgain: failure.mayRunAgain,
+						...(failure.after === undefined
+							? {}
+							: { retryAfterMillis: Duration.toMillis(failure.after) }),
+					}),
 					({ willRetry }): StepOutcome =>
 						willRetry ? { _tag: "Retry", after: failure.after } : finished,
 				);
@@ -199,19 +172,13 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 			 */
 			const endAs = (
 				principal: BotPrincipal,
-				turnId: string,
 				kind: "answered" | "cancelled",
 				noMoreSteps = false,
 			) =>
 				Effect.map(
-					operations["turns.end"](
+					runningTurn.end(
 						principal,
-						{
-							chatId: principal.chat,
-							turnId,
-							ending: kind === "answered" && noMoreSteps ? { kind, noMoreSteps } : { kind },
-						},
-						loopCall(),
+						kind === "answered" && noMoreSteps ? { kind, noMoreSteps } : { kind },
 					),
 					({ steered }): StepOutcome => (steered ? carryOn : finished),
 				);
@@ -219,13 +186,8 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 			/** Takes one step: finishes what the last step left, then makes this one's model request. */
 			const takeStep = (principal: BotPrincipal, place: StepPlace) =>
 				Effect.gen(function* () {
-					const { turnId, step } = place;
-					const chatId = principal.chat;
-					const loaded = yield* operations["turns.load"](
-						principal,
-						{ chatId, turnId, step },
-						loopCall(),
-					);
+					const { step } = place;
+					const loaded = yield* runningTurn.load(principal, step);
 					if (loaded._tag === "Ended") return finished;
 					if (loaded._tag === "Waiting") {
 						return {
@@ -255,38 +217,21 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 							const wasRecorded = (toolCallId: string) =>
 								recordingStep === loaded.callsStep && recordedCallIds.has(toolCallId);
 							const recordCall: Turns.Tools.ToolCallRecorder["open"] = (call) =>
-								stopOn(
-									operations["turns.recordToolCall"](
-										principal,
-										{ chatId, turnId, step: recordingStep, ...call },
-										loopCall(),
-									),
-								);
+								stopOn(runningTurn.recordToolCall(principal, { step: recordingStep, ...call }));
 							const recorder: Turns.Tools.ToolCallRecorder = {
 								open: recordCall,
 								close: (callId, outcome) =>
-									stopOn(
-										operations["turns.finishToolCall"](
-											principal,
-											{ chatId, turnId, callId, outcome },
-											loopCall(),
-										),
-									),
+									stopOn(runningTurn.finishToolCall(principal, callId, outcome)),
 								startApproved: ({ writeOrDelete, ...call }) =>
 									wasRecorded(call.toolCallId) && !approvedCallIds.has(call.toolCallId)
 										? recordCall({ ...call, writeOrDelete })
 										: stopOn(
-												Effect.map(
-													operations["turns.startApprovedToolCall"](
-														principal,
-														{ chatId, turnId, ...call },
-														loopCall(),
-													),
-													(started) => (started._tag === "Refused" ? undefined : started),
+												Effect.map(runningTurn.startApprovedToolCall(principal, call), (started) =>
+													started._tag === "Refused" ? undefined : started,
 												),
 											),
 							};
-							const offered = yield* offerStepTools(
+							const offered = yield* runningTurn.offerStepTools(
 								principal,
 								{
 									replyMessageId: loaded.replyMessageId,
@@ -298,7 +243,7 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 
 							/** Makes one of the step's calls, and says what the model is given back. */
 							const makeCall = (
-								call: Pick<RequestedCall, "toolCallId" | "toolName" | "input" | "invalid">,
+								call: Pick<Turns.RequestedCall, "toolCallId" | "toolName" | "input" | "invalid">,
 							) =>
 								Effect.gen(function* () {
 									if (call.invalid !== undefined) return errorOutput(call.invalid);
@@ -327,15 +272,11 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 								);
 
 							const recordResults = (
-								results: ReadonlyArray<{ toolCallId: string; output: ToolResultOutput }>,
+								results: ReadonlyArray<{ toolCallId: string; output: Turns.ToolResultOutput }>,
 							) =>
 								results.length === 0
 									? Effect.void
-									: operations["turns.recordToolResults"](
-											principal,
-											{ chatId, turnId, results },
-											loopCall(),
-										);
+									: runningTurn.recordToolResults(principal, results);
 
 							/**
 							 * Makes the calls of the step `callsStep` that have no result yet, as
@@ -349,7 +290,7 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 							 * already put to its approvers runs once allowed.
 							 */
 							const finishCalls = (
-								calls: readonly StepCall[],
+								calls: readonly Turns.StepCall[],
 								parked: typeof loaded.approvals,
 								callsStep: number,
 							) =>
@@ -357,7 +298,7 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 									const unanswered = calls.filter((call) => call.result === undefined);
 									if (unanswered.length === 0) return undefined;
 									if (offered.changedApproval !== undefined) {
-										return yield* endFailed(principal, turnId, {
+										return yield* endFailed(principal, {
 											userMessage: APPROVED_TOOL_CHANGED,
 											mayRunAgain: false,
 										});
@@ -370,24 +311,20 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 										),
 									);
 									if (planned.size > 0) {
-										yield* operations["turns.planToolCalls"](
+										yield* runningTurn.planToolCalls(
 											principal,
-											{
-												chatId,
-												turnId,
-												plans: [...planned].map(([toolCallId, plan]) => ({ toolCallId, plan })),
-											},
-											loopCall(),
+											[...planned].map(([toolCallId, plan]) => ({ toolCallId, plan })),
 										);
 									}
 									const parkedFor = new Map(
 										parked.map((approval) => [approval.toolCallId, approval]),
 									);
-									const sends: StepCall[] = [];
+									const sends: Turns.StepCall[] = [];
 									const denied: string[] = [];
 									const withdrawn: string[] = [];
-									const asks: Array<{ toolCallId: string; reopenCallId?: string } & ApprovalAsked> =
-										[];
+									const asks: Array<
+										{ toolCallId: string; reopenCallId?: string } & Turns.ApprovalAsked
+									> = [];
 									for (const call of unanswered) {
 										const approval = parkedFor.get(call.toolCallId);
 										if (approval?.decision === "allowed") sends.push(call);
@@ -425,13 +362,8 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 										...withdrawn.map((toolCallId) => ({ toolCallId, output: withdrawnOutput })),
 									]);
 									if (asks.length === 0) return undefined;
-									const waiting = yield* operations["turns.askForApprovals"](
-										principal,
-										{ chatId, turnId, step: callsStep, approvals: asks },
-										loopCall(),
-									);
-									if (waiting._tag === "NotWaiting")
-										return yield* endAs(principal, turnId, "cancelled");
+									const waiting = yield* runningTurn.askForApprovals(principal, callsStep, asks);
+									if (waiting._tag === "NotWaiting") return yield* endAs(principal, "cancelled");
 									return {
 										_tag: "Waiting",
 										approvals: waiting.approvals,
@@ -440,10 +372,10 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 								});
 
 							/** How a call is to be made now: put to its approvers if it waits for one, else sent. */
-							const planFor = (call: StepCall) =>
+							const planFor = (call: Turns.StepCall) =>
 								Effect.map(
 									offered.approvalOf(call),
-									(asked): CallPlan => (asked ? { _tag: "AskApproval", asked } : dispatch),
+									(asked): Turns.CallPlan => (asked ? { _tag: "AskApproval", asked } : dispatch),
 								);
 
 							// The steps a turn may take: a step past them makes no request, unless
@@ -451,37 +383,29 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 							// it. Past that one, a later steer starts a turn of its own.
 							const noMoreSteps = step >= TURN_STEPS;
 							if (step > TURN_STEPS || (noMoreSteps && !loaded.steered)) {
-								return yield* endAs(principal, turnId, "answered", true);
+								return yield* endAs(principal, "answered", true);
 							}
 							// What the last step left: its calls that waited for approval, or that a
 							// restart cut short, are made now, before this step's model request.
 							const left = yield* finishCalls(loaded.calls, loaded.approvals, loaded.callsStep);
 							if (left !== undefined) return left;
 							if (loaded.requested) {
-								return loaded.answered
-									? yield* endAs(principal, turnId, "answered", noMoreSteps)
-									: carryOn;
+								return loaded.answered ? yield* endAs(principal, "answered", noMoreSteps) : carryOn;
 							}
 
 							const lastStep = step >= TURN_STEPS - 1;
-							const made = yield* operations["turns.makeModelRequest"](
-								principal,
-								{
-									chatId,
-									turnId,
-									step,
-									environment: offered.environment,
-									tools: offered.offered,
-									lastStep,
-								},
-								loopCall(),
-							);
+							const made = yield* runningTurn.makeModelRequest(principal, {
+								step,
+								environment: offered.environment,
+								tools: offered.offered,
+								lastStep,
+							});
 							// The last step was told it may not call tools: what it wrote is the answer.
 							if (made._tag === "Answered") {
-								return yield* endAs(principal, turnId, "answered", noMoreSteps);
+								return yield* endAs(principal, "answered", noMoreSteps);
 							}
 							if (made._tag === "Failed") {
-								return yield* endFailed(principal, turnId, {
+								return yield* endFailed(principal, {
 									userMessage: made.userMessage,
 									mayRunAgain: made.mayRunAgain,
 									...(made.retryAfterMillis === undefined
@@ -544,11 +468,11 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 							orElse: () => Effect.succeed("timedOut" as const),
 						}),
 						Effect.flatMap((outcome): Effect.Effect<StepResult, Refusal> => {
-							if (outcome === "stopped") return endAs(principal, turnId, "cancelled");
+							if (outcome === "stopped") return endAs(principal, "cancelled");
 							if (outcome === "ended") return afterEnded(principal, turnId);
 							if (outcome === "superseded") return Effect.succeed({ _tag: "Superseded" });
 							if (outcome === "timedOut") {
-								return endFailed(principal, turnId, {
+								return endFailed(principal, {
 									userMessage: STEP_TIMED_OUT,
 									mayRunAgain: true,
 								});
@@ -565,12 +489,10 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 					);
 				},
 				release: tools.release,
-				cancelled: (principal, turnId) =>
-					operations["turns.endLost"](
-						principal,
-						{ turnId, ending: { _tag: "AsRequested" } },
-						loopCall(),
-					).pipe(Effect.ignore, Effect.ensuring(tools.release(principal))),
+				cancelled: (principal) =>
+					runningTurn
+						.endLost(principal, { _tag: "AsRequested" })
+						.pipe(Effect.ignore, Effect.ensuring(tools.release(principal))),
 				died: (principal, turnId, cause) =>
 					Effect.gen(function* () {
 						const userMessage = yield* logTurnDefect(
@@ -578,7 +500,7 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 							`A step of turn ${turnId} died`,
 							cause,
 						);
-						return yield* endLost(principal, turnId, { _tag: "Failed", userMessage });
+						return yield* endLost(principal, { _tag: "Failed", userMessage });
 					}),
 				unauthenticated: (request, _attempt) =>
 					Effect.flatMap(runOf(request), (run) =>
@@ -604,25 +526,25 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 export const layer = layerWith(timing);
 
 /** What the model is given back for a call that couldn't be made: why, as an error. */
-function errorOutput(text: string): ToolResultOutput {
-	return { type: "error-text", value: text } as ToolResultOutput;
+function errorOutput(text: string): Turns.ToolResultOutput {
+	return { type: "error-text", value: text } as Turns.ToolResultOutput;
 }
 
 /** A call sent at once. */
-const dispatch: CallPlan = { _tag: "Dispatch" };
+const dispatch: Turns.CallPlan = { _tag: "Dispatch" };
 
 /**
  * What the model is given back for a call whose approval its asker withdrew by
  * writing again before anyone decided it: it was not made, and was not denied.
  */
-const withdrawnOutput: ToolResultOutput = {
+const withdrawnOutput: Turns.ToolResultOutput = {
 	type: "error-text",
 	value:
 		"Not run: your asker wrote again before anyone decided this, so its approval was withdrawn. Read their new message and do what it asks.",
-} as ToolResultOutput;
+} as Turns.ToolResultOutput;
 
 /** What the model is given back for a call its approver denied. */
-const deniedOutput: ToolResultOutput = {
+const deniedOutput: Turns.ToolResultOutput = {
 	type: "execution-denied",
 	reason: Turns.DENIED_OUTPUT.reason,
-} as ToolResultOutput;
+} as Turns.ToolResultOutput;

@@ -1,7 +1,6 @@
 export * as TurnExecution from "./execution.ts";
 
 import { helpersAskedBy, type Message, type Participant } from "@sugabots/contracts";
-import type { TurnSetting } from "@sugabots/contracts/turns";
 import { UserText, userText } from "@sugabots/errors";
 import { eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
@@ -43,6 +42,7 @@ import {
 	newestWithinLimit,
 } from "./context-window.ts";
 import { type Ended, TURN_CANCELLED } from "./lifecycle.ts";
+import type { TurnSetting } from "./loop-values.ts";
 import { answersAlone, type TurnRequest } from "./requests.ts";
 import { type NotRunnable, notRunnable, TurnStore } from "./store.ts";
 
@@ -52,8 +52,8 @@ import { type NotRunnable, notRunnable, TurnStore } from "./store.ts";
  * A turn is asked for when a member posts and run by the bot loop's turn
  * workflow, one step at a time. Its run starts here, with the turn opened
  * through `TurnStore`, before the loop can authenticate the turn's principal;
- * each step then loads what the model is told here, through the loop's own
- * operations, which prove the principal runs the turn.
+ * each step then loads what the model is told here, through `RunningTurn`,
+ * which proves the principal runs the turn.
  */
 export interface Interface {
 	/**

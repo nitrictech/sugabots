@@ -384,8 +384,6 @@ const freshModelProvider = async (fixture: Fixture) => {
 const onAHost = ({ a }: Fixture) => ({ workspace: a.workspace, host: fresh.host() });
 const onAHostOfJ = ({ a }: Fixture) => ({ projectId: a.project, host: fresh.host() });
 
-const TURN_STEPS =
-	"The loop exercises valid calls in packages/bot-loop/src. Shared turn ownership, reach and loss are exercised in proofs/turns.test.ts.";
 const STORED_WORK =
 	"Scheduler dispatch and effects: packages/server/src/scheduler/scheduler.test.ts. These cases use authenticated work.";
 const COMPUTER_TOOLS =
@@ -1091,17 +1089,6 @@ const rows: {
 	"computers.shareFile": { testedIn: COMPUTER_TOOLS },
 	"computers.useBrowser": { testedIn: COMPUTER_TOOLS },
 	"computers.requestHost": { testedIn: COMPUTER_TOOLS },
-
-	"turns.load": { testedIn: TURN_STEPS },
-	"turns.makeModelRequest": { testedIn: TURN_STEPS },
-	"turns.recordToolCall": { testedIn: TURN_STEPS },
-	"turns.planToolCalls": { testedIn: TURN_STEPS },
-	"turns.finishToolCall": { testedIn: TURN_STEPS },
-	"turns.startApprovedToolCall": { testedIn: TURN_STEPS },
-	"turns.askForApprovals": { testedIn: TURN_STEPS },
-	"turns.recordToolResults": { testedIn: TURN_STEPS },
-	"turns.end": { testedIn: TURN_STEPS },
-	"turns.endLost": { testedIn: TURN_STEPS },
 
 	"projectComputer.sleepIfIdle": {
 		input: ({ who }) => {

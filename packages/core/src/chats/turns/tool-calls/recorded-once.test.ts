@@ -1,4 +1,3 @@
-import type { ApprovalBinding } from "@sugabots/contracts/turns";
 import { eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +8,7 @@ import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/test
 import { asMember } from "../../../operations/chats/testing.ts";
 import { servedOperations } from "../../../operations/testing.ts";
 import { chatServicesForTests } from "../../testing.ts";
+import type { ApprovalBinding } from "../loop-values.ts";
 import { CHANGED_SINCE_SENT, TurnRecords } from "../records.ts";
 import {
 	aChatAwaitingReply,

@@ -22,7 +22,7 @@ import {
 } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
 import { layerNoDeps as operationsLayerNoDeps } from "@sugabots/core/operations/layer";
-import { Operations } from "@sugabots/core/operations/registry";
+import { RunningTurn } from "@sugabots/core/operations/running-turn";
 import { servedOperations } from "@sugabots/core/operations/testing";
 import type { BotPrincipal } from "@sugabots/core/principal";
 import { ConnectorCalls } from "@sugabots/core/providers/connectors/connector-calls";
@@ -454,26 +454,26 @@ export interface LoopOptions {
 	readonly clock?: Clock.Clock;
 	readonly logger?: Logger.Logger<unknown, unknown>;
 	/**
-	 * Waited for before each operation the steps call, by its name, so a case
-	 * can hold a step between two of its writes.
+	 * Waited for before each of the running turn's records the steps make, by
+	 * its method's name, so a case can hold a step between two of its writes.
 	 */
-	readonly beforeOperation?: (name: string) => Promise<void>;
+	readonly beforeRecord?: (method: keyof RunningTurn.Interface) => Promise<void>;
 }
 
-/** The operations, each waiting for `beforeOperation` first where it is given. */
-const gatedOperations = (beforeOperation: LoopOptions["beforeOperation"]) =>
+/** The running turn, each method waiting for `beforeRecord` first where it is given. */
+const gatedRunningTurn = (beforeRecord: LoopOptions["beforeRecord"]) =>
 	Layer.effect(
-		Operations.Service,
-		Effect.map(Effect.service(Operations.Service), (operations) => {
-			if (!beforeOperation) return operations;
-			return new Proxy(operations, {
+		RunningTurn.Service,
+		Effect.map(Effect.service(RunningTurn.Service), (running) => {
+			if (!beforeRecord) return running;
+			return new Proxy(running, {
 				get: (target, name, receiver) => {
-					const operation = Reflect.get(target, name, receiver);
-					if (typeof operation !== "function" || typeof name !== "string") return operation;
+					const method = Reflect.get(target, name, receiver);
+					if (typeof method !== "function" || typeof name !== "string") return method;
 					return (...input: unknown[]) =>
 						Effect.andThen(
-							Effect.promise(() => beforeOperation(name)),
-							operation.apply(target, input),
+							Effect.promise(() => beforeRecord(name as keyof RunningTurn.Interface)),
+							method.apply(target, input),
 						);
 				},
 			});
@@ -562,11 +562,10 @@ export async function botLoopOnPostgres(
 			EventStore.layer,
 			Layer.succeed(Models.Service, outside.model),
 		);
-		const environment = Layer.mergeAll(
-			Turns.Runs.layer,
-			Turns.Tools.layer,
-			TurnAuthentication.layer,
-		).pipe(
+		const environment = RunningTurn.layer.pipe(
+			Layer.provideMerge(
+				Layer.mergeAll(Turns.Runs.layer, Turns.Tools.layer, TurnAuthentication.layer),
+			),
 			Layer.provideMerge(
 				operationsLayerNoDeps.pipe(
 					Layer.provideMerge(
@@ -590,7 +589,7 @@ export async function botLoopOnPostgres(
 	const loopOver = async (outside: Outside, options: LoopOptions = {}) => {
 		const environment = await environmentFor(outside);
 		const loop = Steps.layer.pipe(
-			Layer.provide(gatedOperations(options.beforeOperation)),
+			Layer.provide(gatedRunningTurn(options.beforeRecord)),
 			Layer.provideMerge(Layer.succeedContext(environment)),
 		);
 		const scope = Scope.makeUnsafe();
@@ -606,6 +605,7 @@ export async function botLoopOnPostgres(
 			built,
 			steps: onClock(Context.get(built, TurnActivities)),
 			authentication: onPostgres(Context.get(built, TurnAuthentication.Service)),
+			runningTurn: Context.get(built, RunningTurn.Service),
 		};
 	};
 

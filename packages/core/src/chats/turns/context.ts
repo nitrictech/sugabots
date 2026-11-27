@@ -7,7 +7,6 @@ import {
 import { AUTOMATIONS_TOOL_KEY } from "@sugabots/contracts/operations/automations";
 import { SEARCH_HISTORY_TOOL } from "@sugabots/contracts/operations/chat-reads";
 import { WEB_SEARCH_TOOL } from "@sugabots/contracts/operations/web";
-import type { TurnCompaction } from "@sugabots/contracts/turns";
 import { DateTime } from "effect";
 import type { Models } from "../../providers/models/models.ts";
 import {
@@ -18,6 +17,7 @@ import {
 	formatHistoryTime,
 } from "../store/message-text.ts";
 import type { TurnContext } from "./execution.ts";
+import type { TurnCompaction } from "./loop-values.ts";
 
 interface ModelPrompt {
 	system: string;

@@ -11,8 +11,8 @@
  * of what they may do: deciding a turn's tool approvals, steering a turn and
  * interrupting one.
  *
- * For the bot loop: what it records of a turn (`Records`, which the loop's
- * own operations are built from), what its workflow does with no principal
+ * For the bot loop: what it records of a turn (`Records`, which
+ * `RunningTurn` is built from), what its workflow does with no principal
  * (`Runs`), the tools each step offers (`Tools`), and the services core
  * declares and the loop provides, because the loop owns the workflow:
  * starting a turn (`TurnRequests`) and signalling one (`TurnSignals`).
@@ -186,6 +186,13 @@ export {
 	TURN_CANCELLED,
 	turnStoppedUnexpectedly,
 } from "./lifecycle.ts";
+export type {
+	ApprovalAsked,
+	CallPlan,
+	RequestedCall,
+	StepCall,
+	ToolResultOutput,
+} from "./loop-values.ts";
 export { TurnRecords as Records } from "./records.ts";
 export { TurnRequests } from "./requests.ts";
 export { TurnRuns as Runs } from "./runs.ts";

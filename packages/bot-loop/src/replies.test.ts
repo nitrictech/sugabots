@@ -220,8 +220,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's replies, against Postgres",
 				{
 					clock: time.clock,
 					logger,
-					beforeOperation: async (operation) => {
-						if (!defectsInModel && operation === "turns.end") throw defect;
+					beforeRecord: async (method) => {
+						if (!defectsInModel && method === "end") throw defect;
 					},
 				},
 			);

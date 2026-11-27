@@ -4,16 +4,6 @@ import { safeValidateTypes } from "@ai-sdk/provider-utils";
 import { FILE_TOOLS, FILE_WRITING_TOOLS } from "@sugabots/contracts";
 import type { RequestOperationName } from "@sugabots/contracts/operations";
 import { WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "@sugabots/contracts/operations/web";
-import type {
-	ApprovalAsked,
-	ApprovalBinding,
-	CallRecord,
-	OfferedTool as OfferedToolDefinition,
-	StepApproval,
-	ToolResultOutput,
-	TurnEnvironment,
-	TurnSetting,
-} from "@sugabots/contracts/turns";
 import type { UserText } from "@sugabots/errors";
 import { asSchema, type JSONSchema7, type Tool, type ToolResultPart, type ToolSet } from "ai";
 import { Context, Effect, Layer, type Scope } from "effect";
@@ -33,6 +23,16 @@ import { buildCatalog } from "../tools/tool-search/catalog.ts";
 import { CALL_TOOL, callToolTool, toolCatalogNote } from "../tools/tool-search/tool.ts";
 import { connectorToolsForStep } from "./connector-tools.ts";
 import { executionFence, holdTurnForToolWrite } from "./fence.ts";
+import type {
+	ApprovalAsked,
+	ApprovalBinding,
+	CallRecord,
+	OfferedTool as OfferedToolDefinition,
+	StepApproval,
+	ToolResultOutput,
+	TurnEnvironment,
+	TurnSetting,
+} from "./loop-values.ts";
 import { operationTools } from "./operation-tools.ts";
 import { TurnStore } from "./store.ts";
 import type { ResultFiles } from "./tool-calls/long-results.ts";
@@ -75,7 +75,7 @@ function withheldOperations(
 }
 
 /**
- * The bot loop's records of a step's tool calls, through its own operations:
+ * The bot loop's records of a step's tool calls, through `RunningTurn`:
  * each call recorded as sent before it is sent, then finished with what came
  * back. A call that waited for approval is started instead, once allowed,
  * unless its approval no longer holds. Each is recorded once: recording one

@@ -6,7 +6,6 @@ import {
 	messagePartsFor,
 	stepThinkingSchema,
 } from "@sugabots/contracts";
-import { type CallPlan, callPlanSchema } from "@sugabots/contracts/turns";
 import { type DomainError, type UserText, userText } from "@sugabots/errors";
 import type { ModelMessage, ToolModelMessage, ToolResultPart } from "ai";
 import { and, asc, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
@@ -58,6 +57,7 @@ import {
 	transition,
 	unfinishedCallsMessage,
 } from "./lifecycle.ts";
+import { type CallPlan, callPlanSchema } from "./loop-values.ts";
 import { answersAlone, lockOpening, type TurnRequest, TurnRequests } from "./requests.ts";
 import { ToolCallStore } from "./tool-calls/store.ts";
 import { WorkAdmission } from "./work-admission.ts";

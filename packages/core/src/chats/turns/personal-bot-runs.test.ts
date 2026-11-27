@@ -11,7 +11,7 @@ import {
 } from "../../authentication/seed.test-support.ts";
 import { TurnAuthentication } from "../../authentication/turn.ts";
 import { closeDatabase, runOnPostgres } from "../../database/testing.ts";
-import { asRunningTurn } from "../../operations/turns/running-turn.ts";
+import { asRunningTurn } from "../../operations/running-turn.ts";
 import { chatServicesForTests } from "../testing.ts";
 import { TurnRecords } from "./records.ts";
 import { runOver } from "./testing.ts";
@@ -61,7 +61,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a personal bot's runs", async () => 
 		await seedMessage(started.chat, { bot: bot.id, turn: turnId });
 		const principal = await runOnPostgres(authentication.authenticate(turnId));
 		const loaded = await run(
-			asRunningTurn(principal, { chatId: started.chat, turnId }, (runsTurn) =>
+			asRunningTurn(principal, (runsTurn) =>
 				Effect.flatMap(TurnRecords.Service, (records) => records.load(runsTurn, 0)),
 			),
 		);

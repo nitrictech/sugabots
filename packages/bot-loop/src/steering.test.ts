@@ -404,8 +404,8 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 				{ model },
 				{
 					clock: time.clock,
-					beforeOperation: async (operation) => {
-						if (operation !== "turns.end") return;
+					beforeRecord: async (method) => {
+						if (method !== "end") return;
 						await say(sam, "Make it shorter.");
 						await loop.call(adminPrincipal, "projects.removeMember", { projectId, memberId: sam });
 					},
@@ -443,8 +443,8 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 					{ model },
 					{
 						clock: time.clock,
-						beforeOperation: async (operation) => {
-							if (operation === "turns.end") await say(sam, "Make it shorter.");
+						beforeRecord: async (method) => {
+							if (method === "end") await say(sam, "Make it shorter.");
 						},
 					},
 				);
@@ -512,8 +512,8 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 				{ model, connectorTools: wiki("ask", execute) },
 				{
 					clock: time.clock,
-					beforeOperation: async (operation) => {
-						if (operation === "turns.askForApprovals") await say(sam, "Wait for my next message.");
+					beforeRecord: async (method) => {
+						if (method === "askForApprovals") await say(sam, "Wait for my next message.");
 					},
 				},
 			);
@@ -1099,8 +1099,8 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 				{ model },
 				{
 					clock: time.clock,
-					beforeOperation: async (operation) => {
-						if (operation !== "turns.end") return;
+					beforeRecord: async (method) => {
+						if (method !== "end") return;
 						await onDatabase((db) =>
 							db.update(turn).set({ endRequested: "run_ended" }).where(eq(turn.chatId, run.chatId)),
 						);

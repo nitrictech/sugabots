@@ -1,36 +1,14 @@
 /**
- * What the bot loop and core hand each other about a turn through the
- * operations the loop calls itself. None of it crosses a wire: the loop runs
- * in the server's process, so the values that only it and core use are
- * declared by their types and checked no deeper than their shape.
+ * What the bot loop and core hand each other about a turn, through
+ * `RunningTurn`. None of it crosses a wire: the loop runs in the server's
+ * process. A call's plan is stored, so it keeps a schema to read it back by.
  */
 
-import { UserText } from "@sugabots/errors";
+import type { BotColor, BotVisibility } from "@sugabots/contracts/bots";
+import type { ChatKind } from "@sugabots/contracts/messages";
+import type { UserText } from "@sugabots/errors";
 import { Schema } from "effect";
-import type { BotColor, BotVisibility } from "./bots.ts";
-import type { ChatKind } from "./messages.ts";
-
-/**
- * Why a bot was given a turn: a member mentioned it or replied to it, it was the default,
- * it leads a project whose chat got a message mentioning only members (`optional`: it
- * may stay silent), another bot's message mentioned it to ask for its help
- * (`collaboration`: it is that bot's helper), an automation ran, the bots it
- * asked for help have all answered (`hand_back`), it opened its setup
- * interview, or a bot started its chat for a member and briefed it.
- */
-export const turnReasonSchema = Schema.Literals([
-	"mention",
-	"reply",
-	"default",
-	"optional",
-	"collaboration",
-	// An automation ran, whatever started it: a routine, a trigger or somebody by hand.
-	"automation",
-	"hand_back",
-	"interview",
-	"brief",
-]);
-export type TurnReason = typeof turnReasonSchema.Type;
+import type { TurnReason } from "../sql.ts";
 
 /**
  * Where a turn is and who works in it, as its step needs to know to offer
@@ -115,18 +93,12 @@ export interface TurnCompaction {
 	readonly keptFrom: Date;
 }
 
-export const turnSettingSchema = Schema.declare(
-	(value: unknown): value is TurnSetting =>
-		typeof value === "object" && value !== null && "chat" in value && "bot" in value,
-	{ title: "TurnSetting" },
-);
-
 /**
  * What an approved call must still match when it runs, beyond its tool and
  * input: for a connector's tool, the connector configured as it was when
  * the member allowed it. A built-in tool is the same tool wherever it runs.
  */
-export const approvalBindingSchema = Schema.Union([
+const approvalBindingSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("connector"),
 		connectorId: Schema.String,
@@ -145,20 +117,11 @@ export interface ToolResultOutput {
 	readonly type: string;
 }
 
-export const toolResultOutputSchema = Schema.declare(
-	(value: unknown): value is ToolResultOutput =>
-		typeof value === "object" &&
-		value !== null &&
-		"type" in value &&
-		typeof value.type === "string",
-	{ title: "ToolResultOutput" },
-);
-
 /**
  * What a call waits for approval of: the tool, the input it gives it, what
  * that must still match when it runs, and whether it may change something.
  */
-export const approvalAskedSchema = Schema.Struct({
+const approvalAskedSchema = Schema.Struct({
 	tool: Schema.String,
 	input: Schema.Unknown,
 	binding: approvalBindingSchema,
@@ -182,66 +145,59 @@ export const callPlanSchema = Schema.Union([
 export type CallPlan = typeof callPlanSchema.Type;
 
 /** One of a step's tool calls, as the model made it, with what it is given back once it has that. */
-export const stepCallSchema = Schema.Struct({
-	toolCallId: Schema.String,
-	toolName: Schema.String,
-	input: Schema.Unknown,
+export interface StepCall {
+	readonly toolCallId: string;
+	readonly toolName: string;
+	readonly input: unknown;
 	/** How the call is to be made, once the step decided it. */
-	plan: Schema.optional(callPlanSchema),
-	result: Schema.optional(toolResultOutputSchema),
-});
-export type StepCall = typeof stepCallSchema.Type;
+	readonly plan?: CallPlan;
+	readonly result?: ToolResultOutput;
+}
 
 /** A call of the last step that waits for approval, and what it must still match to run. */
-const stepApprovalSchema = Schema.Struct({
-	approvalId: Schema.String,
-	toolCallId: Schema.String,
-	tool: Schema.String,
-	binding: approvalBindingSchema,
-});
-export type StepApproval = typeof stepApprovalSchema.Type;
+export interface StepApproval {
+	readonly approvalId: string;
+	readonly toolCallId: string;
+	readonly tool: string;
+	readonly binding: ApprovalBinding;
+}
 
 /** A call of the last step that waited for approval, with how its approver decided it so far. */
-export const decidedStepApprovalSchema = Schema.Struct({
-	...stepApprovalSchema.fields,
+export interface DecidedStepApproval extends StepApproval {
 	/** `withdrawn` when its asker steered the turn before anyone decided it. */
-	decision: Schema.Literals(["pending", "allowed", "denied", "withdrawn"]),
-});
-export type DecidedStepApproval = typeof decidedStepApprovalSchema.Type;
+	readonly decision: "pending" | "allowed" | "denied" | "withdrawn";
+}
 
 /**
  * A tool the step offers the model, as its model request sends it: its
  * name, what it does, and the JSON Schema of its input.
  */
-export const offeredToolSchema = Schema.Struct({
-	name: Schema.String,
-	description: Schema.optional(Schema.String),
-	inputSchema: Schema.Record(Schema.String, Schema.Unknown),
-});
-export type OfferedTool = typeof offeredToolSchema.Type;
+export interface OfferedTool {
+	readonly name: string;
+	readonly description?: string;
+	readonly inputSchema: { readonly [key: string]: unknown };
+}
 
 /**
  * The facts about one turn's tools that the bot is told, gathered when its
  * first step's prompt is made: what it has, where to find the rest, and its
  * computer.
  */
-export const turnEnvironmentSchema = Schema.Struct({
+export interface TurnEnvironment {
 	/** The built-in tools on offer this turn, by key, so the bot is told it has them. */
-	builtInTools: Schema.Array(Schema.String),
+	readonly builtInTools: ReadonlyArray<string>;
 	/** How to find the tools in the catalog, and which are there. */
-	toolCatalog: Schema.UndefinedOr(Schema.String),
-	computer: Schema.UndefinedOr(Schema.String),
-});
-export type TurnEnvironment = typeof turnEnvironmentSchema.Type;
+	readonly toolCatalog: string | undefined;
+	readonly computer: string | undefined;
+}
 
 /** A tool call a step's model request made. `invalid` says what was wrong with its input, if anything. */
-export const requestedCallSchema = Schema.Struct({
-	toolCallId: Schema.String,
-	toolName: Schema.String,
-	input: Schema.Unknown,
-	invalid: Schema.optional(Schema.String),
-});
-export type RequestedCall = typeof requestedCallSchema.Type;
+export interface RequestedCall {
+	readonly toolCallId: string;
+	readonly toolName: string;
+	readonly input: unknown;
+	readonly invalid?: string;
+}
 
 /** How a turn's run ends, as the loop records it. */
 export type TurnEnding =
@@ -264,10 +220,7 @@ export type TurnEnding =
 	| { readonly kind: "cancelled" };
 
 /** What a tool call returned, or how it failed. */
-export const callOutcomeSchema = Schema.Union([
-	Schema.Struct({ output: Schema.Unknown }),
-	Schema.Struct({ error: UserText.schema }),
-]);
+type CallOutcome = { readonly output: unknown } | { readonly error: UserText };
 
 /**
  * What recording a tool call as sent found, before it is sent. Each call is
@@ -279,17 +232,15 @@ export const callOutcomeSchema = Schema.Union([
  * did. One that changes nothing is sent again, once an execution, and only if
  * its tool is still the one it was sent to.
  */
-export const callRecordSchema = Schema.Union([
+export type CallRecord =
 	/** Send the call now, recorded as `id`. */
-	Schema.TaggedStruct("Send", { id: Schema.String }),
+	| { readonly _tag: "Send"; readonly id: string }
 	/** An earlier execution finished the call. */
-	Schema.TaggedStruct("Finished", { id: Schema.String, outcome: callOutcomeSchema }),
+	| { readonly _tag: "Finished"; readonly id: string; readonly outcome: CallOutcome }
 	/** An earlier execution sent the call and never finished it. */
-	Schema.TaggedStruct("Interrupted", { id: Schema.String, error: UserText.schema }),
+	| { readonly _tag: "Interrupted"; readonly id: string; readonly error: UserText }
 	/**
 	 * The call was recorded and is not sent: this execution sent it already,
 	 * or its tool changed since it was sent.
 	 */
-	Schema.TaggedStruct("NotSent", { id: Schema.String, error: UserText.schema }),
-]);
-export type CallRecord = typeof callRecordSchema.Type;
+	| { readonly _tag: "NotSent"; readonly id: string; readonly error: UserText };

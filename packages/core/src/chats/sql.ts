@@ -16,7 +16,6 @@ import type {
 	ToolCallStatus,
 	WrittenFileKind,
 } from "@sugabots/contracts";
-import type { TurnReason } from "@sugabots/contracts/turns";
 import type { UserText } from "@sugabots/errors";
 import { sql } from "drizzle-orm";
 import {
@@ -406,8 +405,25 @@ export const chatParticipant = pgTable(
 	],
 );
 
-/** Why a bot was given a turn (see `turnReasonSchema`). */
-export type { TurnReason };
+/**
+ * Why a bot was given a turn: a member mentioned it or replied to it, it was the default,
+ * it leads a project whose chat got a message mentioning only members (`optional`: it
+ * may stay silent), another bot's message mentioned it to ask for its help
+ * (`collaboration`: it is that bot's helper), an automation ran, the bots it
+ * asked for help have all answered (`hand_back`), it opened its setup
+ * interview, or a bot started its chat for a member and briefed it.
+ */
+export type TurnReason =
+	| "mention"
+	| "reply"
+	| "default"
+	| "optional"
+	| "collaboration"
+	// An automation ran, whatever started it: a routine, a trigger or somebody by hand.
+	| "automation"
+	| "hand_back"
+	| "interview"
+	| "brief";
 
 export type TurnStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
 

@@ -1,5 +1,4 @@
 import { READ_CHAT_FILE_TOOL } from "@sugabots/contracts/operations/chat-reads";
-import type { CallRecord } from "@sugabots/contracts/turns";
 import { userText } from "@sugabots/errors";
 import { jsonSchema, tool } from "ai";
 import { Effect, Logger, ManagedRuntime, Schema, Stream } from "effect";
@@ -9,6 +8,7 @@ import { effectRunner } from "../../../database/database.ts";
 import { noDatabase } from "../../../database/testing.ts";
 import { ChatFileStore } from "../../../files/chat-file-store.ts";
 import { recordedCallOf } from "../../tools/recorded-call.ts";
+import type { CallRecord } from "../loop-values.ts";
 import type { ToolCallRecorder } from "../tools.ts";
 import { APPROVAL_NO_LONGER_APPLIES, INTERRUPTED_CALL } from "./lifecycle.ts";
 import { type LongResult, MAX_RESULT_CHARACTERS } from "./long-results.ts";

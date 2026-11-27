@@ -89,9 +89,7 @@ export type OfferedIn = "everywhere" | "chatBounds" | "ownChats" | "memberBounds
 
 /**
  * The bot loop's decision: offer the operation as a tool, in some bounds; hold
- * it back and say why; name the operation whose tool already does the same; or
- * mark it as called by the loop itself, offered to no model, as loading a turn
- * and recording its steps are.
+ * it back and say why; or name the operation whose tool already does the same.
  *
  * A tool offered in `chatBounds` or `ownChats` manages a project for the
  * asker, so it always waits for the asker's approval.
@@ -110,8 +108,7 @@ export type BotLoopDecision =
 			readonly approval: AskersApproval;
 	  }
 	| { readonly kind: "heldBack"; readonly reason: string }
-	| { readonly kind: "coveredBy"; readonly operation: string; readonly reason: string }
-	| { readonly kind: "calledByLoop" };
+	| { readonly kind: "coveredBy"; readonly operation: string; readonly reason: string };
 
 /** The segments of an HTTP path, between its slashes. */
 type Segments<Path extends string> = Path extends `${infer Segment}/${infer Rest}`

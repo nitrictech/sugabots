@@ -27,15 +27,15 @@ import type { Call, LongRunningOperation, Operation, Running, ServicesOf } from 
 import { projectsOperations } from "./projects/index.ts";
 import { providersOperations } from "./providers/index.ts";
 import { scheduledWorkOperations } from "./scheduled-work.ts";
-import { turnsOperations } from "./turns/index.ts";
 import { webOperations } from "./web/index.ts";
 import { workspaceOperations } from "./workspace/index.ts";
 
 /**
  * Every operation that runs once per call, by name, for a principal an
  * entrypoint authenticated. The one way into the core, with
- * {@link LongRunning}: every entrypoint calls these, with the call it is
- * making, and each proves access for itself.
+ * {@link LongRunning}, but for the bot loop's records of the turn it runs
+ * (`RunningTurn`): every entrypoint calls these, with the call it is making,
+ * and each proves access for itself.
  *
  * Each input is decoded through its contract's input schema before the
  * operation's body sees it, whichever entrypoint called, so checks across
@@ -90,7 +90,6 @@ const operations = {
 	...webOperations,
 	...approvalsOperations,
 	...eventsOperations,
-	...turnsOperations,
 	...notificationsOperations,
 	...scheduledWorkOperations,
 } satisfies {
@@ -153,10 +152,3 @@ export const make = Effect.gen(function* () {
 });
 
 export const layerNoDeps = processLayer(Layer.effectContext(make));
-
-/**
- * makeOfferStepTools builds the loop's turns.offerStepTools operation.
- * It returns live callbacks owned by the step, so it has no portable
- * contract or exposure manifest entry.
- */
-export { makeOfferStepTools } from "./turns/index.ts";

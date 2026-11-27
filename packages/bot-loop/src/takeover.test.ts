@@ -1,15 +1,15 @@
 import { toolCallPartSchema } from "@sugabots/contracts/messages";
 import { WEB_FETCH_TOOL } from "@sugabots/contracts/operations/web";
-import type { ToolResultOutput } from "@sugabots/contracts/turns";
 import type { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
 import { CALL_TOOL } from "@sugabots/core/chats/tools/tool-search/tool";
 import {
 	aChatWithConnectorAwaitingReply,
 	type TurnCheckpoint,
 } from "@sugabots/core/chats/turns/testing";
+import type { Turns } from "@sugabots/core/chats/turns/turns";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
 import { membership, turn } from "@sugabots/core/database/schema";
-import { closeDatabase, onDatabase } from "@sugabots/core/database/testing";
+import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
 import { Models } from "@sugabots/core/providers/models/models";
 import { streamed } from "@sugabots/core/providers/models/testing";
@@ -318,7 +318,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				{ text: ["Check the wiki."] },
 			);
 			const time = await controlledClock();
-			const { steps, authentication } = await loop.loopOver(
+			const { steps, authentication, runningTurn } = await loop.loopOver(
 				{ model, connectorTools: wiki("allow", execute) },
 				{ clock: time.clock },
 			);
@@ -339,13 +339,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(await stopped).toEqual({ _tag: "Superseded" });
 			// Should its call come back late, whatever the stopped execution would
 			// record of it is refused, as it no longer runs the turn.
-			const lateResult: ToolResultOutput = { type: "json" };
+			const lateResult: Turns.ToolResultOutput = { type: "json" };
 			await expect(
-				loop.call(first, "turns.recordToolResults", {
-					chatId,
-					turnId: opened.turnId,
-					results: [{ toolCallId: "sdk-1", output: lateResult }],
-				}),
+				runOnPostgres(
+					runningTurn.recordToolResults(first, [{ toolCallId: "sdk-1", output: lateResult }]),
+				),
 			).rejects.toMatchObject({ _tag: "TurnExecutionSuperseded" });
 			expect(await steps.step(run.request, second, at(0))).toEqual({ _tag: "Continue" });
 			expect(await steps.step(run.request, second, at(1))).toEqual({ _tag: "Finished" });
@@ -536,8 +534,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			const { steps, authentication } = await loop.loopOver(
 				{ model, egress: unimplemented(Egress.Service, { webFetch }) },
 				{
-					beforeOperation: async (name) => {
-						if (name !== "turns.end" || ends++ > 0) return;
+					beforeRecord: async (method) => {
+						if (method !== "end" || ends++ > 0) return;
 						ending.resolve();
 						await endHeld.promise;
 					},

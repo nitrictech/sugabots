@@ -20,7 +20,6 @@ import { projectsLayer } from "./projects/index.ts";
 import { providersLayer } from "./providers/index.ts";
 import { Operations } from "./registry.ts";
 import { scheduledWorkLayer } from "./scheduled-work.ts";
-import { turnsLayer } from "./turns/index.ts";
 import { webLayer } from "./web/index.ts";
 import { workspaceLayer } from "./workspace/index.ts";
 
@@ -40,7 +39,6 @@ export const layerNoDeps = Operations.layerNoDeps.pipe(
 			webLayer,
 			approvalsLayer,
 			eventsLayer,
-			turnsLayer,
 			notificationsLayer,
 			scheduledWorkLayer,
 		),

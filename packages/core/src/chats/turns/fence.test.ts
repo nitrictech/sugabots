@@ -7,8 +7,8 @@ import { file, message, toolCall, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { asMember } from "../../operations/chats/testing.ts";
+import { asRunningTurn } from "../../operations/running-turn.ts";
 import { servedOperations } from "../../operations/testing.ts";
-import { asRunningTurn } from "../../operations/turns/running-turn.ts";
 import type { BotPrincipal } from "../../principal.ts";
 import { proveEndsTurn } from "../../proofs/ends-turn.ts";
 import { named } from "../../proofs/proof.ts";
@@ -58,13 +58,10 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 	const writeAs = (principal: BotPrincipal, text: string) =>
 		run(
 			Effect.result(
-				asRunningTurn(
-					principal,
-					{ chatId: opened.run.request.chatId, turnId: opened.turnId },
-					(runsTurn) =>
-						Effect.flatMap(TurnStore.Service, (turns) =>
-							turns.keepReply(runsTurn, { content: text, toolCalls: [] }),
-						),
+				asRunningTurn(principal, (runsTurn) =>
+					Effect.flatMap(TurnStore.Service, (turns) =>
+						turns.keepReply(runsTurn, { content: text, toolCalls: [] }),
+					),
 				),
 			),
 		);
