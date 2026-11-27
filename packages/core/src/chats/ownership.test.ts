@@ -15,7 +15,11 @@ const OWNERS: Record<string, readonly string[]> = {
 	systemChat: ["core/src/chats/store/store.ts"],
 	chatParticipant: ["core/src/chats/store/store.ts"],
 	// A turn writes its own reply while it runs; every other message is posted into a chat.
-	message: ["core/src/chats/store/store.ts", "core/src/chats/turns/store.ts"],
+	message: [
+		"core/src/chats/store/store.ts",
+		"core/src/chats/turns/store.ts",
+		"core/src/chats/turns/joins.ts",
+	],
 	// A bot that stays silent on an optional turn reacts 👀 as its turn ends.
 	messageReaction: ["core/src/chats/store/store.ts", "core/src/chats/turns/store.ts"],
 	automation: ["core/src/chats/automations/store.ts"],

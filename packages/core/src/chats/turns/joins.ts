@@ -23,4 +23,3 @@ export const recordJoin = (messageId: string, joined: JoinedTurn) =>
 			.set({ joinedTurns: sql`${message.joinedTurns} || ${JSON.stringify([joined])}::jsonb` })
 			.where(eq(message.id, messageId)),
 	).pipe(Effect.asVoid);
-
