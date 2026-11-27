@@ -7,13 +7,12 @@ import {
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { cn } from "cn";
-import { ChevronRight, Download } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useFile } from "@/lib/files.ts";
 import { Button } from "@/ui/button.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
 import { IconTile } from "@/ui/icon-tile.tsx";
-import { downloadWrittenFile, FILE_KINDS, OutsideRunPageNote } from "./file-kinds.tsx";
+import { FILE_KINDS, OutsideRunPageNote } from "./file-kinds.tsx";
 
 /** A file as a message shows it: at the version written. */
 export type FileAsWritten = Omit<WrittenFilePart, "type">;
@@ -131,7 +130,6 @@ export function FileCardView({
 		);
 	}
 	const previewed = content !== "failed";
-	const loaded = previewed ? content : undefined;
 	return (
 		<article
 			aria-label={file.title}
@@ -165,44 +163,29 @@ export function FileCardView({
 					)}
 				</div>
 			)}
-			{/* The line opens the file; Download sits over its end, as a button can't be inside a button. */}
-			<div className="relative flex min-w-0 items-center gap-3 px-3.5 py-3">
-				<button
-					type="button"
-					onClick={onOpen}
-					aria-label={`Open ${file.title}`}
-					className={cn(
-						"focus-ring absolute inset-0 transition-colors hover:bg-row-hover",
-						previewed ? "rounded-b-bubble" : "rounded-bubble",
-					)}
-				/>
-				<span className="pointer-events-none relative flex min-w-0 flex-1 items-center gap-3">
-					<IconTile size="md" tone="tile">
-						<kind.Icon strokeWidth={2} />
-					</IconTile>
-					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<span className="truncate font-medium text-sm leading-snug">{file.title}</span>
-						<span className="truncate text-muted-foreground text-xs leading-snug">
-							{kind.label} by {botName}
-						</span>
+			<button
+				type="button"
+				onClick={onOpen}
+				aria-label={`Open ${file.title}`}
+				className={cn(
+					"group/line focus-ring flex min-w-0 items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-hover",
+					previewed ? "rounded-b-bubble" : "rounded-bubble",
+				)}
+			>
+				<IconTile size="md" tone="tile">
+					<kind.Icon strokeWidth={2} />
+				</IconTile>
+				<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+					<span className="truncate font-medium text-sm leading-snug">{file.title}</span>
+					<span className="truncate text-muted-foreground text-xs leading-snug">
+						{kind.label} by {botName}
 					</span>
 				</span>
-				{loaded !== undefined && (
-					<IconButton
-						label={`Download ${file.title}`}
-						onClick={() =>
-							downloadWrittenFile({ kind: file.kind, title: file.title, content: loaded })
-						}
-						className="relative"
-					>
-						<Download aria-hidden />
-					</IconButton>
-				)}
 				<ChevronRight
 					aria-hidden
-					className="pointer-events-none relative size-4 shrink-0 text-subtle-foreground"
+					className="size-4 shrink-0 text-subtle-foreground transition group-hover/line:translate-x-0.5 group-hover/line:text-foreground motion-reduce:transition-none"
 				/>
-			</div>
+			</button>
 		</article>
 	);
 }

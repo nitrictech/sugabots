@@ -42,7 +42,7 @@ import { IconTile } from "@/ui/icon-tile.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { useCopy } from "@/ui/use-copy.ts";
-import { downloadWrittenFile, FILE_KINDS, LoadOutsideRunPage } from "./file-kinds.tsx";
+import { FILE_KINDS, LoadOutsideRunPage } from "./file-kinds.tsx";
 
 type Loading = "loading" | "failed";
 
@@ -415,7 +415,7 @@ export function FileStageView({
 						onVersionChange={onVersionChange}
 					/>
 					<MoreMenu>
-						<DropdownMenuItem onClick={() => downloadWrittenFile(file)}>
+						<DropdownMenuItem onClick={() => downloadFile(file)}>
 							<Download aria-hidden />
 							Download
 						</DropdownMenuItem>
@@ -539,6 +539,27 @@ function byWhen(files: readonly ListedFile[], now: Date): Group[] {
 		else groups.push({ label, files: [file] });
 	}
 	return groups;
+}
+
+/** Saves the file as shown, as a file named after its title. */
+function downloadFile(file: WrittenFile) {
+	const { extension, type, contentOf } = FILE_KINDS[file.kind].file;
+	const url = URL.createObjectURL(new Blob([contentOf(file.content)], { type }));
+	const link = document.createElement("a");
+	link.href = url;
+	link.download = fileNameFor(file.title, extension);
+	link.click();
+	// Safari reads the file after `click` returns, so it is let go of later, not at once.
+	setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_READ_MS);
+}
+
+/** Long enough for any browser to have read a downloaded file before it is let go of. */
+const DOWNLOAD_READ_MS = 60_000;
+
+/** `title` as a file name ending in `.extension`, without the characters file systems refuse. */
+function fileNameFor(title: string, extension: string): string {
+	const name = title.replace(/[\\/:*?"<>|]+/g, "-").trim();
+	return name.toLowerCase().endsWith(`.${extension}`) ? name : `${name}.${extension}`;
 }
 
 /** When a file in the list last changed, at the row's end. */

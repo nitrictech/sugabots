@@ -62,27 +62,6 @@ export function LoadOutsideRunPage({
 	);
 }
 
-/** Saves the file as shown, as a file named after its title. */
-export function downloadWrittenFile(file: Pick<WrittenFile, "kind" | "title" | "content">) {
-	const { extension, type, contentOf } = FILE_KINDS[file.kind].file;
-	const url = URL.createObjectURL(new Blob([contentOf(file.content)], { type }));
-	const link = document.createElement("a");
-	link.href = url;
-	link.download = fileNameFor(file.title, extension);
-	link.click();
-	// Safari reads the file after `click` returns, so it is let go of later, not at once.
-	setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_READ_MS);
-}
-
-/** Long enough for any browser to have read a downloaded file before it is let go of. */
-const DOWNLOAD_READ_MS = 60_000;
-
-/** `title` as a file name ending in `.extension`, without the characters file systems refuse. */
-function fileNameFor(title: string, extension: string): string {
-	const name = title.replace(/[\\/:*?"<>|]+/g, "-").trim();
-	return name.toLowerCase().endsWith(`.${extension}`) ? name : `${name}.${extension}`;
-}
-
 export const FILE_KINDS: Record<WrittenFileKind, WrittenFileKindView> = {
 	markdown: {
 		label: FILE_KIND_LABELS.markdown,
@@ -153,7 +132,7 @@ function DocumentStart({ content, onOpen }: { content: string; onOpen: () => voi
 			onClick={onOpen}
 			className={cn(
 				PREVIEW_HEIGHT.className,
-				"w-full cursor-zoom-in overflow-hidden text-xs",
+				"w-full cursor-pointer overflow-hidden text-xs",
 				cutOff && "mask-b-from-60%",
 			)}
 		>
@@ -193,7 +172,7 @@ function PagePreview({
 			className={cn(
 				PREVIEW_HEIGHT.className,
 				// The page is a picture here, so it takes no pointer; the frame's own buttons still do.
-				"w-full cursor-zoom-in overflow-hidden [&_iframe]:pointer-events-none",
+				"w-full cursor-pointer overflow-hidden [&_iframe]:pointer-events-none",
 				pageHeight > PREVIEW_HEIGHT.px && "mask-b-from-60%",
 			)}
 		>

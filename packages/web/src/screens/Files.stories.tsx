@@ -362,7 +362,7 @@ const asWritten = (summary: ListedWrittenFile, title = summary.title): FileAsWri
 
 /**
  * A document's card shows its start, and opens it large from its line, or
- * from anywhere on what it shows; Download saves it.
+ * from anywhere on what it shows.
  */
 export const InlineDocument = meta.story({
 	args: { onOpen: fn() },
@@ -383,7 +383,6 @@ export const InlineDocument = meta.story({
 		await expect(args.onOpen).toHaveBeenCalledTimes(1);
 		await userEvent.click(goals);
 		await expect(args.onOpen).toHaveBeenCalledTimes(2);
-		await expect(canvas.getByRole("button", { name: "Download Q4 outreach plan" })).toBeVisible();
 	},
 });
 
@@ -405,7 +404,7 @@ export const InlineDeleted = meta.story({
 	},
 });
 
-/** A card whose file could not be loaded still says what it is and opens it, with nothing to preview or download. */
+/** A card whose file could not be loaded still says what it is and opens it, with nothing to preview. */
 export const InlineFailed = meta.story({
 	render: () => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
@@ -415,7 +414,6 @@ export const InlineFailed = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("button", { name: "Open Q4 outreach plan" })).toBeVisible();
 		await expect(canvas.queryByRole("heading", { name: "Goals" })).toBeNull();
-		await expect(canvas.queryByRole("button", { name: "Download Q4 outreach plan" })).toBeNull();
 	},
 });
 
