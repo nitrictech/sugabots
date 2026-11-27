@@ -141,7 +141,6 @@ it("offers a bot's own connector in another project only once it is turned on th
 			projectId,
 			botId: bot.id,
 			connectorId,
-			memberId: admin,
 			on: true,
 			addressRevision,
 		});
@@ -190,7 +189,6 @@ it("turns a bot's own connector on from several managers at once", async () => {
 				projectId,
 				botId: bot.id,
 				connectorId: own.id,
-				memberId: admin,
 				on: true,
 				addressRevision: own.addressRevision,
 			}),
