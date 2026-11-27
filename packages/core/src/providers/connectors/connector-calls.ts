@@ -77,16 +77,15 @@ export const make = Effect.map(ConnectorCatalog.Service, from);
 export const layerNoDeps = processLayer(Layer.effect(Service, make));
 export const layer = layerNoDeps.pipe(Layer.provide(ConnectorCatalog.layer));
 
-type Catalog = Omit<ConnectorCatalog.ConnectorToolSet, "tools" | "close"> & {
-	readonly tools: Readonly<
-		Record<string, Omit<OfferedTool, "tool" | "resolveApprovalTargets" | "refreshForApproval">>
-	>;
+type Catalog = Omit<ConnectorCatalog.ConnectorToolSet, "tools" | "refreshForApproval" | "close"> & {
+	readonly tools: Readonly<Record<string, Omit<OfferedTool, "tool" | "resolveApprovalTargets">>>;
 };
 
 interface TurnConnectors {
 	readonly executionNumber: number;
 	readonly sessions: ConnectorSessions;
 	tools: Record<string, OfferedTool>;
+	refreshForApproval: ConnectorCatalog.ConnectorToolSet["refreshForApproval"];
 	close: () => Promise<void>;
 }
 
@@ -113,15 +112,19 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 				)
 					return false;
 				const turn = turns.get(principal.turn);
-				const offered = find(principal, binding.connectorId, binding.tool);
-				if (!offered?.refreshForApproval || !turn) return false;
-				const fresh = yield* offered.refreshForApproval();
+				if (turn?.executionNumber !== principal.executionNumber)
+					return yield* new ResourceHidden({ resource: "connector" });
+				const refresh = turn.refreshForApproval.get(binding.connectorId);
+				if (!refresh) return false;
+				const fresh = yield* refresh(binding.tool);
 				if (!fresh || turns.get(principal.turn) !== turn)
 					return yield* new ResourceHidden({ resource: "connector" });
 				turn.tools = {
 					...turn.tools,
 					[connectorToolKey(fresh.handle, fresh.remoteToolName)]: fresh,
 				};
+				// The revision includes the server's tool definitions. A tool the server adds
+				// in place of an augmentation requires a new approval.
 				if (fresh.connectorRevision !== binding.revision) return yield* new ApprovalNeeded();
 				return true;
 			}),
@@ -135,6 +138,7 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 						executionNumber: principal.executionNumber,
 						sessions: connectorSessions(),
 						tools: {},
+						refreshForApproval: new Map(),
 						close: async () => {},
 					};
 					turns.set(principal.turn, turn);
@@ -158,6 +162,7 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 					return emptyCatalog();
 				}
 				turn.tools = catalog.tools;
+				turn.refreshForApproval = catalog.refreshForApproval;
 				turn.close = catalog.close;
 				return describeCatalog(catalog);
 			}),
@@ -273,6 +278,7 @@ function closeTurnSessions(turnId: string, turn: TurnConnectors) {
 
 function describeCatalog({
 	tools,
+	refreshForApproval: _refresh,
 	close: _,
 	...catalog
 }: ConnectorCatalog.ConnectorToolSet): Catalog {
@@ -280,15 +286,10 @@ function describeCatalog({
 		...catalog,
 		tools: Object.fromEntries(
 			Object.entries(tools).map(
-				([
+				([key, { tool: _, resolveApprovalTargets: _resolve, ...description }]) => [
 					key,
-					{
-						tool: _,
-						resolveApprovalTargets: _resolve,
-						refreshForApproval: _refresh,
-						...description
-					},
-				]) => [key, description],
+					description,
+				],
 			),
 		),
 	};

@@ -86,7 +86,6 @@ import type { UploadSide } from "./signed-upload/tool.ts";
 
 export interface OfferedTool {
 	tool: Tool;
-	refreshForApproval?: () => Effect.Effect<OfferedTool | undefined>;
 	usesComputer?: (input: Readonly<Record<string, unknown>>) => boolean;
 	resolveApprovalTargets?: (
 		input: Readonly<Record<string, unknown>>,
@@ -157,6 +156,7 @@ function jsonSchemaOf(name: string, tool: Tool): JSONSchema7 {
 
 export interface ConnectorToolSet {
 	tools: Record<string, OfferedTool>;
+	refreshForApproval: ReadonlyMap<string, (tool: string) => Effect.Effect<OfferedTool | undefined>>;
 	/** Connectors left out because their server couldn't be listed. */
 	unavailable: string[];
 	/** Connectors left out until someone signs in again, each with the project that holds it. */
@@ -558,28 +558,40 @@ export function from({
 				);
 				const listed = listings.flatMap((recorded) => {
 					if (typeof recorded !== "object") return [];
-					const { target, revision } = recorded;
-					return [{ ...recorded, target: targetWithListing(target, revision, recorded.listing) }];
+					const { target, listing, revision, sessionRevision } = recorded;
+					const current = targetWithListing(target, revision, listing);
+					const use = <A>(work: (session: ServerSession) => Promise<A>) =>
+						useSession(target, sessionRevision, work);
+					const offer = (target: ConnectorTarget, listing: ServerListing) =>
+						buildMcpTools(target, listing, uploadSide, use);
+					const refresh = (name: string) =>
+						Effect.gen(function* () {
+							const fresh = yield* Effect.result(
+								Effect.tryPromise(() => use((session) => session.list())),
+							);
+							if (fresh._tag === "Failure") {
+								yield* Effect.logWarning(
+									"Checking an approved connector's tools failed",
+									fresh.failure.cause,
+								);
+								return undefined;
+							}
+							const revision = yield* recordListing(workspaceId, current, fresh.success);
+							if (revision === undefined) return undefined;
+							const tools = offer(
+								targetWithListing(current, revision, fresh.success),
+								fresh.success,
+							);
+							return tools[connectorToolKey(current.handle, name)];
+						});
+					return [{ target, listing, tools: offer(current, listing), refresh }];
 				});
 				const leftOut = (outcome: ListingOutcome) =>
 					targets.filter((_, index) => listings[index] === outcome);
 				return {
-					tools: Object.assign(
-						{},
-						...listed.map(({ target, listing, sessionRevision }) => ({
-							...offerAugmentationTools(
-								target,
-								listing.tools.map(({ described }) => described),
-								uploadSide,
-							),
-							...buildOfferedTools(
-								target,
-								listing,
-								(work) => useSession(target, sessionRevision, work),
-								(target, fresh) => recordListing(workspaceId, target, fresh),
-							),
-						})),
-						ownTools.tools,
+					tools: Object.assign({}, ...listed.map(({ tools }) => tools), ownTools.tools),
+					refreshForApproval: new Map(
+						listed.map(({ target, refresh }) => [target.connectorId, refresh]),
 					),
 					unavailable: leftOut("unavailable").map((target) => target.handle),
 					signInExpired: [
@@ -627,58 +639,39 @@ function targetWithListing(target: ConnectorTarget, revision: number, listing: S
 	};
 }
 
-function buildOfferedTools(
+function buildMcpTools(
 	target: ConnectorTarget,
 	listing: ServerListing,
+	upload: UploadSide,
 	useSession: <A>(work: (session: ServerSession) => Promise<A>) => Promise<A>,
-	recordListing: (
-		target: ConnectorTarget,
-		listing: ServerListing,
-	) => Effect.Effect<number | undefined>,
 ): Record<string, OfferedTool> {
-	const build = (
-		target: ConnectorTarget,
-		listing: ServerListing,
-		{ described, inputSchema, tool }: ServerListing["tools"][number],
-	): [string, OfferedTool] => {
-		const entry = offeredTool(
+	return {
+		...offerAugmentationTools(
 			target,
-			described,
-			{
-				...tool,
-				execute: (input, options) =>
-					useSession((session) => session.run(listing, described.name, input, options)),
-			},
-			{ description: described.description ?? "", inputSchema },
-		);
-		entry[1].refreshForApproval = () =>
-			Effect.gen(function* () {
-				const fresh = yield* Effect.result(
-					Effect.tryPromise(() => useSession((session) => session.list())),
-				);
-				if (fresh._tag === "Failure") {
-					yield* Effect.logWarning(
-						"Checking an approved connector's tools failed",
-						fresh.failure.cause,
-					);
-					return undefined;
-				}
-				const revision = yield* recordListing(target, fresh.success);
-				if (revision === undefined) return undefined;
-				const current = fresh.success.tools.find((tool) => tool.described.name === described.name);
-				return (
-					current &&
-					build(targetWithListing(target, revision, fresh.success), fresh.success, current)[1]
-				);
-			});
-		return entry;
+			listing.tools.map(({ described }) => described),
+			upload,
+		),
+		...Object.fromEntries(
+			listing.tools.map(({ described, inputSchema, tool }) =>
+				offeredTool(
+					target,
+					described,
+					{
+						...tool,
+						execute: (input, options) =>
+							useSession((session) => session.run(listing, described.name, input, options)),
+					},
+					{ description: described.description ?? "", inputSchema },
+				),
+			),
+		),
 	};
-	return Object.fromEntries(listing.tools.map((tool) => build(target, listing, tool)));
 }
 
 /** No connector tools, made new for each caller, since the set's lists can be changed. */
 const offerNothing = (): ConnectorToolSet => ({
 	tools: {},
+	refreshForApproval: new Map(),
 	unavailable: [],
 	signInExpired: [],
 	instructions: {},

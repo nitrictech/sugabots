@@ -215,6 +215,7 @@ export const wikiWipe = (
 					},
 				},
 				unavailable: [],
+				refreshForApproval: new Map(),
 				signInExpired: [],
 				instructions: {},
 				addable: [],

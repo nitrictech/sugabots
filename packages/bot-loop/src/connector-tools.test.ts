@@ -303,6 +303,87 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			},
 		);
 
+		it.each(["keeps the augmentation", "lists its own upload"] as const)(
+			"checks an approved connector augmentation again when the server %s",
+			async (change) => {
+				await onDatabase((db) =>
+					db
+						.update(connector)
+						.set({
+							handle: "files",
+							url: "https://mcp.linear.app/mcp",
+							toolAccess: { upload_file: "ask" },
+						})
+						.where(eq(connector.id, connectorId)),
+				);
+				const described = {
+					name: "upload_file",
+					description: null,
+					readOnly: false,
+					destructive: false,
+				};
+				const inputSchema: JSONSchema7 = { type: "object" };
+				let serverOffersUpload = false;
+				const list = vi.fn(async () => ({
+					definitions: { tools: serverOffersUpload ? [{ name: described.name, inputSchema }] : [] },
+					instructions: undefined,
+					tools: serverOffersUpload
+						? [{ described, inputSchema, tool: { inputSchema: jsonSchema(inputSchema) } }]
+						: [],
+				}));
+				const run = vi.fn(async () => ({ uploaded: true }));
+				const connectorTools = ConnectorCatalog.from({
+					connectors: await runOnPostgres(
+						ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
+					),
+					httpClients: { for: () => fetch },
+					connect: async () => ({ list, run, close: async () => {} }),
+				});
+				const { model } = calling(CALL_TOOL, {
+					tool: "files__upload_file",
+					arguments: {
+						uploadUrl: "https://storage.googleapis.com/uploads.linear.app/example",
+						headers: {},
+					},
+				});
+				const ran = await loop.runTurn(chatId, { model, connectorTools });
+				const [parked] = await callsOf(ran.turnId);
+				if (!parked) throw new Error("No connector call parked");
+				expect(parked).toMatchObject({ connectorId, approvalStatus: "pending" });
+				const admin = asMember(await loop.callWithConnectorCatalog(connectorTools), adminId);
+				const allow = () => admin.decide({ toolCallId: parked.id, decision: "allow_once" });
+				await allow();
+				expect(list).toHaveBeenCalledTimes(2);
+
+				serverOffersUpload = change === "lists its own upload";
+				const resumed = await resumeAt(ran, 1);
+				expect(list).toHaveBeenCalledTimes(3);
+				expect(run).not.toHaveBeenCalled();
+				if (!serverOffersUpload) {
+					expect(resumed).toEqual({ _tag: "Finished" });
+					expect(await callsOf(ran.turnId)).toMatchObject([
+						{
+							id: parked.id,
+							approvalStatus: "allowed",
+							output: {
+								status: "failed",
+								error: expect.stringContaining("Give the file to upload"),
+							},
+						},
+					]);
+					return;
+				}
+				expect(resumed).toMatchObject({ _tag: "Waiting" });
+				const [renewed] = await callsOf(ran.turnId);
+				expect(renewed).toMatchObject({ id: parked.id, approvalStatus: "pending" });
+				expect(renewed?.approvalId).not.toBe(parked.approvalId);
+
+				await allow();
+				expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
+				expect(run).toHaveBeenCalledOnce();
+			},
+		);
+
 		it("closes a Personal Assistant's pending approval and wakes the turn when tool access changes from Allow to Ask", async () => {
 			await onDatabase((db) =>
 				db
