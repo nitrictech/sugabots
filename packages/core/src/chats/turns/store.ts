@@ -24,7 +24,6 @@ import {
 import {
 	ACTIVE_TURN_STATUSES,
 	chat,
-	type JoinedTurn,
 	message,
 	messageReaction,
 	type StoredMessagePart,
@@ -52,6 +51,7 @@ import {
 	fenceRefusal,
 	holdTurnForToolWrite,
 } from "./fence.ts";
+import { recordJoin } from "./joins.ts";
 import {
 	type Ended,
 	endedAs,
@@ -2029,16 +2029,3 @@ function replyParts(reply: ReplyDraft): StoredMessagePart[] {
 	];
 }
 
-/**
- * Records that the message `messageId` joined the turn of `joined.botId` on
- * `joined.triggerMessageId`, rather than get one of its own, so that turn
- * reads up to it (see `Collaboration.readingLimitOf`). The turns own
- * this write, as it is part of how a turn reads the chat.
- */
-export const recordJoin = (messageId: string, joined: JoinedTurn) =>
-	query((db) =>
-		db
-			.update(message)
-			.set({ joinedTurns: sql`${message.joinedTurns} || ${JSON.stringify([joined])}::jsonb` })
-			.where(eq(message.id, messageId)),
-	).pipe(Effect.asVoid);
