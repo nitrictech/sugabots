@@ -17,8 +17,6 @@ const switchedBy = {
 	"files.readWritten": "file_read",
 	"files.write": "file_write",
 	"files.edit": "file_edit",
-	"web.fetch": "web_fetch",
-	"web.search": "web_search",
 	"automations.list": AUTOMATIONS_TOOL_KEY,
 	"automations.listInChat": AUTOMATIONS_TOOL_KEY,
 	"automations.createWithRoutine": AUTOMATIONS_TOOL_KEY,

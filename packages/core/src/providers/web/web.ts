@@ -1,7 +1,6 @@
 export * as Web from "./web.ts";
 
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { WebToolOff } from "@sugabots/contracts/errors/web";
 import type { OutputOf } from "@sugabots/contracts/operations";
 import type { WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "@sugabots/contracts/operations/web";
 import { eq } from "drizzle-orm";
@@ -15,18 +14,17 @@ import { searchSettingsPath } from "../../server-settings/web-app-paths.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { Egress } from "../network/egress.ts";
 import { providerSearch, searchEndpoint } from "../search-providers/provider-search.ts";
-import { SearchProviderStore } from "../search-providers/search-provider-store.ts";
 import { pageFetcher, WEB_FETCH_LIMITS } from "./fetch-page.ts";
 
 export interface Interface {
 	readonly fetch: <P, W, X>(
 		canFetch: CanUseWeb<P, W, typeof WEB_FETCH_TOOL>,
 		approved: Approved<P, X, [W], "web.fetch">,
-	) => Effect.Effect<OutputOf<"web.fetch">, WebToolOff>;
+	) => Effect.Effect<OutputOf<"web.fetch">>;
 	readonly search: <P, W, X>(
 		canSearch: CanUseWeb<P, W, typeof WEB_SEARCH_TOOL>,
 		approved: Approved<P, X, [W], "web.search">,
-	) => Effect.Effect<OutputOf<"web.search">, WebToolOff | ResourceHidden>;
+	) => Effect.Effect<OutputOf<"web.search">, ResourceHidden>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Web") {
@@ -36,24 +34,14 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Web");
 	const egress = yield* Egress.Service;
-	const providers = yield* SearchProviderStore.Service;
 	const { webAppUrl } = yield* ServerSettings.Service;
 	const fetchPage = pageFetcher({ fetch: egress.webFetch, ...WEB_FETCH_LIMITS });
-	const enabledProvider = (workspaceId: string) =>
-		Effect.filterOrFail(
-			providers.resolve(workspaceId),
-			(provider) => provider !== undefined,
-			() => new WebToolOff(),
-		);
 	return Service.of({
-		fetch: (canFetch, { input: { url } }) =>
+		fetch: (_canFetch, { input: { url } }) =>
 			operation(
 				"fetch",
-				Effect.gen(function* () {
-					yield* enabledProvider(canFetch.inWorkspace.workspace.value);
-					// biome-ignore lint/plugin: fetchPage returns network and page errors as outcomes.
-					return yield* Effect.promise((signal) => fetchPage(url, signal));
-				}),
+				// biome-ignore lint/plugin: fetchPage returns network and page errors as outcomes.
+				Effect.promise((signal) => fetchPage(url, signal)),
 			),
 
 		search: (canSearch, { input }) =>
@@ -61,7 +49,7 @@ export const make = Effect.gen(function* () {
 				"search",
 				Effect.gen(function* () {
 					const workspaceId = canSearch.inWorkspace.workspace.value;
-					const provider = yield* enabledProvider(workspaceId);
+					const provider = canSearch.provider;
 					const search = providerSearch(
 						provider,
 						egress.providers.for({ baseUrl: searchEndpoint(provider) }),
@@ -88,4 +76,4 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-export const layer = layerNoDeps.pipe(Layer.provide(SearchProviderStore.layer));
+export const layer = layerNoDeps;

@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "@sugabots/contracts/operations/web";
 import { eq, sql } from "drizzle-orm";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	addMembership,
@@ -25,9 +25,13 @@ import {
 	searchProvider,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { search } from "../operations/web/search.ts";
 import type { Principal } from "../principal.ts";
 import { encryptAppCredential } from "../providers/connectors/github/credential.ts";
+import { Egress } from "../providers/network/egress.ts";
 import { SearchProviderStore } from "../providers/search-providers/search-provider-store.ts";
+import { Web } from "../providers/web/web.ts";
+import { unimplemented } from "../testing.ts";
 import { proveCanRestrictBotsProject } from "./can-restrict-bot.ts";
 import { proveCanUseConnector } from "./can-use-connector.ts";
 import { proveCanUseWeb } from "./can-use-web.ts";
@@ -493,4 +497,53 @@ describe("resource proofs", () => {
 		expect(await uses(a.workspace, WEB_FETCH_TOOL)).toBe("ok");
 		expect(await uses(b.workspace, WEB_FETCH_TOOL)).toBe("ResourceHidden");
 	});
+
+	it.each(["bot tool", "search provider"] as const)(
+		"finishes web search if the %s is switched off after its settings check",
+		async (switchedOff) => {
+			const { a } = world;
+			const searching = await seedBot(a.workspace, { createdById: a.ed });
+			const chat = await seedProjectChat(a.workspace, searching.defaultProject, a.ed);
+			const principal = await as.botFor(a.ed, searching.id, chat);
+			let providerEnabled = true;
+			const providers = unimplemented(SearchProviderStore.Service, {
+				resolve: () =>
+					Effect.gen(function* () {
+						if (!providerEnabled) return undefined;
+						if (switchedOff === "bot tool") {
+							// biome-ignore lint/plugin: A database failure fails this test.
+							yield* Effect.promise(() =>
+								onDatabase((db) =>
+									db
+										.update(bot)
+										.set({ disabledTools: [WEB_SEARCH_TOOL] })
+										.where(eq(bot.id, searching.id)),
+								),
+							);
+						} else {
+							providerEnabled = false;
+						}
+						return {
+							builtIn: "brave",
+							baseUrl: "https://search.example.com",
+							apiKey: "test-search-key",
+							configurationUpdatedAt: new Date(),
+						};
+					}),
+			});
+			const egress = unimplemented(Egress.Service, {
+				providers: { for: () => async () => Response.json({ web: { results: [] } }) },
+			});
+			const web = Web.layer.pipe(Layer.provide(egress));
+			const request = () =>
+				runOnPostgres(
+					search
+						.run(principal, { query: "field notes", count: 5 }, { kind: "request" })
+						.pipe(Effect.provide([web, providers])),
+				);
+
+			await expect(request()).resolves.toEqual({ ok: true, results: [] });
+			await expect(request()).rejects.toMatchObject({ _tag: "WebToolOff" });
+		},
+	);
 });
