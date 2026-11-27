@@ -570,7 +570,7 @@ function webhookCheck(
 ): Effect.Effect<
 	{
 		auth: WebhookAuth;
-		deliveryIdHeader: string | null;
+		deliveryIdHeader: string | null | undefined;
 		filter: readonly WebhookFilterTest[] | undefined;
 		secretEncrypted: string | null;
 		secret: string | null;

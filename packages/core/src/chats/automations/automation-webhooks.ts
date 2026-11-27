@@ -93,8 +93,7 @@ interface EnabledWebhook {
 	projectId: string;
 	automationId: string;
 	auth: WebhookAuth;
-	/** Where a generic webhook's delivery id is, if anywhere. */
-	deliveryIdHeader: string | null;
+	deliveryIdHeader: string | null | undefined;
 	filter: readonly WebhookFilterTest[] | undefined;
 }
 

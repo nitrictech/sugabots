@@ -1546,6 +1546,32 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(() => secrets.decrypt(stored?.secret ?? "")).not.toThrow();
 		});
 
+		it("deduplicates deliveries to a webhook that used automatic detection on main", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const webhooks = await upgraded.run(
+				Effect.provide(WebhookAuthentication.Service, WebhookAuthentication.layer),
+			);
+			const triggerId = legacy.automaticWebhookTrigger;
+			const deliver = async (headers: Record<string, string>, payload: Schema.Json) => {
+				const delivery = {
+					headers,
+					payload,
+					body: new TextEncoder().encode(JSON.stringify(payload)),
+				};
+				const principal = await upgraded.run(webhooks.trigger(triggerId, delivery));
+				return call(principal, "automations.webhook", { triggerId, headers, payload });
+			};
+
+			for (const { headers, payload } of [
+				{ headers: { "svix-id": "delivery-1" }, payload: { order: 42 } },
+				{ headers: {}, payload: { event_id: "delivery-2" } },
+			]) {
+				const accepted = await deliver(headers, payload);
+				expect(accepted).toEqual({ runId: expect.any(String), duplicate: false });
+				expect(await deliver(headers, payload)).toEqual({ ...accepted, duplicate: true });
+			}
+		});
+
 		it("deletes direct messages, with what was in them, and queues their folders for deletion", async () => {
 			const directMessages = Object.values(legacy.directMessages);
 

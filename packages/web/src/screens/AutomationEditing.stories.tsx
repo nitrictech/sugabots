@@ -469,15 +469,15 @@ export const Webhook = meta.story({
 	},
 });
 
-/** A delivery header is saved independently of auth; clearing it lets every call run. */
+/** A webhook using automatic detection can switch to a header or run every call. */
 export const DeliveryIdHeader = meta.story({
 	beforeEach({ msw }) {
 		let automation: Automation = {
 			...incidentIntake.automation,
-			triggers: incidentIntake.automation.triggers.map((trigger) => ({
-				...trigger,
-				deliveryIdHeader: "Idempotency-Key",
-			})),
+			triggers: automationTriggers(incidentIntake.automation.id, {
+				kind: "webhook",
+				auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+			}),
 		};
 		const item = { ...incidentIntake, automation };
 		msw.use(
@@ -505,6 +505,8 @@ export const DeliveryIdHeader = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		const dialog = within(await openFirstTrigger(canvas));
 		await dialog.findByLabelText("Signing secret");
+		await userEvent.click(dialog.getByRole("button", { name: "Delivery ID: Automatic detection" }));
+		await userEvent.click(await screen.findByRole("menuitemradio", { name: "Use a header" }));
 		const field = await dialog.findByLabelText("Delivery ID header");
 		await expect(field).toHaveValue("Idempotency-Key");
 		await userEvent.clear(field);

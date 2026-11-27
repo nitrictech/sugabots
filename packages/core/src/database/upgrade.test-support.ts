@@ -91,6 +91,7 @@ export const legacy = {
 		automation: "00000008-0000-4000-8000-000000000002",
 		trigger: "00000010-0000-4000-8000-000000000001",
 	},
+	automaticWebhookTrigger: "00000010-0000-4000-8000-000000000002",
 	familyGitHubConnector: "00000011-0000-4000-8000-000000000002",
 	/** The Notes pod's connection, which no bot had. */
 	notesConnection: "00000011-0000-4000-8000-000000000003",
@@ -426,6 +427,10 @@ INSERT INTO "routine" ("id", "workspace_id", "agent_id", "name", "instructions")
  ('00000008-0000-4000-8000-000000000002', '0000000a-0000-4000-8000-000000000001', '0000000c-0000-4000-8000-000000000001', 'Deploy check', 'Check the deploy');
 INSERT INTO "routine_trigger" ("id", "workspace_id", "routine_id", "settings", "secret_digest") VALUES
  ('00000010-0000-4000-8000-000000000001', '0000000a-0000-4000-8000-000000000001', '00000008-0000-4000-8000-000000000002', '{"kind":"webhook","auth":{"kind":"bearer"},"deliveryIdHeader":null}', 'a2f1c0ffee5a2f1c0ffee5a2f1c0ffee5a2f1c0ffee5a2f1c0ffee5a2f1c0ff');
+INSERT INTO "routine" ("id", "workspace_id", "agent_id", "name", "instructions", "state") VALUES
+ ('00000008-0000-4000-8000-000000000003', '0000000a-0000-4000-8000-000000000001', '0000000c-0000-4000-8000-000000000001', 'New orders', 'Review the order', 'enabled');
+INSERT INTO "routine_trigger" ("id", "workspace_id", "routine_id", "settings") VALUES
+ ('${legacy.automaticWebhookTrigger}', '0000000a-0000-4000-8000-000000000001', '00000008-0000-4000-8000-000000000003', '{"kind":"webhook","auth":{"kind":"bearer"}}');
 -- Direct messages: Sam and Pat's, where Sam sent a file Pat has read, and a
 -- group of three.
 INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "initiator_user_id", "conversation_id", "direct_key", "created_at") VALUES

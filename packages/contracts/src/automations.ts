@@ -259,7 +259,8 @@ const automationTriggerSchema = Schema.Union([
 		id: uuidSchema,
 		kind: Schema.Literal("webhook"),
 		auth: webhookAuthSchema,
-		deliveryIdHeader: webhookDeliveryIdHeaderSchema,
+		/** Absent when a generic webhook detects delivery IDs automatically. */
+		deliveryIdHeader: Schema.optional(webhookDeliveryIdHeaderSchema),
 		/** Left out while there is none. */
 		filter: Schema.optional(webhookFilterSchema),
 	}),
