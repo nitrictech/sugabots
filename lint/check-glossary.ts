@@ -7,22 +7,9 @@
  * can come back. `--report` also counts each by package.
  *
  * Only words a machine can tell are meant in the banned sense are checked.
- * Retired words whose meaning changed rather than ended, such as "task",
- * "schedule", "document" and "routine", are left to the reader, as is
- * "summary", which is plain English as often as it is the retired summary.
- * So are banned synonyms that are everyday words or another system's own:
- * "user" (HTTP's user agent, a user message, the current user), "workspace
- * bot" and "internal bot" (any bot in the workspace, and a made-up project's
- * name), "done" and "archived" alone (only their names for a chat's state are
- * checked), "activity" (the workflow engine's word for a step), "streaming"
- * and "reasoning" (the model providers' and the event stream's), "snapshot"
- * (Playwright's), "VNC" (the desktop's protocol), "callback", "endpoint" and
- * "hook" (OAuth's, HTTP's, and React's and better-auth's hooks), "sender" (an
- * email's), "condition" (a query's), "system prompt" and "function call" (a
- * model provider's API), "organisation" (GitHub's), "routing", "dispatch",
- * "seen", "app" (the web app, a GitHub app), "scope", "context" and "sandbox"
- * (turn bounds'; OAuth's scopes, React's contexts, a browser's sandbox): only
- * "approval app", a tool source's old compound name, is checked.
+ * Every other word the glossary retires or bans is listed in `UNCHECKED_WORDS`
+ * with why, and the check fails on a glossary word that is in neither list,
+ * so a word added to the glossary is never skipped without a reason.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -360,6 +347,72 @@ const CHECKED_WORDS: readonly CheckedWord[] = [
 	},
 	{ word: "rerun" },
 
+	// Phrases and jargon no other sense shares
+	{ word: "@all" },
+	{ word: "@everyone" },
+	{ word: "access level" },
+	{ word: "account link" },
+	{ word: "allowed site" },
+	{ word: "allowlist request" },
+	{ word: "app directory" },
+	{ word: "auth middleware" },
+	{ word: "authorizer" },
+	{ word: "bot channel" },
+	{ word: "branded value" },
+	{ word: "built-in allowlist" },
+	{ word: "collaboration chat" },
+	{ word: "collaborator" },
+	{ word: "concierge" },
+	{ word: "core tool" },
+	{ word: "cron job" },
+	{ word: "dao" },
+	{ word: "debug message" },
+	{ word: "default host" },
+	{ word: "delegation" },
+	{ word: "destructive call" },
+	{ word: "dm" },
+	{ word: "enrolment" },
+	{ word: "free request" },
+	{ word: "git credentials" },
+	{ word: "github bot" },
+	{ word: "github integration" },
+	{ word: "identity provider" },
+	{ word: "initiator" },
+	{ word: "injected credentials" },
+	{ word: "internal error" },
+	{ word: "invocation" },
+	{ word: "job runner" },
+	{ word: "join link" },
+	{ word: "live query" },
+	{ word: "main bot" },
+	{ word: "marketplace" },
+	{ word: "moderator" },
+	{ word: "mutating tool call" },
+	{ word: "mutex" },
+	{ word: "outstanding invite" },
+	{ word: "permission level" },
+	{ word: "personal pod" },
+	{ word: "personal project" },
+	{ word: "pod chat" },
+	{ word: "primary bot" },
+	{ word: "publication list" },
+	{ word: "read-only member" },
+	{ word: "recurrence" },
+	{ word: "requester" },
+	{ word: "search backend" },
+	{ word: "service bot" },
+	{ word: "setup wizard" },
+	{ word: "shell access" },
+	{ word: "shim" },
+	{ word: "subtask" },
+	{ word: "system tool" },
+	{ word: "tagline" },
+	{ word: "tool part" },
+	{ word: "truncated output" },
+	{ word: "turn-taking" },
+	{ word: "witness" },
+	{ word: "vm" },
+
 	// Errors
 	{ word: "error id" },
 	{
@@ -373,6 +426,262 @@ const CHECKED_WORDS: readonly CheckedWord[] = [
 	},
 	{
 		word: "display message",
+	},
+];
+
+/** Why a glossary word isn't checked, and the words it applies to. */
+interface UncheckedWords {
+	readonly why: string;
+	readonly words: readonly string[];
+}
+
+/**
+ * The words GLOSSARY.md retires or bans that aren't checked, as it lists them,
+ * grouped by why. A word added to the glossary goes in `CHECKED_WORDS` or here.
+ */
+const UNCHECKED_WORDS: readonly UncheckedWords[] = [
+	{
+		why: "its meaning changed rather than ended, or it is plain English as often as the retired sense",
+		words: ["task", "schedule", "document", "routine", "summary", "archive"],
+	},
+	{
+		why: "it is another system's own word, such as an API's, a library's, a protocol's or a model provider's",
+		words: [
+			"streaming",
+			"reasoning",
+			"snapshot",
+			"vnc",
+			"callback",
+			"endpoint",
+			"hook",
+			"sender",
+			"condition",
+			"system prompt",
+			"function call",
+			"organisation",
+			"org",
+			"activity",
+			"websocket",
+			"oauth",
+			"llm",
+			"model",
+			"token",
+			"cron",
+			"bucket",
+			"s3",
+			"inference",
+			"completion",
+			"container",
+			"environment",
+			"worker",
+			"handler",
+			"adapter",
+			"table",
+			"layer",
+			"queue",
+			"scope",
+			"context",
+			"realtime",
+			"repo",
+			"blob",
+			"workflow",
+			"mutation",
+			"listener",
+			"listeners",
+			"subscribers",
+			"instance",
+			"deployment",
+			"backend",
+			"vendor",
+			"engine",
+			"runner",
+			"executor",
+			"harness",
+			"util",
+			"helper",
+			"firewall",
+			"keepalive",
+			"workdir",
+			"working directory",
+			"identity",
+			"actor",
+			"caller",
+			"assertion",
+			"guard",
+			"policy",
+			"checker",
+			"entity",
+			"storage",
+			"vault",
+			"integration",
+			"plugin",
+			"extension",
+			"abort",
+			"signal",
+			"event",
+			"broadcast",
+			"trace id",
+			"api error",
+			"provider error",
+			"side effect",
+			"network access",
+			"outbound",
+			"overflow",
+			"revision",
+			"lock",
+			"slot",
+			"iteration",
+			"lifetime",
+			"generation",
+			"profile",
+			"assistant",
+			"function",
+			"key",
+			"upload",
+			"response",
+			"update",
+			"format",
+			"log",
+			"exception",
+			"crash",
+			"panic",
+			"ai",
+			"pa",
+			"persona",
+			"session check",
+			"event bus",
+			"sandbox access",
+			"skill",
+			"truncation",
+			"transient",
+			"unauthorised",
+			"inject",
+			"seal",
+			"meter",
+			"billing",
+			"username",
+			"tag",
+			"search engine",
+			"rejection",
+			"test run",
+			"save state",
+			"cloud",
+			"server tool",
+			"remote tool",
+		],
+	},
+	{
+		why: "it is everyday English, meant in another sense far more often than the banned one",
+		words: [
+			"account",
+			"site",
+			"human",
+			"individual",
+			"creator",
+			"owner",
+			"manager",
+			"guest",
+			"observer",
+			"alert",
+			"ping",
+			"seat",
+			"host",
+			"character",
+			"maker",
+			"workspace bot",
+			"internal bot",
+			"directory",
+			"overview",
+			"brain",
+			"onboarding",
+			"bio",
+			"space",
+			"room",
+			"team",
+			"folder",
+			"workspace",
+			"topic",
+			"comment",
+			"post",
+			"run",
+			"job",
+			"routing",
+			"dispatch",
+			"handoff",
+			"action",
+			"command",
+			"confirmation",
+			"consent",
+			"sign-off",
+			"reject",
+			"permission",
+			"closed",
+			"enclosure",
+			"answer",
+			"poster",
+			"member",
+			"reviewer",
+			"seen",
+			"asset",
+			"box",
+			"server",
+			"timer",
+			"history",
+			"output",
+			"credits",
+			"consumption",
+			"price",
+			"spend",
+			"charge",
+			"bill",
+			"disabled",
+			"inactive",
+			"suspended",
+			"asleep",
+			"no price",
+			"rule",
+			"match",
+			"scratch",
+			"hold",
+			"door",
+			"right",
+			"capability",
+			"privilege",
+			"access",
+			"standing",
+			"evidence",
+			"level",
+			"round",
+			"cycle",
+			"turn",
+			"nudge",
+			"follow-up",
+			"stop",
+			"cancel",
+			"halt",
+			"kill",
+			"thoughts",
+			"change",
+			"failure",
+			"problem",
+			"unknown error",
+			"error text",
+			"copy",
+			"details",
+			"label",
+			"title",
+			"restart",
+			"reason",
+			"kind",
+			"flavour",
+			"recap",
+			"recoverable",
+			"watcher",
+		],
+	},
+	{
+		why: "it turns up inside longer names that mean something else, such as the project_bot table's project_bot_project_workspace_fkey",
+		words: ["bot project"],
 	},
 ];
 
@@ -532,7 +841,7 @@ interface Finding {
 	readonly text: string;
 }
 
-function findingsOf(checked: CheckedWord, files: ReadonlyMap<string, string>): Finding[] {
+function findUses(checked: CheckedWord, files: ReadonlyMap<string, string>): Finding[] {
 	const pattern = wordPattern(checked);
 	const findings: Finding[] = [];
 	for (const [path, contents] of files) {
@@ -548,7 +857,7 @@ function findingsOf(checked: CheckedWord, files: ReadonlyMap<string, string>): F
 }
 
 /** `packages/core/src/x.ts` is in `packages/core`; a file at the root is in `.`. */
-function areaOf(path: string): string {
+function packageArea(path: string): string {
 	const [first, second] = path.split("/");
 	if (second === undefined) return ".";
 	return first === "packages" || first === "apps" ? `${first}/${second}` : first;
@@ -572,7 +881,7 @@ function printReport(
 ): void {
 	const byArea = new Map<string, number>();
 	for (const { path } of findings) {
-		const area = areaOf(path);
+		const area = packageArea(path);
 		byArea.set(area, (byArea.get(area) ?? 0) + 1);
 	}
 	console.log(
@@ -583,10 +892,47 @@ function printReport(
 	}
 }
 
+/**
+ * Each glossary word that is neither checked nor listed as unchecked, and each
+ * word listed as unchecked that the glossary no longer has or that is also
+ * checked, as what to do about it.
+ */
+function findUnaccountedWords(glossary: readonly GlossaryWord[]): string[] {
+	const checked = new Set(CHECKED_WORDS.map((entry) => entry.formOf ?? entry.word));
+	const unchecked = UNCHECKED_WORDS.flatMap(({ words }) => words);
+	const uncheckedSet = new Set(unchecked);
+	const listed = new Set(glossary.map((entry) => entry.word));
+	const problems: string[] = [];
+	for (const word of listed) {
+		if (checked.has(word) || uncheckedSet.has(word)) continue;
+		problems.push(
+			`"${word}" is in GLOSSARY.md but neither checked nor listed as unchecked. Add it to CHECKED_WORDS in lint/check-glossary.ts, or to UNCHECKED_WORDS with why.`,
+		);
+	}
+	for (const [index, word] of unchecked.entries()) {
+		if (unchecked.indexOf(word) !== index) {
+			problems.push(`"${word}" is listed twice in UNCHECKED_WORDS. Keep one.`);
+		} else if (checked.has(word)) {
+			problems.push(
+				`"${word}" is both checked and listed as unchecked. Remove it from UNCHECKED_WORDS.`,
+			);
+		} else if (!listed.has(word)) {
+			problems.push(
+				`"${word}" is listed as unchecked but GLOSSARY.md doesn't retire or ban it. Remove it from UNCHECKED_WORDS.`,
+			);
+		}
+	}
+	return problems;
+}
+
 const report = process.argv.includes("--report");
 const glossary = parseGlossary(readFileSync("GLOSSARY.md", "utf8"));
 const files = trackedFiles();
 let failed = false;
+for (const problem of findUnaccountedWords(glossary)) {
+	failed = true;
+	console.error(problem);
+}
 for (const checked of CHECKED_WORDS) {
 	const entries = findInGlossary(checked, glossary);
 	if (entries.length === 0) {
@@ -596,7 +942,7 @@ for (const checked of CHECKED_WORDS) {
 		);
 		continue;
 	}
-	const findings = findingsOf(checked, files);
+	const findings = findUses(checked, files);
 	if (report) printReport(checked, entries, findings);
 	if (findings.length === 0) continue;
 	failed = true;
