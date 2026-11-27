@@ -701,11 +701,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					kind: "bot" as const,
 					id: notesLead.id,
 				})),
-				...reachedOnMain.filter(
-					({ id }) =>
-						id !== migrationScale.orphanedCollaboration &&
-						id !== migrationScale.hostlessPersonalChat,
-				),
+				...reachedOnMain.filter(({ id }) => id !== migrationScale.orphanedCollaboration),
 				{ member: legacy.members.ana, kind: "bot", id: anasAssistant.default_of_bot_id },
 				{ member: legacy.members.sam, kind: "bot", id: anasAssistant.default_of_bot_id },
 				{ member: legacy.members.sam, kind: "bot", id: legacy.bots.patsAssistant },
@@ -1332,7 +1328,36 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			);
 		});
 
-		it("keeps written files from a folded collaboration and a removed personal chat", async () => {
+		it("keeps a chat with no hosting bot, with its messages and attachments, for its member alone", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const { ana, ...outsiders } = legacy.members;
+			const principal = await upgraded.signIn(ana);
+			const { threadId: chatId, fileId, text } = migrationScale.files.personalAttachment;
+			const chat = await call(principal, "chats.get", { chatId, limit: 20 });
+			expect(chat.messages).toContainEqual(
+				expect.objectContaining({
+					id: migrationScale.personalMessage,
+					content: "Notes for the weekend.",
+				}),
+			);
+			const attachment = await call(principal, "chats.file", { chatId, fileId });
+			expect(
+				Buffer.concat(await Effect.runPromise(Stream.runCollect(attachment.stream))).toString(
+					"utf8",
+				),
+			).toBe(text);
+			for (const member of Object.values(outsiders)) {
+				const outsider = await upgraded.signIn(member);
+				await expect(call(outsider, "chats.get", { chatId, limit: 20 })).rejects.toBeInstanceOf(
+					ResourceHidden,
+				);
+				await expect(call(outsider, "chats.file", { chatId, fileId })).rejects.toBeInstanceOf(
+					ResourceHidden,
+				);
+			}
+		});
+
+		it("keeps written files from a folded collaboration and a hostless personal chat", async () => {
 			const { collaboration, personal } = migrationScale.files;
 			expect(
 				await upgraded.rows(`select id, chat_id from file where id = any($1) order by id`, [
@@ -1340,7 +1365,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				]),
 			).toEqual([
 				{ id: collaboration.fileId, chat_id: legacy.threads.trip },
-				{ id: personal.fileId, chat_id: legacy.threads.report },
+				{ id: personal.fileId, chat_id: migrationScale.hostlessPersonalChat },
 			]);
 			for (const file of [collaboration, personal]) {
 				expect(queuedByTheUpgrade).not.toContain(`files/${file.fileId}`);

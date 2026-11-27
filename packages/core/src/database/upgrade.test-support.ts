@@ -115,6 +115,7 @@ export type LegacyFile =
 	| { kind: "version"; fileId: string; versionId: string; text: string };
 
 const orphanedCollaboration = "0000000f-0000-4000-8000-000000000021";
+const chatWithoutBots = "0000000f-0000-4000-8000-000000000026";
 const askingBot = "0000000c-0000-4000-8000-000000000020";
 const askingTurn = "00000002-0000-4000-8000-000000000124";
 const askingReply = "00000001-0000-4000-8000-000000000125";
@@ -126,6 +127,8 @@ export const migrationScale = {
 	orphanedCollaboration,
 	collaborationReply: "00000001-0000-4000-8000-000000000124",
 	hostlessPersonalChat: "0000000f-0000-4000-8000-000000000022",
+	chatWithoutBots,
+	personalMessage: "00000001-0000-4000-8000-000000000126",
 	unattributedRequest: "00000015-0000-4000-8000-000000000020",
 	unclaimedRun: "00000009-0000-4000-8000-000000000003",
 	resultRun: "00000009-0000-4000-8000-000000000004",
@@ -136,6 +139,12 @@ export const migrationScale = {
 	reservedBot: "0000000c-0000-4000-8000-000000000006",
 	cyclicChat: "0000000f-0000-4000-8000-000000000025",
 	files: {
+		personalAttachment: {
+			kind: "thread",
+			threadId: chatWithoutBots,
+			fileId: "00000004-0000-4000-8000-000000000022",
+			text: "My packing list",
+		},
 		collaborationAttachment: {
 			kind: "thread",
 			threadId: orphanedCollaboration,
@@ -611,7 +620,12 @@ VALUES ('${migrationScale.memberlessGeneral}', '${migrationScale.memberlessWorks
 -- The asking bot's deletion takes the collaboration record with it.
 INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "conversation_id", "parent_thread_id") VALUES
  ('${migrationScale.orphanedCollaboration}', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.budget}', 'collaboration', 'Budget', '${legacy.threads.trip}', '${legacy.threads.trip}'),
- ('${migrationScale.hostlessPersonalChat}', '${legacy.workspace}', '0000000d-0000-4000-8000-000000000003', NULL, 'conversation', 'Files', '${migrationScale.hostlessPersonalChat}', NULL);
+ ('${migrationScale.hostlessPersonalChat}', '${legacy.workspace}', '0000000d-0000-4000-8000-000000000003', NULL, 'conversation', 'Files', '${migrationScale.hostlessPersonalChat}', NULL),
+ ('${migrationScale.chatWithoutBots}', '${legacy.workspace}', '0000000d-0000-4000-8000-000000000004', NULL, 'conversation', 'Weekend', '${migrationScale.chatWithoutBots}', NULL);
+INSERT INTO "message" ("id", "thread_id", "author_user_id", "kind", "status", "parts", "content")
+VALUES ('${migrationScale.personalMessage}', '${migrationScale.chatWithoutBots}', '${legacy.members.ana}', 'text', 'complete', '[{"type":"text","text":"Notes for the weekend."}]', 'Notes for the weekend.');
+INSERT INTO "thread_file" ("id", "thread_id", "kind", "name", "content_type", "size", "message_id", "position")
+VALUES ('${migrationScale.files.personalAttachment.fileId}', '${migrationScale.chatWithoutBots}', 'upload', 'packing.txt', 'text/plain', ${migrationScale.files.personalAttachment.text.length}, '${migrationScale.personalMessage}', 0);
 INSERT INTO "agent" ("id", "workspace_id", "pod_id", "name", "handle", "color", "face")
 VALUES ('${askingBot}', '${legacy.workspace}', '${legacy.pods.family}', 'Travel', 'travel', 'sky', 'dot');
 INSERT INTO "turn" ("id", "thread_id", "agent_id", "trigger_message_id", "status", "model", "reason", "started_at", "finished_at")

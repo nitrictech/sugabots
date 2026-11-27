@@ -417,7 +417,10 @@ WITH RECURSIVE removed_chat AS (
 	SELECT t."id"
 	FROM "thread" t
 	LEFT JOIN "pod" p ON p."id" = t."pod_id"
-	WHERE (p."kind" = 'personal' AND t."type" = 'pod_chat')
+	WHERE (p."kind" = 'personal' AND t."type" = 'pod_chat' AND NOT EXISTS (
+			SELECT 1 FROM "workspace_member" m
+			WHERE m."workspace_id" = p."workspace_id" AND m."user_id" = p."owner_id"
+		))
 		OR (t."type" = 'collaboration' AND NOT EXISTS (
 			SELECT 1 FROM "collaboration" c WHERE c."child_thread_id" = t."id"
 		) AND NOT EXISTS (
@@ -473,13 +476,8 @@ FROM "thread" AS "main_chat"
 JOIN "pod" ON "pod"."id" = "main_chat"."pod_id"
 WHERE "main_chat"."main" AND "pod"."kind" = 'shared'
 	AND "artifact"."pod_id" = "pod"."id" AND "artifact"."created_in_thread_id" IS NULL;--> statement-breakpoint
--- A `personal` one's goes to a thread of the bot that made it, or else of the
--- `pod`'s oldest bot other than its Personal Assistant, which only when it is
--- its only bot: the bot's latest thread, or a new one with the `pod`'s owner
--- when it has none. A `personal` `pod` with no bots left is given a Personal
--- Assistant for its owner, on no model until they choose one, to keep their
--- files where only they reach them. One whose owner has left the workspace
--- has nobody to keep them for, so they're deleted with it.
+-- Give an owner with no bot a Personal Assistant to keep the chats and files
+-- only they reached. It has no model until they choose one.
 INSERT INTO "agent" ("workspace_id", "pod_id", "name", "handle", "provisioned_key", "color", "face", "visibility", "assistant_of", "created_by_id")
 SELECT "pod"."workspace_id", "pod"."id", 'Personal Assistant', 'personal-assistant', 'personal-assistant',
 	'teal', 'arc', 'private', "pod"."owner_id", "pod"."owner_id"
@@ -487,11 +485,37 @@ FROM "pod"
 JOIN "workspace_member" ON "workspace_member"."workspace_id" = "pod"."workspace_id"
 	AND "workspace_member"."user_id" = "pod"."owner_id"
 WHERE "pod"."kind" = 'personal'
-	AND EXISTS (
-		SELECT 1 FROM "artifact"
-		WHERE "artifact"."pod_id" = "pod"."id" AND "artifact"."created_in_thread_id" IS NULL
+	AND (
+		EXISTS (
+			SELECT 1 FROM "artifact"
+			WHERE "artifact"."pod_id" = "pod"."id" AND "artifact"."created_in_thread_id" IS NULL
+		)
+		OR EXISTS (
+			SELECT 1 FROM "thread"
+			WHERE "thread"."pod_id" = "pod"."id" AND "thread"."type" = 'pod_chat'
+		)
 	)
-	AND NOT EXISTS (SELECT 1 FROM "agent" WHERE "agent"."pod_id" = "pod"."id");--> statement-breakpoint
+	AND NOT EXISTS (
+		SELECT 1 FROM "agent" WHERE "agent"."pod_id" = "pod"."id"
+			AND ("agent"."created_by_id" = "pod"."owner_id" OR "agent"."assistant_of" = "pod"."owner_id")
+	);--> statement-breakpoint
+-- A personal chat without a host goes to a bot of the member who reached it.
+WITH "hosts" AS (
+	SELECT DISTINCT ON (p."id") p."id" AS "pod_id", a."id" AS "bot_id"
+	FROM "pod" p
+	JOIN "agent" a ON a."pod_id" = p."id"
+		AND (a."created_by_id" = p."owner_id" OR a."assistant_of" = p."owner_id")
+	WHERE p."kind" = 'personal'
+	ORDER BY p."id", a."assistant_of" IS NOT NULL, a."created_at", a."id"
+)
+UPDATE "thread" t SET "host_agent_id" = "hosts"."bot_id", "pod_id" = NULL,
+	"type" = 'conversation', "main" = false, "done_at" = coalesce(t."done_at", t."archived_at"), "archived_at" = NULL
+FROM "hosts"
+WHERE t."pod_id" = "hosts"."pod_id" AND t."type" = 'pod_chat'
+	AND NOT EXISTS (SELECT 1 FROM "removed_chat" WHERE "id" = t."id");--> statement-breakpoint
+-- A written file without a chat goes to the latest chat of the bot that made
+-- it, or of the owner's oldest bot, preferring a bot other than their
+-- Personal Assistant. Open a chat if that bot has none.
 CREATE TEMP TABLE "orphan_file_bot" ON COMMIT DROP AS
 SELECT source."pod_id", source."created_by_agent_id", chosen."id" AS "bot_id"
 FROM (
@@ -566,7 +590,7 @@ DROP INDEX "thread_bot_channel_idx";--> statement-breakpoint
 DROP INDEX "agent_pod_id_idx";--> statement-breakpoint
 DROP INDEX "personal_pod_owner_idx";--> statement-breakpoint
 DROP INDEX "pod_workspace_id_idx";--> statement-breakpoint
--- Its bots and written files have moved, so delete the personal pod.
+-- Its bots, chats and files have moved, so delete the personal pod.
 DELETE FROM "pod" WHERE "kind" = 'personal';--> statement-breakpoint
 DROP INDEX "thread_pod_host_updated_at_idx";--> statement-breakpoint
 ALTER TABLE "model_request" DROP COLUMN "pod_id";--> statement-breakpoint
