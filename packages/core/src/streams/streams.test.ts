@@ -490,14 +490,21 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			testInfrastructure.pipe(Layer.provide(ConfigProvider.layer(settings))),
 		);
 		const runOn = effectRunner(runtime);
-		const proving = Promise.withResolvers<void>();
-		const proved = Promise.withResolvers<void>();
-		let proofs = 0;
+		const replayRequested = Promise.withResolvers<void>();
+		const startReplay = Promise.withResolvers<void>();
 		const abort = new AbortController();
+		const store = await runOn(EventStore.make);
 		const streams = await runOn(
 			Streams.make.pipe(
 				Effect.provideService(EventBus.Service, bus),
-				Effect.provide(EventStore.layer),
+				Effect.provideService(EventStore.Service, {
+					...store,
+					async replayPage(page, limit, signal) {
+						replayRequested.resolve();
+						await startReplay.promise;
+						return store.replayPage(page, limit, signal);
+					},
+				}),
 			),
 		);
 		const starting = runOn(
@@ -507,20 +514,14 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 					stream,
 					since,
 					workspace: world.workspace,
-					prove: Effect.promise(async () => {
-						if (++proofs === 2) {
-							proving.resolve();
-							await proved.promise;
-						}
-						return { kind: "chat", workspace: world.workspace, chat: world.chat } as const;
-					}),
+					prove: Effect.succeed({ kind: "chat", workspace: world.workspace, chat: world.chat }),
 				}),
 			),
 			{ signal: abort.signal },
 		);
 		const interrupted = expect(starting).rejects.toBeDefined();
 		try {
-			await proving.promise;
+			await replayRequested.promise;
 			const holder = holdTransaction(
 				query((db) =>
 					db.execute(sql`lock table event_retention in access exclusive mode`, "objects"),
@@ -528,7 +529,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			);
 			try {
 				await holder.held;
-				proved.resolve();
+				startReplay.resolve();
 				await holder.waitForWaiters(1);
 
 				abort.abort();
@@ -541,7 +542,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			}
 		} finally {
 			abort.abort();
-			proved.resolve();
+			startReplay.resolve();
 			await runtime.dispose();
 		}
 	});
@@ -1460,6 +1461,32 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 					follow(await signedIn.botFor(world.ed, world.pub.id, world.chat), "events.followOwn", {}),
 				),
 			).toBe("ActionForbidden");
+		});
+
+		it("replays a member's notification when pruning only removed another stream's event", async () => {
+			const world = await staffed();
+			const stream = memberStream(world.ed);
+			await commit(stream, streamEvent("approvals.changed", { toolCallId: randomUUID() }));
+			const since = (await stored.latest([stream])).get(stream);
+			if (since === undefined) throw new Error("The member's stream has no cursor");
+			const notification = streamEvent("notification", {
+				title: "Release notes",
+				body: "The draft is ready.",
+				tag: "release-notes",
+				path: "/",
+				chatId: null,
+			});
+			await commit(stream, notification);
+			const unrelated = memberStream(world.vi);
+			await commit(unrelated, streamEvent("approvals.changed", { toolCallId: randomUUID() }));
+			await onDatabase((db) =>
+				db.update(event).set({ createdAt: new Date(0) }).where(eq(event.stream, unrelated)),
+			);
+			await stored.prune(new Date(1));
+
+			const resumed = await follow(await signedIn.member(world.ed), "events.followOwn", { since });
+			onTestFinished(() => resumed.close());
+			expect(await resumed.next()).toEqual({ seq: expect.any(Number), event: notification });
 		});
 
 		it("replays a notification only to a member who still reaches its chat or can still decide its approval", async () => {
