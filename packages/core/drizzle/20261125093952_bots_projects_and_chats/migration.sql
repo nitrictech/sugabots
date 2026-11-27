@@ -3010,7 +3010,7 @@ FOR EACH ROW EXECUTE FUNCTION set_turn_asker();--> statement-breakpoint
 
 -- Resolve direct askers first, then carry them down to replies by other
 -- turns. A cycle without an asker has no seed.
-WITH RECURSIVE ancestry AS MATERIALIZED (
+CREATE TEMP TABLE "turn_asker_ancestry" ON COMMIT DROP AS
 	SELECT t."id",
 		CASE
 			WHEN answered."author_member_id" IS NOT NULL THEN answered."author_member_id"
@@ -3022,13 +3022,20 @@ WITH RECURSIVE ancestry AS MATERIALIZED (
 		CASE WHEN answered."author_bot_id" IS NOT NULL THEN nullif(answered."turn_id", t."id") END AS "writer_id"
 	FROM "turn" t
 	JOIN "message" answered ON answered."id" = t."trigger_message_id"
-	LEFT JOIN "project_chat" started ON started."chat_id" = answered."chat_id"
-), resolved AS (
-	SELECT "id", "asker_id", "automation" FROM ancestry
+	LEFT JOIN "project_chat" started ON started."chat_id" = answered."chat_id";--> statement-breakpoint
+CREATE INDEX ON "turn_asker_ancestry" ("writer_id") WHERE "writer_id" IS NOT NULL;--> statement-breakpoint
+ANALYZE "turn_asker_ancestry";--> statement-breakpoint
+WITH RECURSIVE resolved AS (
+	SELECT "id", "asker_id", "automation" FROM "turn_asker_ancestry"
 	WHERE "writer_id" IS NULL AND ("asker_id" IS NOT NULL OR "automation")
 	UNION ALL
 	SELECT child."id", parent."asker_id", parent."automation"
-	FROM resolved parent JOIN ancestry child ON child."writer_id" = parent."id"
+	FROM resolved parent
+	CROSS JOIN LATERAL (
+		SELECT "id" FROM "turn_asker_ancestry" WHERE "writer_id" = parent."id"
+		-- Keep the writer index lookup for each turn when the chain is deep.
+		OFFSET 0
+	) child
 )
 UPDATE "turn" t SET "asker_id" = resolved."asker_id", "asked_by_automation" = resolved."automation"
 FROM resolved WHERE resolved."id" = t."id";--> statement-breakpoint

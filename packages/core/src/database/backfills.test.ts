@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { eq, inArray, sql } from "drizzle-orm";
+import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	seedAutomation,
@@ -14,8 +15,9 @@ import {
 	seedTurn,
 	seedWorkspace,
 } from "../authentication/seed.test-support.ts";
+import { query, transaction } from "./database.ts";
 import { turn } from "./schema.ts";
-import { closeDatabase, onDatabase } from "./testing.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "./testing.ts";
 
 /** The migration that moved `main`'s installations to bots and projects, whose steps these are. */
 const UPGRADE = join(
@@ -49,8 +51,10 @@ function backfillsOf(step: string): string[] {
 				.join("\n")
 				.trim(),
 		)
-		.filter(
-			(statement) => statement.startsWith("UPDATE ") || statement.startsWith("WITH RECURSIVE "),
+		.filter((statement) =>
+			["CREATE TEMP TABLE ", "CREATE INDEX ", "ANALYZE ", "WITH RECURSIVE ", "UPDATE "].some(
+				(prefix) => statement.startsWith(prefix),
+			),
 		);
 }
 
@@ -117,12 +121,15 @@ describe.skipIf(!process.env.DATABASE_URL)("the asker backfills", () => {
 				.set({ askerId: null, askedByAutomation: false })
 				.where(inArray(turn.id, Object.values(turns))),
 		);
-		for (const statement of [
-			...backfillsOf("Turn askers and joins"),
-			...backfillsOf("Turn askers in code"),
-		]) {
-			await onDatabase((db) => db.execute(sql.raw(statement)));
-		}
+		await runOnPostgres(
+			transaction(
+				Effect.forEach(
+					[...backfillsOf("Turn askers and joins"), ...backfillsOf("Turn askers in code")],
+					(statement) => query((db) => db.execute(sql.raw(statement))),
+					{ discard: true },
+				),
+			),
+		);
 	});
 
 	afterAll(async () => {

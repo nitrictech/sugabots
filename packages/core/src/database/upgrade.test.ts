@@ -2006,6 +2006,71 @@ it.skipIf(!process.env.DATABASE_URL)(
 	UPGRADE_TIMEOUT_MS,
 );
 
+it.skipIf(!process.env.DATABASE_URL)(
+	"backfills turn askers through a deep chain without repeatedly spilling unrelated turns",
+	async () => {
+		const migration = await readFile(
+			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
+			"utf8",
+		);
+		const backfill = migration.slice(
+			migration.indexOf("-- Resolve direct askers first"),
+			migration.indexOf("-- ## Approval target and age"),
+		);
+		await withClient(process.env.DATABASE_URL ?? "", async (client) => {
+			await client.query("begin");
+			try {
+				await client.query(`
+					set local work_mem = '1MB';
+					create temp table "turn" (
+						id uuid primary key, trigger_message_id uuid, asker_id uuid,
+						asked_by_automation boolean not null default false
+					);
+					create temp table message (
+						id uuid primary key, chat_id uuid, author_member_id uuid,
+						automation_trigger jsonb, author_bot_id uuid, turn_id uuid
+					);
+					create temp table project_chat (chat_id uuid primary key, started_by_id uuid);
+					insert into "turn" (id, trigger_message_id)
+					select md5('turn' || ordinal)::uuid, md5('message' || ordinal)::uuid
+					from generate_series(1, 40000) ordinal;
+					insert into message (id, author_member_id, automation_trigger, author_bot_id, turn_id)
+					select md5('message' || ordinal)::uuid,
+						case when ordinal = 1 then md5('member')::uuid end,
+						case when ordinal > 400 then '{}'::jsonb end,
+						case when ordinal between 2 and 400 then md5('bot')::uuid end,
+						case when ordinal between 2 and 400 then md5('turn' || (ordinal - 1))::uuid end
+					from generate_series(1, 40000) ordinal;
+					analyze "turn";
+					analyze message;
+				`);
+				const walk = backfill.lastIndexOf("WITH RECURSIVE");
+				await client.query(backfill.slice(0, walk));
+				const { rows } = await client.query<{ "QUERY PLAN": string }>(
+					`explain (analyze, buffers, timing off) ${backfill.slice(walk)}`,
+				);
+				const updateBuffers = rows.find(({ "QUERY PLAN": line }) => line.startsWith("  Buffers:"));
+				const written = /temp (?:read=\d+ )?written=(\d+)/.exec(
+					updateBuffers?.["QUERY PLAN"] ?? "",
+				);
+				expect(Number(written?.[1] ?? 0)).toBeLessThan(8_192);
+				const result = await client.query(`
+					select count(*)::integer as turns_by_member
+					from "turn" where asker_id = md5('member')::uuid and not asked_by_automation
+				`);
+				expect(result.rows).toEqual([{ turns_by_member: 400 }]);
+				const automation = await client.query(`
+					select count(*)::integer as turns_by_automation
+					from "turn" where asker_id is null and asked_by_automation
+				`);
+				expect(automation.rows).toEqual([{ turns_by_automation: 39_600 }]);
+			} finally {
+				await client.query("rollback");
+			}
+		});
+	},
+);
+
 /** Migrates the database at `url` through `last`, as an installation of `main` was. */
 async function migrateTo(url: string, last: string) {
 	const folder = await mkdtemp(join(tmpdir(), "migrations-"));
