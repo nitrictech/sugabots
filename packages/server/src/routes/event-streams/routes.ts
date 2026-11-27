@@ -200,5 +200,5 @@ function resumeFrom(header: string | undefined): number | undefined {
 	}
 
 	const seq = Number(header);
-	return Number.isSafeInteger(seq) && seq >= 0 ? seq : undefined;
+	return Number.isSafeInteger(seq) ? seq : undefined;
 }

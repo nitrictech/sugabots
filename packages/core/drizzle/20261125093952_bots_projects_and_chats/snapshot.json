@@ -15429,6 +15429,25 @@
         "n|sch|public",
         "n|col|public.project_bot_connector.project_id"
       ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "event_retention"
+      ],
+      "writes": [
+        "s|tbl|public.event_retention",
+        "n|tbl|public.event_retention",
+        "e|tbl|public.event_retention",
+        "n|rel|public.event_retention",
+        "n|type|public.event_retention",
+        "n|rel|public.event_retention_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
     }
   ],
   "deltas": [
@@ -25577,6 +25596,70 @@
         "method": "btree",
         "concurrently": false,
         "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "event_retention",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "event_retention",
+        "name": "singleton",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "event_retention",
+        "name": "pruned_through",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "event_retention",
+        "name": "event_retention_pkey",
+        "columns": [
+          "singleton"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "event_retention",
+        "name": "event_retention_singleton",
+        "value": "\"singleton\"",
+        "entityType": "checks"
       }
     }
   ]

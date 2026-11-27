@@ -14,11 +14,11 @@ import { OperationContract } from "./operation.ts";
 
 /**
  * Where a client resumes a stream, its `Last-Event-ID`: the `seq` of the last
- * durable event it heard, or the one `ready` or `reset` gave it, which is 0
- * for a stream with nothing stored yet. Left out, the stream starts with what
+ * durable event it heard, or the cursor `ready` or `reset` gave it.
+ * Left out, the stream starts with what
  * happens next.
  */
-const since = Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)));
+const since = Schema.optional(Schema.Int);
 
 /**
  * One event as a stream yields it: a durable one with its `seq`, the id a

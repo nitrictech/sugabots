@@ -276,15 +276,6 @@ export const make = Effect.gen(function* () {
 			);
 		});
 
-	/** The `seq` of the newest event on each of `streams`, from which reading them begins. */
-	const latestOn = (streams: ReadonlyArray<EventStream>) =>
-		Effect.forEach(streams, (stream) =>
-			Effect.map(
-				Effect.promise(() => store.latest(stream)),
-				(since) => [stream, since] as const,
-			),
-		).pipe(Effect.map((entries) => new Map<EventStream, number>(entries)));
-
 	/** Events stored on `feeds` since each one's `since`, in `seq` order, moving each `since` on. */
 	const readOn = (
 		feeds: Map<EventStream, number>,
@@ -530,9 +521,14 @@ export const make = Effect.gen(function* () {
 				// control streams from now: listening began first, so nothing between is missed.
 				const resumes =
 					since !== undefined && (yield* Effect.promise(() => store.has(stream, since)));
-				const feeds = yield* latestOn([stream, ...controlStreams]);
-				if (resumes) feeds.set(stream, since);
-				const watcherControls = yield* latestOn(controlStreams);
+				const starts = yield* Effect.promise(() => store.latest([stream, ...controlStreams]));
+				const feeds = new Map(
+					[...starts].map(([stream, cursor]) => [stream, EventStore.afterCursor(cursor)]),
+				);
+				const watcherControls = new Map(
+					[...feeds].filter(([feed]) => controlStreams.includes(feed)),
+				);
+				if (resumes) feeds.set(stream, EventStore.afterCursor(since));
 				const first = yield* operation("follow", prove);
 				const outbox = yield* Queue.bounded<Delivery, Cause.Done>(READ_AHEAD);
 				const expiresAt = yield* operation("follow", expiryOf(principal));
@@ -542,7 +538,7 @@ export const make = Effect.gen(function* () {
 				}
 				// Both carry where the stream starts, so a client cut off before
 				// anything else arrives resumes from there.
-				const start = feeds.get(stream);
+				const start = starts.get(stream);
 				if (since === undefined) {
 					// Where the stream starts is known: whatever the client fetched before
 					// this, it fetches again, and what changes after arrives here.
@@ -658,7 +654,10 @@ export const make = Effect.gen(function* () {
 					},
 					life.stop,
 				);
-				const controls = yield* latestOn([reach, own]);
+				const starts = yield* Effect.promise(() => store.latest([reach, own]));
+				const controls = new Map(
+					[...starts].map(([stream, cursor]) => [stream, EventStore.afterCursor(cursor)]),
+				);
 				yield* operation("keep", prove);
 				const expiresAt = yield* operation("keep", expiryOf(principal));
 				if (expiresAt === undefined) return Effect.void;

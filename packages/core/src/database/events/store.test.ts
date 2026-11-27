@@ -4,11 +4,12 @@ import {
 	type EventStream,
 	type StreamEvent,
 } from "@sugabots/contracts";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { query } from "../database.ts";
 import { event } from "../schema.ts";
-import { closeDatabase, onDatabase, runOnPostgres } from "../testing.ts";
+import { closeDatabase, holdTransaction, onDatabase, runOnPostgres } from "../testing.ts";
 import { EventBus } from "./bus.ts";
 import { type CommittedEvent, EventOutbox } from "./outbox.ts";
 import { EventStore } from "./store.ts";
@@ -149,10 +150,44 @@ for (const { name, skip, make, backdate } of stores) {
 		it("starts a stream with nothing stored where every stream is, and resumes it from there", async () => {
 			const elsewhere = await append(`chat:${crypto.randomUUID()}`, rawEvent("message.created"));
 
-			expect(await store.latest(stream)).toBe(elsewhere);
-			await append(stream, rawEvent("message.created"));
-			expect(await store.has(stream, elsewhere)).toBe(true);
+			const cursor = (await store.latest([stream])).get(stream);
+			if (cursor === undefined) throw new Error("The stream has no cursor");
+			expect(EventStore.afterCursor(cursor)).toBe(elsewhere);
+
+			const first = await append(stream, rawEvent("message.created"));
+
+			expect(await store.has(stream, cursor)).toBe(true);
+			expect(
+				(await store.replay(stream, EventStore.afterCursor(cursor), 10)).map(({ seq }) => seq),
+			).toEqual([first]);
 		});
+
+		it.skipIf(name !== "postgres")(
+			"takes starting positions while another reader holds the stream lock",
+			async () => {
+				const reader = holdTransaction(
+					query((db) =>
+						db.execute(
+							sql`select pg_advisory_xact_lock_shared(hashtextextended(${stream}, 0))`,
+							"objects",
+						),
+					),
+				);
+				await reader.held;
+				const stopWatching = new AbortController();
+				try {
+					const starts = await Promise.race([
+						store.latest([stream, stream]),
+						reader.waitForWaiters(1, stopWatching.signal).then(() => null),
+					]);
+					expect(starts?.size).toBe(1);
+					expect(starts?.has(stream)).toBe(true);
+				} finally {
+					stopWatching.abort();
+					await reader.release();
+				}
+			},
+		);
 
 		it("prunes what is older than the cutoff and keeps the rest", async () => {
 			const old = await append(stream, rawEvent("message.created"));

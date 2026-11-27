@@ -249,7 +249,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		onTestFinished(() => chat.close());
 
 		expect(await chat.next()).toEqual({
-			seq: await stored.latest(chatStream(world.chat)),
+			seq: (await stored.latest([chatStream(world.chat)])).get(chatStream(world.chat)),
 			event: streamEvent("ready"),
 		});
 		const changed = streamEvent("chat.changed", { chatId: world.chat });
@@ -258,12 +258,10 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		expect(next !== "ended" && next.event).toEqual(changed);
 	});
 
-	it("resumes from where ready said the stream starts, missing nothing stored while away", async () => {
+	it("resumes from ready when the event table was empty", async () => {
 		const world = await staffed();
 		const ed = await signedIn.member(world.ed);
-		// Another stream's event: the chat's own stream starts after it.
-		await commit(workspaceStream(world.workspace), jChanged(world));
-		const elsewhere = await stored.latest(workspaceStream(world.workspace));
+		await stored.prune(new Date(Date.now() + 60_000));
 		const first = await follow(ed, "events.followChat", { chatId: world.chat });
 		const ready = await first.next();
 		await first.close();
@@ -274,7 +272,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		const resumed = await follow(ed, "events.followChat", { chatId: world.chat, since });
 		onTestFinished(() => resumed.close());
 
-		expect(since).toBe(elsewhere);
+		expect(since).toBeDefined();
 		const next = await resumed.next();
 		expect(next !== "ended" && next.event).toEqual(changed);
 	});
@@ -302,7 +300,8 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		const ed = await signedIn.member(world.ed);
 		const stream = chatStream(world.chat);
 		await commit(stream, streamEvent("chat.changed", { chatId: world.chat }));
-		const latest = await stored.latest(stream);
+		const latest = (await stored.latest([stream])).get(stream);
+		if (latest === undefined) throw new Error("The stream has no cursor");
 		const chat = await follow(ed, "events.followChat", { chatId: world.chat, since: latest + 1 });
 		onTestFinished(() => chat.close());
 
@@ -1080,8 +1079,9 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			const visStream = memberStream(world.vi);
 			await commit(edsStream, streamEvent("approvals.changed", { toolCallId: randomUUID() }));
 			await commit(visStream, streamEvent("approvals.changed", { toolCallId: randomUUID() }));
-			const edsFirst = await stored.latest(edsStream);
-			const visFirst = await stored.latest(visStream);
+			const starts = await stored.latest([edsStream, visStream]);
+			const edsFirst = starts.get(edsStream);
+			const visFirst = starts.get(visStream);
 			const inJ = Audience.forChat(world.chat, notification("In J", world.chat));
 			await commit(edsStream, inJ);
 			await commit(visStream, inJ);
@@ -1112,7 +1112,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			const world = await staffed();
 			const stream = workspaceStream(world.workspace);
 			await commit(stream, Audience.forWorkspace(streamEvent("chat.changed", { chatId: "first" })));
-			const first = await stored.latest(stream);
+			const first = (await stored.latest([stream])).get(stream);
 			await commit(
 				stream,
 				Audience.forChat(world.chat, streamEvent("chat.changed", { chatId: world.chat })),

@@ -3356,3 +3356,9 @@ CREATE INDEX "event_control_stream_seq_idx" ON "event" ("stream","seq") WHERE "t
 CREATE INDEX "computer_lease_holder_idx" ON "computer_lease" ("holder_kind","holder_id");
 --> statement-breakpoint
 ALTER TABLE "turn" ADD COLUMN "admission" jsonb;
+--> statement-breakpoint
+CREATE TABLE "event_retention" (
+	"singleton" boolean PRIMARY KEY,
+	"pruned_through" bigint NOT NULL,
+	CONSTRAINT "event_retention_singleton" CHECK ("singleton")
+);

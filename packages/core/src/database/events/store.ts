@@ -1,7 +1,7 @@
 export * as EventStore from "./store.ts";
 
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
-import { and, asc, count, eq, gt, inArray, lt, lte, notExists, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lte, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Effect, Layer } from "effect";
 import { processLayer, Tier } from "../../tiers.ts";
@@ -12,7 +12,7 @@ import {
 	query,
 	transaction,
 } from "../database.ts";
-import { CONTROL_EVENT_TYPES, event, isControlEvent } from "./sql.ts";
+import { CONTROL_EVENT_TYPES, event, eventRetention, isControlEvent } from "./sql.ts";
 
 /**
  * Where durable events are read back between a disconnect and a reconnect.
@@ -37,25 +37,11 @@ export interface Interface {
 	 */
 	following(feeds: ReadonlyArray<Feed>, limit: number): Promise<StoredOn[]>;
 
-	/**
-	 * Where the stream is now: the `seq` of its newest event, or, when it has
-	 * none, of the newest event on any stream, after which everything stored on
-	 * it is new. 0 only while no event is stored at all.
-	 */
-	latest(stream: EventStream): Promise<number>;
+	/** The starting cursor for each distinct stream, taken together before following them. */
+	latest(streams: ReadonlyArray<EventStream>): Promise<Map<EventStream, number>>;
 
-	/**
-	 * Whether a client that last saw `seq` on the stream can resume after it:
-	 * the event at `seq` is still here, and is the stream's, or is where
-	 * `latest` put the stream while it had nothing stored.
-	 *
-	 * This is how a resume point is judged, rather than comparing it to the
-	 * oldest surviving `seq`: the sequence is global, so a stream's ids have
-	 * gaps that say nothing about what was pruned. Events are pruned oldest
-	 * first, so if the row a client names is gone, so may be what came after
-	 * it: its history is broken and it needs a `reset`.
-	 */
-	has(stream: EventStream, seq: number): Promise<boolean>;
+	/** Whether the cursor is still within the stream's retained history. */
+	has(stream: EventStream, cursor: number): Promise<boolean>;
 
 	/** Drops events older than `before`. Returns how many went. */
 	prune(before: Date): Promise<number>;
@@ -112,32 +98,58 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 			}));
 		},
 
-		async latest(stream) {
-			const [row] = await Effect.runPromiseWith(context)(
+		async latest(streams) {
+			if (streams.length === 0) return new Map();
+			const wanted = sql`array[${sql.join(
+				streams.map((stream) => sql`${stream}`),
+				sql`, `,
+			)}]::text[]`;
+			const rows = await Effect.runPromiseWith(context)(
 				transaction(
 					Effect.gen(function* () {
-						// Waits for any event being stored on the stream to commit: one stored
-						// next takes a `seq` above every event committed by then.
+						// A writer can reserve a sequence number before its event is visible.
+						// Wait for writers on these streams before taking the read snapshot.
 						yield* query((db) =>
-							db.execute(sql`select lock_event_streams(array[${stream}]::text[])`, "objects"),
+							db.execute(
+								sql`select pg_advisory_xact_lock_shared(hashtextextended(stream, 0))
+								from (select distinct stream collate "C" as stream from unnest(${wanted}) as stream
+									order by stream) as ordered`,
+								"objects",
+							),
 						);
 						return yield* query((db) =>
-							db.execute<{ seq: string | number }>(
-								sql`select coalesce(
-									(select max(${event.seq}) from ${event} where ${event.stream} = ${stream}),
-									(select max(${event.seq}) from ${event}),
-									0
-								) as seq`,
+							db.execute<{ stream: EventStream; cursor: string | number }>(
+								sql`select stream, coalesce(
+									(select max(${event.seq}) from ${event} where ${event.stream} = wanted.stream),
+									-(${sequencePosition}) - 1
+								) as cursor
+								from (select distinct stream from unnest(${wanted}) as stream) as wanted`,
 								"objects",
 							),
 						);
 					}),
 				),
 			);
-			return Number(row?.seq ?? 0);
+			return new Map(rows.map(({ stream, cursor }) => [stream, Number(cursor)]));
 		},
 
 		async has(stream, seq) {
+			if (seq <= 0) {
+				const position = afterCursor(seq);
+				const [row] = await run((db) =>
+					db.execute<{ retained: boolean }>(
+						sql`select ${position} <= (${sequencePosition})
+							and ${position} >= coalesce(
+								(select pruned_through from ${eventRetention}), 0
+							) and not exists (
+								select 1 from ${event}
+								where ${event.stream} = ${stream} and ${event.seq} <= ${position}
+							) as retained`,
+						"objects",
+					),
+				);
+				return row?.retained ?? false;
+			}
 			const earlier = alias(event, "earlier");
 			const rows = await run((db) =>
 				db
@@ -164,20 +176,36 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 		},
 
 		async prune(before) {
-			// The count, not the rows: a week of events is the largest result set
-			// this process would ever pull back, and only its size is wanted.
-			const [counted] = await run((db) => {
-				const deleted = db
-					.$with("deleted")
-					.as(db.delete(event).where(lt(event.createdAt, before)).returning({ seq: event.seq }));
-				return db.with(deleted).select({ removed: count() }).from(deleted);
-			});
-			return counted?.removed ?? 0;
+			const [row] = await run((db) =>
+				db.execute<{ removed: number }>(
+					sql`with deleted as (
+						delete from ${event} where ${event.createdAt} < ${before.toISOString()}::timestamptz
+						returning seq
+					), counted as (
+						select count(*)::integer as removed, max(seq) as pruned_through from deleted
+					), saved as (
+						insert into ${eventRetention} (singleton, pruned_through)
+						select true, pruned_through from counted where pruned_through is not null
+						on conflict (singleton) do update
+						set pruned_through = greatest(${eventRetention}.pruned_through, excluded.pruned_through)
+					)
+					select removed from counted`,
+					"objects",
+				),
+			);
+			return row?.removed ?? 0;
 		},
 	};
 });
 
 export const layer = processLayer(Layer.effect(Service, make));
+
+const sequencePosition = sql`select case when is_called then last_value else 0 end from event_seq_seq`;
+
+/** afterCursor returns the sequence position to read after, including an empty stream's cursor. */
+export function afterCursor(cursor: number): number {
+	return cursor < 0 ? -cursor - 1 : cursor;
+}
 
 /** A durable event as it was stored, with the `seq` clients resume from. */
 export interface Stored {

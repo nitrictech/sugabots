@@ -1,6 +1,6 @@
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
 import type { CommittedEvent } from "./outbox.ts";
-import type { EventStore } from "./store.ts";
+import { EventStore } from "./store.ts";
 
 interface MemoryRow extends EventStore.Stored {
 	stream: EventStream;
@@ -28,6 +28,7 @@ export function inMemoryEventStore({
 }: InMemoryOptions = {}): InMemoryEventStore {
 	const rows: MemoryRow[] = [];
 	let next = 0;
+	let prunedThrough = 0;
 
 	return {
 		record(stream, event) {
@@ -57,11 +58,24 @@ export function inMemoryEventStore({
 				.map(({ seq, stream, event }) => ({ seq, stream, event }));
 		},
 
-		async latest(stream) {
-			return rows.filter((row) => row.stream === stream).at(-1)?.seq ?? rows.at(-1)?.seq ?? 0;
+		async latest(streams) {
+			return new Map(
+				streams.map((stream) => [
+					stream,
+					rows.findLast((row) => row.stream === stream)?.seq ?? -next - 1,
+				]),
+			);
 		},
 
 		async has(stream, seq) {
+			if (seq <= 0) {
+				const position = EventStore.afterCursor(seq);
+				return (
+					prunedThrough <= position &&
+					position <= next &&
+					!rows.some((row) => row.stream === stream && row.seq <= position)
+				);
+			}
 			const row = rows.find((candidate) => candidate.seq === seq);
 			if (!row) return false;
 			return (
@@ -73,6 +87,8 @@ export function inMemoryEventStore({
 		async prune(before) {
 			const survivors = rows.filter((row) => row.createdAt >= before);
 			const removed = rows.length - survivors.length;
+			const latestRemoved = rows.findLast((row) => row.createdAt < before);
+			prunedThrough = Math.max(prunedThrough, latestRemoved?.seq ?? 0);
 			rows.splice(0, rows.length, ...survivors);
 			return removed;
 		},
