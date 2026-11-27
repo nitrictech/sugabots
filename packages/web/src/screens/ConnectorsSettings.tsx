@@ -12,7 +12,7 @@ import {
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import { ArrowUpRight, ChevronDown, ChevronRight, Code, Globe, Info } from "lucide-react";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, useState } from "react";
 import {
 	bearerAuthorization,
 	connectorNeedsAttention,
