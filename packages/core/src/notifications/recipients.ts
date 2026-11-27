@@ -424,9 +424,9 @@ export const mayStillBeTold = Effect.fn("Notifications.mayStillBeTold")(function
 	audience: Audience.Group | undefined,
 ) {
 	if (audience?.kind === "approval") {
-		const deciders = yield* approvalAudience(db, [audience.toolCall]);
-		return deciders.some(
-			(decider) => decider.memberId === memberId && (decider.reachesChat || !audience.showsChat),
+		const approvers = yield* approvalAudience(db, [audience.toolCall]);
+		return approvers.some(
+			(approver) => approver.memberId === memberId && (approver.reachesChat || !audience.showsChat),
 		);
 	}
 	if (audience?.kind !== "chat") return true;
