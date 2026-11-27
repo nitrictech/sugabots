@@ -344,7 +344,10 @@ docker compose pull
 docker compose up -d
 ```
 
-Sugabots applies any database migrations when it starts.
+Sugabots applies any database migrations when it starts. If your server runs a
+version from before projects, read
+[Upgrading to projects](/docs/upgrading-to-projects) before you update: that
+upgrade changes more than most.
 
 If your installation uses `CREDENTIALS_ENCRYPTION_KEY`, the new image can still
 read it. To switch to `SECRETS_ENCRYPTION_KEY`, rename the variable in `.env`,

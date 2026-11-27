@@ -51,6 +51,7 @@ export const docGroups: readonly DocGroup[] = [
 		pages: [
 			{ slug: "run-and-update", bot: { color: "orange", eyes: "pill" } },
 			{ slug: "deploy-with-docker", bot: { color: "ice", eyes: "dot" } },
+			{ slug: "upgrading-to-projects", bot: { color: "teal", eyes: "arc" } },
 		],
 	},
 	{

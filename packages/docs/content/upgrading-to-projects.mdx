@@ -1,0 +1,66 @@
+---
+title: Upgrading to projects
+description: What changes when a server moves from pods to projects, and what to do before and after.
+---
+
+The release that brings projects replaces pods, routines, sandboxes and
+artifacts with projects, automations, computers and files. It's the largest
+update so far, so plan for it.
+
+## Before you start
+
+- **Back up first.** See [Backups](/docs/deploy-with-docker#backups). The
+  upgrade can't be undone except by restoring a backup.
+- **Plan for downtime.** The whole upgrade runs in one database transaction
+  when the new version first starts. Stop every copy of the old version before
+  you start the new one, and expect the first start to take longer than usual
+  on a large installation. If it fails partway, nothing changes, and the old
+  version still runs on the same database.
+
+## What changes
+
+- **Shared pods become private projects** with the same members. Each bot of
+  a shared pod becomes a private bot that those members can reach, and stays in
+  the project, still leading it if it led the pod. Nobody gains access to
+  anything they couldn't reach before.
+- **Each bot gets its own connectors.** A pod's connectors are copied to each
+  of its bots. Sign-ins can't be shared between copies, so **every OAuth
+  connector has to sign in again, once for each bot it was copied to**.
+  Connectors that use an API key or no sign-in keep working.
+- **A pod's GitHub app goes to one bot**: the oldest bot with automations
+  started by it, or otherwise the pod's oldest bot. A GitHub app can't be
+  copied, so the pod's other bots' automations that GitHub started are
+  **paused**. To start them again, set up a GitHub app for each of those bots,
+  point the trigger at it, and resume the automation.
+- **Webhook triggers that only kept a digest of their secret are paused.**
+  Older versions stored only a digest of some webhook secrets, which can't be
+  used to check calls any more. Each such trigger refuses every call, and its
+  automation is paused, until someone gives the trigger a new secret and
+  resumes it. Update the secret wherever the webhook is sent from too.
+- **Direct messages between members are deleted**, with their files. Members
+  now talk in projects' chats.
+- **Chat summaries are deleted.** Bots no longer summarise chats. What they
+  cost still shows in usage.
+- **Collaboration chats are removed.** A helper bot now answers in the chat
+  it was asked from, so each collaboration chat's messages move into that
+  chat, among its own messages in time order.
+- **Work under way is stopped.** Every bot reply that was running or waiting
+  for approval is cancelled, and every automation run under way is recorded as
+  failed. Send the message again, or run the automation again, once the
+  upgrade is done.
+- **A Personal Assistant's automations are paused**, until the member it
+  works for resumes them.
+- **Open browser tabs reload.** The history the web app catches up from is
+  cleared, so every open tab fetches everything again when it reconnects.
+
+## What keeps working
+
+- **Old webhook addresses.** Webhooks sent to the addresses older versions
+  gave out, under `/api/hooks/`, still reach their triggers and GitHub apps.
+  So do the setup addresses each GitHub app was made with. You don't need to
+  change them where they're configured.
+- **Files and computers.** Every file keeps its contents, and every computer
+  keeps its machine and its work. Files kept on disk move to their new folders
+  when the server starts.
+- **Old docs links.** Links to renamed docs pages, such as `/docs/pods`,
+  redirect to the page that replaced them.
