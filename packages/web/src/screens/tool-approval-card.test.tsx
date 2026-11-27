@@ -160,7 +160,7 @@ describe("an approval request", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Review" }));
 		const request = await screen.findByRole("dialog", { name: "Update issue" });
-		within(request).getByText("Platform");
+		within(request).getByText(/"team": "Platform"/);
 		fireEvent.click(within(request).getByRole("button", { name: /^Allow/ }));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
@@ -169,6 +169,15 @@ describe("an approval request", () => {
 			decision: "allow_once",
 		});
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	});
+
+	it("shows exact JSON when reviewing null and empty strings", async () => {
+		const input = { before: { assignee: null }, after: { assignee: "" } };
+		show(asking(input));
+
+		fireEvent.click(screen.getByRole("button", { name: "Review" }));
+		const request = await screen.findByRole("dialog", { name: "Update issue" });
+		expect(request.querySelector("pre")?.textContent).toBe(JSON.stringify(input, null, 2));
 	});
 
 	it("closes the full-screen request without answering", async () => {

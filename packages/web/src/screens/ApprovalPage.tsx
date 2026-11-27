@@ -6,18 +6,17 @@ import type {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { Check, X } from "lucide-react";
-import type { ReactNode } from "react";
 import { useApprovalToolSource, useAskedIn } from "@/lib/approval-tool-source.ts";
 import { useReviewToolCall } from "@/lib/chat-query.ts";
 import { useWorkspaceApprovals } from "@/lib/chats.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { toolTitle, wordsFromKey } from "@/lib/tool-names.ts";
+import { toolTitle } from "@/lib/tool-names.ts";
 import { ChatLink } from "@/shell/ChatLink.tsx";
 import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { PageBackLink } from "@/ui/settings-page.tsx";
-import { Answer, parseFields, RequestValue } from "./ToolApprovalCard.tsx";
+import { Answer, ExactRequest } from "./ToolApprovalCard.tsx";
 import { awaitsApproval } from "./tool-activity.ts";
 
 /** A request as the member's approvals list it: waiting on their decision, or answered. */
@@ -27,7 +26,7 @@ type ListedRequest =
 
 /**
  * One approval in full, on its own page: who wants to do what, every
- * field of the request in a table, and Allow and Deny, or how it was
+ * input of the request as JSON, and Allow and Deny, or how it was
  * answered, with a way to the chat it was asked in.
  */
 export function ApprovalPage({ callId }: { callId: string }) {
@@ -60,7 +59,6 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 	const { connector, toolSourceName, action, hostRequest } = useApprovalToolSource(request);
 	const review = useReviewToolCall(request.chatId);
 	const { project, askedIn } = useAskedIn(request);
-	const fields = parseFields(call.input) ?? [];
 
 	return (
 		<div className="tab-bar-clearance min-h-0 flex-1 overflow-y-auto">
@@ -102,15 +100,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 					</div>
 					<p className="m-0 text-subtle-foreground text-xs max-md:hidden">Asked {askedIn}</p>
 				</header>
-				{fields.length > 0 && (
-					<dl className="m-0 overflow-hidden rounded-xl border border-border">
-						{fields.map(([key, value]) => (
-							<Row key={key} label={wordsFromKey(key)}>
-								<RequestValue value={value} depth={1} />
-							</Row>
-						))}
-					</dl>
-				)}
+				<ExactRequest input={call.input} />
 				<div className="flex flex-wrap items-center gap-3 pt-1 max-md:flex-col max-md:items-stretch max-md:gap-4">
 					{found.kind === "answered" ? (
 						// Announced when the member has just answered it here.
@@ -188,16 +178,6 @@ function AnswerGiven({
 			{answer.decidedByName && ` by ${answer.decidedByName}`}
 			{` at ${formatListTime(new Date(answer.decidedAt), new Date())}`}
 		</p>
-	);
-}
-
-/** One field of the request: its name, then its value; on a phone, the name over the value. */
-function Row({ label, children }: { label: string; children: ReactNode }) {
-	return (
-		<div className="grid grid-cols-label gap-4 border-border border-b px-3.5 py-2.5 last:border-b-0 max-md:grid-cols-1 max-md:gap-1 max-md:py-3">
-			<dt className="text-xs text-subtle-foreground max-md:text-sm">{label}</dt>
-			<dd className="m-0 min-w-0 text-xs text-foreground max-md:text-sm">{children}</dd>
-		</div>
 	);
 }
 

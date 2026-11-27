@@ -253,39 +253,44 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 			<div
 				id={bodyId}
 				// Unfolded, it scrolls, so a keyboard needs to reach it.
-				tabIndex={foldable && open ? 0 : undefined}
+				tabIndex={open ? 0 : undefined}
 				style={FOLDED_HEIGHT_VARIABLE}
 				className={cn(
 					"focus-ring w-full min-w-0 border-border-dashed border-l-2 pl-2.5",
 					foldable && FOLDED_CLASSES_ON_PHONE,
 					folded && FOLDED_CLASSES,
-					foldable &&
-						open &&
+					open &&
 						"md:max-h-tool-input md:overflow-y-auto md:overscroll-contain md:pr-1.5 md:scrollbar-thin",
 				)}
 			>
 				<div ref={content}>
-					<RequestValue value={input} depth={0} />
+					{open ? <ExactRequest input={input} /> : <RequestValue value={input} depth={0} />}
 				</div>
 			</div>
-			{foldable && (
-				<Button
-					variant="link"
-					size="text"
-					aria-expanded={open}
-					aria-controls={bodyId}
-					onClick={() => setOpen(!open)}
-					className="gap-1 py-1.5 max-md:hidden"
-				>
-					{open ? "See less" : "See more"}
-					<ChevronDown
-						aria-hidden
-						className={cn("size-3 transition-transform", open && "rotate-180")}
-						strokeWidth={3}
-					/>
-				</Button>
-			)}
+			<Button
+				variant="link"
+				size="text"
+				aria-expanded={open}
+				aria-controls={bodyId}
+				onClick={() => setOpen(!open)}
+				className="gap-1 py-1.5 max-md:hidden"
+			>
+				{open ? "See less" : "See more"}
+				<ChevronDown
+					aria-hidden
+					className={cn("size-3 transition-transform", open && "rotate-180")}
+					strokeWidth={3}
+				/>
+			</Button>
 		</div>
+	);
+}
+
+export function ExactRequest({ input }: { input: ToolCallPart["input"] }) {
+	return (
+		<pre className="m-0 whitespace-pre-wrap wrap-anywhere rounded-md bg-list px-2.5 py-2 font-mono text-xs">
+			{JSON.stringify(input, null, 2)}
+		</pre>
 	);
 }
 
@@ -339,7 +344,7 @@ function ReviewSheet({
 				<ScrollArea className="min-h-0 flex-1">
 					<div className="flex flex-col gap-4 px-4 py-4">
 						<ReviewHeading step={step} bot={bot} headingId={headingId} />
-						<RequestValue value={input} depth={0} />
+						<ExactRequest input={input} />
 					</div>
 				</ScrollArea>
 				<footer className="shrink-0 border-border-subtle border-t px-4 pt-3 pb-safe-or-4">
@@ -444,7 +449,7 @@ export function Answer({
 type Fields = [string, unknown][];
 
 /** A value's named fields in order, or nothing when it is not a record of them. */
-export function parseFields(value: unknown): Fields | undefined {
+function parseFields(value: unknown): Fields | undefined {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
 	const fields = Object.entries(value);
 	return fields.length > 0 ? fields : undefined;
@@ -470,7 +475,7 @@ const ENTRIES_SHOWN = 10;
  * A value laid out for reading: a record as its fields, a list of records as
  * numbered entries, anything too deep to lay out as indented JSON.
  */
-export function RequestValue({ value, depth }: { value: unknown; depth: number }) {
+function RequestValue({ value, depth }: { value: unknown; depth: number }) {
 	const fields = parseFields(value);
 	if (fields && depth < MAX_DEPTH) return <FieldList fields={fields} depth={depth} />;
 	if (isRecordList(value) && depth < MAX_DEPTH) return <EntryList entries={value} depth={depth} />;

@@ -129,7 +129,7 @@ export const NoLongerWaiting = meta.story({
 export const OutsideTheChat = meta.story({
 	render: at(outside.call.id),
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("api.acme.example")).toBeVisible();
+		await expect(await canvas.findByText(/"host": "api.acme.example"/)).toBeVisible();
 		await expect(
 			canvas.getByText(/Growth Desk wants the project's computer to reach a new host/),
 		).toBeVisible();

@@ -188,9 +188,8 @@ export const ReviewOnAPhone = meta.story({
 	},
 });
 
-/** Labels with commas still show exactly which names the connector receives. */
+/** ListEntryBoundaries keeps a comma inside a label readable in the compact request. */
 export const ListEntryBoundaries = meta.story({
-	globals: { ...PHONE, theme: "light" },
 	args: {
 		call: asking({
 			tool: "linear__update_issue",
@@ -198,11 +197,27 @@ export const ListEntryBoundaries = meta.story({
 		}),
 		connector: linear,
 	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText('["North, West"]')).toBeInTheDocument();
+		await expect(canvas.getByText('["North","West"]')).toBeInTheDocument();
+	},
+});
+
+/** ExactInput distinguishes values that have the same compact label. */
+export const ExactInput = meta.story({
+	globals: { ...PHONE, theme: "light" },
+	args: {
+		call: asking({
+			tool: "linear__update_issue",
+			input: { before: { assignee: null }, after: { assignee: "" } },
+		}),
+		connector: linear,
+	},
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
 		const request = await screen.findByRole("dialog", { name: "Update issue" });
-		await expect(request).toHaveTextContent('["North, West"]');
-		await expect(request).toHaveTextContent('["North","West"]');
+		await expect(request).toHaveTextContent('"assignee": null');
+		await expect(request).toHaveTextContent('"assignee": ""');
 	},
 });
 
