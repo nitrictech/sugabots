@@ -1,6 +1,5 @@
 import { BadRequest, Conflict, Unauthorized } from "@sugabots/contracts/http";
 import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
-import { Ids } from "@sugabots/core/ids/ids";
 import type { Call } from "@sugabots/core/operations/operation";
 import { Operations } from "@sugabots/core/operations/registry";
 import { userText } from "@sugabots/errors";
@@ -22,8 +21,7 @@ export const webhookRoutes = HttpApiBuilder.group(ServerApi, "webhooks", (handle
 	Effect.gen(function* () {
 		const operations = yield* Operations.Service;
 		const webhooks = yield* WebhookAuthentication.Service;
-		const ids = yield* Ids.Service;
-		const nextCall = Effect.map(ids.next, (request): Call => ({ kind: "request", request }));
+		const call: Call = { kind: "request" };
 		return (
 			handlers
 				// A body that is not JSON is refused with the reason rather than the
@@ -53,7 +51,7 @@ export const webhookRoutes = HttpApiBuilder.group(ServerApi, "webhooks", (handle
 						return yield* operations["automations.webhook"](
 							principal,
 							{ triggerId: params.triggerId, headers, payload },
-							yield* nextCall,
+							call,
 						);
 					}).pipe(asHttpError(triggerErrors)),
 				)
@@ -75,7 +73,7 @@ export const webhookRoutes = HttpApiBuilder.group(ServerApi, "webhooks", (handle
 								deliveryId: headers["x-github-delivery"],
 								body,
 							},
-							yield* nextCall,
+							call,
 						).pipe(
 							Effect.mapError((error) =>
 								error._tag === "GitHubDeliveryIdInvalid"

@@ -7,7 +7,6 @@ import {
 } from "@sugabots/contracts/file-pages";
 import { PageAuthentication } from "@sugabots/core/authentication/page";
 import { FilePages } from "@sugabots/core/files/pages";
-import { Ids } from "@sugabots/core/ids/ids";
 import { Operations } from "@sugabots/core/operations/registry";
 import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { processLayer } from "@sugabots/core/tiers";
@@ -31,7 +30,6 @@ export const contentPageRoutes = Layer.effectDiscard(
 		const serverSettings = yield* ServerSettings.Service;
 		const pageAddresses = yield* PageAuthentication.Service;
 		const operations = yield* Operations.Service;
-		const ids = yield* Ids.Service;
 		const { contentOrigin } = serverSettings;
 		if (!contentOrigin) return;
 		const sentToContentOrigin = contentOriginMatcher(contentOrigin);
@@ -61,7 +59,6 @@ export const contentPageRoutes = Layer.effectDiscard(
 						{ fileId: principal.file },
 						{
 							kind: "request",
-							request: yield* ids.next,
 						},
 					);
 				}).pipe(

@@ -1,5 +1,4 @@
 import { SystemWorkAuthentication } from "@sugabots/core/authentication/system-work";
-import { Ids } from "@sugabots/core/ids/ids";
 import type { Call } from "@sugabots/core/operations/operation";
 import { Operations } from "@sugabots/core/operations/registry";
 import { processLayer } from "@sugabots/core/tiers";
@@ -59,8 +58,7 @@ function attemptSweepItem<E>({
 export const make = Effect.gen(function* () {
 	const authenticate = yield* SystemWorkAuthentication.Service;
 	const operations = yield* Operations.Service;
-	const ids = yield* Ids.Service;
-	const request = ids.random.pipe(Effect.map((request): Call => ({ kind: "request", request })));
+	const request = Effect.succeed<Call>({ kind: "request" });
 
 	const routineRetryAt = new Map<string, number>();
 	const runNextRoutine = Effect.gen(function* () {
