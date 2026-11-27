@@ -27,7 +27,11 @@ export interface EventRelay {
 	): Promise<() => Promise<void>>;
 }
 
-/** The Postgres notification channel every process listens on. */
+/**
+ * The Postgres notification channel every process listens on. The database
+ * notifies it too, of the `session.ended` events its `session_ended` trigger
+ * stores, as from `database`.
+ */
 const NOTIFY_CHANNEL = "sugabots_events";
 
 /**

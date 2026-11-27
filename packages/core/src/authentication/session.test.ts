@@ -1,9 +1,13 @@
+import { memberStream, streamEvent } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { EventBus } from "../database/events/bus.ts";
+import { postgresEventRelay } from "../database/events/relay.ts";
+import { EventStore } from "../database/events/store.ts";
 import { session } from "../database/schema.ts";
-import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { closeDatabase, databaseForTests, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { seedMember, seedSession, seedWorkspace } from "./seed.test-support.ts";
 import { type CookieSession, expiryOf, SessionAuthentication } from "./session.ts";
 
@@ -160,5 +164,40 @@ describe("SessionAuthentication", () => {
 		await expect(runOnPostgres(auth.authenticateLongRunning(new Headers()))).rejects.toBeInstanceOf(
 			SessionAuthentication.SessionInvalid,
 		);
+	});
+
+	it("tells the member's streams, in every process, once a session is deleted", async () => {
+		const memberId = await seedMember(workspaceId, "editor");
+		const signedIn = await seedSession(memberId);
+		const store = await runOnPostgres(EventStore.make);
+		const relay = await databaseForTests.runPromise(postgresEventRelay(store));
+		let listening: Promise<unknown> = Promise.resolve();
+		const bus = EventBus.inProcess({
+			store,
+			relay: {
+				broadcast: relay.broadcast,
+				listen: (receive) => {
+					const stop = relay.listen(receive);
+					listening = stop;
+					return stop;
+				},
+			},
+		});
+		const stop = new AbortController();
+		try {
+			await listening;
+			const deliveries = bus.subscribe(memberStream(memberId), { signal: stop.signal });
+
+			await onDatabase((db) => db.delete(session).where(eq(session.id, signedIn.id)));
+
+			const { value } = await deliveries[Symbol.asyncIterator]().next();
+			expect(value).toEqual({
+				seq: expect.any(Number),
+				event: streamEvent("session.ended", { sessionId: signedIn.id }),
+			});
+		} finally {
+			stop.abort();
+			await bus.close();
+		}
 	});
 });

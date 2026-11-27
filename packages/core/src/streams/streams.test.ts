@@ -22,7 +22,6 @@ import {
 	seedProjectChat,
 	seedWorkspace,
 } from "../authentication/seed.test-support.ts";
-import { recordEnded } from "../authentication/session.ts";
 import { chatServicesForTests } from "../chats/testing.ts";
 import { query, transaction } from "../database/database.ts";
 import { Audience } from "../database/events/audience.ts";
@@ -672,12 +671,9 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			const chat = await following(signedOut, "events.followChat", { chatId: world.chat });
 			const other = await following(stillIn, "events.followChat", { chatId: world.chat });
 
-			await runOnPostgres(
-				recordEnded({ session: signedOut.session, member: world.ed }).pipe(
-					Effect.provide(
-						EventOutbox.layer.pipe(Layer.provide(Layer.succeed(EventBus.Service, bus))),
-					),
-				),
+			await commit(
+				memberStream(world.ed),
+				streamEvent("session.ended", { sessionId: signedOut.session }),
 			);
 
 			expect(await nextType(own)).toBe("ended");

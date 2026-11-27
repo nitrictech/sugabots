@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { memberStream, streamEvent } from "@sugabots/contracts";
 import { DesktopUnavailable } from "@sugabots/contracts/errors/computers";
 import type { OutputOf } from "@sugabots/contracts/operations";
 import { userText } from "@sugabots/errors";
@@ -13,7 +14,6 @@ import {
 	seedProjectChat,
 	seedWorkspace,
 } from "../../authentication/seed.test-support.ts";
-import { recordEnded } from "../../authentication/session.ts";
 import { chatServicesForTests } from "../../chats/testing.ts";
 import { DesktopViewer } from "../../chats/tools/browser/viewer.ts";
 import { Computers } from "../../computers/computers.ts";
@@ -291,7 +291,14 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 		const ed = await view(session, world.chat, world.pub.id);
 
 		await runOnPostgres(
-			recordEnded({ session: session.session, member: world.ed }).pipe(
+			Effect.flatMap(EventOutbox.Service, (outbox) =>
+				outbox.publish([
+					{
+						stream: memberStream(world.ed),
+						event: streamEvent("session.ended", { sessionId: session.session }),
+					},
+				]),
+			).pipe(
 				Effect.provide(EventOutbox.layer.pipe(Layer.provide(Layer.succeed(EventBus.Service, bus)))),
 			),
 		);

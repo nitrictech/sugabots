@@ -8,7 +8,6 @@ import {
 } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { recordEnded } from "@sugabots/core/authentication/session";
 import { type Database, effectRunner } from "@sugabots/core/database/database";
 import type { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { Email } from "@sugabots/core/email/email";
@@ -130,15 +129,6 @@ export const make = Effect.gen(function* () {
 
 		// better-auth stores whatever name it is sent, at sign-up and after.
 		databaseHooks: {
-			// Signing out, revoking a session or resetting a password ends sessions
-			// here, and their streams and desktop viewers end with them.
-			session: {
-				delete: {
-					after: async (ended) => {
-						await run(recordEnded({ session: ended.id, member: ended.userId }));
-					},
-				},
-			},
 			user: {
 				create: {
 					before: async (creating, context) => {

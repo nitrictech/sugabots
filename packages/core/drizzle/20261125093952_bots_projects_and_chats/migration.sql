@@ -3254,4 +3254,33 @@ ALTER TABLE "pending_notification" ADD CONSTRAINT "pending_notification_chat_id_
 -- A turn's reply is found by its turn on every write the turn makes while it
 -- runs, and the sweep for lost cancels reads only turns asked to end.
 CREATE INDEX "message_turn_idx" ON "message" ("turn_id") WHERE "turn_id" is not null;--> statement-breakpoint
-CREATE INDEX "turn_end_requested_idx" ON "turn" ("status","finished_at") WHERE "end_requested" is not null;
+CREATE INDEX "turn_end_requested_idx" ON "turn" ("status","finished_at") WHERE "end_requested" is not null;--> statement-breakpoint
+-- ## Ended sessions tell their streams
+-- A member's streams and desktop viewers end with the session they were opened
+-- with. Deleting a session, however it goes (signing out, revoking it,
+-- resetting a password, or with its member), stores `session.ended` on the
+-- member's stream in the same transaction, and notifies every process's event
+-- relay, which Postgres sends once it commits.
+CREATE FUNCTION publish_ended_sessions() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+	stored record;
+BEGIN
+	-- Each stream is locked, in order, as the event outbox locks it, so its events keep one order.
+	PERFORM pg_advisory_xact_lock(hashtextextended(streams.stream, 0))
+	FROM (SELECT DISTINCT 'member:' || "member_id"::text AS stream FROM ended_sessions ORDER BY 1) AS streams;
+	FOR stored IN
+		INSERT INTO "event" ("stream", "type", "payload")
+		SELECT 'member:' || "member_id"::text, 'session.ended',
+			jsonb_build_object('v', 1, 'type', 'session.ended', 'sessionId', "id"::text)
+		FROM ended_sessions
+		RETURNING "seq", "stream"
+	LOOP
+		PERFORM pg_notify('sugabots_events', json_build_object('from', 'database', 'stream', stored."stream", 'seq', stored."seq")::text);
+	END LOOP;
+	RETURN NULL;
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER session_ended
+AFTER DELETE ON "session"
+REFERENCING OLD TABLE AS ended_sessions
+FOR EACH STATEMENT EXECUTE FUNCTION publish_ended_sessions();

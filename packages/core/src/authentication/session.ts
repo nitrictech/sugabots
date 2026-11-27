@@ -1,11 +1,9 @@
 export * as SessionAuthentication from "./session.ts";
 
-import { memberStream, streamEvent } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
 import { and, eq, gt, type SQL } from "drizzle-orm";
 import { Context, DateTime, Effect, ErrorReporter, Layer, Schema } from "effect";
-import { query, serviceOperations, transaction } from "../database/database.ts";
-import { EventOutbox } from "../database/events/outbox.ts";
+import { query, serviceOperations } from "../database/database.ts";
 import { session } from "../database/schema.ts";
 import { authenticated, type MemberSession } from "../principal.ts";
 import { processLayer, Tier } from "../tiers.ts";
@@ -143,22 +141,6 @@ export const expiryOf = (principal: MemberSession) =>
 				.limit(1),
 		).pipe(Effect.map(([row]) => row?.expiresAt)),
 	);
-
-/**
- * Records that the session `ended.session` of `ended.member` ended, as
- * better-auth signs a member out or revokes a session, on the member's own
- * stream, where every stream and desktop viewer opened with that session
- * hears it and ends.
- */
-export const recordEnded = (ended: { readonly session: string; readonly member: string }) =>
-	Effect.flatMap(EventOutbox.Service, (outbox) =>
-		transaction(outbox.publish([sessionEnded(ended)])),
-	);
-
-const sessionEnded = (ended: { readonly session: string; readonly member: string }) => ({
-	stream: memberStream(ended.member),
-	event: streamEvent("session.ended", { sessionId: ended.session }),
-});
 
 /**
  * The token of an `Authorization: Bearer` header: the session's token, as
