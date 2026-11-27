@@ -247,11 +247,41 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		});
 		onTestFinished(() => chat.close());
 
-		expect(await chat.next()).toEqual({ event: streamEvent("ready") });
+		expect(await chat.next()).toEqual({ seq: 0, event: streamEvent("ready") });
 		const changed = streamEvent("chat.changed", { chatId: world.chat });
 		await commit(chatStream(world.chat), changed);
 		const next = await chat.next();
 		expect(next !== "ended" && next.event).toEqual(changed);
+	});
+
+	it("resumes from where ready said the stream starts, missing nothing stored while away", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		const first = await follow(ed, "events.followChat", { chatId: world.chat });
+		const ready = await first.next();
+		await first.close();
+		const changed = streamEvent("chat.changed", { chatId: world.chat });
+		await commit(chatStream(world.chat), changed);
+
+		const since = ready === "ended" ? undefined : ready.seq;
+		const resumed = await follow(ed, "events.followChat", { chatId: world.chat, since });
+		onTestFinished(() => resumed.close());
+
+		expect(since).toBe(0);
+		const next = await resumed.next();
+		expect(next !== "ended" && next.event).toEqual(changed);
+	});
+
+	it("says where a reset stream starts, so a reconnect after it misses nothing", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		const stream = chatStream(world.chat);
+		await commit(stream, streamEvent("chat.changed", { chatId: world.chat }));
+		const latest = await stored.latest(stream);
+		const chat = await follow(ed, "events.followChat", { chatId: world.chat, since: latest + 1 });
+		onTestFinished(() => chat.close());
+
+		expect(await chat.next()).toEqual({ seq: latest, event: streamEvent("reset") });
 	});
 
 	it("sends a live message delta with its execution and without an event id", async () => {

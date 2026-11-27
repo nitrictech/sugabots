@@ -245,13 +245,16 @@ describe("following", () => {
 	it("passes the client's Last-Event-ID on as where to resume, and ignores one that isn't a sequence number", async () => {
 		const { app, followed } = server();
 		const resumed = await open(app, `/chats/${CHAT}/events`, { lastEventId: "41" });
+		const fromEmpty = await open(app, `/chats/${CHAT}/events`, { lastEventId: "0" });
 		const fresh = await open(app, `/chats/${CHAT}/events`, { lastEventId: "nonsense" });
 
 		expect(followed.map(({ input }) => input)).toEqual([
 			{ chatId: CHAT, since: 41 },
+			{ chatId: CHAT, since: 0 },
 			{ chatId: CHAT, since: undefined },
 		]);
 		await resumed.close();
+		await fromEmpty.close();
 		await fresh.close();
 	});
 });

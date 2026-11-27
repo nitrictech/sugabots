@@ -267,6 +267,18 @@ describe("resume", () => {
 		expect(calls[1]?.headers.get("last-event-id")).toBeNull();
 	});
 
+	it("resumes from where ready said the stream starts, even when it starts empty", async () => {
+		const { fetch, calls } = scripted(
+			frame({ event: "ready", id: 0, data: { v: 1, type: "ready" } }),
+			frame({ event: "message.completed", id: 8 }),
+		);
+
+		const seen = await take(events(fetch).chat("c1"), 2);
+
+		expect(seen.map((event) => event.type)).toEqual(["ready", "message.completed"]);
+		expect(calls[1]?.headers.get("last-event-id")).toBe("0");
+	});
+
 	it("does not let a delta move the resume point", async () => {
 		// Deltas carry no id, so a reconnect goes back to the last state change
 		// and the partial text is recovered from the message itself.

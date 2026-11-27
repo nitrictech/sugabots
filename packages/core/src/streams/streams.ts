@@ -495,8 +495,13 @@ export const make = Effect.gen(function* () {
 				}
 				// Read from where the client left off, or what is stored next, and the
 				// control streams from now: listening began first, so nothing between is missed.
+				// 0 is the start `ready` or `reset` gave a stream with nothing stored:
+				// everything stored on it since is what the client missed. Unlike a
+				// stored `seq`, it can't show that some of that was pruned, which
+				// only a client away longer than events are kept could miss.
 				const resumes =
-					since !== undefined && (yield* Effect.promise(() => store.has(stream, since)));
+					since !== undefined &&
+					(since === 0 || (yield* Effect.promise(() => store.has(stream, since))));
 				const feeds = yield* latestOn([stream, ...controlStreams]);
 				if (resumes) feeds.set(stream, since);
 				const watcherControls = yield* latestOn(controlStreams);
@@ -507,13 +512,16 @@ export const make = Effect.gen(function* () {
 					yield* life.end;
 					return { stream: Stream.empty, ended: Deferred.await(life.ended) };
 				}
+				// Both carry where the stream starts, so a client cut off before
+				// anything else arrives resumes from there.
+				const start = feeds.get(stream);
 				if (since === undefined) {
 					// Where the stream starts is known: whatever the client fetched before
 					// this, it fetches again, and what changes after arrives here.
-					yield* Queue.offer(outbox, { event: streamEvent("ready") });
+					yield* Queue.offer(outbox, { seq: start, event: streamEvent("ready") });
 				} else if (!resumes) {
 					// The resume point is gone, or was never this stream's: start again.
-					yield* Queue.offer(outbox, { event: streamEvent("reset") });
+					yield* Queue.offer(outbox, { seq: start, event: streamEvent("reset") });
 				}
 				let current = first;
 				const proveForSending = Effect.map(life.proveAgain, (exit) => {

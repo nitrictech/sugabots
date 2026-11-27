@@ -191,7 +191,7 @@ function frame(seq: number | undefined, event: StreamEvent): string {
 
 /**
  * `Last-Event-ID` is whatever the client sent, including nothing at all. Only a
- * positive integer is a resume point; anything else starts a fresh stream,
+ * whole number is a resume point; anything else starts a fresh stream,
  * which is the same thing a first connection to the stream gets.
  */
 function resumeFrom(header: string | undefined): number | undefined {
@@ -200,5 +200,5 @@ function resumeFrom(header: string | undefined): number | undefined {
 	}
 
 	const seq = Number(header);
-	return Number.isSafeInteger(seq) && seq > 0 ? seq : undefined;
+	return Number.isSafeInteger(seq) && seq >= 0 ? seq : undefined;
 }
