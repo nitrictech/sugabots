@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RENAMED_DOCS } from "./renamed-docs.ts";
+import { RENAMED_DOCS, redirectsFile } from "./renamed-docs.ts";
 import worker, { type Env } from "./worker.ts";
 
 const SITE = "https://sugabots.test";
@@ -264,12 +264,11 @@ describe("a renamed docs page", () => {
 		"%s redirects for good to %s, and its Markdown version to that page's",
 		async (before, now) => {
 			const page = await get(`${before}/`);
-			const markdown = await get(`${before}.md`);
 
 			expect(page.response.status).toBe(301);
 			expect(page.response.headers.get("Location")).toBe(`${SITE}${now}`);
-			expect(markdown.response.status).toBe(301);
-			expect(markdown.response.headers.get("Location")).toBe(`${SITE}${now}.md`);
+			// A Markdown version is a file, which the file server redirects before the Worker could.
+			expect(redirectsFile().split("\n")).toContain(`${before}.md ${now}.md 301`);
 		},
 	);
 });

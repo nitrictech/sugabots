@@ -13,6 +13,7 @@ import { defineConfig, normalizePath, type Plugin } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 import { markdownPath } from "./src/markdown.ts";
 import { NOT_FOUND_PAGE_PATH, NOT_FOUND_PRERENDER_HEADER } from "./src/not-found.ts";
+import { redirectsFile } from "./src/renamed-docs.ts";
 import { sitePagePaths } from "./src/site-pages.ts";
 
 /** Puts a code block's language, and any `title="…"` from its fence, on its `<pre>` for the docs' code frame. */
@@ -67,6 +68,17 @@ function textFiles() {
 	);
 }
 
+/** Writes `_redirects` beside the built files, for Cloudflare to read. */
+function redirects(): Plugin {
+	return {
+		name: "redirects",
+		applyToEnvironment: (environment) => environment.name === "client",
+		generateBundle() {
+			this.emitFile({ type: "asset", fileName: "_redirects", source: redirectsFile() });
+		},
+	};
+}
+
 export default defineConfig({
 	resolve: { tsconfigPaths: true },
 	server: {
@@ -101,6 +113,7 @@ export default defineConfig({
 			},
 		}),
 		react(),
+		redirects(),
 		// The logo and icons belong to `@sugabots/avatars`. They are copied to the root as files,
 		// because search engines and favicon services fetch an icon by URL and skip one inlined
 		// into the page.

@@ -13,11 +13,19 @@ export const RENAMED_DOCS: Readonly<Record<string, string>> = {
 	"/docs/people-and-roles": "/docs/members-and-roles",
 };
 
-/** Where a renamed docs page, or its Markdown version, is now; `undefined` for any other path. */
+/** Where a renamed docs page is now; `undefined` for any other path. */
 export function renamedDocsPath(pathname: string): string | undefined {
-	const markdown = pathname.endsWith(".md");
-	const page = markdown ? pathname.slice(0, -".md".length) : pathname.replace(/\/$/, "");
-	const renamed = RENAMED_DOCS[page];
-	if (!renamed) return undefined;
-	return markdown ? markdownPath(renamed) : renamed;
+	return RENAMED_DOCS[pathname.replace(/\/$/, "")];
+}
+
+/**
+ * The site's `_redirects` file, which sends each renamed page's Markdown
+ * version to its new page's for good. A path with a dot is served straight
+ * from the files, never reaching the Worker, so Cloudflare's file server
+ * redirects these itself.
+ */
+export function redirectsFile(): string {
+	return Object.entries(RENAMED_DOCS)
+		.map(([before, now]) => `${markdownPath(before)} ${markdownPath(now)} 301\n`)
+		.join("");
 }
