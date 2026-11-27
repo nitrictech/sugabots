@@ -33,6 +33,8 @@ export const legacy = {
 		/** Shared, with Rake and Hoe, made in the opposite order to their ids. */
 		garden: "0000000d-0000-4000-8000-000000000006",
 		sam: "0000000d-0000-4000-8000-000000000007",
+		pat: "0000000d-0000-4000-8000-000000000003",
+		ana: "0000000d-0000-4000-8000-000000000004",
 	},
 	bots: {
 		planner: "0000000c-0000-4000-8000-000000000001",
@@ -92,6 +94,8 @@ export const legacy = {
 	familyGitHubConnector: "00000011-0000-4000-8000-000000000002",
 	/** The Notes pod's connection, which no bot had. */
 	notesConnection: "00000011-0000-4000-8000-000000000003",
+	anaKeyConnector: "00000011-0000-4000-8000-000000000004",
+	anaOAuthConnector: "00000011-0000-4000-8000-000000000005",
 	/** Ana's file, in her personal pod, which had no bots and no chat left. */
 	diary: "00000006-0000-4000-8000-000000000004",
 	/** A file written in the Notes pod, which has no bots and no main chat, whose chat is gone. */

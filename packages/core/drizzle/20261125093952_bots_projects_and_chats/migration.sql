@@ -42,27 +42,46 @@ TRUNCATE "event" CONTINUE IDENTITY RESTRICT;--> statement-breakpoint
 DROP TABLE "thread_summary";--> statement-breakpoint
 UPDATE "model_request" SET "purpose" = 'compaction' WHERE "purpose" = 'summary';--> statement-breakpoint
 -- ## Bots own resources
+DROP INDEX "agent_name_idx";--> statement-breakpoint
+DROP INDEX "agent_handle_idx";--> statement-breakpoint
+-- Give a member with no bot of their own a Personal Assistant for their
+-- chats, files, allowed hosts, computer and connectors. They choose its model.
+INSERT INTO "agent" ("workspace_id", "pod_id", "name", "handle", "provisioned_key", "color", "face", "created_by_id")
+SELECT "pod"."workspace_id", "pod"."id", 'Personal Assistant', 'personal-assistant', 'personal-assistant',
+	'teal', 'arc', "pod"."owner_id"
+FROM "pod"
+WHERE "pod"."kind" = 'personal'
+	AND (
+		EXISTS (SELECT 1 FROM "artifact" WHERE "artifact"."pod_id" = "pod"."id" AND "artifact"."created_in_thread_id" IS NULL)
+		OR EXISTS (SELECT 1 FROM "thread" WHERE "thread"."pod_id" = "pod"."id" AND "thread"."type" = 'pod_chat')
+		OR EXISTS (SELECT 1 FROM "sandbox_pod_allowed_host" WHERE "sandbox_pod_allowed_host"."pod_id" = "pod"."id")
+		OR EXISTS (SELECT 1 FROM "sandbox" WHERE "sandbox"."pod_id" = "pod"."id")
+		OR EXISTS (SELECT 1 FROM "connection" WHERE "connection"."pod_id" = "pod"."id")
+	)
+	AND NOT EXISTS (
+		SELECT 1 FROM "agent" WHERE "agent"."pod_id" = "pod"."id"
+			AND (coalesce("agent"."created_by_id", "pod"."owner_id") = "pod"."owner_id"
+				OR "agent"."provisioned_key" = 'personal-assistant')
+	);--> statement-breakpoint
 DROP INDEX "connection_name_idx";--> statement-breakpoint
 DROP INDEX "connection_handle_idx";--> statement-breakpoint
 DROP INDEX "connection_id_pod_id_idx";--> statement-breakpoint
 DROP INDEX "connection_github_pod_idx";--> statement-breakpoint
 ALTER TABLE "connection" ADD COLUMN "agent_id" uuid;--> statement-breakpoint
 ALTER TABLE "sandbox" ADD COLUMN "agent_id" uuid;--> statement-breakpoint
--- Each connection goes to one bot of its `pod`, which keeps its id, so tool
--- calls and GitHub triggers still name it: the oldest bot whose automations
--- trigger on it, or else the `pod`'s oldest bot. Never a Personal Assistant:
--- Sugabots manages it, so it has no automations for a GitHub app to start, and
--- the other bots are the ones whose calls name the connection. A `pod` whose
--- only bot is its Personal Assistant keeps no original; the assistant gets a
--- copy below. A shared pod keeps its GitHub app for the project it becomes.
+-- Each connection goes to one bot of its `pod`, which keeps its id so tool
+-- calls and GitHub triggers still name it. Prefer bots other than the Personal
+-- Assistant, then the oldest bot whose automations trigger on the connection,
+-- then the oldest bot. A shared pod keeps its GitHub app as a project.
 WITH "keeper" AS (
 	SELECT DISTINCT ON ("connection"."id") "connection"."id" AS "connection_id", "agent"."id" AS "agent_id"
 	FROM "connection"
 	JOIN "agent" ON "agent"."pod_id" = "connection"."pod_id"
 	JOIN "pod" ON "pod"."id" = "connection"."pod_id"
-	WHERE "agent"."provisioned_key" IS DISTINCT FROM 'personal-assistant'
-		AND NOT ("pod"."kind" = 'shared' AND "connection"."kind" = 'github')
+	WHERE "pod"."kind" = 'personal'
+		OR ("connection"."kind" <> 'github' AND "agent"."provisioned_key" IS DISTINCT FROM 'personal-assistant')
 	ORDER BY "connection"."id",
+		("agent"."provisioned_key" IS NOT DISTINCT FROM 'personal-assistant'),
 		EXISTS (
 			SELECT 1 FROM "routine"
 			JOIN "routine_trigger" ON "routine_trigger"."routine_id" = "routine"."id"
@@ -147,14 +166,6 @@ AFTER DELETE ON "connection"
 REFERENCING OLD TABLE AS deleted_connectors
 FOR EACH STATEMENT EXECUTE FUNCTION queue_deleted_github_installations();
 --> statement-breakpoint
--- A `personal` `pod` with no bot other than a Personal Assistant has no
--- keeper for its original connections.
--- A `shared` one's stay with their `pod`, which becomes a project under the
--- same id and takes them over (see "Projects own resources" below), as its
--- computer does.
-DELETE FROM "connection" USING "pod"
-WHERE "connection"."agent_id" IS NULL AND "pod"."id" = "connection"."pod_id"
-	AND "pod"."kind" = 'personal';--> statement-breakpoint
 ALTER TABLE "connection" ALTER COLUMN "pod_id" DROP NOT NULL;--> statement-breakpoint
 UPDATE "connection" SET "pod_id" = NULL WHERE "agent_id" IS NOT NULL;--> statement-breakpoint
 -- A `pod`'s computer keeps its provider's id and its work, which is named by
@@ -171,14 +182,6 @@ UPDATE "sandbox" SET "agent_id" = (
 	LIMIT 1
 ), "pod_id" = NULL
 FROM "pod" WHERE "pod"."id" = "sandbox"."pod_id" AND "pod"."kind" = 'personal';--> statement-breakpoint
--- A `personal` `pod` with no bots leaves its computer nothing to work for. It
--- is kept aside until `computer_destruction` is made, which destroys it at its
--- provider once the server starts (see "Computer destructions" below).
-CREATE TABLE "sandbox_left_over" AS
-SELECT "id", "workspace_id", "sandbox_provider_id", "provider_sandbox_id" FROM "sandbox"
-WHERE "agent_id" IS NULL AND "pod_id" IS NULL;--> statement-breakpoint
-DELETE FROM "sandbox" WHERE "agent_id" IS NULL AND "pod_id" IS NULL;
---> statement-breakpoint
 -- ## Bots own resources: keys
 ALTER TABLE "connection" DROP CONSTRAINT "connection_pod_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "sandbox" DROP CONSTRAINT "sandbox_pod_workspace_fkey";--> statement-breakpoint
@@ -218,8 +221,6 @@ CREATE TABLE "pod_agent" (
 );
 --> statement-breakpoint
 ALTER TABLE "agent" DROP CONSTRAINT "agent_placement_check";--> statement-breakpoint
-DROP INDEX "agent_name_idx";--> statement-breakpoint
-DROP INDEX "agent_handle_idx";--> statement-breakpoint
 DROP INDEX "agent_provisioned_key_idx";--> statement-breakpoint
 ALTER TABLE "agent" ADD COLUMN "visibility" text DEFAULT 'public' NOT NULL;--> statement-breakpoint
 ALTER TABLE "agent" ADD COLUMN "assistant_of" uuid;--> statement-breakpoint
@@ -472,33 +473,6 @@ FROM "thread" AS "main_chat"
 JOIN "pod" ON "pod"."id" = "main_chat"."pod_id"
 WHERE "main_chat"."main" AND "pod"."kind" = 'shared'
 	AND "artifact"."pod_id" = "pod"."id" AND "artifact"."created_in_thread_id" IS NULL;--> statement-breakpoint
--- Give an owner with no bot a Personal Assistant to keep their chats, files
--- and allowed hosts. It has no model until they choose one.
-INSERT INTO "agent" ("workspace_id", "pod_id", "name", "handle", "provisioned_key", "color", "face", "visibility", "assistant_of", "created_by_id")
-SELECT "pod"."workspace_id", "pod"."id", 'Personal Assistant', 'personal-assistant', 'personal-assistant',
-	'teal', 'arc', 'private', "pod"."owner_id", "pod"."owner_id"
-FROM "pod"
-JOIN "workspace_member" ON "workspace_member"."workspace_id" = "pod"."workspace_id"
-	AND "workspace_member"."user_id" = "pod"."owner_id"
-WHERE "pod"."kind" = 'personal'
-	AND (
-		EXISTS (
-			SELECT 1 FROM "artifact"
-			WHERE "artifact"."pod_id" = "pod"."id" AND "artifact"."created_in_thread_id" IS NULL
-		)
-		OR EXISTS (
-			SELECT 1 FROM "thread"
-			WHERE "thread"."pod_id" = "pod"."id" AND "thread"."type" = 'pod_chat'
-		)
-		OR EXISTS (
-			SELECT 1 FROM "sandbox_pod_allowed_host"
-			WHERE "sandbox_pod_allowed_host"."pod_id" = "pod"."id"
-		)
-	)
-	AND NOT EXISTS (
-		SELECT 1 FROM "agent" WHERE "agent"."pod_id" = "pod"."id"
-			AND ("agent"."created_by_id" = "pod"."owner_id" OR "agent"."assistant_of" = "pod"."owner_id")
-	);--> statement-breakpoint
 CREATE TEMP TABLE "default_project_allowed_host" ON COMMIT DROP AS
 SELECT "host"."workspace_id", "agent"."id" AS "bot_id", "host"."host", "host"."added_by_id", "host"."created_at"
 FROM "sandbox_pod_allowed_host" AS "host"
@@ -3167,12 +3141,6 @@ CREATE TABLE "computer_destruction" (
 --> statement-breakpoint
 CREATE INDEX "computer_destruction_due_idx" ON "computer_destruction" ("due_at","id");--> statement-breakpoint
 ALTER TABLE "computer_destruction" ADD CONSTRAINT "computer_destruction_provider_workspace_fkey" FOREIGN KEY ("computer_provider_id","workspace_id") REFERENCES "computer_provider"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
--- The computers of `personal` `pod`s with no bots, which "Bots own
--- resources" kept aside, are destroyed at their providers.
-INSERT INTO "computer_destruction" ("workspace_id", "computer_provider_id", "provider_computer_id")
-SELECT "workspace_id", "sandbox_provider_id", "provider_sandbox_id" FROM "sandbox_left_over";--> statement-breakpoint
-DROP TABLE "sandbox_left_over";
---> statement-breakpoint
 -- ## Blob deletions come due
 ALTER TABLE "blob_deletion" ADD COLUMN "due_at" timestamp with time zone DEFAULT now() NOT NULL;--> statement-breakpoint
 CREATE INDEX "blob_deletion_due_idx" ON "blob_deletion" ("due_at","id");

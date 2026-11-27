@@ -246,10 +246,22 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					[legacy.threads.trip, WAITING_REPLY, WAITING_TURN, legacy.familyGitHubConnector],
 				);
 				await client.query(legacySessions);
-				reachedOnMain = (await client.query<Reached>(REACHED_ON_MAIN)).rows;
-				legacyConnectors = (await client.query("select id, pod_id, handle from connection")).rows;
-				legacyBots = (await client.query("select id, pod_id from agent")).rows;
 				const cipher = Secrets.fromKey(Buffer.alloc(32).toString("base64"));
+				await client.query(
+					`insert into connection (id, workspace_id, pod_id, name, handle, kind, url, auth_kind,
+						secret_header, secret_encrypted, oauth_encrypted, created_by_id) values
+						($1, $3, $4, 'Calendar', 'calendar', 'http', 'https://calendar.example.com', 'header', 'X-API-Key', $6, null, $5),
+						($2, $3, $4, 'Notes', 'notes', 'mcp', 'https://notes.example.com', 'oauth', null, null, $7, $5)`,
+					[
+						legacy.anaKeyConnector,
+						legacy.anaOAuthConnector,
+						legacy.workspace,
+						legacy.pods.ana,
+						legacy.members.ana,
+						cipher.encrypt("calendar-key"),
+						cipher.encrypt("notes-oauth"),
+					],
+				);
 				await client.query(
 					"update sandbox_provider set api_key_encrypted = $1, settings = settings || $3::jsonb where id = $2",
 					[
@@ -262,6 +274,9 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					legacy.bots.helper,
 					legacy.bots.planner,
 				]);
+				reachedOnMain = (await client.query<Reached>(REACHED_ON_MAIN)).rows;
+				legacyConnectors = (await client.query("select id, pod_id, handle from connection")).rows;
+				legacyBots = (await client.query("select id, pod_id from agent")).rows;
 			});
 			await storeLegacyBytes(url, store, root);
 			submitted = await submitToMainsEngine(url);
@@ -316,10 +331,12 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				project_id: string;
 				default_of_bot_id: string | null;
 				applied_settings: null;
+				assistant_of: string | null;
 			}>(
 				`select computer.id, computer.provider_computer_id, computer.project_id, project.default_of_bot_id,
-				 computer.applied_settings
-				 from computer join project on project.id = computer.project_id order by computer.id`,
+				 computer.applied_settings, bot.assistant_of
+				 from computer join project on project.id = computer.project_id
+				 left join bot on bot.id = project.default_of_bot_id order by computer.id`,
 			);
 
 			expect(computers).toEqual([
@@ -330,6 +347,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					project_id: legacy.pods.family,
 					default_of_bot_id: null,
 					applied_settings: null,
+					assistant_of: null,
 				},
 				{
 					id: legacy.computers.notes.id,
@@ -337,6 +355,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					project_id: legacy.pods.notes,
 					default_of_bot_id: null,
 					applied_settings: null,
+					assistant_of: null,
 				},
 				// A personal pod's goes to its bot other than the Personal Assistant.
 				{
@@ -345,6 +364,15 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					project_id: expect.any(String),
 					default_of_bot_id: legacy.bots.helper,
 					applied_settings: null,
+					assistant_of: null,
+				},
+				{
+					id: legacy.computers.ana.id,
+					provider_computer_id: legacy.computers.ana.providerId,
+					project_id: expect.any(String),
+					default_of_bot_id: expect.any(String),
+					applied_settings: null,
+					assistant_of: legacy.members.ana,
 				},
 			]);
 		});
@@ -449,18 +477,38 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			).toEqual([{ host, added_by_id: owner, assistant_of: owner }]);
 		});
 
-		it("queues the computer of a personal pod with no bots to be destroyed at its provider", async () => {
-			expect(
-				await upgraded.rows(
-					`select workspace_id, computer_provider_id, provider_computer_id from computer_destruction`,
-				),
-			).toEqual([
-				{
-					workspace_id: legacy.workspace,
-					computer_provider_id: legacy.provider,
-					provider_computer_id: legacy.computers.ana.providerId,
-				},
-			]);
+		it("keeps connectors from a personal pod with no bots reachable only by its owner", async () => {
+			const [project] = await upgraded.rows<{ id: string }>(
+				`select project.id from project join bot on bot.id = project.default_of_bot_id
+				 where bot.assistant_of = $1`,
+				[legacy.members.ana],
+			);
+			if (!project) throw new Error("Ana has no Personal Assistant");
+			const call = await servedOperations({ runOn: upgraded.run });
+			const owner = await upgraded.signIn(legacy.members.ana);
+			const outsiders = await Promise.all(
+				[legacy.members.sam, legacy.members.pat].map(upgraded.signIn),
+			);
+			for (const [connectorId, signedIn] of [
+				[legacy.anaKeyConnector, true],
+				[legacy.anaOAuthConnector, false],
+			] as const) {
+				const input = { projectId: project.id, connectorId };
+				await expect(call(owner, "connectors.get", input)).resolves.toMatchObject({
+					id: connectorId,
+					signedIn,
+					hasSecret: signedIn,
+				});
+				for (const outsider of outsiders) {
+					await expect(call(outsider, "connectors.get", input)).rejects.toBeInstanceOf(
+						ResourceHidden,
+					);
+				}
+			}
+		});
+
+		it("queues no computers for destruction in the upgrade", async () => {
+			expect(await upgraded.rows("select id from computer_destruction")).toEqual([]);
 		});
 
 		it("gives every project a lead among its bots, and one with no bots a lead that answers nobody", async () => {
@@ -546,6 +594,14 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 
 		it.each([
 			{
+				place: "new Personal Assistant",
+				computer: legacy.computers.ana,
+				chatId: migrationScale.chatWithoutBots,
+				botId: undefined,
+				members: [legacy.members.ana],
+				outsiders: [legacy.members.sam, legacy.members.pat],
+			},
+			{
 				place: "personal bot",
 				computer: legacy.computers.pat,
 				chatId: legacy.threads.report,
@@ -563,7 +619,22 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			},
 		])(
 			"opens the preserved computer's desktop only for members of the $place",
-			async ({ computer, chatId, botId, members, outsiders }) => {
+			async ({ computer, chatId, botId: existingBotId, members, outsiders }) => {
+				let botId: string | undefined = existingBotId;
+				if (!botId) {
+					const [assistant] = await upgraded.rows<{ id: string }>(
+						"select id from bot where assistant_of = $1",
+						[legacy.members.ana],
+					);
+					if (!assistant) throw new Error("Ana has no Personal Assistant");
+					botId = assistant.id;
+					const call = await servedOperations({ runOn: upgraded.run });
+					await call(await upgraded.signIn(legacy.members.ana), "bots.update", {
+						botId,
+						changes: { usesComputer: true },
+					});
+				}
+				const input = { chatId, botId };
 				const openedMachines: string[] = [];
 				const fetchComputer: typeof fetch = async (request) => {
 					const url = new URL(request instanceof Request ? request.url : request.toString());
@@ -612,7 +683,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					const principal = await upgraded.signIn(member);
 					return upgraded.run(
 						Effect.scoped(
-							viewDesktop.run(principal, { chatId, botId }, { kind: "request" }).pipe(
+							viewDesktop.run(principal, input, { kind: "request" }).pipe(
 								Effect.flatMap(({ stream }) => Stream.runCollect(stream)),
 								Effect.provideService(DesktopViewer.Service, {
 									...viewer,
@@ -771,10 +842,9 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 						!reachesProject,
 					);
 					for (const file of files) reachedNow.push({ member, kind: "file", id: file.id });
-					const listed = await list(
-						call(principal, "connectors.list", { projectId }),
-						!reachesProject,
-					);
+					const listed = (
+						await list(call(principal, "connectors.list", { projectId }), !reachesProject)
+					).filter((connector) => !("restricted" in connector));
 					expect(listed.map(({ id }) => id).sort()).toEqual(
 						connectors
 							.filter(({ id, project_id }) => {
@@ -1665,10 +1735,13 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 	},
 );
 
-it.skipIf(!process.env.DATABASE_URL)(
-	"queues the GitHub app removed from a personal pod with only a Personal Assistant",
-	async () => {
-		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", "github_uninstall");
+it.skipIf(!process.env.DATABASE_URL).each([
+	{ existingAssistant: true, suffix: "existing" },
+	{ existingAssistant: false, suffix: "new" },
+] as const)(
+	"keeps a personal pod's computer and GitHub app with its $suffix Personal Assistant",
+	async ({ existingAssistant, suffix }) => {
+		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", `assistant_${suffix}`);
 		const connectorId = crypto.randomUUID();
 		const appId = 42;
 		const credential = "encrypted-test-credential";
@@ -1677,38 +1750,51 @@ it.skipIf(!process.env.DATABASE_URL)(
 			await migrateTo(url, LAST_MAIN_MIGRATION);
 			await withClient(url, async (client) => {
 				await client.query(legacyRows);
-				await client.query("delete from agent where id = $1", [legacy.bots.helper]);
+				await client.query("delete from agent where id = any($1)", [
+					existingAssistant
+						? [legacy.bots.helper]
+						: [legacy.bots.helper, legacy.bots.patsAssistant],
+				]);
 				await client.query(
 					`insert into connection (id, workspace_id, pod_id, name, handle, kind, url, settings,
 						app_credential_encrypted, created_by_id)
-						select $1, workspace_id, pod_id, 'GitHub', 'github', 'github', 'https://api.github.com', $2, $3, created_by_id
-						from agent where id = $4`,
+						values ($1, $2, $3, 'GitHub', 'github', 'github', 'https://api.github.com', $4, $5, $6)`,
 					[
 						connectorId,
+						legacy.workspace,
+						legacy.pods.pat,
 						{ kind: "github", appId, installationId: INSTALLATION_ID },
 						credential,
-						legacy.bots.patsAssistant,
+						legacy.members.pat,
 					],
 				);
 			});
 			await Effect.runPromise(applyMigrations.pipe(Effect.provide(poolAt(url))));
 			await withClient(url, async (client) => {
-				const removed = await client.query("select id from connector where id = $1", [connectorId]);
-				expect(removed.rows).toEqual([]);
-				const queued = await client.query(
-					`select workspace_id, connector_id, app_id::int, installation_id::int, app_credential_encrypted
-						from github_uninstall where connector_id = $1`,
+				const kept = await client.query(
+					`select bot.id as bot_id, bot.assistant_of, computer.provider_computer_id,
+						connector.settings->>'installationId' as installation_id, connector.app_credential_encrypted
+					from connector
+					join project on project.id = connector.project_id
+					join bot on bot.id = project.default_of_bot_id
+					join computer on computer.project_id = project.id
+					where connector.id = $1`,
 					[connectorId],
 				);
-				expect(queued.rows).toEqual([
+				expect(kept.rows).toEqual([
 					{
-						workspace_id: legacy.workspace,
-						connector_id: connectorId,
-						app_id: appId,
-						installation_id: INSTALLATION_ID,
+						bot_id: existingAssistant ? legacy.bots.patsAssistant : expect.any(String),
+						assistant_of: legacy.members.pat,
+						provider_computer_id: legacy.computers.pat.providerId,
+						installation_id: String(INSTALLATION_ID),
 						app_credential_encrypted: credential,
 					},
 				]);
+				const queued = await client.query(
+					"select id from github_uninstall where connector_id = $1",
+					[connectorId],
+				);
+				expect(queued.rows).toEqual([]);
 			});
 		} finally {
 			await dropDatabase(url);
@@ -2613,7 +2699,7 @@ async function migrateTo(url: string, last: string) {
 /** This worker's database with `_upgrade_<store>` on the end of its name, so workers never share one. */
 function upgradeDatabaseUrl(
 	workerUrl: string,
-	store: Store | "cycle" | "bot_names" | "project_leads" | "github_uninstall",
+	store: Store | "cycle" | "bot_names" | "project_leads" | "assistant_existing" | "assistant_new",
 ): string {
 	if (!workerUrl) return "";
 	const parsed = new URL(workerUrl);
