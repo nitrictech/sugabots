@@ -12,6 +12,7 @@ import {
 	seedProject,
 	seedProjectChat,
 	seedTurnAnswering,
+	setRole,
 } from "../authentication/seed.test-support.ts";
 import { turnFacts } from "../authentication/turn-facts.ts";
 import { query } from "../database/database.ts";
@@ -532,6 +533,74 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await send("create", "pending")).toBe("ApprovalNeeded");
 			expect(await send("remove", null)).toBe("ApprovalRefused");
 			expect(await send("create", "allowed")).toBe("ok");
+		});
+
+		it("reads a connector tool's access as each call starts, not as it was when the call was recorded", async () => {
+			const { a } = world;
+			const edsBot = await as.botFor(a.ed, a.pub.id, a.chat);
+			const connectorId = await seedConnector(a.workspace, a.project, {
+				tools: [{ name: "list", description: null, readOnly: true, destructive: null }],
+			});
+			const [installed] = await onDatabase((db) =>
+				db.select().from(connector).where(eq(connector.id, connectorId)),
+			);
+			if (!installed) throw new Error("No connector");
+			const callId = await seedApprovalCall(edsBot, {
+				tool: connectorToolKey(installed.handle, "list"),
+				input,
+			});
+			await onDatabase((db) =>
+				db
+					.update(toolCall)
+					.set({
+						status: "running",
+						approvalStatus: null,
+						connectorId,
+						connectorRevision: installed.configurationRevision,
+						remoteToolName: "list",
+						sentInExecution: edsBot.executionNumber,
+						writeOrDelete: false,
+					})
+					.where(eq(toolCall.id, callId)),
+			);
+			const starts = async (access: "allow" | "ask" | "off") => {
+				await onDatabase((db) =>
+					db
+						.update(connector)
+						.set({ toolAccess: { list: access } })
+						.where(eq(connector.id, connectorId)),
+				);
+				return outcome(
+					named(
+						edsBot,
+						toolCallOf(callId),
+						connectorId,
+						edsBot.turn,
+						{ connectorId, tool: "list", arguments: input },
+						(principal, call, connector, turn, input) =>
+							Effect.gen(function* () {
+								const use = yield* proveCanUseConnector(principal, connector, "list");
+								yield* proveConnectorApproved(principal, call, input, turn, use);
+							}),
+					),
+				);
+			};
+			expect(await starts("allow")).toBe("ok");
+			expect(await starts("ask")).toBe("ApprovalNeeded");
+			expect(await starts("off")).toBe("ApprovalRefused");
+		});
+
+		it("takes a run's call as approved only while its approver still may approve it", async () => {
+			const { a } = world;
+			const { principal, run, turnId } = await as.run(a.workspace, a.project, a.pub.id);
+			const approver = await seedMember(a.workspace, "admin");
+			const allowed = await seedApprovalCall(
+				{ chat: run.chat, turn: turnId, bot: a.pub.id },
+				{ status: "allowed", decidedBy: approver },
+			);
+			expect(await approved(principal, toolCallOf(allowed), always, input)).toBe("ok");
+			await setRole(a.workspace, approver, "editor");
+			expect(await approved(principal, toolCallOf(allowed), always, input)).toBe("ApprovalNeeded");
 		});
 
 		it("makes a personal bot ask its creator before any change, and before every call of a run from outside", async () => {
