@@ -215,7 +215,7 @@ function WorkSection<Entry>({
 			<h2 className="m-0 font-normal text-xs">
 				{searching ? (
 					// A search shows everything it found, so there is nothing to fold.
-					<span className="flex h-7 items-center gap-2 px-2 text-subtle-foreground [&_svg]:size-3.25">
+					<span className="flex h-7 items-center gap-2 px-2 text-subtle-foreground [&_svg]:size-3.5">
 						{icon}
 						<span id={labelId} className="flex-1">
 							{title}
@@ -228,7 +228,7 @@ function WorkSection<Entry>({
 						size="text"
 						aria-expanded={open}
 						onClick={() => setOpen(!open)}
-						className="h-7 w-full gap-2 rounded-sm px-2 [&_svg]:size-3.25"
+						className="h-7 w-full gap-2 rounded-sm px-2 [&_svg]:size-3.5"
 					>
 						{icon}
 						<span id={labelId} className="flex-1 text-left">
@@ -239,7 +239,7 @@ function WorkSection<Entry>({
 							aria-hidden
 							strokeWidth={2}
 							className={cn(
-								"size-3.25 transition-transform motion-reduce:transition-none",
+								"size-3.5 transition-transform motion-reduce:transition-none",
 								!open && "-rotate-90",
 							)}
 						/>
@@ -387,7 +387,7 @@ function ChatEntry({
 					{working ? (
 						<span
 							className={cn(
-								"flex h-5 min-w-17 shrink-0 items-center justify-end",
+								"flex h-5 min-w-16 shrink-0 items-center justify-end",
 								mayResolve && HIDE_TIME_WHEN_ACTION_VISIBLE,
 							)}
 						>
@@ -397,7 +397,7 @@ function ChatEntry({
 						<time
 							dateTime={movedAt.toISOString()}
 							className={cn(
-								"flex h-5 min-w-17 shrink-0 items-center justify-end text-subtle-foreground text-xs tabular-nums",
+								"flex h-5 min-w-16 shrink-0 items-center justify-end text-subtle-foreground text-xs tabular-nums",
 								mayResolve && HIDE_TIME_WHEN_ACTION_VISIBLE,
 							)}
 						>

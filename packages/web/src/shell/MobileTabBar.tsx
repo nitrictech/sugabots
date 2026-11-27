@@ -33,7 +33,7 @@ export function MobileTabBar() {
 			// over the page, which scrolls on under it; only the bar itself takes a tap.
 			className="pointer-events-none absolute inset-x-0 bottom-0 z-40 px-4 pb-safe-or-3 view-transition-tabs md:hidden"
 		>
-			<div className="glass pointer-events-auto relative grid grid-cols-3 gap-0.5 rounded-4xl p-1.25">
+			<div className="glass pointer-events-auto relative grid grid-cols-3 gap-0.5 rounded-4xl p-1">
 				{/*
 				 * The highlight behind the open tab, one for the bar, so it slides
 				 * from tab to tab rather than one going dark as another lights.
@@ -42,7 +42,7 @@ export function MobileTabBar() {
 				 */}
 				<span
 					aria-hidden
-					className="absolute inset-y-1.25 left-1.25 w-tab rounded-3xl bg-hover transition-transform duration-300 ease-out motion-reduce:transition-none"
+					className="absolute inset-y-1 left-1 w-tab rounded-3xl bg-hover transition-transform duration-300 ease-out motion-reduce:transition-none"
 					style={{ transform: `translateX(calc(${TABS.indexOf(tab)} * (100% + 2px)))` }}
 				/>
 				<TabLink
@@ -102,7 +102,7 @@ function TabLink({
 		props: {
 			"aria-current": current ? "page" : undefined,
 			className: cn(
-				"focus-ring relative flex h-12.5 flex-col items-center justify-center gap-0.75 rounded-3xl font-medium text-3xs transition-colors",
+				"focus-ring relative flex h-12 flex-col items-center justify-center gap-0.5 rounded-3xl font-medium text-3xs transition-colors",
 				current ? "text-foreground" : "text-muted-foreground",
 			),
 			children: (

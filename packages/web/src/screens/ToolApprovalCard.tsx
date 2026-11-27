@@ -98,14 +98,14 @@ export function ToolApprovalCard({
 			aria-label={`Approval request: ${where ? `${action} in ${where}` : action}`}
 			className="flex animate-rise motion-reduce:animate-none"
 		>
-			<div className="flex min-w-0 max-w-115 flex-1 flex-col gap-2.5 rounded-bubble bg-card pt-2.5 pr-3 pb-3 pl-2.5 text-foreground">
+			<div className="flex min-w-0 max-w-md flex-1 flex-col gap-2.5 rounded-bubble bg-card pt-2.5 pr-3 pb-3 pl-2.5 text-foreground">
 				<StepHeading step={step} />
-				<div className="min-w-0 md:ml-8.5">
+				<div className="min-w-0 md:ml-8">
 					<FoldedRequest input={call.input} />
 				</div>
 				<div
 					className={cn(
-						"flex min-w-0 flex-col gap-2 md:ml-8.5",
+						"flex min-w-0 flex-col gap-2 md:ml-8",
 						// On a wide screen an answered request has nothing here; only a phone's See request is.
 						!answerable && !status && "md:hidden",
 					)}
@@ -177,7 +177,7 @@ function Outcome({
 			role={announced ? "status" : undefined}
 			className="m-0 flex items-start gap-1.5 text-muted-foreground text-xs leading-normal"
 		>
-			<span className="mt-0.75 flex shrink-0">{icon}</span>
+			<span className="mt-0.5 flex shrink-0">{icon}</span>
 			<span>{children}</span>
 		</p>
 	);
@@ -275,7 +275,7 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 					aria-expanded={open}
 					aria-controls={bodyId}
 					onClick={() => setOpen(!open)}
-					className="gap-1.25 py-1.5 max-md:hidden"
+					className="gap-1 py-1.5 max-md:hidden"
 				>
 					{open ? "See less" : "See more"}
 					<ChevronDown
@@ -327,7 +327,7 @@ function ReviewSheet({
 				initialFocus={top}
 				aria-labelledby={headingId}
 				style={botColorVariables(bot.color)}
-				className="inset-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0 sm:max-w-none md:inset-auto md:top-1/2 md:left-1/2 md:h-auto md:max-h-approval md:max-w-144 md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-dialog"
+				className="inset-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0 sm:max-w-none md:inset-auto md:top-1/2 md:left-1/2 md:h-auto md:max-h-approval md:max-w-xl md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-dialog"
 			>
 				<div
 					ref={top}
@@ -394,7 +394,7 @@ export function Answer({
 	actionLabel: string;
 	pinned?: boolean;
 }) {
-	const buttonSize = pinned ? cn(TOUCH_BUTTON, "flex-1") : "h-7.75 px-4 text-xs";
+	const buttonSize = pinned ? cn(TOUCH_BUTTON, "flex-1") : "h-8 px-4 text-xs";
 	const allow = (
 		<Button
 			disabled={pending}
@@ -500,7 +500,7 @@ function FieldList({ fields, depth }: { fields: Fields; depth: number }) {
 						key={key}
 						className="flex min-w-0 flex-col gap-0.5 md:col-span-2 md:grid md:grid-cols-subgrid md:gap-0"
 					>
-						<dt className="text-sm text-muted-foreground leading-normal md:min-w-19">
+						<dt className="text-sm text-muted-foreground leading-normal md:min-w-20">
 							{wordsFromKey(key)}
 						</dt>
 						{nested ? (

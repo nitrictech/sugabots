@@ -11,10 +11,10 @@ import { type KeyboardEvent, useDeferredValue, useState } from "react";
 const looks = {
 	/** At the top of a dialog's list, as a pill. */
 	dialog: {
-		box: "gap-2.25 rounded-xl bg-chip px-3",
+		box: "gap-2 rounded-xl bg-chip px-3",
 		icon: "text-muted-foreground",
 		iconSize: 15,
-		input: "py-2.25 text-sm placeholder:text-muted-foreground",
+		input: "py-2 text-sm placeholder:text-muted-foreground",
 	},
 	/** In a sidebar, as tall as its rows. */
 	sidebar: {
@@ -25,7 +25,7 @@ const looks = {
 	},
 	/** On a settings card, edged in a hairline over the card's fill. */
 	outline: {
-		box: "h-8.5 gap-2 rounded-lg border border-border-strong bg-background px-2.5",
+		box: "h-9 gap-2 rounded-lg border border-border-strong bg-background px-2.5",
 		icon: "text-subtle-foreground",
 		iconSize: 14,
 		input: "text-xs placeholder:text-subtle-foreground",

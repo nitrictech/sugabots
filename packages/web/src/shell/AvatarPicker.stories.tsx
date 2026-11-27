@@ -11,7 +11,7 @@ function Look() {
 	const [shape, setShape] = useState<BotShape>("circle");
 	const [eyes, setEyes] = useState<BotEyes>("pill");
 	return (
-		<div className="flex max-w-105 flex-col items-center gap-4 p-4">
+		<div className="flex max-w-md flex-col items-center gap-4 p-4">
 			<BotAvatar color={color} eyes={eyes} shape={shape} size={96} />
 			<div className="w-full overflow-hidden rounded-panel bg-list">
 				<AvatarPicker
@@ -57,7 +57,7 @@ export const Pick = meta.story({
 function ProjectLook() {
 	const [color, setColor] = useState<ProjectColor>("green");
 	return (
-		<div className="flex max-w-105 flex-col items-center gap-4 rounded-panel bg-list p-4">
+		<div className="flex max-w-md flex-col items-center gap-4 rounded-panel bg-list p-4">
 			<ProjectInitial project={{ name: "Revenue", color }} size="lg" />
 			<ProjectColourPicker value={color} onChange={setColor} />
 		</div>

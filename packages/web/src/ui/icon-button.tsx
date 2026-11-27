@@ -14,7 +14,7 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 const sizes = {
 	sm: "size-5 [&_svg]:size-3.5",
 	default: "size-6 [&_svg]:size-3.5",
-	lg: "size-7.5 [&_svg]:size-3.75",
+	lg: "size-8 [&_svg]:size-4",
 } as const;
 
 export interface IconButtonProps extends Omit<ComponentProps<"button">, "children"> {
@@ -46,11 +46,11 @@ type IconButtonVariant = "quiet" | "bar" | "round" | "toolbar" | "row" | "destru
 
 /** The variants drawn at one size whatever `size` says, and how. */
 const FIXED_SIZE_VARIANTS: Partial<Record<IconButtonVariant, string>> = {
-	bar: "size-7.5 rounded-md text-soft-foreground hover:bg-chip",
-	round: "size-7.25 bg-chip text-foreground hover:bg-hover [&_svg]:size-4",
+	bar: "size-8 rounded-md text-soft-foreground hover:bg-chip",
+	round: "size-7 bg-chip text-foreground hover:bg-hover [&_svg]:size-4",
 	toolbar:
-		"size-7 rounded-md text-subtle-foreground hover:bg-chip hover:text-foreground [&_svg]:size-3.75",
-	row: "size-8 rounded-md text-subtle-foreground hover:bg-row-hover hover:text-foreground aria-[current=page]:bg-row-selected aria-[current=page]:text-foreground data-popup-open:bg-row-hover [&_svg]:size-3.75",
+		"size-7 rounded-md text-subtle-foreground hover:bg-chip hover:text-foreground [&_svg]:size-4",
+	row: "size-8 rounded-md text-subtle-foreground hover:bg-row-hover hover:text-foreground aria-[current=page]:bg-row-selected aria-[current=page]:text-foreground data-popup-open:bg-row-hover [&_svg]:size-4",
 	destructive: "size-7 text-destructive-text hover:bg-destructive-hover",
 };
 

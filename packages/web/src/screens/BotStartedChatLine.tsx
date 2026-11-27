@@ -70,7 +70,7 @@ function LineFace({ face }: { face: BotParticipant }) {
 			size={16}
 			ringed={{ color: "var(--background)", width: 1.5 }}
 			// Positioned, so each face sits over the one before it.
-			className="relative -mr-0.5 max-md:-mr-1.5 max-md:size-5.5"
+			className="relative -mr-0.5 max-md:-mr-1.5 max-md:size-6"
 		/>
 	);
 }

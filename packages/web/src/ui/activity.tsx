@@ -123,7 +123,7 @@ function ActivityCollapsibleContent({ className, children, ...props }: Collapsib
 			<div
 				data-slot="activity-collapsible-content-inner"
 				className={cn(
-					"mt-2 mb-1 ml-1.75 min-w-0 border-l pr-1 pl-4 leading-relaxed wrap-break-word text-muted-foreground",
+					"mt-2 mb-1 ml-1.5 min-w-0 border-l pr-1 pl-4 leading-relaxed wrap-break-word text-muted-foreground",
 					className,
 				)}
 			>

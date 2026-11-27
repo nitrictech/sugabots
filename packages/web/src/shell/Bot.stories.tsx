@@ -49,7 +49,7 @@ export const Palette = meta.story({
 /** Bubbles shows each colour's tint with its text and inline mono, as a bot's message draws them. */
 export const Bubbles = meta.story({
 	render: () => (
-		<div className="flex flex-col gap-2" style={{ maxWidth: 520 }}>
+		<div className="flex max-w-lg flex-col gap-2">
 			{botColors.map((color) => (
 				<div key={color} style={botColorVariables(color)} className="flex items-end gap-2 text-sm">
 					<BotAvatar color={color} eyes="pill" shape="circle" size={34} />

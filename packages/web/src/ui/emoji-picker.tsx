@@ -36,7 +36,7 @@ export function EmojiPicker({
 			resolveEmojiData={resolveEmojiData}
 			columns={COLUMNS}
 			onEmojiSelect={({ emoji }) => choose(emoji)}
-			className="isolate flex h-83 w-83 max-w-full flex-col"
+			className="isolate flex h-80 w-80 max-w-full flex-col"
 		>
 			{/* Ruled off from the grid, so a category's name pushed out at the top of the grid is seen leaving under the line. */}
 			<div className="border-border-strong border-b pb-1.5">

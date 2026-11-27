@@ -38,7 +38,7 @@ export function MessageFiles({ files, urlOf }: { files: readonly FilePart[]; url
 			{others.length > 0 && (
 				<ul className="m-0 flex w-full list-none flex-col gap-1.5 p-0 sm:flex-row sm:flex-wrap">
 					{others.map((file) => (
-						<li key={file.id} className="w-full sm:w-75">
+						<li key={file.id} className="w-full sm:w-72">
 							<FileChip file={file} url={urlOf(file.id)} />
 						</li>
 					))}
@@ -79,12 +79,12 @@ function ImageGrid({ images, urlOf }: { images: readonly FilePart[]; urlOf: File
 	return (
 		<Dialog>
 			{images.length === 1 && only ? (
-				<div className="aspect-4/3 w-full max-w-90">{tileFor(only, "contain")}</div>
+				<div className="aspect-4/3 w-full max-w-96">{tileFor(only, "contain")}</div>
 			) : (
 				<ul
 					className={cn(
 						"m-0 grid w-full list-none gap-1 p-0",
-						images.length === 2 ? "max-w-80 grid-cols-2" : "max-w-120.5 grid-cols-3",
+						images.length === 2 ? "max-w-80 grid-cols-2" : "max-w-lg grid-cols-3",
 					)}
 				>
 					{images.map((file) => (

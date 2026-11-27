@@ -245,7 +245,7 @@ export function SidebarView({
 		<div
 			ref={pane}
 			className={cn(
-				"flex min-h-0 shrink-0 max-md:flex-1 md:w-(--sidebar-width) md:max-w-100",
+				"flex min-h-0 shrink-0 max-md:flex-1 md:w-(--sidebar-width) md:max-w-96",
 				className,
 			)}
 			style={{ "--sidebar-width": `${width ?? SIDEBAR_DEFAULT_WIDTH_PX}px` } as CSSProperties}

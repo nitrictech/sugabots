@@ -137,7 +137,7 @@ export function AboutDialog({
 	const details = debugDetails(running, environment);
 	const known = running.state === "known" ? running.build : undefined;
 	return (
-		<DialogContent sheetOnPhone className="gap-4 p-5 pt-6 sm:max-w-100">
+		<DialogContent sheetOnPhone className="gap-4 p-5 pt-6 sm:max-w-96">
 			<div className="flex flex-col items-center gap-2.5">
 				<SugabotsMark className="size-14" />
 				<DialogTitle className="text-sm">Sugabots</DialogTitle>

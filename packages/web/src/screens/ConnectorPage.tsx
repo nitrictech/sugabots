@@ -520,8 +520,8 @@ function ToolSettings({
 	if (tools.isPending) {
 		return (
 			<div role="status" aria-label="Loading tools" className="flex flex-col gap-3">
-				<div className={cn(SETTINGS_CARD, "h-23 animate-pulse")} />
-				<div className={cn(SETTINGS_CARD, "h-23 animate-pulse")} />
+				<div className={cn(SETTINGS_CARD, "h-24 animate-pulse")} />
+				<div className={cn(SETTINGS_CARD, "h-24 animate-pulse")} />
 			</div>
 		);
 	}

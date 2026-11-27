@@ -320,7 +320,7 @@ function NavigationGroup({ label, children }: { label: string; children: ReactNo
 }
 
 /** What sits at a line's right: a count. One width for all, centred in it, so they line up down the navigation. */
-const TRAILING_SLOT = "grid w-5.5 shrink-0 place-items-center";
+const TRAILING_SLOT = "grid w-6 shrink-0 place-items-center";
 
 /** One line of the navigation, picked out when it is the open page. */
 const NAVIGATION_ITEM =
@@ -357,7 +357,7 @@ function CompactSettingsList() {
 	return (
 		<nav
 			aria-label="Settings sections"
-			className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto bg-background px-4 pt-4 pb-8 *:mx-auto *:w-full *:max-w-155 *:shrink-0 md:px-8 md:pt-9 lg:hidden"
+			className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto bg-background px-4 pt-4 pb-8 *:mx-auto *:w-full *:max-w-xl *:shrink-0 md:px-8 md:pt-9 lg:hidden"
 		>
 			<h1 className="m-0 font-semibold text-3xl text-foreground tracking-tight">Settings</h1>
 			<SettingsListGroups />
@@ -450,7 +450,7 @@ function SettingsTrail({ page }: { page: SettingsLocation }) {
 	return (
 		<nav
 			aria-label="Breadcrumb"
-			className="flex h-13 shrink-0 items-center border-border border-b pr-14 pl-6 max-lg:hidden"
+			className="flex h-14 shrink-0 items-center border-border border-b pr-14 pl-6 max-lg:hidden"
 		>
 			<ol className="m-0 flex min-w-0 list-none items-center gap-2.5 p-0 text-xs">
 				{crumbs.map((crumb, index) => {

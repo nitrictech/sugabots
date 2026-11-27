@@ -34,7 +34,7 @@ function MobilePage({
 			aria-label={title}
 			className="@container/sidebar flex min-h-0 min-w-0 flex-1 flex-col bg-list pt-safe-or-3"
 		>
-			<header className="flex items-center gap-2 pt-4.5 pr-3 pb-3 pl-4.5">
+			<header className="flex items-center gap-2 pt-4 pr-3 pb-3 pl-4">
 				<h1 className="m-0 min-w-0 flex-1 truncate font-semibold text-xl text-foreground tracking-tight">
 					{title}
 				</h1>
@@ -131,7 +131,7 @@ export function MobileOwner({ owner }: { owner: ResourceOwner }) {
 						key={to.page}
 						owner={owner}
 						to={to}
-						className={cn(HOME_ROW, "[&>svg]:size-4.5 [&>svg]:shrink-0")}
+						className={cn(HOME_ROW, "[&>svg]:size-5 [&>svg]:shrink-0")}
 					>
 						<Icon />
 						{label}

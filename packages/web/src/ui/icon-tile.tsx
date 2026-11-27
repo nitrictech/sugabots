@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 const SIZES = {
 	/** Heading a card or a stage. */
-	sm: "size-7 rounded-sm [&_svg]:size-3.75",
+	sm: "size-7 rounded-sm [&_svg]:size-4",
 	/** At the start of a file's row. */
 	md: "size-8 rounded-md [&_svg]:size-4",
 } as const;

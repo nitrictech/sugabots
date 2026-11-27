@@ -71,7 +71,7 @@ export function ChatMessage({ author, avatarSize, time, className, children }: C
 				<div className="flex items-center gap-2">
 					<span className="text-sm font-semibold">{author.name}</span>
 					{author.kind === "bot" && (
-						<span className="rounded bg-muted px-1.25 py-px text-xs leading-snug font-semibold text-muted-foreground">
+						<span className="rounded bg-muted px-1 py-px text-xs leading-snug font-semibold text-muted-foreground">
 							Bot
 						</span>
 					)}
@@ -127,7 +127,7 @@ export function ChatApproval({
 	return (
 		<section
 			aria-label={`Approval request: ${action}`}
-			className="mt-1.5 mb-1 flex w-full max-w-115 flex-col gap-2.5 rounded-3xl border bg-background py-2.5 pr-3 pl-2.5"
+			className="mt-1.5 mb-1 flex w-full max-w-md flex-col gap-2.5 rounded-3xl border bg-background py-2.5 pr-3 pl-2.5"
 		>
 			<div className="flex items-start gap-2.5">
 				<span className="mt-px flex size-6 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-bold text-secondary-foreground">
@@ -138,7 +138,7 @@ export function ChatApproval({
 					<span className="text-sm font-medium wrap-anywhere">{action}</span>
 				</span>
 			</div>
-			<div className="ml-8.5">
+			<div className="ml-8">
 				<AnimatePresence mode="wait" initial={false}>
 					<RevealItem key={decision} initial="hidden" animate="visible" exit="hidden">
 						{decision === "pending" ? (

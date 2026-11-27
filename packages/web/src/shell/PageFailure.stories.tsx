@@ -9,7 +9,7 @@ const meta = preview.meta({
 	parameters: { layout: "fullscreen" },
 	decorators: [
 		(Story) => (
-			<div className="flex h-120">
+			<div className="flex h-screen">
 				<Story />
 			</div>
 		),

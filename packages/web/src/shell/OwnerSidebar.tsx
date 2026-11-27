@@ -39,7 +39,7 @@ export function OwnerSidebar({
 	return (
 		<>
 			{/* As tall as a page's header, bottom border and all, so it sits on the header's line. */}
-			<div className="flex h-13 shrink-0 flex-col justify-center border-transparent border-b px-3">
+			<div className="flex h-14 shrink-0 flex-col justify-center border-transparent border-b px-3">
 				<PageRow
 					link={<Link to="/$workspace" from="/$workspace" />}
 					selected={false}

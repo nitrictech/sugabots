@@ -83,7 +83,7 @@ export function AutomationsPage({
 						}
 					/>
 				) : (
-					<ul className="tab-bar-clearance m-0 flex min-h-0 w-full flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2 md:mx-auto md:max-w-180 md:pt-4">
+					<ul className="tab-bar-clearance m-0 flex min-h-0 w-full flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2 md:mx-auto md:max-w-3xl md:pt-4">
 						{list.isError && (
 							<li className="px-2.5 py-2 text-xs text-muted-foreground">
 								Automations could not be loaded.

@@ -25,7 +25,7 @@ export function AuthLayout({
 				{onBack && <AuthBackButton onClick={onBack} />}
 			</header>
 			<div className="grid flex-1 place-items-center px-4 py-10">
-				<div className="flex w-full max-w-110 flex-col gap-3.5">
+				<div className="flex w-full max-w-md flex-col gap-3.5">
 					<div className="flex flex-col gap-2.5 pb-2">
 						<AuthHeading title={title}>{subtitle}</AuthHeading>
 					</div>
@@ -87,7 +87,7 @@ export function FormRow({
 }) {
 	return (
 		<div className="flex items-center gap-3 border-border border-b px-4 py-3.5 last:border-b-0 focus-within:bg-panel">
-			<label htmlFor={id} className="w-22 shrink-0 text-sm text-muted-foreground">
+			<label htmlFor={id} className="w-24 shrink-0 text-sm text-muted-foreground">
 				{label}
 			</label>
 			{children}

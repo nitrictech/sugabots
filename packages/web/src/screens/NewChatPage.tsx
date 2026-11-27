@@ -93,7 +93,7 @@ export function NewChatPage({ owner }: { owner: ResourceOwner }) {
 			{header}
 			<OwnerPageBar owner={owner} />
 			<div className="flex min-h-0 flex-1 flex-col items-center justify-end overflow-y-auto px-5 pb-16 md:justify-center md:pb-24">
-				<div className="flex w-full max-w-180 flex-col items-center gap-6">
+				<div className="flex w-full max-w-3xl flex-col items-center gap-6">
 					<div className="flex flex-col items-center gap-3 text-center">
 						{/* It watches the request being written, and thinks while the chat starts. */}
 						{bot && <WatchingAvatar bot={bot} size={64} busy={chats.isPending} watching />}
@@ -143,7 +143,7 @@ function OwnerPageBar({ owner }: { owner: ResourceOwner }) {
 	return (
 		<div
 			className={cn(
-				"hidden h-13 shrink-0 items-center pr-4 transition-all duration-300 ease-out md:flex",
+				"hidden h-14 shrink-0 items-center pr-4 transition-all duration-300 ease-out md:flex",
 				sidebarHidden ? "pl-14" : "pl-6",
 			)}
 		>

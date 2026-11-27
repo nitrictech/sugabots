@@ -49,3 +49,26 @@ it("finds animation utilities from plugins that the web stylesheet does not load
 	]);
 	expect(tokens("packages/website/src/control.tsx")).toEqual([]);
 });
+
+it("finds spacing and sizes off the default theme's steps", () => {
+	const source =
+		'"px-2.75 size-7.25 max-md:py-1.25 mt-13 -mt-13 w-70 max-w-105 px-2.5 size-7 mt-12 w-72 w-1/3 max-w-md w-px top-1/2"';
+	expect(tailwindValueViolations("spacing.tsx", source).map(({ token }) => token)).toEqual([
+		"px-2.75",
+		"size-7.25",
+		"max-md:py-1.25",
+		"mt-13",
+		"-mt-13",
+		"w-70",
+		"max-w-105",
+	]);
+});
+
+it("finds fixed lengths in inline styles, leaving computed ones", () => {
+	const source = `<div style={{ width: 12, maxWidth: "520px", padding: "1.5rem", left: \`\${offset}%\`, opacity: 0.5, height: size }} />`;
+	expect(tailwindValueViolations("style.tsx", source).map(({ token }) => token)).toEqual([
+		"style width: 12",
+		"style maxWidth: 520px",
+		"style padding: 1.5rem",
+	]);
+});

@@ -15,7 +15,7 @@ export const ChooseReaction = meta.story({
 	render: function ReactionPicker() {
 		const [reaction, setReaction] = useState("");
 		return (
-			<div className="flex min-h-110 items-end gap-3">
+			<div className="flex min-h-96 items-end gap-3">
 				<EmojiPickerPopover
 					label="Add reaction"
 					trigger={<Button variant="secondary">Add reaction</Button>}

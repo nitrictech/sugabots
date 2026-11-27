@@ -19,7 +19,7 @@ const meta = preview.meta({
 	decorators: [
 		(Story) => (
 			<QueryClientProvider client={createQueryClient()}>
-				<div className="max-w-180 p-4">
+				<div className="max-w-3xl p-4">
 					<Story />
 				</div>
 			</QueryClientProvider>
@@ -43,7 +43,7 @@ const openDesktop = fn();
 
 export const LiveCard = meta.story({
 	render: ({ chatId, botId }) => (
-		<div className="max-w-115">
+		<div className="max-w-md">
 			<LiveDesktopCard chatId={chatId} botId={botId} botName="Growth Desk" onOpen={openDesktop} />
 		</div>
 	),

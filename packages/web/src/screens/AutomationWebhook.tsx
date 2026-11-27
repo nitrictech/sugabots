@@ -503,7 +503,7 @@ function SecretField({
 	const label = secretLabel(auth);
 	return (
 		<div className="flex flex-col gap-2 border-border border-b px-4 py-2.5 last:border-b-0">
-			<div className="flex min-h-6.5 items-center gap-3">
+			<div className="flex min-h-7 items-center gap-3">
 				<SettingsFieldLabel htmlFor={id}>{label}</SettingsFieldLabel>
 				<input
 					id={id}

@@ -58,7 +58,7 @@ const meta = preview.meta({
 	},
 	decorators: [
 		(Story) => (
-			<div className="flex h-180">
+			<div className="flex h-screen">
 				<Story />
 			</div>
 		),

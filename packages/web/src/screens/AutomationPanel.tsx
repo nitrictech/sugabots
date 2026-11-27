@@ -181,7 +181,7 @@ export function AutomationPanel({
 		<>
 			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto">
 				{!asPage && (
-					<div className="flex h-13 shrink-0 items-center gap-2 pr-3 pl-5 max-md:pl-4">
+					<div className="flex h-14 shrink-0 items-center gap-2 pr-3 pl-5 max-md:pl-4">
 						<h3 className="m-0 min-w-0 flex-1 truncate font-semibold text-sm text-foreground">
 							{automation?.name ?? "Automation"}
 						</h3>
@@ -191,7 +191,7 @@ export function AutomationPanel({
 				<div
 					className={cn(
 						"flex flex-col gap-3 px-4 pt-1 pb-6",
-						asPage && "mx-auto w-full max-w-180 pt-6",
+						asPage && "mx-auto w-full max-w-3xl pt-6",
 					)}
 				>
 					{actions.create.error && <Alert>{failureMessage(actions.create.error)}</Alert>}
@@ -348,7 +348,7 @@ export function AutomationPanel({
 			label="Automation"
 			onClose={onClose}
 			headerless
-			className="xl:w-85"
+			className="xl:w-80"
 			actions={moreInBar && more}
 		>
 			{settings}

@@ -41,7 +41,7 @@ export function TriggerKindMark({ choice }: { choice: TriggerKindChoice }) {
 		return <ConnectorMark markId={choice.connector} name={choice.label} size="tile" />;
 	}
 	return (
-		<SettingsRowIcon className="size-8.5 rounded-lg">
+		<SettingsRowIcon className="size-9 rounded-lg">
 			<AutomationTriggerIcon kind={choice.kind} size={15} strokeWidth={2.2} />
 		</SettingsRowIcon>
 	);

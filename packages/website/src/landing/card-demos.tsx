@@ -12,7 +12,7 @@ import { arrive, MessageRow } from "@/landing/chat-parts";
 
 const demoArea =
 	// A little taller on phones, where the messages wrap onto more lines.
-	"relative flex h-68 flex-col rounded-xl border border-landing-line bg-landing-page sm:h-64";
+	"relative flex h-72 flex-col rounded-xl border border-landing-line bg-landing-page sm:h-64";
 
 /** Gary asks, Growth Desk drafts, and Lorraine replies; the visitor can add their own 👍 to the draft. */
 export function ChatDemo() {
@@ -37,7 +37,7 @@ export function ChatDemo() {
 					aria-label={reacted ? "Remove your 👍" : "React with 👍"}
 					onClick={() => setReacted((was) => !was)}
 					className={cn(
-						"mt-1 flex h-6 items-center gap-1.25 self-start rounded-lg border px-2 text-xs font-medium tabular-nums transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-landing-accent",
+						"mt-1 flex h-6 items-center gap-1 self-start rounded-lg border px-2 text-xs font-medium tabular-nums transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-landing-accent",
 						reacted
 							? "border-landing-text bg-landing-button text-landing-text"
 							: "border-transparent bg-landing-chip text-landing-secondary hover:border-landing-control",
@@ -66,7 +66,7 @@ export function ApprovalDemo() {
 			<div className="flex min-w-0 flex-col gap-2.5 rounded-3xl bg-landing-bubble py-2.5 pr-3 pb-3 pl-2.5 text-landing-text">
 				<div className="flex min-w-0 items-start gap-2.5">
 					<span className="mt-px grid size-6 shrink-0 place-items-center rounded-md bg-landing-stripe text-landing-text-strong">
-						<StripeIcon className="size-3.25" />
+						<StripeIcon className="size-3.5" />
 					</span>
 					<div className="flex min-w-0 flex-col gap-0.5">
 						<span className="text-xs/snug text-landing-muted">
@@ -75,29 +75,29 @@ export function ApprovalDemo() {
 						<span className="text-sm/snug font-medium">Refund payment</span>
 					</div>
 				</div>
-				<dl className="ml-8.5 grid min-w-0 grid-cols-capped-label items-baseline gap-x-4 gap-y-0.5 border-l-2 border-landing-rule pl-2.5 text-sm/snug">
-					<dt className="min-w-18 py-0.5 text-landing-muted">Customer</dt>
+				<dl className="ml-8 grid min-w-0 grid-cols-capped-label items-baseline gap-x-4 gap-y-0.5 border-l-2 border-landing-rule pl-2.5 text-sm/snug">
+					<dt className="min-w-20 py-0.5 text-landing-muted">Customer</dt>
 					<dd className="py-0.5">Kestrel Freight</dd>
-					<dt className="min-w-18 py-0.5 text-landing-muted">Amount</dt>
+					<dt className="min-w-20 py-0.5 text-landing-muted">Amount</dt>
 					<dd className="py-0.5">$1,280</dd>
-					<dt className="min-w-18 py-0.5 text-landing-muted">Reason</dt>
+					<dt className="min-w-20 py-0.5 text-landing-muted">Reason</dt>
 					<dd className="py-0.5">Charged twice on 3 Oct</dd>
 				</dl>
-				<div className="ml-8.5 flex min-h-8 items-center">
+				<div className="ml-8 flex min-h-8 items-center">
 					{answer === "waiting" ? (
 						<fieldset className="flex flex-wrap items-center gap-2 text-xs font-semibold">
 							<legend className="sr-only">Answer {cast.ticketDesk.name}’s request</legend>
 							<button
 								type="button"
 								onClick={() => setAnswer("allowed")}
-								className="h-7.75 rounded-md bg-landing-pill px-4 text-landing-page transition-colors hover:bg-landing-pill-hover focus-visible:ring-2 focus-visible:ring-landing-accent outline-none"
+								className="h-8 rounded-md bg-landing-pill px-4 text-landing-page transition-colors hover:bg-landing-pill-hover focus-visible:ring-2 focus-visible:ring-landing-accent outline-none"
 							>
 								Allow
 							</button>
 							<button
 								type="button"
 								onClick={() => setAnswer("denied")}
-								className="h-7.75 rounded-md bg-landing-button px-4 transition-colors hover:bg-landing-control focus-visible:ring-2 focus-visible:ring-landing-accent outline-none"
+								className="h-8 rounded-md bg-landing-button px-4 transition-colors hover:bg-landing-control focus-visible:ring-2 focus-visible:ring-landing-accent outline-none"
 							>
 								Deny
 							</button>
@@ -150,7 +150,7 @@ export function CollaborationDemo() {
 			<div className="flex items-center gap-2 border-b border-landing-line px-4 py-2.5 sm:px-5">
 				<span aria-hidden className="flex shrink-0">
 					{[cast.growthDesk, cast.pricingAnalyst].map((bot) => (
-						<span key={bot.name} className="-mr-1.75">
+						<span key={bot.name} className="-mr-1.5">
 							<StillBotFace
 								{...bot.avatar}
 								ring={{ color: "var(--color-landing-page)", width: 2 }}
@@ -260,7 +260,7 @@ export function ModelsDemo() {
 							: "border-transparent bg-transparent",
 					)}
 				>
-					<StillBotFace {...choice.bot.avatar} className="size-7.5" />
+					<StillBotFace {...choice.bot.avatar} className="size-8" />
 					<span className="flex min-w-0 flex-1 flex-col gap-px">
 						<span className="truncate text-sm font-semibold text-landing-text">
 							{choice.bot.name}
@@ -268,7 +268,7 @@ export function ModelsDemo() {
 						<span className="truncate text-xs text-landing-faint">{choice.job}</span>
 					</span>
 					{/* One width for every model, wide enough for the longest, so they line up down the card. */}
-					<span className="flex w-34 shrink-0 items-center gap-2 rounded-lg border border-landing-frame bg-landing-raised px-2.5 py-1.5">
+					<span className="flex w-36 shrink-0 items-center gap-2 rounded-lg border border-landing-frame bg-landing-raised px-2.5 py-1.5">
 						<ProviderMark builtIn={choice.builtIn} />
 						<span className="flex min-w-0 flex-col leading-tight">
 							<span className="truncate text-xs font-medium text-landing-text">{choice.model}</span>
@@ -290,7 +290,7 @@ function ProviderMark({ builtIn }: { builtIn: BuiltInProviderId }) {
 			alt=""
 			width={15}
 			height={15}
-			className={cn("size-3.75 shrink-0 object-contain", logo.scale)}
+			className={cn("size-4 shrink-0 object-contain", logo.scale)}
 		/>
 	);
 }

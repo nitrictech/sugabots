@@ -11,6 +11,6 @@ export const BotInstructions = meta.story({
 	args: {
 		defaultValue:
 			"Sort new issues by urgency and area. Ask for the steps to reproduce when an issue leaves them out.",
-		className: "max-w-120 bg-panel",
+		className: "max-w-lg bg-panel",
 	},
 });

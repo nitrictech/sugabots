@@ -10,7 +10,7 @@ import { siteLinks } from "@/site-links";
 /** "Run it yourself, or let us.": self-hosting today beside the hosted version to come. */
 export function PlansSection() {
 	return (
-		<section id="plans" className={cn(siteColumn, "flex flex-col gap-12 pt-40 sm:pt-65")}>
+		<section id="plans" className={cn(siteColumn, "flex flex-col gap-12 pt-40 sm:pt-64")}>
 			<SectionHeading
 				title="Run it yourself, or let us."
 				lede="Same app either way. Start on your own machine today, or get on the list for the hosted version."

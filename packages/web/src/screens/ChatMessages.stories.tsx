@@ -642,7 +642,7 @@ export const InTheSidebar = meta.story({
 	},
 	decorators: [
 		(Story) => (
-			<div className="w-95">
+			<div className="w-96">
 				<Story />
 			</div>
 		),
@@ -849,7 +849,7 @@ export const WideTableArriving = meta.story({
 	},
 	// As wide as the nested chat's panel, too narrow for the table, which scrolls inside the message.
 	render: (args) => (
-		<div className="w-140">
+		<div className="w-xl">
 			<LastReplyLandsWhileWatched {...args} />
 		</div>
 	),

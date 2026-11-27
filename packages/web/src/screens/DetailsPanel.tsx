@@ -259,7 +259,7 @@ function SharedFiles({
 							rel="noreferrer"
 							className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
 						>
-							<span className="grid size-5.5 shrink-0 place-items-center rounded-sm border border-border-strong text-muted-foreground">
+							<span className="grid size-6 shrink-0 place-items-center rounded-sm border border-border-strong text-muted-foreground">
 								<FileText aria-hidden size={12} strokeWidth={2} />
 							</span>
 							<span className="min-w-0 flex-1 truncate text-xs text-foreground max-md:text-sm">
@@ -281,7 +281,7 @@ function ParticipantRow({
 	signedIn: CurrentUser;
 }) {
 	return (
-		<li className="flex h-7.5 items-center gap-2.5 max-md:h-11 max-md:gap-3">
+		<li className="flex h-8 items-center gap-2.5 max-md:h-11 max-md:gap-3">
 			<span aria-hidden className="contents">
 				<ParticipantAvatar participant={participant} size={22} />
 			</span>
@@ -388,7 +388,7 @@ function Context({ bot, memory }: { bot: Bot; memory: ChatContext | undefined })
 								) : (
 									<Link
 										{...botSettingsLink(bot)}
-										className="focus-ring -mx-1.5 flex h-7.5 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
+										className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
 									>
 										<ConnectorMark
 											markId={connectorMarkFor(connector)}

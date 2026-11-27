@@ -253,7 +253,7 @@ function WorkspaceSetupFrame({
 								className={cn(
 									"h-1.5 rounded-full transition-all",
 									index === current
-										? "w-5.5 bg-foreground"
+										? "w-6 bg-foreground"
 										: index < current
 											? "w-1.5 bg-muted-foreground"
 											: "w-1.5 bg-border-strong",
@@ -274,7 +274,7 @@ function WorkspaceSetupFrame({
 				)}
 			</header>
 			<div className="grid flex-1 place-items-center px-4 py-10">
-				<div className="flex w-full max-w-110 flex-col gap-5.5">{children}</div>
+				<div className="flex w-full max-w-md flex-col gap-5">{children}</div>
 			</div>
 		</main>
 	);
@@ -318,7 +318,7 @@ function WorkspaceStep({
 	}
 
 	return (
-		<form onSubmit={submit} className="flex flex-col gap-5.5">
+		<form onSubmit={submit} className="flex flex-col gap-5">
 			<AuthHeading title="Name your workspace">
 				It's just you for now. You can invite members later.
 			</AuthHeading>
@@ -394,7 +394,7 @@ function ConnectProviderStep({
 	}
 
 	return (
-		<div className="flex flex-col gap-5.5">
+		<div className="flex flex-col gap-5">
 			<AuthHeading title="Connect a provider">
 				Bots think with a model from a provider you already use. Pick one to start; you can add more
 				later.
@@ -492,7 +492,7 @@ function ChooseModelStep({
 	}
 
 	return (
-		<form onSubmit={submit} className="flex flex-col gap-5.5">
+		<form onSubmit={submit} className="flex flex-col gap-5">
 			<AuthHeading title="Choose a model">
 				Your first bot thinks with this. You can switch on more of {provider.name}'s models later.
 			</AuthHeading>
@@ -597,7 +597,7 @@ function BotStep({
 	}
 
 	return (
-		<form onSubmit={submit} className="flex flex-col gap-5.5">
+		<form onSubmit={submit} className="flex flex-col gap-5">
 			<AuthHeading title="Make your first bot" />
 			<div className="flex justify-center">
 				<BotAvatar color={color} eyes={eyes} shape={shape} size={96} />
@@ -696,11 +696,11 @@ function InviteMembersStep({
 
 	const count = emails.length;
 	return (
-		<form onSubmit={submit} className="flex flex-col gap-5.5">
+		<form onSubmit={submit} className="flex flex-col gap-5">
 			<AuthHeading title="Bring your friends">
 				Invite members to your workspace. You can add them to projects later.
 			</AuthHeading>
-			<div className="focus-ring-within flex min-h-13 flex-wrap items-center gap-1.5 rounded-2xl bg-list px-3 py-2.5">
+			<div className="focus-ring-within flex min-h-14 flex-wrap items-center gap-1.5 rounded-2xl bg-list px-3 py-2.5">
 				{emails.map((email) => (
 					<span
 						key={email}
@@ -711,7 +711,7 @@ function InviteMembersStep({
 							size="sm"
 							label={`Remove ${email}`}
 							onClick={() => setEmails((current) => current.filter((one) => one !== email))}
-							className="size-4.5 text-soft-foreground [&_svg]:size-2.5"
+							className="size-5 text-soft-foreground [&_svg]:size-2.5"
 						>
 							<X aria-hidden strokeWidth={3} />
 						</IconButton>
@@ -785,13 +785,13 @@ function ReadyStep({ workspace, bot }: { workspace: { id: string; slug: string }
 		<>
 			<AuthHeading title={`${bot.name} is ready`} />
 			<div
-				className="flex flex-col gap-0.75 rounded-3xl bg-list px-4 py-4.5"
+				className="flex flex-col gap-0.5 rounded-3xl bg-list px-4 py-4"
 				style={botColorVariables(bot.color)}
 			>
-				<span className="pb-1 pl-10.5 font-medium text-2xs text-muted-foreground">{bot.name}</span>
+				<span className="pb-1 pl-10 font-medium text-2xs text-muted-foreground">{bot.name}</span>
 				<div className="flex items-end gap-2">
 					<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={34} />
-					<div className="flex min-w-0 flex-col gap-0.75">
+					<div className="flex min-w-0 flex-col gap-0.5">
 						{[
 							`Hi, I'm ${bot.name}.`,
 							"I've only just been set up. Help me work out what I'm for?",

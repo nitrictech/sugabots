@@ -28,7 +28,7 @@ const peekingBots: readonly PeekingBot[] = [
 	},
 	{
 		avatar: { color: "amber", eyes: "wink", shape: "bowl" },
-		place: "size-11 translate-y-1/4 sm:size-22 lg:size-32 lg:translate-y-3/10",
+		place: "size-11 translate-y-1/4 sm:size-24 lg:size-32 lg:translate-y-3/10",
 	},
 	{
 		avatar: { color: "sky", eyes: "arc", shape: "pebble" },
@@ -40,11 +40,11 @@ const peekingBots: readonly PeekingBot[] = [
 	},
 	{
 		avatar: { color: "green", eyes: "dot", shape: "leaf" },
-		place: "size-18 translate-y-2/9 sm:size-26 lg:size-36",
+		place: "size-20 translate-y-2/9 sm:size-28 lg:size-36",
 	},
 	{
 		avatar: { color: "orange", eyes: "square", shape: "ghost" },
-		place: "size-13 translate-y-2/7 sm:size-20 lg:size-28",
+		place: "size-14 translate-y-2/7 sm:size-20 lg:size-28",
 	},
 	{
 		avatar: { color: "pink", eyes: "arc", shape: "star" },

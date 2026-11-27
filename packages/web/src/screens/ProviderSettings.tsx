@@ -119,7 +119,7 @@ export function ProviderTile({
 	if (!builtIn) return <LetterTile name={name} className={tile} />;
 	return (
 		<SettingsRowIcon className={tile}>
-			<ProviderLogo builtIn={builtIn} className={large ? "size-5.5" : "size-3.5"} />
+			<ProviderLogo builtIn={builtIn} className={large ? "size-6" : "size-3.5"} />
 		</SettingsRowIcon>
 	);
 }
@@ -143,7 +143,7 @@ function BotFaces({ bots }: { bots: readonly Bot[] }) {
 				/>
 			))}
 			{more > 0 && (
-				<span className="-ml-1.5 grid h-5.5 min-w-5.5 place-items-center rounded-full bg-chip px-1 font-semibold text-2xs text-soft-foreground ring-2 ring-settings-card">
+				<span className="-ml-1.5 grid h-6 min-w-6 place-items-center rounded-full bg-chip px-1 font-semibold text-2xs text-soft-foreground ring-2 ring-settings-card">
 					+{more}
 				</span>
 			)}
@@ -1167,7 +1167,7 @@ function CapabilityIcons({ model }: { model: ProviderModel }) {
 							<Icon
 								role="img"
 								aria-label={entry.name}
-								className="size-3.25 shrink-0"
+								className="size-3.5 shrink-0"
 								strokeWidth={2}
 							/>
 						</Tooltip>

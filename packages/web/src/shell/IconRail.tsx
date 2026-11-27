@@ -42,7 +42,7 @@ export function IconRail({
 		// half the mark), so a mark moving between them moves only sideways.
 		<nav
 			aria-label="Projects and bots"
-			className="scrollbar-none flex w-15.5 shrink-0 flex-col overflow-y-auto bg-rail pb-3 max-md:hidden"
+			className="scrollbar-none flex w-16 shrink-0 flex-col overflow-y-auto bg-rail pb-3 max-md:hidden"
 		>
 			<div aria-hidden className="h-10 shrink-0" />
 			<div className="flex flex-col items-center pt-1">
@@ -59,7 +59,7 @@ export function IconRail({
 					</ul>
 				)}
 				{/* With nothing above it, the sidebar's Projects heading starts its column. */}
-				{assistants.length > 0 ? <RailDivider /> : <div aria-hidden className="h-8.25 shrink-0" />}
+				{assistants.length > 0 ? <RailDivider /> : <div aria-hidden className="h-8 shrink-0" />}
 				<section aria-label="Projects">
 					<ul className={RAIL_LIST}>
 						{projects.map((projectWithAttention) => (
@@ -123,7 +123,7 @@ function BotPlace({ standing, current }: { standing: BotStanding; current: boole
  */
 function RailDivider() {
 	return (
-		<div aria-hidden className="flex h-12.25 shrink-0 items-center">
+		<div aria-hidden className="flex h-12 shrink-0 items-center">
 			<span className="h-px w-6 bg-border" />
 		</div>
 	);

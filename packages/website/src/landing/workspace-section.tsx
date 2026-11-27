@@ -109,7 +109,7 @@ export function WorkspaceSection() {
 	};
 
 	return (
-		<section className={cn(siteColumn, "pt-65")}>
+		<section className={cn(siteColumn, "pt-64")}>
 			{/* The stretch of scrolling the section stays pinned for: a turn per feature. */}
 			<div ref={track} className="pinned:h-scroll-scene">
 				{/* Pinned centred in the space under the header, and only as tall as its content, so the next section follows at the usual distance. */}
@@ -123,7 +123,7 @@ export function WorkspaceSection() {
 						lede="Most AI chats are you and a bot. Sugabots is your team and your bots, with one history."
 					/>
 					{/* A steady height while pinned, so opening a longer feature doesn't move the heading. */}
-					<div className="grid grid-cols-1 items-start gap-10 pinned:min-h-100 lg:grid-cols-2 lg:gap-20">
+					<div className="grid grid-cols-1 items-start gap-10 pinned:min-h-96 lg:grid-cols-2 lg:gap-20">
 						{/* Every demo is drawn, stacked, and the open one fades in over the last, so a switch never flashes. */}
 						<DemoStage className="hidden lg:grid">
 							{features.map(({ title, Demo }, index) => (
@@ -244,7 +244,7 @@ function DemoFrame({
 	children: ReactNode;
 }) {
 	return (
-		<div inert={inert} className={cn("w-full min-w-0 max-w-130 [&>*]:shadow-2xl", className)}>
+		<div inert={inert} className={cn("w-full min-w-0 max-w-lg [&>*]:shadow-2xl", className)}>
 			{children}
 		</div>
 	);

@@ -74,7 +74,7 @@ export function UsageSettings({
 					<Breakdown usage={usage.data} stale={usage.isPlaceholderData} />
 				</>
 			) : (
-				<div aria-hidden className={cn(SETTINGS_CARD, "h-57 animate-pulse")} />
+				<div aria-hidden className={cn(SETTINGS_CARD, "h-56 animate-pulse")} />
 			)}
 		</SettingsPage>
 	);
@@ -95,7 +95,7 @@ function MonthStepper({
 			<IconButton label="Previous month" onClick={() => onChange(shiftMonth(month, -1))}>
 				<ChevronLeft strokeWidth={2} />
 			</IconButton>
-			<span className="min-w-18 text-center font-medium text-xs text-foreground">
+			<span className="min-w-20 text-center font-medium text-xs text-foreground">
 				{monthLabel(month)}
 			</span>
 			<IconButton
@@ -323,7 +323,7 @@ function BreakdownLine({ line, largest }: { line: Line; largest: number }) {
 					}}
 				/>
 			</span>
-			<span className="w-18 shrink-0 text-right text-xs text-foreground tabular-nums">
+			<span className="w-20 shrink-0 text-right text-xs text-foreground tabular-nums">
 				{unknown ? (
 					<>
 						<span aria-hidden>—</span>

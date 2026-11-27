@@ -74,7 +74,7 @@ export function ScreenshotCarousel() {
 		<section
 			aria-roledescription="carousel"
 			aria-label="A look inside Sugabots"
-			className="flex flex-col gap-8 overflow-hidden pt-40 sm:pt-65"
+			className="flex flex-col gap-8 overflow-hidden pt-40 sm:pt-64"
 			onFocus={() => setFocused(true)}
 			onBlur={(event) => {
 				if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
@@ -337,7 +337,7 @@ const lightboxButton =
  */
 function Captions({ current }: { current: number }) {
 	return (
-		<div className="grid max-w-140">
+		<div className="grid max-w-xl">
 			{screenshots.map((screenshot, index) => (
 				<div
 					key={screenshot.title}

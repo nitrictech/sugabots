@@ -16,7 +16,7 @@ const meta = preview.meta({
 	},
 	decorators: [
 		(Story) => (
-			<div className="h-120">
+			<div className="h-screen">
 				<Story />
 			</div>
 		),

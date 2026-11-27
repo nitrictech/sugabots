@@ -131,9 +131,9 @@ const PROJECT_INITIAL_SIZES = {
 	sm: "size-4 rounded text-3xs",
 	md: "size-5 rounded-xs text-2xs",
 	row: "size-7 rounded-sm text-xs",
-	nav: "size-5.5 rounded-md text-2xs",
+	nav: "size-6 rounded-md text-2xs",
 	lg: "size-11 rounded-xl text-sm",
-	xl: "size-22 rounded-3xl text-3xl",
+	xl: "size-24 rounded-3xl text-3xl",
 } as const;
 
 /** A project as a small square holding its initial, in the project's colour. */

@@ -67,7 +67,7 @@ export function SlidingSidebar({
 			{hiding.chatShowing && (
 				// As tall as a page's header, bottom border and all, so it centres on the header's line;
 				// 16px in, so its 30px centres over the 62px rail's faces.
-				<div className="absolute top-0 left-4 z-40 flex h-13 items-center border-transparent border-b max-md:hidden">
+				<div className="absolute top-0 left-4 z-40 flex h-14 items-center border-transparent border-b max-md:hidden">
 					<IconButton
 						label={hiding.hidden ? "Show sidebar" : "Hide sidebar"}
 						variant="bar"

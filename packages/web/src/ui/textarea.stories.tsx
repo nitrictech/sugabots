@@ -8,7 +8,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: { "aria-label": "Instructions", placeholder: "What should it do each time it runs?" },
 	render: (args) => (
-		<div className="w-105">
+		<div className="w-md">
 			<Textarea {...args} />
 		</div>
 	),

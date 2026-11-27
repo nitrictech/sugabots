@@ -38,10 +38,10 @@ const PANEL_BACK_BAR =
  * pushes it down. It takes no room of its own.
  */
 const PHONE_ACTION_ROW =
-	"pointer-events-none sticky top-safe-or-3 z-20 -mt-13 flex h-13 shrink-0 justify-end px-4";
+	"pointer-events-none sticky top-safe-or-3 z-20 -mt-12 flex h-14 shrink-0 justify-end px-4";
 
 const PANEL_BACK_LINK =
-	"focus-ring inline-flex min-h-7.5 min-w-0 items-center gap-1 rounded-md font-medium text-sm text-link";
+	"focus-ring inline-flex min-h-8 min-w-0 items-center gap-1 rounded-md font-medium text-sm text-link";
 
 const PAGE_TITLE = "m-0 font-semibold text-base text-foreground leading-7.5 tracking-tight";
 
@@ -94,10 +94,10 @@ export function SettingsPage({
 			)}
 			<div
 				className={cn(
-					"mx-auto flex w-full max-w-190 flex-col gap-8 px-4 pb-20 md:px-8",
+					"mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 pb-20 md:px-8",
 					// Close under its Back; on a wide screen, as high as any other page.
 					// On a phone every page has a Back above it, the frame's or its own.
-					!back ? "pt-10 max-md:pt-3" : backOnWide ? "pt-3 lg:pt-0.5" : "pt-3 lg:pt-10",
+					!back ? "pt-10 max-md:pt-3" : backOnWide ? "pt-3 lg:pt-0" : "pt-3 lg:pt-10",
 				)}
 			>
 				{hero ? (
@@ -163,7 +163,7 @@ export function SettingsAddButton({
 			),
 			children: (
 				<>
-					<Plus aria-hidden size={14} strokeWidth={2} className="max-md:size-5.5" />
+					<Plus aria-hidden size={14} strokeWidth={2} className="max-md:size-6" />
 					<span className="max-md:sr-only">{children}</span>
 				</>
 			),
@@ -558,7 +558,7 @@ export function SettingsRowButton({
 			type="button"
 			onClick={onClick}
 			disabled={disabled}
-			className="focus-ring h-7.5 shrink-0 whitespace-nowrap rounded-lg border border-border-strong px-3 text-xs text-foreground transition-colors hover:bg-row-hover active:bg-row-selected disabled:cursor-default disabled:opacity-50"
+			className="focus-ring h-8 shrink-0 whitespace-nowrap rounded-lg border border-border-strong px-3 text-xs text-foreground transition-colors hover:bg-row-hover active:bg-row-selected disabled:cursor-default disabled:opacity-50"
 		>
 			{children}
 		</button>
@@ -691,7 +691,7 @@ export function SettingsStatusBadge({
 	return (
 		<span
 			className={cn(
-				"flex h-5.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2 font-medium text-xs",
+				"flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2 font-medium text-xs",
 				STATUS_BADGE_TONES[tone].pill,
 			)}
 		>
@@ -790,7 +790,7 @@ export function SettingsDanger({
 				onClick={onClick}
 				disabled={disabledReason !== undefined}
 				aria-label={label}
-				className="focus-ring -mr-1.5 h-7.5 shrink-0 whitespace-nowrap rounded-lg px-3 font-medium text-xs text-destructive-text transition-colors hover:bg-destructive-hover disabled:cursor-not-allowed disabled:opacity-50"
+				className="focus-ring -mr-1.5 h-8 shrink-0 whitespace-nowrap rounded-lg px-3 font-medium text-xs text-destructive-text transition-colors hover:bg-destructive-hover disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				{action}
 			</button>
@@ -813,7 +813,7 @@ export function PageBackLink({ label, render }: BackTarget) {
 			className: cn(PANEL_BACK_LINK, BACK_ON_PHONE),
 			children: (
 				<>
-					<ChevronLeft aria-hidden size={16} strokeWidth={2.4} className="max-md:size-5.5" />
+					<ChevronLeft aria-hidden size={16} strokeWidth={2.4} className="max-md:size-6" />
 					<span className={cn("min-w-0 truncate", BACK_LABEL_ON_PHONE)}>{label}</span>
 				</>
 			),
@@ -838,7 +838,7 @@ export function CompactBackBar({ label, render, className }: BackTarget & { clas
 			),
 			children: (
 				<>
-					<ChevronLeft aria-hidden size={20} strokeWidth={2.2} className="max-md:size-5.5" />
+					<ChevronLeft aria-hidden size={20} strokeWidth={2.2} className="max-md:size-6" />
 					<span className={BACK_LABEL_ON_PHONE}>{label}</span>
 				</>
 			),

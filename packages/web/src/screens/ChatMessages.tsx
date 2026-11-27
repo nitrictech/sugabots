@@ -464,7 +464,7 @@ function ChatMessage({
 			const call = segment.toolCall;
 			if (!bot) return null;
 			return (
-				<div key={segment.key} className="w-full max-w-115 pt-1.5 pb-1">
+				<div key={segment.key} className="w-full max-w-md pt-1.5 pb-1">
 					<ToolApprovalCard
 						call={call}
 						bot={bot}
@@ -586,7 +586,7 @@ function ChatMessage({
 							onOpenDesktop &&
 							message.status === "writing" &&
 							calls.some((call) => call.tool.startsWith(BROWSER_TOOL_PREFIX)) && (
-								<div className="w-full max-w-115 pt-1">
+								<div className="w-full max-w-md pt-1">
 									<LiveDesktopCard
 										chatId={message.chatId}
 										botId={bot.id}

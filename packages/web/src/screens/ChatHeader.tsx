@@ -276,7 +276,7 @@ function HeaderBar({
 				// Over the chat, which scrolls up under it: a solid bar with no rule.
 				plain ? "md:border-b-0 md:bg-background" : "border-border border-b",
 				sidebarHidden ? "md:pl-14" : "md:pl-6",
-				"relative flex h-13 shrink-0 items-center gap-3 pr-4 transition-all duration-300 ease-out max-md:h-auto max-md:border-b-0 max-md:bg-linear-to-b max-md:from-background max-md:from-80% max-md:to-transparent max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2",
+				"relative flex h-14 shrink-0 items-center gap-3 pr-4 transition-all duration-300 ease-out max-md:h-auto max-md:border-b-0 max-md:bg-linear-to-b max-md:from-background max-md:from-80% max-md:to-transparent max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2",
 			)}
 		>
 			{parent ? (

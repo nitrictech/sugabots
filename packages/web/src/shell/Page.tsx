@@ -48,7 +48,7 @@ export function Page({
 
 export function DirectoryBody({ children }: { children: ReactNode }) {
 	return (
-		<div className="mx-auto flex w-full max-w-180 flex-col gap-6 px-4 pt-6 pb-12">{children}</div>
+		<div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-6 pb-12">{children}</div>
 	);
 }
 
@@ -77,7 +77,7 @@ export function PageHeader({
 	return (
 		<header
 			className={cn(
-				"flex h-13 shrink-0 items-center gap-3 border-border border-b pr-4 transition-all duration-300 ease-out",
+				"flex h-14 shrink-0 items-center gap-3 border-border border-b pr-4 transition-all duration-300 ease-out",
 				sidebarHidden ? "md:pl-14" : "pl-6",
 				"max-md:h-auto max-md:border-b-0 max-md:pt-safe-or-3 max-md:pb-2",
 				tab ? "max-md:gap-0.5 max-md:pr-2 max-md:pl-4" : "max-md:gap-2 max-md:px-4",

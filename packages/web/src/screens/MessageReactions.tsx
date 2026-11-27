@@ -119,7 +119,7 @@ export function AddReactionButton({
 			}
 			header={
 				full && (
-					<p className="m-0 max-w-83 border-border-strong border-b px-3 py-2 text-muted-foreground text-xs">
+					<p className="m-0 max-w-80 border-border-strong border-b px-3 py-2 text-muted-foreground text-xs">
 						This message has {MAX_REACTION_EMOJI_PER_MESSAGE} different reactions, the most it can
 						have. You can still add one of those.
 					</p>

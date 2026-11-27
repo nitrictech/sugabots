@@ -103,7 +103,7 @@ const meta = preview.meta({
 	decorators: [
 		(Story) => (
 			<QueryPreview>
-				<div className="flex h-160 min-w-0">
+				<div className="flex h-screen min-w-0">
 					<Story />
 				</div>
 			</QueryPreview>
@@ -321,7 +321,7 @@ export const InAChat = meta.story({
 	},
 	render: () => (
 		<QueryPreview>
-			<div className="p-6 pl-12.5">
+			<div className="p-6 pl-12">
 				<FileCards parts={[written("file_edit", plan)]} botName={writer.name} onOpen={fn()} />
 			</div>
 		</QueryPreview>
@@ -374,7 +374,7 @@ const asWritten = (summary: ListedWrittenFile, title = summary.title): FileAsWri
 export const InlineDocument = meta.story({
 	args: { onOpen: fn() },
 	render: ({ onOpen }) => (
-		<div className="w-full max-w-155 p-6 pl-12.5">
+		<div className="w-full max-w-xl p-6 pl-12">
 			<FileCardView
 				file={asWritten(plan)}
 				botName={writer.name}
@@ -398,7 +398,7 @@ export const InlineDocument = meta.story({
 /** A card whose file has been deleted keeps only its name, marked deleted, with nothing to open. */
 export const InlineDeleted = meta.story({
 	render: () => (
-		<div className="w-full max-w-155 p-6 pl-12.5">
+		<div className="w-full max-w-xl p-6 pl-12">
 			<FileCardView
 				file={asWritten(dashboard)}
 				botName={writer.name}
@@ -416,7 +416,7 @@ export const InlineDeleted = meta.story({
 /** A card whose file could not be loaded still says what it is and opens it, with nothing to expand. */
 export const InlineFailed = meta.story({
 	render: () => (
-		<div className="w-full max-w-155 p-6 pl-12.5">
+		<div className="w-full max-w-xl p-6 pl-12">
 			<FileCardView file={asWritten(plan)} botName={writer.name} content="failed" onOpen={fn()} />
 		</div>
 	),
@@ -457,7 +457,7 @@ stages.forEach(([name, deals], index) => {
 /** A page a reply wrote, running in place under a header that says which bot made it. */
 export const InlinePage = meta.story({
 	render: () => (
-		<div className="w-full max-w-155 p-6 pl-12.5">
+		<div className="w-full max-w-xl p-6 pl-12">
 			<FileCardView
 				file={asWritten(dashboard)}
 				botName={writer.name}
@@ -499,7 +499,7 @@ export const PageFromGitHubRun = meta.story({
 /** Loading the page a reply wrote. */
 export const InlinePageLoading = meta.story({
 	render: () => (
-		<div className="w-full max-w-155 p-6 pl-12.5">
+		<div className="w-full max-w-xl p-6 pl-12">
 			<FileCardView
 				file={asWritten(dashboard)}
 				botName={writer.name}
@@ -522,7 +522,7 @@ const tallPage = `<!doctype html><html><body style="padding: 16px">${Array.from(
 /** A page taller than the frame: clipped, shown all, then clipped again. */
 export const InlinePageTall = meta.story({
 	render: () => (
-		<div className="w-full max-w-155 p-6 pl-12.5">
+		<div className="w-full max-w-xl p-6 pl-12">
 			<FileCardView
 				file={asWritten(dashboard, "Every deal")}
 				botName={writer.name}
@@ -564,7 +564,7 @@ export const PageFromContentOrigin = meta.story({
 	},
 	render: () => (
 		<ContentOriginPreview>
-			<div className="w-full max-w-155 p-6 pl-12.5">
+			<div className="w-full max-w-xl p-6 pl-12">
 				<FileCardView
 					file={asWritten(dashboard)}
 					botName={writer.name}

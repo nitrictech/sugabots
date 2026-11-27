@@ -13,7 +13,7 @@ export function BotCrowd() {
 	return (
 		<Reveal
 			stagger={0.05}
-			className="grid max-w-94 grid-cols-8 items-center gap-2 py-2.5"
+			className="grid max-w-96 grid-cols-8 items-center gap-2 py-2.5"
 			aria-hidden
 		>
 			{botCrowd.map(({ rotate, lift, ...avatar }) => (

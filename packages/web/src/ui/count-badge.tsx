@@ -8,7 +8,7 @@ const MAX_COUNTED = 99;
  */
 export function CountBadge({ count, label }: { count: number; label: string }) {
 	return (
-		<span className="grid h-4 min-w-4.5 shrink-0 place-items-center rounded-full bg-rail-count px-1.25 font-semibold text-2xs text-primary-foreground">
+		<span className="grid h-4 min-w-5 shrink-0 place-items-center rounded-full bg-rail-count px-1 font-semibold text-2xs text-primary-foreground">
 			<span aria-hidden>{count > MAX_COUNTED ? `${MAX_COUNTED}+` : count}</span>
 			<span className="sr-only">{label}</span>
 		</span>

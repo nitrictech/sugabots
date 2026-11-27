@@ -269,7 +269,7 @@ export function MentionEditor({
 				// On a phone, as big as the field under it, which types at 16px there; see app.css.
 				<span
 					aria-hidden
-					className="pointer-events-none absolute inset-x-0 top-0 truncate py-0.75 text-sm text-subtle-foreground max-md:text-base leading-5.5"
+					className="pointer-events-none absolute inset-x-0 top-0 truncate py-0.5 text-sm text-subtle-foreground max-md:text-base leading-5.5"
 				>
 					{placeholder}
 				</span>
@@ -354,7 +354,7 @@ export function MentionEditor({
 				onBlur={(event) => {
 					if (event.target === event.currentTarget) onBlur(event);
 				}}
-				className="block max-h-40 min-h-7 overflow-y-auto whitespace-pre-wrap break-words py-0.75 text-sm text-foreground leading-5.5 outline-none"
+				className="block max-h-40 min-h-7 overflow-y-auto whitespace-pre-wrap break-words py-0.5 text-sm text-foreground leading-5.5 outline-none"
 			/>
 			{createPortal(
 				mentionable.map((target) => (

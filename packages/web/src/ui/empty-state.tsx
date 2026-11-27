@@ -34,13 +34,13 @@ export function EmptyState({
 		<div
 			className={cn(
 				"grid place-items-center",
-				compact ? "pt-2" : page === "fill" ? "h-above-tab-bar px-6 pt-6 pb-26" : "flex-1 p-6",
+				compact ? "pt-2" : page === "fill" ? "h-above-tab-bar px-6 pt-6 pb-24" : "flex-1 p-6",
 				page === "min" && "min-h-80",
 			)}
 		>
 			<div
 				className={cn(
-					"flex max-w-100 flex-col items-center gap-2.5 text-center",
+					"flex max-w-96 flex-col items-center gap-2.5 text-center",
 					compact && "w-full",
 				)}
 			>

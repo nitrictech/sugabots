@@ -427,7 +427,7 @@ function BuiltInConnectorList({
 					<SettingsGroup label="Something else">
 						<SettingsRow
 							icon={
-								<SettingsRowIcon className="size-8.5 rounded-lg">
+								<SettingsRowIcon className="size-9 rounded-lg">
 									<Code size={15} strokeWidth={2.2} />
 								</SettingsRowIcon>
 							}
@@ -438,7 +438,7 @@ function BuiltInConnectorList({
 						/>
 						<SettingsRow
 							icon={
-								<SettingsRowIcon className="size-8.5 rounded-lg">
+								<SettingsRowIcon className="size-9 rounded-lg">
 									<Globe size={15} strokeWidth={2.2} />
 								</SettingsRowIcon>
 							}

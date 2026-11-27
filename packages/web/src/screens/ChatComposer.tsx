@@ -453,7 +453,7 @@ export function ChatComposer({
 						aria-label={interrupt.label}
 						disabled={interrupt.pending}
 						onClick={interrupt.onInterrupt}
-						className="focus-ring order-4 ml-auto grid size-7.5 shrink-0 place-items-center rounded-lg bg-destructive text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-60 max-md:order-3 max-md:size-9 max-md:rounded-full motion-safe:animate-rise"
+						className="focus-ring order-4 ml-auto grid size-8 shrink-0 place-items-center rounded-lg bg-destructive text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-60 max-md:order-3 max-md:size-9 max-md:rounded-full motion-safe:animate-rise"
 					>
 						<Square size={11} strokeWidth={0} fill="currentColor" className="max-md:size-3" />
 					</button>
@@ -463,9 +463,9 @@ export function ChatComposer({
 						type="submit"
 						aria-label={submitLabel}
 						disabled={!!held || sending || !canSend(value, attachedFiles)}
-						className="focus-ring order-4 ml-auto grid size-7.5 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full motion-safe:animate-rise"
+						className="focus-ring order-4 ml-auto grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full motion-safe:animate-rise"
 					>
-						<ArrowUp size={16} strokeWidth={2.25} className="max-md:size-4.5" />
+						<ArrowUp size={16} strokeWidth={2.25} className="max-md:size-5" />
 					</button>
 				)}
 			</div>
@@ -649,7 +649,7 @@ function AttachButton({
 					label="Add"
 					side="top"
 					render={<DropdownMenuTrigger />}
-					className="order-1 size-7.5 data-popup-open:bg-hover data-popup-open:text-foreground max-md:size-9 [&_svg]:size-4.5 max-md:[&_svg]:size-5"
+					className="order-1 size-8 data-popup-open:bg-hover data-popup-open:text-foreground max-md:size-9 [&_svg]:size-5 max-md:[&_svg]:size-5"
 				>
 					<Plus aria-hidden strokeWidth={2} />
 				</IconButton>
@@ -747,7 +747,7 @@ function SuggestionList<Item>({
 		list.current?.children[selected]?.scrollIntoView({ block: "nearest" });
 	}, [selected]);
 	return (
-		<div className="absolute bottom-full mb-1.5 left-1.5 z-20 w-70 max-w-composer-menu overflow-hidden rounded-lg border border-border-strong bg-panel text-foreground shadow-popover">
+		<div className="absolute bottom-full mb-1.5 left-1.5 z-20 w-72 max-w-composer-menu overflow-hidden rounded-lg border border-border-strong bg-panel text-foreground shadow-popover">
 			<div className="px-3 pt-2.5 pb-1 font-medium text-subtle-foreground text-xs">{title}</div>
 			<div
 				ref={list}
@@ -768,7 +768,7 @@ function SuggestionList<Item>({
 						onMouseDown={(event) => event.preventDefault()}
 						onMouseEnter={() => onHighlight(index)}
 						onClick={() => onChoose(index)}
-						className="flex w-full items-center gap-2.5 rounded-sm px-2 py-1.75 text-left aria-selected:bg-chip"
+						className="flex w-full items-center gap-2.5 rounded-sm px-2 py-1.5 text-left aria-selected:bg-chip"
 					>
 						{renderItem(item)}
 					</button>
@@ -784,7 +784,7 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 			<>
 				<span
 					aria-hidden
-					className="grid size-6.5 shrink-0 place-items-center rounded-full bg-chip text-muted-foreground"
+					className="grid size-7 shrink-0 place-items-center rounded-full bg-chip text-muted-foreground"
 				>
 					<AtSign size={14} />
 				</span>
@@ -814,7 +814,7 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 function EmojiOption({ emoji }: { emoji: Emoji }) {
 	return (
 		<>
-			<span aria-hidden className="grid size-6.5 place-items-center text-xl leading-none">
+			<span aria-hidden className="grid size-7 place-items-center text-xl leading-none">
 				{emoji.emoji}
 			</span>
 			<span className="min-w-0 flex-1 truncate text-sm">

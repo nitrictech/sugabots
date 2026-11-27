@@ -61,7 +61,7 @@ export const Compact = meta.story({
 		actions: <Button className="h-11 w-full text-sm">Set up computers</Button>,
 	},
 	render: (args) => (
-		<div className="w-90 rounded-dialog bg-background p-4">
+		<div className="w-96 rounded-dialog bg-background p-4">
 			<EmptyState {...args} />
 		</div>
 	),

@@ -9,7 +9,7 @@ const meta = preview.meta({
 	component: ScrollArea,
 	tags: ["ai-generated"],
 	render: () => (
-		<ScrollArea className="h-55 w-80 rounded-panel bg-list">
+		<ScrollArea className="h-56 w-80 rounded-panel bg-list">
 			<div className="flex flex-col gap-1.5 p-4">
 				{LINES.map((line) => (
 					<p key={line} className="m-0 text-sm">

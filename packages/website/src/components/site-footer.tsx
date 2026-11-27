@@ -66,10 +66,10 @@ export function SiteFooter({ homeHref = "/" }: SiteFooterProps) {
 						</a>
 						<div className="flex gap-1.5">
 							<IconLink href={siteLinks.github} label="GitHub" cta="github">
-								<GitHubIcon className="size-4.25" />
+								<GitHubIcon className="size-4" />
 							</IconLink>
 							<IconLink href={siteLinks.discord} label="Discord" cta="discord">
-								<DiscordIcon className="size-4.25" />
+								<DiscordIcon className="size-4" />
 							</IconLink>
 						</div>
 					</div>

@@ -55,7 +55,7 @@ export function FileDropTarget({
 			{filesOver && (
 				<div
 					aria-hidden
-					className="pointer-events-none absolute inset-0 z-40 flex bg-drop-veil px-5 pt-4 pb-10.5"
+					className="pointer-events-none absolute inset-0 z-40 flex bg-drop-veil px-5 pt-4 pb-10"
 				>
 					<div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-ring border-dashed bg-drop-target px-4 text-center">
 						<span className="mb-1 grid size-12 place-items-center rounded-tile bg-primary text-primary-foreground">

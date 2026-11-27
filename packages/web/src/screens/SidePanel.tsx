@@ -59,17 +59,17 @@ export function SidePanel({
 				aria-label={label}
 				{...keys}
 				className={cn(
-					"flex min-h-0 w-95 outline-none shrink-0 flex-col border-border border-l bg-aside max-md:absolute max-md:inset-0 max-md:z-40 max-md:w-full max-md:border-l-0",
+					"flex min-h-0 w-96 outline-none shrink-0 flex-col border-border border-l bg-aside max-md:absolute max-md:inset-0 max-md:z-40 max-md:w-full max-md:border-l-0",
 					floating
 						? // Under the header's Details button, over the chat, which makes way for it; the chat stays reachable between the cards.
-							"md:pointer-events-none md:absolute md:top-13 md:right-0 md:bottom-0 md:z-20 md:w-68 md:border-l-0 md:bg-transparent md:motion-safe:animate-cards-in"
-						: "md:max-xl:absolute md:max-xl:inset-y-0 md:max-xl:right-0 md:max-xl:z-40 md:max-xl:w-100 max-w-full md:max-xl:border-l-0 md:max-xl:shadow-dialog",
+							"md:pointer-events-none md:absolute md:top-12 md:right-0 md:bottom-0 md:z-20 md:w-72 md:border-l-0 md:bg-transparent md:motion-safe:animate-cards-in"
+						: "md:max-xl:absolute md:max-xl:inset-y-0 md:max-xl:right-0 md:max-xl:z-40 md:max-xl:w-96 max-w-full md:max-xl:border-l-0 md:max-xl:shadow-dialog",
 					className,
 				)}
 			>
 				<header
 					className={cn(
-						"flex h-13 shrink-0 items-center gap-2 border-border border-b pr-3 pl-4.5",
+						"flex h-14 shrink-0 items-center gap-2 border-border border-b pr-3 pl-4",
 						headerless && (floating ? "md:hidden" : "xl:hidden"),
 						// On a phone, what it shows heads it, so its header is only the round Back.
 						headerless &&

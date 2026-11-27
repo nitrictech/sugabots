@@ -74,7 +74,7 @@ export function ChatFooter({
 		interrupt.isPending ||
 		(interrupt.isSuccess && interruptible.every((turnId) => interrupt.variables?.includes(turnId)));
 	return (
-		<div className="mx-auto w-full max-w-200 shrink-0 px-4 max-md:pb-tab-bar md:px-5">
+		<div className="mx-auto w-full max-w-3xl shrink-0 px-4 max-md:pb-tab-bar md:px-5">
 			<ChatComposer
 				label={composerLabel({ audience, automation: !!details.automation, chatName })}
 				model={model && <ModelName modelId={model} />}
@@ -116,7 +116,7 @@ export function ChatFooter({
 			 * On a phone, with the tabs straight under it, it takes room only while
 			 * there is something to say, and is a small gap above the tabs otherwise.
 			 */}
-			<div className="flex h-6.5 items-center max-md:h-auto max-md:min-h-2 max-md:[&>*]:py-1">
+			<div className="flex h-7 items-center max-md:h-auto max-md:min-h-2 max-md:[&>*]:py-1">
 				{anyoneTyping(typers) ? (
 					<TypingIndicator typers={typers} className="px-1" />
 				) : (

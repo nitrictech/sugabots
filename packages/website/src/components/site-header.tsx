@@ -69,7 +69,7 @@ export function SiteHeader({
 			>
 				<div className="flex items-center gap-2.5">
 					<a href={homeHref} className={cn("flex items-center gap-2.5", colours.text)}>
-						<SugabotsMark className="size-7.5" />
+						<SugabotsMark className="size-8" />
 						<span className="text-lg font-bold tracking-normal">Sugabots</span>
 					</a>
 					{badge && (
@@ -101,7 +101,7 @@ export function SiteHeader({
 						aria-label="GitHub"
 						className={iconButton}
 					>
-						<GitHubIcon className="size-4.5" />
+						<GitHubIcon className="size-5" />
 					</a>
 					<a
 						href={siteLinks.discord}
@@ -109,7 +109,7 @@ export function SiteHeader({
 						aria-label="Discord"
 						className={iconButton}
 					>
-						<DiscordIcon className="size-4.5" />
+						<DiscordIcon className="size-5" />
 					</a>
 					<span className={cn("mx-2.5 hidden h-5 w-px lg:block", colours.divider)} />
 					<a

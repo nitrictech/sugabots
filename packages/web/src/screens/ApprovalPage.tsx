@@ -66,7 +66,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 		<div className="tab-bar-clearance min-h-0 flex-1 overflow-y-auto">
 			<article
 				aria-label={`Approval request: ${toolTitle(call.tool)}`}
-				className="mx-auto flex w-full max-w-220 flex-col gap-4 px-8 pt-8 pb-8 max-md:gap-5 max-md:px-4 max-md:pt-safe-or-3"
+				className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-8 pt-8 pb-8 max-md:gap-5 max-md:px-4 max-md:pt-safe-or-3"
 			>
 				<PageBackLink
 					label="Approvals"

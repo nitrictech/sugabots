@@ -71,11 +71,11 @@ export const FILE_KINDS: Record<WrittenFileKind, WrittenFileKindView> = {
 		Icon: FileText,
 		file: { ...FILE_KIND_DOWNLOADS.markdown, contentOf: (content) => content },
 		// A preview, not the document: wide enough for its tables.
-		cardWidth: "max-w-160",
+		cardWidth: "max-w-2xl",
 		Inline: DocumentPreview,
 		Full: ({ content }) => (
 			<div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-list">
-				<article className="mx-auto max-w-190 px-6 py-6 max-md:px-4">
+				<article className="mx-auto max-w-3xl px-6 py-6 max-md:px-4">
 					<MessageMarkdown text={content} mentionable={[]} writer="bot" />
 				</article>
 			</div>
@@ -113,7 +113,7 @@ function DocumentPreview({
 			type="button"
 			onClick={onOpen}
 			aria-label={`Open ${title}`}
-			className="focus-ring relative block max-h-42 w-full cursor-zoom-in overflow-hidden px-3.5 py-2 text-left text-xs mask-b-from-60%"
+			className="focus-ring relative block max-h-44 w-full cursor-zoom-in overflow-hidden px-3.5 py-2 text-left text-xs mask-b-from-60%"
 		>
 			<MessageMarkdown text={content} mentionable={[]} writer="bot" />
 		</button>
@@ -168,9 +168,9 @@ function LivePage({
 						className="h-8 border border-border-strong bg-panel shadow-popover"
 					>
 						{expanded ? (
-							<ChevronUp aria-hidden className="size-3.75" />
+							<ChevronUp aria-hidden className="size-4" />
 						) : (
-							<ChevronDown aria-hidden className="size-3.75" />
+							<ChevronDown aria-hidden className="size-4" />
 						)}
 						{expanded ? "Show less" : "Show all"}
 					</Button>
@@ -182,6 +182,6 @@ function LivePage({
 
 function InlineLoading() {
 	return (
-		<div className="grid h-30 place-content-center text-muted-foreground text-xs">Loading…</div>
+		<div className="grid h-32 place-content-center text-muted-foreground text-xs">Loading…</div>
 	);
 }

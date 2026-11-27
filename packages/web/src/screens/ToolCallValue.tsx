@@ -90,7 +90,7 @@ export function ToolCallValue({
 					aria-expanded={open}
 					aria-controls={bodyId}
 					onClick={() => setOpen(!open)}
-					className="gap-1.25 py-1"
+					className="gap-1 py-1"
 				>
 					{open ? "See less" : "See more"}
 					<ChevronDown

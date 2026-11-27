@@ -55,7 +55,7 @@ export function ChatLog({
 				aria-label="Chat messages"
 				className={cn(
 					// Fills what the footer leaves, so a short chat needs no scrolling.
-					"mx-auto flex w-full max-w-200 shrink-0 grow flex-col justify-end pb-4",
+					"mx-auto flex w-full max-w-3xl shrink-0 grow flex-col justify-end pb-4",
 					!position.settledAtLatest && "max-md:invisible",
 				)}
 			>

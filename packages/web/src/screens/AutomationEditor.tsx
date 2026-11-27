@@ -288,7 +288,7 @@ function InstructionsPage({
 					onChange={(event) => onChange(event.target.value)}
 					maxLength={MAX_AUTOMATION_INSTRUCTIONS_CHARACTERS}
 					placeholder="e.g. Summarise this week's replies and flag anything that has stalled."
-					className="min-h-95"
+					className="min-h-96"
 				/>
 			</SettingsGroup>
 			<div className="flex justify-end">{action}</div>

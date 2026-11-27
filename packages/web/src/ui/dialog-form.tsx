@@ -16,10 +16,10 @@ import { CloseButton } from "@/ui/close-button.tsx";
 import { DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
 
 const widths = {
-	compact: "max-w-105 sm:max-w-105",
-	default: "max-w-115 sm:max-w-115",
+	compact: "max-w-md sm:max-w-md",
+	default: "max-w-md sm:max-w-md",
 	/** For writing at length, such as an automation's instructions. */
-	wide: "max-w-160 sm:max-w-160",
+	wide: "max-w-2xl sm:max-w-2xl",
 } as const;
 
 /** DialogForm renders a modal form inside Dialog. Start it with a DialogFormHeader and end it with a DialogFormFooter. */
@@ -141,7 +141,7 @@ export function DialogFormHeader({
 	onClose?: () => void;
 }) {
 	return (
-		<header className="grid grid-cols-centered items-center gap-3 px-4.5 pt-4 pb-3 max-md:px-4 max-md:pt-safe-or-4">
+		<header className="grid grid-cols-centered items-center gap-3 px-4 pt-4 pb-3 max-md:px-4 max-md:pt-safe-or-4">
 			{/* `flex`: an inline span would set Back on a line of text, taller than the title, so the header would grow with it. */}
 			<span className="flex justify-self-start">
 				{onBack && (
@@ -155,7 +155,7 @@ export function DialogFormHeader({
 						disabled={backDisabled}
 						onClick={onBack}
 					>
-						<ChevronLeft aria-hidden size={16} strokeWidth={2.4} className="max-md:size-5.5" />
+						<ChevronLeft aria-hidden size={16} strokeWidth={2.4} className="max-md:size-6" />
 						<span className={BACK_LABEL_ON_PHONE}>Back</span>
 					</button>
 				)}
@@ -242,7 +242,7 @@ export function DialogFormFooter({
 		// On a phone, at the foot of the screen, its buttons shared out across it and sized for a thumb.
 		<footer
 			className={cn(
-				"flex justify-end gap-2 px-4.5 pb-4.5 max-md:mt-auto max-md:px-4 max-md:pt-3 max-md:pb-safe-or-4 max-md:*:h-11 max-md:*:flex-1 max-md:*:text-sm",
+				"flex justify-end gap-2 px-4 pb-4 max-md:mt-auto max-md:px-4 max-md:pt-3 max-md:pb-safe-or-4 max-md:*:h-11 max-md:*:flex-1 max-md:*:text-sm",
 				// Holding only Cancel, which a phone leaves to the header, it takes no room there.
 				!action && !beside && "max-md:hidden",
 			)}
@@ -292,7 +292,7 @@ export function DialogFormBody({
 	return (
 		<div
 			className={cn(
-				"flex min-h-0 flex-col overflow-x-hidden overflow-y-auto px-4.5 pt-1 pb-5 max-md:flex-1 max-md:px-4",
+				"flex min-h-0 flex-col overflow-x-hidden overflow-y-auto px-4 pt-1 pb-5 max-md:flex-1 max-md:px-4",
 				gap === "compact" ? "gap-3" : "gap-3.5",
 			)}
 		>

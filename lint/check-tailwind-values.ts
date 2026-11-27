@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join, relative, resolve } from "node:path";
 import { parseSync, Visitor } from "oxc-parser";
 
@@ -7,6 +8,51 @@ const PALETTE_COLOUR =
 	/^(?:accent|bg|border(?:-[trblxyse])?|caret|decoration|divide|drop-shadow|fill|from|inset-ring|inset-shadow|outline|placeholder|ring(?:-offset)?|shadow|stroke|text|to|via)-(?:black|white|(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|[1-9]00|950))$/;
 const BRACKETED_PROPERTY = /^\[(?:--)?[a-z][\w-]*:/i;
 const BRACKETED_VALUE = /^-?[a-z][\w-]*[-/]\[/i;
+
+// Tailwind accepts any multiple of its spacing unit, such as `px-2.75` or `mt-13`, but
+// the design keeps to the steps of its default theme. The web package owns Tailwind.
+const { spacing } = createRequire(new URL("../packages/web/package.json", import.meta.url))(
+	"tailwindcss/defaultTheme",
+) as { spacing: Record<string, string> };
+const SPACING_STEPS = new Set(Object.keys(spacing));
+const SPACING_UTILITY =
+	/^-?(?:[pm][xytrblse]?|gap(?:-[xy])?|space-[xy]|inset(?:-[xy])?|top|right|bottom|left|start|end|(?:min-|max-)?[wh]|size|translate-[xy]|scroll-[mp][xytrblse]?|basis|indent)-(\d+(?:\.\d+)?)$/;
+
+// In an inline style, a fixed length in one of these has a utility to use instead.
+const STYLE_LENGTH_PROPERTIES = new Set([
+	"width",
+	"height",
+	"minWidth",
+	"maxWidth",
+	"minHeight",
+	"maxHeight",
+	"top",
+	"right",
+	"bottom",
+	"left",
+	"inset",
+	"gap",
+	"rowGap",
+	"columnGap",
+	"padding",
+	"paddingTop",
+	"paddingRight",
+	"paddingBottom",
+	"paddingLeft",
+	"paddingInline",
+	"paddingBlock",
+	"margin",
+	"marginTop",
+	"marginRight",
+	"marginBottom",
+	"marginLeft",
+	"marginInline",
+	"marginBlock",
+	"fontSize",
+	"borderRadius",
+	"borderWidth",
+]);
+const FIXED_LENGTH = /^-?(?:\d+|\d*\.\d+)(?:px|rem)$/;
 
 // Only the website imports tw-animate-css.
 const WEB_SOURCE = "packages/web/src/";
@@ -31,7 +77,7 @@ const ALLOWED_COLOURS: Readonly<Record<string, ReadonlySet<string>>> = {
 	),
 };
 
-function utilityOf(token: string): string | undefined {
+function parseUtility(token: string): string | undefined {
 	let brackets = 0;
 	let parentheses = 0;
 	let start = 0;
@@ -61,26 +107,54 @@ function utilityOf(token: string): string | undefined {
 	return token.slice(start).replace(/^!|!$/g, "");
 }
 
-/** tailwindValueViolations lists fixed class values and unavailable animation utilities in static class text. */
+/**
+ * tailwindValueViolations lists fixed class values, spacing off the default theme's steps
+ * and unavailable animation utilities in static class text, and fixed lengths in inline
+ * styles.
+ */
 export function tailwindValueViolations(file: string, source: string) {
 	const found: { token: string; line: number }[] = [];
 	const allowedColours = Object.hasOwn(ALLOWED_COLOURS, file) ? ALLOWED_COLOURS[file] : undefined;
+	const lineAt = (offset: number) => source.slice(0, offset).split("\n").length;
 	const check = (literal: string, offset: number) => {
 		for (const token of literal.split(/\s+/)) {
-			const utility = utilityOf(token);
+			const utility = parseUtility(token);
 			if (!utility) continue;
 			const colour = utility.split("/", 1)[0] ?? "";
+			const spacingStep = SPACING_UTILITY.exec(utility)?.[1];
 			if (
+				(spacingStep !== undefined && !SPACING_STEPS.has(spacingStep)) ||
 				(file.startsWith(WEB_SOURCE) && PLUGIN_ANIMATION.test(utility)) ||
 				BRACKETED_PROPERTY.test(utility) ||
 				BRACKETED_VALUE.test(utility) ||
 				(PALETTE_COLOUR.test(colour) && !allowedColours?.has(token))
 			) {
-				found.push({ token, line: source.slice(0, offset).split("\n").length });
+				found.push({ token, line: lineAt(offset) });
 			}
 		}
 	};
 	new Visitor({
+		JSXAttribute(node) {
+			if (node.name.type !== "JSXIdentifier" || node.name.name !== "style") return;
+			if (node.value?.type !== "JSXExpressionContainer") return;
+			const style = node.value.expression;
+			if (style.type !== "ObjectExpression") return;
+			for (const property of style.properties) {
+				if (property.type !== "Property" || property.key.type !== "Identifier") continue;
+				if (!STYLE_LENGTH_PROPERTIES.has(property.key.name)) continue;
+				const value = property.value;
+				if (value.type !== "Literal") continue;
+				const fixed =
+					typeof value.value === "number" ||
+					(typeof value.value === "string" && FIXED_LENGTH.test(value.value));
+				if (fixed) {
+					found.push({
+						token: `style ${property.key.name}: ${String(value.value)}`,
+						line: lineAt(property.start),
+					});
+				}
+			}
+		},
 		Literal(node) {
 			if (typeof node.value === "string") check(node.value, node.start);
 		},

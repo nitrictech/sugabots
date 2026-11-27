@@ -74,7 +74,7 @@ export function SidebarBot({
  * The end of a sidebar row, as wide as the + beside a section's name, so a
  * row's dot, its +, and the section's + all line up.
  */
-const END_SLOT = "grid w-5.5 shrink-0 place-items-center";
+const END_SLOT = "grid w-6 shrink-0 place-items-center";
 
 /** What waits on the viewer in a bot or project. */
 type Waiting = Pick<AttentionMark, "unreadMessages" | "needsApproval">;

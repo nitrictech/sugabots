@@ -14,8 +14,8 @@ export const callToAction = cva(
 					"font-medium text-landing-button-text hover:bg-landing-bubble hover:text-landing-text-strong",
 			},
 			size: {
-				large: "rounded-lg px-5.5 py-3.25 text-sm leading-none",
-				small: "rounded-lg px-3.5 py-2.25 text-sm leading-none",
+				large: "rounded-lg px-5 py-3 text-sm leading-none",
+				small: "rounded-lg px-3.5 py-2 text-sm leading-none",
 			},
 		},
 		compoundVariants: [{ variant: "primary", size: "small", className: "px-4" }],

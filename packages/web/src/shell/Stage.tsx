@@ -90,7 +90,7 @@ export function Stage({
 			{...keys}
 			className="flex min-h-0 min-w-0 flex-1 flex-col bg-background outline-none max-md:absolute max-md:inset-0 max-md:z-40"
 		>
-			<header className="flex h-13 shrink-0 items-center gap-2 border-border border-b pr-3 pl-4 max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2">
+			<header className="flex h-14 shrink-0 items-center gap-2 border-border border-b pr-3 pl-4 max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2">
 				{parent && <StageBack parent={parent} />}
 				{/* On a phone it covers the page it was opened from, so it goes back to it, as a phone's pages do. */}
 				{!parent && (

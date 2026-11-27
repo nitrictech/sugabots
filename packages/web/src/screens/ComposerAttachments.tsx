@@ -66,7 +66,7 @@ export function AttachmentTray({
 					ref={tray}
 					aria-label="Attached files"
 					className={cn(
-						"m-0 flex max-h-51.5 list-none flex-wrap gap-2 overflow-y-auto px-2.5 pt-2.5",
+						"m-0 flex max-h-52 list-none flex-wrap gap-2 overflow-y-auto px-2.5 pt-2.5",
 						overflowing && "mask-b-from-82% pb-2.5",
 						"max-sm:max-h-none max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:overflow-y-hidden max-sm:mask-none max-sm:px-2 max-sm:pt-2 max-sm:pb-0",
 					)}
@@ -181,7 +181,7 @@ export function AttachmentChip({
 		<li
 			title={status ? `${file.name}\n${status}` : file.name}
 			className={cn(
-				"group relative block size-20 shrink-0 overflow-hidden rounded-lg border has-focus-visible:border-primary-tint-border max-sm:size-18",
+				"group relative block size-20 shrink-0 overflow-hidden rounded-lg border has-focus-visible:border-primary-tint-border max-sm:size-20",
 				failed ? "border-destructive/50 bg-destructive-hover" : "border-border-strong bg-chip",
 			)}
 		>
@@ -196,7 +196,7 @@ export function AttachmentChip({
 				<FilePreview file={file} look={look} dimmed={upload.state === "uploading"} />
 			)}
 			{failed ? (
-				<span className="absolute inset-x-0 bottom-0 flex h-5.5 items-center justify-center border-destructive/30 border-t bg-destructive-hover font-medium text-3xs text-destructive-text transition-opacity group-focus-within:opacity-0 group-hover:opacity-0">
+				<span className="absolute inset-x-0 bottom-0 flex h-6 items-center justify-center border-destructive/30 border-t bg-destructive-hover font-medium text-3xs text-destructive-text transition-opacity group-focus-within:opacity-0 group-hover:opacity-0">
 					{upload.state === "tooLarge" ? "Too large" : "Failed"}
 				</span>
 			) : (
@@ -213,7 +213,7 @@ export function AttachmentChip({
 					<RotateCcw aria-hidden strokeWidth={2.4} />
 				</IconButton>
 			)}
-			<span className="pointer-events-none absolute inset-0 flex flex-col justify-end gap-0.5 bg-linear-to-b from-20% from-transparent to-75% to-background/92 px-1.75 py-1.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+			<span className="pointer-events-none absolute inset-0 flex flex-col justify-end gap-0.5 bg-linear-to-b from-20% from-transparent to-75% to-background/92 px-1.5 py-1.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
 				<MiddleTruncated
 					text={file.name}
 					className="font-medium text-2xs text-foreground leading-tight"
@@ -267,16 +267,16 @@ function FilePreview({ file, look, dimmed }: { file: File; look: FileLook; dimme
 		return (
 			<span
 				className={cn(
-					"absolute top-2.25 inset-x-3.5 -bottom-1.5 flex flex-col gap-1 rounded bg-file-page px-1.75 py-2",
+					"absolute top-2 inset-x-3.5 -bottom-1.5 flex flex-col gap-1 rounded bg-file-page px-1.5 py-2",
 					fade,
 				)}
 			>
-				<i className="mb-0.5 block h-1.25 w-5/8 rounded-sm bg-file-page-heading" />
-				<i className="block h-0.75 rounded-sm bg-file-page-line" />
-				<i className="block h-0.75 rounded-sm bg-file-page-line" />
-				<i className="block h-0.75 w-7/10 rounded-sm bg-file-page-line" />
-				<i className="block h-0.75 rounded-sm bg-file-page-line" />
-				<i className="block h-0.75 w-7/10 rounded-sm bg-file-page-line" />
+				<i className="mb-0.5 block h-1.5 w-5/8 rounded-sm bg-file-page-heading" />
+				<i className="block h-1 rounded-sm bg-file-page-line" />
+				<i className="block h-1 rounded-sm bg-file-page-line" />
+				<i className="block h-1 w-7/10 rounded-sm bg-file-page-line" />
+				<i className="block h-1 rounded-sm bg-file-page-line" />
+				<i className="block h-1 w-7/10 rounded-sm bg-file-page-line" />
 			</span>
 		);
 	}
@@ -284,7 +284,7 @@ function FilePreview({ file, look, dimmed }: { file: File; look: FileLook; dimme
 		return (
 			<span
 				style={SHEET_GRID}
-				className={cn("absolute top-2.25 inset-x-2.5 -bottom-1.5 rounded bg-file-page", fade)}
+				className={cn("absolute top-2 inset-x-2.5 -bottom-1.5 rounded bg-file-page", fade)}
 			/>
 		);
 	}
@@ -341,7 +341,7 @@ function TypeBadge({ file, look }: { file: File; look: Exclude<FileLook, "image"
 	return (
 		<span
 			className={cn(
-				"absolute bottom-1.25 left-1.25 flex h-4 max-w-attachment-preview items-center truncate rounded px-1.25 font-semibold text-3xs text-file-badge-foreground tracking-wide transition-opacity group-focus-within:opacity-0 group-hover:opacity-0",
+				"absolute bottom-1 left-1 flex h-4 max-w-attachment-preview items-center truncate rounded px-1 font-semibold text-3xs text-file-badge-foreground tracking-wide transition-opacity group-focus-within:opacity-0 group-hover:opacity-0",
 				look === "sheet" ? "bg-file-badge-sheet" : "bg-file-badge-other",
 			)}
 		>

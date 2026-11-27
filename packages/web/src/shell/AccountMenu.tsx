@@ -48,7 +48,7 @@ export function AccountMenu({
 					{signedIn.name}
 				</span>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent side="top" align="start" className="w-58">
+			<DropdownMenuContent side="top" align="start" className="w-60">
 				<div className="flex items-center gap-2.5 p-2">
 					<MemberAvatar member={signedIn} size={32} />
 					<span className="flex min-w-0 flex-1 flex-col leading-snug">
@@ -61,7 +61,7 @@ export function AccountMenu({
 					<DropdownMenuSubTrigger>
 						<WorkspaceRow workspace={current} />
 					</DropdownMenuSubTrigger>
-					<DropdownMenuContent side="right" align="end" className="w-58">
+					<DropdownMenuContent side="right" align="end" className="w-60">
 						<DropdownMenuItem render={<Link {...settingsSectionLink("members")} />}>
 							<UserPlus />
 							Invite members
@@ -113,7 +113,7 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
 		<>
 			<span
 				aria-hidden
-				className="grid size-4.5 shrink-0 place-items-center rounded-xs bg-tile font-semibold text-3xs text-foreground"
+				className="grid size-5 shrink-0 place-items-center rounded-xs bg-tile font-semibold text-3xs text-foreground"
 			>
 				{initialOf(workspace.name)}
 			</span>

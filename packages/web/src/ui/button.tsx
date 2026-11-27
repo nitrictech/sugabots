@@ -25,7 +25,7 @@ const buttonVariants = cva(
 				quiet: "font-normal text-subtle-foreground hover:text-foreground disabled:opacity-50",
 			},
 			size: {
-				sm: "h-7.25 px-3.5 text-xs",
+				sm: "h-7 px-3.5 text-xs",
 				default: "h-9 px-4 text-sm",
 				lg: "h-12 px-5 text-sm",
 				bare: "h-auto p-0",

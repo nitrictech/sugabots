@@ -46,7 +46,7 @@ function ProjectChatIntro({ project, name }: { project: Project; name: string })
 			<h2 className="m-0 font-bold text-2xl text-foreground leading-tight tracking-normal text-balance max-md:text-xl">
 				{name}
 			</h2>
-			<p className="m-0 flex max-w-140 items-center gap-2 text-sm text-muted-foreground leading-normal">
+			<p className="m-0 flex max-w-xl items-center gap-2 text-sm text-muted-foreground leading-normal">
 				<ProjectInitial project={project} />
 				In {project.name}
 			</p>
@@ -63,7 +63,7 @@ function BotChatIntro({ bot, title }: { bot: Bot; title: string | undefined }) {
 				<h2 className="m-0 font-bold text-2xl text-foreground leading-tight tracking-normal text-balance max-md:text-xl">
 					{title}
 				</h2>
-				<p className="m-0 flex max-w-140 items-center gap-2 text-sm text-muted-foreground leading-normal">
+				<p className="m-0 flex max-w-xl items-center gap-2 text-sm text-muted-foreground leading-normal">
 					<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={20} />
 					With {bot.name}
 				</p>
@@ -74,7 +74,7 @@ function BotChatIntro({ bot, title }: { bot: Bot; title: string | undefined }) {
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
 			<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={64} />
 			<h2 className="m-0 pt-1 font-bold text-2xl text-foreground tracking-normal">{bot.name}</h2>
-			<p className="m-0 max-w-140 text-sm text-muted-foreground leading-normal">
+			<p className="m-0 max-w-xl text-sm text-muted-foreground leading-normal">
 				This is the start of your chat with {bot.name}.{bot.description && ` ${bot.description}`}
 			</p>
 		</div>

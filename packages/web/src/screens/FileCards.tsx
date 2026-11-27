@@ -77,7 +77,7 @@ function FileCard({
 }
 
 /** A card showing only its header. */
-const COLLAPSED_WIDTH = "max-w-140";
+const COLLAPSED_WIDTH = "max-w-xl";
 
 /**
  * A file among the messages: a header that says which bot made it, so a

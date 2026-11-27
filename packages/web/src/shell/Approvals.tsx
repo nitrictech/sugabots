@@ -82,7 +82,7 @@ export function Approvals() {
 function NothingWaiting() {
 	return (
 		// On a phone, as tall as the card at the top of the next tab's Settings, so moving between them is still.
-		<div className="mb-5 flex items-center gap-3.5 rounded-xl border border-border bg-card p-4 max-md:mb-3 max-md:min-h-24.5 max-md:rounded-2xl max-md:py-0">
+		<div className="mb-5 flex items-center gap-3.5 rounded-xl border border-border bg-card p-4 max-md:mb-3 max-md:min-h-24 max-md:rounded-2xl max-md:py-0">
 			<span
 				aria-hidden
 				className="grid size-10 shrink-0 place-items-center rounded-lg bg-chip text-muted-foreground"
