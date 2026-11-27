@@ -1,3 +1,4 @@
+import { NoComputerProvider } from "@sugabots/contracts/errors/computers";
 import { type ApprovalRefused, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { computersContracts } from "@sugabots/contracts/operations/computers";
@@ -54,6 +55,7 @@ const usingComputer = <N extends ComputerOperation, A, E, R>(
 				Effect.gen(function* () {
 					const canUse = yield* proveCanUseChatComputer(principal, chat);
 					if (call.value.kind === "approvalCheck" && call.value.forDecision) {
+						if (canUse.provider === null) return yield* new NoComputerProvider();
 						return yield* proveComputerUseApproved(
 							principal,
 							call,

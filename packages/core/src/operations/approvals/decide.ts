@@ -36,7 +36,14 @@ export const makeDecide = <R>(
 					input.decision,
 					(approver, call, executionNumber) =>
 						approver.rule === "computerRequest"
-							? network.grantHostRequest(isMember, approver).pipe(Effect.as(undefined))
+							? network.grantHostRequest(isMember, approver).pipe(
+									Effect.as(undefined),
+									Effect.catchTags({
+										NoComputerProvider: () => Effect.succeed("noComputerProvider" as const),
+										ApprovalRefused: () => Effect.succeed("computerUseChanged" as const),
+										ComputerHostBlocked: () => Effect.succeed("hostBlocked" as const),
+									}),
+								)
 							: checkApprovalPermission(isMember.member, call, executionNumber),
 				);
 			}),

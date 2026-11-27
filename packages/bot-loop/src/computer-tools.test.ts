@@ -246,6 +246,32 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			},
 		);
 
+		it("closes a command approval when the workspace disables its computer provider", async () => {
+			const provider = await enableComputers();
+			const source = await queueOutsideRun(await runOnPostgres(defaultProjectOf(botId)), "github");
+			const { model, requests } = calling("run_command", command);
+			const workflow = await loop.runWorkflow(source, { model });
+			await workflow.suspended();
+			const { turnId, parked } = await parkedCallOf(workflow.executionId);
+
+			await loop.call(await signedIn.member(adminId), "computerProviders.update", {
+				workspace: workspaceId,
+				providerId: provider.id,
+				changes: { enabled: false },
+			});
+
+			const error =
+				"This approval was closed because the workspace has no enabled computer provider.";
+			await expect(
+				chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
+			).rejects.toMatchObject({ _tag: "ToolApprovalConflict", userMessage: error });
+			await workflow.completed();
+			expect(await callsOf(turnId)).toMatchObject([
+				{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null, error },
+			]);
+			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
+		});
+
 		it.each([
 			["write_file", { path: "notes.txt", content: "Notes" }],
 			["copy_file_to_computer", { file: "example-file" }],
@@ -726,42 +752,56 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				]);
 			});
 
-			it("adds nothing when the bot that asked lost its computer use while the request waited", async () => {
+			it.each([
+				[
+					"computer use is off",
+					"This approval was closed because the bot can no longer use the computer.",
+				],
+				[
+					"the host is blocked",
+					"This approval was closed because the workspace now blocks the requested host.",
+				],
+				[
+					"the provider is disabled",
+					"This approval was closed because the workspace has no enabled computer provider.",
+				],
+			] as const)("closes the host request and wakes the turn when %s", async (change, error) => {
 				const asked = await anEditorsChat();
-				const { model } = calling(HOST_REQUEST_TOOL, { host: "api.example.com" });
-				const ran = await loop.runTurn(asked.chatId, { model });
-				const [parked] = await callsOf(ran.turnId);
-				if (!parked) throw new Error("No call parked");
+				const { model, requests } = calling(HOST_REQUEST_TOOL, { host: "api.example.com" });
+				const workflow = await loop.runWorkflow(asked.chatId, { model });
+				await workflow.suspended();
+				const { turnId, parked } = await parkedCallOf(workflow.executionId);
 
-				await setComputerUse(false);
-				await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
-
-				expect(await projectHosts()).toEqual([]);
-			});
-
-			it("refuses a host approval once the workspace has no enabled computer provider", async () => {
-				const asked = await anEditorsChat();
-				const { model } = calling(HOST_REQUEST_TOOL, { host: "api.example.com" });
-				const ran = await loop.runTurn(asked.chatId, { model });
-				const [parked] = await callsOf(ran.turnId);
-				if (!parked) throw new Error("No call parked");
-
-				const admin = await signedIn.member(adminId);
-				const [provider] = await loop.call(admin, "computerProviders.list", {
-					workspace: workspaceId,
-				});
-				if (!provider) throw new Error("No computer provider");
-				await loop.call(admin, "computerProviders.update", {
-					workspace: workspaceId,
-					providerId: provider.id,
-					changes: { enabled: false },
-				});
+				if (change === "computer use is off") {
+					await setComputerUse(false);
+				} else if (change === "the host is blocked") {
+					await onDatabase((db) =>
+						db
+							.insert(blockedHost)
+							.values({ workspaceId, host: "example.com", blockedById: adminId }),
+					);
+				} else {
+					const admin = await signedIn.member(adminId);
+					const [provider] = await loop.call(admin, "computerProviders.list", {
+						workspace: workspaceId,
+					});
+					if (!provider) throw new Error("No computer provider");
+					await loop.call(admin, "computerProviders.update", {
+						workspace: workspaceId,
+						providerId: provider.id,
+						changes: { enabled: false },
+					});
+				}
 
 				await expect(
 					chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
-				).rejects.toBeInstanceOf(NoComputerProvider);
+				).rejects.toMatchObject({ _tag: "ToolApprovalConflict", userMessage: error });
+				await workflow.completed();
 				expect(await projectHosts()).toEqual([]);
-				expect(await callsOf(ran.turnId)).toMatchObject([{ approvalStatus: "pending" }]);
+				expect(await callsOf(turnId)).toMatchObject([
+					{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null, error },
+				]);
+				expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
 			});
 
 			it("adds nothing when the host is denied", async () => {
@@ -829,7 +869,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 									parked.approvalId ?? "",
 									"allow_once",
 									(approver) =>
-										network.grantHostRequest(isMember, approver).pipe(Effect.as(undefined)),
+										network
+											.grantHostRequest(isMember, approver)
+											.pipe(Effect.as(undefined), Effect.orDie),
 								);
 							}),
 						);

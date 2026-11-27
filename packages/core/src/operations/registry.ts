@@ -1,6 +1,7 @@
 export * as Operations from "./registry.ts";
 
 import { isDeepStrictEqual } from "node:util";
+import { NoComputerProvider } from "@sugabots/contracts/errors/computers";
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import {
 	botLoopTools,
@@ -39,10 +40,10 @@ import { filesOperations } from "./files/index.ts";
 import { notificationsOperations } from "./notifications/index.ts";
 import {
 	type Call,
-	checkApproval,
 	type LongRunningOperation,
 	type Operation,
 	type Running,
+	runToApproval,
 	type ServicesOf,
 } from "./operation.ts";
 import { projectsOperations } from "./projects/index.ts";
@@ -132,12 +133,13 @@ const checkApprovalPermission = (
 			}
 			if (call.approvalResolvedTargets && "computer" in call.approvalResolvedTargets) {
 				const principal = yield* principalForApprovalCheck(call.turnId, member, executionNumber);
-				yield* named(principal, principal.chat, (principal, chat) =>
+				const provider = yield* named(principal, principal.chat, (principal, chat) =>
 					proveCanUseChatComputer(principal, chat).pipe(
-						Effect.asVoid,
+						Effect.map(({ provider }) => provider),
 						Effect.mapError(() => forbidden),
 					),
 				);
+				if (provider === null) return "noComputerProvider" as const;
 			}
 			return;
 		}
@@ -156,11 +158,17 @@ const checkApprovalPermission = (
 
 		const principal = yield* principalForApprovalCheck(call.turnId, member, executionNumber);
 		const operation: RegisteredOperation<ApprovalServices> = operationsExceptDecide[name];
-		const checked = yield* checkApproval(
-			(check) => operation.run(principal, decoded.success as never, check),
-			{ kind: "approvalCheck", forDecision: true },
+		const result = yield* Effect.result(
+			runToApproval((check) => operation.run(principal, decoded.success as never, check), {
+				kind: "approvalCheck",
+				forDecision: true,
+			}),
 		);
-		if (!checked) return yield* forbidden;
+		if (result._tag === "Failure") {
+			if (result.failure instanceof NoComputerProvider) return "noComputerProvider" as const;
+			return yield* forbidden;
+		}
+		const checked = result.success;
 		if (
 			checked.resolvedTargets &&
 			!isDeepStrictEqual(checked.resolvedTargets, call.approvalResolvedTargets)

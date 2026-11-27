@@ -24,7 +24,15 @@ export class ToolApprovalNotFound
 /** The approval was already decided or its call changed before it could be allowed. */
 export class ToolApprovalConflict
 	extends Schema.TaggedError<ToolApprovalConflict>()("ToolApprovalConflict", {
-		reason: Schema.optional(Schema.Literals(["briefDestinationChanged", "connectorChanged"])),
+		reason: Schema.optional(
+			Schema.Literals([
+				"briefDestinationChanged",
+				"connectorChanged",
+				"noComputerProvider",
+				"computerUseChanged",
+				"hostBlocked",
+			]),
+		),
 	})
 	implements DomainError
 {
@@ -41,6 +49,12 @@ export class ToolApprovalConflict
 				return userText`This approval was closed because the chat the bot wanted to start changed.`;
 			case "connectorChanged":
 				return userText`This approval was closed because the connector or its tool settings changed.`;
+			case "noComputerProvider":
+				return userText`This approval was closed because the workspace has no enabled computer provider.`;
+			case "computerUseChanged":
+				return userText`This approval was closed because the bot can no longer use the computer.`;
+			case "hostBlocked":
+				return userText`This approval was closed because the workspace now blocks the requested host.`;
 			default:
 				return userText`That tool approval has already been decided`;
 		}

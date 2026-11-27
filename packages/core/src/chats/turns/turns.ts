@@ -26,7 +26,6 @@ import type {
 	ToolApprovalConflict,
 	ToolApprovalNotFound,
 } from "@sugabots/contracts/errors/approvals";
-import type { NoComputerProvider } from "@sugabots/contracts/errors/computers";
 import type { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { DomainError, UserText } from "@sugabots/errors";
 import { inArray, type SQLWrapper } from "drizzle-orm";
@@ -268,14 +267,10 @@ export interface ControlsInterface {
 			canDecide: CanDecide<P, X>,
 			call: ApprovalCall,
 			executionNumber: number,
-		) => Effect.Effect<ToolApprovalConflict["reason"], ActionForbidden | NoComputerProvider, R>,
+		) => Effect.Effect<ToolApprovalConflict["reason"], ActionForbidden, R>,
 	) => Effect.Effect<
 		void,
-		| ToolApprovalNotFound
-		| ToolApprovalConflict
-		| ResourceHidden
-		| ActionForbidden
-		| NoComputerProvider,
+		ToolApprovalNotFound | ToolApprovalConflict | ResourceHidden | ActionForbidden,
 		R
 	>;
 	/**

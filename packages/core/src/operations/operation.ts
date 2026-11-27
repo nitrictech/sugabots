@@ -59,20 +59,26 @@ export const unexpectedApprovalProof = Effect.die(
 	new Error("Operation finished an approval check without proving Approved"),
 );
 
-/** checkApproval runs an operation through the proofs it requires before Approved. */
-export const checkApproval = <R>(
+export const runToApproval = <R>(
 	run: (call: ApprovalCheck) => Effect.Effect<unknown, DomainError, R>,
-	call: ApprovalCheck = { kind: "approvalCheck" },
+	call: ApprovalCheck,
 ) =>
 	Effect.suspend(() =>
 		run(call).pipe(
 			Effect.matchEffect({
 				onFailure: (error) =>
-					Effect.succeed(error instanceof ApprovalCheckReached ? error.details : undefined),
+					error instanceof ApprovalCheckReached
+						? Effect.succeed(error.details)
+						: Effect.fail(error),
 				onSuccess: () => unexpectedApprovalProof,
 			}),
 		),
 	);
+
+export const checkApproval = <R>(
+	run: (call: ApprovalCheck) => Effect.Effect<unknown, DomainError, R>,
+	call: ApprovalCheck = { kind: "approvalCheck" },
+) => runToApproval(run, call).pipe(Effect.orElseSucceed(() => undefined));
 
 /**
  * One call of an operation, the `X` of `Approved<P, X, Targets, Operation>`, which the registry

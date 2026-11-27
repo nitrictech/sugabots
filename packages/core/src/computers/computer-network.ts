@@ -9,6 +9,7 @@ import {
 	type ProjectComputerNetwork,
 } from "@sugabots/contracts";
 import { ComputerHostBlocked, NoComputerProvider } from "@sugabots/contracts/errors/computers";
+import { ActionForbidden, ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import type { OutputOf } from "@sugabots/contracts/operations";
 import { computersContracts } from "@sugabots/contracts/operations/computers";
 import { userText } from "@sugabots/errors";
@@ -104,13 +105,16 @@ export interface Interface {
 	 * who is deciding to allow it as one who may manage that project. In the
 	 * caller's transaction, the decision's, so the host is added only if the
 	 * decision commits; the project's running computer learns of it once it
-	 * has. A host the workspace blocked meanwhile is left out, which the turn
-	 * finds when it reads the outcome. Any other call changes nothing.
+	 * has. The grant requires current computer use, an enabled provider and a
+	 * host the workspace permits.
 	 */
 	readonly grantHostRequest: <P, X>(
 		isMember: IsMember<P>,
 		canDecide: CanDecide<P, X>,
-	) => Effect.Effect<void, NoComputerProvider>;
+	) => Effect.Effect<
+		void,
+		ActionForbidden | ApprovalRefused | ComputerHostBlocked | NoComputerProvider
+	>;
 	/**
 	 * What became of the turn's host request for `host`, once `approved` shows
 	 * an approver allowed it: their decision added it, unless the workspace
@@ -206,6 +210,13 @@ export const make = Effect.gen(function* () {
 				blocked.map((row) => row.host),
 			),
 		);
+
+	const checkHost = (workspaceId: string, host: string) =>
+		Effect.gen(function* () {
+			if (!(yield* providers.enabled(workspaceId))) return yield* new NoComputerProvider();
+			const by = yield* blockFor(workspaceId, host);
+			if (by !== undefined) return yield* new ComputerHostBlocked({ host, by });
+		});
 
 	const addToProject = (row: typeof projectAllowedHost.$inferInsert) =>
 		query((db) => db.insert(projectAllowedHost).values(row).onConflictDoNothing()).pipe(
@@ -329,21 +340,15 @@ export const make = Effect.gen(function* () {
 			),
 
 		checkHostRequest: (canUse, host) =>
-			operation(
-				"checkHostRequest",
-				Effect.gen(function* () {
-					if (!(yield* providers.enabled(canUse.workspace))) return yield* new NoComputerProvider();
-					const by = yield* blockFor(canUse.workspace, host);
-					if (by !== undefined) return yield* new ComputerHostBlocked({ host, by });
-				}),
-			),
+			operation("checkHostRequest", checkHost(canUse.workspace, host)),
 
 		grantHostRequest: (isMember, canDecide) =>
 			operation(
 				"grantHostRequest",
 				Effect.gen(function* () {
+					const forbidden = new ActionForbidden({ proof: "CanDecide" });
 					const projectId = canDecide.computerProjectId;
-					if (!projectId) return;
+					if (!projectId) return yield* forbidden;
 					const [call] = yield* query((db) =>
 						db
 							.select({
@@ -358,18 +363,14 @@ export const make = Effect.gen(function* () {
 							.where(eq(toolCall.id, canDecide.call.value))
 							.limit(1),
 					);
-					if (call?.tool !== HOST_REQUEST_TOOL) return;
+					if (call?.tool !== HOST_REQUEST_TOOL) return yield* forbidden;
 					const asked = Schema.decodeUnknownOption(hostRequestInput)(
 						call.executionInput ?? call.input,
 					);
-					if (Option.isNone(asked)) return;
+					if (Option.isNone(asked)) return yield* forbidden;
 					const { host } = asked.value;
 					const project = { workspaceId: call.workspaceId, projectId };
-					if (!(yield* providers.enabled(project.workspaceId)))
-						return yield* new NoComputerProvider();
-					// Blocked while the request waited for its answer.
-					if ((yield* blockFor(project.workspaceId, host)) !== undefined) return;
-					if (TRUSTED_HOSTS.includes(host)) return;
+					yield* checkHost(project.workspaceId, host);
 					// The bot that asked may have lost its computer while the request waited,
 					// such as by its computer use being turned off.
 					const stillUsesComputer = yield* query((db) =>
@@ -378,7 +379,8 @@ export const make = Effect.gen(function* () {
 							return facts !== undefined && (yield* turnUsesComputer(db, facts, projectId));
 						}),
 					);
-					if (!stillUsesComputer) return;
+					if (!stillUsesComputer) return yield* new ApprovalRefused();
+					if (TRUSTED_HOSTS.includes(host)) return;
 					yield* query((db) =>
 						db
 							.insert(projectAllowedHost)

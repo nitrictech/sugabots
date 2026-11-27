@@ -247,7 +247,9 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 								{
 									replyMessageId: loaded.replyMessageId,
 									setting: loaded.setting,
-									approvals: loaded.approvals,
+									approvals: loaded.approvals.filter(
+										({ decision }) => decision === "allowed" || decision === "pending",
+									),
 								},
 								recorder,
 							);
