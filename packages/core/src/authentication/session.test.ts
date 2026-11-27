@@ -169,7 +169,6 @@ describe("SessionAuthentication", () => {
 		const relay = await databaseForTests.runPromise(postgresEventRelay(store));
 		let listening: Promise<unknown> = Promise.resolve();
 		const bus = EventBus.inProcess({
-			store,
 			relay: {
 				broadcast: relay.broadcast,
 				listen: (receive) => {
@@ -203,7 +202,7 @@ describe("SessionAuthentication", () => {
 		const stillSignedIn = await seedSession(member);
 		const stream = memberStream(member);
 		const store = await runOnPostgres(EventStore.make);
-		const bus = EventBus.inProcess({ store });
+		const bus = EventBus.inProcess();
 		const ended = streamEvent("session.ended", { sessionId: ending.id });
 		const told = streamEvent("approvals.changed", { toolCallId: crypto.randomUUID() });
 		const change = Effect.flatMap(

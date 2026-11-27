@@ -72,21 +72,22 @@ export function inMemoryEventStore({
 			);
 		},
 
-		async resume(stream, cursor, limit, controls = []) {
+		async replayPage(page, limit) {
+			if ("feed" in page) {
+				return page.feed.since < prunedThrough
+					? undefined
+					: following([page.feed, ...page.controls], limit);
+			}
+			const { stream, cursor, controls } = page;
 			const position = EventStore.afterCursor(cursor);
 			if (position < prunedThrough) return undefined;
 			const retained =
-				cursor <= 0
+				cursor < 0
 					? position <= next &&
 						!rows.some(
 							(row) => row.stream === stream && row.seq >= prunedThrough && row.seq <= position,
 						)
-					: rows.some(
-							(row) =>
-								row.seq === cursor &&
-								(row.stream === stream ||
-									!rows.some((earlier) => earlier.stream === stream && earlier.seq <= position)),
-						);
+					: rows.some((row) => row.seq === cursor && row.stream === stream);
 			return retained ? following([{ stream, since: position }, ...controls], limit) : undefined;
 		},
 

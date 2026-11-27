@@ -5,7 +5,6 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { askerColumns } from "../../authentication/turn-facts.ts";
 import { transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
-import { inMemoryEventStore } from "../../database/events/testing.ts";
 import {
 	bot,
 	chatParticipant,
@@ -47,7 +46,7 @@ import {
  * itself and frees its lane, as its workflow would.
  */
 describe.skipIf(!process.env.DATABASE_URL)("collaborations, against Postgres", async () => {
-	const services = await chatServicesForTests(EventBus.inProcess({ store: inMemoryEventStore() }));
+	const services = await chatServicesForTests(EventBus.inProcess());
 	const call = await servedOperations({ chats: services });
 	const drive = runOver(services);
 	const runs = onPostgres(Context.get(services, TurnRuns.Service));

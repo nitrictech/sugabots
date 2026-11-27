@@ -13,18 +13,15 @@ import {
 } from "../database.ts";
 import { CONTROL_EVENT_TYPES, event, eventRetention, isControlEvent } from "./sql.ts";
 
-/**
- * Where durable events are read back between a disconnect and a reconnect.
- * `EventOutbox` writes them, on the transaction that made the change.
- *
- * An interface rather than a handful of queries because the bus above it has
- * nothing else to say to the database, and because a store that lives in memory
- * lets the bus, the routes and the client be tested end to end without one.
- * `make` is the real thing; `inMemoryEventStore` in `testing.ts` is the same contract, for tests.
- */
+/** Durable events that streams read after a disconnect and while following. */
 export interface Interface {
 	/** Events on a stream after `since`, oldest first, at most `limit` of them. */
-	replay(stream: EventStream, since: number, limit: number): Promise<Stored[]>;
+	replay(
+		stream: EventStream,
+		since: number,
+		limit: number,
+		signal?: AbortSignal,
+	): Promise<Stored[]>;
 
 	/**
 	 * Events on several streams, each after its own `since` and, where it says,
@@ -34,7 +31,7 @@ export interface Interface {
 	 * and an event committed before another was stored has the lower `seq`, so
 	 * one read in this order is read before anything stored after it.
 	 */
-	following(feeds: ReadonlyArray<Feed>, limit: number): Promise<StoredOn[]>;
+	following(feeds: ReadonlyArray<Feed>, limit: number, signal?: AbortSignal): Promise<StoredOn[]>;
 
 	/** The starting cursor for each distinct stream, taken together before following them. */
 	latest(
@@ -42,12 +39,11 @@ export interface Interface {
 		signal?: AbortSignal,
 	): Promise<Map<EventStream, number>>;
 
-	/** resume reads the first batch, or returns undefined if cursor cannot be replayed. */
-	resume(
-		stream: EventStream,
-		cursor: number,
+	/** replayPage reads a batch, or returns undefined if its starting position is no longer usable. */
+	replayPage(
+		page: ReplayPage,
 		limit: number,
-		controls?: ReadonlyArray<Feed>,
+		signal?: AbortSignal,
 	): Promise<StoredOn[] | undefined>;
 
 	/** Drops events older than `before`. Returns how many went. */
@@ -58,33 +54,33 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 	declare readonly [Tier]: "process";
 }
 
-/**
- * The store on the database the Effect is run with. Its methods are promises
- * because the bus above it is, so it keeps the context it was built in to run
- * its queries on.
- */
 export const make: Effect.Effect<Interface, never, Database> = Effect.gen(function* () {
 	const context = yield* Effect.context<Database>();
-	const run = <A>(statement: (db: Executor) => Effect.Effect<A, QueryFailure>) =>
-		Effect.runPromiseWith(context)(query(statement));
+	const runPromise = Effect.runPromiseWith(context);
+	const run = <A>(
+		statement: (db: Executor) => Effect.Effect<A, QueryFailure>,
+		signal?: AbortSignal,
+	) => runPromise(query(statement), { signal });
 
 	return {
-		async replay(stream, since, limit) {
-			const rows = await run((db) =>
-				db
-					.select({ seq: event.seq, payload: event.payload })
-					.from(event)
-					.where(and(eq(event.stream, stream), gt(event.seq, since)))
-					.orderBy(asc(event.seq))
-					.limit(limit),
+		async replay(stream, since, limit, signal) {
+			const rows = await run(
+				(db) =>
+					db
+						.select({ seq: event.seq, payload: event.payload })
+						.from(event)
+						.where(and(eq(event.stream, stream), gt(event.seq, since)))
+						.orderBy(asc(event.seq))
+						.limit(limit),
+				signal,
 			);
 
 			return rows.map((row) => ({ seq: row.seq, event: row.payload }));
 		},
 
-		async following(feeds, limit) {
+		async following(feeds, limit, signal) {
 			if (feeds.length === 0) return [];
-			const rows = await run((db) => followingRows(db, feeds, limit));
+			const rows = await run((db) => followingRows(db, feeds, limit), signal);
 			return rows.map(({ seq, stream, payload }) => ({ seq, stream, event: payload }));
 		},
 
@@ -94,7 +90,7 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 				streams.map((stream) => sql`${stream}`),
 				sql`, `,
 			)}]::text[]`;
-			const rows = await Effect.runPromiseWith(context)(
+			const rows = await runPromise(
 				transaction(
 					Effect.gen(function* () {
 						// A writer can reserve a sequence number before its event is visible.
@@ -125,35 +121,23 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 			return new Map(rows.map(({ stream, cursor }) => [stream, Number(cursor)]));
 		},
 
-		async resume(stream, cursor, limit, controls = []) {
-			const position = afterCursor(cursor);
-			const retained = sql`${position} >= (${retentionBoundary}) and ${
-				cursor <= 0
-					? sql`${position} <= (${sequencePosition}) and not exists (
-						select 1 from ${event} where ${event.stream} = ${stream}
-						and ${event.seq} between (${retentionBoundary}) and ${position}
-					)`
-					: sql`exists (
-						select 1 from ${event} as anchor where anchor.seq = ${cursor}
-						and (anchor.stream = ${stream} or not exists (
-							select 1 from ${event} where ${event.stream} = ${stream}
-							and ${event.seq} <= ${position}
-						))
-					)`
-			}`;
+		async replayPage(page, limit, signal) {
+			const feed =
+				"cursor" in page ? { stream: page.stream, since: afterCursor(page.cursor) } : page.feed;
+			const retained = sql`${feed.since} >= (${retentionBoundary}) and ${validReplayPosition(page)}`;
 			const rows = await run((db) => {
-				const batch = followingRows(db, [{ stream, since: position }, ...controls], limit);
+				const batch = followingRows(db, [feed, ...page.controls], limit);
 				return db.execute<{
 					retained: boolean;
 					seq: string | null;
 					stream: EventStream;
 					payload: StreamEvent;
 				}>(
-					sql`select retained, batch.* from (select ${retained} as retained) as resume
+					sql`select retained, batch.* from (select ${retained} as retained) as replay
 						left join lateral (${batch}) as batch on retained order by batch.seq`,
 					"objects",
 				);
-			});
+			}, signal);
 			if (!rows[0]?.retained) return undefined;
 			return rows.flatMap(({ seq, stream, payload }) =>
 				seq === null ? [] : [{ seq: Number(seq), stream, event: payload }],
@@ -189,6 +173,21 @@ const sequencePosition = sql`select case when is_called then last_value else 0 e
 
 // Pruning records one watermark across streams, so a gap can conservatively reset another stream.
 const retentionBoundary = sql`select coalesce((select pruned_through from ${eventRetention}), 0)`;
+
+function validReplayPosition(page: ReplayPage) {
+	if ("feed" in page) return sql`true`;
+	const { stream, cursor } = page;
+	if (cursor >= 0) {
+		return sql`exists (
+			select 1 from ${event} where ${event.seq} = ${cursor} and ${event.stream} = ${stream}
+		)`;
+	}
+	const position = afterCursor(cursor);
+	return sql`${position} <= (${sequencePosition}) and not exists (
+		select 1 from ${event} where ${event.stream} = ${stream}
+		and ${event.seq} between (${retentionBoundary}) and ${position}
+	)`;
+}
 
 function followingRows(db: Executor, feeds: readonly Feed[], limit: number) {
 	return db
@@ -231,6 +230,11 @@ export interface Feed {
 	readonly since: number;
 	readonly types?: ReadonlyArray<DurableEventType>;
 }
+
+/** The client's cursor for the first page, or the stream's read position for later pages. */
+export type ReplayPage =
+	| { readonly stream: EventStream; readonly cursor: number; readonly controls: readonly Feed[] }
+	| { readonly feed: Feed; readonly controls: readonly Feed[] };
 
 function typesInFeed(types: readonly DurableEventType[] | undefined) {
 	if (types === undefined) return undefined;

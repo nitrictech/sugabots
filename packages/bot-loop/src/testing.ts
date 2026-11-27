@@ -10,7 +10,6 @@ import { afterCommit as afterTransaction, Database } from "@sugabots/core/databa
 import { EventBus } from "@sugabots/core/database/events/bus";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
 import { EventStore } from "@sugabots/core/database/events/store";
-import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
 import { connector, message, searchProvider, toolCall, turn } from "@sugabots/core/database/schema";
 import {
 	onDatabase,
@@ -555,10 +554,7 @@ export async function botLoopOnPostgres(
 			outside.egress ?? unimplemented(Egress.Service),
 			Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
 			unimplemented(Accounts.Service, { requireEmailVerification: false }),
-			Layer.succeed(
-				EventBus.Service,
-				outside.events ?? EventBus.inProcess({ store: inMemoryEventStore() }),
-			),
+			Layer.succeed(EventBus.Service, outside.events ?? EventBus.inProcess()),
 			EventStore.layer,
 			Layer.succeed(Models.Service, outside.model),
 		);

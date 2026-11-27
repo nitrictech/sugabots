@@ -23,7 +23,6 @@ import { Accounts } from "../../accounts/accounts.ts";
 import { query } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { inMemoryEventStore } from "../../database/events/testing.ts";
 import {
 	automationRun,
 	automationTrigger,
@@ -89,7 +88,7 @@ import type { Delivery } from "./webhook-auth.ts";
 type AutomationAddress = Pick<InputOf<"automations.update">, "projectId" | "automationId">;
 
 describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", async () => {
-	const bus = EventBus.inProcess({ store: inMemoryEventStore() });
+	const bus = EventBus.inProcess();
 	const services = await chatServicesForTests(bus);
 	const call = await servedOperations({ chats: services });
 	/**

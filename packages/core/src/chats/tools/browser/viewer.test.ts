@@ -15,7 +15,6 @@ import { ProjectComputers } from "../../../computers/project-computers.ts";
 import { removeWorkVolumes } from "../../../computers/testing.ts";
 import { EventBus } from "../../../database/events/bus.ts";
 import { EventStore } from "../../../database/events/store.ts";
-import { inMemoryEventStore } from "../../../database/events/testing.ts";
 import {
 	bot as botTable,
 	chatParticipant,
@@ -165,9 +164,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 						ComputerProviderStore.layer,
 						Streams.layer.pipe(
 							Layer.provide([
-								Layer.sync(EventBus.Service, () =>
-									EventBus.inProcess({ store: inMemoryEventStore() }),
-								),
+								Layer.sync(EventBus.Service, () => EventBus.inProcess()),
 								EventStore.layer,
 							]),
 						),

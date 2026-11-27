@@ -10,7 +10,6 @@ import { Context, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { askerColumns } from "../../authentication/turn-facts.ts";
 import { EventBus } from "../../database/events/bus.ts";
-import { EventStore } from "../../database/events/store.ts";
 import {
 	automationRun,
 	bot,
@@ -64,10 +63,8 @@ import { Turns } from "../turns/turns.ts";
 import { WAITING_APPROVALS } from "./chat-view.ts";
 import { startBotChat } from "./testing.ts";
 
-const eventStore = await runOnPostgres(EventStore.make);
-
 describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () => {
-	const services = await chatServicesForTests(EventBus.inProcess({ store: eventStore }));
+	const services = await chatServicesForTests(EventBus.inProcess());
 	const drive = runOver(services);
 	const call = await servedOperations({ chats: services });
 	const manualRunsAs = await manualRunsOver(services);

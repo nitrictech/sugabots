@@ -282,10 +282,11 @@ export const make = Effect.gen(function* () {
 		types: (stream: EventStream) => ReadonlyArray<DurableEventType> | undefined,
 	) =>
 		Effect.map(
-			Effect.promise(() =>
+			Effect.promise((signal) =>
 				store.following(
 					[...feeds].map(([stream, since]) => ({ stream, since, types: types(stream) })),
 					BATCH,
+					signal,
 				),
 			),
 			(rows) => {
@@ -526,6 +527,10 @@ export const make = Effect.gen(function* () {
 				const watcherControls = new Map(
 					[...feeds].filter(([feed]) => controlStreams.includes(feed)),
 				);
+				const replayControls = () =>
+					[...feeds]
+						.filter(([feed]) => feed !== stream)
+						.map(([stream, since]) => ({ stream, since, types: CONTROL_EVENT_TYPES }));
 				const first = yield* operation("follow", prove);
 				const outbox = yield* Queue.bounded<Delivery, Cause.Done>(READ_AHEAD);
 				const expiresAt = yield* operation("follow", expiryOf(principal));
@@ -536,20 +541,18 @@ export const make = Effect.gen(function* () {
 				const replay =
 					since === undefined
 						? undefined
-						: yield* Effect.promise(() =>
-								store.resume(
-									stream,
-									since,
+						: yield* Effect.promise((signal) =>
+								store.replayPage(
+									{
+										stream,
+										cursor: since,
+										controls: replayControls(),
+									},
 									BATCH,
-									[...watcherControls]
-										.filter(([feed]) => feed !== stream)
-										.map(([stream, since]) => ({ stream, since, types: CONTROL_EVENT_TYPES })),
+									signal,
 								),
 							);
-				if (replay && since !== undefined) {
-					feeds.set(stream, EventStore.afterCursor(since));
-					for (const row of replay) feeds.set(row.stream, row.seq);
-				}
+				if (replay && since !== undefined) feeds.set(stream, EventStore.afterCursor(since));
 
 				// Both carry where the stream starts, so a client cut off before
 				// anything else arrives resumes from there.
@@ -623,8 +626,35 @@ export const make = Effect.gen(function* () {
 						if (rows.length < BATCH) return true;
 					}
 				});
+				const sendReplay = Effect.fnUntraced(function* (firstPage: readonly EventStore.StoredOn[]) {
+					let page = firstPage;
+					while (true) {
+						for (const row of page) feeds.set(row.stream, row.seq);
+						if (!(yield* sendStored(page))) return false;
+						if (page.length < BATCH) return true;
+						const next = yield* Effect.promise((signal) =>
+							store.replayPage(
+								{
+									feed: { stream, since: feeds.get(stream) ?? 0 },
+									controls: replayControls(),
+								},
+								BATCH,
+								signal,
+							),
+						);
+						if (!next) {
+							const starts = yield* Effect.promise((signal) => store.latest([stream], signal));
+							const cursor = starts.get(stream);
+							if (cursor === undefined || !(yield* proveForSending())) return false;
+							feeds.set(stream, EventStore.afterCursor(cursor));
+							yield* Queue.offer(outbox, { seq: cursor, event: streamEvent("reset") });
+							return true;
+						}
+						page = next;
+					}
+				});
 				const sending = Effect.gen(function* () {
-					if (replay && !(yield* sendStored(replay))) return;
+					if (replay && !(yield* sendReplay(replay))) return;
 					wakeToRead();
 					while (true) {
 						const next = yield* Queue.take(woken);

@@ -35,7 +35,6 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 		const relay = await databaseForTests.runPromise(postgresEventRelay(store));
 		let listening: Promise<unknown> = Promise.resolve();
 		const bus = EventBus.inProcess({
-			store,
 			relay: {
 				broadcast: relay.broadcast,
 				listen: async (receive) => {

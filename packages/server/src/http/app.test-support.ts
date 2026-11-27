@@ -6,7 +6,6 @@ import { sessionsFromCookies } from "@sugabots/core/authentication/testing";
 import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import type { Database } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
-import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
 import { noDatabase } from "@sugabots/core/database/testing";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Operations } from "@sugabots/core/operations/registry";
@@ -133,7 +132,7 @@ const fakes: Layer.Layer<TestServices, never, Database> = Layer.mergeAll(
 	Ids.layer,
 	serverSettingsWithWebAppAt(WEB_ORIGIN),
 	Egress.layer.pipe(Layer.provide(serverSettingsWithWebAppAt(WEB_ORIGIN)), Layer.orDie),
-	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: inMemoryEventStore() })),
+	Layer.sync(EventBus.Service, () => EventBus.inProcess()),
 );
 
 /** Whose session a test says the cookie in `headers` holds, so HTTP tests run without a database. */

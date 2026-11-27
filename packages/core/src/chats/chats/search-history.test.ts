@@ -2,7 +2,6 @@ import type { InputOf, OutputOf } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
-import { EventStore } from "../../database/events/store.ts";
 import { bot, chatCompaction, file, message } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import { asMember } from "../../operations/chats/testing.ts";
@@ -22,8 +21,7 @@ function matchText(result: OutputOf<"chats.searchHistory">) {
 }
 
 describe.skipIf(!process.env.DATABASE_URL)("searching chat history, against Postgres", async () => {
-	const eventStore = await runOnPostgres(EventStore.make);
-	const services = await chatServicesForTests(EventBus.inProcess({ store: eventStore }));
+	const services = await chatServicesForTests(EventBus.inProcess());
 	const call = await servedOperations({ chats: services });
 	const drive = runOver(services);
 

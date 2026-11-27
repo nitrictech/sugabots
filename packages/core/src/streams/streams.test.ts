@@ -42,7 +42,6 @@ import { Audience } from "../database/events/audience.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { EventStore } from "../database/events/store.ts";
-import { inMemoryEventStore } from "../database/events/testing.ts";
 import { bot, event, projectMember, session } from "../database/schema.ts";
 import {
 	closeDatabase,
@@ -101,7 +100,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 	const subscribed = new Map<EventStream, number>();
 	/** What waits for a stream's last subscription to end. */
 	const awaitingNone = new Map<EventStream, Array<() => void>>();
-	const inProcess = EventBus.inProcess({ store: inMemoryEventStore() });
+	const inProcess = EventBus.inProcess();
 	const bus: EventBus.Interface = {
 		...inProcess,
 		async *subscribe(stream, options) {
@@ -160,7 +159,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				),
 			);
 		outbox = await outboxOver(bus);
-		unheard = await outboxOver(EventBus.inProcess({ store: inMemoryEventStore() }));
+		unheard = await outboxOver(EventBus.inProcess());
 		stored = await runOnPostgres(EventStore.make);
 	});
 
@@ -408,6 +407,175 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		}
 	});
 
+	it("releases the only pool slot when reconnect is interrupted during replay", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		const stream = chatStream(world.chat);
+		const since = (await stored.latest([stream])).get(stream);
+		if (since === undefined) throw new Error("The stream has no cursor");
+		const settings = ConfigProvider.fromEnv({ env: { ...process.env, DATABASE_POOL_SIZE: "1" } });
+		const runtime = ManagedRuntime.make(
+			testInfrastructure.pipe(Layer.provide(ConfigProvider.layer(settings))),
+		);
+		const runOn = effectRunner(runtime);
+		const proving = Promise.withResolvers<void>();
+		const proved = Promise.withResolvers<void>();
+		const abort = new AbortController();
+		const streams = await runOn(
+			Streams.make.pipe(
+				Effect.provideService(EventBus.Service, bus),
+				Effect.provide(EventStore.layer),
+			),
+		);
+		const starting = runOn(
+			Effect.scoped(
+				streams.follow({
+					principal: ed,
+					stream,
+					since,
+					workspace: world.workspace,
+					prove: Effect.promise(async () => {
+						proving.resolve();
+						await proved.promise;
+						return { kind: "chat", workspace: world.workspace, chat: world.chat } as const;
+					}),
+				}),
+			),
+			{ signal: abort.signal },
+		);
+		const interrupted = expect(starting).rejects.toBeDefined();
+		try {
+			await proving.promise;
+			const holder = holdTransaction(
+				query((db) =>
+					db.execute(sql`lock table event_retention in access exclusive mode`, "objects"),
+				),
+			);
+			try {
+				await holder.held;
+				proved.resolve();
+				await holder.waitForWaiters(1);
+
+				abort.abort();
+				await interrupted;
+				await runOn(
+					query((db) => db.execute(sql`select 1`, "objects")).pipe(Effect.timeout("2 seconds")),
+				);
+			} finally {
+				await holder.release();
+			}
+		} finally {
+			abort.abort();
+			proved.resolve();
+			await runtime.dispose();
+		}
+	});
+
+	it("replays all missed pages once, including a commit during startup, then goes live", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		const stream = chatStream(world.chat);
+		const changed = (name: string) => streamEvent("chat.changed", { chatId: name });
+		await commit(stream, changed("anchor"));
+		const since = (await stored.latest([stream])).get(stream);
+		if (since === undefined) throw new Error("The stream has no cursor");
+		const missed = Array.from({ length: 200 }, (_, index) => changed(`missed ${index + 1}`));
+		await runOnPostgres(transaction(outbox.publish(missed.map((event) => ({ stream, event })))));
+		await bus.publish(
+			stream,
+			streamEvent("message.delta", {
+				chatId: world.chat,
+				messageId: randomUUID(),
+				text: "while away",
+				offset: 0,
+				execution: 1,
+			}),
+		);
+
+		const concurrent = changed("during startup");
+		const writer = holdTransaction(
+			query((db) =>
+				db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${stream}, 0))`, "objects"),
+			),
+			outbox.publish([{ stream, event: concurrent }]),
+		);
+		await writer.held;
+		const starting = following(ed, "events.followChat", { chatId: world.chat, since });
+		await writer.waitForWaiters(1);
+		await writer.release();
+		const resumed = await starting;
+		for (const expected of [...missed, concurrent]) {
+			expect(await resumed.next()).toEqual({ seq: expect.any(Number), event: expected });
+		}
+		const live = changed("after replay");
+		await commit(stream, live);
+		expect(await resumed.next()).toEqual({ seq: expect.any(Number), event: live });
+	});
+
+	it("resets when pruning removes an event beyond the first replay page", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		const stream = chatStream(world.chat);
+		const changed = streamEvent("chat.changed", { chatId: world.chat });
+		await runOnPostgres(
+			transaction(outbox.publish(Array.from({ length: 103 }, () => ({ stream, event: changed })))),
+		);
+		const rows = await stored.replay(stream, 0, 103);
+		const [anchor] = rows;
+		const pruned = rows[101];
+		if (!anchor || !pruned) throw new Error("Replay events were not stored");
+		const scope = Scope.makeUnsafe();
+		onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
+		const resumed = await runOnPostgres(
+			Scope.provide(scope)(
+				longRunning["events.followChat"](
+					ed,
+					{ chatId: world.chat, since: anchor.seq },
+					{ kind: "request" },
+				),
+			),
+		);
+
+		// The first page is already read, and the sender waits for its client to take it.
+		await onDatabase((db) =>
+			db
+				.update(event)
+				.set({ createdAt: new Date(0) })
+				.where(eq(event.seq, pruned.seq)),
+		);
+		await stored.prune(new Date(1));
+		const heard = await runOnPostgres(
+			Stream.runCollect(Stream.take(resumed.stream, 101)).pipe(Effect.timeout("4 seconds")),
+		);
+		expect(heard.slice(0, 100).map(({ seq }) => seq)).toEqual(
+			rows.slice(1, 101).map(({ seq }) => seq),
+		);
+		expect(heard[100]).toEqual({ seq: rows[102]?.seq, event: streamEvent("reset") });
+
+		await commit(stream, changed);
+		expect(
+			await runOnPostgres(
+				Stream.runCollect(Stream.take(resumed.stream, 1)).pipe(Effect.timeout("4 seconds")),
+			),
+		).toEqual([{ seq: expect.any(Number), event: changed }]);
+	});
+
+	it("resets a cursor from another stream even when this stream was empty", async () => {
+		const world = await staffed();
+		const stream = workspaceStream(world.workspace);
+		await commit(stream, jChanged(world));
+		const since = (await stored.latest([stream])).get(stream);
+		if (since === undefined) throw new Error("The workspace stream has no cursor");
+		await commit(chatStream(world.chat), streamEvent("chat.changed", { chatId: world.chat }));
+
+		const resumed = await following(await signedIn.member(world.ed), "events.followChat", {
+			chatId: world.chat,
+			since,
+		});
+
+		expect(await nextType(resumed)).toBe("reset");
+	});
+
 	it("says where a reset stream starts, so a reconnect after it misses nothing", async () => {
 		const world = await staffed();
 		const ed = await signedIn.member(world.ed);
@@ -419,6 +587,9 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		onTestFinished(() => chat.close());
 
 		expect(await chat.next()).toEqual({ seq: latest, event: streamEvent("reset") });
+		const changed = streamEvent("chat.changed", { chatId: world.chat });
+		await commit(stream, changed);
+		expect(await chat.next()).toEqual({ seq: expect.any(Number), event: changed });
 	});
 
 	it("sends a live message delta with its execution and without an event id", async () => {

@@ -7,7 +7,6 @@ import { aChatWithConnectorAwaitingReply } from "@sugabots/core/chats/turns/test
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
-import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
 import { bot, membership, modelRequest, turn, workspace } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
@@ -73,7 +72,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's replies, against Postgres",
 	) => wikiWipe(installedId, access, execute);
 
 	it("answers in one step: streams and completes the reply, and tells the chat", async () => {
-		const events = EventBus.inProcess({ store: inMemoryEventStore() });
+		const events = EventBus.inProcess();
 		const publish = vi.fn(events.publish);
 		const { model, requests } = scriptedSteps({
 			text: ["Example Domain", " says hello."],
@@ -173,7 +172,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's replies, against Postgres",
 	});
 
 	it("keeps the turn going when a reply's delta cannot be published", async () => {
-		const events = EventBus.inProcess({ store: inMemoryEventStore() });
+		const events = EventBus.inProcess();
 		const publish = vi.fn(events.publish);
 		publish.mockRejectedValueOnce(new Error("subscriber unavailable"));
 

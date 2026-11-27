@@ -6,7 +6,6 @@ import { anAutomationAdmin, automationsAs } from "../../chats/automations/testin
 import { chatServicesForTests } from "../../chats/testing.ts";
 import { query } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
-import { inMemoryEventStore } from "../../database/events/testing.ts";
 import { automation, automationTrigger, workspace } from "../../database/schema.ts";
 import { closeDatabase, holdTransaction, onDatabase } from "../../database/testing.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
@@ -16,9 +15,7 @@ import { authenticators, principals } from "../../proofs/world.test-support.ts";
 describe.skipIf(!process.env.DATABASE_URL)(
 	"a workspace's time zone, against Postgres",
 	async () => {
-		const services = await chatServicesForTests(
-			EventBus.inProcess({ store: inMemoryEventStore() }),
-		);
+		const services = await chatServicesForTests(EventBus.inProcess());
 		let callOperation: CallOperation;
 		let signedIn: ReturnType<typeof principals>;
 		let workspaceId: string;

@@ -7,7 +7,6 @@ import { event } from "../schema.ts";
 import { closeDatabase, runOnPostgres, waitUntilWaitingOnLocks } from "../testing.ts";
 import { EventBus } from "./bus.ts";
 import { type CommittedEvent, EventOutbox, type PendingEvent } from "./outbox.ts";
-import { inMemoryEventStore } from "./testing.ts";
 
 class Abandoned extends Data.TaggedError("Abandoned") {}
 
@@ -19,7 +18,7 @@ class Abandoned extends Data.TaggedError("Abandoned") {}
 
 describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
 	const bus = {
-		...EventBus.inProcess({ store: inMemoryEventStore() }),
+		...EventBus.inProcess(),
 		publishCommitted: vi.fn(async (_events: CommittedEvent[]) => {}),
 	};
 	const { publish } = Effect.runSync(

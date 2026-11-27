@@ -4,7 +4,6 @@ import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { webhookCallForTests } from "../../authentication/testing.ts";
 import { EventBus } from "../../database/events/bus.ts";
-import { inMemoryEventStore } from "../../database/events/testing.ts";
 import { automationRun, bot as botTable, connector } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import { servedOperations } from "../../operations/testing.ts";
@@ -29,7 +28,7 @@ const opened: RepositoryActivity = {
 
 /** Automations run by what happens at their bot's GitHub app's repositories, against Postgres. */
 describe.skipIf(!process.env.DATABASE_URL)("connector automations, against Postgres", async () => {
-	const services = await chatServicesForTests(EventBus.inProcess({ store: inMemoryEventStore() }));
+	const services = await chatServicesForTests(EventBus.inProcess());
 	const call = await servedOperations({ chats: services });
 	const events = Context.get(services, Automations.ConnectorEvents);
 	let automations: ReturnType<typeof automationsAs>;

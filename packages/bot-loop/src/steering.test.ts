@@ -17,7 +17,6 @@ import { releaseTurn, runningTurns, waitingTurns } from "@sugabots/core/chats/tu
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
-import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
 import {
 	automationRun,
 	bot,
@@ -266,7 +265,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 
 		it("streams thinking, saves it by step, and sends the signed block back after a restart", async () => {
 			await say(sam, "Resolve this chat.");
-			const events = EventBus.inProcess({ store: inMemoryEventStore() });
+			const events = EventBus.inProcess();
 			const publish = vi.fn(events.publish);
 			const thinkingProviderOptions = { anthropic: { signature: "signed-thinking" } };
 			const firstModel = scriptedSteps({
@@ -844,7 +843,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 
 	describe("interrupts", () => {
 		it("stops a step at once when its asker interrupts it, aborting the write it sent, which members are told to check", async () => {
-			const events = EventBus.inProcess({ store: inMemoryEventStore() });
+			const events = EventBus.inProcess();
 			afterCommit = (committed) => events.publishCommitted([...committed]);
 			// Only the signal can stop the step: its own reads of the turn wait on a clock nobody moves.
 			const { clock } = await controlledClock();
@@ -880,7 +879,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 		});
 
 		it("stops a model request at once when interrupted, keeping what it wrote", async () => {
-			const events = EventBus.inProcess({ store: inMemoryEventStore() });
+			const events = EventBus.inProcess();
 			afterCommit = (committed) => events.publishCommitted([...committed]);
 			const { clock } = await controlledClock();
 			await say(sam, "Write an essay.");

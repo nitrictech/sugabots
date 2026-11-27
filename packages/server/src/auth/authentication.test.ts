@@ -7,7 +7,6 @@ import { noComputers } from "@sugabots/core/computers/testing";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventStore } from "@sugabots/core/database/events/store";
-import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
 import { member } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
@@ -58,7 +57,7 @@ async function appWith(
 	policy: { SIGNUP_MODE: Accounts.SignUpMode; REQUIRE_EMAIL_VERIFICATION: "true" | "false" },
 	sent: Email.Message[],
 ) {
-	const bus = EventBus.inProcess({ store: inMemoryEventStore() });
+	const bus = EventBus.inProcess();
 	const runtime = ManagedRuntime.make(
 		Layer.mergeAll(
 			Authentication.layer,

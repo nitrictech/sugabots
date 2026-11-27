@@ -118,7 +118,7 @@ export const postgresEventRelay = (
 				const probe: Probe = { from: origin, probe: await runPromise(ids.random) };
 				const probeHeard = Deferred.makeUnsafe<void>();
 
-				async function deliverNotice(payload: string) {
+				async function deliverNotice(payload: string, signal: AbortSignal) {
 					const notice = JSON.parse(payload) as Notice | Probe;
 					if ("probe" in notice) {
 						if (notice.probe === probe.probe)
@@ -126,22 +126,25 @@ export const postgresEventRelay = (
 						return;
 					}
 					if (notice.from === origin) return;
-					const event = notice.event ?? (await storedEvent(notice));
+					const event = notice.event ?? (await storedEvent(notice, signal));
 					if (!event) return;
 					receive(notice.stream, notice.seq === undefined ? { event } : { seq: notice.seq, event });
 				}
 
-				async function storedEvent({ stream, seq }: Notice): Promise<StreamEvent | undefined> {
+				async function storedEvent(
+					{ stream, seq }: Notice,
+					signal: AbortSignal,
+				): Promise<StreamEvent | undefined> {
 					if (seq === undefined) return undefined;
-					const [stored] = await store.replay(stream, seq - 1, 1);
+					const [stored] = await store.replay(stream, seq - 1, 1, signal);
 					return stored?.seq === seq ? stored.event : undefined;
 				}
 
 				const relayNotice = (payload: string) =>
-					Effect.promise(() =>
-						deliverNotice(payload).catch((cause) =>
-							log("Relaying an event from another process failed", cause),
-						),
+					Effect.promise((signal) =>
+						deliverNotice(payload, signal).catch((cause) => {
+							if (!signal.aborted) log("Relaying an event from another process failed", cause);
+						}),
 					);
 
 				const listening = Deferred.makeUnsafe<void, unknown>();

@@ -15,11 +15,8 @@ import { EventStore } from "./store.ts";
 /**
  * Publish and fan-out for live updates, in order within each stream.
  *
- * An in-process registry of subscribers plus a table for the events worth
- * replaying. A process is never alone for long (a second dev server, a rolling
- * restart, a second replica), so each delivery made here is also handed to the
- * relay, which carries it to the other processes' buses; what they broadcast
- * arrives here and is delivered like a local publish.
+ * The bus sends events to local subscribers and hands them to the relay for
+ * other processes. It delivers events from the relay to the same subscribers.
  */
 
 export interface Interface {
@@ -54,7 +51,7 @@ export const make = Effect.gen(function* () {
 	const log = (message: string, cause: unknown) => void runFork(Effect.logError(message, cause));
 	const relay = yield* postgresEventRelay(store, { log });
 	return yield* Effect.acquireRelease(
-		Effect.sync(() => inProcess({ store, relay, log })),
+		Effect.sync(() => inProcess({ relay, log })),
 		(bus) => Effect.promise(() => bus.close()),
 	);
 });
@@ -68,20 +65,12 @@ export interface Delivery {
 }
 
 interface SubscribeOptions {
-	/** Resume after this `seq` — the client's `Last-Event-ID`. */
-	since?: number;
 	/** Ends the subscription. The stream route aborts on disconnect and on age. */
 	signal?: AbortSignal;
 }
 
 /** How many events a subscriber may fall behind before it is dropped. */
 const MAX_BUFFERED = 1000;
-
-/**
- * Beyond this, a replay costs more than a refetch. The client gets a `reset`
- * and rebuilds the view over REST, which is one query instead of thousands.
- */
-const MAX_REPLAY = 5000;
 
 interface Subscriber {
 	queue: Delivery[];
@@ -92,7 +81,6 @@ interface Subscriber {
 }
 
 interface InProcessOptions {
-	store: EventStore.Interface;
 	/** Without one, deliveries stay in this process: right for tests, wrong for a server. */
 	relay?: EventRelay;
 	maxBuffered?: number;
@@ -101,11 +89,10 @@ interface InProcessOptions {
 
 /** The bus in this process, with `relay` carrying its deliveries to other processes. */
 export function inProcess({
-	store,
 	relay,
 	maxBuffered = MAX_BUFFERED,
 	log = console.error,
-}: InProcessOptions): Interface {
+}: InProcessOptions = {}): Interface {
 	const streams = new Map<EventStream, Set<Subscriber>>();
 	let closed = false;
 
@@ -194,31 +181,13 @@ export function inProcess({
 			await listening?.stop();
 		},
 
-		async *subscribe(stream, { since, signal } = {}) {
-			// Registered before the replay reads a row, so an event published
-			// during the replay is buffered rather than lost in the gap between
-			// the last row read and the first live delivery.
+		async *subscribe(stream, { signal } = {}) {
 			const subscriber: Subscriber = { queue: [], overflowed: false };
 			const subscribers = streams.get(stream) ?? new Set<Subscriber>();
 			subscribers.add(subscriber);
 			streams.set(stream, subscribers);
 
 			try {
-				let replayed = since ?? 0;
-
-				if (since !== undefined && since > 0) {
-					const missed = await store.resume(stream, since, MAX_REPLAY + 1);
-					if (!missed || missed.length > MAX_REPLAY) {
-						replayed = 0;
-						yield { event: resetEvent() };
-					} else {
-						for (const { seq, event } of missed) {
-							replayed = seq;
-							yield { seq, event };
-						}
-					}
-				}
-
 				while (!signal?.aborted && !closed) {
 					if (subscriber.overflowed) {
 						yield { event: resetEvent() };
@@ -230,11 +199,6 @@ export function inProcess({
 						await parked(subscriber, signal);
 						continue;
 					}
-					// Already sent from the table; the live copy is a duplicate.
-					if (delivery.seq !== undefined && delivery.seq <= replayed) {
-						continue;
-					}
-
 					yield delivery;
 				}
 			} finally {

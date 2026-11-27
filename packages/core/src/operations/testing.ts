@@ -12,7 +12,6 @@ import { noComputers } from "../computers/testing.ts";
 import type { RunEffect } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventStore } from "../database/events/store.ts";
-import { inMemoryEventStore } from "../database/events/testing.ts";
 import { runOnPostgres, type TestInfrastructure } from "../database/testing.ts";
 import { Email } from "../email/email.ts";
 import type { Principal } from "../principal.ts";
@@ -220,7 +219,7 @@ export async function operationsForTests(over: ServedOver = {}): Promise<Operati
 }
 
 async function buildOperationRegistries(over: ServedOver) {
-	const bus = EventBus.inProcess({ store: inMemoryEventStore() });
+	const bus = EventBus.inProcess();
 	const runOn = over.runOn ?? runOnPostgres;
 	const chats = over.chats ?? (await chatServicesForTests(bus, undefined, runOn));
 	const outside = Layer.mergeAll(

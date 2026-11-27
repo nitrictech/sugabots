@@ -23,7 +23,6 @@ import { Database, query } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventOutbox } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { inMemoryEventStore } from "../../database/events/testing.ts";
 import { chatParticipant, computerProvider, session } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import type { MemberSession } from "../../principal.ts";
@@ -44,7 +43,7 @@ type Opened = OutputOf<"computers.viewDesktop">;
  * changes, within a second here, in case the bus missed one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves again", () => {
-	const bus = EventBus.inProcess({ store: inMemoryEventStore() });
+	const bus = EventBus.inProcess();
 	let call: CallOperation;
 	let signedIn: ReturnType<typeof principals>;
 	let streams: Streams.Interface;

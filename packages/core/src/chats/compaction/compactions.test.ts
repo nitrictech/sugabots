@@ -3,7 +3,6 @@ import { Context } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 import { seedBot } from "../../authentication/seed.test-support.ts";
 import { EventBus } from "../../database/events/bus.ts";
-import { EventStore } from "../../database/events/store.ts";
 import { bot, message, modelProvider, providerModel } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { asMember } from "../../operations/chats/testing.ts";
@@ -32,8 +31,7 @@ const FIRST_HISTORY_AT = new Date("2025-01-01T00:00:00Z");
 const HISTORY_MESSAGE_INTERVAL_MS = 60_000;
 
 describe.skipIf(!process.env.DATABASE_URL)("compaction, against Postgres", async () => {
-	const eventStore = await runOnPostgres(EventStore.make);
-	const services = await chatServicesForTests(EventBus.inProcess({ store: eventStore }));
+	const services = await chatServicesForTests(EventBus.inProcess());
 	const call = await servedOperations({ chats: services });
 	const chatsAs = (memberId: string) => asMember(call, memberId);
 	const drive = runOver(services);

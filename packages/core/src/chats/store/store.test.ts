@@ -28,7 +28,7 @@ import {
 	createWorkspaceFixture,
 } from "../../database/workspace.test-support.ts";
 import { asMember } from "../../operations/chats/testing.ts";
-import { servedOperations } from "../../operations/testing.ts";
+import { servedRegistry } from "../../operations/testing.ts";
 import { BotStore } from "../../workspaces/bots/bot-store.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
@@ -46,9 +46,9 @@ import {
 const eventStore = await runOnPostgres(EventStore.make);
 
 describe.skipIf(!process.env.DATABASE_URL)("the chat store, against Postgres", async () => {
-	const eventBus = EventBus.inProcess({ store: eventStore });
+	const eventBus = EventBus.inProcess();
 	const services = await chatServicesForTests(eventBus);
-	const call = await servedOperations({ chats: services });
+	const { call, follow } = await servedRegistry({ chats: services });
 	const chatsAs = (memberId: string) => asMember(call, memberId);
 	const drive = runOver(services);
 	let workspaceId: string;
@@ -312,13 +312,18 @@ describe.skipIf(!process.env.DATABASE_URL)("the chat store, against Postgres", a
 			message: "Second",
 		});
 
-		const iterator = eventBus.subscribe(stream, { since: resumePoint.seq })[Symbol.asyncIterator]();
-		const replayed = await iterator.next();
-		await iterator.return?.();
-		expect(replayed.value?.event).toMatchObject({
-			type: "message.created",
-			message: { id: posted.id, retryKey, content: "Second" },
+		const resumed = await follow(await chatsAs(memberId).principal(), "events.followChat", {
+			chatId: details.chat.id,
+			since: resumePoint.seq,
 		});
+		try {
+			const replayed = await resumed.next();
+			expect(replayed).toMatchObject({
+				event: { type: "message.created", message: { id: posted.id, retryKey, content: "Second" } },
+			});
+		} finally {
+			await resumed.close();
+		}
 	});
 
 	it("rejects projects and bots from another workspace at the database boundary", async () => {

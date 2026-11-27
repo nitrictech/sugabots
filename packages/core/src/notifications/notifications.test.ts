@@ -48,7 +48,7 @@ import {
 	waitUntilWaitingOnLocks,
 } from "../database/testing.ts";
 import { createWorkspaceFixture } from "../database/workspace.test-support.ts";
-import { servedOperations } from "../operations/testing.ts";
+import { servedOperations, servedRegistry } from "../operations/testing.ts";
 import { authenticators, principals } from "../proofs/world.test-support.ts";
 import { unimplemented } from "../testing.ts";
 import { seedProject } from "../workspaces/projects/seed.test-support.ts";
@@ -475,7 +475,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		const next = memberPosted(chat, members.ada, `${nextMention} next`);
 		const stream = memberStream(members.bob.id);
 		const store = await runOnPostgres(EventStore.make);
-		const freshBus = EventBus.inProcess({ store });
+		const freshBus = EventBus.inProcess();
 		const marker = () => streamEvent("approvals.changed", { toolCallId: crypto.randomUUID() });
 		const commit = (event: ReturnType<typeof marker>) =>
 			runOnPostgres(
@@ -484,13 +484,15 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				),
 			);
 		await commit(marker());
-		const since = (await store.latest([stream])).get(stream) ?? 0;
+		const since = (await store.latest([stream])).get(stream);
+		if (since === undefined) throw new Error("The member's stream has no cursor");
+		const { follow } = await servedRegistry({ bus: Layer.succeed(EventBus.Service, freshBus) });
+		const bob = await principals(await authenticators()).member(members.bob.id);
 
 		const publishing = Promise.withResolvers<void>();
 		const unblock = Promise.withResolvers<void>();
 		const sent: unknown[] = [];
 		const bus = EventBus.inProcess({
-			store,
 			relay: {
 				listen: async () => async () => {},
 				broadcast: async (_stream, { event }) => {
@@ -526,17 +528,16 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 			const sentinel = marker();
 			await commit(sentinel);
-			const replayed = [];
-			for await (const delivery of freshBus.subscribe(stream, { since })) {
-				if (delivery.event.toolCallId === sentinel.toolCallId) break;
-				replayed.push(delivery);
-			}
-			expect(replayed).toEqual([
-				{
+			const resumed = await follow(bob, "events.followOwn", { since });
+			try {
+				expect(await resumed.next()).toMatchObject({
 					seq: expect.any(Number),
-					event: expect.objectContaining({ type: "notification", body: `${mention} look` }),
-				},
-			]);
+					event: { type: "notification", body: `${mention} look` },
+				});
+				expect(await resumed.next()).toMatchObject({ event: sentinel });
+			} finally {
+				await resumed.close();
+			}
 
 			second = handle([event, next]);
 			await second;

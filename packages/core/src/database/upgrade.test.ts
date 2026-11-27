@@ -462,8 +462,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 						return new Response(null, { status: 204 });
 					throw new Error(`Unexpected computer request to ${url.pathname}`);
 				};
-				const store = await upgraded.run(EventStore.make);
-				const bus = EventBus.inProcess({ store });
+				const bus = EventBus.inProcess();
 				const viewer = await upgraded.run(
 					DesktopViewer.Service.pipe(
 						Effect.provide(

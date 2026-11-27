@@ -34,7 +34,7 @@ function rawEvent(type: DurableEventType, data: Record<string, unknown> = {}): D
 async function storedThroughOutbox(stream: EventStream, stored: DurableEvent): Promise<number> {
 	let committed: CommittedEvent[] = [];
 	const bus = {
-		...EventBus.inProcess({ store: inMemoryEventStore() }),
+		...EventBus.inProcess(),
 		publishCommitted: async (events: CommittedEvent[]) => {
 			committed = events;
 		},
@@ -140,11 +140,15 @@ for (const { name, skip, make, backdate } of stores) {
 		it("knows whether a resume point is still here", async () => {
 			const seq = await append(stream, rawEvent("message.created"));
 
-			expect(await store.resume(stream, seq, 10)).toBeDefined();
-			expect(await store.resume(stream, seq + 1_000_000, 10)).toBeUndefined();
+			expect(await store.replayPage({ stream, cursor: seq, controls: [] }, 10)).toBeDefined();
+			expect(
+				await store.replayPage({ stream, cursor: seq + 1_000_000, controls: [] }, 10),
+			).toBeUndefined();
 			// Another stream's row, after events of the stream the client is resuming.
 			const elsewhere = await append(`chat:${crypto.randomUUID()}`, rawEvent("message.created"));
-			expect(await store.resume(stream, elsewhere, 10)).toBeUndefined();
+			expect(
+				await store.replayPage({ stream, cursor: elsewhere, controls: [] }, 10),
+			).toBeUndefined();
 		});
 
 		it("starts a stream with nothing stored where every stream is, and resumes it from there", async () => {
@@ -156,7 +160,11 @@ for (const { name, skip, make, backdate } of stores) {
 
 			const first = await append(stream, rawEvent("message.created"));
 
-			expect((await store.resume(stream, cursor, 10))?.map(({ seq }) => seq)).toEqual([first]);
+			expect(
+				(await store.replayPage({ stream, cursor: cursor, controls: [] }, 10))?.map(
+					({ seq }) => seq,
+				),
+			).toEqual([first]);
 		});
 
 		it.skipIf(name !== "postgres")(
@@ -192,8 +200,8 @@ for (const { name, skip, make, backdate } of stores) {
 			const kept = await append(stream, rawEvent("message.completed"));
 
 			expect(await store.prune(new Date(Date.now() - 60_000))).toBeGreaterThanOrEqual(1);
-			expect(await store.resume(stream, old, 10)).toBeUndefined();
-			expect(await store.resume(stream, kept, 10)).toBeDefined();
+			expect(await store.replayPage({ stream, cursor: old, controls: [] }, 10)).toBeUndefined();
+			expect(await store.replayPage({ stream, cursor: kept, controls: [] }, 10)).toBeDefined();
 		});
 	});
 }
