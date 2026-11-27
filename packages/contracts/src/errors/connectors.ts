@@ -21,6 +21,24 @@ export class ConnectorNotFound
 	}
 }
 
+/**
+ * A bot's own connector was turned on for an address it no longer has: its
+ * address changed after the one turning it on saw it.
+ */
+export class ConnectorAddressChanged
+	extends Schema.TaggedError<ConnectorAddressChanged>()("ConnectorAddressChanged", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The connector's address changed since it was shown";
+	}
+	get userMessage() {
+		return userText`This connector's address changed since you opened this page. Check where it sends data now, then turn it on again.`;
+	}
+}
+
 /** Another of the project's connectors has that name. */
 export class ConnectorNameTaken
 	extends Schema.TaggedError<ConnectorNameTaken>()("ConnectorNameTaken", {})

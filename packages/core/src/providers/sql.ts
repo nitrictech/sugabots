@@ -221,6 +221,12 @@ export const connector = pgTable(
 		installedById: uuid("installed_by_id").references(() => member.id, { onDelete: "set null" }),
 		/** Incremented whenever the configured target or availability changes. */
 		configurationRevision: integer("configuration_revision").notNull().default(1),
+		/**
+		 * Incremented whenever `url` changes, so a bot's own connector turned on
+		 * in another project for one address stays off at every later one, even
+		 * one it had before.
+		 */
+		addressRevision: integer("address_revision").notNull().default(1),
 		/** The tools the server listed when last asked, as it described them; for GitHub, Sugabots' own. */
 		tools: jsonb("tools").$type<ConnectorTool[]>().notNull().default([]),
 		/**
@@ -270,10 +276,11 @@ export const connector = pgTable(
 /**
  * One of a bot's own connectors, which live in its default project, turned on
  * in another project the bot is in, by one of that project's managers, for the
- * address the connector had then. Without a row the connector is off there,
- * and a row whose address is no longer the connector's leaves it off until
- * somebody turns it on again, so moving a connector to another address turns
- * it off in every project. Goes with the bot's place in the project.
+ * address the connector had then, as its `addressRevision` numbered it.
+ * Without a row the connector is off there, and a row of an earlier address
+ * revision leaves it off until somebody turns it on again, so moving a
+ * connector to another address, even back to an earlier one, turns it off in
+ * every project. Goes with the bot's place in the project.
  */
 export const projectBotConnector = pgTable(
 	"project_bot_connector",
@@ -282,8 +289,8 @@ export const projectBotConnector = pgTable(
 		projectId: uuid("project_id").notNull(),
 		botId: uuid("bot_id").notNull(),
 		connectorId: uuid("connector_id").notNull(),
-		/** The connector's address when it was turned on; it stays on only while that is unchanged. */
-		address: text("address").notNull(),
+		/** The connector's `addressRevision` when it was turned on; it stays on only while that is unchanged. */
+		addressRevision: integer("address_revision").notNull(),
 		/** Who turned it on; null once they have left, or when an upgrade did. */
 		turnedOnById: uuid("turned_on_by_id").references(() => member.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),

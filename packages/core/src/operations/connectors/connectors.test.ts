@@ -2,7 +2,13 @@ import { createHmac } from "node:crypto";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { seedAutomation, seedConnector } from "../../authentication/seed.test-support.ts";
+import {
+	seedAutomation,
+	seedBot,
+	seedConnector,
+	seedMember,
+	seedProject,
+} from "../../authentication/seed.test-support.ts";
 import { automationTrigger, connector } from "../../database/schema.ts";
 import {
 	closeDatabase,
@@ -364,6 +370,66 @@ describe("the connectors operations, beyond who may call them", () => {
 			expect(items.filter((run) => run.automationId === automationId)).toEqual([
 				expect.objectContaining({ trigger: expect.objectContaining({ kind: "github" }) }),
 			]);
+		});
+	});
+	describe("a project's bots' own connectors", () => {
+		it("shows each one's address only to the project's managers and those who see the bot's connectors", async () => {
+			const member = await seedMember(a.workspace, "editor");
+			const privateBot = await seedBot(a.workspace, {
+				createdById: a.admin,
+				visibility: "private",
+			});
+			const projectId = await seedProject(a.workspace, {
+				leadBotId: privateBot.id,
+				members: [a.admin, member],
+			});
+			const connectorId = await seedConnector(a.workspace, privateBot.defaultProject);
+			const listed = async (principal: Principal) =>
+				(await call(principal, "connectors.listProjectBots", { projectId })).map(
+					({ id, url, on }) => ({ id, url, on }),
+				);
+
+			expect(await listed(who.admin)).toEqual([
+				{ id: connectorId, url: expect.any(String), on: false },
+			]);
+			expect(await listed(await as.member(member))).toEqual([
+				{ id: connectorId, url: null, on: false },
+			]);
+		});
+
+		it("turns one on only for the address its manager saw", async () => {
+			const privateBot = await seedBot(a.workspace, {
+				createdById: a.admin,
+				visibility: "private",
+			});
+			const projectId = await seedProject(a.workspace, {
+				leadBotId: privateBot.id,
+				members: [a.admin],
+			});
+			const connectorId = await seedConnector(a.workspace, privateBot.defaultProject);
+			const [shown] = await call(who.admin, "connectors.listProjectBots", { projectId });
+			await store.update(a.workspace, privateBot.defaultProject, connectorId, {
+				url: "https://moved.example.com/mcp",
+			});
+
+			expect(
+				await operationOutcome(call, who.admin, "connectors.setOnInProject", {
+					projectId,
+					connectorId,
+					on: true,
+					addressRevision: shown?.addressRevision ?? 0,
+				}),
+			).toBe("ConnectorAddressChanged");
+			const [moved] = await call(who.admin, "connectors.listProjectBots", { projectId });
+			expect(moved).toMatchObject({ url: "https://moved.example.com/mcp", on: false });
+			expect(
+				await call(who.admin, "connectors.setOnInProject", {
+					projectId,
+					connectorId,
+					on: true,
+					addressRevision: moved?.addressRevision ?? 0,
+				}),
+			).toMatchObject({ on: true, addressChanged: false });
 		});
 	});
 });

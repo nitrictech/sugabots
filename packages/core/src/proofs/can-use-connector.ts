@@ -48,6 +48,7 @@ const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, strin
 							enabled: connector.enabled,
 							kind: connector.kind,
 							url: connector.url,
+							addressRevision: connector.addressRevision,
 							tools: connector.tools,
 							toolAccess: connector.toolAccess,
 						})
@@ -75,7 +76,7 @@ const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, strin
 const connectorAccess = (
 	acting: Principal,
 	id: string,
-	{ projectId, url }: { readonly projectId: string; readonly url: string },
+	{ projectId, addressRevision }: { readonly projectId: string; readonly addressRevision: number },
 ) =>
 	Effect.gen(function* () {
 		const hidden = new ResourceHidden({ resource: "connector" });
@@ -92,7 +93,8 @@ const connectorAccess = (
 		if (botsOwn) {
 			if (acting._tag === "BotForAsker" && !memberReaches(facts.member, facts.project))
 				return yield* hidden;
-			if (!(yield* onWhereTurnWorks(acting, { id, projectId, url }))) return yield* hidden;
+			if (!(yield* onWhereTurnWorks(acting, { id, projectId, addressRevision })))
+				return yield* hidden;
 		} else {
 			const decision = decideReach(acting, facts, undefined);
 			if (decision.kind === "hidden") return yield* hidden;
@@ -113,12 +115,17 @@ const connectorAccess = (
  * Whether the bot's own connector `connector` is on in the project its turn's
  * chat is in: always in the bot's default project, where the connector lives;
  * in any other, only once one of that project's managers turned it on there,
- * for the address it still has. The row is shared until the transaction ends,
- * so a call checked inside one can't run on after it is turned off.
+ * for the address revision it still has. The row is shared until the
+ * transaction ends, so a call checked inside one can't run on after it is
+ * turned off.
  */
 const onWhereTurnWorks = (
 	acting: BotForAsker | AutomationRun,
-	connector: { readonly id: string; readonly projectId: string; readonly url: string },
+	connector: {
+		readonly id: string;
+		readonly projectId: string;
+		readonly addressRevision: number;
+	},
 ) =>
 	Effect.gen(function* () {
 		const [working] = yield* query((db) =>
@@ -140,7 +147,7 @@ const onWhereTurnWorks = (
 						eq(projectBotConnector.projectId, workingProject),
 						eq(projectBotConnector.connectorId, connector.id),
 						eq(projectBotConnector.botId, acting.bot),
-						eq(projectBotConnector.address, connector.url),
+						eq(projectBotConnector.addressRevision, connector.addressRevision),
 					),
 				)
 				.limit(1)

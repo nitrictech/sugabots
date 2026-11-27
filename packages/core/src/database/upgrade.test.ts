@@ -24,6 +24,8 @@ import { DurableDeferred, Workflow } from "effect/unstable/workflow";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SessionAuthentication } from "../authentication/session.ts";
+import { TurnAuthentication } from "../authentication/turn.ts";
+import { askerColumns } from "../authentication/turn-facts.ts";
 import { WebhookAuthentication, WebhookRefused } from "../authentication/webhook.ts";
 import { reachesBotFor, reachesChatFor, reachesProjectFor } from "../authorization/access.ts";
 import { BlobStore } from "../blob-store/blob-store.ts";
@@ -36,9 +38,12 @@ import { Files } from "../files/files.ts";
 import { Ids } from "../ids/ids.ts";
 import { requestOutcome, servedOperations } from "../operations/testing.ts";
 import type { Principal } from "../principal.ts";
+import { proveCanReachConnector } from "../proofs/can-use-connector.ts";
+import { named } from "../proofs/proof.ts";
 import { Secrets } from "../secrets/secrets.ts";
 import { effectRunner, query, type RunEffect, transaction } from "./database.ts";
 import { applyMigrations } from "./migrations.ts";
+import { message, turn } from "./schema.ts";
 import { type TestInfrastructure, testInfrastructure } from "./testing.ts";
 import {
 	bytesQueuedForDeletion,
@@ -356,7 +361,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 						select 1 from project_bot_connector turned_on
 						where turned_on.project_id = $1 and turned_on.connector_id = connector.id
 							and turned_on.bot_id = project.default_of_bot_id
-							and turned_on.address = connector.url
+							and turned_on.address_revision = connector.address_revision
 					) as on
 				 from connector
 				 join project on project.id = connector.project_id
@@ -368,6 +373,64 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				new Set([legacy.bots.planner, legacy.bots.budget]),
 			);
 			expect(own.filter(({ on }) => !on)).toEqual([]);
+		});
+
+		it("lets a shared pod's bot use its own connector in a turn in the private project the pod became", async () => {
+			const { planner } = legacy.bots;
+			const [own] = await upgraded.rows<{ id: string }>(
+				`select connector.id from connector
+				 join project on project.id = connector.project_id
+				 where project.default_of_bot_id = $1 and connector.kind <> 'github'
+				 order by connector.id limit 1`,
+				[planner],
+			);
+			if (!own) throw new Error("Planner kept none of the pod's connectors");
+			const asked = await upgraded.run(
+				query((db) =>
+					db
+						.insert(message)
+						.values({
+							chatId: legacy.threads.trip,
+							authorMemberId: legacy.members.sam,
+							status: "complete",
+							parts: [],
+							content: "Check the calendar",
+						})
+						.returning({ id: message.id }),
+				),
+			);
+			const answering = {
+				chatId: legacy.threads.trip,
+				botId: planner,
+				triggerMessageId: asked[0]?.id ?? "",
+			};
+			const [turnRow] = await upgraded.run(
+				query((db) =>
+					db
+						.insert(turn)
+						.values({
+							...answering,
+							...askerColumns(answering),
+							status: "running",
+							model: "m",
+							reason: "mention",
+							startedAt: new Date(),
+						})
+						.returning({ id: turn.id }),
+				),
+			);
+
+			const reached = await upgraded.run(
+				Effect.gen(function* () {
+					const authenticator = yield* TurnAuthentication.make;
+					const principal = yield* authenticator.authenticate(turnRow?.id ?? "");
+					return yield* named(principal, own.id, (acting, connector) =>
+						Effect.map(proveCanReachConnector(acting, connector), (reach) => reach.connector.value),
+					);
+				}),
+			);
+
+			expect(reached).toBe(own.id);
 		});
 
 		it("records who started a chat nobody started as its project's creator", async () => {

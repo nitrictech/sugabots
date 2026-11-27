@@ -4,7 +4,6 @@ import {
 	seedBot,
 	seedMember,
 	seedProject,
-	seedProjectBotConnector,
 	seedProjectChat,
 	seedWorkspace,
 } from "../../authentication/seed.test-support.ts";
@@ -87,7 +86,7 @@ it("excludes a switched-off built-in connector from a turn’s tools and addable
 	}
 });
 
-it("offers a bot's own connector in another project only once it is turned on there, for its address", async () => {
+it("offers a bot's own connector in another project only once it is turned on there, for the address its manager saw", async () => {
 	const workspaceId = await seedWorkspace();
 	const admin = await seedMember(workspaceId, "admin");
 	const bot = await seedBot(workspaceId, { createdById: admin });
@@ -131,13 +130,63 @@ it("offers a bot's own connector in another project only once it is turned on th
 		kind: "http",
 	});
 
+	const turnOn = (addressRevision: number) =>
+		store.setOnInProject({
+			workspaceId,
+			projectId,
+			botId: bot.id,
+			connectorId: own.id,
+			memberId: admin,
+			on: true,
+			addressRevision,
+		});
+	const moveTo = (url: string) => store.update(workspaceId, bot.defaultProject, own.id, { url });
+
 	expect(await offered()).not.toContain(own.id);
 
-	await seedProjectBotConnector(workspaceId, projectId, bot.id, own.id);
+	await turnOn(own.addressRevision);
 	expect(await offered()).toContain(own.id);
 
-	await store.update(workspaceId, bot.defaultProject, own.id, {
-		url: "https://other-tracker.example.com/api",
+	await moveTo("https://other-tracker.example.com/api");
+	expect(await offered()).not.toContain(own.id);
+	// Moved back, it is still off: it was turned on for the address as it was then.
+	const movedBack = await moveTo("https://tracker.example.com/api");
+	expect(await offered()).not.toContain(own.id);
+
+	// Turning it on for the address its manager saw is refused once it has moved since.
+	await expect(turnOn(own.addressRevision)).rejects.toMatchObject({
+		_tag: "ConnectorAddressChanged",
 	});
 	expect(await offered()).not.toContain(own.id);
+	await turnOn(movedBack?.addressRevision ?? 0);
+	expect(await offered()).toContain(own.id);
+});
+
+it("turns a bot's own connector on from several managers at once", async () => {
+	const workspaceId = await seedWorkspace();
+	const admin = await seedMember(workspaceId, "admin");
+	const bot = await seedBot(workspaceId, { createdById: admin });
+	const projectId = await seedProject(workspaceId, { leadBotId: bot.id, members: [admin] });
+	const store = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
+	const own = await store.create(workspaceId, bot.defaultProject, admin, {
+		name: "Tracker",
+		url: "https://tracker.example.com/api",
+		kind: "http",
+	});
+
+	const turnedOn = await Promise.allSettled(
+		Array.from({ length: 8 }, () =>
+			store.setOnInProject({
+				workspaceId,
+				projectId,
+				botId: bot.id,
+				connectorId: own.id,
+				memberId: admin,
+				on: true,
+				addressRevision: own.addressRevision,
+			}),
+		),
+	);
+
+	expect(turnedOn.filter(({ status }) => status === "rejected")).toEqual([]);
 });

@@ -74,21 +74,34 @@ export function useProjectBotConnectors(projectId: string) {
 	});
 }
 
-/** Turns a project bot's own connector on or off in the project. */
+/**
+ * Turns a project bot's own connector on or off in the project, for the
+ * address revision shown. When its address changed meanwhile, the server
+ * refuses, and the list is read again to show the new address.
+ */
 export function useSetProjectBotConnectorOn(projectId: string) {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: ({ connectorId, on }: { connectorId: string; on: boolean }) =>
+		mutationFn: ({
+			connectorId,
+			on,
+			addressRevision,
+		}: {
+			connectorId: string;
+			on: boolean;
+			addressRevision: number;
+		}) =>
 			Effect.runPromise(
 				client.api.connectors.setOnInProject({
 					params: { projectId, connectorId },
-					payload: { on },
+					payload: { on, addressRevision },
 				}),
 			),
 		onSuccess: (changed) =>
 			queryClient.setQueryData<ProjectBotConnector[]>(projectBotConnectorsKey(projectId), (rows) =>
 				rows?.map((row) => (row.id === changed.id ? changed : row)),
 			),
+		onError: () => queryClient.invalidateQueries({ queryKey: projectBotConnectorsKey(projectId) }),
 	});
 }
 

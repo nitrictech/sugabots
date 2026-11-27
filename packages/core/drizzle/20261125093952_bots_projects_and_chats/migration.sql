@@ -3411,13 +3411,15 @@ WHERE b."in_shared_pod"
 ON CONFLICT ("bot_id", "member_id") DO NOTHING;--> statement-breakpoint
 -- A bot's own connectors stay off in each project but its default one until
 -- one of that project's managers turns them on there, for the address each
--- has then.
+-- has then, numbered by its address revision, which every change of address
+-- raises.
+ALTER TABLE "connector" ADD COLUMN "address_revision" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 CREATE TABLE "project_bot_connector" (
 	"workspace_id" uuid NOT NULL,
 	"project_id" uuid NOT NULL,
 	"bot_id" uuid NOT NULL,
 	"connector_id" uuid NOT NULL,
-	"address" text NOT NULL,
+	"address_revision" integer NOT NULL,
 	"turned_on_by_id" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "project_bot_connector_pkey" PRIMARY KEY("project_id","connector_id")
@@ -3429,8 +3431,8 @@ ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_projec
 ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_connector_workspace_fkey" FOREIGN KEY ("connector_id","workspace_id") REFERENCES "connector"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
 -- A `shared` `pod`'s bots used their own connectors in the `pod`, so each
 -- stays on in the private project the `pod` became.
-INSERT INTO "project_bot_connector" ("workspace_id", "project_id", "bot_id", "connector_id", "address")
-SELECT b."workspace_id", pb."project_id", b."id", c."id", c."url"
+INSERT INTO "project_bot_connector" ("workspace_id", "project_id", "bot_id", "connector_id", "address_revision")
+SELECT b."workspace_id", pb."project_id", b."id", c."id", c."address_revision"
 FROM "bot" b
 INNER JOIN "project_bot" pb ON pb."bot_id" = b."id"
 INNER JOIN "project" p ON p."id" = pb."project_id" AND p."default_of_bot_id" IS NULL

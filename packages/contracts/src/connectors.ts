@@ -201,8 +201,17 @@ export const projectBotConnectorSchema = Schema.Struct({
 	id: uuidSchema,
 	name: Schema.String,
 	kind: connectorKindSchema,
-	/** Where the connector sends what the bot gives it. */
-	url: Schema.String,
+	/**
+	 * Where the connector sends what the bot gives it, now. Null for a member
+	 * who neither manages the project nor sees the bot's own connectors.
+	 */
+	url: Schema.NullOr(Schema.String),
+	/**
+	 * Which of the connector's addresses `url` is: it goes up each time the
+	 * address changes. Turning the connector on names it, so it is turned on
+	 * only for the address its manager saw.
+	 */
+	addressRevision: Schema.Int,
 	botId: uuidSchema,
 	botName: Schema.String,
 	on: Schema.Boolean,
@@ -401,10 +410,12 @@ export function builtInConnectorFor(url: string): BuiltInConnector | undefined {
 
 /**
  * The mark a connector is drawn with: GitHub's for a GitHub connector, a
- * built-in connector's for its server, and none, so its letters, for any other.
+ * built-in connector's for its server, and none, so its letters, for any other
+ * or one whose address isn't shown.
  */
-export function connectorMarkFor(connector: { kind: ConnectorKind; url: string }) {
-	return connector.kind === "github" ? "github" : builtInConnectorFor(connector.url)?.id;
+export function connectorMarkFor(connector: { kind: ConnectorKind; url: string | null }) {
+	if (connector.kind === "github") return "github";
+	return connector.url === null ? undefined : builtInConnectorFor(connector.url)?.id;
 }
 
 /** The host of an address, without `URL`, which the contracts run without a DOM for. */

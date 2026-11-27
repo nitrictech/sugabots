@@ -1154,11 +1154,13 @@
 			},
 			"query": {},
 			"body": {
-				"on": "boolean"
+				"on": "boolean",
+				"addressRevision": "integer"
 			},
 			"errors": {
 				"ActionForbidden": 403,
 				"BotCannotReach": 403,
+				"ConnectorAddressChanged": 409,
 				"ConnectorNotFound": 404,
 				"ResourceHidden": 404
 			}

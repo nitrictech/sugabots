@@ -315,6 +315,7 @@ const botsOwn: ProjectBotConnector[] = [
 		name: "Notion",
 		kind: "mcp",
 		url: "https://mcp.notion.com/mcp",
+		addressRevision: 1,
 		botId: growthDesk.id,
 		botName: growthDesk.name,
 		on: true,
@@ -325,6 +326,7 @@ const botsOwn: ProjectBotConnector[] = [
 		name: "Billing API",
 		kind: "http",
 		url: "https://billing.example.com/v1",
+		addressRevision: 1,
 		botId: growthDesk.id,
 		botName: growthDesk.name,
 		on: false,
@@ -335,6 +337,7 @@ const botsOwn: ProjectBotConnector[] = [
 		name: "CRM",
 		kind: "http",
 		url: "https://crm.example.com/api",
+		addressRevision: 3,
 		botId: accountManager.id,
 		botName: accountManager.name,
 		on: false,
@@ -355,9 +358,14 @@ export const BotsOwnConnectors = meta.story({
 			http.put(
 				`${API}/projects/:projectId/bot-connectors/:connectorId`,
 				async ({ params, request }) => {
-					const { on } = (await request.json()) as { on: boolean };
+					const { on, addressRevision } = (await request.json()) as {
+						on: boolean;
+						addressRevision: number;
+					};
 					rows = rows.map((row) =>
-						row.id === params.connectorId ? { ...row, on, addressChanged: false } : row,
+						row.id === params.connectorId && row.addressRevision === addressRevision
+							? { ...row, on, addressChanged: false }
+							: row,
 					);
 					return HttpResponse.json(rows.find((row) => row.id === params.connectorId));
 				},
@@ -386,7 +394,32 @@ export const BotsOwnConnectorMoved = meta.story({
 	play: async ({ canvas }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: /Account Manager/ }));
 		await expect(
-			await canvas.findByText("Its address changed, so it is off until someone turns it on again"),
+			await canvas.findByText(
+				"Now sends data to https://crm.example.com/api, so it is off until someone turns it on again",
+			),
 		).toBeInTheDocument();
+	},
+});
+
+/**
+ * To a member who neither manages the project nor sees the bots' own
+ * connectors: whether each is on, without where it sends data.
+ */
+export const BotsOwnConnectorsWithoutAddresses = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/projects/:projectId/bot-connectors`, () =>
+				HttpResponse.json(botsOwn.map((row) => ({ ...row, url: null }))),
+			),
+		);
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: /Account Manager/ }));
+		await expect(
+			await canvas.findByText(
+				"Its address changed, so it is off until a manager turns it on again",
+			),
+		).toBeInTheDocument();
+		await expect(canvas.queryByText(/crm\.example\.com/)).toBeNull();
 	},
 });

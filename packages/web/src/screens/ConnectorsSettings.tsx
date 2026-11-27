@@ -211,16 +211,16 @@ function BotConnectors({
 							<ConnectorMark markId={connectorMarkFor(connector)} name={connector.name} size="md" />
 							<span className="flex min-w-0 flex-1 flex-col leading-snug">
 								<span className="truncate text-sm text-foreground">{connector.name}</span>
-								<span
-									className={cn(
-										"truncate text-xs",
-										connector.addressChanged ? "text-destructive-text" : "text-subtle-foreground",
-									)}
-								>
-									{connector.addressChanged
-										? "Its address changed, so it is off until someone turns it on again"
-										: `Sends data to ${connector.url}`}
-								</span>
+								{(connector.url !== null || connector.addressChanged) && (
+									<span
+										className={cn(
+											"truncate text-xs",
+											connector.addressChanged ? "text-destructive-text" : "text-subtle-foreground",
+										)}
+									>
+										{botConnectorLine(connector)}
+									</span>
+								)}
 							</span>
 							<Tooltip
 								label={
@@ -239,7 +239,11 @@ function BotConnectors({
 										disabled={!canManage || setOn.isPending}
 										aria-label={`${connector.name} in ${project.name}`}
 										onCheckedChange={(checked) =>
-											setOn.mutate({ connectorId: connector.id, on: checked })
+											setOn.mutate({
+												connectorId: connector.id,
+												on: checked,
+												addressRevision: connector.addressRevision,
+											})
 										}
 									/>
 								</span>
@@ -262,6 +266,19 @@ function BotConnectors({
 			</Accordion.Panel>
 		</Accordion.Item>
 	);
+}
+
+/**
+ * What a bot's own connector's line says under its name: where it sends data
+ * now, to those who may see that, and whether its address changed since it
+ * was turned on here.
+ */
+function botConnectorLine(connector: ProjectBotConnector): string {
+	if (connector.url === null)
+		return "Its address changed, so it is off until a manager turns it on again";
+	return connector.addressChanged
+		? `Now sends data to ${connector.url}, so it is off until someone turns it on again`
+		: `Sends data to ${connector.url}`;
 }
 
 /** How many of a bot's connectors its row shows the marks of. */

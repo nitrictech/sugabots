@@ -495,13 +495,20 @@ export async function seedProjectBotConnector(
 ): Promise<void> {
 	const found = only(
 		await onDatabase((db) =>
-			db.select({ url: connector.url }).from(connector).where(eq(connector.id, connectorId)),
+			db
+				.select({ addressRevision: connector.addressRevision })
+				.from(connector)
+				.where(eq(connector.id, connectorId)),
 		),
 	);
 	await onDatabase((db) =>
-		db
-			.insert(projectBotConnector)
-			.values({ workspaceId, projectId, botId, connectorId, address: found.url }),
+		db.insert(projectBotConnector).values({
+			workspaceId,
+			projectId,
+			botId,
+			connectorId,
+			addressRevision: found.addressRevision,
+		}),
 	);
 }
 

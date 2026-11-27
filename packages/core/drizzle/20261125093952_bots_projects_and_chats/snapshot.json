@@ -13961,6 +13961,24 @@
       "statementTarget": [
         "column",
         "public",
+        "connector",
+        "address_revision"
+      ],
+      "writes": [
+        "s|col|public.connector.address_revision",
+        "n|col|public.connector.address_revision",
+        "e|col|public.connector.address_revision"
+      ],
+      "reads": [
+        "n|tbl|public.connector",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
         "project",
         "deleting"
       ],
@@ -23433,6 +23451,22 @@
       "op": "create",
       "row": {
         "schema": "public",
+        "table": "connector",
+        "name": "address_revision",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "1",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
         "table": "project",
         "name": "deleting",
         "type": "boolean",
@@ -24897,8 +24931,8 @@
       "row": {
         "schema": "public",
         "table": "project_bot_connector",
-        "name": "address",
-        "type": "text",
+        "name": "address_revision",
+        "type": "integer",
         "typeSchema": null,
         "notNull": true,
         "dimensions": 0,

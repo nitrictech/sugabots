@@ -12,6 +12,7 @@ import type {
 	UnsavedConnector,
 } from "@sugabots/contracts";
 import {
+	type ConnectorAddressChanged,
 	ConnectorDoesNotUseOAuth,
 	type ConnectorNameTaken,
 	ConnectorNeededNoSignIn,
@@ -23,17 +24,23 @@ import { type ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors
 import type { UrlNotAllowed } from "@sugabots/contracts/errors/providers";
 import { Clock, Context, Effect, Layer } from "effect";
 import { ProjectComputers } from "../../computers/project-computers.ts";
-import { type Database, serviceOperations } from "../../database/database.ts";
+import { type Database, query, serviceOperations } from "../../database/database.ts";
 import type { MemberSession } from "../../principal.ts";
 import type { CanRestrictBotsProject } from "../../proofs/can-restrict-bot.ts";
+import { mayInProjectAs, memberActing, memberReaches, reachFacts } from "../../proofs/facts.ts";
 import { proveIsMember } from "../../proofs/is-member.ts";
-import type { CanManageProject, CanReadConnectors } from "../../proofs/project-permissions.ts";
+import {
+	type CanManageProject,
+	type CanReadConnectors,
+	memberManaging,
+} from "../../proofs/project-permissions.ts";
 import type { Named } from "../../proofs/proof.ts";
 import type {
 	CanSetProjectBotConnector,
 	CanSwitchOffConnector,
 	ReachesConnector,
 } from "../../proofs/reaches-connector.ts";
+import type { ReachesProject } from "../../proofs/reaches-project.ts";
 import { Secrets } from "../../secrets/secrets.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { Egress, type EgressHttpClient } from "../network/egress.ts";
@@ -65,11 +72,14 @@ export interface Interface {
 	readonly listProjectBots: <P, J>(
 		canRead: CanReadConnectors<P, J>,
 	) => Effect.Effect<ProjectBotConnector[]>;
-	/** Turns a project bot's own connector on in the project, for the address it has now, or off. */
+	/**
+	 * Turns a project bot's own connector on in the project, for the address
+	 * numbered `addressRevision`, which must still be its address, or off.
+	 */
 	readonly setOnInProject: <P, J, K>(
 		canSet: CanSetProjectBotConnector<P, J, K>,
-		on: boolean,
-	) => Effect.Effect<ProjectBotConnector, ConnectorNotFound>;
+		change: { readonly on: boolean; readonly addressRevision: number },
+	) => Effect.Effect<ProjectBotConnector, ConnectorNotFound | ConnectorAddressChanged>;
 	readonly listForRestriction: <P, J>(
 		canRestrict: CanRestrictBotsProject<P, J>,
 	) => Effect.Effect<RestrictableConnector[]>;
@@ -316,10 +326,20 @@ export const make = Effect.gen(function* () {
 		listProjectBots: (canRead) =>
 			operation(
 				"listProjectBots",
-				projectBotConnectorsIn(canRead.reach.workspace, canRead.reach.project.value),
+				Effect.gen(function* () {
+					const { reach } = canRead;
+					const rows = yield* projectBotConnectorsIn(reach.workspace, reach.project.value);
+					const shownProjects = yield* botProjectsShowingAddresses(
+						reach,
+						new Set(rows.map((row) => row.botProjectId)),
+					);
+					return rows.map(({ botProjectId, shown }) =>
+						shownProjects.has(botProjectId) ? shown : { ...shown, url: null },
+					);
+				}),
 			),
 
-		setOnInProject: (canSet, on) =>
+		setOnInProject: (canSet, { on, addressRevision }) =>
 			operation(
 				"setOnInProject",
 				Effect.gen(function* () {
@@ -333,14 +353,16 @@ export const make = Effect.gen(function* () {
 						botId: canSet.bot,
 						memberId: canSet.member,
 						on,
+						addressRevision,
 					});
-					const [shown] = yield* projectBotConnectorsIn(
+					// Its manager sees its address.
+					const [row] = yield* projectBotConnectorsIn(
 						where.workspaceId,
 						where.projectId,
 						where.connectorId,
 					);
-					if (!shown) return yield* new ConnectorNotFound();
-					return shown;
+					if (!row) return yield* new ConnectorNotFound();
+					return row.shown;
 				}),
 			),
 
@@ -556,3 +578,33 @@ export const layerNoDeps = processLayer(Layer.effect(Service, make));
 export const layer = layerNoDeps.pipe(
 	Layer.provide([ConnectorStore.layer, ConnectorSignIn.layer, ProjectComputers.layer]),
 );
+
+/**
+ * Of the bots' default projects `botProjects`, those whose connectors'
+ * addresses the member `reach` acts for sees in the project: every one for
+ * a member who manages the project, and so turns connectors on there; for
+ * anyone else, those of bots whose own connectors they may see. Anyone who
+ * reaches the project sees whether each is on.
+ */
+const botProjectsShowingAddresses = <P, J>(
+	reach: ReachesProject<P, J>,
+	botProjects: ReadonlySet<string>,
+) =>
+	Effect.gen(function* () {
+		const member = memberActing(reach.as);
+		if (!member) return new Set<string>();
+		if (memberManaging(reach.as, reach.facts)) return botProjects;
+		const shown = new Set<string>();
+		for (const projectId of botProjects) {
+			const place = yield* query((db) =>
+				reachFacts(db, projectId, { member: member.actor.memberId }),
+			);
+			if (
+				place?.member &&
+				memberReaches(place.member, place.project) &&
+				mayInProjectAs(place.member, place.project, "connector.read")
+			)
+				shown.add(projectId);
+		}
+		return shown;
+	});

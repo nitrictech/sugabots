@@ -19,6 +19,7 @@ import {
 	unsavedConnectorSchema,
 } from "../connectors.ts";
 import {
+	ConnectorAddressChanged,
 	ConnectorDoesNotUseOAuth,
 	ConnectorNameTaken,
 	ConnectorNeededNoSignIn,
@@ -150,10 +151,16 @@ export const connectorsContracts = {
 	}),
 	"connectors.setOnInProject": OperationContract.make("connectors.setOnInProject", {
 		description:
-			"Turn one of a project bot's own connectors on or off in the project, for the address it has now. A bot uses it in the project's chats only while it is on.",
-		input: Schema.Struct({ projectId: uuidSchema, connectorId: uuidSchema, on: Schema.Boolean }),
+			"Turn one of a project bot's own connectors on or off in the project. Turning it on is refused once its address has changed since the manager saw it. A bot uses it in the project's chats only while it is on.",
+		input: Schema.Struct({
+			projectId: uuidSchema,
+			connectorId: uuidSchema,
+			on: Schema.Boolean,
+			/** The connector's address revision as the manager saw it; turning it off goes ahead regardless. */
+			addressRevision: Schema.Int,
+		}),
 		output: projectBotConnectorSchema,
-		errors: [...refusals, ConnectorNotFound],
+		errors: [...refusals, ConnectorNotFound, ConnectorAddressChanged],
 		changes: true,
 		http: {
 			kind: "offered",

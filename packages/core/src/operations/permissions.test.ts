@@ -903,7 +903,11 @@ const rows: {
 	},
 	"connectors.remove": { input: fresh.connector, outcomes: managesJ },
 	"connectors.setOnInProject": {
-		input: async (fixture) => ({ ...(await fresh.pubsOwnConnector(fixture)), on: true }),
+		input: async (fixture) => ({
+			...(await fresh.pubsOwnConnector(fixture)),
+			on: true,
+			addressRevision: 1,
+		}),
 		outcomes: managesJ,
 	},
 	"connectors.test": { input: fresh.connector, outcomes: managesJ },

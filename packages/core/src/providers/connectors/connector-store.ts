@@ -4,7 +4,11 @@ export * as ConnectorStore from "./connector-store.ts";
 import { createHash } from "node:crypto";
 import type { ConnectorTool, ConnectorUpdate, NewConnector } from "@sugabots/contracts";
 import { handleFromName } from "@sugabots/contracts";
-import { ConnectorNameTaken, UnknownConnectorTool } from "@sugabots/contracts/errors/connectors";
+import {
+	ConnectorAddressChanged,
+	ConnectorNameTaken,
+	UnknownConnectorTool,
+} from "@sugabots/contracts/errors/connectors";
 import type { UserText } from "@sugabots/errors";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
@@ -124,9 +128,10 @@ export interface Interface {
 	) => Effect.Effect<boolean>;
 	/**
 	 * Turns the bot `botId`'s own connector `connectorId` on in the project
-	 * `projectId`, for the address the connector has now, as `memberId`; or
-	 * off. The caller has proved the connector is the bot's and the bot is in
-	 * the project.
+	 * `projectId`, as `memberId`, for the address numbered `addressRevision`,
+	 * failing with `ConnectorAddressChanged` once the connector has another;
+	 * or off. The caller has proved the connector is the bot's and the bot is
+	 * in the project.
 	 */
 	readonly setOnInProject: (input: {
 		readonly workspaceId: string;
@@ -135,7 +140,8 @@ export interface Interface {
 		readonly connectorId: string;
 		readonly memberId: string;
 		readonly on: boolean;
-	}) => Effect.Effect<void>;
+		readonly addressRevision: number;
+	}) => Effect.Effect<void, ConnectorAddressChanged>;
 	/**
 	 * Records what a test of the configuration last updated at `testedAt`
 	 * found, unless the connector has been reconfigured since.
@@ -435,6 +441,7 @@ export const make = Effect.gen(function* () {
 										enabled: changes.enabled,
 										handle: changes.name === undefined ? undefined : handleFromName(changes.name),
 										url: changes.url,
+										addressRevision: moved ? sql`${connector.addressRevision} + 1` : undefined,
 										secretHeader: changes.secretHeader,
 										secretEncrypted: changes.secret
 											? cipher.encrypt(changes.secret)
@@ -492,35 +499,54 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.map(([row]) => row)),
 			),
 
-		setOnInProject: ({ workspaceId, projectId, botId, connectorId, memberId, on }) =>
+		setOnInProject: ({
+			workspaceId,
+			projectId,
+			botId,
+			connectorId,
+			memberId,
+			on,
+			addressRevision,
+		}) =>
 			operation(
 				"setOnInProject",
 				transaction(
 					Effect.gen(function* () {
-						const inProject = and(
-							eq(projectBotConnector.projectId, projectId),
-							eq(projectBotConnector.connectorId, connectorId),
-						);
-						yield* query((db) => db.delete(projectBotConnector).where(inProject));
-						if (!on) return;
-						// Shared, so the address can't change between reading it and keeping it.
+						// The connector before its row in the project, the order deleting the
+						// connector takes them in; shared, so its address can't change until
+						// this commits.
 						const [current] = yield* query((db) =>
 							db
-								.select({ url: connector.url })
+								.select({ addressRevision: connector.addressRevision })
 								.from(connector)
 								.where(and(eq(connector.id, connectorId), eq(connector.workspaceId, workspaceId)))
 								.for("share"),
 						);
 						if (!current) return;
+						if (!on) {
+							yield* query((db) =>
+								db
+									.delete(projectBotConnector)
+									.where(
+										and(
+											eq(projectBotConnector.projectId, projectId),
+											eq(projectBotConnector.connectorId, connectorId),
+										),
+									),
+							);
+							return;
+						}
+						if (current.addressRevision !== addressRevision)
+							return yield* new ConnectorAddressChanged();
+						const turnedOn = { botId, addressRevision, turnedOnById: memberId };
 						yield* query((db) =>
-							db.insert(projectBotConnector).values({
-								workspaceId,
-								projectId,
-								botId,
-								connectorId,
-								address: current.url,
-								turnedOnById: memberId,
-							}),
+							db
+								.insert(projectBotConnector)
+								.values({ workspaceId, projectId, connectorId, ...turnedOn })
+								.onConflictDoUpdate({
+									target: [projectBotConnector.projectId, projectBotConnector.connectorId],
+									set: turnedOn,
+								}),
 						);
 					}),
 				),
@@ -804,6 +830,7 @@ export const make = Effect.gen(function* () {
 									.update(connector)
 									.set({
 										url: gitHubAppUrl(settings.slug),
+										addressRevision: addressRevisionAfter(gitHubAppUrl(settings.slug)),
 										settings: { ...settings, installationId: null, account: null },
 										installedById: null,
 										configurationRevision: sql`${connector.configurationRevision} + 1`,
@@ -987,6 +1014,10 @@ export function changesReach(changes: Pick<ConnectorUpdate, "url" | "secret" | "
 	);
 }
 
+/** The connector's address revision once its address is `url`: one more if that is a change. */
+const addressRevisionAfter = (url: string) =>
+	sql`${connector.addressRevision} + case when ${connector.url} = ${url} then 0 else 1 end`;
+
 /** Records the installation on the GitHub connector, answering whether there was one to record it on. */
 const recordInstallation = (
 	workspaceId: string,
@@ -1002,6 +1033,7 @@ const recordInstallation = (
 			.update(connector)
 			.set({
 				url: `https://github.com/${account}`,
+				addressRevision: addressRevisionAfter(`https://github.com/${account}`),
 				// Merged in SQL, so the app's own settings are kept as they are.
 				settings: sql`${connector.settings} || ${JSON.stringify({ installationId, account })}::jsonb`,
 				installedById,

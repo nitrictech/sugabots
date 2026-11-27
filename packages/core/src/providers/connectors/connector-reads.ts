@@ -61,8 +61,10 @@ export const connectorsIn = (workspaceId: string, projectId: string, cipher: Sec
 /**
  * The own connectors of the bots in the project `projectId`, by bot name and
  * then connector name, each with whether it is on in the project: turned on
- * there for the address it still has. Its own bot's, in a bot's default
- * project, are the project's connectors, so they aren't among them.
+ * there for the address revision it still has. Its own bot's, in a bot's
+ * default project, are the project's connectors, so they aren't among them.
+ * Each carries the bot's default project, where its connectors live, which
+ * decides who sees its address.
  */
 export const projectBotConnectorsIn = (
 	workspaceId: string,
@@ -76,9 +78,11 @@ export const projectBotConnectorsIn = (
 				name: connector.name,
 				kind: connector.kind,
 				url: connector.url,
+				addressRevision: connector.addressRevision,
 				botId: bot.id,
 				botName: bot.name,
-				turnedOnFor: projectBotConnector.address,
+				botProjectId: project.id,
+				turnedOnFor: projectBotConnector.addressRevision,
 			})
 			.from(projectBot)
 			.innerJoin(bot, eq(bot.id, projectBot.botId))
@@ -101,11 +105,14 @@ export const projectBotConnectorsIn = (
 			)
 			.orderBy(asc(bot.name), asc(connector.name)),
 	).pipe(
-		Effect.map((rows): ProjectBotConnector[] =>
-			rows.map(({ turnedOnFor, ...row }) => ({
-				...row,
-				on: turnedOnFor === row.url,
-				addressChanged: turnedOnFor !== null && turnedOnFor !== row.url,
+		Effect.map((rows) =>
+			rows.map(({ turnedOnFor, botProjectId, ...row }) => ({
+				botProjectId,
+				shown: {
+					...row,
+					on: turnedOnFor === row.addressRevision,
+					addressChanged: turnedOnFor !== null && turnedOnFor !== row.addressRevision,
+				} satisfies ProjectBotConnector,
 			})),
 		),
 	);

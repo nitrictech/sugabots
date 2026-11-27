@@ -177,6 +177,7 @@ export const failureForError = {
 	ComputerMadeMeanwhile: Conflict,
 	ComputerProviderHasComputers: Conflict,
 	ComputerUnavailable: Conflict,
+	ConnectorAddressChanged: Conflict,
 	ComputersNotDestroyed: Conflict,
 	ConnectorNameTaken: Conflict,
 	LeadsProjects: Conflict,
