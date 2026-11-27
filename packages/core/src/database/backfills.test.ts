@@ -49,7 +49,9 @@ function backfillsOf(step: string): string[] {
 				.join("\n")
 				.trim(),
 		)
-		.filter((statement) => statement.startsWith("UPDATE"));
+		.filter(
+			(statement) => statement.startsWith("UPDATE ") || statement.startsWith("WITH RECURSIVE "),
+		);
 }
 
 /**

@@ -111,6 +111,36 @@ export type LegacyFile =
 	| { kind: "thread"; threadId: string; fileId: string; text: string }
 	| { kind: "version"; fileId: string; versionId: string; text: string };
 
+export const migrationScale = {
+	memberlessWorkspace: "0000000a-0000-4000-8000-000000000002",
+	memberlessPod: "0000000d-0000-4000-8000-000000000020",
+	memberlessGeneral: "0000000f-0000-4000-8000-000000000020",
+	orphanedCollaboration: "0000000f-0000-4000-8000-000000000021",
+	hostlessPersonalChat: "0000000f-0000-4000-8000-000000000022",
+	unattributedRequest: "00000015-0000-4000-8000-000000000020",
+	unclaimedRun: "00000009-0000-4000-8000-000000000003",
+	resultRun: "00000009-0000-4000-8000-000000000004",
+	feed: "0000000f-0000-4000-8000-00000000000a",
+	feedResult: "00000001-0000-4000-8000-000000000120",
+	chatResult: "00000001-0000-4000-8000-000000000121",
+	reservedBot: "0000000c-0000-4000-8000-000000000006",
+	cyclicChat: "0000000f-0000-4000-8000-000000000025",
+	files: {
+		collaboration: {
+			kind: "version",
+			fileId: "00000006-0000-4000-8000-000000000020",
+			versionId: "00000007-0000-4000-8000-000000000020",
+			text: "# Budget",
+		},
+		personal: {
+			kind: "version",
+			fileId: "00000006-0000-4000-8000-000000000021",
+			versionId: "00000007-0000-4000-8000-000000000021",
+			text: "# Personal notes",
+		},
+	},
+} as const;
+
 export const legacyFiles: readonly LegacyFile[] = [
 	{
 		kind: "thread",
@@ -522,4 +552,56 @@ INSERT INTO "session" ("token", "user_id", "expires_at") VALUES
 ${Object.values(legacy.members)
 	.map((member) => ` ('${legacySessionToken(member)}', '${member}', now() + interval '1 day')`)
 	.join(",\n")};
+`;
+
+export const legacyMigrationScaleRows = `
+-- A workspace whose General chat has nobody to credit.
+INSERT INTO "workspace" ("id", "name", "slug")
+VALUES ('${migrationScale.memberlessWorkspace}', 'Empty', 'empty');
+INSERT INTO "pod" ("id", "workspace_id", "kind", "name", "slug")
+VALUES ('${migrationScale.memberlessPod}', '${migrationScale.memberlessWorkspace}', 'shared', 'Empty', 'empty');
+INSERT INTO "thread" ("id", "workspace_id", "pod_id", "type", "main", "title", "conversation_id")
+VALUES ('${migrationScale.memberlessGeneral}', '${migrationScale.memberlessWorkspace}', '${migrationScale.memberlessPod}', 'pod_chat', true, 'General', '${migrationScale.memberlessGeneral}');
+
+-- Written files outlived one collaboration's record and a personal chat has no host.
+INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "conversation_id", "parent_thread_id") VALUES
+ ('${migrationScale.orphanedCollaboration}', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.budget}', 'collaboration', 'Budget', '${legacy.threads.trip}', '${legacy.threads.trip}'),
+ ('${migrationScale.hostlessPersonalChat}', '${legacy.workspace}', '0000000d-0000-4000-8000-000000000003', NULL, 'conversation', 'Files', '${migrationScale.hostlessPersonalChat}', NULL);
+INSERT INTO "artifact" ("id", "workspace_id", "pod_id", "kind", "title", "current_version", "created_by_agent_id", "created_in_thread_id") VALUES
+ ('${migrationScale.files.collaboration.fileId}', '${legacy.workspace}', '${legacy.pods.family}', 'document', 'Budget', 1, '${legacy.bots.budget}', '${migrationScale.orphanedCollaboration}'),
+ ('${migrationScale.files.personal.fileId}', '${legacy.workspace}', '0000000d-0000-4000-8000-000000000003', 'document', 'Personal notes', 1, '${legacy.bots.helper}', '${migrationScale.hostlessPersonalChat}');
+INSERT INTO "artifact_version" ("id", "artifact_id", "number", "content_type", "size") VALUES
+ ('${migrationScale.files.collaboration.versionId}', '${migrationScale.files.collaboration.fileId}', 1, 'text/markdown', ${migrationScale.files.collaboration.text.length}),
+ ('${migrationScale.files.personal.versionId}', '${migrationScale.files.personal.fileId}', 1, 'text/markdown', ${migrationScale.files.personal.text.length});
+UPDATE "agent" SET "created_by_id" = NULL WHERE "id" = '${legacy.bots.helper}';
+INSERT INTO "model_request" ("id", "workspace_id", "purpose", "step", "provider_id", "model", "outcome", "started_at", "ended_at", "cost_usd", "cost_source")
+VALUES ('${migrationScale.unattributedRequest}', '${legacy.workspace}', 'agent-turn', 0, '${legacy.provider}', 'm', 'completed', '2026-10-05 09:01', '2026-10-05 09:02', 0.5, 'provider-reported');
+
+INSERT INTO "agent" ("id", "workspace_id", "pod_id", "name", "handle", "color", "face")
+VALUES ('${migrationScale.reservedBot}', '${legacy.workspace}', '${legacy.pods.family}', 'Digest', 'personal-assistant', 'sky', 'dot');
+
+-- A queued run whose lane went away, and a finished run that posted to two chats.
+INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "conversation_id") VALUES
+ ('0000000f-0000-4000-8000-000000000023', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.planner}', 'routine', 'Daily digest', '0000000f-0000-4000-8000-000000000023'),
+ ('0000000f-0000-4000-8000-000000000024', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.planner}', 'routine', 'Daily digest', '0000000f-0000-4000-8000-000000000024');
+INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "conversation_id", "routine_id")
+VALUES ('${migrationScale.feed}', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.planner}', 'routine_feed', 'Daily digest', '${migrationScale.feed}', '${legacy.routine}');
+INSERT INTO "routine_execution" ("id", "routine_id", "workspace_id", "agent_id", "thread_id", "trigger_kind", "trigger_identity", "trigger", "routine_name", "instructions", "state", "started_at", "finished_at") VALUES
+ ('${migrationScale.unclaimedRun}', '${legacy.routine}', '${legacy.workspace}', '${legacy.bots.planner}', '0000000f-0000-4000-8000-000000000023', 'manual', 'unclaimed', '{"kind":"manual"}', 'Daily digest', 'Sum up the day', 'queued', NULL, NULL),
+ ('${migrationScale.resultRun}', '${legacy.routine}', '${legacy.workspace}', '${legacy.bots.planner}', '0000000f-0000-4000-8000-000000000024', 'manual', 'result', '{"kind":"manual"}', 'Daily digest', 'Sum up the day', 'completed', '2026-10-09 09:00', '2026-10-09 09:01');
+UPDATE "routine" SET "results" = 'post_to_chat', "chat_id" = '${legacy.threads.trip}' WHERE "id" = '${legacy.routine}';
+INSERT INTO "message" ("id", "thread_id", "author_agent_id", "routine_execution_id", "kind", "status", "parts", "content", "created_at") VALUES
+ ('${migrationScale.feedResult}', '${migrationScale.feed}', '${legacy.bots.planner}', '${migrationScale.resultRun}', 'text', 'complete', '[{"type":"text","text":"Digest ready."}]', 'Digest ready.', '2026-10-09 09:02'),
+ ('${migrationScale.chatResult}', '${legacy.threads.trip}', '${legacy.bots.planner}', '${migrationScale.resultRun}', 'text', 'complete', '[{"type":"text","text":"Digest ready."}]', 'Digest ready.', '2026-10-09 09:01');
+
+-- The reply and read must go with the direct chat.
+INSERT INTO "message" ("thread_id", "author_user_id", "reply_to_message_id", "kind", "status", "parts", "content")
+VALUES ('${legacy.directMessages.samAndPat}', '${legacy.members.pat}', '00000001-0000-4000-8000-0000000000d1', 'text', 'complete', '[]', 'Got the tickets.');
+`;
+
+export const legacyCyclicCollaboration = `
+INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "conversation_id", "parent_thread_id")
+VALUES ('${migrationScale.cyclicChat}', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.budget}', 'collaboration', 'Budget', '${legacy.threads.trip}', '${migrationScale.cyclicChat}');
+INSERT INTO "collaboration" ("parent_thread_id", "parent_message_id", "turn_id", "child_thread_id", "collaborator_agent_id", "brief", "status", "at_offset")
+VALUES ('${migrationScale.cyclicChat}', '${legacy.tripMessages.answered}', '00000002-0000-4000-8000-000000000001', '${migrationScale.cyclicChat}', '${legacy.bots.budget}', 'Check the budget', 'done', 0);
 `;

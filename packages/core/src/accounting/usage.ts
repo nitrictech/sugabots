@@ -1,7 +1,7 @@
 export * as Usage from "./usage.ts";
 
 import { DEFAULT_TIME_ZONE, type UsageMonth, type WorkspaceUsage } from "@sugabots/contracts";
-import { and, eq, gte, lt, ne, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, gte, isNotNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import { query, serviceOperations } from "../database/database.ts";
 import { bot, modelProvider, modelRequest, providerModel, workspace } from "../database/schema.ts";
@@ -104,7 +104,6 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 	const bots = yield* query((db) =>
 		db
 			.select({
-				// Never null for a bot's turn, by `model_request_bot_valid`.
 				botId: sql<string>`${modelRequest.botId}`,
 				name: bot.name,
 				color: bot.color,
@@ -114,7 +113,14 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 			})
 			.from(modelRequest)
 			.leftJoin(bot, eq(bot.id, modelRequest.botId))
-			.where(and(inMonth, byBots, eq(modelRequest.byPersonalAssistant, false)))
+			.where(
+				and(
+					inMonth,
+					byBots,
+					isNotNull(modelRequest.botId),
+					eq(modelRequest.byPersonalAssistant, false),
+				),
+			)
 			.groupBy(modelRequest.botId, bot.name, bot.color, bot.eyes, bot.shape),
 	);
 	const models = yield* query((db) =>

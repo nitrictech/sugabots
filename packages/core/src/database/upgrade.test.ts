@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm, symlink } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,12 +54,15 @@ import {
 	type LegacyFile,
 	legacy,
 	legacyBytes,
+	legacyCyclicCollaboration,
 	legacyFiles,
 	legacyKeyOf,
+	legacyMigrationScaleRows,
 	legacyRows,
 	legacySessions,
 	legacySessionToken,
 	legacySummaryRequest,
+	migrationScale,
 } from "./upgrade.test-support.ts";
 
 /**
@@ -100,6 +103,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			await migrateTo(url, LAST_MAIN_MIGRATION);
 			await withClient(url, async (client) => {
 				await client.query(legacyRows);
+				await client.query(legacyMigrationScaleRows);
 				await client.query(legacySummaryRequest);
 				await client.query(legacySessions);
 				reachedOnMain = (await client.query<Reached>(REACHED_ON_MAIN)).rows;
@@ -203,6 +207,13 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					lead: legacy.bots.hoe,
 					name: "Hoe",
 					model: "m",
+					in_project: true,
+				},
+				{
+					id: migrationScale.memberlessPod,
+					lead: expect.any(String),
+					name: "Lead",
+					model: null,
 					in_project: true,
 				},
 			]);
@@ -373,7 +384,11 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 
 			expect(sortedReach(reachedNow.filter(({ id }) => legacyIds.has(id)))).toEqual(
 				sortedReach([
-					...reachedOnMain,
+					...reachedOnMain.filter(
+						({ id }) =>
+							id !== migrationScale.orphanedCollaboration &&
+							id !== migrationScale.hostlessPersonalChat,
+					),
 					// Admins know which personal bots there are, without reaching their chats.
 					{ member: legacy.members.sam, kind: "bot", id: legacy.bots.patsAssistant },
 					{ member: legacy.members.sam, kind: "bot", id: legacy.bots.helper },
@@ -598,24 +613,89 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			});
 		});
 
-		it("records the runs main's routine workflow held as failed, and keeps no lane of a workflow gone", async () => {
+		it("records every unfinished run as failed, and keeps no lane of a workflow gone", async () => {
 			const workflows = await upgraded.rows<{ workflow: string }>(
 				`select workflow from lane where workflow is not null
 				 union select workflow from lane_request order by 1`,
 			);
 			const runs = await upgraded.rows(
 				`select id, state, error from run where id = any($1) order by id`,
-				[[legacy.routineRuns.running, legacy.routineRuns.waiting]],
+				[[legacy.routineRuns.running, legacy.routineRuns.waiting, migrationScale.unclaimedRun]],
 			);
 
 			expect(workflows.map(({ workflow }) => workflow)).toEqual(["compaction", "turn"]);
 			expect(runs).toEqual(
-				[legacy.routineRuns.running, legacy.routineRuns.waiting].map((id) => ({
-					id,
-					state: "failed",
-					error: "Stopped when Sugabots was upgraded. Run it again.",
-				})),
+				[legacy.routineRuns.running, legacy.routineRuns.waiting, migrationScale.unclaimedRun].map(
+					(id) => ({
+						id,
+						state: "failed",
+						error: "Stopped when Sugabots was upgraded. Run it again.",
+					}),
+				),
 			);
+		});
+
+		it("keeps both copies of an automation result and links the run from its feed", async () => {
+			expect(
+				await upgraded.rows(
+					`select id, chat_id, run_id, content from message where id = any($1) order by id`,
+					[[migrationScale.feedResult, migrationScale.chatResult]],
+				),
+			).toEqual([
+				{
+					id: migrationScale.feedResult,
+					chat_id: migrationScale.feed,
+					run_id: migrationScale.resultRun,
+					content: "Digest ready.",
+				},
+				{
+					id: migrationScale.chatResult,
+					chat_id: legacy.threads.trip,
+					run_id: null,
+					content: "Digest ready.",
+				},
+			]);
+		});
+
+		it("leaves the opener unknown when a workspace has no members", async () => {
+			expect(
+				await upgraded.rows(`select started_by_id from project_chat where chat_id = $1`, [
+					migrationScale.memberlessGeneral,
+				]),
+			).toEqual([{ started_by_id: null }]);
+		});
+
+		it("retains the cost of a turn whose bot is unknown", async () => {
+			expect(
+				await upgraded.rows(
+					`select purpose, bot_id, cost_usd::float8 as usd from model_request where id = $1`,
+					[migrationScale.unattributedRequest],
+				),
+			).toEqual([{ purpose: "bot-turn", bot_id: null, usd: 0.5 }]);
+		});
+
+		it("gives ordinary bots handles they can keep", async () => {
+			const [bot] = await upgraded.rows<{ handle: string }>(
+				`select handle from bot where id = $1`,
+				[migrationScale.reservedBot],
+			);
+			expect(bot?.handle).toBeDefined();
+			expect(bot?.handle).not.toMatch(/^(here|channel|personal-assistant(-\d+)?)$/);
+		});
+
+		it("keeps written files from removed chats within their original audience", async () => {
+			const { collaboration, personal } = migrationScale.files;
+			expect(
+				await upgraded.rows(`select id, chat_id from file where id = any($1) order by id`, [
+					[collaboration.fileId, personal.fileId],
+				]),
+			).toEqual([
+				{ id: collaboration.fileId, chat_id: legacy.threads.general },
+				{ id: personal.fileId, chat_id: legacy.threads.report },
+			]);
+			for (const file of [collaboration, personal]) {
+				expect(queuedByTheUpgrade).not.toContain(`files/${file.fileId}`);
+			}
 		});
 
 		it("pauses a webhook trigger's automation that kept only its secret's digest, and refuses every delivery to it", async () => {
@@ -684,7 +764,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			);
 			const chatOf = new Map(files.map(({ id, chat_id }) => [id, chat_id]));
 
-			for (const file of legacyFiles) {
+			for (const file of [...legacyFiles, ...Object.values(migrationScale.files)]) {
 				expect(await upgraded.read(keyNow(file, chatOf)), legacyKeyOf(file)).toBe(file.text);
 			}
 		});
@@ -703,6 +783,41 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(await upgraded.read(keyNow(legacyFiles[0] as LegacyFile, new Map()))).toBe("plan");
 		});
 	},
+);
+
+it.skipIf(!process.env.DATABASE_URL)(
+	"reports the ids in a collaboration cycle and rolls back",
+	async () => {
+		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", "cycle");
+		const migration = await readFile(
+			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
+			"utf8",
+		);
+		await recreateDatabase(url);
+		try {
+			await migrateTo(url, LAST_MAIN_MIGRATION);
+			await withClient(url, async (client) => {
+				await client.query(legacyRows);
+				await client.query(legacyCyclicCollaboration);
+				await client.query("begin");
+				try {
+					await client.query("set local statement_timeout = '2s'");
+					await expect(client.query(migration)).rejects.toThrow(
+						`Collaboration chat ancestry has a cycle: ${migrationScale.cyclicChat}`,
+					);
+				} finally {
+					await client.query("rollback");
+				}
+				const { rows } = await client.query("select id from thread where id = $1", [
+					migrationScale.cyclicChat,
+				]);
+				expect(rows).toEqual([{ id: migrationScale.cyclicChat }]);
+			});
+		} finally {
+			await dropDatabase(url);
+		}
+	},
+	UPGRADE_TIMEOUT_MS,
 );
 
 /**
@@ -873,9 +988,16 @@ function segments(key: string): [string, ...string[]] {
 
 /** Bytes as `main` stored them, at their legacy keys, before the upgrade. */
 async function storeLegacyBytes(url: string, store: Store, root: string) {
+	const bytes = [
+		...legacyBytes,
+		...Object.values(migrationScale.files).map((file) => ({
+			key: legacyKeyOf(file),
+			text: file.text,
+		})),
+	];
 	if (store === "postgres") {
 		await withClient(url, async (client) => {
-			for (const { key, text } of legacyBytes) {
+			for (const { key, text } of bytes) {
 				await client.query(
 					`insert into blob (key, bytes, content_type, size) values ($1, $2, 'text/plain', $3)`,
 					[key, Buffer.from(text), Buffer.byteLength(text)],
@@ -887,7 +1009,7 @@ async function storeLegacyBytes(url: string, store: Store, root: string) {
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			const onDisk = yield* fromFileSystem(root);
-			for (const { key, text } of legacyBytes) {
+			for (const { key, text } of bytes) {
 				yield* onDisk.put(BlobStore.key(...segments(key)), {
 					stream: Stream.succeed(new TextEncoder().encode(text)),
 					contentType: "text/plain",
@@ -964,7 +1086,7 @@ async function migrateTo(url: string, last: string) {
 }
 
 /** This worker's database with `_upgrade_<store>` on the end of its name, so workers never share one. */
-function upgradeDatabaseUrl(workerUrl: string, store: Store): string {
+function upgradeDatabaseUrl(workerUrl: string, store: Store | "cycle"): string {
 	if (!workerUrl) return "";
 	const parsed = new URL(workerUrl);
 	parsed.pathname = `${parsed.pathname}_upgrade_${store}`;

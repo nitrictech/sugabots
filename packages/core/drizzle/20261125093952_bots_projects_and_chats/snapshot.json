@@ -9617,24 +9617,6 @@
       "statementTarget": [
         "column",
         "public",
-        "project_thread",
-        "started_by_id"
-      ],
-      "writes": [
-        "s|colprop|public.project_thread.started_by_id.notNull"
-      ],
-      "reads": [
-        "n|tbl|public.project_thread",
-        "n|sch|public",
-        "n|col|public.project_thread.started_by_id"
-      ],
-      "sqlHash": "672fc8eae2069225"
-    },
-    {
-      "statementType": "alter_column",
-      "statementTarget": [
-        "column",
-        "public",
         "project",
         "lead_bot_id"
       ],
@@ -22479,7 +22461,7 @@
         "schema": "public",
         "table": "model_request",
         "name": "model_request_bot_valid",
-        "value": "(\"purpose\" = 'bot-turn') = (\"bot_id\" is not null)",
+        "value": "\"purpose\" = 'bot-turn' or \"bot_id\" is null",
         "entityType": "checks"
       }
     },

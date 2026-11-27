@@ -219,10 +219,8 @@ export const projectChat = pgTable(
 		 */
 		resolvedAt: timestamp("resolved_at", { withTimezone: true }),
 		startRetryKey: uuid("start_retry_key"),
-		/** The member who started it. */
-		startedById: uuid("started_by_id")
-			.notNull()
-			.references(() => member.id, { onDelete: "restrict" }),
+		/** The member who started it, when known for an upgraded chat. */
+		startedById: uuid("started_by_id").references(() => member.id, { onDelete: "restrict" }),
 	},
 	(table) => [
 		chatOfKind(table, "project_chat_chat_fkey"),

@@ -14,11 +14,25 @@
 -- each thread takes its members, messages, reads and files by their foreign
 -- keys, and `thread_blob_deletion` queues its folder, `threads/<id>`, which
 -- follows every chat's folder to `chats/<id>` below.
+-- The foreign keys still cascade and queue blob deletions. Index the
+-- referencing columns so each cascade can find its rows without a table scan.
+CREATE INDEX "migration_tool_call_chat_idx" ON "tool_call" ("thread_id") WHERE "thread_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "migration_message_reply_idx" ON "message" ("reply_to_message_id") WHERE "reply_to_message_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "migration_thread_read_chat_idx" ON "thread_read" ("thread_id") WHERE "thread_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "migration_collaboration_parent_idx" ON "collaboration" ("parent_thread_id") WHERE "parent_thread_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "migration_thread_participant_chat_idx" ON "thread_participant" ("thread_id") WHERE "thread_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "migration_thread_summary_source_idx" ON "thread_summary" ("source_message_id") WHERE "source_message_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "migration_routine_chat_idx" ON "routine" ("chat_id") WHERE "chat_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "migration_artifact_chat_idx" ON "artifact" ("created_in_thread_id") WHERE "created_in_thread_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "migration_thread_file_tool_call_idx" ON "thread_file" ("tool_call_id") WHERE "tool_call_id" IS NOT NULL;--> statement-breakpoint
 DELETE FROM "thread" WHERE "type" = 'direct';--> statement-breakpoint
 DROP TABLE "direct_member";--> statement-breakpoint
 ALTER TABLE "thread" DROP CONSTRAINT "thread_direct_valid";--> statement-breakpoint
 DROP INDEX "thread_direct_key_idx";--> statement-breakpoint
 ALTER TABLE "thread" DROP COLUMN "direct_key";--> statement-breakpoint
+-- Reconnecting clients refetch when their last event is gone. Keep the
+-- sequence so no new event can be mistaken for one from before the upgrade.
+TRUNCATE "event" CONTINUE IDENTITY RESTRICT;--> statement-breakpoint
 -- ## Summaries go
 -- Bots no longer summarise their chats, so the summaries go. Their lanes go
 -- with the routines' below. The model requests that wrote them stay in the
@@ -258,7 +272,8 @@ ALTER TABLE "pod_agent" ADD CONSTRAINT "pod_agent_pod_workspace_fkey" FOREIGN KE
 ALTER TABLE "pod_agent" ADD CONSTRAINT "pod_agent_agent_workspace_fkey" FOREIGN KEY ("agent_id","workspace_id") REFERENCES "agent"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
 -- The bots of a `pod` of kind `personal` become its owner's private bots, and
 -- its Personal Assistant becomes theirs by `assistant_of`.
-UPDATE "agent" SET "visibility" = 'private'
+UPDATE "agent" SET "visibility" = 'private',
+	"created_by_id" = coalesce("agent"."created_by_id", "pod"."owner_id")
 FROM "pod" WHERE "pod"."id" = "agent"."pod_id" AND "pod"."kind" = 'personal';--> statement-breakpoint
 UPDATE "agent" SET "assistant_of" = "pod"."owner_id"
 FROM "pod"
@@ -277,13 +292,13 @@ WHERE "routine"."id" = "routine_trigger"."routine_id" AND "agent"."id" = "routin
 -- Handles and names become unique across the workspace, among the bots people
 -- address: the oldest keeps its own, and each other gets the lowest number from
 -- 2 that no bot has taken, shortened to fit (handles 48 characters, names 64).
--- `personal-assistant` is every Personal Assistant's handle now, so no other
--- bot keeps it.
+-- Group mentions and Personal Assistants' handles are reserved.
 DO $$
 DECLARE
 	clashing record;
 	suffix_number integer;
 	candidate text;
+	handle_base text;
 BEGIN
 	FOR clashing IN
 		SELECT "id", "workspace_id", "handle" FROM (
@@ -292,12 +307,16 @@ BEGIN
 			) AS "rank"
 			FROM "agent" WHERE "system_agent_key" IS NULL AND "assistant_of" IS NULL
 		) AS "ranked"
-		WHERE "rank" > 1 OR "handle" = 'personal-assistant' ORDER BY "created_at", "id"
+		WHERE "rank" > 1 OR "handle" IN ('here', 'channel') OR "handle" ~ '^personal-assistant(-[0-9]+)?$'
+		ORDER BY "created_at", "id"
 	LOOP
+		handle_base := CASE WHEN clashing.handle ~ '^personal-assistant(-[0-9]+)?$'
+			THEN clashing.handle || '-bot' ELSE clashing.handle END;
 		suffix_number := 2;
 		LOOP
-			candidate := rtrim(left(clashing.handle, 48 - length('-' || suffix_number)), '-') || '-' || suffix_number;
-			EXIT WHEN NOT EXISTS (
+			candidate := rtrim(left(handle_base, 48 - length('-' || suffix_number)), '-') || '-' || suffix_number;
+			EXIT WHEN candidate NOT IN ('here', 'channel') AND candidate !~ '^personal-assistant(-[0-9]+)?$'
+			AND NOT EXISTS (
 				SELECT 1 FROM "agent"
 				WHERE "workspace_id" = clashing.workspace_id AND "handle" = candidate
 					AND "system_agent_key" IS NULL AND "assistant_of" IS NULL
@@ -357,7 +376,37 @@ ON CONFLICT DO NOTHING;--> statement-breakpoint
 UPDATE "thread" SET "type" = 'pod_chat'
 WHERE "type" = 'conversation' AND "host_agent_id" IS NULL AND "pod_id" IS NOT NULL;--> statement-breakpoint
 UPDATE "thread" SET "type" = 'conversation', "pod_id" = NULL WHERE "type" = 'bot_channel';--> statement-breakpoint
-UPDATE "thread" SET "pod_id" = NULL WHERE "type" <> 'pod_chat';--> statement-breakpoint
+UPDATE "thread" SET "pod_id" = NULL WHERE "type" <> 'pod_chat' AND "pod_id" IS NOT NULL;--> statement-breakpoint
+-- Keep written files listed by a pod even if their chat cannot be migrated.
+CREATE TEMP TABLE "removed_chat" ON COMMIT DROP AS
+WITH RECURSIVE removed_chat AS (
+	SELECT t."id"
+	FROM "thread" t
+	LEFT JOIN "pod" p ON p."id" = t."pod_id"
+	WHERE (p."kind" = 'personal' AND t."type" = 'pod_chat')
+		OR (t."type" = 'collaboration' AND NOT EXISTS (
+			SELECT 1 FROM "collaboration" c WHERE c."child_thread_id" = t."id"
+		))
+		OR (t."type" = 'routine' AND NOT EXISTS (
+			SELECT 1 FROM "routine_execution" r WHERE r."thread_id" = t."id"
+		))
+		OR (t."type" = 'system_agent' AND EXISTS (
+			SELECT 1 FROM "thread" parent WHERE parent."id" = t."parent_thread_id" AND parent."type" = 'collaboration'
+		))
+	UNION
+	SELECT dependent."id"
+	FROM removed_chat
+	CROSS JOIN LATERAL (
+		SELECT "id" FROM "thread" WHERE "parent_thread_id" = removed_chat."id"
+		UNION
+		SELECT "id" FROM "thread" WHERE "conversation_id" = removed_chat."id"
+		UNION
+		SELECT "child_thread_id" FROM "collaboration" WHERE "parent_thread_id" = removed_chat."id"
+	) dependent
+)
+SELECT "id" FROM removed_chat;--> statement-breakpoint
+UPDATE "artifact" SET "created_in_thread_id" = NULL
+WHERE "created_in_thread_id" IN (SELECT "id" FROM "removed_chat");--> statement-breakpoint
 -- A file is reached through the thread it was made in. A file whose thread
 -- is gone, which its `pod`'s Files still listed, moves to a thread there: a
 -- `shared` one's goes to the `pod_chat` row marked `main`, which is opened for
@@ -398,40 +447,44 @@ WHERE "pod"."kind" = 'personal'
 		WHERE "artifact"."pod_id" = "pod"."id" AND "artifact"."created_in_thread_id" IS NULL
 	)
 	AND NOT EXISTS (SELECT 1 FROM "agent" WHERE "agent"."pod_id" = "pod"."id");--> statement-breakpoint
-DO $$
-DECLARE
-	orphan record;
-	chosen_bot uuid;
-	task uuid;
-BEGIN
-	FOR orphan IN
-		SELECT "artifact"."id", "artifact"."workspace_id", "artifact"."pod_id",
-			"artifact"."created_by_agent_id", "pod"."owner_id"
-		FROM "artifact" JOIN "pod" ON "pod"."id" = "artifact"."pod_id"
-		WHERE "pod"."kind" = 'personal' AND "artifact"."created_in_thread_id" IS NULL
-	LOOP
-		SELECT "id" INTO chosen_bot FROM "agent"
-		WHERE "pod_id" = orphan.pod_id
-		ORDER BY "id" = orphan.created_by_agent_id DESC NULLS LAST, "assistant_of" IS NOT NULL,
-			"created_at", "id"
-		LIMIT 1;
-		CONTINUE WHEN chosen_bot IS NULL;
-		SELECT "id" INTO task FROM "thread"
-		WHERE "host_agent_id" = chosen_bot AND "type" = 'conversation'
-		ORDER BY "updated_at" DESC, "id" DESC
-		LIMIT 1;
-		IF task IS NULL THEN
-			task := uuidv7();
-			INSERT INTO "thread" ("id", "workspace_id", "host_agent_id", "conversation_id", "type", "title", "initiator_user_id")
-			VALUES (task, orphan.workspace_id, chosen_bot, task, 'conversation', 'Files', orphan.owner_id);
-			INSERT INTO "thread_participant" ("thread_id", "agent_id") VALUES (task, chosen_bot);
-			IF orphan.owner_id IS NOT NULL THEN
-				INSERT INTO "thread_participant" ("thread_id", "user_id") VALUES (task, orphan.owner_id);
-			END IF;
-		END IF;
-		UPDATE "artifact" SET "created_in_thread_id" = task WHERE "id" = orphan.id;
-	END LOOP;
-END $$;--> statement-breakpoint
+CREATE TEMP TABLE "orphan_file_bot" ON COMMIT DROP AS
+SELECT source."pod_id", source."created_by_agent_id", chosen."id" AS "bot_id"
+FROM (
+	SELECT DISTINCT a."pod_id", a."created_by_agent_id"
+	FROM "artifact" a JOIN "pod" p ON p."id" = a."pod_id"
+	WHERE p."kind" = 'personal' AND a."created_in_thread_id" IS NULL
+) source
+CROSS JOIN LATERAL (
+	SELECT "id" FROM "agent"
+	WHERE "pod_id" = source."pod_id"
+	ORDER BY ("id" = source."created_by_agent_id") DESC NULLS LAST,
+		"assistant_of" IS NOT NULL, "created_at", "id"
+	LIMIT 1
+) chosen;--> statement-breakpoint
+CREATE TEMP TABLE "orphan_file_chat" ON COMMIT DROP AS
+SELECT a."id" AS "bot_id", a."workspace_id", p."owner_id",
+	coalesce(latest."id", uuidv7()) AS "chat_id", latest."id" IS NULL AS "needs_chat"
+FROM (SELECT DISTINCT "bot_id" FROM "orphan_file_bot") chosen
+JOIN "agent" a ON a."id" = chosen."bot_id"
+JOIN "pod" p ON p."id" = a."pod_id"
+LEFT JOIN LATERAL (
+	SELECT "id" FROM "thread"
+	WHERE "pod_id" IS NULL AND "host_agent_id" = a."id" AND "type" = 'conversation'
+		AND "id" NOT IN (SELECT "id" FROM "removed_chat")
+	ORDER BY "updated_at" DESC, "id" DESC
+	LIMIT 1
+) latest ON true;--> statement-breakpoint
+INSERT INTO "thread" ("id", "workspace_id", "host_agent_id", "conversation_id", "type", "title", "initiator_user_id")
+SELECT "chat_id", "workspace_id", "bot_id", "chat_id", 'conversation', 'Files', "owner_id"
+FROM "orphan_file_chat" WHERE "needs_chat";--> statement-breakpoint
+INSERT INTO "thread_participant" ("thread_id", "agent_id")
+SELECT "chat_id", "bot_id" FROM "orphan_file_chat" WHERE "needs_chat";--> statement-breakpoint
+INSERT INTO "thread_participant" ("thread_id", "user_id")
+SELECT "chat_id", "owner_id" FROM "orphan_file_chat" WHERE "needs_chat" AND "owner_id" IS NOT NULL;--> statement-breakpoint
+UPDATE "artifact" a SET "created_in_thread_id" = destination."chat_id"
+FROM "orphan_file_bot" source JOIN "orphan_file_chat" destination ON destination."bot_id" = source."bot_id"
+WHERE a."created_in_thread_id" IS NULL AND a."pod_id" = source."pod_id"
+	AND a."created_by_agent_id" IS NOT DISTINCT FROM source."created_by_agent_id";--> statement-breakpoint
 DELETE FROM "artifact" WHERE "created_in_thread_id" IS NULL;--> statement-breakpoint
 UPDATE "agent" SET "pod_id" = NULL;--> statement-breakpoint
 -- A `personal` `pod` admitted its owner alone; projects have no such rule.
@@ -452,14 +505,14 @@ ALTER TABLE "pod" DROP CONSTRAINT "pod_personal_owner_check";--> statement-break
 ALTER TABLE "pod" DROP CONSTRAINT "pod_personal_slug_check";--> statement-breakpoint
 DROP INDEX "artifact_pod_updated_at_idx";--> statement-breakpoint
 DROP INDEX "thread_pod_host_created_at_idx";--> statement-breakpoint
-DROP INDEX "thread_pod_host_updated_at_idx";--> statement-breakpoint
 DROP INDEX "thread_origin_message_idx";--> statement-breakpoint
 DROP INDEX "thread_bot_channel_idx";--> statement-breakpoint
 DROP INDEX "agent_pod_id_idx";--> statement-breakpoint
 DROP INDEX "personal_pod_owner_idx";--> statement-breakpoint
 DROP INDEX "pod_workspace_id_idx";--> statement-breakpoint
--- Their bots have left them, so a Personal pod has nothing left in it.
+-- Its bots and written files have moved, so delete the personal pod.
 DELETE FROM "pod" WHERE "kind" = 'personal';--> statement-breakpoint
+DROP INDEX "thread_pod_host_updated_at_idx";--> statement-breakpoint
 ALTER TABLE "model_request" DROP COLUMN "pod_id";--> statement-breakpoint
 ALTER TABLE "agent" DROP COLUMN "pod_id";--> statement-breakpoint
 ALTER TABLE "agent" DROP COLUMN "provisioned_key";--> statement-breakpoint
@@ -467,18 +520,15 @@ ALTER TABLE "pod" DROP COLUMN "owner_id";--> statement-breakpoint
 ALTER TABLE "pod" DROP COLUMN "kind";--> statement-breakpoint
 ALTER TABLE "artifact" DROP COLUMN "pod_id";--> statement-breakpoint
 ALTER TABLE "thread" DROP COLUMN "origin_message_id";--> statement-breakpoint
-ALTER TABLE "artifact" ALTER COLUMN "created_in_thread_id" SET NOT NULL;--> statement-breakpoint
 -- Dropping `kind` took the partial index that named it.
 DROP INDEX IF EXISTS "pod_slug_idx";--> statement-breakpoint
 CREATE UNIQUE INDEX "pod_slug_idx" ON "pod" ("workspace_id","slug");--> statement-breakpoint
-CREATE INDEX "artifact_thread_updated_at_idx" ON "artifact" ("created_in_thread_id","updated_at");--> statement-breakpoint
 CREATE INDEX "thread_pod_updated_at_idx" ON "thread" ("pod_id","updated_at");--> statement-breakpoint
 CREATE INDEX "thread_host_updated_at_idx" ON "thread" ("host_agent_id","updated_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "agent_name_idx" ON "agent" ("workspace_id",lower("name")) WHERE "system_agent_key" is null and "assistant_of" is null;--> statement-breakpoint
 CREATE UNIQUE INDEX "agent_handle_idx" ON "agent" ("workspace_id","handle") WHERE "system_agent_key" is null and "assistant_of" is null;--> statement-breakpoint
 CREATE UNIQUE INDEX "agent_assistant_handle_idx" ON "agent" ("workspace_id","assistant_of","handle") WHERE "assistant_of" is not null;--> statement-breakpoint
 ALTER TABLE "agent" ADD CONSTRAINT "agent_assistant_workspace_member_fkey" FOREIGN KEY ("workspace_id","assistant_of") REFERENCES "workspace_member"("workspace_id","user_id") ON DELETE CASCADE;--> statement-breakpoint
-ALTER TABLE "artifact" DROP CONSTRAINT "artifact_created_in_thread_id_thread_id_fkey", ADD CONSTRAINT "artifact_created_in_thread_id_thread_id_fkey" FOREIGN KEY ("created_in_thread_id") REFERENCES "thread"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "thread" ADD CONSTRAINT "thread_pod_valid" CHECK (("type" = 'pod_chat') = ("pod_id" is not null));--> statement-breakpoint
 ALTER TABLE "agent" ADD CONSTRAINT "agent_visibility_check" CHECK ("visibility" in ('public', 'private'));--> statement-breakpoint
 ALTER TABLE "pod" ADD CONSTRAINT "pod_visibility_check" CHECK ("visibility" in ('public', 'private'));--> statement-breakpoint
@@ -572,8 +622,6 @@ BEGIN
 		);
 	END LOOP;
 END $$;--> statement-breakpoint
-DROP INDEX "message_run_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "message_run_idx" ON "message" ("run_id","thread_id") WHERE "run_id" is not null;--> statement-breakpoint
 ALTER TABLE "message" DROP CONSTRAINT "message_one_author", ADD CONSTRAINT "message_one_author" CHECK (num_nonnulls("author_user_id", "author_agent_id", "automation_trigger") = 1);--> statement-breakpoint
 ALTER TABLE "thread" DROP CONSTRAINT "thread_automation_valid", ADD CONSTRAINT "thread_automation_valid" CHECK (("automation_id" is not null) = ("type" = 'routine_feed'));--> statement-breakpoint
 ALTER TABLE "notification_settings" DROP CONSTRAINT "notification_settings_automation_runs_valid", ADD CONSTRAINT "notification_settings_automation_runs_valid" CHECK ("automation_runs" in ('failures', 'all', 'none'));
@@ -635,13 +683,13 @@ CREATE TABLE "file" (
 	"current_version" integer,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "file_kind_valid" CHECK ("kind" in ('document', 'html', 'upload', 'agent_attachment', 'tool_result')),
+	CONSTRAINT "file_kind_valid" CHECK ("kind" in ('markdown', 'html', 'attachment', 'bot_attachment', 'tool_result')),
 	CONSTRAINT "file_source_valid" CHECK (case "kind"
-				when 'upload' then "name" is not null and "content_type" is not null
+				when 'attachment' then "name" is not null and "content_type" is not null
 					and "size" is not null and "tool_call_id" is null
 					and ("message_id" is null) = ("position" is null)
 					and "created_by_agent_id" is null and "current_version" is null
-				when 'agent_attachment' then "name" is not null and "content_type" is not null
+				when 'bot_attachment' then "name" is not null and "content_type" is not null
 					and "size" is not null and "tool_call_id" is null
 					and "uploader_id" is null and "message_id" is not null
 					and "position" is not null
@@ -666,9 +714,32 @@ CREATE TABLE "file_version" (
 	"size" integer NOT NULL,
 	"author_agent_id" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "file_version_file_kind_valid" CHECK ("file_kind" in ('document', 'html'))
+	CONSTRAINT "file_version_file_kind_valid" CHECK ("file_kind" in ('markdown', 'html'))
 );
 --> statement-breakpoint
+-- The files kept whole in a conversation move across as they are: tool
+-- results, uploads and bots' attachments, under the same ids, so their blobs,
+-- kept by id under their conversation's folder, are still theirs. A file on a
+-- message was last changed when the message was sent.
+INSERT INTO "file" ("id", "thread_id", "kind", "name", "content_type", "size", "tool_call_id", "uploader_id", "message_id", "position", "created_at", "updated_at")
+SELECT "thread_file"."id", "thread_file"."thread_id", CASE "thread_file"."kind"
+		WHEN 'upload' THEN 'attachment'
+		WHEN 'agent_attachment' THEN 'bot_attachment'
+		ELSE "thread_file"."kind"
+	END, "thread_file"."name",
+	"thread_file"."content_type", "thread_file"."size", "thread_file"."tool_call_id", "thread_file"."uploader_id",
+	"thread_file"."message_id", "thread_file"."position", "thread_file"."created_at",
+	greatest("thread_file"."created_at", coalesce("message"."created_at", "thread_file"."created_at"))
+FROM "thread_file" LEFT JOIN "message" ON "message"."id" = "thread_file"."message_id";--> statement-breakpoint
+-- The files bots wrote move across under the same ids, so their versions'
+-- blobs, under `artifacts/<id>`, are still theirs; the title is the name.
+INSERT INTO "file" ("id", "thread_id", "kind", "name", "created_by_agent_id", "current_version", "created_at", "updated_at")
+SELECT "id", "created_in_thread_id", CASE "kind" WHEN 'document' THEN 'markdown' ELSE "kind" END, "title", "created_by_agent_id", "current_version", "created_at", "updated_at"
+FROM "artifact";--> statement-breakpoint
+INSERT INTO "file_version" ("id", "file_id", "file_kind", "number", "content_type", "size", "author_agent_id", "created_at")
+SELECT "artifact_version"."id", "artifact_version"."artifact_id", "file"."kind", "artifact_version"."number",
+	"artifact_version"."content_type", "artifact_version"."size", "artifact_version"."author_agent_id", "artifact_version"."created_at"
+FROM "artifact_version" JOIN "file" ON "file"."id" = "artifact_version"."artifact_id";--> statement-breakpoint
 CREATE INDEX "file_thread_updated_at_idx" ON "file" ("thread_id","updated_at");--> statement-breakpoint
 CREATE INDEX "file_message_idx" ON "file" ("message_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "file_id_kind_idx" ON "file" ("id","kind");--> statement-breakpoint
@@ -680,25 +751,7 @@ ALTER TABLE "file" ADD CONSTRAINT "file_message_id_message_id_fkey" FOREIGN KEY 
 ALTER TABLE "file" ADD CONSTRAINT "file_created_by_agent_id_agent_id_fkey" FOREIGN KEY ("created_by_agent_id") REFERENCES "agent"("id") ON DELETE SET NULL;--> statement-breakpoint
 ALTER TABLE "file_version" ADD CONSTRAINT "file_version_author_agent_id_agent_id_fkey" FOREIGN KEY ("author_agent_id") REFERENCES "agent"("id") ON DELETE SET NULL;--> statement-breakpoint
 ALTER TABLE "file_version" ADD CONSTRAINT "file_version_file_fkey" FOREIGN KEY ("file_id","file_kind") REFERENCES "file"("id","kind") ON DELETE CASCADE;--> statement-breakpoint
--- The files kept whole in a conversation move across as they are: tool
--- results, uploads and bots' attachments, under the same ids, so their blobs,
--- kept by id under their conversation's folder, are still theirs. A file on a
--- message was last changed when the message was sent.
-INSERT INTO "file" ("id", "thread_id", "kind", "name", "content_type", "size", "tool_call_id", "uploader_id", "message_id", "position", "created_at", "updated_at")
-SELECT "thread_file"."id", "thread_file"."thread_id", "thread_file"."kind", "thread_file"."name",
-	"thread_file"."content_type", "thread_file"."size", "thread_file"."tool_call_id", "thread_file"."uploader_id",
-	"thread_file"."message_id", "thread_file"."position", "thread_file"."created_at",
-	greatest("thread_file"."created_at", coalesce("message"."created_at", "thread_file"."created_at"))
-FROM "thread_file" LEFT JOIN "message" ON "message"."id" = "thread_file"."message_id";--> statement-breakpoint
--- The files bots wrote move across under the same ids, so their versions'
--- blobs, under `artifacts/<id>`, are still theirs; the title is the name.
-INSERT INTO "file" ("id", "thread_id", "kind", "name", "created_by_agent_id", "current_version", "created_at", "updated_at")
-SELECT "id", "created_in_thread_id", "kind", "title", "created_by_agent_id", "current_version", "created_at", "updated_at"
-FROM "artifact";--> statement-breakpoint
-INSERT INTO "file_version" ("id", "file_id", "file_kind", "number", "content_type", "size", "author_agent_id", "created_at")
-SELECT "artifact_version"."id", "artifact_version"."artifact_id", "artifact"."kind", "artifact_version"."number",
-	"artifact_version"."content_type", "artifact_version"."size", "artifact_version"."author_agent_id", "artifact_version"."created_at"
-FROM "artifact_version" JOIN "artifact" ON "artifact"."id" = "artifact_version"."artifact_id";--> statement-breakpoint
+CREATE INDEX "migration_file_tool_call_idx" ON "file" ("tool_call_id") WHERE "tool_call_id" IS NOT NULL;--> statement-breakpoint
 -- Dropping the old tables fires none of their DELETE triggers, so no blob is queued for deletion here: the copied `file` rows keep every blob.
 DROP TABLE "artifact_version";--> statement-breakpoint
 DROP TABLE "artifact";--> statement-breakpoint
@@ -710,7 +763,7 @@ CREATE FUNCTION queue_deleted_file_blobs() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
 	INSERT INTO "blob_deletion" ("prefix")
-	SELECT 'artifacts/' || "id"::text FROM deleted_files WHERE "kind" IN ('document', 'html');
+	SELECT 'artifacts/' || "id"::text FROM deleted_files WHERE "kind" IN ('markdown', 'html');
 	RETURN NULL;
 END;
 $$;--> statement-breakpoint
@@ -778,7 +831,6 @@ ALTER TABLE "channel_member" RENAME CONSTRAINT "pod_member_workspace_member_fkey
 DROP INDEX "notification_override_channel_idx";--> statement-breakpoint
 CREATE UNIQUE INDEX "notification_override_channel_idx" ON "notification_override" ("user_id","channel_id") WHERE "channel_id" is not null;--> statement-breakpoint
 ALTER TABLE "notification_override" DROP CONSTRAINT "notification_override_one_place", ADD CONSTRAINT "notification_override_one_place" CHECK (num_nonnulls("channel_id", "agent_id") = 1);--> statement-breakpoint
-ALTER TABLE "thread" DROP CONSTRAINT "thread_channel_valid", ADD CONSTRAINT "thread_channel_valid" CHECK (("type" = 'pod_chat') = ("channel_id" is not null));--> statement-breakpoint
 -- Constraints Postgres named itself (primary keys, not-null constraints and the
 -- foreign keys named for their columns) keep the old words in their names;
 -- the ones a server has depend on its Postgres version, so each is renamed if it is there.
@@ -844,14 +896,6 @@ CREATE TRIGGER administrator_channels
 AFTER INSERT OR UPDATE OF "role" ON "workspace_member"
 FOR EACH ROW WHEN (NEW."role" IN ('owner', 'admin'))
 EXECUTE FUNCTION add_new_administrator_to_channels();--> statement-breakpoint
--- The `pod.updated` events kept for clients that reconnect, renamed `channel.updated`.
-UPDATE "event" SET "type" = 'channel.updated', "payload" = jsonb_set("payload", '{type}', '"channel.updated"')
-WHERE "type" = 'pod.updated';
---> statement-breakpoint
--- A tool call's approval decided where it was raised is `conversation`'s to decide now.
-UPDATE "event" SET "payload" = jsonb_set("payload", '{toolCall,approval,deciders}', '"conversation"')
-WHERE "payload" #>> '{toolCall,approval,deciders}' = 'pod';
---> statement-breakpoint
 -- ## Agents become bots
 ALTER TABLE "agent_allowed_host" RENAME TO "bot_allowed_host";--> statement-breakpoint
 ALTER TABLE "agent" RENAME TO "bot";--> statement-breakpoint
@@ -901,45 +945,9 @@ ALTER TABLE "bot" RENAME CONSTRAINT "agent_assistant_workspace_member_fkey" TO "
 ALTER TABLE "channel_bot" RENAME CONSTRAINT "channel_bot_agent_workspace_fkey" TO "channel_bot_bot_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "pinned_bot" RENAME CONSTRAINT "pinned_agent_workspace_member_fkey" TO "pinned_bot_workspace_member_fkey";--> statement-breakpoint
 ALTER TABLE "pinned_bot" RENAME CONSTRAINT "pinned_agent_agent_workspace_fkey" TO "pinned_bot_bot_workspace_fkey";--> statement-breakpoint
-DROP INDEX "thread_participant_bot_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "thread_participant_bot_idx" ON "thread_participant" ("thread_id","bot_id") WHERE "bot_id" is not null;--> statement-breakpoint
-DROP INDEX "notification_override_bot_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "notification_override_bot_idx" ON "notification_override" ("user_id","bot_id") WHERE "bot_id" is not null;--> statement-breakpoint
-DROP INDEX "bot_name_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "bot_name_idx" ON "bot" ("workspace_id",lower("name")) WHERE "system_bot_key" is null and "assistant_of" is null;--> statement-breakpoint
-DROP INDEX "bot_handle_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "bot_handle_idx" ON "bot" ("workspace_id","handle") WHERE "system_bot_key" is null and "assistant_of" is null;--> statement-breakpoint
 ALTER TABLE "model_request" DROP CONSTRAINT "model_request_purpose_valid";--> statement-breakpoint
 UPDATE "model_request" SET "purpose" = 'bot-turn' WHERE "purpose" = 'agent-turn';--> statement-breakpoint
-ALTER TABLE "model_request" ADD CONSTRAINT "model_request_purpose_valid" CHECK ("purpose" in ('bot-turn', 'facilitation', 'compaction', 'trial', 'provider-check'));--> statement-breakpoint
-ALTER TABLE "message" DROP CONSTRAINT "message_one_author", ADD CONSTRAINT "message_one_author" CHECK (num_nonnulls("author_user_id", "author_bot_id", "automation_trigger") = 1);--> statement-breakpoint
-ALTER TABLE "thread_participant" DROP CONSTRAINT "thread_participant_one_identity", ADD CONSTRAINT "thread_participant_one_identity" CHECK (num_nonnulls("user_id", "bot_id") = 1);--> statement-breakpoint
-ALTER TABLE "automation" DROP CONSTRAINT "automation_created_by_bot_valid", ADD CONSTRAINT "automation_created_by_bot_valid" CHECK ("created_by_bot_id" is null or "created_by_bot_id" = "bot_id");--> statement-breakpoint
-ALTER TABLE "thread" DROP CONSTRAINT "thread_host_valid", ADD CONSTRAINT "thread_host_valid" CHECK (("type" = 'pod_chat') = ("host_bot_id" is null));--> statement-breakpoint
 ALTER TABLE "notification_override" DROP CONSTRAINT "notification_override_one_place", ADD CONSTRAINT "notification_override_one_place" CHECK (num_nonnulls("channel_id", "bot_id") = 1);--> statement-breakpoint
-ALTER TABLE "file" DROP CONSTRAINT "file_kind_valid";--> statement-breakpoint
-ALTER TABLE "file" DROP CONSTRAINT "file_source_valid";--> statement-breakpoint
-UPDATE "file" SET "kind" = 'bot_attachment' WHERE "kind" = 'agent_attachment';--> statement-breakpoint
-ALTER TABLE "file" ADD CONSTRAINT "file_kind_valid" CHECK ("kind" in ('document', 'html', 'upload', 'bot_attachment', 'tool_result'));--> statement-breakpoint
-ALTER TABLE "file" ADD CONSTRAINT "file_source_valid" CHECK (case "kind"
-				when 'upload' then "name" is not null and "content_type" is not null
-					and "size" is not null and "tool_call_id" is null
-					and ("message_id" is null) = ("position" is null)
-					and "created_by_bot_id" is null and "current_version" is null
-				when 'bot_attachment' then "name" is not null and "content_type" is not null
-					and "size" is not null and "tool_call_id" is null
-					and "uploader_id" is null and "message_id" is not null
-					and "position" is not null
-					and "created_by_bot_id" is null and "current_version" is null
-				when 'tool_result' then "name" is null and "content_type" is not null
-					and "size" is not null and "uploader_id" is null
-					and "message_id" is null and "position" is null
-					and "created_by_bot_id" is null and "current_version" is null
-				else "name" is not null and "current_version" is not null
-					and "content_type" is null and "size" is null
-					and "tool_call_id" is null and "uploader_id" is null
-					and "message_id" is null and "position" is null
-			end);--> statement-breakpoint
 -- Constraints Postgres named itself (primary keys, not-null constraints and the
 -- foreign keys named for their columns) keep the old words in their names;
 -- the ones a server has depend on its Postgres version, so each is renamed if it is there.
@@ -979,11 +987,6 @@ UPDATE "computer" SET "disk_usage" = jsonb_set(
 	)
 )
 WHERE jsonb_typeof("disk_usage" -> 'folders') = 'array' AND jsonb_array_length("disk_usage" -> 'folders') > 0;--> statement-breakpoint
--- The events kept for clients that reconnect name bots by the old word throughout
--- (their fields, kinds and types), and clients only read the new one. A client
--- whose last event is gone gets a reset and fetches everything again, so they go.
-DELETE FROM "event";
---> statement-breakpoint
 -- ## Conversations by kind
 -- Each kind of conversation gets its own table, keyed by the conversation's id,
 -- holding what makes it that kind; `thread` becomes `conversation`, holding
@@ -996,25 +999,26 @@ CREATE TABLE "automation_feed" (
 );--> statement-breakpoint
 CREATE TABLE "channel_conversation" (
 	"conversation_id" uuid PRIMARY KEY,
-	"kind" text GENERATED ALWAYS AS ('channel_conversation') STORED NOT NULL,
 	"workspace_id" uuid NOT NULL,
 	"channel_id" uuid NOT NULL,
 	"main" boolean DEFAULT false NOT NULL,
 	"archived_at" timestamp with time zone,
 	"started_by_id" uuid,
+	"done_at" timestamp with time zone,
+	"kind" text GENERATED ALWAYS AS ('project_chat') STORED NOT NULL,
 	CONSTRAINT "channel_conversation_archived_valid" CHECK ("archived_at" is null or not "main")
 );--> statement-breakpoint
 CREATE TABLE "system_conversation" (
 	"conversation_id" uuid PRIMARY KEY,
-	"kind" text GENERATED ALWAYS AS ('system') STORED NOT NULL,
 	"workspace_id" uuid NOT NULL,
 	"bot_id" uuid NOT NULL,
 	"system_bot_key" text NOT NULL,
-	"served_conversation_id" uuid NOT NULL
+	"served_conversation_id" uuid NOT NULL,
+	"kind" text GENERATED ALWAYS AS ('system_chat') STORED NOT NULL
 );--> statement-breakpoint
 CREATE TABLE "task" (
 	"conversation_id" uuid PRIMARY KEY,
-	"kind" text GENERATED ALWAYS AS ('task') STORED NOT NULL,
+	"kind" text GENERATED ALWAYS AS ('project_chat') STORED NOT NULL,
 	"workspace_id" uuid NOT NULL,
 	"bot_id" uuid NOT NULL,
 	"started_by_id" uuid,
@@ -1063,15 +1067,6 @@ ALTER INDEX "thread_read_user_thread_idx" RENAME TO "conversation_read_user_conv
 ALTER INDEX "message_thread_created_at_idx" RENAME TO "message_conversation_created_at_idx";--> statement-breakpoint
 ALTER INDEX "turn_thread_started_at_idx" RENAME TO "turn_conversation_started_at_idx";--> statement-breakpoint
 ALTER INDEX "file_thread_updated_at_idx" RENAME TO "file_conversation_updated_at_idx";--> statement-breakpoint
-UPDATE "conversation" SET "kind" = CASE "kind"
-	WHEN 'conversation' THEN 'task'
-	WHEN 'pod_chat' THEN 'channel_conversation'
-	WHEN 'routine' THEN 'run'
-	WHEN 'routine_feed' THEN 'automation_feed'
-	WHEN 'system_agent' THEN 'system'
-	ELSE "kind"
-END;
---> statement-breakpoint
 ALTER TABLE "run" ADD COLUMN "kind" text GENERATED ALWAYS AS ('run') STORED NOT NULL;
 --> statement-breakpoint
 ALTER TABLE "collaboration" ADD COLUMN "kind" text GENERATED ALWAYS AS ('collaboration') STORED NOT NULL;
@@ -1082,19 +1077,29 @@ ALTER TABLE "collaboration" ADD COLUMN "root_conversation_id" uuid;
 -- the columns that held it go.
 INSERT INTO "task" ("conversation_id", "workspace_id", "bot_id", "started_by_id", "done_at")
 SELECT "id", "workspace_id", "host_bot_id", "initiator_user_id", "done_at"
-FROM "conversation" WHERE "kind" = 'task';
+FROM "conversation" WHERE "kind" = 'conversation';
 --> statement-breakpoint
 INSERT INTO "channel_conversation" ("conversation_id", "workspace_id", "channel_id", "main", "archived_at", "started_by_id")
 SELECT "id", "workspace_id", "channel_id", "main", "archived_at", "initiator_user_id"
-FROM "conversation" WHERE "kind" = 'channel_conversation';
+FROM "conversation" WHERE "kind" = 'pod_chat';
 --> statement-breakpoint
 INSERT INTO "automation_feed" ("conversation_id", "workspace_id", "automation_id")
 SELECT "id", "workspace_id", "automation_id"
-FROM "conversation" WHERE "kind" = 'automation_feed';
+FROM "conversation" WHERE "kind" = 'routine_feed';
 --> statement-breakpoint
 INSERT INTO "system_conversation" ("conversation_id", "workspace_id", "bot_id", "system_bot_key", "served_conversation_id")
 SELECT "id", "workspace_id", "host_bot_id", "system_bot_key", "parent_thread_id"
-FROM "conversation" WHERE "kind" = 'system';
+FROM "conversation" WHERE "kind" = 'system_agent';
+--> statement-breakpoint
+UPDATE "conversation" SET "kind" = CASE "kind"
+	WHEN 'conversation' THEN 'project_chat'
+	WHEN 'pod_chat' THEN 'project_chat'
+	WHEN 'routine' THEN 'run'
+	WHEN 'routine_feed' THEN 'automation_feed'
+	WHEN 'system_agent' THEN 'system_chat'
+	ELSE "kind"
+END
+WHERE "kind" <> 'collaboration';
 --> statement-breakpoint
 -- A collaboration's root was its conversation's; the one it was asked from stands in where none was kept.
 UPDATE "collaboration" SET "root_conversation_id" = coalesce(c."conversation_id", "collaboration"."parent_conversation_id")
@@ -1120,8 +1125,6 @@ ALTER TABLE "conversation" DROP COLUMN "done_at";--> statement-breakpoint
 ALTER TABLE "conversation" DROP COLUMN "automation_id";--> statement-breakpoint
 ALTER TABLE "conversation" DROP COLUMN "main";--> statement-breakpoint
 ALTER TABLE "conversation" DROP COLUMN "archived_at";--> statement-breakpoint
-DROP INDEX "model_request_conversation_idx";--> statement-breakpoint
-CREATE INDEX "model_request_conversation_idx" ON "model_request" ("conversation_id") WHERE "conversation_id" is not null;--> statement-breakpoint
 CREATE UNIQUE INDEX "automation_feed_automation_idx" ON "automation_feed" ("automation_id");--> statement-breakpoint
 CREATE INDEX "channel_conversation_channel_idx" ON "channel_conversation" ("channel_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "channel_conversation_main_idx" ON "channel_conversation" ("channel_id") WHERE "main";--> statement-breakpoint
@@ -1144,7 +1147,6 @@ ALTER TABLE "system_conversation" ADD CONSTRAINT "system_conversation_bot_worksp
 ALTER TABLE "task" ADD CONSTRAINT "task_started_by_id_user_id_fkey" FOREIGN KEY ("started_by_id") REFERENCES "user"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "task" ADD CONSTRAINT "task_conversation_fkey" FOREIGN KEY ("conversation_id","kind","workspace_id") REFERENCES "conversation"("id","kind","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "task" ADD CONSTRAINT "task_bot_workspace_fkey" FOREIGN KEY ("bot_id","workspace_id") REFERENCES "bot"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
-ALTER TABLE "conversation" ADD CONSTRAINT "conversation_kind_valid" CHECK ("kind" in ('task', 'channel_conversation', 'collaboration', 'run', 'automation_feed', 'system'));--> statement-breakpoint
 -- Constraints Postgres named itself (primary keys, not-null constraints and the
 -- foreign keys named for their columns) keep the old words in their names;
 -- the ones a server has depend on its Postgres version, so each is renamed if it is there.
@@ -1205,12 +1207,12 @@ BEGIN
 		RETURN NULL;
 	END IF;
 	has_kind_row := CASE NEW."kind"
-		WHEN 'task' THEN EXISTS (SELECT 1 FROM "task" WHERE "conversation_id" = NEW."id")
-		WHEN 'channel_conversation' THEN EXISTS (SELECT 1 FROM "channel_conversation" WHERE "conversation_id" = NEW."id")
+		WHEN 'project_chat' THEN EXISTS (SELECT 1 FROM "task" WHERE "conversation_id" = NEW."id")
+			OR EXISTS (SELECT 1 FROM "channel_conversation" WHERE "conversation_id" = NEW."id")
 		WHEN 'collaboration' THEN EXISTS (SELECT 1 FROM "collaboration" WHERE "conversation_id" = NEW."id")
 		WHEN 'run' THEN EXISTS (SELECT 1 FROM "run" WHERE "conversation_id" = NEW."id")
 		WHEN 'automation_feed' THEN EXISTS (SELECT 1 FROM "automation_feed" WHERE "conversation_id" = NEW."id")
-		WHEN 'system' THEN EXISTS (SELECT 1 FROM "system_conversation" WHERE "conversation_id" = NEW."id")
+		WHEN 'system_chat' THEN EXISTS (SELECT 1 FROM "system_conversation" WHERE "conversation_id" = NEW."id")
 		ELSE false
 	END;
 	IF NOT has_kind_row THEN
@@ -1264,12 +1266,12 @@ FOR EACH ROW EXECUTE FUNCTION delete_conversation_of_kind_row();
 -- under one whose record was deleted, nothing can reach any more: it goes, with
 -- what is in it, and its own nested collaborations by the triggers above.
 DELETE FROM "conversation" AS c WHERE NOT CASE c."kind"
-	WHEN 'task' THEN EXISTS (SELECT 1 FROM "task" WHERE "conversation_id" = c."id")
-	WHEN 'channel_conversation' THEN EXISTS (SELECT 1 FROM "channel_conversation" WHERE "conversation_id" = c."id")
+	WHEN 'project_chat' THEN EXISTS (SELECT 1 FROM "task" WHERE "conversation_id" = c."id")
+		OR EXISTS (SELECT 1 FROM "channel_conversation" WHERE "conversation_id" = c."id")
 	WHEN 'collaboration' THEN EXISTS (SELECT 1 FROM "collaboration" WHERE "conversation_id" = c."id")
 	WHEN 'run' THEN EXISTS (SELECT 1 FROM "run" WHERE "conversation_id" = c."id")
 	WHEN 'automation_feed' THEN EXISTS (SELECT 1 FROM "automation_feed" WHERE "conversation_id" = c."id")
-	WHEN 'system' THEN EXISTS (SELECT 1 FROM "system_conversation" WHERE "conversation_id" = c."id")
+	WHEN 'system_chat' THEN EXISTS (SELECT 1 FROM "system_conversation" WHERE "conversation_id" = c."id")
 	ELSE false
 END;
 --> statement-breakpoint
@@ -1280,7 +1282,7 @@ CREATE VIEW "placed_conversation" AS (select
 	case c.kind
 		when 'collaboration' then co.root_conversation_id
 		when 'run' then rf.conversation_id
-		when 'system' then null
+		when 'system_chat' then null
 		else c.id
 	end as root_conversation_id,
 	coalesce(co.parent_conversation_id, sc.served_conversation_id) as parent_conversation_id,
@@ -1299,14 +1301,6 @@ left join "automation_feed" rf on rf.automation_id = r.automation_id
 left join "automation_feed" f on f.conversation_id = c.id
 left join "automation" fa on fa.id = f.automation_id
 left join "system_conversation" sc on sc.conversation_id = c.id);
---> statement-breakpoint
--- ## Events in the old words go
--- The events kept for clients that reconnect name conversations by the old
--- word: the `thread.*` and `conversation.thread_changed` types, `threadId` in
--- their payloads, and `audienceThreadId` on those for the workspace's lists.
--- A client whose last event is gone gets a reset and fetches everything
--- again, so they go.
-DELETE FROM "event";
 --> statement-breakpoint
 -- ## Channels become projects
 -- Channels become projects, a bot's tasks and a project's conversations
@@ -1339,28 +1333,9 @@ ALTER TABLE "project_bot" RENAME CONSTRAINT "channel_bot_channel_workspace_fkey"
 ALTER TABLE "project_bot" RENAME CONSTRAINT "channel_bot_bot_workspace_fkey" TO "project_bot_bot_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "project_member" RENAME CONSTRAINT "channel_member_channel_workspace_fkey" TO "project_member_project_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "project_member" RENAME CONSTRAINT "channel_member_workspace_member_fkey" TO "project_member_workspace_member_fkey";--> statement-breakpoint
-DROP INDEX "notification_override_project_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "notification_override_project_idx" ON "notification_override" ("user_id","project_id") WHERE "project_id" is not null;--> statement-breakpoint
 ALTER TABLE "notification_override" DROP CONSTRAINT "notification_override_one_place", ADD CONSTRAINT "notification_override_one_place" CHECK (num_nonnulls("project_id", "bot_id") = 1);--> statement-breakpoint
--- The two kinds by their new names. Each kind row names its conversation by
--- `(id, kind)`, so its foreign key and its `kind`, which is always its own kind,
--- go while the conversations' kinds change, and come back by the new name.
-ALTER TABLE "project_thread" DROP CONSTRAINT "channel_conversation_conversation_fkey";--> statement-breakpoint
-ALTER TABLE "bot_thread" DROP CONSTRAINT "task_conversation_fkey";--> statement-breakpoint
-ALTER TABLE "project_thread" DROP COLUMN "kind";--> statement-breakpoint
-ALTER TABLE "bot_thread" DROP COLUMN "kind";--> statement-breakpoint
-ALTER TABLE "conversation" DROP CONSTRAINT "conversation_kind_valid";--> statement-breakpoint
-UPDATE "conversation" SET "kind" = CASE "kind"
-	WHEN 'task' THEN 'bot_thread'
-	WHEN 'channel_conversation' THEN 'project_thread'
-	ELSE "kind"
-END
-WHERE "kind" IN ('task', 'channel_conversation');--> statement-breakpoint
-ALTER TABLE "conversation" ADD CONSTRAINT "conversation_kind_valid" CHECK ("kind" in ('bot_thread', 'project_thread', 'collaboration', 'run', 'automation_feed', 'system'));--> statement-breakpoint
-ALTER TABLE "project_thread" ADD COLUMN "kind" text GENERATED ALWAYS AS ('project_thread') STORED NOT NULL;--> statement-breakpoint
-ALTER TABLE "bot_thread" ADD COLUMN "kind" text GENERATED ALWAYS AS ('bot_thread') STORED NOT NULL;--> statement-breakpoint
-ALTER TABLE "project_thread" ADD CONSTRAINT "project_thread_conversation_fkey" FOREIGN KEY ("conversation_id","kind","workspace_id") REFERENCES "conversation"("id","kind","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
-ALTER TABLE "bot_thread" ADD CONSTRAINT "bot_thread_conversation_fkey" FOREIGN KEY ("conversation_id","kind","workspace_id") REFERENCES "conversation"("id","kind","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "project_thread" RENAME CONSTRAINT "channel_conversation_conversation_fkey" TO "project_thread_conversation_fkey";--> statement-breakpoint
+ALTER TABLE "bot_thread" RENAME CONSTRAINT "task_conversation_fkey" TO "bot_thread_conversation_fkey";--> statement-breakpoint
 -- An automation's schedule triggers are its routines: in their settings, which
 -- `kind` follows, in the runs they started, and on the messages those runs posted.
 ALTER TABLE "automation_trigger" DROP CONSTRAINT "automation_trigger_schedule_valid";--> statement-breakpoint
@@ -1378,7 +1353,7 @@ CREATE VIEW "placed_conversation" AS (select
 	case c.kind
 		when 'collaboration' then co.root_conversation_id
 		when 'run' then rf.conversation_id
-		when 'system' then null
+		when 'system_chat' then null
 		else c.id
 	end as root_conversation_id,
 	coalesce(co.parent_conversation_id, sc.served_conversation_id) as parent_conversation_id,
@@ -1437,12 +1412,12 @@ BEGIN
 		RETURN NULL;
 	END IF;
 	has_kind_row := CASE NEW."kind"
-		WHEN 'bot_thread' THEN EXISTS (SELECT 1 FROM "bot_thread" WHERE "conversation_id" = NEW."id")
-		WHEN 'project_thread' THEN EXISTS (SELECT 1 FROM "project_thread" WHERE "conversation_id" = NEW."id")
+		WHEN 'project_chat' THEN EXISTS (SELECT 1 FROM "bot_thread" WHERE "conversation_id" = NEW."id")
+			OR EXISTS (SELECT 1 FROM "project_thread" WHERE "conversation_id" = NEW."id")
 		WHEN 'collaboration' THEN EXISTS (SELECT 1 FROM "collaboration" WHERE "conversation_id" = NEW."id")
 		WHEN 'run' THEN EXISTS (SELECT 1 FROM "run" WHERE "conversation_id" = NEW."id")
 		WHEN 'automation_feed' THEN EXISTS (SELECT 1 FROM "automation_feed" WHERE "conversation_id" = NEW."id")
-		WHEN 'system' THEN EXISTS (SELECT 1 FROM "system_conversation" WHERE "conversation_id" = NEW."id")
+		WHEN 'system_chat' THEN EXISTS (SELECT 1 FROM "system_conversation" WHERE "conversation_id" = NEW."id")
 		ELSE false
 	END;
 	IF NOT has_kind_row THEN
@@ -1498,7 +1473,6 @@ EXECUTE FUNCTION add_new_administrator_to_projects();--> statement-breakpoint
 -- The events kept for clients that reconnect name channels, tasks and
 -- schedules by their old words. A client whose last event is gone gets a reset
 -- and fetches everything again, so they go.
-DELETE FROM "event";
 --> statement-breakpoint
 -- ## Projects are their threads
 -- A project is made of its threads and has no chat of its own: the thread
@@ -1515,7 +1489,7 @@ CREATE VIEW "placed_conversation" AS (select
 	case c.kind
 		when 'collaboration' then co.root_conversation_id
 		when 'run' then rf.conversation_id
-		when 'system' then null
+		when 'system_chat' then null
 		else c.id
 	end as root_conversation_id,
 	coalesce(co.parent_conversation_id, sc.served_conversation_id) as parent_conversation_id,
@@ -1542,7 +1516,6 @@ left join "system_conversation" sc on sc.conversation_id = c.id);
 -- optional turn and stays silent.
 DROP VIEW "placed_conversation";--> statement-breakpoint
 ALTER TABLE "message_reaction" ADD COLUMN "bot_id" uuid;--> statement-breakpoint
-ALTER TABLE "project_thread" ADD COLUMN "done_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "project" ADD COLUMN "lead_bot_id" uuid;--> statement-breakpoint
 ALTER TABLE "project" ADD COLUMN "default_of_bot_id" uuid;--> statement-breakpoint
 ALTER TABLE "message_reaction" ALTER COLUMN "user_id" DROP NOT NULL;--> statement-breakpoint
@@ -1667,20 +1640,14 @@ INSERT INTO "project_bot" ("workspace_id", "project_id", "bot_id", "created_at")
 SELECT p."workspace_id", p."id", p."default_of_bot_id", p."created_at"
 FROM "project" p
 WHERE p."default_of_bot_id" IS NOT NULL;--> statement-breakpoint
--- A bot's threads become its default project's, keeping their ids, so every
--- message, turn, file and link to them stays as it was. `bot_thread` names its
--- conversation by `(id, kind)`, and deleting its row would delete the
--- conversation, so both go before the conversations change kind.
+-- A bot's chats keep their ids and join its default project.
 DROP TRIGGER "bot_thread_conversation_deletion" ON "bot_thread";--> statement-breakpoint
 ALTER TABLE "bot_thread" DROP CONSTRAINT "bot_thread_conversation_fkey";--> statement-breakpoint
-ALTER TABLE "conversation" DROP CONSTRAINT "conversation_kind_valid";--> statement-breakpoint
-UPDATE "conversation" SET "kind" = 'project_thread' WHERE "kind" = 'bot_thread';--> statement-breakpoint
 INSERT INTO "project_thread" ("conversation_id", "workspace_id", "project_id", "started_by_id", "done_at")
 SELECT t."conversation_id", t."workspace_id", p."id", t."started_by_id", t."done_at"
 FROM "bot_thread" t
 INNER JOIN "project" p ON p."default_of_bot_id" = t."bot_id";--> statement-breakpoint
 DROP TABLE "bot_thread";--> statement-breakpoint
-ALTER TABLE "conversation" ADD CONSTRAINT "conversation_kind_valid" CHECK ("kind" in ('project_thread', 'collaboration', 'run', 'automation_feed', 'system'));--> statement-breakpoint
 CREATE OR REPLACE FUNCTION conversation_has_kind_row() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
 	has_kind_row boolean;
@@ -1689,11 +1656,11 @@ BEGIN
 		RETURN NULL;
 	END IF;
 	has_kind_row := CASE NEW."kind"
-		WHEN 'project_thread' THEN EXISTS (SELECT 1 FROM "project_thread" WHERE "conversation_id" = NEW."id")
+		WHEN 'project_chat' THEN EXISTS (SELECT 1 FROM "project_thread" WHERE "conversation_id" = NEW."id")
 		WHEN 'collaboration' THEN EXISTS (SELECT 1 FROM "collaboration" WHERE "conversation_id" = NEW."id")
 		WHEN 'run' THEN EXISTS (SELECT 1 FROM "run" WHERE "conversation_id" = NEW."id")
 		WHEN 'automation_feed' THEN EXISTS (SELECT 1 FROM "automation_feed" WHERE "conversation_id" = NEW."id")
-		WHEN 'system' THEN EXISTS (SELECT 1 FROM "system_conversation" WHERE "conversation_id" = NEW."id")
+		WHEN 'system_chat' THEN EXISTS (SELECT 1 FROM "system_conversation" WHERE "conversation_id" = NEW."id")
 		ELSE false
 	END;
 	IF NOT has_kind_row THEN
@@ -1710,7 +1677,7 @@ CREATE VIEW "placed_conversation" AS (select
 	case c.kind
 		when 'collaboration' then co.root_conversation_id
 		when 'run' then rf.conversation_id
-		when 'system' then null
+		when 'system_chat' then null
 		else c.id
 	end as root_conversation_id,
 	coalesce(co.parent_conversation_id, sc.served_conversation_id) as parent_conversation_id,
@@ -1809,7 +1776,7 @@ CREATE VIEW "placed_conversation" AS (select
 	case c.kind
 		when 'collaboration' then co.root_conversation_id
 		when 'run' then rf.conversation_id
-		when 'system' then null
+		when 'system_chat' then null
 		else c.id
 	end as root_conversation_id,
 	coalesce(co.parent_conversation_id, sc.served_conversation_id) as parent_conversation_id,
@@ -1857,14 +1824,13 @@ ALTER TABLE "automation_trigger" DROP COLUMN "secret_digest";--> statement-break
 UPDATE "computer" SET "image" = 'unknown' WHERE "image" IS NULL;--> statement-breakpoint
 ALTER TABLE "computer" ALTER COLUMN "image" SET NOT NULL;--> statement-breakpoint
 -- A thread nobody started, such as a `pod`'s main chat, was started by its
--- project's creator, or, when they are gone, by the workspace's owner.
+-- project's creator or the workspace's owner, if there is one.
 UPDATE "project_thread" SET "started_by_id" = coalesce("project"."created_by_id", (
 	SELECT "workspace_member"."user_id" FROM "workspace_member"
 	WHERE "workspace_member"."workspace_id" = "project"."workspace_id" AND "workspace_member"."role" = 'owner'
 	ORDER BY "workspace_member"."created_at" LIMIT 1
 ))
 FROM "project" WHERE "project"."id" = "project_thread"."project_id" AND "project_thread"."started_by_id" IS NULL;--> statement-breakpoint
-ALTER TABLE "project_thread" ALTER COLUMN "started_by_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "project" ALTER COLUMN "lead_bot_id" SET NOT NULL;--> statement-breakpoint
 -- Checked at commit, which Drizzle can't declare: deleting a bot deletes its
 -- default project, which it leads, in the same statement.
@@ -1880,7 +1846,6 @@ ALTER TABLE "conversation_participant" RENAME TO "chat_participant";--> statemen
 ALTER TABLE "conversation_read" RENAME TO "chat_read";--> statement-breakpoint
 ALTER TABLE "project_thread" RENAME TO "project_chat";--> statement-breakpoint
 ALTER TABLE "system_conversation" RENAME TO "system_chat";--> statement-breakpoint
-ALTER TABLE "project_chat" DROP CONSTRAINT "project_thread_conversation_fkey";--> statement-breakpoint
 ALTER TABLE "model_request" RENAME COLUMN "conversation_id" TO "chat_id";--> statement-breakpoint
 ALTER TABLE "automation_feed" RENAME COLUMN "conversation_id" TO "chat_id";--> statement-breakpoint
 ALTER TABLE "run" RENAME COLUMN "conversation_id" TO "chat_id";--> statement-breakpoint
@@ -1956,9 +1921,9 @@ ALTER TABLE "file" RENAME CONSTRAINT "file_conversation_id_not_null" TO "file_ch
 ALTER TABLE "message" RENAME CONSTRAINT "message_conversation_id_conversation_id_fkey" TO "message_chat_id_chat_id_fkey";--> statement-breakpoint
 ALTER TABLE "message" RENAME CONSTRAINT "message_conversation_id_not_null" TO "message_chat_id_not_null";--> statement-breakpoint
 ALTER TABLE "project_chat" RENAME CONSTRAINT "project_thread_conversation_id_not_null" TO "project_chat_chat_id_not_null";--> statement-breakpoint
+ALTER TABLE "project_chat" RENAME CONSTRAINT "project_thread_kind_not_null" TO "project_chat_kind_not_null";--> statement-breakpoint
 ALTER TABLE "project_chat" RENAME CONSTRAINT "project_thread_pkey" TO "project_chat_pkey";--> statement-breakpoint
 ALTER TABLE "project_chat" RENAME CONSTRAINT "project_thread_project_id_not_null" TO "project_chat_project_id_not_null";--> statement-breakpoint
-ALTER TABLE "project_chat" RENAME CONSTRAINT "project_thread_started_by_id_not_null" TO "project_chat_started_by_id_not_null";--> statement-breakpoint
 ALTER TABLE "project_chat" RENAME CONSTRAINT "project_thread_started_by_id_user_id_fkey" TO "project_chat_started_by_id_user_id_fkey";--> statement-breakpoint
 ALTER TABLE "project_chat" RENAME CONSTRAINT "project_thread_workspace_id_not_null" TO "project_chat_workspace_id_not_null";--> statement-breakpoint
 ALTER TABLE "run" RENAME CONSTRAINT "run_conversation_id_not_null" TO "run_chat_id_not_null";--> statement-breakpoint
@@ -1974,15 +1939,7 @@ ALTER TABLE "tool_call" RENAME CONSTRAINT "tool_call_conversation_id_conversatio
 ALTER TABLE "tool_call" RENAME CONSTRAINT "tool_call_conversation_id_not_null" TO "tool_call_chat_id_not_null";--> statement-breakpoint
 ALTER TABLE "turn" RENAME CONSTRAINT "turn_conversation_id_conversation_id_fkey" TO "turn_chat_id_chat_id_fkey";--> statement-breakpoint
 ALTER TABLE "turn" RENAME CONSTRAINT "turn_conversation_id_not_null" TO "turn_chat_id_not_null";--> statement-breakpoint
--- The kind `project_thread` is now `project_chat`: the kind row's own `kind`
--- follows its name, and the chats it names are moved with it, once the key
--- between them is gone.
-ALTER TABLE "project_chat" DROP COLUMN "kind";--> statement-breakpoint
-ALTER TABLE "chat" DROP CONSTRAINT "conversation_kind_valid";--> statement-breakpoint
-UPDATE "chat" SET "kind" = 'project_chat' WHERE "kind" = 'project_thread';--> statement-breakpoint
-ALTER TABLE "chat" ADD CONSTRAINT "chat_kind_valid" CHECK ("kind" in ('project_chat', 'collaboration', 'run', 'automation_feed', 'system'));--> statement-breakpoint
-ALTER TABLE "project_chat" ADD COLUMN "kind" text GENERATED ALWAYS AS ('project_chat') STORED NOT NULL;--> statement-breakpoint
-ALTER TABLE "project_chat" ADD CONSTRAINT "project_chat_chat_fkey" FOREIGN KEY ("chat_id","kind","workspace_id") REFERENCES "chat"("id","kind","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "project_chat" RENAME CONSTRAINT "project_thread_conversation_fkey" TO "project_chat_chat_fkey";--> statement-breakpoint
 -- The triggers and their functions name the tables in their bodies, so each is
 -- made again by its new name. A deleted chat's files are kept under `chats/<id>`.
 DROP TRIGGER "conversation_blob_deletion" ON "chat";--> statement-breakpoint
@@ -2017,7 +1974,7 @@ BEGIN
 		WHEN 'collaboration' THEN EXISTS (SELECT 1 FROM "collaboration" WHERE "chat_id" = NEW."id")
 		WHEN 'run' THEN EXISTS (SELECT 1 FROM "run" WHERE "chat_id" = NEW."id")
 		WHEN 'automation_feed' THEN EXISTS (SELECT 1 FROM "automation_feed" WHERE "chat_id" = NEW."id")
-		WHEN 'system' THEN EXISTS (SELECT 1 FROM "system_chat" WHERE "chat_id" = NEW."id")
+		WHEN 'system_chat' THEN EXISTS (SELECT 1 FROM "system_chat" WHERE "chat_id" = NEW."id")
 		ELSE false
 	END;
 	IF NOT has_kind_row THEN
@@ -2075,7 +2032,7 @@ CREATE VIEW "placed_chat" AS (select
 	case c.kind
 		when 'collaboration' then co.root_chat_id
 		when 'run' then rf.chat_id
-		when 'system' then null
+		when 'system_chat' then null
 		else c.id
 	end as root_chat_id,
 	coalesce(co.parent_chat_id, sc.served_chat_id) as parent_chat_id,
@@ -2110,7 +2067,7 @@ CREATE VIEW "placed_chat" AS (select
 	case c.kind
 		when 'collaboration' then co.root_chat_id
 		when 'run' then rf.chat_id
-		when 'system' then null
+		when 'system_chat' then null
 		else c.id
 	end as root_chat_id,
 	coalesce(co.parent_chat_id, sc.served_chat_id) as parent_chat_id,
@@ -2281,16 +2238,14 @@ END;
 $$;--> statement-breakpoint
 -- Request purposes are the glossary's: facilitation is gone, and a trial or
 -- provider check is a model test.
-ALTER TABLE "model_request" DROP CONSTRAINT "model_request_purpose_valid";--> statement-breakpoint
 UPDATE "model_request" SET "purpose" = 'model-test' WHERE "purpose" IN ('trial', 'provider-check');--> statement-breakpoint
 DELETE FROM "model_request" WHERE "purpose" = 'facilitation';--> statement-breakpoint
-ALTER TABLE "model_request" ADD CONSTRAINT "model_request_purpose_valid" CHECK ("purpose" in ('bot-turn', 'compaction', 'model-test'));--> statement-breakpoint
 -- Written files' blobs are kept under `files/<id>`.
 CREATE OR REPLACE FUNCTION queue_deleted_file_blobs() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
 	INSERT INTO "blob_deletion" ("prefix")
-	SELECT 'files/' || "id"::text FROM deleted_files WHERE "kind" IN ('document', 'html');
+	SELECT 'files/' || "id"::text FROM deleted_files WHERE "kind" IN ('markdown', 'html');
 	RETURN NULL;
 END;
 $$;--> statement-breakpoint
@@ -2325,12 +2280,7 @@ UPDATE "run" SET
 	"pending_terminal_state" = NULL,
 	"pending_terminal_error" = NULL,
 	"updated_at" = now()
-WHERE "state" IN ('queued', 'running') AND "id"::text IN (
-	SELECT "payload"->>'executionId' FROM "lane"
-	WHERE "workflow" = 'routine' AND "state" <> 'idle'
-	UNION
-	SELECT "payload"->>'executionId' FROM "lane_request" WHERE "workflow" = 'routine'
-);--> statement-breakpoint
+WHERE "state" IN ('queued', 'running');--> statement-breakpoint
 DELETE FROM "lane_request" WHERE "workflow" IN ('routine', 'summary');--> statement-breakpoint
 DELETE FROM "lane"
 WHERE "workflow" IN ('routine', 'summary') OR "key" LIKE 'routine:%' OR "key" LIKE 'summary:%';--> statement-breakpoint
@@ -2394,67 +2344,6 @@ UPDATE "provider_model" SET "disabled_capabilities" = (
 	FROM jsonb_array_elements("disabled_capabilities")
 ) WHERE "disabled_capabilities" ? 'reasoning';
 --> statement-breakpoint
--- ## System chat kind
--- A system bot's chat is a system chat, the glossary's word, so its kind is
--- `system_chat`, as its table is named. The kind row's own `kind` follows it,
--- and the chats it names are moved with it once the key between them is gone.
-DROP VIEW "placed_chat";--> statement-breakpoint
-ALTER TABLE "system_chat" DROP CONSTRAINT "system_chat_chat_fkey";--> statement-breakpoint
-ALTER TABLE "system_chat" DROP COLUMN "kind";--> statement-breakpoint
-ALTER TABLE "chat" DROP CONSTRAINT "chat_kind_valid";--> statement-breakpoint
-UPDATE "chat" SET "kind" = 'system_chat' WHERE "kind" = 'system';--> statement-breakpoint
-ALTER TABLE "chat" ADD CONSTRAINT "chat_kind_valid" CHECK ("kind" in ('project_chat', 'collaboration', 'run', 'automation_feed', 'system_chat'));--> statement-breakpoint
-ALTER TABLE "system_chat" ADD COLUMN "kind" text GENERATED ALWAYS AS ('system_chat') STORED NOT NULL;--> statement-breakpoint
-ALTER TABLE "system_chat" ADD CONSTRAINT "system_chat_chat_fkey" FOREIGN KEY ("chat_id","kind","workspace_id") REFERENCES "chat"("id","kind","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
--- The kind check names the kinds in its body, so it is made again.
-CREATE OR REPLACE FUNCTION chat_has_kind_row() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE
-	has_kind_row boolean;
-BEGIN
-	IF NOT EXISTS (SELECT 1 FROM "chat" WHERE "id" = NEW."id") THEN
-		RETURN NULL;
-	END IF;
-	has_kind_row := CASE NEW."kind"
-		WHEN 'project_chat' THEN EXISTS (SELECT 1 FROM "project_chat" WHERE "chat_id" = NEW."id")
-		WHEN 'collaboration' THEN EXISTS (SELECT 1 FROM "collaboration" WHERE "chat_id" = NEW."id")
-		WHEN 'run' THEN EXISTS (SELECT 1 FROM "run" WHERE "chat_id" = NEW."id")
-		WHEN 'automation_feed' THEN EXISTS (SELECT 1 FROM "automation_feed" WHERE "chat_id" = NEW."id")
-		WHEN 'system_chat' THEN EXISTS (SELECT 1 FROM "system_chat" WHERE "chat_id" = NEW."id")
-		ELSE false
-	END;
-	IF NOT has_kind_row THEN
-		RAISE EXCEPTION 'chat % is a % with no % row', NEW."id", NEW."kind", NEW."kind"
-			USING ERRCODE = 'foreign_key_violation';
-	END IF;
-	RETURN NULL;
-END;
-$$;
---> statement-breakpoint
-CREATE VIEW "placed_chat" AS (select
-	c.id, c.workspace_id, c.kind, c.title, c.created_at, c.updated_at,
-	coalesce(p.default_of_bot_id, co.collaborator_bot_id, sc.bot_id) as bot_id,
-	p.id as project_id,
-	case c.kind
-		when 'collaboration' then co.root_chat_id
-		when 'run' then rf.chat_id
-		when 'system_chat' then null
-		else c.id
-	end as root_chat_id,
-	coalesce(co.parent_chat_id, sc.served_chat_id) as parent_chat_id,
-	cc.started_by_id,
-	sc.system_bot_key,
-	cc.resolved_at,
-	f.automation_id
-from "chat" c
-left join "project_chat" cc on cc.chat_id = c.id
-left join "collaboration" co on co.chat_id = c.id
-left join "run" r on r.chat_id = c.id
-left join "automation_feed" rf on rf.automation_id = r.automation_id
-left join "automation_feed" f on f.chat_id = c.id
-left join "automation" a on a.id = coalesce(r.automation_id, f.automation_id)
-left join "project" p on p.id = coalesce(cc.project_id, a.project_id)
-left join "system_chat" sc on sc.chat_id = c.id);
---> statement-breakpoint
 -- ## Glossary words for columns, and failed turns' errors
 -- Columns named by the glossary: compacted history is a condensed account, a
 -- turn is interrupted, its workflow is its execution, and a bot has instructions.
@@ -2464,55 +2353,27 @@ ALTER TABLE "turn" RENAME COLUMN "cancel_requested" TO "interrupt_requested";-->
 ALTER TABLE "bot" RENAME COLUMN "prompt" TO "instructions";--> statement-breakpoint
 ALTER TABLE "message" DROP COLUMN "kind";--> statement-breakpoint
 ALTER TABLE "workspace" DROP COLUMN "logo";--> statement-breakpoint
-DROP INDEX "message_run_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "message_run_idx" ON "message" ("run_id") WHERE "run_id" is not null;--> statement-breakpoint
-ALTER TABLE "model_request" ADD CONSTRAINT "model_request_bot_valid" CHECK (("purpose" = 'bot-turn') = ("bot_id" is not null));--> statement-breakpoint
+-- Main could post the same result in the feed and in a project's chat.
+-- Keep the feed's link to the run, and every copy's message, parts and files.
+WITH linked AS (
+	SELECT m."id", row_number() OVER (
+		PARTITION BY m."run_id"
+		ORDER BY (feed."chat_id" IS NOT NULL) DESC, m."created_at", m."id"
+	) AS rank
+	FROM "message" m
+	LEFT JOIN "run" r ON r."id" = m."run_id"
+	LEFT JOIN "automation_feed" feed
+		ON feed."automation_id" = r."automation_id" AND feed."chat_id" = m."chat_id"
+	WHERE m."run_id" IS NOT NULL
+)
+UPDATE "message" m SET "run_id" = NULL
+FROM linked WHERE m."id" = linked."id" AND linked.rank > 1;--> statement-breakpoint
+ALTER TABLE "model_request" ADD CONSTRAINT "model_request_purpose_valid" CHECK ("purpose" in ('bot-turn', 'compaction', 'model-test')),
+	ADD CONSTRAINT "model_request_bot_valid" CHECK ("purpose" = 'bot-turn' or "bot_id" is null);--> statement-breakpoint
 ALTER TABLE "turn" ADD CONSTRAINT "turn_failure_has_error" CHECK ("status" <> 'failed' or "error" is not null);--> statement-breakpoint
 ALTER TABLE "run" DROP CONSTRAINT "run_pending_terminal_valid", ADD CONSTRAINT "run_pending_terminal_valid" CHECK (("pending_terminal_state" is null and "pending_terminal_error" is null)
 				or ("state" = 'running' and "pending_terminal_state" = 'cancelled' and "pending_terminal_error" is null)
 				or ("state" = 'running' and "pending_terminal_state" = 'failed' and "pending_terminal_error" is not null));--> statement-breakpoint
--- A written Markdown file's kind is `markdown`, and a person's file is an
--- `attachment`. The versions' key carries the kind and has no ON UPDATE, so it
--- is dropped while the rows move, and their checks are made again.
-ALTER TABLE "file_version" DROP CONSTRAINT "file_version_file_fkey";--> statement-breakpoint
-ALTER TABLE "file_version" DROP CONSTRAINT "file_version_file_kind_valid";--> statement-breakpoint
-ALTER TABLE "file" DROP CONSTRAINT "file_kind_valid";--> statement-breakpoint
-ALTER TABLE "file" DROP CONSTRAINT "file_source_valid";--> statement-breakpoint
-UPDATE "file" SET "kind" = 'markdown' WHERE "kind" = 'document';--> statement-breakpoint
-UPDATE "file" SET "kind" = 'attachment' WHERE "kind" = 'upload';--> statement-breakpoint
-UPDATE "file_version" SET "file_kind" = 'markdown' WHERE "file_kind" = 'document';--> statement-breakpoint
-ALTER TABLE "file" ADD CONSTRAINT "file_kind_valid" CHECK ("kind" in ('markdown', 'html', 'attachment', 'bot_attachment', 'tool_result'));--> statement-breakpoint
-ALTER TABLE "file" ADD CONSTRAINT "file_source_valid" CHECK (case "kind"
-				when 'attachment' then "name" is not null and "content_type" is not null
-					and "size" is not null and "tool_call_id" is null
-					and ("message_id" is null) = ("position" is null)
-					and "created_by_bot_id" is null and "current_version" is null
-				when 'bot_attachment' then "name" is not null and "content_type" is not null
-					and "size" is not null and "tool_call_id" is null
-					and "uploader_id" is null and "message_id" is not null
-					and "position" is not null
-					and "created_by_bot_id" is null and "current_version" is null
-				when 'tool_result' then "name" is null and "content_type" is not null
-					and "size" is not null and "uploader_id" is null
-					and "message_id" is null and "position" is null
-					and "created_by_bot_id" is null and "current_version" is null
-				else "name" is not null and "current_version" is not null
-					and "content_type" is null and "size" is null
-					and "tool_call_id" is null and "uploader_id" is null
-					and "message_id" is null and "position" is null
-			end);--> statement-breakpoint
-ALTER TABLE "file_version" ADD CONSTRAINT "file_version_file_kind_valid" CHECK ("file_kind" in ('markdown', 'html'));--> statement-breakpoint
-ALTER TABLE "file_version" ADD CONSTRAINT "file_version_file_fkey" FOREIGN KEY ("file_id","file_kind") REFERENCES "file"("id","kind") ON DELETE CASCADE;--> statement-breakpoint
--- The blob deletion names the written kinds in its body, so it is made again.
-CREATE OR REPLACE FUNCTION queue_deleted_file_blobs() RETURNS trigger
-LANGUAGE plpgsql AS $$
-BEGIN
-	INSERT INTO "blob_deletion" ("prefix")
-	SELECT 'files/' || "id"::text FROM deleted_files WHERE "kind" IN ('markdown', 'html');
-	RETURN NULL;
-END;
-$$;
---> statement-breakpoint
 -- ## Members, personal bots and read cursors
 -- Members, personal bots and read cursors by their glossary names: a person
 -- is a member, a bot only its creator sees is a personal bot, and how far a
@@ -2561,10 +2422,6 @@ BEGIN
 	END LOOP;
 END;
 $$;--> statement-breakpoint
-DROP INDEX "chat_participant_member_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "chat_participant_member_idx" ON "chat_participant" ("chat_id","member_id") WHERE "member_id" is not null;--> statement-breakpoint
-DROP INDEX "message_reaction_message_member_emoji_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "message_reaction_message_member_emoji_idx" ON "message_reaction" ("message_id","member_id","emoji") WHERE "member_id" is not null;--> statement-breakpoint
 ALTER TABLE "message" DROP CONSTRAINT "message_one_author", ADD CONSTRAINT "message_one_author" CHECK (num_nonnulls("author_member_id", "author_bot_id", "automation_trigger") = 1);--> statement-breakpoint
 ALTER TABLE "chat_participant" DROP CONSTRAINT "chat_participant_one_identity", ADD CONSTRAINT "chat_participant_one_identity" CHECK (num_nonnulls("member_id", "bot_id") = 1);--> statement-breakpoint
 ALTER TABLE "message_reaction" DROP CONSTRAINT "message_reaction_one_reactor", ADD CONSTRAINT "message_reaction_one_reactor" CHECK (num_nonnulls("member_id", "bot_id") = 1);--> statement-breakpoint
@@ -2642,15 +2499,26 @@ WHERE "prefix" LIKE 'threads/%';--> statement-breakpoint
 -- A helper's failed turn its workflow will start again has not ended, which
 -- its asking bot's hand-back waits for.
 ALTER TABLE "turn" ADD COLUMN "retrying" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-CREATE TABLE "collaboration_move" AS
+CREATE TEMP TABLE "collaboration_move" ON COMMIT DROP AS
 WITH RECURSIVE above AS (
 	SELECT "chat_id", "parent_chat_id" AS "target_chat_id" FROM "collaboration"
 	UNION ALL
 	SELECT above."chat_id", up."parent_chat_id"
 	FROM above JOIN "collaboration" up ON up."chat_id" = above."target_chat_id"
 )
-SELECT "chat_id", "target_chat_id" FROM above
-WHERE "target_chat_id" NOT IN (SELECT "chat_id" FROM "collaboration");--> statement-breakpoint
+CYCLE "target_chat_id" SET "is_cycle" USING "path"
+SELECT "chat_id", "target_chat_id", "is_cycle" FROM above
+WHERE "is_cycle" OR "target_chat_id" NOT IN (SELECT "chat_id" FROM "collaboration");--> statement-breakpoint
+DO $$
+DECLARE
+	affected_chats uuid[];
+BEGIN
+	SELECT array_agg(DISTINCT "chat_id" ORDER BY "chat_id") INTO affected_chats
+	FROM "collaboration_move" WHERE "is_cycle";
+	IF affected_chats IS NOT NULL THEN
+		RAISE EXCEPTION 'Collaboration chat ancestry has a cycle: %', array_to_string(affected_chats, ', ');
+	END IF;
+END $$;--> statement-breakpoint
 -- Turns and compactions asked for there never start. A turn waiting for
 -- approvals keeps its lane, so that once it is cancelled below the sweep
 -- for lost cancels finds its workflow, still waiting, and tells it to stop.
@@ -2703,11 +2571,6 @@ SELECT moved."target_chat_id", participant."member_id", participant."bot_id", pa
 FROM "chat_participant" participant
 JOIN "collaboration_move" moved ON moved."chat_id" = participant."chat_id"
 ON CONFLICT DO NOTHING;--> statement-breakpoint
--- What was recorded on the collaboration chats' own streams, and the cards'
--- updates, which no client shows any more.
-DELETE FROM "event"
-WHERE "type" = 'collaboration.updated'
-	OR "stream" IN (SELECT 'chat:' || "chat_id" FROM "collaboration_move");--> statement-breakpoint
 -- A finished asking reply that held nothing but collaboration cards goes,
 -- unless something still points at it: a turn answering it, or one asked for
 -- and not yet started, as a resumption is; a reply quoting it; a reaction, a
@@ -2777,7 +2640,7 @@ WHERE "prefix" IN (SELECT 'chats/' || "chat_id" FROM "collaboration_move");--> s
 DROP TABLE "collaboration_move";--> statement-breakpoint
 DROP VIEW "placed_chat";--> statement-breakpoint
 DROP TABLE "collaboration";--> statement-breakpoint
-ALTER TABLE "chat" DROP CONSTRAINT "chat_kind_valid", ADD CONSTRAINT "chat_kind_valid" CHECK ("kind" in ('project_chat', 'run', 'automation_feed', 'system_chat'));--> statement-breakpoint
+ALTER TABLE "chat" ADD CONSTRAINT "chat_kind_valid" CHECK ("kind" in ('project_chat', 'run', 'automation_feed', 'system_chat'));--> statement-breakpoint
 -- The kind check names the kinds in its body, so it is made again.
 CREATE OR REPLACE FUNCTION chat_has_kind_row() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
@@ -2921,10 +2784,7 @@ ALTER TABLE "turn" ADD COLUMN "execution_number" integer DEFAULT 0 NOT NULL;
 -- A tool call is recorded as sent before it is sent, under its turn, the
 -- step that made it and the model's id for it, so only one execution of the
 -- turn sends it. Calls made before steps were recorded have no step, and
--- keep no such key.
-DROP INDEX "tool_call_sdk_call_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "tool_call_step_call_idx" ON "tool_call" ("turn_id","step","sdk_tool_call_id");
---> statement-breakpoint
+-- stay unique by turn and call. Build the two indexes after the bulk writes.
 -- ## OAuth exchange claim
 ALTER TABLE "connector" ADD COLUMN "oauth_exchange_id" uuid;--> statement-breakpoint
 ALTER TABLE "connector" ADD COLUMN "oauth_exchange_until" timestamp with time zone;
@@ -2944,9 +2804,6 @@ CREATE TABLE "notification_delivery" (
 --> statement-breakpoint
 ALTER TABLE "notification_delivery" ADD CONSTRAINT "notification_delivery_chat_id_chat_id_fkey" FOREIGN KEY ("chat_id") REFERENCES "chat"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "notification_delivery" ADD CONSTRAINT "notification_delivery_member_id_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "member"("id") ON DELETE CASCADE;
---> statement-breakpoint
--- ## Tool calls without steps stay unique
-CREATE UNIQUE INDEX "tool_call_unstepped_call_idx" ON "tool_call" ("turn_id","sdk_tool_call_id") WHERE "step" is null;
 --> statement-breakpoint
 -- ## Tool calls remember who sent them
 -- Which execution of its turn last sent each tool call, so a newer execution
@@ -3058,41 +2915,35 @@ CREATE TRIGGER turn_asker
 BEFORE INSERT ON "turn"
 FOR EACH ROW EXECUTE FUNCTION set_turn_asker();--> statement-breakpoint
 
--- The turns made before askers were stored keep the asker their chain of turns gave them.
-UPDATE "turn" AS t SET ("asker_id", "asked_by_automation") = (
-	WITH RECURSIVE asking(turn_id, message_id, visited) AS (
-		SELECT t.id, t.trigger_message_id, ARRAY[t.id]
-		UNION ALL
-		SELECT earlier.id, earlier.trigger_message_id, array_append(asking.visited, earlier.id)
-		FROM asking
-		INNER JOIN "message" AS asking_message ON asking_message.id = asking.message_id
-		INNER JOIN "turn" AS earlier ON earlier.id = asking_message.turn_id
-		WHERE asking_message.author_bot_id IS NOT NULL
-			AND earlier.id <> ALL(asking.visited)
-	)
-	SELECT
+-- Resolve direct askers first, then carry them down to replies by other
+-- turns. A cycle without an asker has no seed.
+WITH RECURSIVE ancestry AS MATERIALIZED (
+	SELECT t."id",
 		CASE
-			WHEN end_message.author_member_id IS NOT NULL THEN end_message.author_member_id
-			WHEN end_message.automation_trigger IS NULL
-				AND (end_message.turn_id IS NULL OR end_message.turn_id = asking.turn_id)
-				THEN end_chat.started_by_id
-		END,
-		coalesce(end_message.author_member_id IS NULL AND end_message.automation_trigger IS NOT NULL, false)
-	FROM asking
-	INNER JOIN "message" AS end_message ON end_message.id = asking.message_id
-	LEFT JOIN "project_chat" AS end_chat ON end_chat.chat_id = end_message.chat_id
-	ORDER BY cardinality(asking.visited) DESC
-	LIMIT 1
+			WHEN answered."author_member_id" IS NOT NULL THEN answered."author_member_id"
+			WHEN answered."automation_trigger" IS NULL
+				AND (answered."turn_id" IS NULL OR answered."turn_id" = t."id")
+				THEN started."started_by_id"
+		END AS "asker_id",
+		answered."author_member_id" IS NULL AND answered."automation_trigger" IS NOT NULL AS "automation",
+		CASE WHEN answered."author_bot_id" IS NOT NULL THEN nullif(answered."turn_id", t."id") END AS "writer_id"
+	FROM "turn" t
+	JOIN "message" answered ON answered."id" = t."trigger_message_id"
+	LEFT JOIN "project_chat" started ON started."chat_id" = answered."chat_id"
+), resolved AS (
+	SELECT "id", "asker_id", "automation" FROM ancestry
+	WHERE "writer_id" IS NULL AND ("asker_id" IS NOT NULL OR "automation")
+	UNION ALL
+	SELECT child."id", parent."asker_id", parent."automation"
+	FROM resolved parent JOIN ancestry child ON child."writer_id" = parent."id"
 )
-WHERE EXISTS (SELECT 1 FROM "message" WHERE "message"."id" = t.trigger_message_id);
---> statement-breakpoint
+UPDATE "turn" t SET "asker_id" = resolved."asker_id", "asked_by_automation" = resolved."automation"
+FROM resolved WHERE resolved."id" = t."id";--> statement-breakpoint
 -- ## Approval target and age
 ALTER TABLE "tool_call" ADD COLUMN "approval_computer_project_id" uuid;--> statement-breakpoint
 ALTER TABLE "tool_call" ADD COLUMN "approval_connector_access" text;--> statement-breakpoint
 ALTER TABLE "tool_call" ADD COLUMN "approval_asked_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "tool_call" ADD COLUMN "approval_resolved_targets" jsonb;--> statement-breakpoint
-CREATE INDEX "tool_call_pending_approval_age_idx" ON "tool_call" (coalesce("approval_asked_at", "started_at")) WHERE "approval_status" = 'pending';
---> statement-breakpoint
 UPDATE "tool_call" AS call
 SET "approval_computer_project_id" = placed."project_id"
 FROM "placed_chat" AS placed
@@ -3458,3 +3309,16 @@ ALTER TABLE "bot" DROP COLUMN "in_shared_pod";
 -- ## Approval notifications found by their call
 -- Deleting a tool call deletes the notifications asking to approve it.
 CREATE INDEX "notification_delivery_approval_call_idx" ON "notification_delivery" ("approval_call_id");
+--> statement-breakpoint
+-- Build indexes whose keys are ready after the bulk writes.
+DROP INDEX "message_run_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "message_run_idx" ON "message" ("run_id") WHERE "run_id" is not null;--> statement-breakpoint
+DROP INDEX "tool_call_sdk_call_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "tool_call_step_call_idx" ON "tool_call" ("turn_id","step","sdk_tool_call_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "tool_call_unstepped_call_idx" ON "tool_call" ("turn_id","sdk_tool_call_id") WHERE "step" is null;--> statement-breakpoint
+CREATE INDEX "tool_call_pending_approval_age_idx" ON "tool_call" (coalesce("approval_asked_at", "started_at")) WHERE "approval_status" = 'pending';--> statement-breakpoint
+DROP INDEX "migration_tool_call_chat_idx";--> statement-breakpoint
+DROP INDEX "migration_message_reply_idx";--> statement-breakpoint
+DROP INDEX "migration_thread_read_chat_idx";--> statement-breakpoint
+DROP INDEX "migration_thread_participant_chat_idx";--> statement-breakpoint
+DROP INDEX "migration_file_tool_call_idx";
