@@ -146,7 +146,7 @@ describe("attachments and approvals in a chat", () => {
 			request: crypto.randomUUID(),
 		});
 
-		await expect(Effect.runPromise(body as Effect.Effect<unknown, unknown>)).rejects.toThrow(
+		await expect(Effect.runPromise(Effect.orDie(body) as Effect.Effect<unknown>)).rejects.toThrow(
 			"chats.send was called with an input its contract refuses",
 		);
 	});
