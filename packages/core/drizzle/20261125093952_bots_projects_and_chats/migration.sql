@@ -541,6 +541,18 @@ FROM "orphan_file_bot" source JOIN "orphan_file_chat" destination ON destination
 WHERE a."created_in_thread_id" IS NULL AND a."pod_id" = source."pod_id"
 	AND a."created_by_agent_id" IS NOT DISTINCT FROM source."created_by_agent_id";--> statement-breakpoint
 DELETE FROM "artifact" WHERE "created_in_thread_id" IS NULL;--> statement-breakpoint
+-- A personal pod's level applied where its bot had no level of its own.
+-- Either mute kept the bot quiet until it expired.
+INSERT INTO "notification_override" AS bot_override ("user_id", "agent_id", "level", "muted_until", "updated_at")
+SELECT pod_override."user_id", "agent"."id", pod_override."level", pod_override."muted_until", pod_override."updated_at"
+FROM "pod"
+JOIN "notification_override" pod_override ON pod_override."pod_id" = "pod"."id" AND pod_override."user_id" = "pod"."owner_id"
+JOIN "agent" ON "agent"."pod_id" = "pod"."id"
+WHERE "pod"."kind" = 'personal'
+ON CONFLICT ("user_id", "agent_id") WHERE "agent_id" IS NOT NULL
+DO UPDATE SET "level" = coalesce(bot_override."level", excluded."level"),
+	"muted_until" = greatest(bot_override."muted_until", excluded."muted_until"),
+	"updated_at" = greatest(bot_override."updated_at", excluded."updated_at");--> statement-breakpoint
 UPDATE "agent" SET "pod_id" = NULL;--> statement-breakpoint
 -- A `personal` `pod` admitted its owner alone; projects have no such rule.
 DROP TRIGGER "personal_pod_owner_membership" ON "pod_member";--> statement-breakpoint
@@ -844,9 +856,29 @@ UPDATE "message" SET "parts" = (
 -- as a reply's file cards and an automation's posted result are read from them.
 UPDATE "tool_call" SET
 	"tool" = 'file_' || substring("tool" from 10),
-	"input" = replace("input"::text, '"artifactId"', '"fileId"')::jsonb,
-	"execution_input" = replace("execution_input"::text, '"artifactId"', '"fileId"')::jsonb,
-	"output" = replace(replace("output"::text, '"artifactId"', '"fileId"'), '"artifacts"', '"files"')::jsonb
+	"input" = CASE WHEN jsonb_typeof("input") = 'object' AND "input" ? 'artifactId'
+		THEN ("input" - 'artifactId') || jsonb_build_object('fileId', "input"->'artifactId')
+		ELSE "input"
+	END,
+	"execution_input" = CASE WHEN jsonb_typeof("execution_input") = 'object' AND "execution_input" ? 'artifactId'
+		THEN ("execution_input" - 'artifactId') || jsonb_build_object('fileId', "execution_input"->'artifactId')
+		ELSE "execution_input"
+	END,
+	"output" = CASE
+		WHEN "tool" = 'artifact_list' AND jsonb_typeof("output"->'artifacts') = 'array' THEN
+			("output" - 'artifacts') || jsonb_build_object('files', (
+				SELECT coalesce(jsonb_agg(
+					CASE WHEN jsonb_typeof(entry) = 'object' AND entry ? 'artifactId'
+						THEN (entry - 'artifactId') || jsonb_build_object('fileId', entry->'artifactId')
+						ELSE entry
+					END ORDER BY position
+				), '[]'::jsonb)
+				FROM jsonb_array_elements("output"->'artifacts') WITH ORDINALITY AS listed(entry, position)
+			))
+		WHEN jsonb_typeof("output") = 'object' AND "output" ? 'artifactId'
+			THEN ("output" - 'artifactId') || jsonb_build_object('fileId', "output"->'artifactId')
+		ELSE "output"
+	END
 WHERE "tool" IN ('artifact_list', 'artifact_read', 'artifact_write', 'artifact_edit');--> statement-breakpoint
 -- The file tools a bot has switched off, by their new names.
 UPDATE "agent" SET "disabled_tools" = (
@@ -2201,6 +2233,8 @@ UPDATE "computer_provider" SET "managed_resources" = ("managed_resources" - 'pre
 UPDATE "automation_trigger" SET "settings" = ("settings" - 'connectionId') || jsonb_build_object('connectorId', "settings"->'connectionId') WHERE "settings" ? 'connectionId';--> statement-breakpoint
 UPDATE "run" SET "trigger" = ("trigger" - 'connectionId') || jsonb_build_object('connectorId', "trigger"->'connectionId') WHERE "trigger" ? 'connectionId';
 --> statement-breakpoint
+UPDATE "run" SET "trigger" = ("trigger" - 'requestedByUserId') || jsonb_build_object('requestedByMemberId', "trigger"->'requestedByUserId')
+WHERE "trigger_kind" = 'manual' AND "trigger" ? 'requestedByUserId';--> statement-breakpoint
 -- ## People, avatars and computers by their glossary names
 -- People, memberships, invitations, avatars and computers by their glossary
 -- names: a user is a person, a workspace member's place is a membership, an

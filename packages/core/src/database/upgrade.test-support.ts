@@ -128,6 +128,7 @@ export const migrationScale = {
 	unattributedRequest: "00000015-0000-4000-8000-000000000020",
 	unclaimedRun: "00000009-0000-4000-8000-000000000003",
 	resultRun: "00000009-0000-4000-8000-000000000004",
+	resultRunChat: "0000000f-0000-4000-8000-000000000024",
 	feed: "0000000f-0000-4000-8000-00000000000a",
 	feedResult: "00000001-0000-4000-8000-000000000120",
 	chatResult: "00000001-0000-4000-8000-000000000121",
@@ -153,6 +154,13 @@ export const migrationScale = {
 			text: "# Personal notes",
 		},
 	},
+} as const;
+
+export const personalPodMute = "2099-01-01T10:00:00.000Z";
+export const fileToolCalls = {
+	write: "00000003-0000-4000-8000-000000000121",
+	read: "00000003-0000-4000-8000-000000000122",
+	list: "00000003-0000-4000-8000-000000000123",
 } as const;
 
 export const legacyFiles: readonly LegacyFile[] = [
@@ -507,7 +515,7 @@ INSERT INTO "tool_call" ("id", "thread_id", "message_id", "turn_id", "tool", "sd
  ('00000003-0000-4000-8000-000000000106', '0000000f-0000-4000-8000-000000000002', '00000001-0000-4000-8000-00000000010a', '00000002-0000-4000-8000-000000000106', 'github__delete_comment', 'sdk-106', '{"id":1}', NULL, 'awaiting_approval', 'approval-106', 'pending', '00000011-0000-4000-8000-000000000002', 1, 'delete_comment', true, 0, '2026-10-05 09:12', '2026-10-05 09:12'),
  ('00000003-0000-4000-8000-000000000107', '0000000f-0000-4000-8000-000000000002', '00000001-0000-4000-8000-000000000002', '00000002-0000-4000-8000-000000000001', 'linear__create_issue', 'sdk-107', '{"title":"Hotel"}', '{"ok":true}', 'completed', 'approval-107', 'allowed', '00000011-0000-4000-8000-000000000001', 1, 'create_issue', true, 1, '2026-10-05 09:01', '2026-10-05 09:02'),
  ('00000003-0000-4000-8000-000000000108', '0000000f-0000-4000-8000-000000000002', '00000001-0000-4000-8000-000000000002', '00000002-0000-4000-8000-000000000001', 'request_network_access', 'sdk-108', '{"host":"example.org"}', '{"granted":true}', 'completed', 'approval-108', 'allowed', NULL, NULL, NULL, false, 2, '2026-10-05 09:01', '2026-10-05 09:02'),
- ('00000003-0000-4000-8000-000000000109', '0000000f-0000-4000-8000-000000000002', '00000001-0000-4000-8000-000000000002', '00000002-0000-4000-8000-000000000001', 'artifact_write', 'sdk-109', '{"artifactId":"00000006-0000-4000-8000-000000000001","content":"# Itinerary"}', '{"artifactId":"00000006-0000-4000-8000-000000000001","artifacts":[]}', 'completed', NULL, NULL, NULL, NULL, NULL, true, 3, '2026-10-05 09:01', '2026-10-05 09:02');
+ ('00000003-0000-4000-8000-000000000109', '0000000f-0000-4000-8000-000000000002', '00000001-0000-4000-8000-000000000002', '00000002-0000-4000-8000-000000000001', 'artifact_write', 'sdk-109', '{"artifactId":"00000006-0000-4000-8000-000000000001","baseVersion":1,"content":"# Itinerary"}', '{"status":"written","artifactId":"00000006-0000-4000-8000-000000000001","kind":"document","title":"Itinerary","version":2}', 'completed', NULL, NULL, NULL, NULL, NULL, true, 3, '2026-10-05 09:01', '2026-10-05 09:02');
 INSERT INTO "lane" ("key", "subject", "state", "workflow", "execution_id", "payload") VALUES
  ('turn:0000000f-0000-4000-8000-00000000000c:0000000c-0000-4000-8000-000000000002', '0000000f-0000-4000-8000-00000000000c', 'idle', NULL, NULL, NULL),
  ('turn:0000000f-0000-4000-8000-000000000002:0000000c-0000-4000-8000-000000000002', '0000000f-0000-4000-8000-000000000002', 'running', 'turn', 'execution-budget', '{"threadId":"0000000f-0000-4000-8000-000000000002","agentId":"0000000c-0000-4000-8000-000000000002","triggerMessageId":"00000001-0000-4000-8000-000000000107","reason":"resume"}');
@@ -623,12 +631,16 @@ VALUES ('${migrationScale.reservedBot}', '${legacy.workspace}', '${legacy.pods.f
 -- A queued run whose lane went away, and a finished run that posted to two chats.
 INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "conversation_id") VALUES
  ('0000000f-0000-4000-8000-000000000023', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.planner}', 'routine', 'Daily digest', '0000000f-0000-4000-8000-000000000023'),
- ('0000000f-0000-4000-8000-000000000024', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.planner}', 'routine', 'Daily digest', '0000000f-0000-4000-8000-000000000024');
+ ('${migrationScale.resultRunChat}', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.planner}', 'routine', 'Daily digest', '${migrationScale.resultRunChat}');
 INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "conversation_id", "routine_id")
 VALUES ('${migrationScale.feed}', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.planner}', 'routine_feed', 'Daily digest', '${migrationScale.feed}', '${legacy.routine}');
 INSERT INTO "routine_execution" ("id", "routine_id", "workspace_id", "agent_id", "thread_id", "trigger_kind", "trigger_identity", "trigger", "routine_name", "instructions", "state", "started_at", "finished_at") VALUES
  ('${migrationScale.unclaimedRun}', '${legacy.routine}', '${legacy.workspace}', '${legacy.bots.planner}', '0000000f-0000-4000-8000-000000000023', 'manual', 'unclaimed', '{"kind":"manual"}', 'Daily digest', 'Sum up the day', 'queued', NULL, NULL),
- ('${migrationScale.resultRun}', '${legacy.routine}', '${legacy.workspace}', '${legacy.bots.planner}', '0000000f-0000-4000-8000-000000000024', 'manual', 'result', '{"kind":"manual"}', 'Daily digest', 'Sum up the day', 'completed', '2026-10-09 09:00', '2026-10-09 09:01');
+ ('${migrationScale.resultRun}', '${legacy.routine}', '${legacy.workspace}', '${legacy.bots.planner}', '${migrationScale.resultRunChat}', 'manual', 'result', '{"kind":"manual"}', 'Daily digest', 'Sum up the day', 'completed', '2026-10-09 09:00', '2026-10-09 09:01');
+UPDATE "routine_execution"
+SET "trigger_identity" = "id"::text,
+	"trigger" = jsonb_build_object('kind', 'manual', 'requestId', "id", 'requestedAt', '2026-10-08T09:00:00.000Z', 'requestedByUserId', '${legacy.members.sam}')
+WHERE "trigger_kind" = 'manual';
 UPDATE "routine" SET "results" = 'post_to_chat', "chat_id" = '${legacy.threads.trip}' WHERE "id" = '${legacy.routine}';
 INSERT INTO "message" ("id", "thread_id", "author_agent_id", "routine_execution_id", "kind", "status", "parts", "content", "created_at") VALUES
  ('${migrationScale.feedResult}', '${migrationScale.feed}', '${legacy.bots.planner}', '${migrationScale.resultRun}', 'text', 'complete', '[{"type":"text","text":"Digest ready."}]', 'Digest ready.', '2026-10-09 09:02'),
@@ -637,6 +649,29 @@ INSERT INTO "message" ("id", "thread_id", "author_agent_id", "routine_execution_
 -- The reply and read must go with the direct chat.
 INSERT INTO "message" ("thread_id", "author_user_id", "reply_to_message_id", "kind", "status", "parts", "content")
 VALUES ('${legacy.directMessages.samAndPat}', '${legacy.members.pat}', '00000001-0000-4000-8000-0000000000d1', 'text', 'complete', '[]', 'Got the tickets.');
+`;
+
+export const legacyPersonalPodNotifications = `
+INSERT INTO "notification_override" ("user_id", "pod_id", "level", "muted_until") VALUES
+ ('${legacy.members.pat}', '0000000d-0000-4000-8000-000000000003', 'nothing', '${personalPodMute}'),
+ ('${legacy.members.lee}', '0000000d-0000-4000-8000-000000000005', 'nothing', '2099-01-01T08:00:00.000Z');
+INSERT INTO "notification_override" ("user_id", "agent_id", "level", "muted_until") VALUES
+ ('${legacy.members.pat}', '${legacy.bots.helper}', 'all', '2099-01-01T09:00:00.000Z'),
+ ('${legacy.members.lee}', '${legacy.bots.sketch}', NULL, '${personalPodMute}');
+`;
+
+export const legacyFileToolCalls = `
+INSERT INTO "tool_call" ("id", "thread_id", "message_id", "turn_id", "tool", "input", "execution_input", "output", "status", "at_offset") VALUES
+ ('${fileToolCalls.write}', '${legacy.threads.trip}', '${legacy.tripMessages.answered}', '00000002-0000-4000-8000-000000000001', 'artifact_write',
+  '{"artifactId":"00000006-0000-4000-8000-000000000001","baseVersion":1,"content":"artifactId"}',
+  '{"artifactId":"00000006-0000-4000-8000-000000000001","baseVersion":1,"content":"artifactId"}',
+  '{"status":"written","artifactId":"00000006-0000-4000-8000-000000000001","kind":"document","title":"artifacts","version":2}', 'completed', 0),
+ ('${fileToolCalls.read}', '${legacy.threads.trip}', '${legacy.tripMessages.answered}', '00000002-0000-4000-8000-000000000001', 'artifact_read',
+  '{"artifactId":"00000006-0000-4000-8000-000000000001"}', NULL,
+  '{"status":"found","artifactId":"00000006-0000-4000-8000-000000000001","kind":"document","title":"artifacts","version":2,"updatedAt":"2026-10-05T09:02:00.000Z","content":"artifactId"}', 'completed', 0),
+ ('${fileToolCalls.list}', '${legacy.threads.trip}', '${legacy.tripMessages.answered}', '00000002-0000-4000-8000-000000000001', 'artifact_list',
+  '{}', NULL,
+  '{"artifacts":[{"artifactId":"00000006-0000-4000-8000-000000000001","kind":"document","title":"artifacts","version":2,"updatedAt":"2026-10-05T09:02:00.000Z"}]}', 'completed', 0);
 `;
 
 export const legacyCyclicCollaboration = `

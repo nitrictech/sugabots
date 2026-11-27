@@ -6,6 +6,8 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { PgClient } from "@effect/sql-pg";
 import { botUpdateSchema } from "@sugabots/contracts";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { automationsContracts } from "@sugabots/contracts/operations/automations";
+import { chatReadsContracts } from "@sugabots/contracts/operations/chat-reads";
 import { WorkflowEngines } from "@sugabots/workflow/engine";
 import { makeWithDefaults } from "drizzle-orm/effect-postgres";
 import { migrate } from "drizzle-orm/effect-postgres/migrator";
@@ -82,6 +84,7 @@ import { message, turn } from "./schema.ts";
 import { type TestInfrastructure, testInfrastructure } from "./testing.ts";
 import {
 	bytesQueuedForDeletion,
+	fileToolCalls,
 	LAST_MAIN_MIGRATION,
 	type LegacyFile,
 	legacy,
@@ -89,13 +92,16 @@ import {
 	legacyCyclicCollaboration,
 	legacyFacilitationRequest,
 	legacyFiles,
+	legacyFileToolCalls,
 	legacyKeyOf,
 	legacyMigrationScaleRows,
+	legacyPersonalPodNotifications,
 	legacyRows,
 	legacySessions,
 	legacySessionToken,
 	legacySummaryRequest,
 	migrationScale,
+	personalPodMute,
 } from "./upgrade.test-support.ts";
 
 /**
@@ -183,6 +189,8 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					],
 				);
 				await client.query(legacyMigrationScaleRows);
+				await client.query(legacyPersonalPodNotifications);
+				await client.query(legacyFileToolCalls);
 				await client.query(
 					`with added as (
 						insert into routine (workspace_id, agent_id, name, instructions, state)
@@ -1042,6 +1050,80 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					content: "Digest ready.",
 				},
 			]);
+		});
+
+		const manualRun = {
+			id: migrationScale.resultRun,
+			trigger: {
+				kind: "manual",
+				requestId: migrationScale.resultRun,
+				requestedAt: "2026-10-08T09:00:00.000Z",
+				requestedByMemberId: legacy.members.sam,
+			},
+		};
+
+		it("opens a historical manual run as a run chat", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const sam = await upgraded.signIn(legacy.members.sam);
+			const chat = await call(sam, "chats.get", { chatId: migrationScale.resultRunChat, limit: 1 });
+			const response = Schema.encodeSync(chatReadsContracts["chats.get"].output)(chat);
+			expect(response.automationRun).toMatchObject(manualRun);
+		});
+
+		it("lists historical manual runs in their automation's project", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const sam = await upgraded.signIn(legacy.members.sam);
+			const [project] = await upgraded.rows<{ id: string }>(
+				"select id from project where default_of_bot_id = $1",
+				[legacy.bots.planner],
+			);
+			if (!project) throw new Error("Planner has no default project");
+			const page = await call(sam, "automations.projectRuns", { projectId: project.id, limit: 10 });
+			const response = Schema.encodeSync(automationsContracts["automations.projectRuns"].output)(
+				page,
+			);
+			expect(response.items).toContainEqual(expect.objectContaining(manualRun));
+		});
+
+		it("carries personal pod notification levels and mutes to the bots", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const pat = await upgraded.signIn(legacy.members.pat);
+			const lee = await upgraded.signIn(legacy.members.lee);
+			const { helper, patsAssistant, sketch } = legacy.bots;
+
+			expect(await call(pat, "notifications.settings", {})).toMatchObject({
+				bots: { [patsAssistant]: "nothing", [helper]: "all" },
+				mutedUntil: { bots: { [patsAssistant]: personalPodMute, [helper]: personalPodMute } },
+			});
+			expect(await call(lee, "notifications.settings", {})).toMatchObject({
+				bots: { [sketch]: "nothing" },
+				mutedUntil: { bots: { [sketch]: personalPodMute } },
+			});
+		});
+
+		it("renames the file tool keys while preserving recorded text", async () => {
+			const [write, read, list] = await upgraded.rows(
+				"select tool, input, execution_input, output from tool_call where id = any($1) order by id",
+				[Object.values(fileToolCalls)],
+			);
+			const fileId = "00000006-0000-4000-8000-000000000001";
+			const writeInput = { fileId, baseVersion: 1, content: "artifactId" };
+			expect(write).toEqual({
+				tool: "file_write",
+				input: writeInput,
+				execution_input: writeInput,
+				output: { status: "written", fileId, kind: "document", title: "artifacts", version: 2 },
+			});
+			expect(read).toMatchObject({
+				tool: "file_read",
+				input: { fileId },
+				execution_input: null,
+				output: { fileId, title: "artifacts", content: "artifactId" },
+			});
+			expect(list).toMatchObject({
+				tool: "file_list",
+				output: { files: [{ fileId, title: "artifacts" }] },
+			});
 		});
 
 		it("leaves the opener unknown when a workspace has no members", async () => {
