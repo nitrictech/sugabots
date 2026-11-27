@@ -867,7 +867,7 @@ export const make = Effect.gen(function* () {
 	const opened = (project: Project, provider: ComputerProviderStore.Configured) =>
 		Effect.gen(function* () {
 			const at = computers.forAccess(provider.access);
-			const replaced = (computer: Computers.Computer): Opened => ({
+			const replaced = (computer: Computers.Computer): Arrived => ({
 				computer,
 				arrival: "replaced",
 			});
@@ -877,7 +877,7 @@ export const make = Effect.gen(function* () {
 				(row, intentId) =>
 					openedAndRecorded(at, row, intentId).pipe(
 						Effect.map(
-							({ computer, resumed }): Opened => ({
+							({ computer, resumed }): Arrived => ({
 								computer,
 								arrival: !resumed
 									? "running"
@@ -892,14 +892,14 @@ export const make = Effect.gen(function* () {
 						Effect.catchTag("ComputerStopped", () =>
 							Effect.map(
 								restarted(project, row, provider.access, intentId),
-								(computer): Opened => ({ computer, arrival: "rebooted" }),
+								(computer): Arrived => ({ computer, arrival: "rebooted" }),
 							),
 						),
 					),
 			);
 			if (existing) return existing;
 			if (!row)
-				return { computer: yield* made(project, provider), arrival: "made" } satisfies Opened;
+				return { computer: yield* made(project, provider), arrival: "made" } satisfies Arrived;
 			yield* leaveOldProvider(row);
 			return replaced(yield* made(project, provider));
 		});
@@ -973,7 +973,8 @@ export const make = Effect.gen(function* () {
 				project,
 				Effect.gen(function* () {
 					const row = yield* lockComputer(inProject(project));
-					if (!row || row.providerComputerId !== providerComputerId || row.sleptAt) return false;
+					if (!row || row.providerComputerId !== providerComputerId || row.sleptAt)
+						return undefined;
 					const now = yield* DateTime.now;
 					if (hasFreshIntent(row, now)) return "busy" as const;
 					const expiresAt = DateTime.toDateUtc(DateTime.addDuration(now, LEASE));
@@ -996,7 +997,7 @@ export const make = Effect.gen(function* () {
 								set: { providerComputerId, expiresAt },
 							}),
 					);
-					return true;
+					return row.id;
 				}),
 			);
 			let leased = yield* attempt;
@@ -1405,9 +1406,10 @@ export const make = Effect.gen(function* () {
 							),
 						);
 						if (!result) continue;
-						if (!(yield* lease(project, holder, result.computer.id))) continue;
+						const record = yield* lease(project, holder, result.computer.id);
+						if (!record) continue;
 						yield* applyNetwork(project, result.computer, computers.forAccess(provider.access));
-						return result;
+						return { ...result, record } satisfies Opened;
 					}
 				}),
 			),
@@ -1958,8 +1960,17 @@ export interface Project {
 	readonly projectId: string;
 }
 
+/** How the project's computer came to be ready, before a lease holds it. */
+type Arrived = Omit<Opened, "record">;
+
 export interface Opened {
 	readonly computer: Computers.Computer;
+	/**
+	 * The project's computer record the lease holds. A reset replaces the
+	 * record with another, so whoever opened it can tell the computer they
+	 * expected from one made since in its place.
+	 */
+	readonly record: string;
 	/**
 	 * How the computer came to be ready, which decides what the bot is told:
 	 * - `made`: new, with nothing in it.

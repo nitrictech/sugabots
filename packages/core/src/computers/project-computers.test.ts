@@ -559,6 +559,19 @@ describe("a project's computer, over an in-memory provider", () => {
 	});
 
 	describe("resetting", () => {
+		it("leases the record it opens, which a reset replaces with another", async () => {
+			const world = await startWorld();
+			const first = await world.open();
+			const again = await world.open();
+			await world.release();
+			await runOnPostgres(world.projectComputers.reset(world.project));
+
+			const replacement = await world.open();
+
+			expect(again.record).toBe(first.record);
+			expect(replacement.record).not.toBe(first.record);
+		});
+
 		it("won't reset a computer a turn is using, and resets it once the turn lets go", async () => {
 			const world = await startWorld();
 			await world.open();

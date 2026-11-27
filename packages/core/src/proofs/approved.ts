@@ -156,6 +156,14 @@ export const proveApprovedAsResolved = <
 	...targets: NamedTargets<Targets>
 ) => proveApproval(principal, call, rule, input, targets, { resolvedTargets });
 
+/**
+ * `proveApproved` for a bot's request to reach a host, bound to the project
+ * whose computer it asked from, not to that computer: allowing it adds the
+ * host to the project's allowed hosts, which are the project's policy for
+ * whatever computer it has, so the grant outlasts a reset. Whoever decides
+ * must manage the project, and the bot that asked must still be able to use
+ * its computer when they do.
+ */
 export const proveComputerRequestApproved = <P, X, I, C>(
 	principal: Named<P, Principal>,
 	call: Named<X, Call>,

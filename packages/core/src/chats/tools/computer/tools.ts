@@ -7,7 +7,7 @@ import {
 } from "@sugabots/contracts";
 import { MAX_SHARED_FILE_BYTES } from "@sugabots/contracts/operations/computers";
 import { type DomainError, UserText, userText } from "@sugabots/errors";
-import { Effect } from "effect";
+import { Effect, ErrorReporter, Schema } from "effect";
 import { Computers } from "../../../computers/computers.ts";
 import type { ProjectComputers } from "../../../computers/project-computers.ts";
 import type { RunEffect } from "../../../database/database.ts";
@@ -58,10 +58,16 @@ export function placeOf(turn: { chatId: string; botId: string }): Place {
 }
 
 /**
+ * The computer as a call finds it open: whether the step made it, which
+ * tells a computer made for this turn from one made since a call was proved.
+ */
+export type StepOpened = ProjectComputers.Opened & { readonly madeInStep: boolean };
+
+/**
  * Opens the computer of the project the turn works in on the first call that needs it, and reuses it for
  * the rest of the turn, so a turn that never runs anything never starts one.
  */
-type OpenComputer = () => Promise<ProjectComputers.Opened>;
+type OpenComputer = () => Promise<StepOpened>;
 
 /** The computer of the project the turn works in, as the turn's tools reach it. */
 export interface TurnComputer {
@@ -88,10 +94,11 @@ export function openOncePerTurn(open: () => Promise<ProjectComputers.Opened>): O
 			throw cause;
 		});
 		const opened = await opening;
+		const madeInStep = opened.arrival === "made";
 		// What happened to the computer is news only to the first call that sees it.
-		if (told) return { ...opened, arrival: "running" };
+		if (told) return { ...opened, arrival: "running", madeInStep };
 		told = true;
-		return opened;
+		return { ...opened, madeInStep };
 	};
 }
 
@@ -111,7 +118,8 @@ export async function inComputer<A>(
 	try {
 		opened = await computer.open();
 	} catch (cause) {
-		if (cause instanceof Computers.Unavailable) return failed(cause.userMessage);
+		if (cause instanceof Computers.Unavailable || cause instanceof ComputerUseEnded)
+			return failed(cause.userMessage);
 		throw cause;
 	}
 	const note = arrivalNote(opened.arrival);
@@ -126,6 +134,25 @@ export async function inComputer<A>(
 		),
 		{ signal: abortSignal },
 	);
+}
+
+/**
+ * The turn may no longer use its project's computer: its bot's computer use
+ * was turned off, or its asker may no longer change things in the project,
+ * since its step began.
+ */
+export class ComputerUseEnded
+	extends Schema.TaggedError<ComputerUseEnded>()("ComputerUseEnded", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The turn may no longer use its project's computer";
+	}
+	get userMessage() {
+		return userText`You can't use this project's computer any more, so nothing was done there.`;
+	}
 }
 
 /** What the bot needs to know about how its computer came back, if anything. */

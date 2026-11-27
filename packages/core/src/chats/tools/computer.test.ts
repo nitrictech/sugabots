@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { Effect, Exit, Layer, Scope, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -23,6 +24,7 @@ import {
 	localComputerTools,
 	stepOnComputer,
 } from "./computer/testing.ts";
+import { ComputerUseEnded } from "./computer/tools.ts";
 import { TurnComputers } from "./computer/turn-computers.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("computer tool step lifetimes", () => {
@@ -62,6 +64,63 @@ describe.skipIf(!process.env.DATABASE_URL)("computer tool step lifetimes", () =>
 			await Effect.runPromise(
 				Effect.all([Scope.close(later, Exit.void), Scope.close(earlier, Exit.void)]),
 			);
+		}
+	});
+
+	it("proves again that the turn may use it, so a tool that opens it after computer use is turned off runs nothing", async () => {
+		const workspaceId = await seedWorkspace();
+		const memberId = await seedMember(workspaceId, "editor");
+		const bot = await seedBot(workspaceId, { usesComputer: true, createdById: memberId });
+		const chatId = await seedProjectChat(workspaceId, bot.defaultProject, memberId);
+		const principal = await principals(await authenticators()).botFor(memberId, bot.id, chatId);
+		const providers = await runOnPostgres(
+			Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer),
+		);
+		await runOnPostgres(
+			providers.create(workspaceId, {
+				createdById: memberId,
+				provider: {
+					settings: {
+						builtIn: "opensandbox",
+						serverUrl: "https://computers.example.com",
+						image: "sugabots-computer:dev",
+						networkMode: "allowed-hosts-only",
+					},
+					enabled: true,
+					apiKey: "never-used",
+				},
+			}),
+		);
+		const computers = await runOnPostgres(
+			Effect.provide(TurnComputers.Service, TurnComputers.layer).pipe(Effect.provide(noComputers)),
+		);
+		const scope = Effect.runSync(Scope.make());
+		try {
+			const { step } = await stepOnComputer(
+				computers,
+				principal,
+				{
+					workspaceId,
+					projectId: bot.defaultProject,
+					turnId: principal.turn,
+					chatId,
+					botId: bot.id,
+					color: "orange",
+					naturalBrowsing: false,
+					acceptsImages: false,
+				},
+				scope,
+			);
+			const opening = step.atPlace;
+			if (!opening) throw new Error("The step has no computer");
+
+			await onDatabase((db) =>
+				db.update(botTable).set({ usesComputer: false }).where(eq(botTable.id, bot.id)),
+			);
+
+			await expect(opening.open()).rejects.toBeInstanceOf(ComputerUseEnded);
+		} finally {
+			await Effect.runPromise(Scope.close(scope, Exit.void));
 		}
 	});
 });

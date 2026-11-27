@@ -3,6 +3,7 @@ export * as TurnComputers from "./turn-computers.ts";
 import { posix } from "node:path";
 import type { BotColor } from "@sugabots/contracts";
 import { NoComputerProvider } from "@sugabots/contracts/errors/computers";
+import { ApprovalNeeded } from "@sugabots/contracts/errors/proofs";
 import type { OutputOf } from "@sugabots/contracts/operations";
 import { MAX_SHARED_FILE_MEGABYTES } from "@sugabots/contracts/operations/computers";
 import { UserText, userText } from "@sugabots/errors";
@@ -18,7 +19,7 @@ import { effectRunner, serviceOperations } from "../../../database/database.ts";
 import { ChatFileStore } from "../../../files/chat-file-store.ts";
 import { Ids } from "../../../ids/ids.ts";
 import type { BotPrincipal } from "../../../principal.ts";
-import type { Approved } from "../../../proofs/approved.ts";
+import type { Approved, ApprovedOperation } from "../../../proofs/approved.ts";
 import {
 	type CanUseChatComputer,
 	proveCanUseChatComputer,
@@ -34,6 +35,7 @@ import {
 	type AttachToReply,
 	arrivalNote,
 	type ComputerAtPlace,
+	ComputerUseEnded,
 	diskNote,
 	megabytes,
 	networkNote,
@@ -41,6 +43,7 @@ import {
 	type Place,
 	placeOf,
 	readSharableFile,
+	type StepOpened,
 	type TurnComputer,
 } from "./tools.ts";
 
@@ -69,15 +72,15 @@ export interface Interface {
 	readonly runCommand: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.runCommand">,
-	) => Effect.Effect<OutputOf<"computers.runCommand">, NoComputerProvider>;
+	) => Effect.Effect<OutputOf<"computers.runCommand">, NoComputerProvider | ApprovalNeeded>;
 	readonly readFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.readFile">,
-	) => Effect.Effect<OutputOf<"computers.readFile">, NoComputerProvider>;
+	) => Effect.Effect<OutputOf<"computers.readFile">, NoComputerProvider | ApprovalNeeded>;
 	readonly writeFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.writeFile">,
-	) => Effect.Effect<OutputOf<"computers.writeFile">, NoComputerProvider>;
+	) => Effect.Effect<OutputOf<"computers.writeFile">, NoComputerProvider | ApprovalNeeded>;
 	/**
 	 * Copies a file in the chat into the chat's folder in the computer. The
 	 * file is looked up first, so an id that names none never starts the
@@ -86,7 +89,7 @@ export interface Interface {
 	readonly copyChatFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.copyChatFile">,
-	) => Effect.Effect<OutputOf<"computers.copyChatFile">, NoComputerProvider>;
+	) => Effect.Effect<OutputOf<"computers.copyChatFile">, NoComputerProvider | ApprovalNeeded>;
 	/**
 	 * Attaches a file from the computer to the turn's reply, where members see
 	 * it as soon as it is. One file at a time, since each is held whole on its
@@ -95,12 +98,12 @@ export interface Interface {
 	readonly shareFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.shareFile">,
-	) => Effect.Effect<OutputOf<"computers.shareFile">, NoComputerProvider>;
+	) => Effect.Effect<OutputOf<"computers.shareFile">, NoComputerProvider | ApprovalNeeded>;
 	/** Calls one of the browser tools in the bot's browser in the chat. */
 	readonly useBrowser: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.useBrowser">,
-	) => Effect.Effect<OutputOf<"computers.useBrowser">, NoComputerProvider>;
+	) => Effect.Effect<OutputOf<"computers.useBrowser">, NoComputerProvider | ApprovalNeeded>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/TurnComputers") {
@@ -216,8 +219,16 @@ export const make = Effect.gen(function* () {
 					computer.exec(`mkdir -p '${place.folder}' '${place.home}'`, DIRECTORY_COMMAND),
 				),
 			);
+			const opening = openOncePerTurn(() => run(prepared, { signal: stepEnded }));
 			const computer: TurnComputer = {
-				open: openOncePerTurn(() => run(prepared, { signal: stepEnded })),
+				// Each call proves again that the turn may use the computer, the
+				// connectors' tools that read from it included, so a call made after
+				// the bot's computer use or its asker's standing went runs nothing there.
+				open: async () => {
+					if (!(await run(operation("forStep", canAskForComputer(principal)))))
+						throw new ComputerUseEnded();
+					return opening();
+				},
 				run,
 			};
 			const browser = browserSession(computer, place, turn);
@@ -249,14 +260,14 @@ export const make = Effect.gen(function* () {
 		forStep,
 		requireComputer: (canUse) => Effect.asVoid(stepOf(canUse)),
 
-		runCommand: (canUse, { input: { command, timeout_seconds } }) =>
+		runCommand: (canUse, approved) =>
 			Effect.flatMap(stepOf(canUse), ({ computer, place }) =>
-				inComputer(computer, (opened) =>
+				inComputer(computer, approvedComputer(canUse, approved), (opened) =>
 					opened
-						.exec(`bash -lc ${Computers.shellQuoted(command)}`, {
+						.exec(`bash -lc ${Computers.shellQuoted(approved.input.command)}`, {
 							cwd: place.folder,
 							env: { HOME: place.home },
-							timeout: `${timeout_seconds} seconds`,
+							timeout: `${approved.input.timeout_seconds} seconds`,
 							maxOutputCharacters: MAX_OUTPUT_CHARACTERS,
 						})
 						.pipe(
@@ -271,12 +282,13 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		readFile: (canUse, { input: { path } }) =>
+		readFile: (canUse, approved) =>
 			Effect.flatMap(stepOf(canUse), ({ computer, place, acceptsImages }) => {
+				const { path } = approved.input;
 				const asImage =
 					acceptsImages && IMAGE_EXTENSIONS.has(posix.extname(path).slice(1).toLowerCase());
 				const where = absolute(place, path);
-				return inComputer(computer, (opened) =>
+				return inComputer(computer, approvedComputer(canUse, approved), (opened) =>
 					opened
 						.readFile(where, asImage ? MAX_IMAGE_BYTES : MAX_READ_BYTES)
 						.pipe(
@@ -287,20 +299,23 @@ export const make = Effect.gen(function* () {
 				);
 			}),
 
-		writeFile: (canUse, { input: { path, content } }) =>
-			Effect.flatMap(stepOf(canUse), ({ computer, place }) =>
-				inComputer(computer, (opened) =>
+		writeFile: (canUse, approved) =>
+			Effect.flatMap(stepOf(canUse), ({ computer, place }) => {
+				const { path, content } = approved.input;
+				return inComputer(computer, approvedComputer(canUse, approved), (opened) =>
 					opened
 						.writeFile(absolute(place, path), new TextEncoder().encode(content))
 						.pipe(Effect.as({ written: absolute(place, path) })),
-				),
-			),
+				);
+			}),
 
-		copyChatFile: (canUse, { input: { file } }) =>
+		copyChatFile: (canUse, approved) =>
 			Effect.flatMap(stepOf(canUse), ({ computer, place }) =>
-				files.read({ chatId: canUse.chat.value, fileId: file }).pipe(
+				files.read({ chatId: canUse.chat.value, fileId: approved.input.file }).pipe(
 					Effect.flatMap((found) =>
-						inComputer(computer, (opened) => copyChatFileInto(opened, place, found, ids)),
+						inComputer(computer, approvedComputer(canUse, approved), (opened) =>
+							copyChatFileInto(opened, place, found, ids),
+						),
 					),
 					Effect.catchTags({
 						ChatFileNotFound: refusedRead,
@@ -310,26 +325,39 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		shareFile: (canUse, { input: { path, name } }) =>
+		shareFile: (canUse, approved) =>
 			Effect.flatMap(stepOf(canUse), ({ computer, place, attach, sharing }) => {
+				const { path, name } = approved.input;
 				if (!attach) {
 					return Effect.succeed(failed(userText`Files can be shared only in a project's chats.`));
 				}
-				return inComputer(computer, (opened) =>
+				return inComputer(computer, approvedComputer(canUse, approved), (opened) =>
 					sharing.withPermits(1)(shareFrom(opened, absolute(place, path), name, attach)),
 				);
 			}),
 
-		useBrowser: (canUse, { input: { tool, arguments: input } }) =>
-			Effect.flatMap(stepOf(canUse), ({ browser, acceptsImages }) => {
-				if (!browser || !isBrowserTool(tool, acceptsImages)) {
-					return Effect.succeed(failed(userText`There is no browser tool by that name.`));
-				}
-				return Effect.tryPromise({
-					try: (signal) => browser.call(tool, input, signal),
-					catch: (cause) => cause,
-				}).pipe(Effect.orDie);
-			}),
+		useBrowser: (canUse, approved) =>
+			Effect.flatMap(stepOf(canUse), ({ computer, browser, acceptsImages }) =>
+				Effect.gen(function* () {
+					const { tool, arguments: input } = approved.input;
+					if (!browser || !isBrowserTool(tool, acceptsImages)) {
+						return failed(userText`There is no browser tool by that name.`);
+					}
+					// The browser opens the computer itself; this checks it is the approved one first.
+					const opened = yield* openAsApproved(computer, approvedComputer(canUse, approved));
+					if ("status" in opened) return opened;
+					return yield* Effect.tryPromise({
+						try: (signal) => browser.call(tool, input, signal),
+						catch: (cause) => cause,
+					}).pipe(
+						Effect.catchIf(
+							(cause): cause is ComputerUseEnded => cause instanceof ComputerUseEnded,
+							(refusal) => Effect.succeed(failed(refusal.userMessage)),
+						),
+						Effect.orDie,
+					);
+				}),
+			),
 	});
 });
 
@@ -399,21 +427,13 @@ const canAskForComputer = (principal: BotPrincipal) =>
  */
 function inComputer<A extends object>(
 	computer: TurnComputer,
+	expected: ApprovedComputer,
 	work: (
 		computer: Computers.Computer,
 	) => Effect.Effect<A | Failed, Computers.Unavailable | Computers.FileFailed>,
-): Effect.Effect<(A & { note?: UserText }) | Failed> {
+): Effect.Effect<(A & { note?: UserText }) | Failed, ApprovalNeeded> {
 	return Effect.gen(function* () {
-		const opened = yield* Effect.tryPromise({
-			try: () => computer.open(),
-			catch: (cause) => cause,
-		}).pipe(
-			Effect.catchIf(
-				(cause): cause is Computers.Unavailable => cause instanceof Computers.Unavailable,
-				(unavailable) => Effect.succeed(failed(unavailable.userMessage)),
-			),
-			Effect.orDie,
-		);
+		const opened = yield* openAsApproved(computer, expected);
 		if ("status" in opened) return opened;
 		const note = arrivalNote(opened.arrival);
 		const result = yield* work(opened.computer).pipe(
@@ -425,6 +445,51 @@ function inComputer<A extends object>(
 		);
 		if ("status" in result && result.status === "failed") return result;
 		return note ? { ...result, note } : result;
+	});
+}
+
+/**
+ * The computer an approver allowed the call on: the project's computer
+ * record as the call was proved, or null when it had none, so only a computer
+ * the step made for it will do. Undefined for a call nobody approved, which
+ * any computer of the project serves.
+ */
+type ApprovedComputer = { readonly record: string | null } | undefined;
+
+/** The computer the call `approved` was allowed on, as `canUse` proved it. */
+function approvedComputer<P, C, X, N extends ApprovedOperation>(
+	canUse: CanUseChatComputer<P, C>,
+	approved: Approved<P, X, [C], N>,
+): ApprovedComputer {
+	return approved.decidedBy === null ? undefined : { record: canUse.computer };
+}
+
+/**
+ * Opens the step's computer, which takes the step's lease on it, and checks it
+ * is the one `expected` names: a computer reset or made since the call was
+ * approved needs a fresh approval. A refusal the bot can act on becomes a result.
+ */
+function openAsApproved(
+	computer: TurnComputer,
+	expected: ApprovedComputer,
+): Effect.Effect<StepOpened | Failed, ApprovalNeeded> {
+	return Effect.gen(function* () {
+		const opened = yield* Effect.tryPromise({
+			try: () => computer.open(),
+			catch: (cause) => cause,
+		}).pipe(
+			Effect.catchIf(
+				(cause): cause is Computers.Unavailable | ComputerUseEnded =>
+					cause instanceof Computers.Unavailable || cause instanceof ComputerUseEnded,
+				(refusal) => Effect.succeed(failed(refusal.userMessage)),
+			),
+			Effect.orDie,
+		);
+		if ("status" in opened || expected === undefined) return opened;
+		const asApproved =
+			expected.record === null ? opened.madeInStep : opened.record === expected.record;
+		if (!asApproved) return yield* new ApprovalNeeded();
+		return opened;
 	});
 }
 
