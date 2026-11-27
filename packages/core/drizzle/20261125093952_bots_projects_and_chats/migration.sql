@@ -329,9 +329,10 @@ BEGIN
 	END LOOP;
 END $$;--> statement-breakpoint
 -- A `pod` of kind `shared` keeps its people and gains its bots, as projects
--- have them.
-INSERT INTO "pod_agent" ("workspace_id", "pod_id", "agent_id")
-SELECT "agent"."workspace_id", "agent"."pod_id", "agent"."id"
+-- have them, each added when it was made in the pod, so the first one added
+-- is the first one made.
+INSERT INTO "pod_agent" ("workspace_id", "pod_id", "agent_id", "created_at")
+SELECT "agent"."workspace_id", "agent"."pod_id", "agent"."id", "agent"."created_at"
 FROM "agent" JOIN "pod" ON "pod"."id" = "agent"."pod_id"
 WHERE "pod"."kind" = 'shared';--> statement-breakpoint
 -- Everyone keeps the bots they saw in their sidebar: each `pod_member` pins

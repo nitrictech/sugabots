@@ -197,6 +197,14 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					model: null,
 					in_project: true,
 				},
+				// Hoe was made first, though Rake's id comes first.
+				{
+					id: legacy.pods.garden,
+					lead: legacy.bots.hoe,
+					name: "Hoe",
+					model: "m",
+					in_project: true,
+				},
 			]);
 		});
 
