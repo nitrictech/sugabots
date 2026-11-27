@@ -3,7 +3,7 @@ export * as DesktopViewer from "./viewer.ts";
 import type { BotColor } from "@sugabots/contracts";
 import { DesktopUnavailable } from "@sugabots/contracts/errors/computers";
 import { userText } from "@sugabots/errors";
-import { and, eq } from "drizzle-orm";
+import { and, eq, not } from "drizzle-orm";
 import { Context, Effect, Layer, type Scope } from "effect";
 import { ComputerProviderStore } from "../../../computers/computer-provider-store.ts";
 import type { Computers } from "../../../computers/computers.ts";
@@ -17,6 +17,7 @@ import {
 } from "../../../database/schema.ts";
 import { Ids } from "../../../ids/ids.ts";
 import type { CanUseComputer } from "../../../proofs/can-use-computer.ts";
+import { botRemovalStarted } from "../../../proofs/facts.ts";
 import type { Named } from "../../../proofs/proof.ts";
 import type { ReachesChat } from "../../../proofs/reaches-chat.ts";
 import { processLayer, Tier } from "../../../tiers.ts";
@@ -61,7 +62,8 @@ export interface Interface {
 	/**
 	 * The id of the computer the bot's desktop in the chat is shown on, for
 	 * proving again that the member may still use it: refused once the bot
-	 * left the chat or stopped using its computer, or the computer is gone.
+	 * left the chat, is being deleted, stopped using its computer, or the
+	 * computer is gone.
 	 */
 	readonly stillShown: <P, C, B>(
 		chat: ReachesChat<P, C>,
@@ -141,7 +143,7 @@ export const make = Effect.gen(function* () {
 				db
 					.select({ usesComputer: botTable.usesComputer, color: botTable.color })
 					.from(botTable)
-					.where(eq(botTable.id, bot.value))
+					.where(and(eq(botTable.id, bot.value), not(botRemovalStarted(botTable.id))))
 					.limit(1),
 			);
 			// The UI hides the desktop then too, but this is what stops a request

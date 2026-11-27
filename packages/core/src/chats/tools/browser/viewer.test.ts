@@ -1,18 +1,37 @@
+import { and, eq } from "drizzle-orm";
 import { Effect, Exit, Layer, Scope, Stream } from "effect";
 import { WebSocket } from "undici";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+	seedBot,
+	seedComputer,
+	seedMember,
+	seedProject,
+	seedProjectChat,
+	seedWorkspace,
+} from "../../../authentication/seed.test-support.ts";
 import { ComputerProviderStore } from "../../../computers/computer-provider-store.ts";
 import { ProjectComputers } from "../../../computers/project-computers.ts";
 import { removeWorkVolumes } from "../../../computers/testing.ts";
 import { EventBus } from "../../../database/events/bus.ts";
 import { EventStore } from "../../../database/events/store.ts";
 import { inMemoryEventStore } from "../../../database/events/testing.ts";
-import { bot as botTable, chatParticipant } from "../../../database/schema.ts";
+import {
+	bot as botTable,
+	chatParticipant,
+	computer,
+	computerProvider,
+	project,
+} from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { createWorkspaceFixture } from "../../../database/workspace.test-support.ts";
 import { viewDesktop } from "../../../operations/computers/view-desktop.ts";
-import { authenticators, principals } from "../../../proofs/world.test-support.ts";
+import { named } from "../../../proofs/proof.ts";
+import { proveReachesChat } from "../../../proofs/reaches-chat.ts";
+import { authenticators, principals, signedIn } from "../../../proofs/world.test-support.ts";
+import { Secrets } from "../../../secrets/secrets.ts";
 import { Streams } from "../../../streams/streams.ts";
+import { unimplemented } from "../../../testing.ts";
 import { defaultProjectOf } from "../../../workspaces/projects/project-reads.ts";
 import { seedChat } from "../../seed.test-support.ts";
 import {
@@ -23,6 +42,81 @@ import {
 import { TurnComputers } from "../computer/turn-computers.ts";
 import { DesktopViewer } from "./viewer.ts";
 import { answerChallenge } from "./vnc-authentication.ts";
+
+describe("desktop reach against Postgres", () => {
+	afterAll(closeDatabase);
+
+	it("refuses a desktop recheck for a non-lead bot whose deletion started", async () => {
+		const workspaceId = await seedWorkspace();
+		const memberId = await seedMember(workspaceId, "admin");
+		const lead = await seedBot(workspaceId);
+		const participant = await seedBot(workspaceId, { usesComputer: true });
+		const projectId = await seedProject(workspaceId, {
+			leadBotId: lead.id,
+			bots: [participant.id],
+		});
+		const chatId = await seedProjectChat(workspaceId, projectId, memberId);
+		await onDatabase((db) => db.insert(chatParticipant).values({ chatId, botId: participant.id }));
+		const computerId = await seedComputer(workspaceId, projectId);
+		const key = await runOnPostgres(
+			Secrets.Service.use((secrets) => Effect.succeed(secrets.encrypt("test key"))),
+		);
+		await onDatabase((db) =>
+			db
+				.update(computerProvider)
+				.set({ enabled: true, apiKeyEncrypted: key })
+				.where(
+					eq(
+						computerProvider.id,
+						db
+							.select({ id: computer.computerProviderId })
+							.from(computer)
+							.where(eq(computer.id, computerId)),
+					),
+				),
+		);
+		const viewer = await runOnPostgres(
+			Effect.provide(
+				DesktopViewer.Service,
+				DesktopViewer.layerNoDeps.pipe(
+					Layer.provide([ComputerProviderStore.layer, unimplemented(ProjectComputers.Service)]),
+				),
+			),
+		);
+		const principal = await signedIn(memberId);
+		const check = () =>
+			runOnPostgres(
+				named(principal, chatId, participant.id, (principal, chat, bot) =>
+					Effect.flatMap(proveReachesChat(principal, chat), (reach) =>
+						viewer.stillShown(reach, bot),
+					),
+				),
+			);
+		expect(await check()).toBe(computerId);
+
+		await onDatabase((db) =>
+			db
+				.update(project)
+				.set({ deleting: true })
+				.where(
+					and(eq(project.id, participant.defaultProject), eq(project.workspaceId, workspaceId)),
+				),
+		);
+
+		await expect(check()).rejects.toMatchObject({ _tag: "DesktopUnavailable" });
+		await expect(
+			runOnPostgres(
+				Effect.scoped(
+					named(principal, chatId, participant.id, (principal, chat, bot) =>
+						Effect.flatMap(proveReachesChat(principal, chat), (reach) =>
+							viewer.openComputer(reach, bot),
+						),
+					),
+				),
+			),
+		).rejects.toMatchObject({ _tag: "DesktopUnavailable" });
+	});
+});
 
 /**
  * Watching a bot's desktop, against Postgres and a real OpenSandbox server
