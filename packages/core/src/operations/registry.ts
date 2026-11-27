@@ -1,7 +1,7 @@
 export * as Operations from "./registry.ts";
 
 import { NoComputerProvider } from "@sugabots/contracts/errors/computers";
-import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
+import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import {
 	botLoopTools,
 	type FailureOf,
@@ -25,6 +25,7 @@ import {
 	checkConnectorApprovalPermission,
 	checkConnectorCallSettings,
 } from "../proofs/can-use-connector.ts";
+import { briefRecipientChanged } from "../proofs/may-brief.ts";
 import { named } from "../proofs/proof.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { makeDecide } from "./approvals/decide.ts";
@@ -123,11 +124,12 @@ const checkApprovalPermission = (
 	Effect.gen(function* () {
 		const forbidden = new ActionForbidden({ proof: "CanDecide" });
 		if (call.connectorId) {
-			yield* checkConnectorApprovalPermission(member, {
+			const connectorConflict = yield* checkConnectorApprovalPermission(member, {
 				connectorId: call.connectorId,
 				turnId: call.turnId,
 				writeOrDelete: call.writeOrDelete,
 			});
+			if (connectorConflict) return connectorConflict;
 			if (yield* checkConnectorCallSettings({ ...call, connectorId: call.connectorId })) {
 				return "connectorChanged" as const;
 			}
@@ -166,6 +168,15 @@ const checkApprovalPermission = (
 		);
 		if (result._tag === "Failure") {
 			if (result.failure instanceof NoComputerProvider) return "noComputerProvider" as const;
+			const approvedBot = call.approvalResolvedTargets?.bot;
+			if (
+				name === "chats.startBriefedChat" &&
+				approvedBot &&
+				result.failure instanceof ResourceHidden &&
+				Schema.is(operationContracts["chats.startBriefedChat"].input)(decoded.success) &&
+				(yield* briefRecipientChanged(principal, decoded.success.with, approvedBot))
+			)
+				return "briefDestinationChanged" as const;
 			return yield* forbidden;
 		}
 		const checked = result.success;

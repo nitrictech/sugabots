@@ -180,8 +180,9 @@ export const checkConnectorApprovalPermission = (
 				{ member: memberId },
 			),
 		);
+		if (!place) return "connectorChanged" as const;
 		if (
-			!place?.member ||
+			!place.member ||
 			!memberReaches(place.member, place.project) ||
 			(call.writeOrDelete && !mayInProjectAs(place.member, place.project, "project.change"))
 		)

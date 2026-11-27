@@ -144,6 +144,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		});
 
 		it.each([
+			"connector deleted",
 			"connector disabled",
 			"off in the project",
 			"configuration changed",
@@ -172,7 +173,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			const { turnId, parked } = await parkedCallOf(workflow.executionId);
 			expect(parked).toMatchObject({ connectorId, approvalStatus: "pending" });
 
-			if (change === "off in the project") {
+			if (change === "connector deleted") {
+				await onDatabase((db) => db.delete(connector).where(eq(connector.id, connectorId)));
+			} else if (change === "off in the project") {
 				await onDatabase((db) =>
 					db.delete(projectBotConnector).where(eq(projectBotConnector.connectorId, connectorId)),
 				);

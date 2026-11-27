@@ -42,9 +42,39 @@ export interface MayBrief<P, B> extends Proof<"MayBrief", [P, B]> {
 
 const MayBriefProof = defineProof("MayBrief");
 
+type BriefRecipient = { readonly id: string } | { readonly handle: string | undefined };
+
+const findBriefRecipient = (acting: BotForAsker, recipient: BriefRecipient) =>
+	query((db) =>
+		findBotRecord(
+			db,
+			and(
+				eq(bot.workspaceId, acting.workspace),
+				"id" in recipient
+					? eq(bot.id, recipient.id)
+					: recipient.handle === undefined
+						? eq(bot.id, acting.bot)
+						: and(
+								sql`lower(${bot.handle}) = lower(${recipient.handle.trim().replace(/^@/, "")})`,
+								or(isNull(bot.assistantOf), eq(bot.createdById, acting.asker)),
+							),
+			),
+			{ member: acting.asker },
+		),
+	);
+
+export const briefRecipientChanged = (
+	acting: BotForAsker,
+	handle: string | undefined,
+	approvedBot: string,
+) =>
+	findBriefRecipient(acting, { handle }).pipe(
+		Effect.map((record) => record?.id !== approvedBot || record.deleting || !record.defaultProject),
+	);
+
 export const withBriefRecipient = <P, A, E, R>(
 	principal: Named<P, Principal>,
-	recipient: { readonly id: string } | { readonly handle: string | undefined },
+	recipient: BriefRecipient,
 	use: <B>(proof: MayBrief<P, B>) => Effect.Effect<A, E, R>,
 ) =>
 	Effect.gen(function* () {
@@ -52,23 +82,7 @@ export const withBriefRecipient = <P, A, E, R>(
 		const hidden = new ResourceHidden({ resource: "bot" });
 		if (acting._tag !== "BotForAsker") return yield* hidden;
 		if ("id" in recipient && !isUuid(recipient.id)) return yield* hidden;
-		const record = yield* query((db) =>
-			findBotRecord(
-				db,
-				and(
-					eq(bot.workspaceId, acting.workspace),
-					"id" in recipient
-						? eq(bot.id, recipient.id)
-						: recipient.handle === undefined
-							? eq(bot.id, acting.bot)
-							: and(
-									sql`lower(${bot.handle}) = lower(${recipient.handle.trim().replace(/^@/, "")})`,
-									or(isNull(bot.assistantOf), eq(bot.createdById, acting.asker)),
-								),
-				),
-				{ member: acting.asker },
-			),
-		);
+		const record = yield* findBriefRecipient(acting, recipient);
 		if (!record) return yield* hidden;
 		const { turn, destination } = yield* resolveBrief(acting, record);
 		const turnRule =
