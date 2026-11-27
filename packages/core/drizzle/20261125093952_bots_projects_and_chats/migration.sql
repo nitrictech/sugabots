@@ -542,11 +542,9 @@ FROM "orphan_file_bot" source JOIN "orphan_file_chat" destination ON destination
 WHERE a."created_in_thread_id" IS NULL AND a."pod_id" = source."pod_id"
 	AND a."created_by_agent_id" IS NOT DISTINCT FROM source."created_by_agent_id";--> statement-breakpoint
 DELETE FROM "artifact" WHERE "created_in_thread_id" IS NULL;--> statement-breakpoint
--- A pod's level applied where its bot had no level of its own. Carry it to
--- the bot's own chats and automation feeds, which leave the pod's project.
--- Either mute kept the bot quiet until it expired.
-INSERT INTO "notification_override" AS bot_override ("user_id", "agent_id", "level", "muted_until", "updated_at")
-SELECT pod_override."user_id", "agent"."id", pod_override."level", pod_override."muted_until", pod_override."updated_at"
+-- Save the inherited preferences while each bot still names its pod.
+CREATE TEMP TABLE "default_project_notification_override" ON COMMIT DROP AS
+SELECT pod_override."user_id", "agent"."id" AS "bot_id", pod_override."level", pod_override."muted_until", pod_override."updated_at"
 FROM "pod"
 JOIN "notification_override" pod_override ON pod_override."pod_id" = "pod"."id"
 JOIN "agent" ON "agent"."pod_id" = "pod"."id"
@@ -554,11 +552,7 @@ WHERE ("pod"."kind" = 'personal' AND "pod"."owner_id" = pod_override."user_id")
 	OR ("pod"."kind" = 'shared' AND EXISTS (
 		SELECT 1 FROM "pod_member"
 		WHERE "pod_member"."pod_id" = "pod"."id" AND "pod_member"."user_id" = pod_override."user_id"
-	))
-ON CONFLICT ("user_id", "agent_id") WHERE "agent_id" IS NOT NULL
-DO UPDATE SET "level" = coalesce(bot_override."level", excluded."level"),
-	"muted_until" = greatest(bot_override."muted_until", excluded."muted_until"),
-	"updated_at" = greatest(bot_override."updated_at", excluded."updated_at");--> statement-breakpoint
+	));--> statement-breakpoint
 UPDATE "agent" SET "pod_id" = NULL;--> statement-breakpoint
 -- A `personal` `pod` admitted its owner alone; projects have no such rule.
 DROP TRIGGER "personal_pod_owner_membership" ON "pod_member";--> statement-breakpoint
@@ -1751,6 +1745,12 @@ INSERT INTO "project_bot" ("workspace_id", "project_id", "bot_id", "created_at")
 SELECT p."workspace_id", p."id", p."default_of_bot_id", p."created_at"
 FROM "project" p
 WHERE p."default_of_bot_id" IS NOT NULL;--> statement-breakpoint
+-- The bot's own chats inherit these preferences. Its explicit overrides
+-- still apply wherever it works.
+INSERT INTO "notification_override" ("user_id", "project_id", "level", "muted_until", "updated_at")
+SELECT saved."user_id", p."id", saved."level", saved."muted_until", saved."updated_at"
+FROM "default_project_notification_override" saved
+JOIN "project" p ON p."default_of_bot_id" = saved."bot_id";--> statement-breakpoint
 -- A bot's chats keep their ids and join its default project.
 DROP TRIGGER "bot_thread_conversation_deletion" ON "bot_thread";--> statement-breakpoint
 ALTER TABLE "bot_thread" DROP CONSTRAINT "bot_thread_conversation_fkey";--> statement-breakpoint

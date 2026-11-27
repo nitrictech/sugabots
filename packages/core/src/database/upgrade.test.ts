@@ -1119,20 +1119,45 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(response.items).toContainEqual(expect.objectContaining(manualRun));
 		});
 
-		it("carries personal pod notification levels and mutes to the bots", async () => {
+		async function findDefaultProject(botId: string) {
+			const [project] = await upgraded.rows<{ id: string }>(
+				"select id from project where default_of_bot_id = $1",
+				[botId],
+			);
+			if (!project) throw new Error(`Bot ${botId} has no default project`);
+			return project.id;
+		}
+
+		it("keeps inherited personal notification preferences in default projects", async () => {
 			const call = await servedOperations({ runOn: upgraded.run });
 			const pat = await upgraded.signIn(legacy.members.pat);
 			const lee = await upgraded.signIn(legacy.members.lee);
 			const { helper, patsAssistant, sketch } = legacy.bots;
+			const helperProject = await findDefaultProject(helper);
+			const assistantProject = await findDefaultProject(patsAssistant);
+			const sketchProject = await findDefaultProject(sketch);
 
-			expect(await call(pat, "notifications.settings", {})).toMatchObject({
-				bots: { [patsAssistant]: "nothing", [helper]: "all" },
-				mutedUntil: { bots: { [patsAssistant]: personalPodMute, [helper]: personalPodMute } },
+			const patSettings = await call(pat, "notifications.settings", {});
+			expect.soft(patSettings).toMatchObject({
+				projects: { [assistantProject]: "nothing", [helperProject]: "nothing" },
+				mutedUntil: {
+					projects: { [assistantProject]: personalPodMute, [helperProject]: personalPodMute },
+				},
 			});
-			expect(await call(lee, "notifications.settings", {})).toMatchObject({
-				bots: { [sketch]: "nothing" },
-				mutedUntil: { bots: { [sketch]: personalPodMute } },
+			expect.soft(patSettings.bots[patsAssistant]).toBeUndefined();
+			expect.soft(patSettings.bots[helper]).toBe("all");
+			expect.soft(patSettings.mutedUntil.bots[patsAssistant]).toBeUndefined();
+			expect.soft(patSettings.mutedUntil.bots[helper]).toBe("2099-01-01T09:00:00.000Z");
+
+			const leeSettings = await call(lee, "notifications.settings", {});
+			expect.soft(leeSettings).toMatchObject({
+				projects: { [sketchProject]: "nothing" },
+				mutedUntil: {
+					projects: { [sketchProject]: "2099-01-01T08:00:00.000Z" },
+					bots: { [sketch]: personalPodMute },
+				},
 			});
+			expect(leeSettings.bots[sketch]).toBeUndefined();
 		});
 
 		it("keeps shared pod notification mutes in a bot's chat and automation feed", async () => {
@@ -1140,46 +1165,74 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			const pat = await upgraded.signIn(legacy.members.pat);
 			const { planner, budget } = legacy.bots;
 			const { family } = legacy.pods;
-			expect.soft(await call(pat, "notifications.settings", {})).toMatchObject({
-				projects: { [family]: "nothing" },
-				bots: { [planner]: "all", [budget]: "nothing" },
+			const plannerProject = await findDefaultProject(planner);
+			const budgetProject = await findDefaultProject(budget);
+			const settings = await call(pat, "notifications.settings", {});
+			expect.soft(settings).toMatchObject({
+				projects: { [family]: "nothing", [plannerProject]: "nothing", [budgetProject]: "nothing" },
+				bots: { [planner]: "all" },
 				mutedUntil: {
-					projects: { [family]: sharedPodMute },
-					bots: { [planner]: sharedPodMute, [budget]: sharedPodMute },
+					projects: {
+						[family]: sharedPodMute,
+						[plannerProject]: sharedPodMute,
+						[budgetProject]: sharedPodMute,
+					},
+					bots: { [planner]: "2099-02-01T09:00:00.000Z" },
 				},
 			});
+			expect.soft(settings.bots[budget]).toBeUndefined();
+			expect.soft(settings.mutedUntil.bots[budget]).toBeUndefined();
 
-			for (const [chatId, resultOf] of [
-				[legacy.threads.askPlanner, null],
-				[migrationScale.feed, { chatId: migrationScale.resultRunChat }],
-			] as const) {
-				const recipientsAt = (now: string) =>
-					upgraded
-						.run(
-							query((db) =>
-								forMessage(
-									db,
-									{
-										chatId,
-										messageId: migrationScale.feedResult,
-										author: { kind: "bot", botId: planner },
-										authorName: "Planner",
-										content: "@pat-rivera @sam-rivera The digest is ready.",
-										fileNames: [],
-										fileTitles: [],
-										repliesTo: null,
-										resultOf,
-									},
-									new Date(now),
-								),
+			const receives = (
+				chatId: string,
+				botId: string,
+				now: string,
+				resultOf: { chatId: string } | null = null,
+			) =>
+				upgraded
+					.run(
+						query((db) =>
+							forMessage(
+								db,
+								{
+									chatId,
+									messageId: migrationScale.feedResult,
+									author: { kind: "bot", botId },
+									authorName: "Planner",
+									content: "@pat-rivera @sam-rivera The digest is ready.",
+									fileNames: [],
+									fileTitles: [],
+									repliesTo: null,
+									resultOf,
+								},
+								new Date(now),
 							),
-						)
-						.then((recipients) => recipients.map(({ memberId }) => memberId).sort());
-				expect.soft(await recipientsAt("2099-02-01T09:30:00Z")).toEqual([legacy.members.sam]);
-				expect(await recipientsAt("2099-02-01T10:30:00Z")).toEqual([
-					legacy.members.sam,
-					legacy.members.pat,
-				]);
+						),
+					)
+					.then((recipients) => recipients.some(({ memberId }) => memberId === legacy.members.pat));
+			const duringMute = "2099-02-01T09:30:00Z";
+			const afterMute = "2099-02-01T10:30:00Z";
+			const familyProject = { kind: "project", id: family } as const;
+			try {
+				expect.soft(await receives(legacy.threads.trip, planner, duringMute)).toBe(false);
+				await call(pat, "notifications.mute", { ...familyProject, until: null });
+				expect
+					.soft(await receives(legacy.threads.trip, planner, "2099-02-01T08:30:00Z"))
+					.toBe(false);
+				expect.soft(await receives(legacy.threads.trip, planner, duringMute)).toBe(true);
+				expect.soft(await receives(legacy.threads.trip, budget, afterMute)).toBe(false);
+				await call(pat, "notifications.setLevel", { ...familyProject, level: "all" });
+				expect.soft(await receives(legacy.threads.trip, budget, afterMute)).toBe(true);
+				for (const [chatId, resultOf] of [
+					[legacy.threads.askPlanner, null],
+					[migrationScale.feed, { chatId: migrationScale.resultRunChat }],
+				] as const) {
+					expect.soft(await receives(chatId, planner, duringMute, resultOf)).toBe(false);
+					expect.soft(await receives(chatId, planner, afterMute, resultOf)).toBe(true);
+				}
+			} finally {
+				await call(pat, "notifications.setLevel", { ...familyProject, level: "nothing" });
+				await call(pat, "notifications.mute", { ...familyProject, until: sharedPodMute });
 			}
 		});
 
