@@ -234,6 +234,7 @@ These identifiers keep their spelling for compatibility. Migrations, and the tes
 | `sugabots-sandbox` | `packages/contracts/src/computer-providers.ts`, `docker/computer/Dockerfile`, the computer publishing workflows in `.github/workflows/`, and `build:computer` in `package.json`. | The published computer image and E2B template keep the names that registries, workspace settings and E2B accounts already reference. |
 | `PROVIDER_AUTHORITY=sandbox-provider` | `docker/computer/sugabots-desktop` | Persisted browser profiles use this certificate name. The desktop script uses the same name to remove the previous certificate before trusting its replacement. |
 | `resume` | `packages/core/src/chats/turns/requests.ts` | Stored turn workflow payloads use this name for a hand-back, so a workflow can resume after an upgrade. |
+| `/workspace/threads` and `/workspace/agents` | Computer folder upgrade | Existing work is moved from these paths the first time it is used after upgrading. |
 | The upgrade test's rows | `packages/core/src/database/upgrade.test*.ts` | It writes an installation as `main` left it, by `main`'s names, and checks what the migrations make of it. |
 | Old webhook and GitHub app addresses | `packages/server/src/http/renamed-paths.ts` and its test | GitHub apps and webhook senders keep posting to the addresses they were given before the upgrade, so the server still answers them. |
 | Old docs addresses | `packages/website/src/renamed-docs.ts` | Links and search results still point at the pages' old names, which redirect to the new ones. |

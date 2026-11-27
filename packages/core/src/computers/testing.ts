@@ -179,7 +179,11 @@ export function inMemoryComputers(
 	let creationHold: Effect.Effect<void> | undefined;
 	let labelledLookupHold: Effect.Effect<void> | undefined;
 	const openingHolds = new Map<Computers.ComputerId, Effect.Effect<void>>();
-	let answerCommand = (_computerId: Computers.ComputerId) => 0;
+	let answerCommand = (
+		_computerId: Computers.ComputerId,
+		_command: string,
+		_options: Computers.ExecOptions,
+	) => 0;
 	let destroyFailures = 0;
 	const missing = (id: Computers.ComputerId) =>
 		new Computers.Missing({ provider: "opensandbox", computerId: id });
@@ -192,10 +196,10 @@ export function inMemoryComputers(
 		held: Map<Computers.ComputerId, Held>,
 	): Computers.Computer => ({
 		id,
-		exec: () =>
+		exec: (command, options) =>
 			Effect.sync(() => {
 				const none = { text: "", truncated: false };
-				return { exitCode: answerCommand(id), stdout: none, stderr: none };
+				return { exitCode: answerCommand(id, command, options), stdout: none, stderr: none };
 			}),
 		readFile: unsupported("readFile"),
 		writeFile: unsupported("writeFile"),
@@ -344,7 +348,7 @@ export function inMemoryComputers(
 		/** How many computers the provider has made, at every endpoint, those it no longer has included. */
 		made: () => created,
 		/** The exit code of each command run in the computer with this id from now on; success by default. */
-		answerCommandsWith: (answer: (computerId: Computers.ComputerId) => number) => {
+		answerCommandsWith: (answer: typeof answerCommand) => {
 			answerCommand = answer;
 		},
 		/** Resolves with the next network the computer is given. */

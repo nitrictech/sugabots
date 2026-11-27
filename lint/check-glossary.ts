@@ -88,9 +88,10 @@ const CHECKED_WORDS: readonly CheckedWord[] = [
 	{
 		word: "agent",
 		// Others' agents: the HTTP user agent, coding agents, crawlers and AI
-		// agents generally, and SSH's and GPG's.
+		// agents generally, and SSH's and GPG's. Upgraded computers also keep
+		// work under the old path until it is first used.
 		otherMeanings:
-			/user[-_ ]?agents?|AI agents?|your[- ]agent|(?:ssh|gpg)-agent|SSH and GPG agents/gi,
+			/user[-_ ]?agents?|AI agents?|your[- ]agent|(?:ssh|gpg)-agent|SSH and GPG agents|\/workspace\/agents\b/gi,
 		keptIn: [
 			// undici's Agent, the connection pool requests are sent through.
 			/^packages\/core\/src\/providers\/network\/egress(\.test)?\.ts$/,
@@ -180,8 +181,9 @@ const CHECKED_WORDS: readonly CheckedWord[] = [
 	// Projects and chats
 	{
 		word: "thread",
-		// A web forum's, and GitHub's comments on a pull request's code.
-		otherMeanings: /forum thread|review thread|reviewThreadId/g,
+		// A web forum's, GitHub's comments on a pull request's code, and the old
+		// path under which upgraded computers kept files.
+		otherMeanings: /forum thread|review thread|reviewThreadId|\/workspace\/threads\b/g,
 	},
 	{ word: "conversation" },
 	{ word: "default bot" },

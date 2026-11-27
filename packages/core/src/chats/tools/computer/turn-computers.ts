@@ -233,12 +233,11 @@ export const make = Effect.gen(function* () {
 			// Opening the computer serves every call in the step, so it stops when
 			// the step ends rather than with the call that started it.
 			const stepEnded = yield* Effect.abortSignal;
-			const prepared = projectComputers.open(project, provider, holder).pipe(
-				// The folders are made on first use, so any computer gains them.
-				Effect.tap(({ computer }) =>
-					computer.exec(`mkdir -p '${place.folder}' '${place.home}'`, DIRECTORY_COMMAND),
-				),
-			);
+			const prepared = projectComputers
+				.open(project, provider, holder)
+				.pipe(
+					Effect.tap(({ computer }) => prepareFolders(computer, place, provider.access.provider)),
+				);
 			const opening = openOncePerTurn(() => run(prepared, { signal: stepEnded }));
 			const computer: TurnComputer = { open: opening, run };
 			const browser = browserSession(run, place, turn);
@@ -510,6 +509,39 @@ function openAsApproved(
 		if (!asApproved) return yield* new ApprovalNeeded();
 		return opened;
 	});
+}
+
+/** prepareFolders moves existing chat and bot folders into place on first use after an upgrade. */
+function prepareFolders(computer: Computers.Computer, place: Place, provider: string) {
+	const paths = [
+		{ folder: place.folder, oldParent: "/workspace/threads" },
+		{ folder: place.home, oldParent: "/workspace/agents" },
+	];
+	const script = paths
+		.flatMap(({ folder, oldParent }) => {
+			const parent = Computers.shellQuoted(posix.dirname(folder));
+			const old = Computers.shellQuoted(posix.join(oldParent, posix.basename(folder)));
+			const current = Computers.shellQuoted(folder);
+			return [
+				`mkdir -p ${parent} || exit 1`,
+				`if [ -d ${old} ]; then mv -n -- ${old} ${parent}/ || [ -d ${current} ] || exit 1; fi`,
+				`mkdir -p ${current} || exit 1`,
+			];
+		})
+		.join("\n");
+	return computer.exec(script, DIRECTORY_COMMAND).pipe(
+		Effect.flatMap(({ exitCode, stderr }) =>
+			exitCode === 0
+				? Effect.void
+				: Effect.fail(
+						new Computers.Unavailable({
+							provider,
+							reason: userText`Couldn't prepare the chat and home folders on the computer. Try again shortly.`,
+							cause: stderr.text,
+						}),
+					),
+		),
+	);
 }
 
 /**

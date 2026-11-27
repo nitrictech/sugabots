@@ -1,4 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { Effect, Exit, Layer, Scope, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -9,9 +13,15 @@ import {
 	seedWorkspace,
 } from "../../authentication/seed.test-support.ts";
 import { ComputerProviderStore } from "../../computers/computer-provider-store.ts";
+import { ComputerSignIn } from "../../computers/computer-sign-in.ts";
 import { Computers } from "../../computers/computers.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
-import { noComputers, removeWorkVolumes } from "../../computers/testing.ts";
+import {
+	inMemoryComputers,
+	localComputerEgress,
+	noComputers,
+	removeWorkVolumes,
+} from "../../computers/testing.ts";
 import { allowedHost, bot as botTable, computerProvider, message } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
@@ -64,6 +74,103 @@ describe.skipIf(!process.env.DATABASE_URL)("computer tool step lifetimes", () =>
 			await Effect.runPromise(
 				Effect.all([Scope.close(later, Exit.void), Scope.close(earlier, Exit.void)]),
 			);
+		}
+	});
+
+	it("reuses files from the old chat and bot folders when opening the computer", async () => {
+		const workspaceId = await seedWorkspace();
+		const memberId = await seedMember(workspaceId, "editor");
+		const bot = await seedBot(workspaceId, { usesComputer: true, createdById: memberId });
+		const chatId = await seedProjectChat(workspaceId, bot.defaultProject, memberId);
+		const as = principals(await authenticators());
+		const providers = await runOnPostgres(
+			Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer),
+		);
+		await runOnPostgres(
+			providers.create(workspaceId, {
+				createdById: memberId,
+				provider: {
+					settings: {
+						builtIn: "opensandbox",
+						serverUrl: "https://computers.example.com",
+						image: "sugabots-computer:dev",
+					},
+					enabled: true,
+					apiKey: "never-used",
+				},
+			}),
+		);
+		const provider = inMemoryComputers();
+		const computers = await runOnPostgres(
+			Effect.provide(TurnComputers.Service, TurnComputers.layerNoDeps).pipe(
+				Effect.provide([
+					ProjectComputers.layerNoDeps,
+					ComputerProviderStore.layer,
+					ChatFileStore.layer,
+				]),
+				Effect.provide([
+					provider.layer,
+					ComputerProviderStore.layer,
+					ComputerSignIn.none,
+					localComputerEgress,
+				]),
+			),
+		);
+		const workspace = await mkdtemp(join(tmpdir(), "computer-folders-"));
+		const localPath = (path: string) => path.replace("/workspace", workspace);
+		const oldChat = join(localPath("/workspace/threads"), chatId);
+		const oldHome = join(localPath("/workspace/agents"), bot.id);
+		const newChat = join(workspace, "chats", chatId);
+		const newHome = join(workspace, "bots", bot.id);
+		provider.answerCommandsWith(
+			(_computer, command, { cwd, env }) =>
+				spawnSync("bash", ["-c", command.replaceAll("/workspace/", `${workspace}/`)], {
+					cwd: cwd?.replace("/workspace/", `${workspace}/`),
+					env: { ...process.env, HOME: env?.HOME?.replace("/workspace/", `${workspace}/`) },
+				}).status ?? 1,
+		);
+		const readFromBothFolders = async () => {
+			const principal = await as.botFor(memberId, bot.id, chatId);
+			const scope = Effect.runSync(Scope.make());
+			try {
+				const { call } = await stepOnComputer(
+					computers,
+					principal,
+					{
+						workspaceId,
+						projectId: bot.defaultProject,
+						turnId: principal.turn,
+						chatId,
+						botId: bot.id,
+						color: "orange",
+						naturalBrowsing: false,
+						acceptsImages: false,
+					},
+					scope,
+				);
+				return await call("computers.runCommand", {
+					command: 'test -f checkout && test -f "$HOME/notes"',
+					timeout_seconds: 30,
+				});
+			} finally {
+				await Effect.runPromise(Scope.close(scope, Exit.void));
+			}
+		};
+		try {
+			await mkdir(oldChat, { recursive: true });
+			await mkdir(oldHome, { recursive: true });
+			await writeFile(join(oldChat, "checkout"), "original checkout");
+			await writeFile(join(oldHome, "notes"), "original notes");
+			expect(await readFromBothFolders()).toMatchObject({ exitCode: 0 });
+
+			await mkdir(oldChat, { recursive: true });
+			await writeFile(join(oldChat, "checkout"), "older checkout");
+			expect(await readFromBothFolders()).toMatchObject({ exitCode: 0 });
+			expect(await readFile(join(newChat, "checkout"), "utf8")).toBe("original checkout");
+			expect(await readFile(join(newHome, "notes"), "utf8")).toBe("original notes");
+			expect(await readFile(join(oldChat, "checkout"), "utf8")).toBe("older checkout");
+		} finally {
+			await rm(workspace, { recursive: true, force: true });
 		}
 	});
 
