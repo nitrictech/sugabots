@@ -338,7 +338,7 @@ const botsOwn: ProjectBotConnector[] = [
 		url: "https://mcp.notion.com/mcp",
 		addressRevision: 1,
 		botId: growthDesk.id,
-		botName: growthDesk.name,
+
 		on: true,
 		addressChanged: false,
 	},
@@ -349,7 +349,7 @@ const botsOwn: ProjectBotConnector[] = [
 		url: "https://billing.example.com/v1",
 		addressRevision: 1,
 		botId: growthDesk.id,
-		botName: growthDesk.name,
+
 		on: false,
 		addressChanged: false,
 	},
@@ -360,7 +360,7 @@ const botsOwn: ProjectBotConnector[] = [
 		url: "https://crm.example.com/api",
 		addressRevision: 3,
 		botId: accountManager.id,
-		botName: accountManager.name,
+
 		on: false,
 		addressChanged: true,
 	},

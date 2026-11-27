@@ -9,7 +9,6 @@ import type { ApprovalAsked, CallRecord } from "../loop-values.ts";
 import type { ToolCallRecorder } from "../tools.ts";
 import { APPROVAL_NO_LONGER_APPLIES, INTERRUPTED_CALL } from "./lifecycle.ts";
 import { forModel, type ResultFiles } from "./long-results.ts";
-import type { ToolCallStore } from "./store.ts";
 
 export interface RecordingOptions {
 	/** Where the turn's calls are written down: the bot loop's own records of them. */

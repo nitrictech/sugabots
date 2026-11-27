@@ -310,7 +310,7 @@ export const make = Effect.gen(function* () {
 		update: (_canManage, automation, target, _member, input) =>
 			operation("update", writes.update(scopeOf(target, automation.value), input, Effect.void)),
 
-		updateInChat: (canManage, automation, target, approved, timeZone) => {
+		updateInChat: (_canManage, automation, target, approved, timeZone) => {
 			const { name, instructions, paused, routineExpression } = approved.input;
 			const input: AutomationUpdate = {
 				name,

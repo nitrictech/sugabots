@@ -5,11 +5,10 @@
  * reaches the chat, calls it. The package does not export this file.
  */
 
-import type { JoinedTurn } from "@sugabots/contracts";
 import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
-import { message } from "../../database/schema.ts";
+import { type JoinedTurn, message } from "../../database/schema.ts";
 
 /**
  * Records that the message `messageId` joined the turn of `joined.botId` on

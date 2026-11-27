@@ -7,7 +7,6 @@ import {
 	addMembership,
 	seedAutomation,
 	seedBot,
-	seedComputer,
 	seedConnector,
 	seedMessage,
 	seedPage,
