@@ -710,11 +710,11 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			expect(sentTo(members.bob.id)).toEqual([]);
 		});
 
-		it.each([
-			{ change: "decided", set: () => ({ approvalStatus: "approved" as const }) },
+		it.each<{ change: string; set: () => Partial<typeof toolCall.$inferInsert> }>([
+			{ change: "decided", set: () => ({ approvalStatus: "allowed" }) },
 			{
 				change: "decided and asked about again",
-				set: () => ({ approvalId: crypto.randomUUID(), approvalStatus: "pending" as const }),
+				set: () => ({ approvalId: crypto.randomUUID(), approvalStatus: "pending" }),
 			},
 		])("sends an approval again to nobody once its call is $change", async ({ set }) => {
 			// Only Ada, who made it, reaches a personal bot, so only she may decide its calls.
