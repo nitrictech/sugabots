@@ -36,7 +36,12 @@ export function offerAugmentationTools(
 				augmentationToolBuilders[augmentation];
 			const tool = builders[described.name]?.(target, side);
 			if (!tool) throw new Error(`No builder for ${augmentation}'s ${described.name}`);
-			return offeredTool(target, described, tool);
+			const offered = offeredTool(target, described, tool);
+			if (side.computer && augmentation === "linear" && described.name === "upload_file") {
+				offered[1].usesComputer = (input) =>
+					typeof input.path === "string" && input.file === undefined;
+			}
+			return offered;
 		}),
 	);
 }

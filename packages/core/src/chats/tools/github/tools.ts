@@ -52,9 +52,11 @@ export function gitHubTools({
 		configurationRevision: connector.configurationRevision,
 	};
 	return Object.fromEntries(
-		GITHUB_CONNECTOR_TOOLS.map((described) =>
-			offeredTool(offering, described, tools[described.name]),
-		),
+		GITHUB_CONNECTOR_TOOLS.map((described) => {
+			const offered = offeredTool(offering, described, tools[described.name]);
+			if (computer && described.name === "push_branch") offered[1].usesComputer = () => true;
+			return offered;
+		}),
 	);
 }
 

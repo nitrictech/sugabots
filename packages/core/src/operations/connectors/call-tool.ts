@@ -24,7 +24,7 @@ export const callTool = defineOperation(
 					named(input, (approvedInput) =>
 						Effect.gen(function* () {
 							const running = yield* proveRunsTurn(acting, turn);
-							const described = calls.described(principal, input.connectorId, input.tool);
+							const described = calls.described(principal, input);
 							if (!described && calling.value.kind === "approvalCheck")
 								return yield* new ResourceHidden({ resource: "connector" });
 							const { use, approved } = yield* proveConnectorCall(
@@ -32,10 +32,7 @@ export const callTool = defineOperation(
 								connector,
 								calling,
 								approvedInput,
-								described && {
-									revision: described.connectorRevision,
-									described: described.described,
-								},
+								described,
 							);
 							if (!described) return yield* new ResourceHidden({ resource: "connector" });
 							if (use.writeOrDelete) {

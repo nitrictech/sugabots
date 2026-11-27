@@ -19,7 +19,7 @@ import { effectRunner, serviceOperations } from "../../../database/database.ts";
 import { ChatFileStore } from "../../../files/chat-file-store.ts";
 import { Ids } from "../../../ids/ids.ts";
 import type { BotPrincipal } from "../../../principal.ts";
-import type { Approved, ApprovedOperation } from "../../../proofs/approved.ts";
+import type { Approved, ComputerApprovalTarget } from "../../../proofs/approved.ts";
 import {
 	type CanUseChatComputer,
 	proveCanUseChatComputer,
@@ -37,6 +37,7 @@ import {
 	type ComputerAtPlace,
 	ComputerUseEnded,
 	diskNote,
+	matchesComputerApproval,
 	megabytes,
 	networkNote,
 	openOncePerTurn,
@@ -238,7 +239,7 @@ export const make = Effect.gen(function* () {
 				.pipe(
 					Effect.tap(({ computer }) => prepareFolders(computer, place, provider.access.provider)),
 				);
-			const opening = openOncePerTurn(() => run(prepared, { signal: stepEnded }));
+			const opening = openOncePerTurn(provider.id, () => run(prepared, { signal: stepEnded }));
 			const computer: TurnComputer = {
 				run,
 				open: async () => {
@@ -302,8 +303,8 @@ export const make = Effect.gen(function* () {
 		forStep,
 		checkStep: (canUse) => operation("checkStep", findCheckedStep(canUse)),
 
-		runCommand: ({ canUse, computer, place }, approved) =>
-			inComputer(computer, approvedComputer(canUse, approved), (opened) =>
+		runCommand: ({ computer, place }, approved) =>
+			inComputer(computer, approved.computer, (opened) =>
 				opened
 					.exec(`bash -lc ${Computers.shellQuoted(approved.input.command)}`, {
 						cwd: place.folder,
@@ -322,12 +323,12 @@ export const make = Effect.gen(function* () {
 					),
 			),
 
-		readFile: ({ canUse, computer, place, acceptsImages }, approved) => {
+		readFile: ({ computer, place, acceptsImages }, approved) => {
 			const { path } = approved.input;
 			const asImage =
 				acceptsImages && IMAGE_EXTENSIONS.has(posix.extname(path).slice(1).toLowerCase());
 			const where = absolute(place, path);
-			return inComputer(computer, approvedComputer(canUse, approved), (opened) =>
+			return inComputer(computer, approved.computer, (opened) =>
 				opened
 					.readFile(where, asImage ? MAX_IMAGE_BYTES : MAX_READ_BYTES)
 					.pipe(
@@ -338,9 +339,9 @@ export const make = Effect.gen(function* () {
 			);
 		},
 
-		writeFile: ({ canUse, computer, place }, approved) => {
+		writeFile: ({ computer, place }, approved) => {
 			const { path, content } = approved.input;
-			return inComputer(computer, approvedComputer(canUse, approved), (opened) =>
+			return inComputer(computer, approved.computer, (opened) =>
 				opened
 					.writeFile(absolute(place, path), new TextEncoder().encode(content))
 					.pipe(Effect.as({ written: absolute(place, path) })),
@@ -350,7 +351,7 @@ export const make = Effect.gen(function* () {
 		copyChatFile: ({ canUse, computer, place }, approved) =>
 			files.read({ chatId: canUse.chat.value, fileId: approved.input.file }).pipe(
 				Effect.flatMap((found) =>
-					inComputer(computer, approvedComputer(canUse, approved), (opened) =>
+					inComputer(computer, approved.computer, (opened) =>
 						copyChatFileInto(opened, place, found, ids),
 					),
 				),
@@ -361,23 +362,23 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		shareFile: ({ canUse, computer, place, attach, sharing }, approved) => {
+		shareFile: ({ computer, place, attach, sharing }, approved) => {
 			const { path, name } = approved.input;
 			if (!attach) {
 				return Effect.succeed(failed(userText`Files can be shared only in a project's chats.`));
 			}
-			return inComputer(computer, approvedComputer(canUse, approved), (opened) =>
+			return inComputer(computer, approved.computer, (opened) =>
 				sharing.withPermits(1)(shareFrom(opened, absolute(place, path), name, attach)),
 			);
 		},
 
-		useBrowser: ({ canUse, computer, browser, acceptsImages }, approved) =>
+		useBrowser: ({ computer, browser, acceptsImages }, approved) =>
 			Effect.gen(function* () {
 				const { tool, arguments: input } = approved.input;
 				if (!browser || !isBrowserTool(tool, acceptsImages)) {
 					return failed(userText`There is no browser tool by that name.`);
 				}
-				const opened = yield* openAsApproved(computer, approvedComputer(canUse, approved));
+				const opened = yield* openAsApproved(computer, approved.computer);
 				if ("status" in opened) return opened;
 				return yield* Effect.tryPromise({
 					try: (signal) => browser.call(opened.computer, tool, input, signal),
@@ -444,7 +445,7 @@ const canAskForComputer = (principal: BotPrincipal) =>
 
 function inComputer<A extends object>(
 	computer: TurnComputer,
-	expected: ApprovedComputer,
+	expected: ComputerApprovalTarget | undefined,
 	work: (
 		computer: Computers.Computer,
 	) => Effect.Effect<A | Failed, Computers.Unavailable | Computers.FileFailed>,
@@ -466,27 +467,6 @@ function inComputer<A extends object>(
 }
 
 /**
- * The computer an approver allowed the call on: the project's computer
- * record and the provider's machine under it as the call was proved, or null
- * when it had none, so only a computer the step made for it will do.
- * Undefined for a call nobody approved, which any computer of the project
- * serves.
- */
-type ApprovedComputer =
-	| { readonly record: string | null; readonly machine: string | null }
-	| undefined;
-
-/** The computer the call `approved` was allowed on, as `canUse` proved it. */
-function approvedComputer<P, C, X, N extends ApprovedOperation>(
-	canUse: CanUseChatComputer<P, C>,
-	approved: Approved<P, X, [C], N>,
-): ApprovedComputer {
-	return approved.decidedBy === null
-		? undefined
-		: { record: canUse.computer, machine: canUse.machine };
-}
-
-/**
  * Opens the step's computer, which takes the step's lease on it, and checks it
  * is the one `expected` names: a computer reset, made or moved to another
  * machine since the call was approved needs a fresh approval. A refusal the
@@ -494,7 +474,7 @@ function approvedComputer<P, C, X, N extends ApprovedOperation>(
  */
 function openAsApproved(
 	computer: TurnComputer,
-	expected: ApprovedComputer,
+	expected: ComputerApprovalTarget | undefined,
 ): Effect.Effect<StepOpened | Failed, ApprovalNeeded> {
 	return Effect.gen(function* () {
 		const opened = yield* Effect.tryPromise({
@@ -509,11 +489,7 @@ function openAsApproved(
 			Effect.orDie,
 		);
 		if ("status" in opened || expected === undefined) return opened;
-		const asApproved =
-			expected.record === null
-				? opened.madeInStep
-				: opened.record === expected.record && opened.computer.id === expected.machine;
-		if (!asApproved) return yield* new ApprovalNeeded();
+		if (!matchesComputerApproval(opened, expected)) return yield* new ApprovalNeeded();
 		return opened;
 	});
 }

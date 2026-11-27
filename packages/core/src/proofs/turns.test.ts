@@ -2,7 +2,7 @@ import type { JsonValue, ToolApprovalStatus } from "@sugabots/contracts";
 import { connectorToolKey, HOST_REQUEST_TOOL } from "@sugabots/contracts";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { and, eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { Effect, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	seedBot,
@@ -13,10 +13,14 @@ import {
 	seedProject,
 	seedProjectChat,
 	seedTurnAnswering,
+	seedWorkspace,
 	setRole,
 } from "../authentication/seed.test-support.ts";
 import { turnFacts } from "../authentication/turn-facts.ts";
-import type { Computers } from "../computers/computers.ts";
+import { offerAugmentationTools } from "../chats/tools/augmentations.ts";
+import { Turns } from "../chats/turns/turns.ts";
+import { Computers } from "../computers/computers.ts";
+import { inMemoryComputers } from "../computers/testing.ts";
 import { query } from "../database/database.ts";
 import {
 	computer,
@@ -27,8 +31,11 @@ import {
 	turn,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { callTool } from "../operations/connectors/call-tool.ts";
 import { ApprovalCheckReached, type Call } from "../operations/operation.ts";
 import type { Principal } from "../principal.ts";
+import { ConnectorCalls } from "../providers/connectors/connector-calls.ts";
+import { unimplemented } from "../testing.ts";
 import {
 	type ApprovalRule,
 	approvalNeed,
@@ -615,6 +622,187 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await approved(principal, toolCallOf(allowed), always, input)).toBe("ok");
 			await setRole(a.workspace, approver, "editor");
 			expect(await approved(principal, toolCallOf(allowed), always, input)).toBe("ok");
+		});
+
+		it("binds a connector upload to the approved machine and checks the one actually opened", async () => {
+			const workspaceId = await seedWorkspace();
+			const asker = await seedMember(workspaceId, "editor");
+			const bot = await seedBot(workspaceId, { createdById: asker, usesComputer: true });
+			const projectId = bot.defaultProject;
+			const record = await seedComputer(workspaceId, projectId);
+			const [machine] = await onDatabase((db) =>
+				db.select().from(computer).where(eq(computer.id, record)),
+			);
+			if (!machine) throw new Error("Missing computer");
+			await onDatabase((db) =>
+				db
+					.update(computerProvider)
+					.set({ enabled: true })
+					.where(eq(computerProvider.id, machine.computerProviderId)),
+			);
+			const acting = await as.botFor(
+				asker,
+				bot.id,
+				await seedProjectChat(workspaceId, projectId, asker),
+			);
+			const connectorId = await seedConnector(workspaceId, projectId, {
+				toolAccess: { upload_file: "ask" },
+			});
+			const url = "https://mcp.linear.app/mcp";
+			const [installed] = await onDatabase((db) =>
+				db.update(connector).set({ url }).where(eq(connector.id, connectorId)).returning(),
+			);
+			if (!installed) throw new Error("Missing connector");
+
+			const read: string[] = [];
+			const uploaded: Uint8Array[] = [];
+			const content = new Uint8Array([1, 2, 3]);
+			const computers = await Effect.runPromise(
+				Computers.Service.pipe(Effect.provide(inMemoryComputers().layer)),
+			);
+			const provider = computers.forAccess({
+				provider: "opensandbox",
+				baseUrl: "https://computers.example.com",
+				image: "debian",
+				apiKey: Redacted.make("unused"),
+				size: { cpuCount: 1, memoryGiB: 1 },
+				networkMode: "open",
+			});
+			const providerComputer = await Effect.runPromise(
+				provider.create({
+					workName: "uploads",
+					labels: {},
+					reach: { kind: "open", blockedHosts: [] },
+				}),
+			);
+			let openedMachine = machine.providerComputerId;
+			const side = {
+				chatId: acting.chat,
+				files: { read: () => Effect.die("Unexpected chat file read") },
+				run: Effect.runPromise,
+				computer: {
+					place: { folder: "/workspace/chat", home: "/workspace/home" },
+					run: Effect.runPromise,
+					open: async () => ({
+						record,
+						providerId: machine.computerProviderId,
+						arrival: "running" as const,
+						madeInStep: false,
+						computer: {
+							...providerComputer,
+							id: openedMachine,
+							readFile: (path: string, maxBytes: number) =>
+								Effect.sync(() => {
+									read.push(path);
+									return { content: content.subarray(0, maxBytes), sizeBytes: content.byteLength };
+								}),
+						},
+					}),
+				},
+				upload: {
+					for: () => async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+						uploaded.push(init?.body as Uint8Array);
+						return new Response(null, { status: 200 });
+					},
+				},
+			};
+			const tools = offerAugmentationTools(
+				{
+					connectorId,
+					handle: installed.handle,
+					kind: "mcp",
+					url,
+					auth: "header",
+					headers: {},
+					toolAccess: installed.toolAccess,
+					configurationRevision: installed.configurationRevision,
+					configurationUpdatedAt: installed.updatedAt,
+				},
+				[],
+				side,
+			);
+			const calls = ConnectorCalls.from({
+				forTurn: () =>
+					Effect.succeed({
+						tools,
+						unavailable: [],
+						signInExpired: [],
+						instructions: {},
+						addable: [],
+						fromProjectAndBot: false,
+						close: async () => {},
+					}),
+			});
+			await runOnPostgres(
+				calls.offer(
+					acting,
+					{ projectId, ownProjectId: projectId },
+					{
+						...side,
+						computerSignsIn: false,
+					},
+				),
+			);
+			const args = {
+				path: "report.txt",
+				uploadUrl: "https://storage.googleapis.com/uploads.linear.app/example",
+				headers: {},
+			};
+			const input = { connectorId, tool: "upload_file", arguments: args };
+			const call = (call: Call) =>
+				callTool
+					.run(acting, input, call)
+					.pipe(
+						Effect.provideService(ConnectorCalls.Service, calls),
+						Effect.provide(unimplemented(Turns.Records.Service, { markActed: () => Effect.void })),
+					);
+			const checked = await runOnPostgres(
+				call({ kind: "approvalCheck" }).pipe(
+					Effect.catchTag("ApprovalNeeded", (error) => Effect.succeed(error)),
+				),
+			);
+			if (!(checked instanceof ApprovalCheckReached))
+				throw new Error("Approval check did not reach approval");
+			const approved = await seedApprovalCall(acting, {
+				tool: connectorToolKey(installed.handle, input.tool),
+				status: "allowed",
+				decidedBy: asker,
+				input: args,
+			});
+			await onDatabase((db) =>
+				db
+					.update(toolCall)
+					.set({
+						status: "running",
+						approvalResolvedTargets: checked.details.resolvedTargets ?? null,
+						approvalConnectorAccess: "ask",
+						connectorId,
+						connectorRevision: installed.configurationRevision,
+						remoteToolName: input.tool,
+						sentInExecution: acting.executionNumber,
+						writeOrDelete: true,
+					})
+					.where(eq(toolCall.id, approved)),
+			);
+
+			expect(await runOnPostgres(call(toolCallOf(approved)))).toMatchObject({ status: "uploaded" });
+			expect(uploaded).toEqual([content]);
+			expect(read).toEqual(["/workspace/chat/report.txt", "/workspace/chat/report.txt"]);
+
+			openedMachine = Computers.ComputerId("replacement");
+			await expect(runOnPostgres(call(toolCallOf(approved)))).rejects.toMatchObject({
+				_tag: "ApprovalNeeded",
+			});
+			expect(uploaded).toHaveLength(1);
+			expect(read).toHaveLength(2);
+
+			await onDatabase((db) =>
+				db
+					.update(computer)
+					.set({ providerComputerId: openedMachine })
+					.where(eq(computer.id, record)),
+			);
+			expect(await outcome(call(toolCallOf(approved)))).toBe("ApprovalNeeded");
 		});
 
 		it("takes an approval to work on a computer as covering only the machine it was on", async () => {

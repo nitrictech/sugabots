@@ -101,6 +101,7 @@ export interface Approved<
 	readonly input: InputOf<Operation>;
 	/** The member who allowed it; none when it needed no one. */
 	readonly decidedBy: string | null;
+	readonly computer: ComputerApprovalTarget | undefined;
 	readonly sdkToolCallId: string | null;
 	readonly connectorCall:
 		| {
@@ -110,6 +111,20 @@ export interface Approved<
 				readonly arguments: unknown;
 		  }
 		| undefined;
+}
+
+export type ComputerApprovalTarget = Pick<
+	CanUseChatComputer<unknown, unknown>,
+	"provider" | "computer" | "machine"
+>;
+type ComputerUse<P> = ComputerApprovalTarget & Pick<CanUseChatComputer<P, unknown>, "principal">;
+
+function computerApprovalTarget({
+	provider,
+	computer,
+	machine,
+}: ComputerApprovalTarget): ComputerApprovalTarget {
+	return { provider, computer, machine };
 }
 
 const ApprovedProof = defineProof("Approved");
@@ -179,16 +194,7 @@ export const proveComputerUseApproved = <P, X, N extends ComputerOperation, I, C
 	rule: ApprovalRule<OrdinaryApproval, N>,
 	input: Named<I, InputOf<NoInfer<N>>>,
 	computerUse: CanUseChatComputer<NoInfer<P>, C>,
-) =>
-	computerUse.principal.value === principal.value
-		? proveApproval(principal, call, rule, input, [computerUse.chat], {
-				resolvedTargets: {
-					provider: computerUse.provider,
-					computer: computerUse.computer,
-					machine: computerUse.machine,
-				},
-			})
-		: Effect.fail(new ApprovalRefused());
+) => proveApproval(principal, call, rule, input, [computerUse.chat], { computerUse });
 
 /**
  * `proveApproved` for a bot's request to reach a host, bound to the project
@@ -217,12 +223,13 @@ export const proveComputerRequestApproved = <P, X, I, C>(
 			)
 		: Effect.fail(new ApprovalRefused());
 
-export const proveConnectorApproved = <P, X, I, T, K>(
+export const proveConnectorApproved = <P, X, I, T, K, C>(
 	principal: Named<P, Principal>,
 	call: Named<X, Call>,
 	input: Named<I, InputOf<"connectors.callTool">>,
 	turn: Named<T, string>,
 	connectorUse: CanUseConnector<NoInfer<P>, K>,
+	computerUse?: CanUseChatComputer<NoInfer<P>, C>,
 ) =>
 	proveApproval(
 		principal,
@@ -232,6 +239,7 @@ export const proveConnectorApproved = <P, X, I, T, K>(
 		[turn, connectorUse.reach.connector],
 		{
 			connectorUse,
+			computerUse,
 		},
 	);
 
@@ -250,15 +258,21 @@ const proveApproval = <
 	targets: NamedTargets<Targets>,
 	{
 		connectorUse,
+		computerUse,
 		computerProjectId,
-		resolvedTargets,
+		resolvedTargets: otherTargets,
 	}: {
 		connectorUse?: CanUseConnector<P, K>;
+		computerUse?: ComputerUse<NoInfer<P>> | undefined;
 		computerProjectId?: string;
 		resolvedTargets?: ResolvedTargets;
 	} = {},
 ) =>
 	Effect.gen(function* () {
+		if (computerUse && computerUse.principal.value !== principal.value)
+			return yield* new ApprovalRefused();
+		const computer = computerUse && computerApprovalTarget(computerUse);
+		const resolvedTargets = computer ?? otherTargets;
 		const input: InputOf<N> = inputNamed.value;
 		if (typeof input !== "object" || input === null) return yield* new ApprovalRefused();
 		const acting = principal.value;
@@ -287,6 +301,7 @@ const proveApproval = <
 				call: callNamed,
 				input,
 				decidedBy,
+				computer: decidedBy === null ? undefined : computer,
 				sdkToolCallId,
 				connectorCall: connectorUse && {
 					connectorId: connectorUse.reach.connector.value,

@@ -80,6 +80,7 @@ import type { UploadSide } from "./signed-upload/tool.ts";
 
 export interface OfferedTool {
 	tool: Tool;
+	usesComputer?: (input: Readonly<Record<string, unknown>>) => boolean;
 	described: Pick<ConnectorTool, "name" | "readOnly" | "destructive"> & {
 		defaultAccess?: ConnectorAccess;
 	};

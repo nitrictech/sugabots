@@ -1,9 +1,10 @@
 export * as ConnectorCalls from "./connector-calls.ts";
 
 import { safeValidateTypes } from "@ai-sdk/provider-utils";
-import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { ApprovalNeeded, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { asSchema } from "ai";
 import { Context, Duration, Effect, Layer, Option } from "effect";
+import { withComputerApproval } from "../../chats/tools/computer/tools.ts";
 import { ConnectorCatalog, type OfferedTool } from "../../chats/tools/connector-catalog.ts";
 import { withRecordedCall } from "../../chats/tools/recorded-call.ts";
 import { buildCatalog } from "../../chats/tools/tool-search/catalog.ts";
@@ -28,9 +29,8 @@ export interface Interface {
 	}) => Effect.Effect<void>;
 	readonly described: (
 		principal: BotPrincipal,
-		connectorId: string,
-		tool: string,
-	) => Pick<OfferedTool, "connectorRevision" | "described"> | undefined;
+		input: { connectorId: string; tool: string; arguments: Readonly<Record<string, unknown>> },
+	) => { revision: number; described: OfferedTool["described"]; usesComputer: boolean } | undefined;
 	readonly validateArguments: (
 		principal: BotPrincipal,
 		connectorId: string,
@@ -47,7 +47,7 @@ export interface Interface {
 		turn: RunsTurn<P, T>,
 		use: CanUseConnector<NoInfer<P>, K>,
 		approved: Approved<NoInfer<P>, X, [T, K], "connectors.callTool">,
-	) => Effect.Effect<unknown, ResourceHidden>;
+	) => Effect.Effect<unknown, ResourceHidden | ApprovalNeeded>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -127,9 +127,15 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 				turns.delete(turnId);
 				return closeTurnSessions(turnId, turn);
 			}),
-		described: (principal, connectorId, name) => {
-			const tool = find(principal, connectorId, name);
-			return tool && { connectorRevision: tool.connectorRevision, described: tool.described };
+		described: (principal, input) => {
+			const tool = find(principal, input.connectorId, input.tool);
+			return (
+				tool && {
+					revision: tool.connectorRevision,
+					described: tool.described,
+					usesComputer: tool.usesComputer?.(input.arguments) ?? false,
+				}
+			);
 		},
 		validateArguments: (principal, connectorId, name, args) =>
 			Effect.promise(async () => {
@@ -177,14 +183,29 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 					call.kind !== "toolCall"
 				)
 					return yield* new ResourceHidden({ resource: "connector" });
-				return yield* Effect.promise((signal) =>
-					Promise.resolve(
+				if (
+					approved.decidedBy !== null &&
+					offered.usesComputer?.(approved.input.arguments) &&
+					!approved.computer
+				) {
+					return yield* new ApprovalNeeded();
+				}
+				const context = withComputerApproval(
+					withRecordedCall(undefined, call.toolCall),
+					approved.computer,
+				);
+				return yield* Effect.tryPromise({
+					try: async (signal) =>
 						execute(approvedTool.arguments, {
 							toolCallId: approved.sdkToolCallId ?? call.toolCall,
 							messages: [],
 							abortSignal: signal,
-							context: withRecordedCall(undefined, call.toolCall),
+							context,
 						}),
+					catch: (cause) => cause,
+				}).pipe(
+					Effect.catch((cause) =>
+						cause instanceof ApprovalNeeded ? Effect.fail(cause) : Effect.die(cause),
 					),
 				);
 			}),

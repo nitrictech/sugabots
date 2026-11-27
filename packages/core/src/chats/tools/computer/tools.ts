@@ -5,12 +5,14 @@ import {
 	formatDiskSize,
 	HOST_REQUEST_TOOL,
 } from "@sugabots/contracts";
+import { ApprovalNeeded } from "@sugabots/contracts/errors/proofs";
 import { MAX_SHARED_FILE_BYTES } from "@sugabots/contracts/operations/computers";
 import { type DomainError, UserText, userText } from "@sugabots/errors";
 import { Effect, ErrorReporter, Schema } from "effect";
 import { Computers } from "../../../computers/computers.ts";
 import type { ProjectComputers } from "../../../computers/project-computers.ts";
 import type { RunEffect } from "../../../database/database.ts";
+import type { ComputerApprovalTarget } from "../../../proofs/approved.ts";
 import { type Failed, failed } from "../failed.ts";
 
 /*
@@ -61,7 +63,10 @@ export function placeOf(turn: { chatId: string; botId: string }): Place {
  * The computer as a call finds it open: whether the step made it, which
  * tells a computer made for this turn from one made since a call was proved.
  */
-export type StepOpened = ProjectComputers.Opened & { readonly madeInStep: boolean };
+export type StepOpened = ProjectComputers.Opened & {
+	readonly madeInStep: boolean;
+	readonly providerId: string;
+};
 
 /**
  * Opens the computer of the project the turn works in on the first call that needs it, and reuses it for
@@ -85,7 +90,10 @@ export interface ComputerAtPlace extends TurnComputer {
  * The computer of the project the turn works in, opened once per turn. A failed opening is not kept, so
  * the next call tries again.
  */
-export function openOncePerTurn(open: () => Promise<ProjectComputers.Opened>): OpenComputer {
+export function openOncePerTurn(
+	providerId: string,
+	open: () => Promise<ProjectComputers.Opened>,
+): OpenComputer {
 	let opening: Promise<ProjectComputers.Opened> | undefined;
 	let told = false;
 	return async () => {
@@ -96,10 +104,38 @@ export function openOncePerTurn(open: () => Promise<ProjectComputers.Opened>): O
 		const opened = await opening;
 		const madeInStep = opened.arrival === "made";
 		// What happened to the computer is news only to the first call that sees it.
-		if (told) return { ...opened, arrival: "running", madeInStep };
+		if (told) return { ...opened, arrival: "running", madeInStep, providerId };
 		told = true;
-		return { ...opened, madeInStep };
+		return { ...opened, madeInStep, providerId };
 	};
+}
+
+class ComputerApprovalContext {
+	readonly target: ComputerApprovalTarget;
+
+	constructor(context: Record<string, unknown>, target: ComputerApprovalTarget) {
+		Object.assign(this, context);
+		this.target = target;
+	}
+}
+
+export function withComputerApproval(
+	context: Record<string, unknown>,
+	approved: ComputerApprovalTarget | undefined,
+) {
+	return approved ? new ComputerApprovalContext(context, approved) : context;
+}
+
+export function matchesComputerApproval(
+	opened: StepOpened,
+	expected: ComputerApprovalTarget,
+): boolean {
+	return (
+		opened.providerId === expected.provider &&
+		(expected.computer === null
+			? opened.madeInStep
+			: opened.record === expected.computer && opened.computer.id === expected.machine)
+	);
 }
 
 /**
@@ -113,14 +149,21 @@ export async function inComputer<A>(
 	work: (
 		computer: Computers.Computer,
 	) => Effect.Effect<A, Computers.Unavailable | Computers.FileFailed>,
+	context: unknown,
 ): Promise<(A & { note?: UserText }) | Failed> {
-	let opened: ProjectComputers.Opened;
+	let opened: StepOpened;
 	try {
 		opened = await computer.open();
 	} catch (cause) {
 		if (cause instanceof Computers.Unavailable || cause instanceof ComputerUseEnded)
 			return failed(cause.userMessage);
 		throw cause;
+	}
+	if (
+		context instanceof ComputerApprovalContext &&
+		!matchesComputerApproval(opened, context.target)
+	) {
+		throw new ApprovalNeeded();
 	}
 	const note = arrivalNote(opened.arrival);
 	return computer.run(

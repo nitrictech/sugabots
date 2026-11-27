@@ -39,13 +39,16 @@ export function pushTool(
 			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: async (
 				{ repository, directory, commit, branch, force = false },
-				{ abortSignal },
+				{ abortSignal, context },
 			) => {
 				const path = connected.repository(repository);
 				if (!path) return notConnectorRepository(repository, connected.repositories);
 				if (!computer) return failed("This bot has no computer to push from in this turn.");
-				const bundled = await inComputer(computer, abortSignal, (opened) =>
-					bundleCommit(opened, computer.place, { turnId, directory, commit }),
+				const bundled = await inComputer(
+					computer,
+					abortSignal,
+					(opened) => bundleCommit(opened, computer.place, { turnId, directory, commit }),
+					context,
 				);
 				if (!("bundle" in bundled)) return bundled;
 				return onRepository(path, (target) =>

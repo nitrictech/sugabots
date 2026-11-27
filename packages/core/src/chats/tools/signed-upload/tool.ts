@@ -88,7 +88,10 @@ export function signedUploadTool(
 					description: "The headers given for the upload, exactly as given",
 				}),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-		execute: async ({ file, path, uploadUrl, headers }, { abortSignal }): Promise<UploadResult> => {
+		execute: async (
+			{ file, path, uploadUrl, headers },
+			{ abortSignal, context },
+		): Promise<UploadResult> => {
 			const source = sourceOf(file, path);
 			if ("status" in source) return source;
 			if (!isUnder(uploadUrl, service.destination)) {
@@ -103,7 +106,7 @@ export function signedUploadTool(
 					? await run(chatFileContent(files, chatId, source.fileId), {
 							signal: abortSignal,
 						})
-					: await computerFileContent(computer, source.path, abortSignal);
+					: await computerFileContent(computer, source.path, abortSignal, context);
 			if (!(content instanceof Uint8Array)) return content;
 			return put(
 				upload.for({ baseUrl: service.destination }),
@@ -155,17 +158,22 @@ async function computerFileContent(
 	computer: UploadSide["computer"],
 	path: string,
 	abortSignal: AbortSignal | undefined,
+	context: unknown,
 ): Promise<Uint8Array | Failed> {
 	if (!computer)
 		return failed(userText`This bot has no computer, so only files in the chat can be uploaded.`);
 	const absolutePath = posix.resolve(computer.place.folder, path);
-	const read = await inComputer(computer, abortSignal, (opened) =>
-		readSharableFile(
-			opened,
-			absolutePath,
-			(sizeBytes) =>
-				userText`The file is ${megabytes(sizeBytes)} MB; files up to ${MAX_SHARED_FILE_MEGABYTES} MB from the computer can be uploaded.`,
-		),
+	const read = await inComputer(
+		computer,
+		abortSignal,
+		(opened) =>
+			readSharableFile(
+				opened,
+				absolutePath,
+				(sizeBytes) =>
+					userText`The file is ${megabytes(sizeBytes)} MB; files up to ${MAX_SHARED_FILE_MEGABYTES} MB from the computer can be uploaded.`,
+			),
+		context,
 	);
 	return "content" in read ? read.content : read;
 }
