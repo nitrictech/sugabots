@@ -237,10 +237,18 @@ for (const { name, skip, make, backdate } of stores) {
 				const changed = await append(control, rawEvent("reach.changed"));
 				await onDatabase((db) => db.execute(sql`analyze event`, "objects"));
 
+				const countFetched = query((db) =>
+					db.execute<{ fetched: string }>(
+						sql`select seq_tup_read + idx_tup_fetch as fetched
+							from pg_stat_xact_user_tables where relname = 'event'`,
+						"objects",
+					),
+				).pipe(Effect.map(([stats]) => Number(stats?.fetched)));
 				const { page, fetched } = await runOnPostgres(
 					transaction(
 						Effect.gen(function* () {
 							const inTransaction = yield* EventStore.make;
+							const fetchedBefore = yield* countFetched;
 							const controls = [
 								{ stream: control, since: cursor, types: ["reach.changed", "session.ended"] },
 							] as const;
@@ -249,14 +257,8 @@ for (const { name, skip, make, backdate } of stores) {
 									? inTransaction.replayPage({ stream, cursor, controls }, 100, signal)
 									: inTransaction.following([{ stream, since: cursor }, ...controls], 100, signal),
 							);
-							const [stats] = yield* query((db) =>
-								db.execute<{ fetched: string }>(
-									sql`select seq_tup_read + idx_tup_fetch as fetched
-								from pg_stat_xact_user_tables where relname = 'event'`,
-									"objects",
-								),
-							);
-							return { page, fetched: Number(stats?.fetched) };
+							const fetched = (yield* countFetched) - fetchedBefore;
+							return { page, fetched };
 						}),
 					),
 				);
