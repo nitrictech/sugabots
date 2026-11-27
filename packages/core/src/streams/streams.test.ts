@@ -405,6 +405,32 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			expect(erinHeard !== "ended" && erinHeard.event).toEqual(sentinel);
 		});
 
+		it("tells everyone that a private bot lost a member, naming the bot to nobody", async () => {
+			const world = await staffed();
+			const secret = await seedBot(world.workspace, {
+				createdById: world.ed,
+				visibility: "private",
+				members: [world.ed, world.vi],
+			});
+			const erin = await following(await signedIn.member(world.erin), "events.followWorkspace", {
+				workspace: world.workspace,
+			});
+			const vi = await following(await signedIn.member(world.vi), "events.followWorkspace", {
+				workspace: world.workspace,
+			});
+
+			await call(await signedIn.member(world.ed), "bots.removeMember", {
+				botId: secret.id,
+				memberId: world.vi,
+			});
+
+			const unnamed = streamEvent("reach.changed", { about: { kind: "workspace" } });
+			for (const follower of [erin, vi]) {
+				const heard = await follower.next();
+				expect(heard !== "ended" && heard.event).toEqual(unnamed);
+			}
+		});
+
 		it("proves again when a role changes, and sends what the new role reaches", async () => {
 			const world = await staffed();
 			const erin = await following(await signedIn.member(world.erin), "events.followWorkspace", {

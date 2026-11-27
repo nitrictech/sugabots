@@ -246,7 +246,7 @@ export const make = Effect.gen(function* () {
 							if (changesReach) {
 								yield* outbox.publish([
 									row.visibility === "private" && facts.visibility !== "private"
-										? botReachNarrowed(workspace, row.id)
+										? botReachNarrowed(workspace)
 										: reachChanged(workspace, { kind: "bot", botId: row.id }),
 									...left.map((projectId) =>
 										reachChanged(workspace, { kind: "project", projectId }),
@@ -284,7 +284,7 @@ export const make = Effect.gen(function* () {
 					const outcome = yield* store.removeMember(workspace, bot.value, member.value);
 					switch (outcome) {
 						case "removed":
-							return yield* outbox.publish([botReachNarrowed(workspace, bot.value)]);
+							return yield* outbox.publish([botReachNarrowed(workspace)]);
 						case "administrator":
 							return yield* new AdministratorInEveryPrivateBot();
 						case "not_a_member":

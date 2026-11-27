@@ -17,14 +17,11 @@ export const reachChanged = (workspaceId: string, about: ReachChange): PendingEv
 });
 
 /**
- * The event that records a change to who reaches the bot `botId` that may
- * leave some members out, as making it private or taking a member out of it
- * does. Sent to everyone in the workspace, so those who no longer reach it
- * hear it too and drop it from what they see.
+ * The event that records a change to who reaches a bot that may leave some
+ * members out, as making it private or taking a member out of it does. Sent
+ * to everyone in the workspace, so those who no longer reach it hear it too
+ * and drop it from what they see, and so it names no bot: a private bot's id
+ * is for those who reach it.
  */
-export const botReachNarrowed = (workspaceId: string, botId: string): PendingEvent => ({
-	stream: workspaceStream(workspaceId),
-	event: Audience.forWorkspace(
-		streamEvent("reach.changed", { about: { kind: "bot" as const, botId } }),
-	),
-});
+export const botReachNarrowed = (workspaceId: string): PendingEvent =>
+	reachChanged(workspaceId, { kind: "workspace" });
