@@ -1,4 +1,4 @@
-import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { ApprovalNeeded, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { asksBeforeAllTools, type TurnFacts, turnFacts } from "../authentication/turn-facts.ts";
@@ -37,10 +37,53 @@ const MayBriefProof = defineProof("MayBrief");
 
 export const proveMayBrief = <P, B>(principal: Named<P, Principal>, botId: Named<B, string>) =>
 	Effect.gen(function* () {
-		const hidden = new ResourceHidden({ resource: "bot" });
 		const acting = principal.value;
-		if (acting._tag !== "BotForAsker") return yield* Effect.fail(hidden);
-		const record = yield* query((db) => botRecord(db, botId.value));
+		if (acting._tag !== "BotForAsker") return yield* new ResourceHidden({ resource: "bot" });
+		const { record, turn, destination } = yield* resolveBrief(acting, botId.value);
+		const turnRule =
+			acting.bounds.kind === "member"
+				? "memberBounds"
+				: asksBeforeAllTools(turn)
+					? "askBeforeAllTools"
+					: null;
+		const proof: MayBrief<P, B> = MayBriefProof.prove([principal, botId], {
+			principal,
+			bot: botId,
+			workspace: record.workspace,
+			asker: acting.asker,
+			briefingBot: acting.bot,
+			turnRule,
+			project: destination,
+		});
+		return proof;
+	});
+
+/**
+ * Fails with `ApprovalNeeded` unless the brief `mayBrief` proved still goes
+ * where it was proved to go: its asker still reaches the recipient and the
+ * project, and the recipient is still in the same project, the turn's while it
+ * is in it, or its own otherwise. Run in the brief's write, under the
+ * workspace's lock shared, so a recipient taken out of the turn's project, or
+ * an asker who lost it, since the proof is seen before the chat is started.
+ */
+export const requireBriefDestination = <P, B>(mayBrief: MayBrief<P, B>) =>
+	Effect.gen(function* () {
+		const acting = mayBrief.principal.value;
+		if (acting._tag !== "BotForAsker") return yield* new ResourceHidden({ resource: "bot" });
+		const { destination } = yield* resolveBrief(acting, mayBrief.bot.value);
+		if (destination !== mayBrief.project) return yield* new ApprovalNeeded();
+	});
+
+/**
+ * Who a brief from `acting` to the bot `botId` reaches and where its chat
+ * starts: the turn's project when the bot is in it, the bot's own project
+ * otherwise. Hidden unless the turn may write a brief and its asker reaches
+ * the bot and that project.
+ */
+const resolveBrief = (acting: BotForAsker, botId: string) =>
+	Effect.gen(function* () {
+		const hidden = new ResourceHidden({ resource: "bot" });
+		const record = yield* query((db) => botRecord(db, botId));
 		if (!record || record.workspace !== acting.workspace || !record.defaultProject) {
 			return yield* Effect.fail(hidden);
 		}
@@ -66,22 +109,7 @@ export const proveMayBrief = <P, B>(principal: Named<P, Principal>, botId: Named
 		) {
 			return yield* new ResourceHidden({ resource: "project" });
 		}
-		const turnRule =
-			acting.bounds.kind === "member"
-				? "memberBounds"
-				: asksBeforeAllTools(turn)
-					? "askBeforeAllTools"
-					: null;
-		const proof: MayBrief<P, B> = MayBriefProof.prove([principal, botId], {
-			principal,
-			bot: botId,
-			workspace: record.workspace,
-			asker: acting.asker,
-			briefingBot: acting.bot,
-			turnRule,
-			project: destination,
-		});
-		return proof;
+		return { record, turn, destination };
 	});
 
 export function canWriteBrief(reason: TurnFacts["reason"]): boolean {

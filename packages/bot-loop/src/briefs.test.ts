@@ -12,12 +12,26 @@ import {
 import { startBotChat } from "@sugabots/core/chats/chats/testing";
 import { aChatAwaitingReply, runningTurns } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
+import { query } from "@sugabots/core/database/database";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
-import { bot, chatParticipant, message, placedChat } from "@sugabots/core/database/schema";
-import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
+import {
+	bot,
+	chatParticipant,
+	message,
+	placedChat,
+	projectBot,
+	workspace,
+} from "@sugabots/core/database/schema";
+import {
+	closeDatabase,
+	holdTransaction,
+	onDatabase,
+	runOnPostgres,
+} from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
+import { operationsForTests } from "@sugabots/core/operations/testing";
 import { and, eq } from "drizzle-orm";
-import { Context, Schema } from "effect";
+import { Context, Effect, Schema } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { botLoopOnPostgres, calling, callsOf, resumeAt, scriptedSteps } from "./testing.ts";
 
@@ -31,6 +45,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 	let afterCommit: ((events: readonly CommittedEvent[]) => Promise<void>) | undefined;
 	const loop = await botLoopOnPostgres(delivered, async (events) => afterCommit?.(events));
 	const chatsAs = (memberId: string) => asMember(loop.call, memberId);
+	const operations = await operationsForTests({ chats: loop.services });
 	let chatId: string;
 	let workspaceId: string;
 	let botId: string;
@@ -223,6 +238,72 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 			withBotId: recipient.id,
 		});
 		expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(started.id);
+	});
+
+	it("asks again, and adds nobody, when the recipient leaves the project while the brief waits to write", async () => {
+		const recipient = await seedBot(workspaceId, { createdById: adminId });
+		const [target] = await onDatabase((db) =>
+			db.update(bot).set({ model: "m" }).where(eq(bot.id, recipient.id)).returning(),
+		);
+		if (!target) throw new Error("No recipient bot");
+		const projectId = await seedProject(workspaceId, {
+			leadBotId: botId,
+			bots: [recipient.id],
+			members: [adminId],
+		});
+		const asked = await chatsAs(adminId).startProjectChat({
+			projectId,
+			retryKey: crypto.randomUUID(),
+			message: "Ask the other bot to draft the report.",
+		});
+		const input = { title: "Draft the report", brief: "Summarize it.", with: `@${target.handle}` };
+		const { model } = scriptedSteps(
+			{ calls: [{ toolCallId: "brief", toolName: START_CHAT_TOOL, input }] },
+			{ text: ["Started."] },
+		);
+		const ran = await loop.runTurn(asked.chat.id, { model });
+		const [parked] = await callsOf(ran.turnId);
+		if (!parked) throw new Error("No call parked");
+		await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
+		const principal = await ran.authentication.authenticate(ran.turnId);
+
+		// The recipient is taken out of the project, as removing a bot does, under
+		// the workspace's lock, after the brief was proved and before it writes.
+		const removing = holdTransaction(
+			Effect.gen(function* () {
+				yield* query((db) =>
+					db
+						.select({ id: workspace.id })
+						.from(workspace)
+						.where(eq(workspace.id, workspaceId))
+						.for("no key update"),
+				);
+				yield* query((db) =>
+					db
+						.delete(projectBot)
+						.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, recipient.id))),
+				);
+			}),
+		);
+		await removing.held;
+		const briefing = runOnPostgres(
+			operations["chats.startBriefedChat"](principal, input, {
+				kind: "toolCall",
+				toolCall: parked.id,
+			}),
+		);
+		await removing.waitForWaiters(1);
+		await removing.release();
+
+		await expect(briefing).rejects.toMatchObject({ _tag: "ApprovalNeeded" });
+		expect(
+			await onDatabase((db) =>
+				db
+					.select()
+					.from(placedChat)
+					.where(and(eq(placedChat.workspaceId, workspaceId), eq(placedChat.title, input.title))),
+			),
+		).toEqual([]);
 	});
 
 	it("asks again when the brief's handle names another bot by the time it runs", async () => {

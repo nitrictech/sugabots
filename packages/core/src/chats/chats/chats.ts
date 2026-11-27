@@ -13,7 +13,11 @@ import {
 	type ReplyTargetNotFound,
 	type UnsentAttachmentsNotFound,
 } from "@sugabots/contracts/errors/chats";
-import { ApprovalRefused, ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import {
+	type ApprovalNeeded,
+	ApprovalRefused,
+	ResourceHidden,
+} from "@sugabots/contracts/errors/proofs";
 import { and, eq, isNotNull, isNull, notExists } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
@@ -30,7 +34,7 @@ import type { Approved } from "../../proofs/approved.ts";
 import type { CanManageBot } from "../../proofs/can-manage-bot.ts";
 import type { CanManageChats } from "../../proofs/chat-permissions.ts";
 import type { IsMember } from "../../proofs/is-member.ts";
-import type { MayBrief } from "../../proofs/may-brief.ts";
+import { type MayBrief, requireBriefDestination } from "../../proofs/may-brief.ts";
 import type { CanChangeChat, CanTakePart } from "../../proofs/project-permissions.ts";
 import type { Named } from "../../proofs/proof.ts";
 import type { ReachesAutomation } from "../../proofs/reaches-automation.ts";
@@ -135,7 +139,7 @@ export interface Interface {
 		approved: Approved<P, X, [B], "chats.startBriefedChat">,
 	) => Effect.Effect<
 		BotStartedChat,
-		ApprovalRefused | BotHasNoModel | ResourceHidden | ToolWriteRefusal
+		ApprovalNeeded | ApprovalRefused | BotHasNoModel | ResourceHidden | ToolWriteRefusal
 	>;
 	/**
 	 * Records that the member has read the chat `reach` is about up to its
@@ -352,6 +356,9 @@ export const make = Effect.gen(function* () {
 							return yield* new ApprovalRefused();
 						}
 						yield* holdTurnOf(principal, { project: mayBrief.project, permission: "project.read" });
+						// Under the workspace's lock shared, which the fence took: the
+						// recipient must still go where the approval sent it.
+						yield* requireBriefDestination(mayBrief);
 						const botId = mayBrief.bot.value;
 						const [recipient] = yield* query((db) =>
 							db
