@@ -15193,6 +15193,47 @@
         "n|col|public.connector.workspace_id",
         "e|uniqueness|public.connector.id.workspace_id"
       ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "notification_delivery",
+        "approval_call_id"
+      ],
+      "writes": [
+        "s|col|public.notification_delivery.approval_call_id",
+        "n|col|public.notification_delivery.approval_call_id",
+        "e|col|public.notification_delivery.approval_call_id"
+      ],
+      "reads": [
+        "n|tbl|public.notification_delivery",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "notification_delivery"
+      ],
+      "writes": [
+        "s|fk|public.notification_delivery.notification_delivery_approval_call_id_tool_call_id_fkey",
+        "n|fk|public.notification_delivery.notification_delivery_approval_call_id_tool_call_id_fkey",
+        "e|fk|public.notification_delivery.notification_delivery_approval_call_id_tool_call_id_fkey",
+        "n|con|public.notification_delivery.notification_delivery_approval_call_id_tool_call_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.notification_delivery",
+        "n|sch|public",
+        "n|tbl|public.tool_call",
+        "n|sch|public",
+        "n|col|public.notification_delivery.approval_call_id",
+        "n|col|public.tool_call.id",
+        "e|uniqueness|public.tool_call.id"
+      ]
     }
   ],
   "deltas": [
@@ -25074,6 +25115,42 @@
         ],
         "nameExplicit": false,
         "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "approval_call_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "notification_delivery_approval_call_id_tool_call_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "approval_call_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "tool_call",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
       }
     }
   ]

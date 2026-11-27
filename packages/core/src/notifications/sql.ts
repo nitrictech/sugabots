@@ -17,7 +17,7 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { chat } from "../chats/sql.ts";
+import { chat, toolCall } from "../chats/sql.ts";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
 import { bot, member, project } from "../workspaces/sql.ts";
 import type { NotificationCause } from "./notifications.ts";
@@ -104,6 +104,14 @@ export const notificationDelivery = pgTable(
 			.notNull()
 			.references(() => member.id, { onDelete: "cascade" }),
 		notification: jsonb("notification").$type<NotificationContent>().notNull(),
+		/**
+		 * The call waiting for approval that this notification asks the member
+		 * to decide; null for any other notification. Whether they may still be
+		 * told it depends on whether they can still decide it.
+		 */
+		approvalCallId: uuid("approval_call_id").references(() => toolCall.id, {
+			onDelete: "cascade",
+		}),
 		createdAt: stamp("created_at"),
 		/** When it went to the member's tabs; null until then, so one that didn't is sent again. */
 		sentAt: timestamp("sent_at", { withTimezone: true }),

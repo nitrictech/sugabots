@@ -975,6 +975,42 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			).toBe("ActionForbidden");
 		});
 
+		it("replays a notification only to a member who still reaches its chat or can still decide its approval", async () => {
+			const world = await staffed();
+			const notification = (title: string, chatId: string | null) =>
+				streamEvent("notification", { title, body: "", tag: title, path: "/", chatId });
+			const edsStream = memberStream(world.ed);
+			const visStream = memberStream(world.vi);
+			await commit(edsStream, streamEvent("approvals.changed", { toolCallId: randomUUID() }));
+			await commit(visStream, streamEvent("approvals.changed", { toolCallId: randomUUID() }));
+			const edsFirst = await stored.latest(edsStream);
+			const visFirst = await stored.latest(visStream);
+			const inJ = Audience.forChat(world.chat, notification("In J", world.chat));
+			await commit(edsStream, inJ);
+			await commit(visStream, inJ);
+			await commit(
+				edsStream,
+				Audience.addressedTo(
+					{ kind: "approval", toolCall: randomUUID(), showsChat: false },
+					notification("Not Ed's to decide", null),
+				),
+			);
+			await commit(edsStream, notification("For anyone", null));
+			await takeEdOut(world);
+
+			const ed = await following(await signedIn.member(world.ed), "events.followOwn", {
+				since: edsFirst,
+			});
+			const vi = await following(await signedIn.member(world.vi), "events.followOwn", {
+				since: visFirst,
+			});
+
+			const edHeard = await ed.next();
+			expect(edHeard !== "ended" && edHeard.event.title).toBe("For anyone");
+			const viHeard = await vi.next();
+			expect(viHeard !== "ended" && viHeard.event).toEqual(notification("In J", world.chat));
+		});
+
 		it("resumes after the client's last event, and proves what it replays", async () => {
 			const world = await staffed();
 			const stream = workspaceStream(world.workspace);

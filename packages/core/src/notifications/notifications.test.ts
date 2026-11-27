@@ -19,6 +19,7 @@ import { askerColumns } from "../authentication/turn-facts.ts";
 import { ChatEvent } from "../chats/events.ts";
 import { seedChat } from "../chats/seed.test-support.ts";
 import { query, transaction } from "../database/database.ts";
+import { Audience } from "../database/events/audience.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import {
@@ -209,12 +210,16 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	const emit = async (...events: ChatEvent[]) => {
 		await (await emitting(...events)).batchEnded;
 	};
+	/** The notifications published for `memberId`, as their stream sends them. */
 	const sentTo = (memberId: string) =>
 		published
 			.filter(
 				({ stream, event }) => stream === memberStream(memberId) && event.type === "notification",
 			)
-			.map(({ event: { type: _type, v: _version, ...notification } }) => notification);
+			.map(({ event }) => {
+				const { type: _type, v: _version, ...notification } = Audience.read(event).event;
+				return notification;
+			});
 
 	let workspaceId: string;
 	let workspaceSlug: string;
@@ -674,6 +679,37 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			expect(sentTo(members.bob.id)).toEqual([]);
 		});
 
+		it.each([
+			{
+				change: "has lost the standing to decide it",
+				set: { role: "viewer" as const },
+			},
+			{ change: "is leaving the workspace", set: { leaving: true } },
+		])("sends an approval again to nobody who $change", async ({ set }) => {
+			// Bob administers the workspace, so he may decide the personal bot's
+			// computer request, though he doesn't reach its chat.
+			await onDatabase((db) =>
+				db.update(botTable).set({ visibility: "personal" }).where(eq(botTable.id, botId)),
+			);
+			await onDatabase((db) =>
+				db.update(membership).set({ role: "admin" }).where(eq(membership.memberId, members.bob.id)),
+			);
+			const chat = await chatWithBot([members.ada.id]);
+			const { turnId, callIds } = await turnWaitingOn(chat, [HOST_REQUEST_TOOL]);
+			await recordedUnsent(
+				ChatEvent.TurnSuspended({ chatId: chat, workspaceId, turnId, approvalCallIds: callIds }),
+			);
+			await onDatabase((db) =>
+				db.update(membership).set(set).where(eq(membership.memberId, members.bob.id)),
+			);
+
+			await aWhileLater();
+			const { sendLeftBehind } = await notifications();
+			await run(sendLeftBehind);
+
+			expect(sentTo(members.bob.id)).toEqual([]);
+		});
+
 		it("sends each notification once when another sweep runs while the first is still publishing", async () => {
 			const chat = await projectChat();
 			const bob = `@${handleFromName(members.bob.name)}`;
@@ -718,21 +754,15 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			const mention = `@${handleFromName(members.bob.name)} look`;
 			const stopped = await served();
 			const { handler } = await stopped.run(Notifications.Service);
-			// Who may be told waits on the workspace's lock, which a change of reach holds.
-			const changingReach = holdTransaction(
-				query((db) =>
-					db
-						.select({ id: workspace.id })
-						.from(workspace)
-						.where(eq(workspace.id, workspaceId))
-						.for("update"),
-				),
+			// Recording whom to tell waits for another transaction that locks the deliveries' table.
+			const lockingDeliveries = holdTransaction(
+				query((db) => db.execute(sql`lock table ${notificationDelivery} in exclusive mode`)),
 			);
-			await changingReach.held;
+			await lockingDeliveries.held;
 			await stopped.run(transaction(handler([memberPosted(chat, members.ada, mention)])));
 			await waitUntilWaitingOnLocks(1);
 			const stopping = stopped.close();
-			await changingReach.release();
+			await lockingDeliveries.release();
 			await stopping;
 			const sentBeforeStopping = sentTo(members.bob.id).length;
 

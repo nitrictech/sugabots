@@ -32,6 +32,7 @@ import { EventBus } from "../database/events/bus.ts";
 import { EventStore } from "../database/events/store.ts";
 import { bot, member, placedChat, project } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
+import { mayStillBeTold } from "../notifications/recipients.ts";
 import type { Running } from "../operations/operation.ts";
 import type { MemberSession } from "../principal.ts";
 import type { IsMember } from "../proofs/is-member.ts";
@@ -48,8 +49,9 @@ import { processLayer, Tier } from "../tiers.ts";
  * It proves again, naming its values afresh, on each change of who reaches
  * what in its workspace (a `reach.changed` event), and ends once a proof is
  * refused, its session ends (a `session.ended` event) or its session expires.
- * What it sends is decided by its last proof alone: the entrypoint decides
- * nothing about who hears what.
+ * What it sends is decided by its last proof alone, but for a notification on
+ * a member's own stream, which is checked as it is sent: the entrypoint
+ * decides nothing about who hears what.
  *
  * Two things keep it honest, apart from each other:
  *
@@ -75,7 +77,11 @@ export interface Interface {
 	readonly hearingIn: <P, W>(reach: ReachSet<P, W>) => Effect.Effect<Hearing>;
 	/** What `reach`'s principal hears on the chat's own stream: everything on it. */
 	readonly hearingChat: <P, C>(reach: ReachesChat<P, C>) => Hearing;
-	/** What the member hears on their own stream: everything on it. */
+	/**
+	 * What the member hears on their own stream: everything on it, but a
+	 * notification only while they still reach its chat or can still decide
+	 * its approval, read as it is sent.
+	 */
 	readonly hearingOwn: <P>(isMember: IsMember<P>) => Hearing;
 	/**
 	 * The chat `chatId` names, by the id it is stored under, and its
@@ -403,6 +409,13 @@ export const make = Effect.gen(function* () {
 		projects: Map<string, string | undefined>,
 	) =>
 		Effect.gen(function* () {
+			if (hearing.kind === "own") {
+				const told = yield* operation(
+					"follow",
+					query((db) => mayStillBeTold(db, hearing.member, audience)),
+				);
+				return told ? ("heard" satisfies Heard) : ("unheard" satisfies Heard);
+			}
 			if (hearing.kind !== "workspace") return "heard" satisfies Heard;
 			if (audience?.kind !== "chat") return hears(hearing, audience);
 			if (!projects.has(audience.chat)) {
@@ -679,6 +692,9 @@ function hears(
 			return among(hearing.projects, audience.project);
 		case "bot":
 			return among(hearing.bots, audience.bot);
+		// Only a member's own stream carries approvals.
+		case "approval":
+			return "unheard";
 	}
 }
 
@@ -696,6 +712,8 @@ function idOf(audience: Audience.Group): string {
 			return audience.project;
 		case "bot":
 			return audience.bot;
+		case "approval":
+			return audience.toolCall;
 		case "workspace":
 			return "";
 	}

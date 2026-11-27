@@ -10,12 +10,13 @@ import {
 	type QuietHours,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { type AnyColumn, and, eq, inArray, isNull, type SQL, sql } from "drizzle-orm";
+import { type AnyColumn, and, eq, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { reachesChatFor } from "../authorization/access.ts";
 import { fixedApprovalInput } from "../chats/tools/approvers.ts";
 import type { Executor } from "../database/database.ts";
+import type { Audience } from "../database/events/audience.ts";
 import {
 	automation,
 	automationRun,
@@ -48,6 +49,8 @@ import { approvalPath, chatPath } from "../server-settings/web-app-paths.ts";
 export interface Addressed {
 	memberId: string;
 	notification: NotificationContent;
+	/** The call waiting for approval that the notification asks the member to decide, if it asks one. */
+	approvalCallId?: string;
 }
 
 /** Why a member would want to hear of something. */
@@ -283,6 +286,7 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 		const description = decidable.length === 1 ? firstDecidable.tool : `${decidable.length} tools`;
 		addressed.push({
 			memberId,
+			approvalCallId: firstDecidable.id,
 			notification: {
 				title: `${first.botName} needs your approval`,
 				body: reachesChat
@@ -406,6 +410,40 @@ function sharedPreview(names: readonly string[]): string {
 	if (names.length === 0) return "";
 	return names.length === 1 ? `Shared ${names[0]}` : `Shared ${names.length} files`;
 }
+
+/**
+ * Whether `memberId` may still be told a notification for `audience`, read
+ * now in the caller's transaction: they reach its chat, or, for an approval,
+ * they can still decide the call and reach its chat when the notification
+ * shows the chat. A notification for no chat or approval, such as a test,
+ * needs neither.
+ */
+export const mayStillBeTold = Effect.fn("Notifications.mayStillBeTold")(function* (
+	db: Executor,
+	memberId: string,
+	audience: Audience.Group | undefined,
+) {
+	if (audience?.kind === "approval") {
+		const deciders = yield* approvalAudience(db, [audience.toolCall]);
+		return deciders.some(
+			(decider) => decider.memberId === memberId && (decider.reachesChat || !audience.showsChat),
+		);
+	}
+	if (audience?.kind !== "chat") return true;
+	const [reaching] = yield* db
+		.select({ id: member.id })
+		.from(member)
+		.innerJoin(placedChat, eq(placedChat.id, audience.chat))
+		.where(
+			and(
+				eq(member.id, memberId),
+				isNotNull(placedChat.projectId),
+				reachesChatFor({ projectId: placedChat.projectId }, member.id),
+			),
+		)
+		.limit(1);
+	return reaching !== undefined;
+});
 
 type Place = NonNullable<Effect.Success<ReturnType<typeof placeOf>>>;
 

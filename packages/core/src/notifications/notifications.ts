@@ -11,9 +11,8 @@ import {
 	streamEvent,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, type SQL } from "drizzle-orm";
 import { Context, DateTime, Duration, Effect, Layer, Schedule } from "effect";
-import { reachesChatFor } from "../authorization/access.ts";
 import type { ChatEvent } from "../chats/events.ts";
 import {
 	afterCommit,
@@ -21,15 +20,13 @@ import {
 	type Executor,
 	query,
 	serviceOperations,
-	Transaction,
 	transaction,
 } from "../database/database.ts";
+import { Audience } from "../database/events/audience.ts";
 import { EventBus } from "../database/events/bus.ts";
 import type { DomainEvents } from "../database/events/domain-events.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import {
-	member,
-	membership,
 	notificationDelivery,
 	notificationOverride,
 	notificationSettings,
@@ -51,6 +48,7 @@ import {
 	forFailedReply,
 	forMessage,
 	forReply,
+	mayStillBeTold,
 	type WrittenMessage,
 } from "./recipients.ts";
 
@@ -128,48 +126,51 @@ export const make = Effect.gen(function* () {
 		);
 
 	/**
-	 * Records the deliveries `which` picks sent, if none is yet, and stores
-	 * their notifications in the same transaction, so whichever process marks
-	 * one sent is the only one to publish it. The outbox publishes them once
-	 * the transaction commits.
+	 * Sends the unsent deliveries `which` picks for `delivery`'s member if they
+	 * may still be told it, and forgets them if not. Marking them sent and
+	 * storing their notifications, for the outbox to publish once the
+	 * transaction commits, happen in one transaction, so whichever process
+	 * marks one sent is the only one to publish it. The check holds a share of
+	 * the workspace's lock until then, so a change to who reaches what either
+	 * commits first, and keeps it from them, or after the notification is
+	 * stored for them. Each stored notification names its chat or approval, so
+	 * the member's stream checks again before it sends it.
 	 */
-	const markSentAndDeliver = (which: SQL | undefined) =>
+	const sendIfStillTold = (delivery: DeliveryToSend, which: SQL | undefined) =>
 		transaction(
 			Effect.gen(function* () {
+				const audience = audienceOf(delivery);
+				const [placed] = yield* query((db) =>
+					db
+						.select({ workspaceId: placedChat.workspaceId })
+						.from(placedChat)
+						.where(eq(placedChat.id, delivery.chatId))
+						.limit(1),
+				);
+				if (placed) yield* shareWorkspaceLock(placed.workspaceId);
+				// A statement of its own, so it reads what a change that held the lock committed.
+				const told =
+					placed !== undefined &&
+					(yield* query((db) => mayStillBeTold(db, delivery.memberId, audience)));
+				if (!told) {
+					yield* query((db) =>
+						db.delete(notificationDelivery).where(and(which, isNull(notificationDelivery.sentAt))),
+					);
+					return;
+				}
 				const sentAt = yield* DateTime.nowAsDate;
 				const sent = yield* query((db) =>
 					db
 						.update(notificationDelivery)
 						.set({ sentAt })
 						.where(and(which, isNull(notificationDelivery.sentAt)))
-						.returning({
-							memberId: notificationDelivery.memberId,
-							notification: notificationDelivery.notification,
-						}),
+						.returning({ notification: notificationDelivery.notification }),
 				);
-				yield* deliver(sent);
-			}),
-		);
-
-	/**
-	 * Sends the unsent deliveries `which` picks for `delivery`'s member if they
-	 * may still be told it, and forgets them if not. The check holds a share of
-	 * the workspace's lock until the transaction commits, so a change to who
-	 * reaches what either commits first, and keeps it from them, or after the
-	 * notification is stored for them.
-	 */
-	const sendIfStillTold = (
-		delivery: Pick<NotificationDeliveryRow, "chatId" | "memberId" | "notification">,
-		which: SQL | undefined,
-	) =>
-		transaction(
-			Effect.gen(function* () {
-				if (yield* mayStillBeTold(delivery)) {
-					yield* markSentAndDeliver(which);
-					return;
-				}
-				yield* query((db) =>
-					db.delete(notificationDelivery).where(and(which, isNull(notificationDelivery.sentAt))),
+				yield* outbox.publish(
+					sent.map(({ notification }) => ({
+						stream: memberStream(delivery.memberId),
+						event: Audience.addressedTo(audience, streamEvent("notification", notification)),
+					})),
 				);
 			}),
 		);
@@ -184,6 +185,7 @@ export const make = Effect.gen(function* () {
 						deliveryId,
 						memberId: addressed.memberId,
 						notification: addressed.notification,
+						approvalCallId: addressed.approvalCallId,
 					})
 					.onConflictDoNothing()
 					.returning({ id: notificationDelivery.deliveryId }),
@@ -195,7 +197,7 @@ export const make = Effect.gen(function* () {
 				operation(
 					"handler",
 					sendIfStillTold(
-						{ chatId, ...addressed },
+						{ ...addressed, chatId, approvalCallId: addressed.approvalCallId ?? null },
 						and(
 							eq(notificationDelivery.chatId, chatId),
 							eq(notificationDelivery.deliveryId, deliveryId),
@@ -210,45 +212,24 @@ export const make = Effect.gen(function* () {
 			);
 		});
 
-	const deliverAbout = (chatId: string, deliveryId: string, addressed: readonly Addressed[]) =>
-		Effect.forEach(
-			addressed,
-			(one) =>
-				transaction(
-					Effect.gen(function* () {
-						if (yield* reachesChatUnderLock(chatId, one.memberId)) {
-							yield* recordDelivery(chatId, deliveryId, one);
-						}
-					}),
-				),
-			{ discard: true },
-		);
-
-	const deliverApproval = (
-		waiting: Extract<NotificationCause, { kind: "approval" }>,
-		deliveryId: string,
-		now: Date,
-	) =>
-		transaction(
-			Effect.gen(function* () {
-				yield* shareWorkspaceLock(waiting.workspaceId);
-				const addressed = yield* query((db) => forApprovals(db, waiting, now));
-				for (const recipient of addressed)
-					yield* recordDelivery(waiting.chatId, deliveryId, recipient);
-			}),
-		);
+	/**
+	 * Records `addressed`, each in a transaction of its own, to send once it
+	 * commits. Whether each member may still be told is checked as it is sent.
+	 */
+	const recordDeliveries = (chatId: string, deliveryId: string, addressed: readonly Addressed[]) =>
+		Effect.forEach(addressed, (one) => transaction(recordDelivery(chatId, deliveryId, one)), {
+			discard: true,
+		});
 
 	/** Sends a pending notification's notifications, then forgets it. */
 	const send = (pending: PendingNotification) =>
 		Effect.gen(function* () {
 			const now = yield* DateTime.nowAsDate;
 			const { cause, chatId, deliveryId } = pending;
-			if (cause.kind === "approval") {
-				yield* deliverApproval(cause, deliveryId, now);
-			} else {
-				const addressed = yield* query((db) => notificationsFor(db, cause, now));
-				yield* deliverAbout(chatId, deliveryId, addressed);
-			}
+			const addressed = yield* query((db) =>
+				cause.kind === "approval" ? forApprovals(db, cause, now) : notificationsFor(db, cause, now),
+			);
+			yield* recordDeliveries(chatId, deliveryId, addressed);
 			yield* query((db) =>
 				db.delete(pendingNotification).where(eq(pendingNotification.id, pending.id)),
 			);
@@ -505,6 +486,11 @@ export const layer = processLayer(Layer.effect(Service, make));
 
 type NotificationDeliveryRow = typeof notificationDelivery.$inferSelect;
 
+type DeliveryToSend = Pick<
+	NotificationDeliveryRow,
+	"chatId" | "memberId" | "notification" | "approvalCallId"
+>;
+
 /** How long the process that wrote a notification has to send it before the sweep does. */
 const SEND_GRACE = Duration.seconds(30);
 
@@ -696,72 +682,15 @@ const shareWorkspaceLock = (workspaceId: string) =>
 	);
 
 /**
- * Whether `memberId` reaches the chat `chatId`, read once a share of its
- * workspace's lock (see `HoldsWorkspaceLock` in `proofs/`) is held until the
- * enclosing transaction ends, so no change to who reaches what commits until
- * then.
+ * Whom a delivery's notification is for: those who can still decide its
+ * approval, or else those who reach the chat it shows or is about.
  */
-const reachesChatUnderLock = (chatId: string, memberId: string) =>
-	Effect.gen(function* () {
-		yield* Transaction;
-		const [placed] = yield* query((db) =>
-			db
-				.select({ workspaceId: placedChat.workspaceId, projectId: placedChat.projectId })
-				.from(placedChat)
-				.where(eq(placedChat.id, chatId))
-				.limit(1),
-		);
-		if (!placed?.projectId) return false;
-		const { projectId } = placed;
-		yield* shareWorkspaceLock(placed.workspaceId);
-		// A statement of its own, so it reads what a change that held the lock committed.
-		const [reaching] = yield* query((db) =>
-			db
-				.select({ id: member.id })
-				.from(member)
-				.where(
-					and(
-						eq(member.id, memberId),
-						reachesChatFor({ projectId: sql`${projectId}::uuid` }, member.id),
-					),
-				)
-				.limit(1),
-		);
-		return reaching !== undefined;
-	});
-
-/**
- * Whether the member `delivery` is for may still be told it: they reach the
- * chat it shows, or, for one that shows none, such as an approval asked of a
- * computer's project's manager, are still in the workspace of the chat it is
- * about. Read under a share of the workspace's lock, as {@link reachesChatUnderLock}.
- */
-const mayStillBeTold = (
-	delivery: Pick<NotificationDeliveryRow, "chatId" | "memberId" | "notification">,
-) =>
-	Effect.gen(function* () {
-		const { memberId, notification } = delivery;
-		if (notification.chatId) return yield* reachesChatUnderLock(notification.chatId, memberId);
-		const [placed] = yield* query((db) =>
-			db
-				.select({ workspaceId: placedChat.workspaceId })
-				.from(placedChat)
-				.where(eq(placedChat.id, delivery.chatId))
-				.limit(1),
-		);
-		if (!placed) return false;
-		yield* shareWorkspaceLock(placed.workspaceId);
-		const [inWorkspace] = yield* query((db) =>
-			db
-				.select({ id: membership.id })
-				.from(membership)
-				.where(
-					and(eq(membership.workspaceId, placed.workspaceId), eq(membership.memberId, memberId)),
-				)
-				.limit(1),
-		);
-		return inWorkspace !== undefined;
-	});
+function audienceOf(delivery: DeliveryToSend): Audience.Group {
+	const { approvalCallId, notification } = delivery;
+	return approvalCallId
+		? { kind: "approval", toolCall: approvalCallId, showsChat: notification.chatId !== null }
+		: { kind: "chat", chat: notification.chatId ?? delivery.chatId };
+}
 
 /** A project or a bot, where a member chooses in place of the level above. */
 export interface Place {

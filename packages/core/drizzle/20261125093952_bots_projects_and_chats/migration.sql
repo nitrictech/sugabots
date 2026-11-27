@@ -3280,6 +3280,8 @@ CREATE TABLE "pending_notification" (
 ALTER TABLE "notification_delivery" ADD COLUMN "created_at" timestamp with time zone DEFAULT now() NOT NULL;--> statement-breakpoint
 ALTER TABLE "notification_delivery" ADD COLUMN "sent_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "notification_delivery" ADD COLUMN "claimed_until" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "notification_delivery" ADD COLUMN "approval_call_id" uuid;--> statement-breakpoint
+ALTER TABLE "notification_delivery" ADD CONSTRAINT "notification_delivery_approval_call_id_tool_call_id_fkey" FOREIGN KEY ("approval_call_id") REFERENCES "tool_call"("id") ON DELETE CASCADE;--> statement-breakpoint
 -- Every notification recorded before was sent as it was recorded.
 UPDATE "notification_delivery" SET "sent_at" = "created_at";--> statement-breakpoint
 CREATE INDEX "notification_delivery_unsent_idx" ON "notification_delivery" ("created_at") WHERE "sent_at" is null;--> statement-breakpoint
