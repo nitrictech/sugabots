@@ -4,7 +4,7 @@ import { type DocPage, docPages } from "@sugabots/docs";
 export const docsPageList = docPages.map(pageEntry).join("\n");
 
 function pageEntry(page: DocPage): string {
-	const headings = page.sections.map((section) => section.heading).join(" · ");
+	const headings = page.sections.map((section) => section.heading).join("; ");
 	return `- ${page.slug}: ${page.description}${headings ? `\n  Sections: ${headings}` : ""}`;
 }
 

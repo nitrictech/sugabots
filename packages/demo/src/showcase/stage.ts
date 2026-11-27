@@ -165,7 +165,7 @@ const BILLING_ENGINEER = {
 		content: [
 			"# Incident: Kestrel Freight charged twice",
 			"",
-			"**Billing · 3 Oct · Resolved**",
+			"**Billing, 3 Oct, resolved**",
 			"",
 			"## What happened",
 			"Kestrel Freight was charged $1,280 twice for their October invoice, a minute apart. Ticket Desk refunded the second charge, with Anita's approval.",
