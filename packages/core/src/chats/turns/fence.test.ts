@@ -2,9 +2,25 @@ import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { seedBot } from "../../authentication/seed.test-support.ts";
 import { TurnAuthentication } from "../../authentication/turn.ts";
-import { file, membership, message, projectChat, toolCall, turn } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
+import { query, transaction } from "../../database/database.ts";
+import {
+	file,
+	membership,
+	message,
+	projectChat,
+	toolCall,
+	turn,
+	workspace,
+} from "../../database/schema.ts";
+import {
+	closeDatabase,
+	holdTransaction,
+	onDatabase,
+	onPostgres,
+	runOnPostgres,
+} from "../../database/testing.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { asMember } from "../../operations/chats/testing.ts";
 import { asRunningTurn } from "../../operations/running-turn.ts";
@@ -17,7 +33,7 @@ import { named } from "../../proofs/proof.ts";
 import { proveReachesChat } from "../../proofs/reaches-chat.ts";
 import { Chats } from "../chats/chats.ts";
 import { chatServicesForTests } from "../testing.ts";
-import { executionFence, holdRunningTurn } from "./fence.ts";
+import { executionFence, holdRunningTurn, holdTurnForToolWrite } from "./fence.ts";
 import { TurnRecords } from "./records.ts";
 import { TurnStore } from "./store.ts";
 import {
@@ -298,4 +314,66 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 			expect(stored?.resolvedAt).toBeNull();
 		},
 	);
+
+	/**
+	 * Changes the opened turn's asker's role under the workspace's lock, as a
+	 * change of role does, and holds the lock until released.
+	 */
+	const changingAskersRole = (role: "editor" | "viewer") => {
+		const { principal } = opened;
+		if (principal._tag !== "BotForAsker") throw new Error("fixture");
+		return holdTransaction(
+			Effect.gen(function* () {
+				yield* query((db) =>
+					db
+						.select({ id: workspace.id })
+						.from(workspace)
+						.where(eq(workspace.id, principal.workspace))
+						.for("no key update"),
+				);
+				yield* query((db) =>
+					db.update(membership).set({ role }).where(eq(membership.memberId, principal.asker)),
+				);
+			}),
+		);
+	};
+
+	it("waits for a change of role in progress, then refuses a write that needs managing a bot the asker no longer manages", async () => {
+		const { principal } = opened;
+		const othersBot = await seedBot(principal.workspace);
+		const demoting = changingAskersRole("editor");
+		await demoting.held;
+
+		const writing = run(
+			Effect.result(
+				transaction(
+					holdTurnForToolWrite(
+						executionFence(opened.turnId, principal.executionNumber, { managedBot: othersBot.id }),
+					),
+				),
+			),
+		);
+		await demoting.waitForWaiters(1);
+		await demoting.release();
+
+		expect(await writing).toMatchObject({
+			_tag: "Failure",
+			failure: { _tag: "ActionForbidden" },
+		});
+	});
+
+	it("shares no file once its asker can no longer change the chat", async () => {
+		const demoting = changingAskersRole("viewer");
+		await demoting.held;
+
+		const sharing = turns.attachFile(
+			{ ...replyTurnOf(opened), executionNumber: opened.principal.executionNumber },
+			{ name: "late.csv", contentType: "text/csv", content: new Uint8Array([0x61]) },
+		);
+		await demoting.waitForWaiters(1);
+		await demoting.release();
+
+		await expect(sharing).rejects.toMatchObject({ _tag: "ActionForbidden" });
+		expect(await turns.replyFiles(replyTurnOf(opened))).toEqual([]);
+	});
 });

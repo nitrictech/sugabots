@@ -506,19 +506,27 @@ export const botRemovalStarted = (botId: SQLWrapper) =>
 			and removing_bot_project.deleting
 	)`;
 
-/** Whether the turn's bot and the member it acts for can still use its chat. */
-export const turnReachesChat = (db: Executor, facts: TurnFacts) =>
+/**
+ * The places of the turn's asker and bot in its chat's project, while both can
+ * still use its chat; undefined once either can't.
+ */
+export const turnChatPlace = (db: Executor, facts: TurnFacts) =>
 	Effect.gen(function* () {
-		if (!facts.project) return false;
+		if (!facts.project) return undefined;
 		const asker = askerOf(facts);
-		if (asker === undefined && (facts.askedBy.kind !== "automation" || !facts.run)) return false;
+		if (asker === undefined && (facts.askedBy.kind !== "automation" || !facts.run))
+			return undefined;
 		const place = yield* reachFacts(db, facts.project, {
 			...(asker && { member: asker }),
 			bot: facts.bot,
 		});
-		return (
+		const reaches =
 			place !== undefined &&
 			(asker === undefined || memberReaches(place.member, place.project)) &&
-			botReaches(place.bot, place.project, place.member)
-		);
+			botReaches(place.bot, place.project, place.member);
+		return reaches ? place : undefined;
 	});
+
+/** Whether the turn's bot and the member it acts for can still use its chat. */
+export const turnReachesChat = (db: Executor, facts: TurnFacts) =>
+	Effect.map(turnChatPlace(db, facts), (place) => place !== undefined);

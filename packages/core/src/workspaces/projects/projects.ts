@@ -25,7 +25,7 @@ import {
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { Context, Effect, Layer } from "effect";
 import type { Actor } from "../../authorization/permissions.ts";
-import { holdTurnOf, type ToolWriteRefusal } from "../../chats/turns/turns.ts";
+import { holdTurnUnderWorkspaceLock, type ToolWriteRefusal } from "../../chats/turns/turns.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { serviceOperations, Transaction } from "../../database/database.ts";
 import { EventOutbox } from "../../database/events/outbox.ts";
@@ -138,7 +138,8 @@ export interface Interface {
 	 * nothing. Checked again as they join, so a project made private
 	 * meanwhile is hidden from them.
 	 */
-	readonly join: <P, J, X>(
+	readonly join: <P, W, J, X>(
+		lock: HoldsWorkspaceLock<P, W>,
 		canJoin: CanJoinProject<P, J>,
 		approved: Approved<P, X, [J], "projects.join">,
 	) => Effect.Effect<Project, ResourceHidden | ToolWriteRefusal, Transaction>;
@@ -148,7 +149,8 @@ export interface Interface {
 	 * Adds `bot`: a public bot to any project, a private bot to a private one,
 	 * and a personal bot to none. Adding one already in it changes nothing.
 	 */
-	readonly addBot: <P, J, B, X>(
+	readonly addBot: <P, W, J, B, X>(
+		lock: HoldsWorkspaceLock<P, W>,
 		canChange: CanChangeProjectMembers<P, J>,
 		bot: ReachesBot<P, B>,
 		approved: Approved<P, X, [J, B], "projects.addBot">,
@@ -196,12 +198,12 @@ export const make = Effect.gen(function* () {
 				projectsListedTo(canRead.inWorkspace.workspace.value, canRead.actor.memberId),
 			),
 
-		create: (lock, canCreate, lead, input, approved) =>
+		create: (lock, canCreate, lead, input, _approved) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
 					yield* Transaction;
-					yield* holdTurnOf(approved.principal.value);
+					yield* holdTurnUnderWorkspaceLock(lock);
 					const workspaceId = lock.workspace.value;
 					const slug = yield* newProjectSlug(input);
 					// Its creator, the workspace's owner and admins and its lead are in it from the start.
@@ -292,12 +294,12 @@ export const make = Effect.gen(function* () {
 		leave: (canLeave) =>
 			operation("leave", removeProjectMember(canLeave.reach, canLeave.member.actor.memberId)),
 
-		join: (canJoin, approved) =>
+		join: (lock, canJoin, _approved) =>
 			operation(
 				"join",
 				Effect.gen(function* () {
 					yield* Transaction;
-					yield* holdTurnOf(approved.principal.value);
+					yield* holdTurnUnderWorkspaceLock(lock);
 					const { member } = canJoin;
 					const joined = yield* store.join(
 						canJoin.workspace,
@@ -318,12 +320,12 @@ export const make = Effect.gen(function* () {
 		bots: (reach) =>
 			operation("bots", projectBots(reach.project.value, viewerOf(memberActing(reach.as)))),
 
-		addBot: (canChange, bot, approved) =>
+		addBot: (lock, canChange, bot, _approved) =>
 			operation(
 				"addBot",
 				Effect.gen(function* () {
 					yield* Transaction;
-					yield* holdTurnOf(approved.principal.value);
+					yield* holdTurnUnderWorkspaceLock(lock);
 					const { reach } = canChange;
 					yield* store.addBot(reach.workspace, reach.project.value, bot.bot.value);
 					yield* membersChanged(reach);

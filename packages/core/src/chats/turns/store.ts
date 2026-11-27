@@ -6,6 +6,7 @@ import {
 	messagePartsFor,
 	stepThinkingSchema,
 } from "@sugabots/contracts";
+import type { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { type DomainError, type UserText, userText } from "@sugabots/errors";
 import type { ModelMessage, ToolModelMessage, ToolResultPart } from "ai";
 import { and, asc, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
@@ -44,7 +45,13 @@ import {
 	toMessage,
 	toReactions,
 } from "../store/participants.ts";
-import { type FenceRefusal, fenced, fenceRefusal } from "./fence.ts";
+import {
+	executionFence,
+	type FenceRefusal,
+	fenced,
+	fenceRefusal,
+	holdTurnForToolWrite,
+} from "./fence.ts";
 import {
 	type Ended,
 	endedAs,
@@ -166,16 +173,23 @@ export interface Interface {
 	/**
 	 * Attaches `file` to the turn's reply, after the files already on it, and
 	 * announces what the reply carries now, for the execution of the turn
-	 * `executionNumber`. Fails with `ReplyEnded` once the turn is no longer
-	 * running, or a newer execution took it over, and `TooManyReplyFiles` once
-	 * the reply carries as many as a message can.
+	 * `executionNumber`, through the fence for tool writes. Fails with
+	 * `ReplyEnded` once the turn is no longer running, or a newer execution
+	 * took it over; `ResourceHidden` or `ActionForbidden` once its asker can
+	 * no longer change things in the chat; and `TooManyReplyFiles` once the
+	 * reply carries as many as a message can.
 	 */
 	readonly attachFile: (
 		turn: ReplyTurn & { readonly executionNumber: number },
 		file: ReplyFile,
 	) => Effect.Effect<
 		FilePart,
-		ReplyEnded | ChatFileStore.TooManyReplyFiles | ChatFileStore.FileTooLarge | BlobStore.Failure
+		| ReplyEnded
+		| ResourceHidden
+		| ActionForbidden
+		| ChatFileStore.TooManyReplyFiles
+		| ChatFileStore.FileTooLarge
+		| BlobStore.Failure
 	>;
 	/** The files the turn's reply carries, in the order attached. */
 	readonly replyFiles: (turn: ReplyTurn) => Effect.Effect<readonly FilePart[]>;
@@ -1042,20 +1056,24 @@ export const make = Effect.gen(function* () {
 					(stored) =>
 						transaction(
 							Effect.gen(function* () {
-								// Locked, as ending the turn locks it: a call still running when the
-								// turn was cancelled finds it ended, and shares nothing.
+								// The fence shares the turn, as ending it locks it, so a call still
+								// running when the turn was cancelled finds it ended and shares
+								// nothing; and its asker must still be able to change the chat.
+								yield* holdTurnForToolWrite(
+									executionFence(reply.turnId, reply.executionNumber, {
+										permission: "project.change",
+									}),
+								).pipe(
+									Effect.catchTags({
+										TurnEnded: () => Effect.fail(new ReplyEnded()),
+										TurnExecutionSuperseded: () => Effect.fail(new ReplyEnded()),
+									}),
+								);
 								const [running] = yield* query((db) =>
 									db
 										.select({ id: turn.id })
 										.from(turn)
-										.where(
-											and(
-												eq(turn.id, reply.turnId),
-												eq(turn.status, "running"),
-												eq(turn.executionNumber, reply.executionNumber),
-											),
-										)
-										.for("update"),
+										.where(and(eq(turn.id, reply.turnId), eq(turn.status, "running"))),
 								);
 								if (!running) return yield* new ReplyEnded();
 								const attached = yield* files.attachToReply(stored);

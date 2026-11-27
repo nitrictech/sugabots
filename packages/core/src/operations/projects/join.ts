@@ -21,7 +21,7 @@ export const join = defineOperation(projectsContracts["projects.join"], (princip
 						approvedInput,
 						project,
 					);
-					return yield* projects.join(canJoin, approved);
+					return yield* projects.join(lock, canJoin, approved);
 				}),
 			),
 		);

@@ -31,7 +31,7 @@ export const addBot = defineOperation(
 							project,
 							bot,
 						);
-						return yield* projects.addBot(canChange, reachesBot, approved);
+						return yield* projects.addBot(lock, canChange, reachesBot, approved);
 					}),
 				),
 			);

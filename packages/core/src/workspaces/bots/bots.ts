@@ -338,7 +338,8 @@ export const make = Effect.gen(function* () {
 					if (facts.assistantOf !== null) return yield* new AssistantInstructionsManaged();
 					const saved = yield* transaction(
 						Effect.gen(function* () {
-							yield* holdTurnOf(approved.principal.value);
+							// Its asker must still manage the bot as the write commits.
+							yield* holdTurnOf(approved.principal.value, { managedBot: facts.id });
 							return yield* store.update(workspace, facts.id, {
 								instructions: approved.input.instructions,
 								description: approved.input.description,

@@ -470,13 +470,14 @@ export const projectsServiceMistakes = underWorkspaceLock(principal, "workspace"
 				yield* proveCanChangeProjectMembers(lock, yield* proveRealReachesProject(other, project));
 
 				// A bot proven reached by another principal, added to a project this one may change.
+				const reachedByOther = yield* proveReachesBot(other, bot);
 				// @ts-expect-error TS2345 [Argument of type 'ReachesBot<NameA, NameC>' is not assignable to parameter of type 'ReachesBot<P, NameC>']
-				yield* projectsService.addBot(canChange, yield* proveReachesBot(other, bot), approved);
+				yield* projectsService.addBot(lock, canChange, reachedByOther, approved);
 
 				// A bot added for a bot's call another principal's approval allowed.
 				const reachesBot = yield* proveReachesBot(lock.principal, bot);
-				// @ts-expect-error TS2345 [Argument of type 'CanChangeProjectMembers<P, NameB>' is not assignable to parameter of type 'CanChangeProjectMembers<NameA, NameB>'] The approval belongs to a different principal.
-				yield* projectsService.addBot(canChange, reachesBot, approvedForOther);
+				// @ts-expect-error TS2345 [Argument of type 'HoldsWorkspaceLock<P, W>' is not assignable to parameter of type 'HoldsWorkspaceLock<NameA, W>'] The approval belongs to a different principal.
+				yield* projectsService.addBot(lock, canChange, reachesBot, approvedForOther);
 
 				// A project deleted with the proof that its members may be changed, not that it may be deleted.
 				// @ts-expect-error TS2739 [from type 'ProjectDeletionStarted<unknown, unknown, "project">']
@@ -496,6 +497,7 @@ export const projectsServiceMistakes = underWorkspaceLock(principal, "workspace"
 				yield* outsideTheLock;
 				yield* projectsService.addMember(canChange, member);
 				yield* projectsService.addBot(
+					lock,
 					canChange,
 					yield* proveReachesBot(lock.principal, bot),
 					approved,
