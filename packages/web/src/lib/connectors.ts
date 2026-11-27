@@ -146,10 +146,8 @@ export function useMarkedConnectors(
 	botIds: readonly string[],
 	projectId?: string | null,
 ): (botId: string) => ReadonlyMap<string, MarkedConnector> {
-	const defaultProjectOf = useDefaultProjectsOf(botIds);
-	const projectIds = [
-		...new Set([...(projectId ? [projectId] : []), ...defaultProjectOf.values()]),
-	];
+	const defaultProjects = useBotDefaultProjects(botIds);
+	const projectIds = [...new Set([...(projectId ? [projectId] : []), ...defaultProjects.values()])];
 	const lists = useQueries({
 		queries: projectIds.map((one) => connectorsQuery(one)),
 	});
@@ -158,7 +156,7 @@ export function useMarkedConnectors(
 	);
 	const projectMarked = projectId ? markedIn.get(projectId) : undefined;
 	return (botId) => {
-		const defaultProjectId = defaultProjectOf.get(botId);
+		const defaultProjectId = defaultProjects.get(botId);
 		const ownMarked = defaultProjectId ? markedIn.get(defaultProjectId) : undefined;
 		// The project's entries come last, so they win a handle both have.
 		return new Map([...(ownMarked ?? []), ...(projectMarked ?? [])]);
@@ -179,7 +177,7 @@ function markedConnectorsByHandle(connectors: readonly Connector[]): Map<string,
  * already loaded say: a transcript is shown inside a workspace whose roster
  * the sidebar has loaded. A bot no roster has yet is left out.
  */
-function useDefaultProjectsOf(botIds: readonly string[]): ReadonlyMap<string, string> {
+function useBotDefaultProjects(botIds: readonly string[]): ReadonlyMap<string, string> {
 	const rosters = useQueryClient().getQueriesData<readonly Bot[]>({ queryKey: ["bots"] });
 	return new Map(
 		botIds.flatMap((botId): [string, string][] => {

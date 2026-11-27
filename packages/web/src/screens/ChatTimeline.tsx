@@ -66,7 +66,7 @@ export function ChatTimeline({
 	onReply: (message: Message) => void;
 	onJumpToMessage: (messageId: string) => void;
 }) {
-	const authorLinkOf = useAuthorLinks();
+	const findAuthorLink = useAuthorLinks();
 	const reactions = useReactions(signedIn);
 	const reacting = { memberId: signedIn.id, onToggle: reactions.toggle, onAdd: reactions.add };
 	const automationFeed = details.chat.kind === "automation_feed";
@@ -93,7 +93,7 @@ export function ChatTimeline({
 							dividers={false}
 							onOpenFile={onOpenFile}
 							onOpenDesktop={onOpenDesktop}
-							fileUrlOf={(fileId) => chatFileUrl(chatId, fileId)}
+							buildFileUrl={(fileId) => chatFileUrl(chatId, fileId)}
 							previews={previews}
 							approvalPermissions={details.permissions}
 							queued={queued}
@@ -104,9 +104,9 @@ export function ChatTimeline({
 							namedBotId={host?.id}
 							nameColorsFor={chatId}
 							highlightedMessageId={pointedOutMessageId}
-							authorLinkOf={authorLinkOf}
+							findAuthorLink={findAuthorLink}
 							onReply={onReply}
-							sideLinesOf={(message) => {
+							buildSideLines={(message) => {
 								const { author } = message;
 								if (author.kind !== "bot") return null;
 								return chatsStartedBy(message).map((started) => (
@@ -118,7 +118,7 @@ export function ChatTimeline({
 									/>
 								));
 							}}
-							workOf={(message) => runReplies.get(message.id)}
+							findRunWork={(message) => runReplies.get(message.id)}
 							onJumpToMessage={onJumpToMessage}
 							reacting={reacting}
 						/>

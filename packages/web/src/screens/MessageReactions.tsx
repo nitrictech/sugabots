@@ -41,7 +41,7 @@ export function MessageReactions({
 			{reactions.map((reaction) => {
 				const mine = reacting !== undefined && isAmong(reaction, reacting.memberId);
 				const who = whoReacted(reaction, reacting?.memberId);
-				const count = reactorsOf(reaction).length;
+				const count = listReactors(reaction).length;
 				const label = `${reaction.emoji} ${count}: ${who}`;
 				const pill = cn(
 					"flex h-6 items-center gap-1 rounded-full px-2 transition-colors",
@@ -145,13 +145,13 @@ function isAmong(reaction: MessageReaction, memberId: string): boolean {
 const MAX_NAMED = 10;
 
 /** Who reacted with the emoji, members first, then the bots that did, as a bot reads with 👀 what it chose not to answer. */
-function reactorsOf(reaction: MessageReaction): MessageReaction["members"] {
+function listReactors(reaction: MessageReaction): MessageReaction["members"] {
 	return [...reaction.members, ...(reaction.bots ?? [])];
 }
 
 /** For example "You, Sam and Reviewer reacted with 👍", or "… and 4 others reacted with 👍". */
 function whoReacted(reaction: MessageReaction, memberId: string | undefined): string {
-	const names = reactorsOf(reaction).map((reactor) =>
+	const names = listReactors(reaction).map((reactor) =>
 		reactor.id === memberId ? "You" : reactor.name,
 	);
 	return `${listNames(names, { maxNamed: MAX_NAMED })} reacted with ${reaction.emoji}`;

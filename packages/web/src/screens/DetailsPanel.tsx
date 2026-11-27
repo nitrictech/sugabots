@@ -29,7 +29,7 @@ import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { SpacedText } from "@/ui/spaced-text.tsx";
 import { Switch } from "@/ui/switch.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
-import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
+import { ContextMeter, computeUsedPercent } from "./ContextMeter.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { ModelName } from "./ModelName.tsx";
 import { ParticipantAvatar } from "./ParticipantAvatar.tsx";
@@ -106,7 +106,7 @@ export function DetailsPanel({
 					</div>
 				</div>
 				<Context bot={bot} memory={context ?? undefined} />
-				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
+				<SharedFiles files={contents.files} buildFileUrl={contents.buildFileUrl} />
 				<Computer owner={{ bot }} bot={bot} chatId={chatId} onOpen={onOpenDesktop} />
 				{/* From a tablet up, automations are in the bot's sidebar. */}
 				<div className="contents md:hidden">
@@ -149,7 +149,7 @@ export interface ChatContents {
 	participants: readonly Participant[];
 	/** The files in the messages loaded so far, oldest first: older pages add theirs as they load. */
 	files: readonly FilePart[];
-	fileUrlOf: (fileId: string) => string;
+	buildFileUrl: (fileId: string) => string;
 }
 
 /**
@@ -213,7 +213,7 @@ export function ProjectDetails({
 				</div>
 				<Members participants={contents.participants} signedIn={signedIn} />
 				{computer && <Computer owner={{ project }} {...computer} />}
-				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
+				<SharedFiles files={contents.files} buildFileUrl={contents.buildFileUrl} />
 			</div>
 		</SidePanel>
 	);
@@ -242,10 +242,10 @@ function Members({
 /** The files shared in the chat, newest first, each opening as it is served. */
 function SharedFiles({
 	files,
-	fileUrlOf,
+	buildFileUrl,
 }: {
 	files: readonly FilePart[];
-	fileUrlOf: (fileId: string) => string;
+	buildFileUrl: (fileId: string) => string;
 }) {
 	if (files.length === 0) return null;
 	return (
@@ -254,7 +254,7 @@ function SharedFiles({
 				{(file) => (
 					<li key={file.id}>
 						<a
-							href={fileUrlOf(file.id)}
+							href={buildFileUrl(file.id)}
 							target="_blank"
 							rel="noreferrer"
 							className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
@@ -412,7 +412,7 @@ function Context({ bot, memory }: { bot: Bot; memory: ChatContext | undefined })
 				<div className="flex flex-col gap-1.5 pt-1">
 					<h4 className="m-0 flex font-normal text-subtle-foreground text-xs">
 						<span className="flex-1">Memory</span>
-						<span className="font-mono">{usedPercentOf(memory)}%</span>
+						<span className="font-mono">{computeUsedPercent(memory)}%</span>
 					</h4>
 					<ContextMeter context={memory} />
 				</div>

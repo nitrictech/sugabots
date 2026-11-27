@@ -117,7 +117,7 @@ const meta = preview.meta({
 					size: 48_210,
 				},
 			],
-			fileUrlOf: (fileId: string) => `https://files.example/${fileId}`,
+			buildFileUrl: (fileId: string) => `https://files.example/${fileId}`,
 		},
 		onOpenAutomations: fn(),
 		onOpenDesktop: fn(),

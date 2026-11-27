@@ -55,7 +55,7 @@ function message(id: string, author: Message["author"], content: string): Messag
 const PROJECT = "0199a3a0-0000-7000-8000-00000000000b";
 
 /** Where a file would be served. Most stories have none, so nothing asks for one. */
-const fileUrlOf = (fileId: string) => `/files/${fileId}`;
+const buildFileUrl = (fileId: string) => `/files/${fileId}`;
 
 function toolCall(id: string, tool: string): ToolCallPart {
 	return {
@@ -86,7 +86,7 @@ const meta = preview.meta({
 		participants: [host, member],
 		membersReachingProject: [member, jay],
 		chatKind: "project_chat",
-		fileUrlOf,
+		buildFileUrl,
 	},
 	decorators: [
 		function WithQueries(Story) {
@@ -261,7 +261,7 @@ const sentFilesOnly: Message = {
 	createdAt: "2026-09-22T04:32:00.000Z",
 };
 /** The pictures where they are drawn, and every other file where it would be served. */
-const servedAt = (fileId: string) => pictures.get(fileId) ?? fileUrlOf(fileId);
+const servedAt = (fileId: string) => pictures.get(fileId) ?? buildFileUrl(fileId);
 const stillSending: Message = {
 	...message("0199a3a0-0000-7000-8000-000000000312", member, "Numbers attached"),
 	parts: [{ type: "text", text: "Numbers attached" }, ...attachedFiles.slice(2)],
@@ -274,7 +274,7 @@ const stillSending: Message = {
  */
 export const WithFiles = meta.story({
 	args: {
-		fileUrlOf: servedAt,
+		buildFileUrl: servedAt,
 		messages: [askedWithFiles, sentFilesOnly],
 	},
 	play: async ({ canvas }) => {
@@ -294,7 +294,7 @@ export const WithFiles = meta.story({
 /** A message still being sent: its files show, without links until the API can serve them. */
 export const FilesWhileSending = meta.story({
 	args: {
-		fileUrlOf: servedAt,
+		buildFileUrl: servedAt,
 		messages: [stillSending],
 		sending: new Set([stillSending.id]),
 	},

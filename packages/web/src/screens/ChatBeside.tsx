@@ -92,7 +92,7 @@ export function ChatBeside({
 		files: shownMessages.flatMap((message) =>
 			message.parts.filter((part): part is FilePart => part.type === "file"),
 		),
-		fileUrlOf: (fileId) => chatFileUrl(chatId, fileId),
+		buildFileUrl: (fileId) => chatFileUrl(chatId, fileId),
 	};
 	// A project's automation's feed is set up beside it, as a bot's is.
 	if (details.automation) {

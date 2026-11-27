@@ -17,7 +17,7 @@ import { ChatLink } from "@/shell/ChatLink.tsx";
 import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { PageBackLink } from "@/ui/settings-page.tsx";
-import { Answer, fieldsOf, RequestValue } from "./ToolApprovalCard.tsx";
+import { Answer, parseFields, RequestValue } from "./ToolApprovalCard.tsx";
 import { awaitsApproval } from "./tool-activity.ts";
 
 /** A request as the member's approvals list it: waiting on their decision, or answered. */
@@ -60,7 +60,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 	const { connector, toolSourceName, action, hostRequest } = useApprovalToolSource(request);
 	const review = useReviewToolCall(request.chatId);
 	const { project, askedIn } = useAskedIn(request);
-	const fields = fieldsOf(call.input) ?? [];
+	const fields = parseFields(call.input) ?? [];
 
 	return (
 		<div className="tab-bar-clearance min-h-0 flex-1 overflow-y-auto">

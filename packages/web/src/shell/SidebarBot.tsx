@@ -88,7 +88,7 @@ export function hasNews({ unreadMessages, needsApproval }: Waiting): boolean {
  * What a bot's or project's dot says, if anything: it needs the viewer, as a
  * decision or a mention does, or it holds unread messages, with how many.
  */
-export function attentionOf({
+export function describeAttention({
 	unreadMessages,
 	needsApproval,
 }: Waiting): { attention: Attention; label: string } | undefined {
@@ -107,7 +107,7 @@ export function attentionOf({
  * the row's bold name, so they are only counted for a screen reader.
  */
 export function RowAttention({ className, ...waiting }: Waiting & { className?: string }) {
-	const mark = attentionOf(waiting);
+	const mark = describeAttention(waiting);
 	if (!mark) return null;
 	if (mark.attention === "unread") return <span className="sr-only">{mark.label}</span>;
 	return <AttentionDot attention="needsYou" label={mark.label} className={className} />;

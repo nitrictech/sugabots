@@ -30,11 +30,11 @@ import {
 } from "@/ui/settings-page.tsx";
 import {
 	buildTriggerDraft,
+	buildTriggerInput,
 	TriggerDialog,
 	type TriggerDraft,
 	type TriggerSection,
 	TriggersGroup,
-	triggerInputOf,
 } from "./AutomationTriggers.tsx";
 
 /** An automation with the bot or project it belongs to. */
@@ -70,7 +70,7 @@ export function NewAutomationPage({
 	const actions = useAutomationActions();
 	const runner = useLeadBot(owner);
 	const listed = triggers.flatMap(({ key, draft }) => {
-		const written = triggerInputOf(draft);
+		const written = buildTriggerInput(draft);
 		return "input" in written ? [{ key, trigger: written.input }] : [];
 	});
 	const ready = name.trim() !== "" && instructions.trim() !== "";

@@ -3,7 +3,7 @@ import { cn } from "cn";
 import { Meter } from "@/ui/meter.tsx";
 
 /** How much of the bot's short-term memory the chat fills, as a whole percentage. */
-export function usedPercentOf(context: ChatContext): number {
+export function computeUsedPercent(context: ChatContext): number {
 	return Math.round(Math.min(context.usedTokens / context.windowTokens, 1) * 100);
 }
 
@@ -16,7 +16,7 @@ export function usedPercentOf(context: ChatContext): number {
 export function ContextMeter({ context }: { context: ChatContext }) {
 	const { measuredAt, windowTokens, compactionLineTokens, compactedAt } = context;
 	const compactedSinceMeasured = compactedAt !== null && compactedAt > measuredAt;
-	const usedPercent = usedPercentOf(context);
+	const usedPercent = computeUsedPercent(context);
 	const linePercent = Math.round((compactionLineTokens / windowTokens) * 100);
 	return (
 		<Meter

@@ -364,8 +364,8 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const disconnectError = disconnect.error ?? actions.signOut.error;
 	// Switching a provider off only stops what it offers; removing one deletes
 	// every model it lists, including one held while the provider is off.
-	const held = useHoldersOf(seeded ? offeredModelsOf(provider) : provider.models);
-	const heldOn = useHoldersOf(offeredModelsOf(provider));
+	const held = useCombinedHolders(seeded ? listOfferedModels(provider) : provider.models);
+	const heldOn = useCombinedHolders(listOfferedModels(provider));
 	const usage = useModelUsage();
 	const [checkingUsage, setCheckingUsage] = useState(false);
 	// Kept as they were when the dialog opened: once they move, the provider goes
@@ -383,7 +383,7 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	async function latestStranded() {
 		setCheckingUsage(true);
 		const latest = await usage.latest().finally(() => setCheckingUsage(false));
-		return strandedModelsOf(provider, latest);
+		return findStrandedModels(provider, latest);
 	}
 
 	async function switchOff() {
@@ -548,7 +548,7 @@ function ProviderAccessGroup({ provider, local }: { provider: ModelProvider; loc
 	const signInService = builtInSignInService(provider.builtIn);
 	const error = actions.update.error ?? actions.test.error;
 	const tested = actions.test.data;
-	const held = useHoldersOf(offeredModelsOf(provider));
+	const held = useCombinedHolders(listOfferedModels(provider));
 
 	return (
 		<SettingsGroup
@@ -773,9 +773,9 @@ function ProviderFieldForm({
  * What must keep running on any of `models`, all of them together, or nothing
  * when none is held.
  */
-function useHoldersOf(models: readonly ProviderModel[]): ModelHolders | undefined {
-	const holdersOf = useModelHolders();
-	const held = models.flatMap((model) => holdersOf(model.modelId) ?? []);
+function useCombinedHolders(models: readonly ProviderModel[]): ModelHolders | undefined {
+	const findHolders = useModelHolders();
+	const held = models.flatMap((model) => findHolders(model.modelId) ?? []);
 	if (held.length === 0) return undefined;
 	return {
 		newBots: held.some((holders) => holders.newBots),
@@ -938,8 +938,11 @@ interface StrandedModel {
 }
 
 /** The provider's offered models that bots would be left on if it went off. */
-function strandedModelsOf(provider: ModelProvider, workspaceBots: readonly Bot[]): StrandedModel[] {
-	return offeredModelsOf(provider).flatMap((model) => {
+function findStrandedModels(
+	provider: ModelProvider,
+	workspaceBots: readonly Bot[],
+): StrandedModel[] {
+	return listOfferedModels(provider).flatMap((model) => {
 		const bots = memberFacingBotsOn(workspaceBots, model.modelId);
 		return bots.length > 0 ? [{ model, bots }] : [];
 	});
@@ -976,9 +979,9 @@ function MoveBotsOffProviderDialog({
 		(candidate) => candidate.providerId === provider.id,
 	);
 	const [chosen, setChosen] = useState<Record<string, string>>({});
-	const destinationOf = (modelId: string) => offeredOr(chosen[modelId]);
+	const chooseDestination = (modelId: string) => offeredOr(chosen[modelId]);
 	const moveBots = stranded.flatMap(({ model }) => {
-		const to = destinationOf(model.modelId);
+		const to = chooseDestination(model.modelId);
 		return to ? [{ from: model.modelId, to }] : [];
 	});
 	const [error, setError] = useState<unknown>();
@@ -1034,7 +1037,7 @@ function MoveBotsOffProviderDialog({
 										<MoveToMenu
 											label={`Move ${modelName(model)} bots to`}
 											candidates={candidates}
-											value={destinationOf(model.modelId)}
+											value={chooseDestination(model.modelId)}
 											onChange={(modelId) => setChosen({ ...chosen, [model.modelId]: modelId })}
 										/>
 									}
@@ -1063,14 +1066,14 @@ function MoveBotsOffProviderDialog({
 }
 
 /** The models the provider offers bots: none unless it is usable, connected and switched on. */
-function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
+function listOfferedModels(provider: ModelProvider): ProviderModel[] {
 	return providerIsUsable(provider) ? provider.models.filter((model) => model.enabled) : [];
 }
 
 /** The key, masked once saved; Replace swaps it for a new one. */
 function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boolean }) {
 	const actions = useProviderActions();
-	const held = useHoldersOf(offeredModelsOf(provider));
+	const held = useCombinedHolders(listOfferedModels(provider));
 	const [replacing, setReplacing] = useState(!provider.hasApiKey && !optional);
 	const [apiKey, setApiKey] = useState("");
 
@@ -1197,7 +1200,7 @@ function ScrollingWhen({ large, children }: { large: boolean; children: ReactNod
 }
 
 /** Who makes a model on a provider that resells many: OpenRouter names it `maker/model`. */
-function makerOf(model: ProviderModel): string | undefined {
+function parseMaker(model: ProviderModel): string | undefined {
 	const slash = model.modelId.indexOf("/");
 	return slash > 0 ? model.modelId.slice(0, slash) : undefined;
 }
@@ -1209,7 +1212,7 @@ function makerLabel(maker: string): string {
 function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
 	const usage = useModelUsage();
-	const holdersOf = useModelHolders();
+	const findHolders = useModelHolders();
 	const [search, setSearch] = useState("");
 	const [adding, setAdding] = useState(false);
 	const [checkingUsage, setCheckingUsage] = useState(false);
@@ -1235,7 +1238,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 		setCheckingUsage(true);
 		const latest = await usage.latest().finally(() => setCheckingUsage(false));
 		const strandsBots = memberFacingBotsOn(latest, model.modelId).length > 0;
-		if (strandsBots || holdersOf(model.modelId) !== undefined) {
+		if (strandsBots || findHolders(model.modelId) !== undefined) {
 			setMovingOff(model);
 			return;
 		}
@@ -1279,8 +1282,8 @@ function Models({ provider }: { provider: ModelProvider }) {
 				{shown.map((model) => {
 					const bots = memberFacingBotsOn(usage.bots, model.modelId);
 					const used = bots.length === 0 ? "Not used yet" : formatCount(bots.length, "bot", "bots");
-					const who = large ? makerLabel(makerOf(model) ?? provider.name) : used;
-					const held = model.enabled ? holdersOf(model.modelId) : undefined;
+					const who = large ? makerLabel(parseMaker(model) ?? provider.name) : used;
+					const held = model.enabled ? findHolders(model.modelId) : undefined;
 					return (
 						<SettingsRow
 							key={model.id}
@@ -1337,7 +1340,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 						provider={provider}
 						model={movingOff}
 						bots={memberFacingBotsOn(usage.bots, movingOff.modelId)}
-						held={holdersOf(movingOff.modelId)}
+						held={findHolders(movingOff.modelId)}
 						done={() => setMovingOff(undefined)}
 					/>
 				)}

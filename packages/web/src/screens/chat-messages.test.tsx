@@ -116,7 +116,7 @@ function show(
 	const chat = (shown: Message[], participants = over.participants ?? [host]) => (
 		<QueryClientProvider client={queryClient}>
 			<ChatMessages
-				fileUrlOf={(fileId) => `/files/${fileId}`}
+				buildFileUrl={(fileId) => `/files/${fileId}`}
 				messages={shown}
 				typing={{ host, isRunning: false }}
 				participants={participants}

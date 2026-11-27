@@ -81,7 +81,7 @@ const automationPage = (one: BotsAutomation) =>
 const newPage = `/suga/bots/${triager.handle}/automations/new`;
 
 /** The id of `one`'s feed, where its runs post. */
-const feedOf = (one: BotsAutomation) =>
+const buildFeedId = (one: BotsAutomation) =>
 	`${one.automation.id.slice(0, -4)}f${one.automation.id.slice(-3)}`;
 
 /**
@@ -89,7 +89,7 @@ const feedOf = (one: BotsAutomation) =>
  * automations as `one` and `others`: what the automation's page reads to show it.
  */
 function serveAutomation(one: BotsAutomation, others: readonly Automation[] = []) {
-	const feed = feedOf(one);
+	const feed = buildFeedId(one);
 	client.api.automations.list.mockImplementation(({ params }: { params: { projectId: string } }) =>
 		Effect.succeed(
 			[one.automation, ...others].filter((automation) => automation.projectId === params.projectId),

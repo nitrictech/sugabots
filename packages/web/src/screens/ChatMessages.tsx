@@ -87,13 +87,13 @@ export function ChatMessages({
 	queued = NONE_QUEUED,
 	sending = NONE_SENDING,
 	highlightedMessageId,
-	authorLinkOf,
+	findAuthorLink,
 	onReply,
-	sideLinesOf,
-	workOf,
+	buildSideLines,
+	findRunWork,
 	onJumpToMessage,
 	reacting,
-	fileUrlOf,
+	buildFileUrl,
 	answeringFace,
 	viewerWriting = false,
 	viewerId,
@@ -155,16 +155,16 @@ export function ChatMessages({
 	/** A message pointed out for a moment, as one jumped to is. */
 	highlightedMessageId?: string;
 	/** Where an author's name leads. Names are plain text without it. */
-	authorLinkOf?: (author: PagedAuthor) => AuthorLink | undefined;
+	findAuthorLink?: (author: PagedAuthor) => AuthorLink | undefined;
 	/** Starts a reply quoting the message, from its hover toolbar. Without it, none is offered. */
 	onReply?: (message: Message) => void;
 	/** The lines of the chats a bot's message started, drawn under it. */
-	sideLinesOf?: (message: Message) => ReactNode;
+	buildSideLines?: (message: Message) => ReactNode;
 	/**
 	 * The reply whose work shows over a message, where it isn't the message's
 	 * own: a run's result shows its run's. By default, each message's own.
 	 */
-	workOf?: (message: Message) => Message | undefined;
+	findRunWork?: (message: Message) => Message | undefined;
 	/** Goes to the message a reply quotes, from its quote. Without it, the quote is only read. */
 	onJumpToMessage?: (messageId: string) => void;
 	/**
@@ -176,7 +176,7 @@ export function ChatMessages({
 	 * Where a file attached to a message is served. A message still being sent
 	 * shows its files without links, as the API can't serve them until it has it.
 	 */
-	fileUrlOf: (fileId: string) => string;
+	buildFileUrl: (fileId: string) => string;
 	/** The face that comes alive for the bot answering, as `findAnsweringFace` finds it; none unless given. */
 	answeringFace?: AnsweringFace;
 	/** Whether the viewer is writing a reply, which the answering face watches. */
@@ -200,7 +200,7 @@ export function ChatMessages({
 	const pendingReplier =
 		typing?.isRunning && messages.at(-1)?.author.kind === "member" ? typing.host : undefined;
 	const speakers = useMemo(() => speakersIn(messages), [messages]);
-	const markedConnectorsOf = useMarkedConnectors(speakers, projectId);
+	const findMarkedConnectors = useMarkedConnectors(speakers, projectId);
 	const fileNames = useMemo(() => fileNamesIn(messages), [messages]);
 	const watchedWritten = useRepliesWatchedBeingWritten(messages);
 	return (
@@ -236,7 +236,7 @@ export function ChatMessages({
 							chatKind={chatKind}
 							markedConnectors={
 								message.author.kind === "bot"
-									? markedConnectorsOf(message.author.id)
+									? findMarkedConnectors(message.author.id)
 									: NO_MARKED_CONNECTORS
 							}
 							fileNames={fileNames}
@@ -247,13 +247,13 @@ export function ChatMessages({
 							sending={sending.has(message.id)}
 							queuedNote={queuedNote}
 							highlighted={message.id === highlightedMessageId}
-							authorLinkOf={authorLinkOf}
+							findAuthorLink={findAuthorLink}
 							onReply={onReply}
-							sideLines={sideLinesOf?.(message)}
-							work={workOf?.(message)}
+							sideLines={buildSideLines?.(message)}
+							work={findRunWork?.(message)}
 							onJumpToMessage={onJumpToMessage}
 							reacting={reacting}
-							fileUrlOf={fileUrlOf}
+							buildFileUrl={buildFileUrl}
 							onOpenFile={onOpenFile}
 							onOpenDesktop={onOpenDesktop}
 							previews={previews}
@@ -369,13 +369,13 @@ function ChatMessage({
 	sending,
 	queuedNote,
 	highlighted,
-	authorLinkOf,
+	findAuthorLink,
 	onReply,
 	sideLines,
 	work,
 	onJumpToMessage,
 	reacting,
-	fileUrlOf,
+	buildFileUrl,
 	onOpenFile,
 	onOpenDesktop,
 	previews,
@@ -410,7 +410,7 @@ function ChatMessage({
 	/** Whether it is pointed out for a moment, as one jumped to is. */
 	highlighted: boolean;
 	/** Where its author's name leads. */
-	authorLinkOf?: (author: PagedAuthor) => AuthorLink | undefined;
+	findAuthorLink?: (author: PagedAuthor) => AuthorLink | undefined;
 	onReply?: (message: Message) => void;
 	sideLines?: ReactNode;
 	/** The reply whose work shows over it, where it isn't its own, as a run's result shows its run's. */
@@ -418,7 +418,7 @@ function ChatMessage({
 	onJumpToMessage?: (messageId: string) => void;
 	reacting?: Reacting;
 	/** Where a file attached to it is served. */
-	fileUrlOf: (fileId: string) => string;
+	buildFileUrl: (fileId: string) => string;
 	onOpenFile?: (fileId: string) => void;
 	onOpenDesktop?: () => void;
 	previews: boolean;
@@ -430,7 +430,7 @@ function ChatMessage({
 	const { author } = message;
 	// Only a run's own chat has its trigger, and the run's panel leaves it out.
 	if (author.kind === "automation_trigger") return null;
-	const authorLink = authorLinkOf?.(author);
+	const authorLink = findAuthorLink?.(author);
 	// A reply with nothing settled yet is only its typing line, under the last message.
 	if (showsNothingYet(message)) return null;
 
@@ -455,7 +455,7 @@ function ChatMessage({
 		<ReplyQuote
 			replyTo={message.replyTo}
 			onJump={onJumpToMessage}
-			tone={quoteToneOf(message.replyTo.author, nameColorsFor ?? message.chatId)}
+			tone={chooseQuoteTone(message.replyTo.author, nameColorsFor ?? message.chatId)}
 		/>
 	);
 
@@ -519,7 +519,7 @@ function ChatMessage({
 		</>
 	);
 	const fileList = files.length > 0 && (
-		<MessageFiles files={files} fileUrl={sending ? notServedYet : fileUrlOf} />
+		<MessageFiles files={files} fileUrl={sending ? notServedYet : buildFileUrl} />
 	);
 	// The bot the header names carries no head of its own.
 	const headed = startsGroup && !(bot !== undefined && bot.id === namedBotId);
@@ -778,7 +778,7 @@ interface QuoteTone {
 }
 
 /** The colour of a quote of `author`'s message: their name's colour in this chat, or a bot's own colour. */
-function quoteToneOf(author: MessageReplyTo["author"], chatId: string): QuoteTone {
+function chooseQuoteTone(author: MessageReplyTo["author"], chatId: string): QuoteTone {
 	if (author.kind === "member") return nameColorIn(chatId, author.id);
 	if (author.kind === "bot") {
 		return {

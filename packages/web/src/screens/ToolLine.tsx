@@ -20,11 +20,11 @@ import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { ToolCallValue } from "./ToolCallValue.tsx";
 import { awaitsApproval, formatElapsed } from "./tool-activity.ts";
 import {
+	describeNote,
 	describeStep,
-	noteOf,
+	describeToolSource,
 	stepDetails,
 	toolLineText,
-	toolSourceOf,
 	toolStepRuns,
 } from "./tool-steps.ts";
 
@@ -295,7 +295,11 @@ function CallMark({ call, connector }: { call: ToolCallPart; connector?: MarkedC
 			{splitToolKey(call.tool).handle === BUILT_IN_HANDLE ? (
 				<Wrench strokeWidth={1.75} />
 			) : (
-				<ConnectorMark markId={connector?.markId} name={toolSourceOf(call, connector)} size="xs" />
+				<ConnectorMark
+					markId={connector?.markId}
+					name={describeToolSource(call, connector)}
+					size="xs"
+				/>
 			)}
 		</ActivityIcon>
 	);
@@ -314,7 +318,7 @@ function CallLine({
 	const [inputShown, setInputShown] = useState(false);
 	const connector = markedConnectors.get(splitToolKey(call.tool).handle);
 	const { action, subject } = describeStep(call, fileNames);
-	const note = noteOf(call);
+	const note = describeNote(call);
 	const details = stepDetails(call);
 	return (
 		<ActivityCollapsible>

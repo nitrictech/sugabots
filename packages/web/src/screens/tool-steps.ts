@@ -16,7 +16,7 @@ import { awaitsApproval } from "./tool-activity.ts";
  * A reply's tool calls as the tool line says them: in one line over the reply
  * (`toolLineText`), and once it is opened, in runs under what the bot said it
  * was about to do, each call written as what it did to what ("Read
- * image.png", "Ran ls -la") with a note on how it went (`noteOf`), rather
+ * image.png", "Ran ls -la") with a note on how it went (`describeNote`), rather
  * than as the tool's name and its raw output.
  *
  * What the bot says just before a call is narration ("Now let me get the
@@ -153,7 +153,7 @@ export function stepDetails(call: ToolCallPart): StepDetails {
 	const output = asRecord(stored.output);
 	const inputWithText = (textKey: string) => {
 		const { [textKey]: text, ...rest } = asRecord(call.input);
-		return { input: textOf(text), otherArguments: shown(rest) };
+		return { input: takeWords(text), otherArguments: shown(rest) };
 	};
 	const cut = stored.cut === undefined ? {} : { outputCut: stored.cut };
 	switch (call.tool) {
@@ -166,7 +166,7 @@ export function stepDetails(call: ToolCallPart): StepDetails {
 		case "read_file":
 			return {
 				...inputWithText("path"),
-				output: textOf(output.content) ?? shown(stored.output),
+				output: takeWords(output.content) ?? shown(stored.output),
 				...cut,
 			};
 		case "write_file":
@@ -174,7 +174,7 @@ export function stepDetails(call: ToolCallPart): StepDetails {
 		case "read_chat_file":
 			return {
 				input: shown(call.input),
-				output: textOf(output.lines) ?? shown(stored.output),
+				output: takeWords(output.lines) ?? shown(stored.output),
 				...cut,
 			};
 	}
@@ -232,7 +232,7 @@ function shown(value: unknown): unknown {
 	return value;
 }
 
-function textOf(value: unknown): string | undefined {
+function takeWords(value: unknown): string | undefined {
 	return isWords(value) ? value : undefined;
 }
 
@@ -278,7 +278,7 @@ function pageTitle(output: Record<string, unknown>): unknown {
 }
 
 /** The tool source a call reached, by name: the connector, or the built-in tool itself ("Web search"). */
-export function toolSourceOf(call: ToolCallPart, connector?: MarkedConnector): string {
+export function describeToolSource(call: ToolCallPart, connector?: MarkedConnector): string {
 	const { handle } = splitToolKey(call.tool);
 	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return "Browser";
 	if (call.tool.startsWith(FILE_TOOL_PREFIX)) return "Files";
@@ -303,7 +303,7 @@ export function toolLineText(
 					calls
 						.filter(matching)
 						.map((call) =>
-							toolSourceOf(call, markedConnectors.get(splitToolKey(call.tool).handle)),
+							describeToolSource(call, markedConnectors.get(splitToolKey(call.tool).handle)),
 						),
 				),
 			],
@@ -328,13 +328,13 @@ export function toolLineText(
 				: undefined;
 
 	if (!tail) {
-		const totalMs = calls.filter(finished).reduce((sum, call) => sum + durationOf(call), 0);
+		const totalMs = calls.filter(finished).reduce((sum, call) => sum + measureDuration(call), 0);
 		return `Used ${used} for ${formatTotal(totalMs)}`;
 	}
 	return used ? `Used ${used}, ${tail}` : capitalise(tail);
 }
 
-function durationOf(call: ToolCallPart): number {
+function measureDuration(call: ToolCallPart): number {
 	if (!call.finishedAt) return 0;
 	return Math.max(new Date(call.finishedAt).getTime() - new Date(call.startedAt).getTime(), 0);
 }
@@ -353,7 +353,7 @@ function formatTotal(ms: number): string {
  * waiting, running, was refused or failed and why, or how many results it
  * found. Nothing, for a call that simply worked.
  */
-export function noteOf(call: ToolCallPart): { text: string; failed: boolean } | undefined {
+export function describeNote(call: ToolCallPart): { text: string; failed: boolean } | undefined {
 	const failed = (text: string) => ({ text, failed: true });
 	const said = (text: string) => ({ text, failed: false });
 	if (call.approval?.status === "denied") {

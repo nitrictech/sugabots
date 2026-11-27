@@ -54,7 +54,7 @@ import { RoutineGroups } from "./RoutineSchedule.tsx";
 export type TriggerSection = "routines" | "triggers";
 
 /** The section that lists a trigger of `kind`. */
-function sectionOf(kind: TriggerKind): TriggerSection {
+function chooseTriggerSection(kind: TriggerKind): TriggerSection {
 	return kind === "routine" ? "routines" : "triggers";
 }
 
@@ -123,7 +123,7 @@ export function buildTriggerDraft(trigger: AutomationTriggerInput): TriggerDraft
 }
 
 /** What `draft` saves as, or why it can't be saved yet. */
-export function triggerInputOf(
+export function buildTriggerInput(
 	draft: TriggerDraft,
 ): { input: AutomationTriggerInput } | { notReady: string } {
 	switch (draft.kind) {
@@ -226,7 +226,7 @@ export function TriggersGroup({
 	headingLevel?: 2 | 3;
 }) {
 	const words = SECTION_WORDS[section];
-	const listed = triggers.filter(({ trigger }) => sectionOf(trigger.kind) === section);
+	const listed = triggers.filter(({ trigger }) => chooseTriggerSection(trigger.kind) === section);
 	return (
 		<SettingsGroup label={words.label} headingLevel={headingLevel}>
 			{listed.length === 0 && (
@@ -304,7 +304,7 @@ export function TriggerDialog({
 		);
 	}
 	const choice = triggerKindChoice(draft.kind);
-	const written = triggerInputOf(draft);
+	const written = buildTriggerInput(draft);
 	const saving = settings === undefined;
 	return (
 		<DialogFormFrame>
@@ -358,7 +358,13 @@ export function TriggerDialog({
 					onCancel={saving ? done : undefined}
 					cancel={saving}
 					cancelDisabled={pending}
-					action={saving ? (editing ? "Save" : SECTION_WORDS[sectionOf(draft.kind)].add) : "Done"}
+					action={
+						saving
+							? editing
+								? "Save"
+								: SECTION_WORDS[chooseTriggerSection(draft.kind)].add
+							: "Done"
+					}
 					actionDisabled={pending || (saving && (filterEditing || !("input" in written)))}
 				/>
 			</DialogFormStep>
@@ -378,7 +384,7 @@ function DraftGroups({
 	onChange: (draft: TriggerDraft) => void;
 	onFilterEditingChange: (editing: boolean) => void;
 }) {
-	const written = triggerInputOf(draft);
+	const written = buildTriggerInput(draft);
 	const notReady = "notReady" in written ? written.notReady : undefined;
 	switch (draft.kind) {
 		case "routine":

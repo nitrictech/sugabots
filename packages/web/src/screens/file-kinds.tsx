@@ -17,8 +17,8 @@ interface WrittenFileKindView {
 	/** What it is called beside its title, such as "Document". */
 	label: string;
 	Icon: LucideIcon;
-	/** How Download saves it: as `type`, ending in `.extension`, holding `contentOf` its content. */
-	file: { extension: string; type: string; contentOf: (content: string) => string };
+	/** How Download saves it: as `type`, ending in `.extension`, holding `formatContent` its content. */
+	file: { extension: string; type: string; formatContent: (content: string) => string };
 	/** How wide its card among the messages may grow once expanded, as a Tailwind class. */
 	cardWidth: string;
 	/** Its content, version `at`, in a card among the messages; `undefined` while it loads. */
@@ -69,7 +69,7 @@ export const FILE_KINDS: Record<WrittenFileKind, WrittenFileKindView> = {
 	markdown: {
 		label: FILE_KIND_LABELS.markdown,
 		Icon: FileText,
-		file: { ...FILE_KIND_DOWNLOADS.markdown, contentOf: (content) => content },
+		file: { ...FILE_KIND_DOWNLOADS.markdown, formatContent: (content) => content },
 		// A preview, not the document: wide enough for its tables.
 		cardWidth: "max-w-2xl",
 		Inline: DocumentPreview,
@@ -85,7 +85,7 @@ export const FILE_KINDS: Record<WrittenFileKind, WrittenFileKindView> = {
 		label: FILE_KIND_LABELS.html,
 		Icon: PanelsTopLeft,
 		// Opened from disk, the page still can't reach the network, as in the app's frame.
-		file: { ...FILE_KIND_DOWNLOADS.html, contentOf: withContentPolicy },
+		file: { ...FILE_KIND_DOWNLOADS.html, formatContent: withContentPolicy },
 		// The page itself, running: as much room as the reply's text has.
 		cardWidth: "max-w-none",
 		Inline: LivePage,

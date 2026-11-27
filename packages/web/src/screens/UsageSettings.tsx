@@ -345,10 +345,11 @@ type ModelUsage = WorkspaceUsage["models"][number];
  * Every model through one provider shares its colour; past eight they repeat.
  */
 function providerColors(models: readonly ModelUsage[]): (model: ModelUsage) => string {
-	const providerOf = (model: ModelUsage) => model.builtIn ?? model.providerName ?? "removed";
-	const order = [...new Set(models.map(providerOf))];
+	const findProviderName = (model: ModelUsage) => model.builtIn ?? model.providerName ?? "removed";
+	const order = [...new Set(models.map(findProviderName))];
 	return (model) => {
-		const hue = PROVIDER_HUES[order.indexOf(providerOf(model)) % PROVIDER_HUES.length] ?? "blue";
+		const hue =
+			PROVIDER_HUES[order.indexOf(findProviderName(model)) % PROVIDER_HUES.length] ?? "blue";
 		return projectPalettes[hue].swatch;
 	};
 }
@@ -390,7 +391,7 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 				})),
 			);
 		case "model": {
-			const colorOf = providerColors(usage.models);
+			const chooseColor = providerColors(usage.models);
 			return usage.models.map((model) => {
 				const label = modelName({ displayName: model.displayName, modelId: model.model });
 				const providerName =
@@ -401,7 +402,7 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 					icon: <ProviderTile name={providerName} builtIn={model.builtIn} />,
 					label,
 					sub: providerName,
-					color: colorOf(model),
+					color: chooseColor(model),
 					usd: model.usd,
 					unknownCostRequests: model.unknownCostRequests,
 				};

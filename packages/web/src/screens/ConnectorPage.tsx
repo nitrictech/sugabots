@@ -464,12 +464,14 @@ function toolKinds(tools: readonly ConnectorToolSetting[]): ToolKind[] {
 		{ kind: "read" as const, tools: tools.filter((tool) => !connectorToolWritesOrDeletes(tool)) },
 		{ kind: "change" as const, tools: tools.filter(connectorToolWritesOrDeletes) },
 	].flatMap(({ kind, tools: ofKind }) =>
-		ofKind.length === 0 ? [] : [{ kind, tools: ofKind, setting: settingOf(ofKind, kind) }],
+		ofKind.length === 0
+			? []
+			: [{ kind, tools: ofKind, setting: findMostCommonAccess(ofKind, kind) }],
 	);
 }
 
 /** The access most of `tools` have, leaning as the kind does when two are tied. */
-function settingOf(tools: readonly ConnectorToolSetting[], kind: ToolKind["kind"]) {
+function findMostCommonAccess(tools: readonly ConnectorToolSetting[], kind: ToolKind["kind"]) {
 	const count = (access: ConnectorAccess) => tools.filter((tool) => tool.access === access).length;
 	const leaning = KIND_LEANING[kind];
 	return (["allow", "ask", "off"] as const).reduce<ConnectorAccess>(

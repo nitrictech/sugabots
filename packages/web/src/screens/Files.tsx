@@ -543,8 +543,8 @@ function byWhen(files: readonly ListedFile[], now: Date): Group[] {
 
 /** Saves the file as shown, as a file named after its title. */
 function downloadFile(file: WrittenFile) {
-	const { extension, type, contentOf } = FILE_KINDS[file.kind].file;
-	const url = URL.createObjectURL(new Blob([contentOf(file.content)], { type }));
+	const { extension, type, formatContent } = FILE_KINDS[file.kind].file;
+	const url = URL.createObjectURL(new Blob([formatContent(file.content)], { type }));
 	const link = document.createElement("a");
 	link.href = url;
 	link.download = fileNameFor(file.title, extension);

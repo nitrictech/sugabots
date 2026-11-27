@@ -6,7 +6,7 @@ import { type ReactElement, type ReactNode, useRef } from "react";
 import { botLink, projectLink } from "@/lib/links.ts";
 import { OWNER_MARK_SIZE_PX, ownerMarkTransition } from "@/lib/owner-mark.ts";
 import { TurnTakingAvatar } from "@/shell/Bot.tsx";
-import { attentionOf, type BotStanding } from "@/shell/SidebarBot.tsx";
+import { type BotStanding, describeAttention } from "@/shell/SidebarBot.tsx";
 import { ProjectInitial, type ProjectWithAttention } from "@/shell/SidebarProject.tsx";
 import { AttentionDot } from "@/ui/attention-dot.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -68,7 +68,7 @@ export function IconRail({
 									label={projectWithAttention.project.name}
 									render={<Link {...projectLink(projectWithAttention.project)} />}
 									current={projectWithAttention.project.slug === currentProjectSlug}
-									attentionMark={attentionOf(projectWithAttention)}
+									attentionMark={describeAttention(projectWithAttention)}
 								>
 									<span
 										style={ownerMarkTransition(projectWithAttention.project.id)}
@@ -107,7 +107,7 @@ function BotPlace({ standing, current }: { standing: BotStanding; current: boole
 			label={standing.bot.name}
 			render={<Link {...botLink(standing.bot)} onPointerEnter={() => face.current?.hop()} />}
 			current={current}
-			attentionMark={attentionOf(standing)}
+			attentionMark={describeAttention(standing)}
 		>
 			<span style={ownerMarkTransition(standing.bot.id)} className="flex">
 				<TurnTakingAvatar bot={standing.bot} size={OWNER_MARK_SIZE_PX} faceRef={face} />
@@ -147,7 +147,7 @@ function RailItem({
 	render: ReactElement;
 	/** Whether it is the bot or project open. */
 	current: boolean;
-	attentionMark: ReturnType<typeof attentionOf>;
+	attentionMark: ReturnType<typeof describeAttention>;
 	children: ReactNode;
 }) {
 	const link = useRender({

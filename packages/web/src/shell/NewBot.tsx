@@ -432,16 +432,16 @@ function ModelPicker({
 	} = useSearchFilter(models, (model) => [model.displayName, model.modelId, model.providerName]);
 	const { bots } = useBots();
 	const list = useRef<HTMLDivElement>(null);
-	const usersOf = (modelId: string) => bots?.filter((bot) => bot.model === modelId).length ?? 0;
+	const countUsers = (modelId: string) => bots?.filter((bot) => bot.model === modelId).length ?? 0;
 	const suggested = searching
 		? []
 		: [...models]
 				.sort(
 					(a, b) =>
 						Number(b.modelId === defaultModel) - Number(a.modelId === defaultModel) ||
-						usersOf(b.modelId) - usersOf(a.modelId),
+						countUsers(b.modelId) - countUsers(a.modelId),
 				)
-				.filter((model, index) => index === 0 || usersOf(model.modelId) > 0)
+				.filter((model, index) => index === 0 || countUsers(model.modelId) > 0)
 				.slice(0, SUGGESTED_MODELS);
 	const rest = found.filter((model) => !suggested.includes(model));
 	const providers = [...new Set(rest.map((model) => model.providerName))];

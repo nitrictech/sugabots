@@ -69,7 +69,7 @@ function isSource(kind: WebhookAuthKind): kind is WebhookSource {
 	return (WEBHOOK_SOURCES as readonly string[]).includes(kind);
 }
 
-function sourceOf(auth: WebhookAuth): WebhookSourceChoice {
+function chooseWebhookSource(auth: WebhookAuth): WebhookSourceChoice {
 	return isSource(auth.kind) ? auth.kind : "generic";
 }
 
@@ -128,7 +128,7 @@ export function authNote(auth: WebhookAuth): string {
 		case "linear":
 			return WEBHOOK_SOURCE_NOTES[auth.kind];
 		case "hmac":
-			return `Sign the raw request body with the secret using HMAC ${labelOf(WEBHOOK_ALGORITHM_OPTIONS, auth.algorithm)}, and send the digest in ${auth.header}, written in ${labelOf(WEBHOOK_ENCODING_OPTIONS, auth.encoding).toLowerCase()}. Keep signed requests private. A captured request can be sent again.`;
+			return `Sign the raw request body with the secret using HMAC ${findOptionLabel(WEBHOOK_ALGORITHM_OPTIONS, auth.algorithm)}, and send the digest in ${auth.header}, written in ${findOptionLabel(WEBHOOK_ENCODING_OPTIONS, auth.encoding).toLowerCase()}. Keep signed requests private. A captured request can be sent again.`;
 		case "api_key":
 			return `Send the key in the ${auth.header} header.`;
 		case "bearer":
@@ -354,7 +354,7 @@ function SourceRow({
 		<SettingsMenuRow
 			label="Source"
 			options={SOURCE_OPTIONS}
-			value={sourceOf(auth)}
+			value={chooseWebhookSource(auth)}
 			mark={(source) => <SourceMark source={source} />}
 			onChange={(source) =>
 				onChange(source === "generic" ? DEFAULT_WEBHOOK_AUTH : { kind: source })
@@ -378,7 +378,7 @@ function SourceMark({ source }: { source: WebhookSourceChoice }) {
 	);
 }
 
-function labelOf<Value extends string>(
+function findOptionLabel<Value extends string>(
 	options: readonly { value: Value; label: string }[],
 	value: Value,
 ): string {

@@ -444,7 +444,7 @@ export function Answer({
 type Fields = [string, unknown][];
 
 /** A value's named fields in order, or nothing when it is not a record of them. */
-export function fieldsOf(value: unknown): Fields | undefined {
+export function parseFields(value: unknown): Fields | undefined {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
 	const fields = Object.entries(value);
 	return fields.length > 0 ? fields : undefined;
@@ -471,7 +471,7 @@ const ENTRIES_SHOWN = 10;
  * numbered entries, anything too deep to lay out as indented JSON.
  */
 export function RequestValue({ value, depth }: { value: unknown; depth: number }) {
-	const fields = fieldsOf(value);
+	const fields = parseFields(value);
 	if (fields && depth < MAX_DEPTH) return <FieldList fields={fields} depth={depth} />;
 	if (isRecordList(value) && depth < MAX_DEPTH) return <EntryList entries={value} depth={depth} />;
 	if (value !== null && typeof value === "object" && !isPlainList(value)) {
@@ -526,7 +526,7 @@ function FieldList({ fields, depth }: { fields: Fields; depth: number }) {
 
 /** Whether a value has fields or records inside, and so is laid out under its name. */
 function hasStructure(value: unknown): boolean {
-	return isRecordList(value) || fieldsOf(value) !== undefined;
+	return isRecordList(value) || parseFields(value) !== undefined;
 }
 
 /** A list of records, the first few until asked for the rest. */
@@ -554,7 +554,7 @@ function EntryList({ entries, depth }: { entries: unknown[]; depth: number }) {
  * a table, so those fields are named once rather than on every entry.
  */
 function Entries({ entries, depth }: { entries: unknown[]; depth: number }) {
-	const columns = sharedColumnsOf(entries);
+	const columns = findSharedColumns(entries);
 	if (columns) return <EntryTable columns={columns} rows={entries as Record<string, unknown>[]} />;
 	return (
 		<ol className="m-0 flex w-full list-none flex-col gap-2 p-0">
@@ -577,7 +577,7 @@ function Entries({ entries, depth }: { entries: unknown[]; depth: number }) {
 }
 
 /** The fields every entry has, in the same order, when they are few and flat enough for a table. */
-function sharedColumnsOf(entries: unknown[]): string[] | undefined {
+function findSharedColumns(entries: unknown[]): string[] | undefined {
 	const [first] = entries;
 	if (!isSmallRecord(first)) return undefined;
 	const columns = Object.keys(first);
@@ -640,7 +640,7 @@ function EntryNumber({ children }: { children: ReactNode }) {
 const SMALL_RECORD_FIELDS = 4;
 
 function isSmallRecord(value: unknown): value is Record<string, unknown> {
-	const fields = fieldsOf(value);
+	const fields = parseFields(value);
 	return (
 		fields !== undefined &&
 		fields.length <= SMALL_RECORD_FIELDS &&
@@ -678,7 +678,7 @@ function PlainValue({ value }: { value: unknown }) {
 	if (typeof value === "number") {
 		return <span className="text-sm tabular-nums leading-normal">{value}</span>;
 	}
-	if (fieldsOf(value) === undefined && typeof value === "object") return <Quiet>None</Quiet>;
+	if (parseFields(value) === undefined && typeof value === "object") return <Quiet>None</Quiet>;
 	return (
 		<span className="whitespace-pre-wrap text-pretty text-sm leading-normal wrap-anywhere">
 			{String(value)}
