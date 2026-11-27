@@ -185,6 +185,7 @@ export function inMemoryComputers(
 		_options: Computers.ExecOptions,
 	) => 0;
 	let destroyFailures = 0;
+	let networkFailures = 0;
 	const missing = (id: Computers.ComputerId) =>
 		new Computers.Missing({ provider: "opensandbox", computerId: id });
 	const unsupported = (call: string) => () =>
@@ -212,7 +213,14 @@ export function inMemoryComputers(
 		uploadFile: (path, content) => Effect.sync(() => void held.get(id)?.uploads.set(path, content)),
 		endpoint: unsupported("endpoint"),
 		setNetwork: (network) =>
-			Effect.sync(() => {
+			Effect.gen(function* () {
+				if (networkFailures > 0) {
+					networkFailures -= 1;
+					return yield* new Computers.Unavailable({
+						provider: "opensandbox",
+						cause: "The computer provider did not update the network",
+					});
+				}
 				held.get(id)?.networks.push(network);
 				for (const wake of networkWaiters.get(id) ?? []) wake(network);
 				networkWaiters.delete(id);
@@ -340,6 +348,9 @@ export function inMemoryComputers(
 		/** The next `count` calls to destroy a computer fail, as when the provider doesn't answer. */
 		failDestroys: (count: number) => {
 			destroyFailures = count;
+		},
+		failNetworkUpdates: (count: number) => {
+			networkFailures = count;
 		},
 		/** The provider loses the computer, as when its operator deletes it. */
 		lose: (id: Computers.ComputerId) => {

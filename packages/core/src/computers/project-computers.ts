@@ -119,10 +119,10 @@ export interface Interface {
 		provider: ComputerProviderStore.Configured,
 		holder: Holder,
 	) => Effect.Effect<Opened, Computers.Unavailable>;
-	/** Checks that the opened machine has the sign-in its project allows now. */
-	readonly checkSignIn: (
+	/** Checks that the opened machine has the network rules and sign-in its project allows now. */
+	readonly checkSettings: (
 		project: Project,
-		provider: ComputerProviderStore.Configured,
+		providerId: string,
 		opened: Opened,
 	) => Effect.Effect<void, Computers.Unavailable>;
 	/**
@@ -256,11 +256,11 @@ export const make = Effect.gen(function* () {
 	// When each project's computer must be signed in again, from when it last was by
 	// this process. Another process's computers are signed in on first renewal.
 	const signInDue = new Map<string, number>();
-	const appliedSignIn = new Map<
+	const appliedSettings = new Map<
 		string,
 		{
 			readonly machine: Computers.ComputerId;
-			readonly revision: string | undefined;
+			readonly revision: string;
 		}
 	>();
 
@@ -308,25 +308,31 @@ export const make = Effect.gen(function* () {
 	// When a computer that failed to upgrade on its own may be tried again, by its record's id.
 	const upgradeRetryAt = new Map<string, number>();
 
+	const readSettings = (project: Project, at: Computers.Provider) =>
+		Effect.gen(function* () {
+			const [reach, source] = yield* Effect.all([
+				reachOf(project, at),
+				at.capabilities.credentials === "none" ? Effect.undefined : signIns.forProject(project),
+			]);
+			const hosts = reach.kind === "open" ? reach.blockedHosts : reach.hosts;
+			const revision = JSON.stringify([reach.kind, hosts.toSorted(), source?.revision]);
+			return { reach, source, revision };
+		});
+
 	/**
 	 * Sets what the project's computer may reach and what it is signed in with,
 	 * as far as its provider can add credentials.
 	 */
 	const applyNetwork = (project: Project, computer: Computers.Computer, at: Computers.Provider) =>
 		Effect.gen(function* () {
-			const source =
-				at.capabilities.credentials === "none" ? undefined : yield* signIns.forProject(project);
-			const [reach, signedIn] = yield* Effect.all([
-				reachOf(project, at),
-				source?.load ?? Effect.succeed(ComputerSignIn.NOT_SIGNED_IN),
-			]);
+			const { reach, source, revision } = yield* readSettings(project, at);
+			const signedIn = yield* source?.load ?? Effect.succeed(ComputerSignIn.NOT_SIGNED_IN);
+			appliedSettings.delete(project.projectId);
 			yield* computer.setNetwork({
 				reach,
 				credentials: fittedTo(at.capabilities.credentials, signedIn.credentials),
 			});
-			if (at.capabilities.credentials !== "none") {
-				appliedSignIn.set(project.projectId, { machine: computer.id, revision: source?.revision });
-			}
+			appliedSettings.set(project.projectId, { machine: computer.id, revision });
 			if (signedIn.expiresAt === undefined) {
 				signInDue.delete(project.projectId);
 				return;
@@ -1444,19 +1450,20 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		checkSignIn: (project, provider, opened) =>
+		checkSettings: (project, providerId, opened) =>
 			operation(
-				"checkSignIn",
+				"checkSettings",
 				Effect.gen(function* () {
-					if (computers.forAccess(provider.access).capabilities.credentials === "none") return;
-					const source = yield* signIns.forProject(project);
-					const applied = appliedSignIn.get(project.projectId);
-					if (applied?.machine === opened.computer.id && applied.revision === source?.revision)
-						return;
+					const provider = yield* providers.enabled(project.workspaceId);
+					if (provider?.id === providerId) {
+						const { revision } = yield* readSettings(project, computers.forAccess(provider.access));
+						const applied = appliedSettings.get(project.projectId);
+						if (applied?.machine === opened.computer.id && applied.revision === revision) return;
+					}
 					return yield* new Computers.Unavailable({
-						provider: provider.access.provider,
-						reason: userText`The computer's sign-in is being updated. Try again shortly.`,
-						cause: "The computer's sign-in does not match the project settings",
+						provider: provider?.access.provider ?? "unconfigured",
+						reason: userText`The computer's network settings are being updated. Try again shortly.`,
+						cause: "The computer's network settings do not match the project settings",
 					});
 				}),
 			),

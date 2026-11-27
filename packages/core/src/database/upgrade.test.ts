@@ -36,6 +36,7 @@ import { Compaction, CompactionRequest } from "../chats/compaction/compaction.wo
 import { DesktopViewer } from "../chats/tools/browser/viewer.ts";
 import { TurnComputers } from "../chats/tools/computer/turn-computers.ts";
 import { TurnRequests } from "../chats/turns/turns.ts";
+import { ComputerNetwork } from "../computers/computer-network.ts";
 import { ComputerProviderStore } from "../computers/computer-provider-store.ts";
 import { ComputerSignIn } from "../computers/computer-sign-in.ts";
 import { ProjectComputers } from "../computers/project-computers.ts";
@@ -43,6 +44,7 @@ import { inMemoryComputers } from "../computers/testing.ts";
 import { ChatFileStore } from "../files/chat-file-store.ts";
 import { Files } from "../files/files.ts";
 import { Ids } from "../ids/ids.ts";
+import { blockHost } from "../operations/computers/block-host.ts";
 import { runCommand } from "../operations/computers/use-computer.ts";
 import { viewDesktop } from "../operations/computers/view-desktop.ts";
 import { setOnInProject } from "../operations/connectors/set-on-in-project.ts";
@@ -1123,7 +1125,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(await upgraded.read(keyNow(legacyFiles[0] as LegacyFile, new Map()))).toBe("plan");
 		});
 
-		it("withdraws the upgraded computer's sign-in before another tool can use it", async () => {
+		it("checks the upgraded computer's sign-in and network before another tool can use it", async () => {
 			const projectId = legacy.pods.family;
 			const chatId = legacy.threads.trip;
 			const botId = legacy.bots.planner;
@@ -1143,6 +1145,9 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			);
 			const connectors = Connectors.layerNoDeps.pipe(
 				Layer.provide([projectComputers, ConnectorStore.layer, ConnectorSignIn.layer]),
+			);
+			const network = ComputerNetwork.layerNoDeps.pipe(
+				Layer.provide([projectComputers, ComputerProviderStore.layer, provider.layer]),
 			);
 
 			const [asked] = await upgraded.run(
@@ -1228,8 +1233,19 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 						expect(yield* Fiber.join(switchingOff)).toMatchObject({ on: false });
 						expect(machine.networks.at(-1)?.credentials).toEqual([]);
 						expect(yield* command).toMatchObject({ exitCode: 0 });
+
+						const host = "example.com";
+						expect(machine.networks.at(-1)?.reach).toEqual({ kind: "open", blockedHosts: [] });
+						provider.failNetworkUpdates(1);
+						expect(
+							yield* blockHost.run(member, { workspace: workspaceId, host }, { kind: "request" }),
+						).toMatchObject({
+							blockedHosts: expect.arrayContaining([expect.objectContaining({ host })]),
+						});
+						expect(machine.networks.at(-1)?.reach).toEqual({ kind: "open", blockedHosts: [] });
+						expect(yield* command).toMatchObject({ status: "failed" });
 					}),
-				).pipe(Effect.provide([turnComputers, connectors]), Effect.provide(egress)),
+				).pipe(Effect.provide([turnComputers, connectors, network]), Effect.provide(egress)),
 			);
 		});
 	},

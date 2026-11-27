@@ -244,7 +244,7 @@ export const make = Effect.gen(function* () {
 				run,
 				open: async () => {
 					const opened = await opening();
-					await run(projectComputers.checkSignIn(project, provider, opened));
+					await run(projectComputers.checkSettings(project, provider.id, opened));
 					return opened;
 				},
 			};
