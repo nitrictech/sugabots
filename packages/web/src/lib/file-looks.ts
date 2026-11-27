@@ -10,17 +10,17 @@ const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xls", "xlsx", "ods", "numbers"]
  * Any image is drawn as its picture, where an image the browser can't draw
  * falls back to a file's icon.
  */
-export function fileLookOf(file: { name: string; type: string }): FileLook {
+export function classifyFileLook(file: { name: string; type: string }): FileLook {
 	const mediaType = mediaTypeEssence(file.type);
 	if (mediaType.startsWith("image/")) return "image";
-	const extension = extensionOf(file.name);
+	const extension = parseExtension(file.name);
 	if (mediaType === "application/pdf" || extension === "pdf") return "pdf";
 	if (mediaType === "text/csv" || SHEET_EXTENSIONS.has(extension)) return "sheet";
 	return "other";
 }
 
 /** The part of `name` after its last dot, lowercased, or "" when it has none. */
-export function extensionOf(name: string): string {
+export function parseExtension(name: string): string {
 	const dot = name.lastIndexOf(".");
 	return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }

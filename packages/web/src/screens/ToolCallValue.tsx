@@ -1,7 +1,7 @@
 import { cn } from "cn";
 import { ChevronDown } from "lucide-react";
 import { type CSSProperties, useId, useLayoutEffect, useRef, useState } from "react";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
 import { Button } from "@/ui/button.tsx";
 
@@ -136,7 +136,7 @@ function Fields({ fields, depth }: { fields: Record<string, unknown>; depth: num
 					</dt>
 					<dd className="m-0 min-w-0">
 						{key === "images" && Array.isArray(value) ? (
-							<span>{countOf(value.length, "image", "images")}</span>
+							<span>{formatCount(value.length, "image", "images")}</span>
 						) : (
 							<Value value={value} depth={depth + 1} />
 						)}

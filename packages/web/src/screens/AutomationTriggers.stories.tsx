@@ -5,7 +5,7 @@ import { expect, fn, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk } from "@/shell/story-fixtures.test-support.ts";
 import { Dialog } from "@/ui/dialog.tsx";
-import { TriggerDialog, TriggersGroup, triggerDraftOf } from "./AutomationTriggers.tsx";
+import { buildTriggerDraft, TriggerDialog, TriggersGroup } from "./AutomationTriggers.tsx";
 
 /*
  * An automation's routines and other triggers, as its settings list them, and
@@ -96,7 +96,7 @@ export const EditingARoutine = meta.story({
 		<Dialog open>
 			<TriggerDialog
 				owner={{ bot: growthDesk }}
-				editing={triggerDraftOf(weekdayMornings)}
+				editing={buildTriggerDraft(weekdayMornings)}
 				onSave={fn(async () => {})}
 				onRemove={removeRoutine}
 				done={fn()}

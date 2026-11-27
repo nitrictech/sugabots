@@ -16,7 +16,7 @@ import { awaitedApprovers } from "@/lib/approvals.ts";
 import { useReviewToolCall } from "@/lib/chat-query.ts";
 import type { MarkedConnector } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { connectorLabel, splitToolKey, stepLabel, wordsFromKey } from "@/lib/tool-names.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -506,7 +506,7 @@ function FieldList({ fields, depth }: { fields: Fields; depth: number }) {
 						{nested ? (
 							<dd className="col-span-2 m-0 min-w-0">
 								{Array.isArray(value) && (
-									<span className="sr-only">{countOf(value.length, "entry", "entries")}</span>
+									<span className="sr-only">{formatCount(value.length, "entry", "entries")}</span>
 								)}
 								<div className="mt-1 ml-1 border-border-subtle border-l pl-3">
 									<RequestValue value={value} depth={depth + 1} />

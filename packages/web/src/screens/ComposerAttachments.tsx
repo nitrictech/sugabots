@@ -11,8 +11,8 @@ import {
 	useState,
 } from "react";
 import type { AttachmentUpload, ComposerAttachment } from "@/lib/composer-attachments.ts";
-import { extensionOf, type FileLook, fileLookOf } from "@/lib/file-looks.ts";
-import { countOf, listNames } from "@/lib/name-list.ts";
+import { classifyFileLook, type FileLook, parseExtension } from "@/lib/file-looks.ts";
+import { formatCount, listNames } from "@/lib/name-list.ts";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
 import { Progress } from "@/ui/progress.tsx";
@@ -39,8 +39,8 @@ export function AttachmentTray({
 	const tray = useRef<HTMLUListElement>(null);
 	const overflowing = useOverflowsVertically(tray, items.length);
 	const failureIdPrefix = useId();
-	const failures = failureNotesOf(items);
-	const failureIdOf = (key: string) => {
+	const failures = buildFailureNotes(items);
+	const failureNoteId = (key: string) => {
 		const index = failures.findIndex((note) => note.keys.includes(key));
 		return index === -1 ? undefined : `${failureIdPrefix}-${index}`;
 	};
@@ -75,7 +75,7 @@ export function AttachmentTray({
 						<AttachmentChip
 							key={attachment.key}
 							attachment={attachment}
-							failureId={failureIdOf(attachment.key)}
+							failureId={failureNoteId(attachment.key)}
 							onRemove={() => removeAt(index, attachment.key)}
 							onRetry={() => onRetry(attachment.key)}
 						/>
@@ -106,12 +106,12 @@ export function AttachmentTray({
 }
 
 /** The failed files, one note for each reason, naming the files it applies to. */
-function failureNotesOf(
+function buildFailureNotes(
 	items: readonly ComposerAttachment[],
 ): { reason: string; names: string; keys: string[] }[] {
 	const byReason = new Map<string, ComposerAttachment[]>();
 	for (const item of items) {
-		const reason = failureReasonOf(item.upload);
+		const reason = describeFailure(item.upload);
 		if (reason) byReason.set(reason, [...(byReason.get(reason) ?? []), item]);
 	}
 	return [...byReason].map(([reason, failed]) => ({
@@ -123,7 +123,7 @@ function failureNotesOf(
 
 const TOO_LARGE_REASON = `Too large. ${MAX_ATTACHMENT_MEGABYTES} MB at most.`;
 
-function failureReasonOf(upload: AttachmentUpload): string | undefined {
+function describeFailure(upload: AttachmentUpload): string | undefined {
 	if (upload.state === "tooLarge") return TOO_LARGE_REASON;
 	if (upload.state === "failed") return upload.reason;
 	return undefined;
@@ -145,7 +145,7 @@ export function LeftOutNote({ count }: { count: number }) {
 						className="shrink-0 text-muted-foreground"
 					/>
 					<span>
-						{countOf(count, "file wasn't", "files weren't")} added. A message can have{" "}
+						{formatCount(count, "file wasn't", "files weren't")} added. A message can have{" "}
 						{MAX_ATTACHMENTS_PER_MESSAGE} at most.
 					</span>
 				</>
@@ -173,8 +173,8 @@ export function AttachmentChip({
 	onRemove: () => void;
 	onRetry: () => void;
 }) {
-	const look = fileLookOf(file);
-	const status = uploadStatusOf(upload);
+	const look = classifyFileLook(file);
+	const status = describeUploadStatus(upload);
 	const failed = upload.state === "failed" || upload.state === "tooLarge";
 	const retryable = upload.state === "failed" && upload.retryable;
 	return (
@@ -246,7 +246,7 @@ export function AttachmentChip({
 	);
 }
 
-function uploadStatusOf(upload: AttachmentUpload): string | undefined {
+function describeUploadStatus(upload: AttachmentUpload): string | undefined {
 	switch (upload.state) {
 		case "uploading":
 			return `Uploading ${Math.round(upload.progress * 100)}%`;
@@ -345,7 +345,7 @@ function TypeBadge({ file, look }: { file: File; look: Exclude<FileLook, "image"
 				look === "sheet" ? "bg-file-badge-sheet" : "bg-file-badge-other",
 			)}
 		>
-			{extensionOf(file.name).toUpperCase() || "FILE"}
+			{parseExtension(file.name).toUpperCase() || "FILE"}
 		</span>
 	);
 }

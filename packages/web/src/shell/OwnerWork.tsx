@@ -15,7 +15,7 @@ import { type ReactNode, useId, useState } from "react";
 import { useProjectRuns } from "@/lib/automations.ts";
 import { lastMovedAt, needsViewer, useProjectChats, useSetResolved } from "@/lib/chats.ts";
 import { formatListTime } from "@/lib/list-time.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { useNow } from "@/lib/now.ts";
 import {
 	OwnerLink,
@@ -471,7 +471,9 @@ function ResolvedEntry({
 		.map((member) => (member.id === memberId ? "You" : member.name))
 		.join(", ");
 	const movedAt = new Date(lastMovedAt(row));
-	const about = <SpacedText parts={[talking, countOf(row.messageCount, "message", "messages")]} />;
+	const about = (
+		<SpacedText parts={[talking, formatCount(row.messageCount, "message", "messages")]} />
+	);
 	return (
 		<div className="group/chat relative">
 			<Tooltip label={about} side="right" align="start">
@@ -642,7 +644,7 @@ function MessageCount({ count }: { count: number }) {
 		<span className="flex shrink-0 items-center gap-1 text-subtle-foreground text-xs tabular-nums">
 			<MessageSquare aria-hidden size={12} strokeWidth={1.75} />
 			<span aria-hidden>{count}</span>
-			<span className="sr-only">{countOf(count, "message", "messages")}</span>
+			<span className="sr-only">{formatCount(count, "message", "messages")}</span>
 		</span>
 	);
 }

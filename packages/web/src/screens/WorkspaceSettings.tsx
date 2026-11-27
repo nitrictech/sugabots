@@ -12,7 +12,7 @@ import { failureMessage } from "@/lib/failure.ts";
 import { settingsSectionLink } from "@/lib/links.ts";
 import { useLivelinessChoice } from "@/lib/liveliness.tsx";
 import { SETTINGS_BESIDE, useMediaQuery } from "@/lib/media.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { type SettingsLocation, sectionOf } from "@/lib/open-settings.ts";
 import { useProjects } from "@/lib/projects.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
@@ -153,7 +153,7 @@ function workspaceSummary(
 	projects: number | undefined,
 ): string | undefined {
 	if (members === undefined || projects === undefined) return undefined;
-	return `Workspace with ${countOf(members, "member", "members")} and ${countOf(projects, "project", "projects")}`;
+	return `Workspace with ${formatCount(members, "member", "members")} and ${formatCount(projects, "project", "projects")}`;
 }
 
 function GeneralSettings({

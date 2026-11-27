@@ -31,7 +31,7 @@ import { useStartInterview } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { botLink, chatLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { BotColourPicker, EyesGlyph, ShapeGlyph } from "@/shell/AvatarPicker.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
@@ -486,7 +486,7 @@ function ModelPicker({
 						}
 						moveFocus(event, null);
 					}}
-					placeholder={`Search ${countOf(models.length, "model", "models")}`}
+					placeholder={`Search ${formatCount(models.length, "model", "models")}`}
 					autoComplete="off"
 					className="h-10 gap-2 rounded-lg border border-border-strong bg-transparent"
 				/>

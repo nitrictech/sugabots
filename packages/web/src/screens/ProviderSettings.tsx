@@ -47,7 +47,7 @@ import { formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { MODEL_MAKER_NAMES } from "@/lib/model-makers.ts";
 import { modelName, useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { searchModels } from "@/lib/model-search.ts";
-import { capitalise, countOf } from "@/lib/name-list.ts";
+import { capitalise, formatCount } from "@/lib/name-list.ts";
 import { NOT_A_SERVER_ADDRESS, parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import { useSystemBots } from "@/lib/system-bots.ts";
@@ -212,7 +212,7 @@ function OtherBots({ bots }: { bots: readonly Bot[] }) {
 				tabIndex={0}
 				className="focus-ring cursor-default rounded-sm text-foreground underline decoration-dotted underline-offset-2"
 			>
-				{countOf(bots.length, "other", "others")}
+				{formatCount(bots.length, "other", "others")}
 				<span className="sr-only">: {LIST.format(bots.map((bot) => bot.name))}</span>
 			</span>
 		</Tooltip>
@@ -986,7 +986,7 @@ function MoveBotsOffProviderDialog({
 	const botCount = stranded.reduce((total, { bots }) => total + bots.length, 0);
 	const verb = then === "disconnect" ? "disconnect" : "switch off";
 	const users = [
-		...(botCount > 0 ? [countOf(botCount, "bot", "bots")] : []),
+		...(botCount > 0 ? [formatCount(botCount, "bot", "bots")] : []),
 		...(held ? holderNames(held) : []),
 	];
 	const uses = users.length === 1 && botCount === 1 ? "uses" : "use";
@@ -1278,7 +1278,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 				)}
 				{shown.map((model) => {
 					const bots = memberFacingBotsOn(usage.bots, model.modelId);
-					const used = bots.length === 0 ? "Not used yet" : countOf(bots.length, "bot", "bots");
+					const used = bots.length === 0 ? "Not used yet" : formatCount(bots.length, "bot", "bots");
 					const who = large ? makerLabel(makerOf(model) ?? provider.name) : used;
 					const held = model.enabled ? holdersOf(model.modelId) : undefined;
 					return (

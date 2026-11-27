@@ -180,7 +180,7 @@ export function MentionEditor({
 			const root = box.current;
 			if (!root) return;
 			const segments = segmentsOfBox(root, mentionable);
-			if (signatureOf(segments) === drawnSignatureOf(root)) return;
+			if (buildSignature(segments) === readDrawnSignature(root)) return;
 			drawSegments(root, segments, templates);
 			if (caret !== undefined) placeCaret(root, caret);
 		},
@@ -191,15 +191,15 @@ export function MentionEditor({
 	// chosen mention written in.
 	useLayoutEffect(() => {
 		const root = box.current;
-		if (!root || textOf(root) === value) return;
-		drawSegments(root, segmentsOf(value, mentionable, { endFinishes: true }), templates);
+		if (!root || readText(root) === value) return;
+		drawSegments(root, parseSegments(value, mentionable, { endFinishes: true }), templates);
 		if (document.activeElement === root) placeCaret(root, value.length);
 	}, [value, mentionable, templates]);
 
 	// Drawn again when who can be mentioned changes.
 	useLayoutEffect(() => {
 		const root = box.current;
-		redraw(root && document.activeElement === root ? caretOf(root) : undefined);
+		redraw(root && document.activeElement === root ? readCaret(root) : undefined);
 	}, [redraw]);
 
 	useImperativeHandle(ref, () => ({
@@ -229,7 +229,7 @@ export function MentionEditor({
 	useEffect(() => {
 		function caretMoved() {
 			const root = box.current;
-			if (root && document.activeElement === root) onCaretChange(caretOf(root));
+			if (root && document.activeElement === root) onCaretChange(readCaret(root));
 		}
 		document.addEventListener("selectionchange", caretMoved);
 		return () => document.removeEventListener("selectionchange", caretMoved);
@@ -239,8 +239,8 @@ export function MentionEditor({
 	function readBack() {
 		const root = box.current;
 		if (!root || composing.current) return;
-		const text = textOf(root).slice(0, maxLength);
-		const caret = Math.min(caretOf(root), text.length);
+		const text = readText(root).slice(0, maxLength);
+		const caret = Math.min(readCaret(root), text.length);
 		redraw(caret);
 		onValueChange(text, caret);
 	}
@@ -248,17 +248,17 @@ export function MentionEditor({
 	/** Replaces the selection with `inserted`, as typing it would. */
 	function insert(inserted: string) {
 		const root = box.current;
-		if (root) replace(selectionOf(root), inserted);
+		if (root) replace(readSelection(root), inserted);
 	}
 
 	/** Replaces the text from `start` to `end` with `inserted`, leaving the caret after it. */
 	function replace({ start, end }: TextRange, inserted: string) {
 		const root = box.current;
 		if (!root) return;
-		const current = textOf(root);
+		const current = readText(root);
 		const text = `${current.slice(0, start)}${inserted}${current.slice(end)}`.slice(0, maxLength);
 		const caret = Math.min(start + inserted.length, text.length);
-		drawSegments(root, segmentsOf(text, mentionable, { endFinishes: true }), templates);
+		drawSegments(root, parseSegments(text, mentionable, { endFinishes: true }), templates);
 		placeCaret(root, caret);
 		onValueChange(text, caret);
 	}
@@ -311,17 +311,17 @@ export function MentionEditor({
 					const toLine = lineKey(event);
 					if (toLine) {
 						event.preventDefault();
-						const { anchor, focus } = directedSelectionOf(root);
-						const target = lineEdge(textOf(root), focus, toLine);
+						const { anchor, focus } = readDirectedSelection(root);
+						const target = lineEdge(readText(root), focus, toLine);
 						if (event.shiftKey) selectBetween(root, anchor, target);
 						else placeCaret(root, target);
 						return;
 					}
 					if (event.key === "Backspace" && event.metaKey) {
-						const { start, end } = selectionOf(root);
+						const { start, end } = readSelection(root);
 						if (start !== end) return;
 						event.preventDefault();
-						replace({ start: lineEdge(textOf(root), start, "start"), end }, "");
+						replace({ start: lineEdge(readText(root), start, "start"), end }, "");
 						return;
 					}
 					if (event.key === "Backspace" || event.key === "Delete") {
@@ -348,7 +348,7 @@ export function MentionEditor({
 					if (event.target !== event.currentTarget) return;
 					// A draft kept from an earlier visit is picked up at its end, not before its first
 					// word, unless a click put the caret where it landed.
-					if (!pointed) placeCaret(event.currentTarget, textOf(event.currentTarget).length);
+					if (!pointed) placeCaret(event.currentTarget, readText(event.currentTarget).length);
 					onFocus(event);
 				}}
 				onBlur={(event) => {
@@ -394,7 +394,10 @@ function chipAt(root: HTMLElement, target: EventTarget): HTMLElement | undefined
 /** Where `chip`, one of `root`'s, is in the text. */
 function rangeOfChip(root: HTMLElement, chip: HTMLElement): TextRange {
 	const index = [...root.childNodes].indexOf(chip);
-	return { start: offsetOf(root, root, index), end: offsetOf(root, root, index + 1) };
+	return {
+		start: measureTextOffset(root, root, index),
+		end: measureTextOffset(root, root, index + 1),
+	};
 }
 
 /** Whether `event` types a character, rather than being a shortcut or a key that moves or deletes. */
@@ -407,7 +410,7 @@ function typesCharacter(event: KeyboardEvent): boolean {
  * `mentionable`: those followed by whitespace, or with `endFinishes`, by the
  * end of the text, as in a draft written elsewhere.
  */
-function segmentsOf(
+function parseSegments(
 	text: string,
 	mentionable: readonly MentionTarget[],
 	{ endFinishes }: { endFinishes: boolean },
@@ -437,7 +440,7 @@ function segmentsOfBox(root: HTMLElement, mentionable: readonly MentionTarget[])
 	const segments: Segment[] = [];
 	let run = "";
 	const endRun = () => {
-		for (const segment of segmentsOf(run, mentionable, { endFinishes: false })) {
+		for (const segment of parseSegments(run, mentionable, { endFinishes: false })) {
 			if (segment.kind === "text") pushText(segments, segment.text);
 			else segments.push(segment);
 		}
@@ -464,7 +467,7 @@ function pushText(segments: Segment[], text: string) {
 }
 
 /** What `segments` draw, to tell whether the box already shows them. */
-function signatureOf(segments: readonly Segment[]): string {
+function buildSignature(segments: readonly Segment[]): string {
 	return JSON.stringify({
 		drawn: segments.map((segment) =>
 			segment.kind === "text" ? segment.text : { mention: segment.target.handle },
@@ -484,7 +487,7 @@ function needsFiller(segments: readonly Segment[]): boolean {
 }
 
 /** The signature of what the box shows now. */
-function drawnSignatureOf(root: HTMLElement): string {
+function readDrawnSignature(root: HTMLElement): string {
 	const drawn: (string | { mention: string })[] = [];
 	let filler = false;
 	for (const node of root.childNodes) {
@@ -521,7 +524,7 @@ function drawSegments(root: HTMLElement, segments: readonly Segment[], templates
 }
 
 /** The box's text: chips as their `@handle`, lines the browser made as new lines. */
-function textOf(root: Node): string {
+function readText(root: Node): string {
 	let text = "";
 	root.childNodes.forEach((node, index) => {
 		text += textOfNode(node, index);
@@ -536,7 +539,7 @@ function textOfNode(node: Node, index: number): string {
 	if (node.hasAttribute(FILLER_ATTRIBUTE)) return "";
 	// The browser keeps a line break at the end of a box it empties, to give it height; it adds no line.
 	if (node.tagName === "BR") return node.nextSibling ? "\n" : "";
-	const inner = textOf(node);
+	const inner = readText(node);
 	return (node.tagName === "DIV" || node.tagName === "P") && index > 0 ? `\n${inner}` : inner;
 }
 
@@ -556,7 +559,7 @@ function chipText(chip: HTMLElement): string {
 }
 
 /** How far into the text a point in the box is. */
-function offsetOf(root: HTMLElement, container: Node, offset: number): number {
+function measureTextOffset(root: HTMLElement, container: Node, offset: number): number {
 	if (container === root || !root.contains(container)) {
 		return [...root.childNodes]
 			.slice(0, offset)
@@ -569,7 +572,7 @@ function offsetOf(root: HTMLElement, container: Node, offset: number): number {
 			if (node instanceof HTMLElement && node.hasAttribute(MENTION_ATTRIBUTE)) {
 				return total + textOfNode(node, index).length;
 			}
-			return total + offsetOf(node as HTMLElement, container, offset);
+			return total + measureTextOffset(node as HTMLElement, container, offset);
 		}
 		total += textOfNode(node, index).length;
 	}
@@ -581,7 +584,7 @@ function offsetOf(root: HTMLElement, container: Node, offset: number): number {
  * Backspace or right after it for Delete; none while text is selected.
  */
 function chipBesideCaret(root: HTMLElement, key: "Backspace" | "Delete"): TextRange | undefined {
-	const { start, end } = selectionOf(root);
+	const { start, end } = readSelection(root);
 	if (start !== end) return undefined;
 	let offset = 0;
 	for (const [index, node] of root.childNodes.entries()) {
@@ -594,21 +597,21 @@ function chipBesideCaret(root: HTMLElement, key: "Backspace" | "Delete"): TextRa
 	return undefined;
 }
 
-function selectionOf(root: HTMLElement): TextRange {
+function readSelection(root: HTMLElement): TextRange {
 	const selection = document.getSelection();
 	if (!selection || selection.rangeCount === 0 || !root.contains(selection.anchorNode)) {
-		const end = textOf(root).length;
+		const end = readText(root).length;
 		return { start: end, end };
 	}
 	const range = selection.getRangeAt(0);
 	return {
-		start: offsetOf(root, range.startContainer, range.startOffset),
-		end: offsetOf(root, range.endContainer, range.endOffset),
+		start: measureTextOffset(root, range.startContainer, range.startOffset),
+		end: measureTextOffset(root, range.endContainer, range.endOffset),
 	};
 }
 
-function caretOf(root: HTMLElement): number {
-	return selectionOf(root).end;
+function readCaret(root: HTMLElement): number {
+	return readSelection(root).end;
 }
 
 /** Where `offset` into the text is in the box, after a chip it falls inside. */
@@ -642,15 +645,15 @@ function selectBetween(root: HTMLElement, anchor: number, focus: number) {
 }
 
 /** The selection as offsets into the text: where it was started, and where it ends now. */
-function directedSelectionOf(root: HTMLElement): { anchor: number; focus: number } {
+function readDirectedSelection(root: HTMLElement): { anchor: number; focus: number } {
 	const selection = document.getSelection();
 	if (!selection?.anchorNode || !selection.focusNode || !root.contains(selection.anchorNode)) {
-		const end = textOf(root).length;
+		const end = readText(root).length;
 		return { anchor: end, focus: end };
 	}
 	return {
-		anchor: offsetOf(root, selection.anchorNode, selection.anchorOffset),
-		focus: offsetOf(root, selection.focusNode, selection.focusOffset),
+		anchor: measureTextOffset(root, selection.anchorNode, selection.anchorOffset),
+		focus: measureTextOffset(root, selection.focusNode, selection.focusOffset),
 	};
 }
 

@@ -18,7 +18,7 @@ const MAKERS: readonly (readonly [RegExp, BuiltInProviderId])[] = [
  * The logo to show for a model: its maker's, read from `modelId`, else that of
  * the provider serving it, else none.
  */
-export function modelLogoOf(
+export function chooseModelLogo(
 	modelId: string | null,
 	servedBy: BuiltInProviderId | null,
 ): BuiltInProviderId | null {

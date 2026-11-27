@@ -27,7 +27,7 @@ import {
 } from "@/lib/composer-attachments.ts";
 import { useAvailableEmoji } from "@/lib/emoji.ts";
 import { matchesMedia, REDUCED_MOTION } from "@/lib/media.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { rememberEmoji } from "@/lib/recent-emoji.ts";
 import {
 	DropdownMenu,
@@ -342,7 +342,7 @@ export function ChatComposer({
 					title="Mention"
 					label="Who to mention"
 					items={menu.matches}
-					keyOf={mentionTargetKey}
+					itemKey={mentionTargetKey}
 					selected={selectedSuggestion}
 					onHighlight={setActiveSuggestion}
 					onChoose={(index) => chooseSuggestion(menu, index)}
@@ -356,7 +356,7 @@ export function ChatComposer({
 					title="Emoji"
 					label="Emoji matching what was typed"
 					items={menu.matches}
-					keyOf={(emoji) => emoji.emoji}
+					itemKey={(emoji) => emoji.emoji}
 					selected={selectedSuggestion}
 					onHighlight={setActiveSuggestion}
 					onChoose={(index) => chooseSuggestion(menu, index)}
@@ -687,7 +687,7 @@ function filesNote(items: readonly ComposerAttachment[]): string | undefined {
 			? `${action} the file that failed`
 			: `${action} the ${readiness.failed} files that failed`;
 	}
-	if (!readiness.ready) return `${countOf(readiness.uploading, "file", "files")} uploading`;
+	if (!readiness.ready) return `${formatCount(readiness.uploading, "file", "files")} uploading`;
 	if (items.length >= MAX_ATTACHMENTS_PER_MESSAGE) {
 		return `${MAX_ATTACHMENTS_PER_MESSAGE} of ${MAX_ATTACHMENTS_PER_MESSAGE} files`;
 	}
@@ -725,7 +725,7 @@ function SuggestionList<Item>({
 	title,
 	label,
 	items,
-	keyOf,
+	itemKey,
 	selected,
 	onHighlight,
 	onChoose,
@@ -735,7 +735,7 @@ function SuggestionList<Item>({
 	title: string;
 	label: string;
 	items: readonly Item[];
-	keyOf: (item: Item) => string;
+	itemKey: (item: Item) => string;
 	selected: number;
 	onHighlight: (index: number) => void;
 	onChoose: (index: number) => void;
@@ -758,7 +758,7 @@ function SuggestionList<Item>({
 			>
 				{items.map((item, index) => (
 					<button
-						key={keyOf(item)}
+						key={itemKey(item)}
 						id={`${id}-${index}`}
 						type="button"
 						role="option"
@@ -791,7 +791,7 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-sm">@{suggestion.handle}</span>
 					<span className="truncate text-muted-foreground text-xs">
-						Notifies {countOf(suggestion.notifies.length, "member", "members")}
+						Notifies {formatCount(suggestion.notifies.length, "member", "members")}
 					</span>
 				</span>
 			</>

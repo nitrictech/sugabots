@@ -33,7 +33,7 @@ import { ownAssistants, useBots, useCreateBot, useModels } from "@/lib/bots.ts";
 import { useStartInterview } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { modelName, useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import type { Session } from "@/lib/session.ts";
 import {
@@ -406,7 +406,7 @@ function ConnectProviderStep({
 							key={provider.id}
 							icon={<ProviderTile name={provider.name} builtIn={provider.builtIn} />}
 							label={provider.name}
-							sub={countOf(provider.models.length, "model", "models")}
+							sub={formatCount(provider.models.length, "model", "models")}
 							chevron
 							onClick={() => continueWith(provider).catch(() => {})}
 						/>
@@ -745,7 +745,7 @@ function InviteMembersStep({
 					? "Sending…"
 					: count === 0
 						? "Continue"
-						: `Send ${countOf(count, "invite", "invites")}`}
+						: `Send ${formatCount(count, "invite", "invites")}`}
 			</Button>
 			<QuietLink onClick={onContinue}>Skip for now</QuietLink>
 		</form>

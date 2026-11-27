@@ -9,7 +9,12 @@ import {
 	FileText,
 } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useRef, useState } from "react";
-import { extensionOf, type FileLook, fileLookOf, fileSizeLabel } from "@/lib/file-looks.ts";
+import {
+	classifyFileLook,
+	type FileLook,
+	fileSizeLabel,
+	parseExtension,
+} from "@/lib/file-looks.ts";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { Dialog, DialogClose, DialogContent, DialogTitle, DialogTrigger } from "@/ui/dialog.tsx";
 import { FileRow } from "@/ui/file-row.tsx";
@@ -29,17 +34,23 @@ export type FileUrlOf = (fileId: string) => string | undefined;
  * images as pictures, each opening full size over the chat, then every other
  * file as a chip to download. A file not served yet shows without a link.
  */
-export function MessageFiles({ files, urlOf }: { files: readonly FilePart[]; urlOf: FileUrlOf }) {
-	const images = files.filter((file) => lookOf(file) === "image");
-	const others = files.filter((file) => lookOf(file) !== "image");
+export function MessageFiles({
+	files,
+	fileUrl,
+}: {
+	files: readonly FilePart[];
+	fileUrl: FileUrlOf;
+}) {
+	const images = files.filter((file) => classifyFilePart(file) === "image");
+	const others = files.filter((file) => classifyFilePart(file) !== "image");
 	return (
 		<div className="flex w-full flex-col items-start gap-1.5 pt-1.5">
-			{images.length > 0 && <ImageGrid images={images} urlOf={urlOf} />}
+			{images.length > 0 && <ImageGrid images={images} fileUrl={fileUrl} />}
 			{others.length > 0 && (
 				<ul className="m-0 flex w-full list-none flex-col gap-1.5 p-0 sm:flex-row sm:flex-wrap">
 					{others.map((file) => (
 						<li key={file.id} className="w-full sm:w-72">
-							<FileChip file={file} url={urlOf(file.id)} />
+							<FileChip file={file} url={fileUrl(file.id)} />
 						</li>
 					))}
 				</ul>
@@ -48,8 +59,8 @@ export function MessageFiles({ files, urlOf }: { files: readonly FilePart[]; url
 	);
 }
 
-function lookOf(file: FilePart): FileLook {
-	return fileLookOf({ name: file.name, type: file.contentType });
+function classifyFilePart(file: FilePart): FileLook {
+	return classifyFileLook({ name: file.name, type: file.contentType });
 }
 
 /**
@@ -58,9 +69,9 @@ function lookOf(file: FilePart): FileLook {
  * is shown. Tiles keep their size before their images load, so the chat
  * doesn't move as they arrive.
  */
-function ImageGrid({ images, urlOf }: { images: readonly FilePart[]; urlOf: FileUrlOf }) {
+function ImageGrid({ images, fileUrl }: { images: readonly FilePart[]; fileUrl: FileUrlOf }) {
 	const served = images.flatMap((file) => {
-		const url = urlOf(file.id);
+		const url = fileUrl(file.id);
 		return url ? [{ file, url }] : [];
 	});
 	const [openedIndex, setOpenedIndex] = useState(0);
@@ -294,14 +305,14 @@ function DownloadButton({
 
 /** A file that isn't a picture: its kind, name and size, and a way to download it once it can be. */
 function FileChip({ file, url }: { file: FilePart; url: string | undefined }) {
-	const extension = extensionOf(file.name).toUpperCase();
+	const extension = parseExtension(file.name).toUpperCase();
 	return (
 		<FileRow
 			look="card"
 			className="w-full pr-2"
 			icon={
 				<IconTile size="md" tone="tile">
-					<FileLookIcon look={lookOf(file)} />
+					<FileLookIcon look={classifyFilePart(file)} />
 				</IconTile>
 			}
 			title={<MiddleTruncated text={file.name} />}

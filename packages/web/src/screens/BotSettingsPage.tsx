@@ -29,9 +29,9 @@ import { failureMessage } from "@/lib/failure.ts";
 import { botAutomationsLink, botComputerLink, botConnectorsLink, botsLink } from "@/lib/links.ts";
 import { formatDate } from "@/lib/list-time.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { modelLogoOf } from "@/lib/model-logo.ts";
+import { chooseModelLogo } from "@/lib/model-logo.ts";
 import { modelName } from "@/lib/model-providers.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
 import { useSession } from "@/lib/session.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -522,7 +522,7 @@ function ModelRow({
 	const offered = data?.models ?? [];
 	const current = offered.find((candidate) => candidate.modelId === model);
 	const switchedOff = model !== null && data !== undefined && current === undefined;
-	const logo = modelLogoOf(model, current?.providerBuiltIn ?? null);
+	const logo = chooseModelLogo(model, current?.providerBuiltIn ?? null);
 	const shownName = current ? modelName(current) : (model ?? "None chosen");
 	return (
 		<SettingsControlRow label="Model">
@@ -550,7 +550,7 @@ function ModelRow({
 								onValueChange={(value) => onChoose(value)}
 							>
 								{offered.map((candidate) => {
-									const mark = modelLogoOf(candidate.modelId, candidate.providerBuiltIn);
+									const mark = chooseModelLogo(candidate.modelId, candidate.providerBuiltIn);
 									return (
 										<DropdownMenuRadioItem key={candidate.modelId} value={candidate.modelId}>
 											{mark && <ProviderLogo builtIn={mark} className="size-3.5" />}
@@ -611,7 +611,7 @@ function BotConnectors({ bot }: { bot: Bot }) {
 							<ConnectorMark markId={connectorMarkFor(connector)} name={connector.name} size="md" />
 						}
 						label={connector.name}
-						sub={countOf(tools, "tool", "tools")}
+						sub={formatCount(tools, "tool", "tools")}
 					/>
 				);
 			})}

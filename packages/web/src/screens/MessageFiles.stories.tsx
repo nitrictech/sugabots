@@ -44,7 +44,7 @@ const pictures = new Map(
 );
 // Bytes no browser can draw, so the image falls back without asking any server.
 const undrawable = "data:image/heic;base64,AAAAGGZ0eXBoZWljAAAAAA==";
-const urlOf = (fileId: string) =>
+const fileUrl = (fileId: string) =>
 	pictures.get(fileId) ?? (fileId.endsWith("07") ? undrawable : `/files/${fileId}`);
 
 /** An image the browser can't draw: a HEIC photo, which falls back to its name and an icon. */
@@ -54,7 +54,7 @@ const meta = preview.meta({
 	title: "Product/MessageFiles",
 	component: MessageFiles,
 	tags: ["ai-generated"],
-	args: { files: [acmeRequest], urlOf },
+	args: { files: [acmeRequest], fileUrl },
 	decorators: [
 		(Story) => (
 			<div className="max-w-2xl bg-background p-5">
@@ -136,7 +136,7 @@ export const ImagesSteppedThroughOnAPhone = meta.story({
 export const UnavailableImages = meta.story({
 	args: {
 		files: [oldPricing, holidayPhoto, newPricing],
-		urlOf: (fileId) => (fileId === oldPricing.id ? undefined : urlOf(fileId)),
+		fileUrl: (fileId) => (fileId === oldPricing.id ? undefined : fileUrl(fileId)),
 	},
 	play: async ({ canvas, canvasElement }) => {
 		await expect(canvas.queryByRole("button", { name: "Open pricing-page-old.png" })).toBeNull();

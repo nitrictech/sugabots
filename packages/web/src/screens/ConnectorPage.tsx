@@ -17,7 +17,7 @@ import {
 } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useInstallGitHubApp } from "@/lib/github-connectors.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import {
 	ownerName,
 	type ResourceOwner,
@@ -491,12 +491,12 @@ const TOOLS_SHOWN_BEFORE_SCROLLING = 8;
 const KIND_WORDS = {
 	read: {
 		heading: "Tools that read",
-		all: (count: number) => `All ${countOf(count, "read tool", "read tools")}`,
+		all: (count: number) => `All ${formatCount(count, "read tool", "read tools")}`,
 		sub: "Look things up without changing anything",
 	},
 	change: {
 		heading: "Tools that make changes",
-		all: (count: number) => `All ${countOf(count, "change tool", "change tools")}`,
+		all: (count: number) => `All ${formatCount(count, "change tool", "change tools")}`,
 		sub: "Create, edit, delete or send things",
 	},
 } as const;

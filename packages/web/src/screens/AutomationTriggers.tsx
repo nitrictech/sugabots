@@ -90,7 +90,7 @@ function newTriggerDraft(kind: TriggerKind): TriggerDraft {
 }
 
 /** `trigger` as a draft to change. A webhook's secret is changed apart from it, so it starts blank. */
-export function triggerDraftOf(trigger: AutomationTriggerInput): TriggerDraft {
+export function buildTriggerDraft(trigger: AutomationTriggerInput): TriggerDraft {
 	switch (trigger.kind) {
 		case "routine":
 			return {

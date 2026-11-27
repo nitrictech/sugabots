@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { useRef } from "react";
 import { botLink } from "@/lib/links.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { OWNER_MARK_SIZE_PX, ownerMarkTransition } from "@/lib/owner-mark.ts";
 import { useOwnerProblems } from "@/lib/owner-pages.ts";
 import { useHideSidebar } from "@/lib/sidebar-hidden.tsx";
@@ -93,7 +93,9 @@ export function attentionOf({
 	needsApproval,
 }: Waiting): { attention: Attention; label: string } | undefined {
 	const unread =
-		unreadMessages > 0 ? countOf(unreadMessages, "unread message", "unread messages") : undefined;
+		unreadMessages > 0
+			? formatCount(unreadMessages, "unread message", "unread messages")
+			: undefined;
 	if (needsApproval) {
 		return { attention: "needsYou", label: unread ? `${unread}, needs you` : "Needs you" };
 	}

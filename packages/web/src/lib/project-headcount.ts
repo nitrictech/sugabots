@@ -1,4 +1,4 @@
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 
 /**
  * Who is in a project, as its pages say it: "3 members, 2 bots". Either count
@@ -12,8 +12,8 @@ export function projectHeadcount({
 	bots: number | undefined;
 }) {
 	return [
-		members === undefined ? undefined : countOf(members, "member", "members"),
-		bots === undefined ? undefined : countOf(bots, "bot", "bots"),
+		members === undefined ? undefined : formatCount(members, "member", "members"),
+		bots === undefined ? undefined : formatCount(bots, "bot", "bots"),
 	]
 		.filter(Boolean)
 		.join(", ");

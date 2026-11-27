@@ -9,7 +9,7 @@ import {
 import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { formatFullTimestamp, formatListTimeInSentence } from "@/lib/list-time.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { useProjectComputer, useProjectComputerActions } from "@/lib/project-computer.ts";
 import {
 	type ResourceOwner,
@@ -85,7 +85,7 @@ function ComputerGroup({ owner, shown }: { owner: ResourceOwner; shown: ProjectC
 		computer.turnsUsing > 0 &&
 			`${computer.turnsUsing === 1 ? "A bot is" : `${computer.turnsUsing} bots are`} using it`,
 		computer.membersWatching > 0 &&
-			`${countOf(computer.membersWatching, "member", "members")} watching`,
+			`${formatCount(computer.membersWatching, "member", "members")} watching`,
 	].filter(Boolean);
 	const inUse = computer.turnsUsing > 0;
 

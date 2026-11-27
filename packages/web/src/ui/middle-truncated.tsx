@@ -1,12 +1,12 @@
 import { cn } from "cn";
-import { extensionOf } from "@/lib/file-looks.ts";
+import { parseExtension } from "@/lib/file-looks.ts";
 
 /** How many characters before the extension stay when a name is cut short. */
 const MIDDLE_TRUNCATION_KEPT = 3;
 
 /** Shows `text` on one line, cutting from its middle when it is too long, so its end and extension stay. */
 export function MiddleTruncated({ text, className }: { text: string; className?: string }) {
-	const extensionLength = extensionOf(text).length;
+	const extensionLength = parseExtension(text).length;
 	const tailLength = Math.min(Math.ceil(text.length / 2), extensionLength + MIDDLE_TRUNCATION_KEPT);
 	return (
 		<span className={cn("flex min-w-0 whitespace-nowrap", className)}>

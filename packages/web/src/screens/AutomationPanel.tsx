@@ -39,17 +39,17 @@ import { Switch } from "@/ui/switch.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 import {
-	copyOf,
+	buildAutomationCopy,
 	DeleteAutomation,
 	instructionsNote,
 	type PlacedAutomation,
 } from "./AutomationEditor.tsx";
 import { RUN_OUTCOME_LABELS, type RunOutcome, RunStatus } from "./AutomationRun.tsx";
 import {
+	buildTriggerDraft,
 	TriggerDialog,
 	type TriggerSection,
 	TriggersGroup,
-	triggerDraftOf,
 } from "./AutomationTriggers.tsx";
 import { WebhookGroups } from "./AutomationWebhook.tsx";
 import { ShowMore, SidePanel } from "./SidePanel.tsx";
@@ -127,7 +127,7 @@ export function AutomationPanel({
 		try {
 			const created = await actions.create.mutateAsync({
 				projectId,
-				json: copyOf(original, siblingNames),
+				json: buildAutomationCopy(original, siblingNames),
 			});
 			await navigateToOwnerPage(owner, {
 				page: "automation",
@@ -501,7 +501,7 @@ function AutomationTriggerDialog({
 	return (
 		<TriggerDialog
 			owner={owner}
-			editing={editing && triggerDraftOf(editing)}
+			editing={editing && buildTriggerDraft(editing)}
 			adding={opened.kind === "new_trigger" ? opened.section : undefined}
 			settings={
 				editing?.kind === "webhook" ? (

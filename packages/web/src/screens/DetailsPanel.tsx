@@ -18,7 +18,7 @@ import { useComputerGap } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnectorActions, useConnectors } from "@/lib/connectors.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { botSettingsLink } from "@/lib/links.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { projectHeadcount } from "@/lib/project-headcount.ts";
 import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import { automationStartsLabel } from "@/lib/routine-schedule.ts";
@@ -399,7 +399,7 @@ function Context({ bot, memory }: { bot: Bot; memory: ChatContext | undefined })
 											{connector.name}
 										</span>
 										<span className="shrink-0 text-subtle-foreground text-xs">
-											{countOf(usableToolCount(connector), "tool", "tools")}
+											{formatCount(usableToolCount(connector), "tool", "tools")}
 										</span>
 									</Link>
 								)}

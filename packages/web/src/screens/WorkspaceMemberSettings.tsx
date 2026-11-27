@@ -13,7 +13,7 @@ import { type FormEvent, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { memberSettingsLink, settingsSectionLink } from "@/lib/links.ts";
 import { formatDate, formatTimeAfterVerb } from "@/lib/list-time.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { projectHeadcount } from "@/lib/project-headcount.ts";
 import { usePlaceProjectMember, useProjectMembers, useProjects } from "@/lib/projects.ts";
 import {
@@ -280,8 +280,8 @@ function expiryText(leftMs: number): string {
 	if (leftMs <= 0) return "expired";
 	if (leftMs < HOUR_MS) return "expires in under an hour";
 	if (leftMs < DAY_MS)
-		return `expires in ${countOf(Math.floor(leftMs / HOUR_MS), "hour", "hours")}`;
-	return `expires in ${countOf(Math.floor(leftMs / DAY_MS), "day", "days")}`;
+		return `expires in ${formatCount(Math.floor(leftMs / HOUR_MS), "hour", "hours")}`;
+	return `expires in ${formatCount(Math.floor(leftMs / DAY_MS), "day", "days")}`;
 }
 
 function MemberPage({

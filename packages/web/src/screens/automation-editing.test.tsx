@@ -696,7 +696,7 @@ describe("a bot's automations", () => {
 	});
 
 	it("duplicates an automation, paused and with a name of its own, then opens the copy", async () => {
-		const copyOf = (n: number, name: string): BotsAutomation => ({
+		const buildCopy = (n: number, name: string): BotsAutomation => ({
 			...morningBrief,
 			automation: {
 				...morningBrief.automation,
@@ -705,8 +705,8 @@ describe("a bot's automations", () => {
 				state: "paused",
 			},
 		});
-		const firstCopy = copyOf(1, "Morning brief copy");
-		const secondCopy = copyOf(2, "Morning brief copy 2");
+		const firstCopy = buildCopy(1, "Morning brief copy");
+		const secondCopy = buildCopy(2, "Morning brief copy 2");
 		client.api.automations.create.mockReturnValue(
 			Effect.succeed({ automation: secondCopy.automation, secrets: [] }),
 		);

@@ -15,6 +15,6 @@ export function capitalise(text: string): string {
 }
 
 /** `count` with the word for one or for several: "1 reply", "3 replies". */
-export function countOf(count: number, one: string, several: string): string {
+export function formatCount(count: number, one: string, several: string): string {
 	return `${count} ${count === 1 ? one : several}`;
 }

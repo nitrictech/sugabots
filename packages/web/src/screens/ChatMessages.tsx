@@ -519,7 +519,7 @@ function ChatMessage({
 		</>
 	);
 	const fileList = files.length > 0 && (
-		<MessageFiles files={files} urlOf={sending ? notServedYet : fileUrlOf} />
+		<MessageFiles files={files} fileUrl={sending ? notServedYet : fileUrlOf} />
 	);
 	// The bot the header names carries no head of its own.
 	const headed = startsGroup && !(bot !== undefined && bot.id === namedBotId);

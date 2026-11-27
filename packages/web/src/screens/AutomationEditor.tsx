@@ -29,11 +29,11 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import {
+	buildTriggerDraft,
 	TriggerDialog,
 	type TriggerDraft,
 	type TriggerSection,
 	TriggersGroup,
-	triggerDraftOf,
 	triggerInputOf,
 } from "./AutomationTriggers.tsx";
 
@@ -165,7 +165,7 @@ export function NewAutomationPage({
 						editing={editing?.draft}
 						adding={"adding" in open ? open.adding : undefined}
 						onSave={async (input) => {
-							const draft = triggerDraftOf(input);
+							const draft = buildTriggerDraft(input);
 							setTriggers((current) =>
 								editing
 									? current.map((one) => (one.key === editing.key ? { ...one, draft } : one))
@@ -198,7 +198,10 @@ interface DraftedTrigger {
  * secret its webhook source made has to be pasted into it again. A repository copy runs on the
  * same repository and events.
  */
-export function copyOf(automation: Automation, siblingNames: readonly string[]): NewAutomation {
+export function buildAutomationCopy(
+	automation: Automation,
+	siblingNames: readonly string[],
+): NewAutomation {
 	const fields = {
 		name: copyName(automation.name, siblingNames),
 		instructions: automation.instructions,

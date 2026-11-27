@@ -9,7 +9,7 @@ import { useId, useState } from "react";
 import { useBots } from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { botSettingsLink, projectBotsLink, projectMembersLink, projectsLink } from "@/lib/links.ts";
-import { countOf, listNames } from "@/lib/name-list.ts";
+import { formatCount, listNames } from "@/lib/name-list.ts";
 import { projectHeadcount } from "@/lib/project-headcount.ts";
 import {
 	useDeleteProject,
@@ -319,7 +319,7 @@ function ProjectBots({ project }: { project: Project }) {
 	const count = bots.data?.length ?? 0;
 	return (
 		<SettingsPage
-			description={`${countOf(count, "bot", "bots")} in ${project.name}`}
+			description={`${formatCount(count, "bot", "bots")} in ${project.name}`}
 			headerAction={
 				may && (
 					<DropdownMenu>

@@ -12,7 +12,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { modelName } from "@/lib/model-providers.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { formatCount } from "@/lib/name-list.ts";
 import { projectPalettes } from "@/lib/project-looks.ts";
 import { PROVIDER_HUES } from "@/lib/provider-hues.ts";
 import {
@@ -439,6 +439,6 @@ function footnote(unknownCostRequests: number): string {
 	const unknownCost =
 		unknownCostRequests === 0
 			? ""
-			: ` ${countOf(unknownCostRequests, "request", "requests")} ${unknownCostRequests === 1 ? "has" : "have"} an unknown cost and ${unknownCostRequests === 1 ? "isn't" : "aren't"} included.`;
+			: ` ${formatCount(unknownCostRequests, "request", "requests")} ${unknownCostRequests === 1 ? "has" : "have"} an unknown cost and ${unknownCostRequests === 1 ? "isn't" : "aren't"} included.`;
 	return `Estimated from each provider's published prices.${unknownCost} Your provider bills you directly.`;
 }

@@ -1,6 +1,6 @@
 import { type MessagePart, messagePreview, type ToolCallPart } from "@sugabots/contracts";
 import type { MarkedConnector } from "@/lib/connectors.ts";
-import { capitalise, countOf, listNames } from "@/lib/name-list.ts";
+import { capitalise, formatCount, listNames } from "@/lib/name-list.ts";
 import {
 	BROWSER_TOOL_PREFIX,
 	BUILT_IN_HANDLE,
@@ -372,7 +372,7 @@ export function noteOf(call: ToolCallPart): { text: string; failed: boolean } | 
 	const refusal = refusalIn(call.output);
 	if (refusal) return failed(refusal);
 	const count = resultCountIn(outputValue(call.output));
-	return count === undefined ? undefined : said(countOf(count, "result", "results"));
+	return count === undefined ? undefined : said(formatCount(count, "result", "results"));
 }
 
 /**
