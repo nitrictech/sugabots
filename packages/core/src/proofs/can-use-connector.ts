@@ -7,7 +7,7 @@ import { ActionForbidden, BotCannotReach, ResourceHidden } from "@sugabots/contr
 import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { Effect, Result } from "effect";
 import { type Executor, query } from "../database/database.ts";
-import { connector, placedChat, projectBotConnector } from "../database/schema.ts";
+import { connector, placedChat, project, projectBotConnector, turn } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
 import { toolsOf } from "../providers/connectors/connector-store.ts";
@@ -106,6 +106,29 @@ function enabledConnectorRows(db: Executor, acting: Principal, selected: SQL | u
 		)
 		.where(and(eq(connector.enabled, true), selected));
 }
+
+export const checkConnectorWritePermission = (
+	memberId: string,
+	call: { readonly connectorId: string; readonly turnId: string },
+) =>
+	Effect.gen(function* () {
+		const place = yield* query((db) =>
+			reachFacts(
+				db,
+				sql`(select case when ${project.defaultOfBotId} = ${turn.botId}
+					then ${placedChat.projectId} else ${connector.projectId} end
+					from ${connector}
+					inner join ${project} on ${project.id} = ${connector.projectId}
+					inner join ${turn} on ${turn.id} = ${call.turnId}
+					inner join ${placedChat} on ${placedChat.id} = ${turn.chatId}
+					where ${connector.id} = ${call.connectorId}
+						and ${connector.workspaceId} = ${placedChat.workspaceId})`,
+				{ member: memberId },
+			),
+		);
+		if (!place?.member || !mayInProjectAs(place.member, place.project, "project.change"))
+			return yield* new ActionForbidden({ proof: "CanDecide" });
+	});
 
 const connectorPlaces = (
 	acting: Principal,

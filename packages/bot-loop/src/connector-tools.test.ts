@@ -8,6 +8,7 @@ import {
 	seedProject,
 	seedProjectChat,
 	seedTurnAnswering,
+	setRole,
 } from "@sugabots/core/authentication/seed.test-support";
 import { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
 import { CALL_TOOL } from "@sugabots/core/chats/tools/tool-search/tool";
@@ -118,6 +119,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			if (!parked) throw new Error("no call parked");
 
 			await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
+			await setRole(workspaceId, adminId, "viewer");
 			// The workflow resumes the turn: it authenticates it again and takes the next step.
 			const principal = await ran.authentication.authenticate(ran.turnId);
 			const next = await ran.steps.step(ran.run.request, principal, {
@@ -137,6 +139,33 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				status: "complete",
 				content: "I need approval. Wiped.",
 			});
+		});
+
+		it("refuses a demoted asker's Allow for a pending connector write", async () => {
+			await setRole(workspaceId, adminId, "editor");
+			const execute = vi.fn(async () => ({ removed: true }));
+			const { model } = scriptedSteps({
+				calls: [
+					{
+						toolCallId: "wipe",
+						toolName: CALL_TOOL,
+						input: { tool: "wiki__wipe", arguments: {} },
+					},
+				],
+			});
+			const ran = await loop.runTurn(chatId, { model, connectorTools: wiki("ask", execute) });
+			const [parked] = await callsOf(ran.turnId);
+			if (!parked) throw new Error("No call parked");
+			expect(parked).toMatchObject({ approvalStatus: "pending", writeOrDelete: true });
+
+			await setRole(workspaceId, adminId, "viewer");
+			await expect(
+				chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
+			).rejects.toMatchObject({ _tag: "ActionForbidden" });
+			expect(await callsOf(ran.turnId)).toMatchObject([{ approvalStatus: "pending" }]);
+			await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "deny" });
+			expect(await callsOf(ran.turnId)).toMatchObject([{ approvalStatus: "denied" }]);
+			expect(execute).not.toHaveBeenCalled();
 		});
 
 		it("refuses a call that needs approval when its input is too large to show in full", async () => {

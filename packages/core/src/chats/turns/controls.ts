@@ -1,6 +1,7 @@
 import { ToolApprovalConflict, ToolApprovalNotFound } from "@sugabots/contracts/errors/approvals";
 import { Effect } from "effect";
 import { serviceOperations, transaction } from "../../database/database.ts";
+import { checkConnectorWritePermission } from "../../proofs/can-use-connector.ts";
 import { approvalCutoff } from "./approval-withdrawals.ts";
 import { TurnSignals } from "./signals.ts";
 import { TurnStore } from "./store.ts";
@@ -35,6 +36,9 @@ export const makeControls = Effect.gen(function* () {
 						)
 							return yield* new ToolApprovalNotFound();
 						if (!candidate.executionId) return yield* new ToolApprovalNotFound();
+						const { connectorId, writeOrDelete, turnId } = candidate.call;
+						if (decision !== "deny" && connectorId && writeOrDelete)
+							yield* checkConnectorWritePermission(isMember.member, { connectorId, turnId });
 						const approvalId = shownApprovalId;
 						const decided = { decision, memberId: isMember.member };
 						// Recorded and sent in one transaction: the engine writes the signal
