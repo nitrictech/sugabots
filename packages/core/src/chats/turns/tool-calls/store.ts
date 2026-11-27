@@ -567,8 +567,7 @@ export const make = Effect.gen(function* () {
 											eq(connector.configurationRevision, binding.connectorRevision),
 										),
 									)
-									.limit(1)
-									.for("update"),
+									.limit(1),
 							);
 							if (!approvedConnector) {
 								return yield* refuse(APPROVED_CONNECTOR_CHANGED);

@@ -142,11 +142,10 @@ export const holdTurnForToolWrite = (
  */
 export const holdTurnUnderWorkspaceLock = <P, W>(
 	lock: HoldsWorkspaceLock<P, W>,
-	needs?: WriteNeeds,
 ): Effect.Effect<void, ToolWriteRefusal, Database> => {
 	const principal = lock.principal.value;
 	return principal._tag === "BotForAsker" || principal._tag === "AutomationRun"
-		? holdTurnAndStanding(executionFence(principal.turn, principal.executionNumber, needs))
+		? holdTurnAndStanding(executionFence(principal.turn, principal.executionNumber))
 		: Effect.void;
 };
 
