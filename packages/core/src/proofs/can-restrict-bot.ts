@@ -9,6 +9,7 @@ import type { Principal } from "../principal.ts";
 import {
 	administers,
 	type BotRecord,
+	botAtAdmission,
 	botRecord,
 	memberReachesBot,
 	restrictsBot,
@@ -70,7 +71,7 @@ const restrictingAdmin = (
 		if (met.kind === "run") return yield* Effect.fail(forbidden);
 		const { actor } = met;
 		// Admins see every bot, without reaching it.
-		const seen = memberReachesBot(actor, record) || administers(actor);
+		const seen = memberReachesBot(actor, botAtAdmission(principal, record)) || administers(actor);
 		if (!seen) return yield* Effect.fail(hidden);
 		if (!restrictsBot(actor, record) || met.mayManage !== "always") {
 			return yield* Effect.fail(forbidden);

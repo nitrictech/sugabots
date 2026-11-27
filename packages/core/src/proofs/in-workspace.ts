@@ -60,14 +60,19 @@ export const proveInWorkspace = <P, W>(
 					and(
 						eq(membership.workspaceId, workspace.id),
 						eq(membership.leaving, false),
-						eq(membership.memberId, sql`${member ?? null}::uuid`),
+						eq(
+							membership.memberId,
+							sql`${acting._tag === "BotForAsker" && acting.admission ? null : (member ?? null)}::uuid`,
+						),
 					),
 				)
 				.where(and(eq(workspace.id, id), eq(workspace.deleting, false), contains))
 				.limit(1),
 		);
 		if (!row?.botInWorkspace) return yield* Effect.fail(hidden);
-		if (member !== undefined && !row.role) return yield* Effect.fail(hidden);
+		const role =
+			acting._tag === "BotForAsker" && acting.admission ? acting.admission.role : row.role;
+		if (member !== undefined && !role) return yield* Effect.fail(hidden);
 		const givesPermissions =
 			acting._tag === "MemberSession" ||
 			(acting._tag === "BotForAsker" && acting.bounds.kind === "member");
@@ -75,9 +80,7 @@ export const proveInWorkspace = <P, W>(
 			principal,
 			workspace: workspaceId,
 			permissionsOf:
-				givesPermissions && member && row.role
-					? { memberId: member, workspaceRole: row.role }
-					: undefined,
+				givesPermissions && member && role ? { memberId: member, workspaceRole: role } : undefined,
 		});
 		return proof;
 	});

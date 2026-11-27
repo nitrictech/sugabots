@@ -8,6 +8,7 @@ import {
 	type ProjectFacts,
 	type ReachFacts,
 	reachFacts,
+	useTurnAdmission,
 	whoActs,
 } from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
@@ -42,7 +43,7 @@ function joiner(principal: Principal, facts: ReachFacts): MemberPlace | undefine
 		(principal._tag === "BotForAsker" &&
 			principal.bounds.kind === "member" &&
 			principal.workspace === facts.project.workspace);
-	return joinsForThemselves ? facts.member : undefined;
+	return joinsForThemselves ? useTurnAdmission(principal, facts).member : undefined;
 }
 
 /** Whether `member` may join the project `facts` describes, or is in it already. */

@@ -9,9 +9,10 @@ import {
 	type AutomationRun,
 	authenticated,
 	type BotForAsker,
+	type TurnAdmission,
 	type TurnBounds,
 } from "../principal.ts";
-import { turnReachesChat } from "../proofs/facts.ts";
+import { captureTurnAdmission } from "../proofs/facts.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { askerOf, hasMemberBounds, type TurnFacts, turnFacts } from "./turn-facts.ts";
 
@@ -19,7 +20,7 @@ import { askerOf, hasMemberBounds, type TurnFacts, turnFacts } from "./turn-fact
  * The authenticator for a turn, which the bot loop calls each time a turn
  * starts or resumes: from the turn's stored ids, who the bot is and who it
  * acts for. The first execution checks that the bot and its asker reach
- * the chat. A positive execution number records admission for later executions.
+ * the chat and records its permissions for later executions.
  *
  * Each principal it builds is a new execution of the turn: it raises the
  * turn's execution number, which the principal carries, so the writes of an
@@ -59,7 +60,11 @@ export const make = Effect.gen(function* () {
 					if (project === null) {
 						return yield* new TurnUnavailable({ turn: turnId, reason: "inNoProject" });
 					}
-					const admitted = facts.executionNumber > 0 || (yield* query((db) => turnReachesChat(db, facts)));
+					const admission =
+						facts.admission ?? (yield* query((db) => captureTurnAdmission(db, facts)));
+					const execution = admission
+						? yield* newExecution(facts.turn, admission)
+						: { executionNumber: 0, admission: null };
 					const asker = askerOf(facts);
 					if (asker !== undefined) {
 						return authenticated.botForAsker({
@@ -69,7 +74,7 @@ export const make = Effect.gen(function* () {
 							askedByAutomation: facts.askedBy.kind === "automation",
 							chat: facts.chat,
 							turn: facts.turn,
-							executionNumber: admitted ? yield* newExecution(facts.turn) : 0,
+							...execution,
 							bounds: boundsOf(facts, asker, project),
 						});
 					}
@@ -81,7 +86,7 @@ export const make = Effect.gen(function* () {
 							run: facts.run.run,
 							chat: facts.chat,
 							turn: facts.turn,
-							executionNumber: admitted ? yield* newExecution(facts.turn) : 0,
+							...execution,
 							bounds: { kind: "chat", project },
 						});
 					}
@@ -97,18 +102,39 @@ export const layerNoDeps = processLayer(Layer.effect(Service, make));
  * Raises the turn `turnId`'s execution number and returns it: the number of
  * the execution being authenticated, which every older one no longer is.
  */
-const newExecution = (turnId: string) =>
+const newExecution = (turnId: string, admission: TurnAdmission) =>
 	Effect.flatMap(
 		query((db) =>
 			db
 				.update(turn)
-				.set({ executionNumber: sql`${turn.executionNumber} + 1` })
+				.set({
+					executionNumber: sql`${turn.executionNumber} + 1`,
+					admission: sql`coalesce(${turn.admission}, ${JSON.stringify(admission)}::jsonb)`,
+				})
 				.where(eq(turn.id, turnId))
-				.returning({ executionNumber: turn.executionNumber }),
+				.returning({ executionNumber: turn.executionNumber, admission: turn.admission }),
 		),
 		([raised]) =>
-			raised ? Effect.succeed(raised.executionNumber) : Effect.die(new Error("A turn is gone")),
+			raised
+				? Effect.succeed({ ...raised, admission: freezeAdmission(raised.admission) })
+				: Effect.die(new Error("A turn is gone")),
 	);
+
+function freezeAdmission(admission: TurnAdmission | null): TurnAdmission | null {
+	if (!admission) return null;
+	for (const place of Object.values(admission.projects)) {
+		const bot = place.project.defaultOf;
+		if (bot) {
+			if ("memberIds" in bot) Object.freeze(bot.memberIds);
+			Object.freeze(bot);
+		}
+		Object.freeze(place.project);
+		Object.freeze(place);
+	}
+	Object.freeze(admission.projects);
+	Object.freeze(admission.chatProjectBotIds);
+	return Object.freeze(admission);
+}
 
 export const layer = layerNoDeps;
 

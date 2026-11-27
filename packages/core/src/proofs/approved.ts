@@ -22,7 +22,6 @@ import { toolCall } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import { ApprovalCheckReached, type Call, type ResolvedTargets } from "../operations/operation.ts";
 import type { Principal } from "../principal.ts";
-import { approverFacts } from "./approvers.ts";
 import type { CanUseChatComputer } from "./can-use-computer.ts";
 import type { CanUseConnector } from "./can-use-connector.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
@@ -78,9 +77,9 @@ export function approvalRule(name: ApprovedOperation): ApprovalRule {
 
 /**
  * The operation may run on Targets for principal P in call X. P is a signed-in member, so no approval applies;
- * X needs none; or someone still an approver for it allowed it, its tool's
+ * X needs none; or an approver allowed it, its tool's
  * access still lets it, and the arguments they allowed equal X's input. The
- * decision is stored, not a proof, and this proves it again each time.
+ * stored decision is checked against the call each time.
  *
  * A personal bot's call waits where its tool's policy says so, and so does
  * every call in its runs a webhook or GitHub event started, and a brief's
@@ -181,9 +180,11 @@ export const proveComputerUseApproved = <P, X, N extends ComputerOperation, I, C
 	input: Named<I, InputOf<NoInfer<N>>>,
 	computerUse: CanUseChatComputer<NoInfer<P>, C>,
 ) =>
-	proveApproval(principal, call, rule, input, [computerUse.chat], {
-		resolvedTargets: { computer: computerUse.computer, machine: computerUse.machine },
-	});
+	computerUse.principal.value === principal.value
+		? proveApproval(principal, call, rule, input, [computerUse.chat], {
+				resolvedTargets: { computer: computerUse.computer, machine: computerUse.machine },
+			})
+		: Effect.fail(new ApprovalRefused());
 
 /**
  * `proveApproved` for a bot's request to reach a host, bound to the project
@@ -199,9 +200,18 @@ export const proveComputerRequestApproved = <P, X, I, C>(
 	input: Named<I, InputOf<"computers.requestHost">>,
 	computerUse: CanUseChatComputer<NoInfer<P>, C>,
 ) =>
-	proveApproval(principal, call, approvalRule("computers.requestHost"), input, [computerUse.chat], {
-		computerProjectId: computerUse.project,
-	});
+	computerUse.principal.value === principal.value
+		? proveApproval(
+				principal,
+				call,
+				approvalRule("computers.requestHost"),
+				input,
+				[computerUse.chat],
+				{
+					computerProjectId: computerUse.project,
+				},
+			)
+		: Effect.fail(new ApprovalRefused());
 
 export const proveConnectorApproved = <P, X, I, T, K>(
 	principal: Named<P, Principal>,
@@ -327,10 +337,6 @@ const proveApproval = <
 		});
 		if (recorded === "refused") return yield* new ApprovalRefused();
 		if (recorded === "needed") return yield* new ApprovalNeeded();
-		if (recorded !== null) {
-			const { approver } = yield* approverFacts(recorded, facts, computerProjectId);
-			if (!approver) return yield* new ApprovalNeeded();
-		}
 		return approved(recorded, decision?.sdkToolCallId);
 	});
 

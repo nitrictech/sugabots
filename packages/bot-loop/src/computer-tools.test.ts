@@ -418,9 +418,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(resumed).toMatchObject({ _tag: "Waiting" });
 			});
 
-			it("asks again when the approver loses authority before the turn resumes", async () => {
+			it("keeps a host decision when its approver is demoted before the turn resumes", async () => {
 				const asked = await anEditorsChat();
-				const nextApprover = await seedMember(workspaceId, "admin");
 				const { model, requests } = calling(HOST_REQUEST_TOOL, { host: "api.example.com" });
 				const ran = await loop.runTurn(asked.chatId, { model });
 				const [approved] = await callsOf(ran.turnId);
@@ -449,25 +448,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						attempt: 0,
 						step: 1,
 					});
-				const waiting = await resume();
-				const [reparked] = await callsOf(ran.turnId);
-				if (!reparked) throw new Error("No renewed host call");
-				expect(reparked).toMatchObject({
-					id: approved.id,
-					approvalStatus: "pending",
-					decidedById: null,
-				});
-				expect(reparked.approvalId).not.toBe(approved.approvalId);
-				expect(waiting).toEqual({
-					_tag: "Waiting",
-					approvals: [reparked.approvalId],
-					taken: false,
-				});
-				expect(requests).toHaveLength(1);
-				await chatsAs(nextApprover).decide({ toolCallId: approved.id, decision: "allow_once" });
 				expect(await resume()).toEqual({ _tag: "Finished" });
+				expect(requests).toHaveLength(2);
 				expect(await callsOf(ran.turnId)).toMatchObject([
-					{ status: "completed", decidedById: nextApprover },
+					{ status: "completed", decidedById: adminId },
 				]);
 			});
 
@@ -514,7 +498,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(await projectHosts()).toEqual([]);
 			});
 
-			it("proves its approver again as the decision is made, so one who lost the standing adds nothing", async () => {
+			it("lets an admitted decision finish after its approver is demoted", async () => {
 				const asked = await anEditorsChat();
 				const { model } = calling(HOST_REQUEST_TOOL, { host: "api.example.com" });
 				const ran = await loop.runTurn(asked.chatId, { model });
@@ -561,9 +545,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					),
 				);
 
-				await expect(decided).rejects.toMatchObject({ _tag: "ActionForbidden" });
-				expect(await projectHosts()).toEqual([]);
-				expect(await callsOf(ran.turnId)).toMatchObject([{ approvalStatus: "pending" }]);
+				await decided;
+				expect(await projectHosts()).toHaveLength(1);
+				expect(await callsOf(ran.turnId)).toMatchObject([{ approvalStatus: "allowed" }]);
 			});
 		});
 	},

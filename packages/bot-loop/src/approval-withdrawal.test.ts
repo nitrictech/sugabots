@@ -12,7 +12,7 @@ import { runningTurns } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import { query } from "@sugabots/core/database/database";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
-import { bot, membership, turn } from "@sugabots/core/database/schema";
+import { bot, turn } from "@sugabots/core/database/schema";
 import {
 	closeDatabase,
 	holdTransaction,
@@ -22,7 +22,7 @@ import {
 } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
 import { authenticators, principals } from "@sugabots/core/proofs/world.test-support";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Context, Option, Schema } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { botLoopOnPostgres, calling, callsOf, parkedCallOf, storedTurn } from "./testing.ts";
@@ -81,12 +81,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		 * was withdrawn: the approval is gone, or so is the asker's sight of it.
 		 */
 		const lateDecisionRefusedWith = {
-			"project member removal": "ToolApprovalNotFound",
-			"project departure": "ToolApprovalNotFound",
-			"workspace departure": "ResourceHidden",
-			"workspace member removal": "ResourceHidden",
 			"bot removal": "ResourceHidden",
-			"project bot removal": "ToolApprovalNotFound",
 			"project deletion": "ResourceHidden",
 			"workspace deletion": "ResourceHidden",
 			expiry: "ToolApprovalNotFound",
@@ -97,13 +92,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			async (reason) => {
 				const asker = await seedMember(workspaceId, "editor");
 				const signedIn = principals(await authenticators());
-				const askerSession = await signedIn.member(asker);
 				const adminSession = await signedIn.member(adminId);
 				const projectId = await seedProject(workspaceId, {
-					leadBotId:
-						reason === "project bot removal" || reason === "bot removal"
-							? (await seedBot(workspaceId)).id
-							: botId,
+					leadBotId: reason === "bot removal" ? (await seedBot(workspaceId)).id : botId,
 					members: [asker],
 					bots: [botId],
 				});
@@ -137,36 +128,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					await checked.catch(() => {});
 				};
 				switch (reason) {
-					case "project member removal":
-						await loop.call(adminSession, "projects.removeMember", { projectId, memberId: asker });
-						break;
-					case "project departure":
-						await loop.call(askerSession, "projects.leave", { projectId });
-						break;
-					case "workspace departure":
-						await loop.call(askerSession, "workspaces.leave", { workspace: workspaceId });
-						break;
-					case "workspace member removal": {
-						const [record] = await onDatabase((db) =>
-							db
-								.select({ id: membership.id })
-								.from(membership)
-								.where(
-									and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, asker)),
-								),
-						);
-						if (!record) throw new Error("No membership");
-						await loop.call(adminSession, "workspaces.removeMembership", {
-							workspace: workspaceId,
-							membershipId: record.id,
-						});
-						break;
-					}
 					case "bot removal":
 						await loop.call(adminSession, "bots.remove", { botId });
-						break;
-					case "project bot removal":
-						await loop.call(adminSession, "projects.removeBot", { projectId, botId });
 						break;
 					case "project deletion":
 						await loop.call(adminSession, "projects.remove", { projectId });
@@ -190,47 +153,38 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			15_000,
 		);
 
-		it.each(["reach withdrawal", "expiry"] as const)(
-			"serializes a decision racing %s and refuses it when the withdrawal wins",
-			async (reason) => {
-				const asker = await seedMember(workspaceId, "editor");
-				const projectId = await seedProject(workspaceId, { leadBotId: botId, members: [asker] });
-				const started = await chatsAs(asker).startProjectChat({
-					projectId,
-					retryKey: crypto.randomUUID(),
-					message: "Draft the report.",
-				});
-				const { workflow, turnId, parked, requests } = await pendingBrief(started.chat.id);
-				const signedIn = principals(await authenticators());
-				const admin = await signedIn.member(adminId);
-				const withdraw =
-					reason === "expiry"
-						? await loop.expiryOf(parked)
-						: () => loop.call(admin, "projects.removeMember", { projectId, memberId: asker });
-				const lock = holdTransaction(
-					query((db) =>
-						db.select({ id: turn.id }).from(turn).where(eq(turn.id, turnId)).for("update"),
-					),
-				);
-				await lock.held;
-				const withdrawing = withdraw();
-				void withdrawing.catch(() => {});
-				await waitUntilWaitingOnLocks(1);
-				const decision = expect(
-					chatsAs(asker).decide({ toolCallId: parked.id, decision: "allow_once" }),
-				).rejects.toMatchObject({ _tag: "ToolApprovalNotFound" });
-				void decision.catch(() => {});
-				await waitUntilWaitingOnLocks(2);
-				await lock.release();
-				await Promise.all([withdrawing, decision]);
-				await workflow.completed();
-				expect(await storedTurn(turnId)).toMatchObject({ status: "cancelled" });
-				expect(await callsOf(turnId)).toMatchObject([
-					{ approvalStatus: "denied", decidedById: null },
-				]);
-				expect(requests).toHaveLength(1);
-			},
-			15_000,
-		);
+		it("refuses a decision after expiry wins the turn lock", async () => {
+			const asker = await seedMember(workspaceId, "editor");
+			const projectId = await seedProject(workspaceId, { leadBotId: botId, members: [asker] });
+			const started = await chatsAs(asker).startProjectChat({
+				projectId,
+				retryKey: crypto.randomUUID(),
+				message: "Draft the report.",
+			});
+			const { workflow, turnId, parked, requests } = await pendingBrief(started.chat.id);
+			const withdraw = await loop.expiryOf(parked);
+			const lock = holdTransaction(
+				query((db) =>
+					db.select({ id: turn.id }).from(turn).where(eq(turn.id, turnId)).for("update"),
+				),
+			);
+			await lock.held;
+			const withdrawing = withdraw();
+			void withdrawing.catch(() => {});
+			await waitUntilWaitingOnLocks(1);
+			const decision = expect(
+				chatsAs(asker).decide({ toolCallId: parked.id, decision: "allow_once" }),
+			).rejects.toMatchObject({ _tag: "ToolApprovalNotFound" });
+			void decision.catch(() => {});
+			await waitUntilWaitingOnLocks(2);
+			await lock.release();
+			await Promise.all([withdrawing, decision]);
+			await workflow.completed();
+			expect(await storedTurn(turnId)).toMatchObject({ status: "cancelled" });
+			expect(await callsOf(turnId)).toMatchObject([
+				{ approvalStatus: "denied", decidedById: null },
+			]);
+			expect(requests).toHaveLength(1);
+		}, 15_000);
 	},
 );

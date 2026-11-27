@@ -13857,6 +13857,24 @@
       ]
     },
     {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "turn",
+        "admission"
+      ],
+      "writes": [
+        "s|col|public.turn.admission",
+        "n|col|public.turn.admission",
+        "e|col|public.turn.admission"
+      ],
+      "reads": [
+        "n|tbl|public.turn",
+        "n|sch|public"
+      ]
+    },
+    {
       "statementType": "drop_index",
       "statementTarget": [
         "index",
@@ -23538,6 +23556,22 @@
         "notNull": true,
         "dimensions": 0,
         "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "turn",
+        "name": "admission",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
         "generated": null,
         "identity": null,
         "entityType": "columns"

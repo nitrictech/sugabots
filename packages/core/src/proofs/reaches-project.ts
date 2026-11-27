@@ -3,7 +3,14 @@ import type { SQL } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../database/database.ts";
 import type { Principal } from "../principal.ts";
-import { decideReach, type ProjectFacts, type ReachedAs, reachFacts, whoActs } from "./facts.ts";
+import {
+	decideReach,
+	type ProjectFacts,
+	type ReachedAs,
+	reachFacts,
+	useTurnAdmission,
+	whoActs,
+} from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
 /**
@@ -47,7 +54,7 @@ export const proveReachesProject = <P, J>(
 			principal,
 			project: projectId,
 			workspace: facts.project.workspace,
-			facts: facts.project,
+			facts: useTurnAdmission(acting, facts).project,
 			as: decision.as,
 		});
 		return proof;

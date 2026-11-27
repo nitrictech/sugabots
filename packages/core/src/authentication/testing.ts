@@ -37,6 +37,7 @@ export const botForAskerForTests = (fields: {
 		chat: fields.chat,
 		turn: fields.turn,
 		executionNumber: 1,
+		admission: null,
 		bounds: { kind: "chat", project: fields.project },
 	});
 

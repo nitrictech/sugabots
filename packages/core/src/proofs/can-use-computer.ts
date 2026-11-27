@@ -15,6 +15,7 @@ import {
 	type ReachFacts,
 	reachFacts,
 	turnChatPlace,
+	useTurnAdmission,
 	whoActs,
 } from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
@@ -32,6 +33,7 @@ export type ComputerUse = "watch" | "control";
  */
 export interface CanUseComputer<P, M> extends Proof<"CanUseComputer", [P, M]> {
 	readonly computer: Named<M, string>;
+	readonly chat: string;
 	readonly control: boolean;
 }
 
@@ -58,6 +60,7 @@ export const proveCanUseComputer = <P, C, M>(
 	}
 	const proof: CanUseComputer<P, M> = CanUseComputerProof.prove([reach.principal, computerId], {
 		computer: computerId,
+		chat: reach.chat.value,
 		control: use !== "watch" && mayControl,
 	});
 	return Effect.succeed(proof);
@@ -122,7 +125,7 @@ export const proveCanUseChatComputer = <P, C>(
 		if (decision.kind === "botCannotReach") {
 			return yield* Effect.fail(new BotCannotReach({ resource: "computer" }));
 		}
-		if (!botUsesComputer(decision.as, facts)) {
+		if (!botUsesComputer(decision.as, useTurnAdmission(acting, facts))) {
 			return yield* Effect.fail(new ActionForbidden({ proof: "CanUseComputer" }));
 		}
 		const [made] = yield* query((db) =>
@@ -145,22 +148,15 @@ export const proveCanUseChatComputer = <P, C>(
 		return proof;
 	});
 
-/**
- * Whether the turn `facts` describe may still work on the computer of the
- * project `projectId`, as `proveCanUseChatComputer` would decide for its
- * principal now: the project is its chat's, it still reaches the chat, its bot
- * still has computer use on and, acting for an asker, the asker may still
- * change things there.
- */
+/** turnUsesComputer checks the turn's admission and the bot's current computer setting. */
 export const turnUsesComputer = (db: Executor, facts: TurnFacts, projectId: string) =>
 	Effect.gen(function* () {
 		if (facts.project !== projectId) return false;
 		const place = yield* turnChatPlace(db, facts);
 		if (!place?.bot?.usesComputer) return false;
-		if (facts.askedBy.kind === "automation") return true;
-		return (
-			place.member !== undefined && mayInProjectAs(place.member, place.project, "project.change")
-		);
+		return place.member
+			? mayInProjectAs(place.member, place.project, "project.change")
+			: facts.askedBy.kind === "automation";
 	});
 
 /**

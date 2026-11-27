@@ -442,12 +442,11 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await approveFor(a.otherChat)).toBe("ApprovalRefused");
 		});
 
-		it("runs a call only once an approver still allows it, with the arguments they allowed", async () => {
+		it("runs a call only with its recorded decision and the arguments allowed", async () => {
 			const { a } = world;
 			const edsBot = await as.botFor(a.ed, a.pub.id, a.chat);
 			const pending = await seedApprovalCall(edsBot);
 			const allowed = await seedApprovalCall(edsBot, { status: "allowed", decidedBy: a.ed });
-			const byOwner = await seedApprovalCall(edsBot, { status: "allowed", decidedBy: a.owner });
 			const denied = await seedApprovalCall(edsBot, { status: "denied", decidedBy: a.ed });
 			const otherTool = await seedApprovalCall(edsBot, {
 				status: "allowed",
@@ -460,7 +459,6 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(
 				await decidedBy(edsBot, toolCallOf(allowed), always, { count: 5, query: "Ship it" }),
 			).toBe(a.ed);
-			expect(await approved(edsBot, toolCallOf(byOwner), always, input)).toBe("ApprovalNeeded");
 			expect(
 				await approved(edsBot, toolCallOf(allowed), always, { ...input, query: "Ship all of it" }),
 			).toBe("ApprovalRefused");
@@ -599,7 +597,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await starts("off")).toBe("ApprovalRefused");
 		});
 
-		it("takes a run's call as approved only while its approver still may approve it", async () => {
+		it("keeps a decision made before its approver was demoted", async () => {
 			const { a } = world;
 			const { principal, run, turnId } = await as.run(a.workspace, a.project, a.pub.id);
 			const approver = await seedMember(a.workspace, "admin");
@@ -609,7 +607,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			);
 			expect(await approved(principal, toolCallOf(allowed), always, input)).toBe("ok");
 			await setRole(a.workspace, approver, "editor");
-			expect(await approved(principal, toolCallOf(allowed), always, input)).toBe("ApprovalNeeded");
+			expect(await approved(principal, toolCallOf(allowed), always, input)).toBe("ok");
 		});
 
 		it("takes an approval to work on a computer as covering only the machine it was on", async () => {
@@ -715,21 +713,6 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 				"ApprovalNeeded",
 			);
 			expect(await approved(await briefedBy(a.helper.id), request, never, input)).toBe("ok");
-		});
-
-		it("takes a run's call as approved only from an admin or a manager of its bot", async () => {
-			const { a } = world;
-			const { principal, run, turnId } = await as.run(a.workspace, a.project, a.pub.id);
-			const byAdmin = await seedApprovalCall(
-				{ chat: run.chat, turn: turnId, bot: a.pub.id },
-				{ status: "allowed", decidedBy: a.admin },
-			);
-			const byQuinn = await seedApprovalCall(
-				{ chat: run.chat, turn: turnId, bot: a.pub.id },
-				{ status: "allowed", decidedBy: a.quinn },
-			);
-			expect(await approved(principal, toolCallOf(byAdmin), always, input)).toBe("ok");
-			expect(await approved(principal, toolCallOf(byQuinn), always, input)).toBe("ApprovalNeeded");
 		});
 	});
 });

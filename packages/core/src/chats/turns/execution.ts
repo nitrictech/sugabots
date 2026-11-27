@@ -315,7 +315,16 @@ export const make = Effect.gen(function* () {
 						const loaded = yield* query((db) =>
 							loadTurnContext(db, request.chatId, readingLimit, MAX_HISTORY_MESSAGES),
 						);
-						const speaker = loaded && speakerIn(loaded, request.botId);
+						const speaker =
+							loaded &&
+							(speakerIn(loaded, request.botId) ??
+								(yield* query((db) =>
+									db.query.bot.findFirst({
+										where: { id: request.botId, workspaceId: loaded.workspaceId },
+										columns: SPEAKER_COLUMNS,
+										with: SPEAKER_RELATIONS,
+									}),
+								)));
 						if (!loaded || !speaker) {
 							return yield* Effect.die(new Error("A running turn's chat or bot is gone"));
 						}

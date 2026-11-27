@@ -147,7 +147,7 @@ describe("reach and what it permits", () => {
 			expect(await reachesProject(edsBot, b.project)).toBe("ResourceHidden");
 		});
 
-		it("hides the project from a bot whose asker lost it, and tells a bot it can't reach one its asker reaches", async () => {
+		it("keeps an admitted turn's reach and denies a new turn after access changes", async () => {
 			const { a } = world;
 			const projectId = await seedProject(a.workspace, {
 				leadBotId: a.pub.id,
@@ -171,9 +171,13 @@ describe("reach and what it permits", () => {
 					.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, a.helper.id))),
 			);
 
-			expect(await reachesProject(quinnsBot, projectId)).toBe("ResourceHidden");
-			expect(await reachesProject(helpersTurn, projectId)).toBe("BotCannotReach");
-			expect(await reachesChat(helpersTurn, chatId)).toBe("BotCannotReach");
+			expect(await reachesProject(quinnsBot, projectId)).toBe("ok");
+			expect(await reachesProject(helpersTurn, projectId)).toBe("ok");
+			expect(await reachesChat(helpersTurn, chatId)).toBe("ok");
+			const afterMemberRemoval = await as.botFor(a.quinn, a.pub.id, chatId);
+			const afterBotRemoval = await as.botFor(a.ed, a.helper.id, chatId);
+			expect(await reachesProject(afterMemberRemoval, projectId)).toBe("ResourceHidden");
+			expect(await reachesChat(afterBotRemoval, chatId)).toBe("BotCannotReach");
 		});
 
 		it("lets a personal bot in its own chats, a Personal Assistant included, reach what its creator reaches and nothing more", async () => {

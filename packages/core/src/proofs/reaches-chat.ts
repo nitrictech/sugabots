@@ -5,7 +5,14 @@ import { query } from "../database/database.ts";
 import { placedChat } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
-import { decideReach, type ProjectFacts, type ReachedAs, reachFacts, whoActs } from "./facts.ts";
+import {
+	decideReach,
+	type ProjectFacts,
+	type ReachedAs,
+	reachFacts,
+	useTurnAdmission,
+	whoActs,
+} from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 import { webhookReachesChat } from "./webhook-chats.ts";
 
@@ -52,7 +59,7 @@ export const proveReachesChat = <P, C>(
 			principal,
 			chat: chatId,
 			workspace: facts.project.workspace,
-			project: facts.project,
+			project: useTurnAdmission(acting, facts).project,
 			as: decision.as,
 		});
 		return proof;

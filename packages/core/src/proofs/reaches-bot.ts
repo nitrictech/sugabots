@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import type { Actor } from "../authorization/permissions.ts";
 import { query } from "../database/database.ts";
 import type { Principal } from "../principal.ts";
-import { type BotRecord, botRecord, memberReachesBot, whoActs } from "./facts.ts";
+import { type BotRecord, botAtAdmission, botRecord, memberReachesBot, whoActs } from "./facts.ts";
 import { meetBot } from "./meet-bot.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
@@ -35,7 +35,9 @@ export const proveReachesBot = <P, B>(principal: Named<P, Principal>, botId: Nam
 		if (!record || record.systemBot || record.deleting) return yield* Effect.fail(hidden);
 		const met = yield* meetBot(principal.value, record);
 		const reaches =
-			met.kind === "run" || (met.kind === "member" && memberReachesBot(met.actor, record));
+			met.kind === "run" ||
+			(met.kind === "member" &&
+				memberReachesBot(met.actor, botAtAdmission(principal.value, record)));
 		if (!reaches) return yield* Effect.fail(hidden);
 		const proof: ReachesBot<P, B> = ReachesBotProof.prove([principal, botId], {
 			principal,

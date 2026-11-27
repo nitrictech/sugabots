@@ -37,7 +37,7 @@ import {
 } from "../database/schema.ts";
 import { outerColumn } from "../database/sql.ts";
 import { isUuid } from "../ids/ids.ts";
-import type { Principal, TurnBounds } from "../principal.ts";
+import type { BotPrincipal, Principal, TurnAdmission, TurnBounds } from "../principal.ts";
 
 /** A project as reach is decided: its workspace and lead bot, and on a bot's default project, that bot. */
 export interface ProjectFacts {
@@ -111,7 +111,11 @@ export const reachFactsIn = (
 	who: { readonly member?: string; readonly bot?: string },
 ) =>
 	isUuid(workspaceId)
-		? reachFactsWhere(db, eq(project.workspaceId, workspaceId), who)
+		? reachFactsWhere(
+				db,
+				and(eq(project.workspaceId, workspaceId), eq(project.deleting, false)),
+				who,
+			)
 		: Effect.succeed([]);
 
 /** The projects `where` picks, each with the places in it of `who.member` and `who.bot`. */
@@ -447,7 +451,7 @@ export function decideReach(
 	facts: ReachFacts,
 	chat: string | undefined,
 ): ReachDecision {
-	const { project } = facts;
+	const { project, member } = useTurnAdmission(principal, facts);
 	switch (principal._tag) {
 		case "MemberSession":
 			return facts.member && memberReaches(facts.member, project)
@@ -457,13 +461,13 @@ export function decideReach(
 			if (principal.workspace !== project.workspace) return hidden;
 			if (principal.bounds.kind === "chat" && principal.bounds.project !== project.id)
 				return hidden;
-			if (!facts.member || !memberReaches(facts.member, project)) return hidden;
-			if (!botReaches(facts.bot, project, facts.member)) return { kind: "botCannotReach" };
+			if (!member || !memberReaches(member, project)) return hidden;
+			if (!admittedBotReaches(principal, facts, member)) return { kind: "botCannotReach" };
 			return {
 				kind: "reaches",
 				as: {
 					kind: "asker",
-					place: facts.member,
+					place: member,
 					bot: principal.bot,
 					turn: principal.turn,
 					bounds: principal.bounds,
@@ -473,7 +477,7 @@ export function decideReach(
 		case "AutomationRun":
 			if (principal.workspace !== project.workspace) return hidden;
 			if (principal.bounds.project !== project.id) return hidden;
-			if (!botReaches(facts.bot, project, undefined)) return { kind: "botCannotReach" };
+			if (!admittedBotReaches(principal, facts, undefined)) return { kind: "botCannotReach" };
 			return { kind: "reaches", as: { kind: "run", bot: principal.bot, turn: principal.turn } };
 		case "WebhookCall":
 			return hidden;
@@ -487,6 +491,81 @@ export function decideReach(
 			return hidden;
 	}
 }
+
+export function useTurnAdmission(principal: Principal, facts: ReachFacts): ReachFacts {
+	if (
+		principal._tag !== "BotForAsker" ||
+		!principal.admission ||
+		principal.workspace !== facts.project.workspace
+	)
+		return facts;
+	const admitted = principal.admission.projects[facts.project.id];
+	if (!admitted) return facts;
+	return {
+		...facts,
+		project: { ...facts.project, defaultOf: admitted.project.defaultOf },
+		member: {
+			actor: actorOf(principal.asker, principal.admission.role ?? undefined),
+			inProject: admitted.inProject,
+		},
+	};
+}
+
+export function botAtAdmission(principal: Principal, record: BotRecord): BotRecord {
+	if (principal._tag !== "BotForAsker" || principal.workspace !== record.workspace) return record;
+	const saved =
+		record.defaultProject &&
+		principal.admission?.projects[record.defaultProject]?.project.defaultOf;
+	return saved ? { ...record, ...saved } : record;
+}
+
+function admittedBotReaches(
+	principal: BotPrincipal,
+	facts: ReachFacts,
+	member: MemberPlace | undefined,
+) {
+	const admitted = principal.admission?.projects[facts.project.id];
+	return admitted?.botReaches ?? botReaches(facts.bot, facts.project, member);
+}
+
+export const captureTurnAdmission = (db: Executor, facts: TurnFacts) =>
+	Effect.gen(function* () {
+		const asker = askerOf(facts);
+		if (
+			!facts.project ||
+			(asker === undefined && (facts.askedBy.kind !== "automation" || !facts.run))
+		)
+			return null;
+		const places = yield* reachFactsIn(db, facts.workspace, {
+			...(asker && { member: asker }),
+			bot: facts.bot,
+		});
+		const home = places.find(({ project }) => project.id === facts.project);
+		if (!home || !botReaches(home.bot, home.project, home.member)) return null;
+		if (asker !== undefined && !memberReaches(home.member, home.project)) return null;
+		const placedBots = yield* db
+			.select({ id: projectBot.botId })
+			.from(projectBot)
+			.where(eq(projectBot.projectId, facts.project));
+		const admission: TurnAdmission = {
+			role: home.member?.actor.workspaceRole ?? null,
+			chatProjectBotIds: [
+				...new Set([facts.bot, home.project.leadBot, ...placedBots.map(({ id }) => id)]),
+			],
+			projects: Object.fromEntries(
+				places.map(({ project, member, bot }) => [
+					project.id,
+					{
+						project,
+						inProject: member?.inProject ?? false,
+						memberReaches: memberReaches(member, project),
+						botReaches: botReaches(bot, project, member),
+					},
+				]),
+			),
+		};
+		return admission;
+	});
 
 /** The member and bot a principal stands for, whose places a reach query loads. */
 export function whoActs(principal: Principal): { readonly member?: string; readonly bot?: string } {
@@ -530,16 +609,26 @@ export const turnChatPlace = (db: Executor, facts: TurnFacts) =>
 		if (asker === undefined && (facts.askedBy.kind !== "automation" || !facts.run))
 			return undefined;
 		const place = yield* reachFacts(db, facts.project, {
-			...(asker && { member: asker }),
+			...(asker && !facts.admission && { member: asker }),
 			bot: facts.bot,
 		});
-		const reaches =
-			place !== undefined &&
-			(asker === undefined || memberReaches(place.member, place.project)) &&
-			botReaches(place.bot, place.project, place.member);
-		return reaches ? place : undefined;
+		if (!place) return undefined;
+		const admitted = facts.admission?.projects[facts.project];
+		if (facts.admission) {
+			if (!admitted?.botReaches || (asker !== undefined && !admitted.memberReaches))
+				return undefined;
+			return {
+				...place,
+				project: { ...place.project, defaultOf: admitted.project.defaultOf },
+				member:
+					asker === undefined
+						? undefined
+						: {
+								actor: actorOf(asker, facts.admission.role ?? undefined),
+								inProject: admitted.inProject,
+							},
+			};
+		}
+		if (asker !== undefined && !memberReaches(place.member, place.project)) return undefined;
+		return botReaches(place.bot, place.project, place.member) ? place : undefined;
 	});
-
-/** Whether the turn's bot and the member it acts for can still use its chat. */
-export const turnReachesChat = (db: Executor, facts: TurnFacts) =>
-	Effect.map(turnChatPlace(db, facts), (place) => place !== undefined);

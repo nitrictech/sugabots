@@ -396,10 +396,10 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			]);
 		});
 
-		it("leaves an unread steer in the chat when the turn loses reach", async () => {
+		it("reads an admitted steer after its asker loses reach", async () => {
 			await say(sam, "Summarise.");
 			const adminPrincipal = await chatsAs(admin).principal();
-			const { model, requests } = scriptedSteps({ text: ["Summary."] });
+			const { model, requests } = scriptedSteps({ text: ["Summary."] }, { text: ["Shorter."] });
 			const time = await controlledClock();
 			const workflow = await loop.runWorkflow(
 				chatId,
@@ -407,7 +407,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 				{
 					clock: time.clock,
 					beforeRecord: async (method) => {
-						if (method !== "end") return;
+						if (method !== "end" || requests.length !== 1) return;
 						await say(sam, "Make it shorter.");
 						await loop.call(adminPrincipal, "projects.removeMember", { projectId, memberId: sam });
 					},
@@ -415,14 +415,17 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			);
 			await workflow.completed();
 
-			expect(requests).toHaveLength(1);
+			expect(requests).toHaveLength(2);
 			expect(readOf(requests[0])).toContain("Summarise.");
-			expect(readOf(requests[0])).not.toContain("Make it shorter.");
+			expect(readSinceOf(requests[1])).toContain("Make it shorter.");
 			const details = await chatsAs(admin).get(chatId);
 			expect(details.messages).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({ content: expect.stringContaining("Make it shorter.") }),
-					expect.objectContaining({ status: "failed", content: "Summary." }),
+					expect.objectContaining({
+						status: "complete",
+						content: expect.stringContaining("Shorter."),
+					}),
 				]),
 			);
 			expect(await runOnPostgres(runningTurns(chatId))).toEqual([]);
@@ -502,45 +505,6 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 				);
 			},
 		);
-
-		it("does not hand on an unread steer when lost reach withdraws an approval", async () => {
-			await say(sam, "Wipe the wiki.");
-			const adminPrincipal = await chatsAs(admin).principal();
-			const { model, requests } = scriptedSteps(wipe);
-			const execute = vi.fn(async () => ({}));
-			const time = await controlledClock();
-			const workflow = await loop.runWorkflow(
-				chatId,
-				{ model, connectorTools: wiki("ask", execute) },
-				{
-					clock: time.clock,
-					beforeRecord: async (method) => {
-						if (method === "askForApprovals") await say(sam, "Wait for my next message.");
-					},
-				},
-			);
-			await workflow.suspended();
-			await loop.call(adminPrincipal, "projects.removeMember", { projectId, memberId: sam });
-			await workflow.completed();
-
-			expect(requests).toHaveLength(1);
-			expect(readOf(requests[0])).toContain("Wipe the wiki.");
-			expect(readOf(requests[0])).not.toContain("Wait for my next message.");
-			expect(execute).not.toHaveBeenCalled();
-			const details = await chatsAs(admin).get(chatId);
-			expect(details.messages).toContainEqual(
-				expect.objectContaining({
-					status: "cancelled",
-					parts: expect.arrayContaining([
-						expect.objectContaining({
-							tool: "wiki__wipe",
-							approval: expect.objectContaining({ status: "denied" }),
-						}),
-					]),
-				}),
-			);
-			expect(await runOnPostgres(runningTurns(chatId))).toEqual([]);
-		});
 	});
 
 	describe("a steer its turn never read, handed on", () => {
@@ -745,31 +709,44 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			},
 		);
 
-		it.each(["steer first", "other first", "at once"] as const)(
-			"ends without making the call when its asker loses the chat as they steer it (%s)",
-			async (order) => {
-				await say(sam, "Wipe the wiki.");
-				const { workflow, turnId, execute } = await parkedWorkflow("Wiped.");
+		it("resumes an allowed connector call after its asker loses reach", async () => {
+			await say(sam, "Wipe the wiki.");
+			const { workflow, turnId, parked, execute, requests } = await parkedWorkflow("Wiped.");
+			await say(vee, "What's in the wiki?");
+			const [other] = await runOnPostgres(runningTurns(chatId));
+			if (!other) throw new Error("No turn holding the lane");
+			await chatsAs(sam).decide({ toolCallId: parked.id, decision: "allow_once" });
+			await workflow.suspended();
+			await loop.call(await chatsAs(admin).principal(), "projects.removeMember", {
+				projectId,
+				memberId: sam,
+			});
+			await workflow.releaseLaneOf(other);
+			await workflow.laneGranted();
+			await workflow.completed();
 
-				await inOrder(
-					order,
-					() => say(sam, "Actually, don't wipe it."),
-					async () =>
-						chatsAs(admin)
-							.principal()
-							.then((principal) =>
-								loop.call(principal, "projects.removeMember", { projectId, memberId: sam }),
-							),
-				);
+			expect(execute).toHaveBeenCalledOnce();
+			expect(requests).toHaveLength(2);
+			expect(await storedTurn(turnId)).toMatchObject({ status: "done" });
+		});
 
-				await workflow.completed();
-				expect(execute).not.toHaveBeenCalled();
-				expect(await callsOf(turnId)).toMatchObject([
-					{ status: "failed", approvalStatus: "denied" },
-				]);
-				expect((await storedTurn(turnId))?.status).not.toBe("done");
-			},
-		);
+		it("keeps an approval pending after its asker loses reach", async () => {
+			await say(sam, "Wipe the wiki.");
+			const { workflow, turnId, parked, execute } = await parkedWorkflow("Wiped.");
+			await loop.call(await chatsAs(admin).principal(), "projects.removeMember", {
+				projectId,
+				memberId: sam,
+			});
+
+			expect(await storedTurn(turnId)).toMatchObject({ status: "waiting" });
+			expect(await callsOf(turnId)).toMatchObject([{ approvalStatus: "pending" }]);
+			await expect(
+				chatsAs(sam).decide({ toolCallId: parked.id, decision: "allow_once" }),
+			).rejects.toMatchObject({ _tag: "ResourceHidden" });
+			await (await loop.expiryOf(parked))();
+			await workflow.completed();
+			expect(execute).not.toHaveBeenCalled();
+		});
 	});
 
 	describe("who a turn reads for", () => {

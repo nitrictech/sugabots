@@ -3,7 +3,14 @@ import { Effect } from "effect";
 import type { Actor } from "../authorization/permissions.ts";
 import { query } from "../database/database.ts";
 import type { Principal } from "../principal.ts";
-import { type BotRecord, botRecord, managesBot, memberReachesBot, whoActs } from "./facts.ts";
+import {
+	type BotRecord,
+	botAtAdmission,
+	botRecord,
+	managesBot,
+	memberReachesBot,
+	whoActs,
+} from "./facts.ts";
 import { meetBot } from "./meet-bot.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
@@ -38,10 +45,11 @@ export const proveCanManageBot = <P, B>(principal: Named<P, Principal>, botId: N
 		if (!record || record.systemBot)
 			return yield* Effect.fail(new ResourceHidden({ resource: "bot" }));
 		const met = yield* meetBot(principal.value, record);
+		const admitted = botAtAdmission(principal.value, record);
 		const visible =
-			met.kind === "run" || (met.kind === "member" && memberReachesBot(met.actor, record));
+			met.kind === "run" || (met.kind === "member" && memberReachesBot(met.actor, admitted));
 		const manages =
-			met.kind === "member" && met.mayManage !== "never" && managesBot(met.actor, record);
+			met.kind === "member" && met.mayManage !== "never" && managesBot(met.actor, admitted);
 		if (met.kind !== "member" || !manages) {
 			return yield* Effect.fail(
 				visible

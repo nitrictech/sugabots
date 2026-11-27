@@ -45,11 +45,16 @@ export const meetBot = (principal: Principal, bot: BotRecord) =>
 				if (
 					bounds.kind === "chat" &&
 					!own &&
-					!(yield* query((db) => projectHasBot(db, bounds.project, bot.id)))
+					!(
+						principal.admission?.chatProjectBotIds.includes(bot.id) ??
+						(yield* query((db) => projectHasBot(db, bounds.project, bot.id)))
+					)
 				) {
 					return { kind: "none" };
 				}
-				const role = yield* query((db) => roleIn(db, bot.workspace, principal.asker));
+				const role = principal.admission
+					? (principal.admission.role ?? undefined)
+					: yield* query((db) => roleIn(db, bot.workspace, principal.asker));
 				const actor = actorOf(principal.asker, role);
 				if (bounds.kind === "member") {
 					return { kind: "member", actor, mayManage: "always" };
@@ -65,7 +70,9 @@ export const meetBot = (principal: Principal, bot: BotRecord) =>
 				if (principal.workspace !== bot.workspace) return { kind: "none" };
 				const { project } = principal.bounds;
 				const withinBounds =
-					bot.id === principal.bot || (yield* query((db) => projectHasBot(db, project, bot.id)));
+					bot.id === principal.bot ||
+					(principal.admission?.chatProjectBotIds.includes(bot.id) ??
+						(yield* query((db) => projectHasBot(db, project, bot.id))));
 				return withinBounds ? { kind: "run" } : { kind: "none" };
 			}
 			default:

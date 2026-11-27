@@ -35,6 +35,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
 import type { ResolvedTargets } from "../operations/operation.ts";
+import type { TurnAdmission } from "../principal.ts";
 import { bot, member, project, workspace } from "../workspaces/sql.ts";
 
 /**
@@ -462,6 +463,7 @@ export const turn = pgTable(
 		 * it acts for still carries it.
 		 */
 		executionNumber: integer("execution_number").notNull().default(0),
+		admission: jsonb("admission").$type<TurnAdmission>(),
 		status: text("status").$type<TurnStatus>().notNull(),
 		model: text("model").notNull(),
 		contextTokens: integer("context_tokens"),

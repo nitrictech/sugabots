@@ -3328,3 +3328,5 @@ CREATE INDEX "file_message_name_trigram_idx" ON "file" USING gin ("name" gin_trg
 CREATE INDEX "event_control_stream_seq_idx" ON "event" ("stream","seq") WHERE "type" in ('reach.changed', 'session.ended');
 --> statement-breakpoint
 CREATE INDEX "computer_lease_holder_idx" ON "computer_lease" ("holder_kind","holder_id");
+--> statement-breakpoint
+ALTER TABLE "turn" ADD COLUMN "admission" jsonb;

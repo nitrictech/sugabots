@@ -9,12 +9,14 @@ import type { BotForAsker, Principal } from "../principal.ts";
 import {
 	actorOf,
 	type BotRecord,
+	botAtAdmission,
 	findBotRecord,
 	memberReaches,
 	memberReachesBot,
 	projectHasBot,
 	reachFacts,
 	roleIn,
+	useTurnAdmission,
 } from "./facts.ts";
 import { defineProof, type Named, named, type Proof } from "./proof.ts";
 
@@ -63,6 +65,7 @@ export const withBriefRecipient = <P, A, E, R>(
 									or(isNull(bot.assistantOf), eq(bot.createdById, acting.asker)),
 								),
 				),
+				{ member: acting.asker },
 			),
 		);
 		if (!record) return yield* hidden;
@@ -110,12 +113,16 @@ const resolveBrief = (acting: BotForAsker, record: BotRecord) =>
 		)
 			return yield* Effect.fail(hidden);
 		const { project } = turn;
-		const role = yield* query((db) => roleIn(db, record.workspace, acting.asker));
-		if (!memberReachesBot(actorOf(acting.asker, role), record)) return yield* Effect.fail(hidden);
+		const role = acting.admission
+			? (acting.admission.role ?? undefined)
+			: yield* query((db) => roleIn(db, record.workspace, acting.asker));
+		if (!memberReachesBot(actorOf(acting.asker, role), botAtAdmission(acting, record)))
+			return yield* Effect.fail(hidden);
 		const destination = (yield* query((db) => projectHasBot(db, project, record.id)))
 			? project
 			: record.defaultProject;
-		const reach = yield* query((db) => reachFacts(db, destination, { member: acting.asker }));
+		const live = yield* query((db) => reachFacts(db, destination, { member: acting.asker }));
+		const reach = live && useTurnAdmission(acting, live);
 		if (
 			!reach ||
 			reach.project.workspace !== acting.workspace ||

@@ -12,7 +12,14 @@ import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
 import { toolsOf } from "../providers/connectors/connector-store.ts";
 import { toolAccessOf } from "../providers/connectors/tool-access.ts";
-import { decideReach, mayInProjectAs, memberReaches, reachFacts, whoActs } from "./facts.ts";
+import {
+	decideReach,
+	mayInProjectAs,
+	memberReaches,
+	reachFacts,
+	useTurnAdmission,
+	whoActs,
+} from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
 export interface ReachesEnabledConnector<P, K> extends Proof<"ReachesEnabledConnector", [P, K]> {
@@ -129,9 +136,11 @@ const connectorAccess = (
 		if (!source) return yield* hidden;
 		const place = own ? working : source;
 		if (!place) return yield* hidden;
+		const admittedPlace = useTurnAdmission(acting, place);
+		const { member } = admittedPlace;
 		if (own) {
 			if (!workingProjectId || place.project.id !== workingProjectId) return yield* hidden;
-			if (acting._tag === "BotForAsker" && !memberReaches(place.member, place.project))
+			if (acting._tag === "BotForAsker" && !memberReaches(member, admittedPlace.project))
 				return yield* hidden;
 		} else {
 			const decision = decideReach(acting, place, undefined);
@@ -141,11 +150,10 @@ const connectorAccess = (
 			if (decision.as.kind === "webhook" || decision.as.kind === "systemWork")
 				return yield* new ActionForbidden({ proof: "CanUseConnector" });
 		}
-		const member =
-			acting._tag === "MemberSession" || acting._tag === "BotForAsker" ? place.member : undefined;
+
 		return (
 			acting._tag === "AutomationRun" ||
-			(member !== undefined && mayInProjectAs(member, place.project, "project.change"))
+			(member !== undefined && mayInProjectAs(member, admittedPlace.project, "project.change"))
 		);
 	});
 

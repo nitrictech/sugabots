@@ -1,4 +1,4 @@
-import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import { inArray, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import {
 	reachedBotUntilDeletionFor,
 	reachesBotFor,
@@ -7,7 +7,7 @@ import {
 } from "../authorization/access.ts";
 import { bot, project, projectBot } from "../database/schema.ts";
 import { outerColumn } from "../database/sql.ts";
-import type { Principal } from "../principal.ts";
+import type { BotPrincipal, Principal } from "../principal.ts";
 import { botRemovalStarted } from "./facts.ts";
 import type { InWorkspace } from "./in-workspace.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
@@ -93,6 +93,42 @@ const projectHasBot = (projectId: string, botId: SQLWrapper) =>
 				))
 	)`;
 
+function admittedPredicates(
+	principal: BotPrincipal,
+	admission: NonNullable<BotPrincipal["admission"]>,
+) {
+	const { bounds } = principal;
+	const projects = Object.values(admission.projects);
+	const reachedProjects = projects
+		.filter(
+			({ project, memberReaches, botReaches }) =>
+				(bounds.kind === "member" || bounds.project === project.id) &&
+				botReaches &&
+				(principal._tag === "AutomationRun" || memberReaches),
+		)
+		.map(({ project }) => project.id);
+	const reachedBots = projects.flatMap(({ project, memberReaches }) =>
+		project.defaultOf && (memberReaches || principal._tag === "AutomationRun")
+			? [project.defaultOf.id]
+			: [],
+	);
+	const projectIsActive = (projectId: SQLWrapper) => sql<boolean>`exists (
+		select 1 from ${project} as admitted_project
+		where admitted_project.id = ${outerColumn(projectId)} and not admitted_project.deleting
+	)`;
+	const reachesProject = (projectId: SQLWrapper) =>
+		sql<boolean>`(${inArray(outerColumn(projectId), reachedProjects)} and ${projectIsActive(projectId)})`;
+	return {
+		reachesProject,
+		reachesChat: (chat: ChatColumns) => reachesProject(chat.projectId),
+		reachesBot: (botId: SQLWrapper) =>
+			sql<boolean>`(${inArray(outerColumn(botId), reachedBots)}
+				and not ${botRemovalStarted(botId)}
+				and ${principal._tag === "AutomationRun" ? projectIsActive(sql`${principal.bounds.project}::uuid`) : sql`true`}
+				and ${bounds.kind === "member" ? sql`true` : inArray(outerColumn(botId), admission.chatProjectBotIds)})`,
+	};
+}
+
 /** The predicates for `principal`, before each is kept to the workspace. */
 function predicatesOf(principal: Principal) {
 	switch (principal._tag) {
@@ -103,6 +139,7 @@ function predicatesOf(principal: Principal) {
 				reachesBot: (botId: SQLWrapper) => reachesBotFor(botId, principal.member),
 			};
 		case "BotForAsker": {
+			if (principal.admission) return admittedPredicates(principal, principal.admission);
 			const { asker, bounds } = principal;
 			const withinBounds = (projectId: SQLWrapper) =>
 				bounds.kind === "member"
@@ -120,6 +157,7 @@ function predicatesOf(principal: Principal) {
 			};
 		}
 		case "AutomationRun": {
+			if (principal.admission) return admittedPredicates(principal, principal.admission);
 			const { project: runProject } = principal.bounds;
 			const runProjectIsActive = sql<boolean>`exists (
 				select 1 from ${project} as reach_set_run_project

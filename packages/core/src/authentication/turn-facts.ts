@@ -31,6 +31,7 @@ import {
 } from "../database/schema.ts";
 import { outerColumn } from "../database/sql.ts";
 import { isUuid } from "../ids/ids.ts";
+import type { TurnAdmission } from "../principal.ts";
 
 export interface TurnFacts {
 	readonly turn: string;
@@ -38,7 +39,7 @@ export interface TurnFacts {
 	readonly workspace: string;
 	readonly bot: string;
 	readonly status: TurnStatus;
-	readonly executionNumber: number;
+	readonly admission: TurnAdmission | null;
 	readonly reason: TurnReason | null;
 	/** The project the turn's chat is in; none for a chat in no project, such as a system chat. */
 	readonly project: string | null;
@@ -84,7 +85,7 @@ export const turnFacts = (db: Executor, turnId: string) =>
 				chat: turn.chatId,
 				bot: turn.botId,
 				status: turn.status,
-				executionNumber: turn.executionNumber,
+				admission: turn.admission,
 				reason: turn.reason,
 				workspace: placedChat.workspaceId,
 				project: placedChat.projectId,
@@ -114,7 +115,7 @@ export const turnFacts = (db: Executor, turnId: string) =>
 			workspace: row.workspace,
 			bot: row.bot,
 			status: row.status,
-			 executionNumber: row.executionNumber,
+			admission: row.admission,
 			reason: row.reason,
 			project: row.project,
 			inOwnChats: row.defaultOfBot === row.bot,

@@ -141,14 +141,13 @@ describe("the automations operations, beyond who may call them", () => {
 		});
 	});
 
-	it("hides child ids from a bot that lost reach to a project its asker still reaches", async () => {
+	it("hides child ids from a new turn whose bot no longer reaches the project", async () => {
 		const projectId = await seedProject(a.workspace, {
 			leadBotId: a.pub.id,
 			bots: [a.helper.id],
 			members: [a.ed],
 		});
 		const chat = await seedProjectChat(a.workspace, projectId, a.ed);
-		const acting = await as.botFor(a.ed, a.helper.id, chat);
 		const { automationId } = await anAutomation(projectId);
 		const triggerId = await seedWebhookTrigger(automationId, a.workspace, { kind: "bearer" }, null);
 		const connectorId = await seedConnector(a.workspace, projectId);
@@ -159,6 +158,7 @@ describe("the automations operations, beyond who may call them", () => {
 				.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, a.helper.id))),
 		);
 
+		const acting = await as.botFor(a.ed, a.helper.id, chat);
 		for (const name of ["automations.list", "projects.listMembers"] as const) {
 			await expect(call(acting, name, { projectId }), name).rejects.toMatchObject({
 				_tag: "BotCannotReach",

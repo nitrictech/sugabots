@@ -5,7 +5,14 @@ import { query } from "../database/database.ts";
 import { message, placedChat } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
-import { decideReach, type ProjectFacts, type ReachedAs, reachFacts, whoActs } from "./facts.ts";
+import {
+	decideReach,
+	type ProjectFacts,
+	type ReachedAs,
+	reachFacts,
+	useTurnAdmission,
+	whoActs,
+} from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
 /**
@@ -53,7 +60,7 @@ export const proveReachesMessage = <P, M>(
 			message: messageId,
 			chat: found.chat,
 			workspace: facts.project.workspace,
-			project: facts.project,
+			project: useTurnAdmission(acting, facts).project,
 			as: decision.as,
 		});
 		return proof;

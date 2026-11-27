@@ -752,8 +752,7 @@ export const make = Effect.gen(function* () {
 			const [found] = yield* query((db) =>
 				db.select().from(message).where(eq(message.turnId, turnId)).limit(1),
 			);
-			if (!found)
-				return yield* Effect.die(new Error("A running turn has no reply message"));
+			if (!found) return yield* Effect.die(new Error("A running turn has no reply message"));
 			return {
 				_tag: "Opened",
 				turnId,
@@ -784,7 +783,6 @@ export const make = Effect.gen(function* () {
 			yield* announceStart(request, turnId, reply);
 			return { _tag: "Opened", turnId, reply };
 		});
-
 
 	return Service.of({
 		ask: (request) => operation("ask", transaction(ask(request))),
@@ -823,7 +821,8 @@ export const make = Effect.gen(function* () {
 						if (!existing) return yield* openFirstReply(request);
 						const reopened = yield* reopen(existing, request.executionId);
 						if (reopened._tag === "NotRunnable") return reopened;
-						if (reopened.followUp?._tag === "Resume") return yield* resumeReply(existing.id, request.author);
+						if (reopened.followUp?._tag === "Resume")
+							return yield* resumeReply(existing.id, request.author);
 						return yield* restartReply(existing.id, request);
 					}),
 				),
@@ -1920,10 +1919,9 @@ function stateOf(row: {
  * 1. An automation run's settlement lock (`lockAutomationSettlement`), which
  *    settling the run takes before it ends the run's turns (`cancelUnder`),
  *    and admitting work into the run before it opens a turn.
- * 2. The workspace's row: `FOR SHARE` to park calls for approval or decide
- *    them (`underWorkspaceShare`); `FOR NO KEY UPDATE` to change who reaches
- *    what (`underWorkspaceLock`), which then withdraws the approvals of the
- *    turns that lost their chat.
+ * 2. The workspace's row: `FOR SHARE` to park calls for approval, ordered
+ *    with deletion, which holds the row `FOR NO KEY UPDATE` until it has
+ *    withdrawn approvals for the work it deletes.
  * 3. Each bot's turns, bot by bot in bot-id order: the opening of the bot's
  *    turns in the chat (`lockOpening`), then its turn rows in turn-id order.
  *    A tool call's row is locked only while its turn's row is held, so it
@@ -2032,4 +2030,3 @@ function replyParts(reply: ReplyDraft): StoredMessagePart[] {
 		...(reply.thinking ?? []).map((part) => ({ ...part, type: "thinking" as const })),
 	];
 }
-

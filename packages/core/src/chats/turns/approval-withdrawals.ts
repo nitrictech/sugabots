@@ -1,13 +1,12 @@
 export * as ApprovalWithdrawals from "./approval-withdrawals.ts";
 
 import { userText } from "@sugabots/errors";
-import { and, asc, eq, exists, isNull, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, exists, isNull, or, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Duration, Effect, Layer } from "effect";
-import { turnFacts } from "../../authentication/turn-facts.ts";
 import { type Database, query, transaction } from "../../database/database.ts";
-import { chat, toolCall, turn } from "../../database/schema.ts";
+import { chat, placedChat, project, toolCall, turn, workspace } from "../../database/schema.ts";
 import type { DoesStoredWork } from "../../proofs/does-stored-work.ts";
-import { turnReachesChat } from "../../proofs/facts.ts";
+import { botRemovalStarted } from "../../proofs/facts.ts";
 import type { HoldsWorkspaceLock } from "../../proofs/workspace-lock.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { awaitsDecisions } from "./lifecycle.ts";
@@ -64,10 +63,13 @@ export const make = Effect.gen(function* () {
 					db
 						.select({ id: turn.id })
 						.from(turn)
-						.innerJoin(chat, eq(chat.id, turn.chatId))
+						.innerJoin(placedChat, eq(placedChat.id, turn.chatId))
+						.innerJoin(workspace, eq(workspace.id, placedChat.workspaceId))
+						.leftJoin(project, eq(project.id, placedChat.projectId))
 						.where(
 							and(
-								eq(chat.workspaceId, lock.workspace.value),
+								eq(placedChat.workspaceId, lock.workspace.value),
+								or(workspace.deleting, project.deleting, botRemovalStarted(turn.botId)),
 								eq(turn.status, "waiting"),
 								isNull(turn.endRequested),
 								exists(
@@ -84,7 +86,7 @@ export const make = Effect.gen(function* () {
 						.orderBy(asc(turn.botId), asc(turn.id)),
 				);
 				for (const { id } of waiting) {
-					yield* withdraw(id, "lost_reach", lostChat(id));
+					yield* withdraw(id, "lost_reach", Effect.succeed(true));
 				}
 			}),
 		expire: (work) =>
@@ -144,11 +146,3 @@ export const dueApprovals = (condition?: SQL) =>
 				.limit(EXPIRY_BATCH_SIZE),
 		);
 	});
-
-const lostChat = (turnId: string) =>
-	query((db) =>
-		Effect.gen(function* () {
-			const facts = yield* turnFacts(db, turnId);
-			return !facts || !(yield* turnReachesChat(db, facts));
-		}),
-	);

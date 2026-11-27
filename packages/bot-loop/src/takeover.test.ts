@@ -15,7 +15,7 @@ import { Models } from "@sugabots/core/providers/models/models";
 import { streamed } from "@sugabots/core/providers/models/testing";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { unimplemented } from "@sugabots/core/testing";
-import { DisplayName, userText } from "@sugabots/errors";
+import { DisplayName } from "@sugabots/errors";
 import { eq, sql } from "drizzle-orm";
 import { Duration, Effect, Option, Schema } from "effect";
 import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -593,7 +593,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(requests).toEqual([]);
 		});
 
-		it("leaves a turn whose asker left to the newer execution, when an older one finds out first", async () => {
+		it("lets only the current execution finish after its asker leaves", async () => {
 			const { model, requests } = scriptedSteps({ text: ["Hello."] });
 			const { steps, authentication } = await loop.loopOver({ model });
 			const { run, opened } = await openTurnInChat(chatId, steps);
@@ -607,13 +607,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(stale).toEqual({ _tag: "Superseded" });
 			expect(await storedTurn(opened.turnId)).toMatchObject({ status: "running" });
 
-			// The newer execution, which still runs the turn, ends it.
 			expect(await steps.step(run.request, second, at)).toEqual({ _tag: "Finished" });
 			expect(await storedTurn(opened.turnId)).toMatchObject({
-				status: "failed",
-				error: userText`This bot can no longer reach this chat, so it stopped.`,
+				status: "done",
 			});
-			expect(requests).toEqual([]);
+			expect(requests).toHaveLength(1);
 		});
 	},
 );

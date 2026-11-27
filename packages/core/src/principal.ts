@@ -9,6 +9,22 @@
  * is frozen, and so is every object it holds.
  */
 
+import type { WorkspaceRole } from "@sugabots/contracts";
+import type { ProjectFacts } from "./proofs/facts.ts";
+
+export interface TurnAdmission {
+	readonly role: WorkspaceRole | null;
+	readonly chatProjectBotIds: readonly string[];
+	readonly projects: Readonly<Record<string, AdmittedProject>>;
+}
+
+export interface AdmittedProject {
+	readonly project: ProjectFacts;
+	readonly inProject: boolean;
+	readonly memberReaches: boolean;
+	readonly botReaches: boolean;
+}
+
 /** Keeps the kind in a private field, which a literal or a spread copy can't have. */
 abstract class Authenticated<Tag extends string> {
 	readonly #tag: Tag;
@@ -79,6 +95,7 @@ class BotForAsker extends Authenticated<"BotForAsker"> {
 	 * checks it is still the current one.
 	 */
 	readonly executionNumber: number;
+	readonly admission: TurnAdmission | null;
 	readonly bounds: TurnBounds;
 
 	constructor(fields: Omit<BotForAsker, "_tag">) {
@@ -90,6 +107,7 @@ class BotForAsker extends Authenticated<"BotForAsker"> {
 		this.chat = fields.chat;
 		this.turn = fields.turn;
 		this.executionNumber = fields.executionNumber;
+		this.admission = fields.admission;
 		this.bounds = Object.freeze({ ...fields.bounds });
 		Object.freeze(this);
 	}
@@ -110,6 +128,7 @@ class AutomationRun extends Authenticated<"AutomationRun"> {
 	readonly turn: string;
 	/** Which execution of the turn this is (see `BotForAsker.executionNumber`). */
 	readonly executionNumber: number;
+	readonly admission: TurnAdmission | null;
 	readonly bounds: ChatBounds;
 
 	constructor(fields: Omit<AutomationRun, "_tag">) {
@@ -121,6 +140,7 @@ class AutomationRun extends Authenticated<"AutomationRun"> {
 		this.chat = fields.chat;
 		this.turn = fields.turn;
 		this.executionNumber = fields.executionNumber;
+		this.admission = fields.admission;
 		this.bounds = Object.freeze({ ...fields.bounds });
 		Object.freeze(this);
 	}

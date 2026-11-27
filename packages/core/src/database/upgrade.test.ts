@@ -454,6 +454,17 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			]);
 		});
 
+		it("keeps legacy turns without admission and drops connector approval metadata", async () => {
+			const columns = await upgraded.rows<{ table_name: string; column_name: string }>(
+				`select table_name, column_name from information_schema.columns
+				 where table_schema = 'public'
+				   and ((table_name = 'turn' and column_name = 'admission')
+				     or (table_name = 'project_bot_connector' and column_name = 'turned_on_by_id'))`,
+			);
+			expect(columns).toEqual([{ table_name: "turn", column_name: "admission" }]);
+			expect(await upgraded.rows("select id from turn where admission is not null")).toEqual([]);
+		});
+
 		it("keeps a shared pod's bots' own connectors on in the private project it became", async () => {
 			const own = await upgraded.rows<{ bot_id: string; on: boolean }>(
 				`select project.default_of_bot_id as bot_id,

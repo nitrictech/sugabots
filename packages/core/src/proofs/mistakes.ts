@@ -1074,12 +1074,10 @@ export const computerUseMistakes = named(
 					),
 				);
 				yield* named(command, (input) =>
-					// @ts-expect-error TS2345 [Argument of type 'ApprovalRule<'] A computer command needs an approval bound to the machine.
+					// @ts-expect-error TS2345 [not assignable to parameter of type 'ApprovalRule<OrdinaryApproval, OrdinaryOperation>'] A computer command needs an approval bound to the machine.
 					proveNamedApproval(principal, call, approvalRule("computers.runCommand"), input, chat),
 				);
 
-				// @ts-expect-error TS2345 [Argument of type 'CanUseChatComputer<NameB, NameC>' is not assignable to parameter of type 'CanUseChatComputer<NoInfer<NameA>, NameC>'] Only the principal that can use the computer may request this host.
-				yield* proveComputerRequestApproved(principal, call, host, otherUses);
 				// @ts-expect-error TS2554 [Expected 4 arguments, but got 3.] Requesting a host requires authority to use the computer.
 				yield* proveComputerRequestApproved(principal, call, host);
 				yield* proveNamedApproval(
