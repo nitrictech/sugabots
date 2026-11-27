@@ -114,6 +114,7 @@ const UPGRADE_TIMEOUT_MS = 120_000;
 
 const WAITING_TURN = "00000002-0000-4000-8000-000000000107";
 const WAITING_REPLY = "00000001-0000-4000-8000-00000000010b";
+const FAILED_TURN = "00000002-0000-4000-8000-000000000108";
 
 type Store = "postgres" | "filesystem";
 
@@ -179,7 +180,16 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				);
 				await client.query(legacyMigrationScaleRows);
 				await client.query(legacySummaryRequest);
+				await client.query("update model_request set agent_id = $1 where id = $2", [
+					legacy.bots.planner,
+					legacy.summaryRequest,
+				]);
 				await client.query(legacyFacilitationRequest);
+				await client.query(
+					`insert into turn (id, thread_id, agent_id, trigger_message_id, status, model, reason, started_at, finished_at)
+					values ($1, $2, $3, $4, 'failed', 'm', 'mention', now(), now())`,
+					[FAILED_TURN, legacy.threads.trip, legacy.bots.budget, legacy.tripMessages.answered],
+				);
 				await client.query(
 					`insert into turn (id, thread_id, agent_id, trigger_message_id, status, model, reason, checkpoint, started_at)
 					values ($1, $2, $3, $4, 'waiting', 'm', 'mention', $5, now())`,
@@ -723,6 +733,12 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			);
 			expect(columns).toEqual([{ table_name: "turn", column_name: "admission" }]);
 			expect(await upgraded.rows("select id from turn where admission is not null")).toEqual([]);
+		});
+
+		it("keeps a failed turn with main's fallback message when it had no error", async () => {
+			expect(
+				await upgraded.rows("select status, error from turn where id = $1", [FAILED_TURN]),
+			).toEqual([{ status: "failed", error: "The reply stopped unexpectedly." }]);
 		});
 
 		it("keeps a shared pod's bots' own connectors on in the private project it became", async () => {

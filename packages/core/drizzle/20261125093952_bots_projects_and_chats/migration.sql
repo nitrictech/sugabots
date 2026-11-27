@@ -2356,8 +2356,10 @@ WITH linked AS (
 )
 UPDATE "message" m SET "run_id" = NULL
 FROM linked WHERE m."id" = linked."id" AND linked.rank > 1;--> statement-breakpoint
+UPDATE "model_request" SET "bot_id" = NULL WHERE "purpose" <> 'bot-turn' AND "bot_id" IS NOT NULL;--> statement-breakpoint
 ALTER TABLE "model_request" ADD CONSTRAINT "model_request_purpose_valid" CHECK ("purpose" in ('bot-turn', 'compaction', 'model-test', 'legacy-facilitation')),
 	ADD CONSTRAINT "model_request_bot_valid" CHECK ("purpose" = 'bot-turn' or "bot_id" is null);--> statement-breakpoint
+UPDATE "turn" SET "error" = 'The reply stopped unexpectedly.' WHERE "status" = 'failed' AND "error" IS NULL;--> statement-breakpoint
 ALTER TABLE "turn" ADD CONSTRAINT "turn_failure_has_error" CHECK ("status" <> 'failed' or "error" is not null);--> statement-breakpoint
 ALTER TABLE "run" DROP CONSTRAINT "run_pending_terminal_valid", ADD CONSTRAINT "run_pending_terminal_valid" CHECK (("pending_terminal_state" is null and "pending_terminal_error" is null)
 				or ("state" = 'running' and "pending_terminal_state" = 'cancelled' and "pending_terminal_error" is null)
