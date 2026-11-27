@@ -335,27 +335,35 @@ export const make = Effect.gen(function* () {
 		{ reach, source, revision }: Settings,
 	) =>
 		Effect.gen(function* () {
-			const signedIn = yield* source?.load ?? Effect.succeed(ComputerSignIn.NOT_SIGNED_IN);
-			// A provider may change only part of its network before failing, so
-			// neither revision can be relied on until the update succeeds.
-			yield* setAppliedSettings(row, intentId, null);
+			const signedIn = source ? yield* source.load : ComputerSignIn.NOT_SIGNED_IN;
+			const applied = row.appliedSettings;
+			if (!signedIn && applied?.revision === revision) return;
+			if (applied && applied.revision !== revision) {
+				// A provider may change only part of the network before failing.
+				// Clear the old revision before changing the network or sign-in.
+				yield* setAppliedSettings(row, intentId, null);
+			} else {
+				yield* requireIntent(row, intentId);
+			}
 			yield* computer.setNetwork({
 				reach,
-				credentials: fittedTo(at.capabilities.credentials, signedIn.credentials),
+				credentials: fittedTo(at.capabilities.credentials, signedIn?.credentials ?? []),
 			});
-			const refreshAtMillis =
-				signedIn.expiresAt === undefined
-					? null
-					: DateTime.toEpochMillis(
-							DateTime.subtractDuration(signedIn.expiresAt, CREDENTIAL_REFRESH_MARGIN),
-						);
+			let refreshAtMillis: number | null = null;
+			if (!signedIn) {
+				refreshAtMillis = yield* Clock.currentTimeMillis;
+			} else if (signedIn.expiresAt !== undefined) {
+				refreshAtMillis = DateTime.toEpochMillis(
+					DateTime.subtractDuration(signedIn.expiresAt, CREDENTIAL_REFRESH_MARGIN),
+				);
+			}
 			yield* setAppliedSettings(row, intentId, { revision, refreshAtMillis });
 		});
 
 	const settingsNeedRefresh = (row: ComputerRow, settings: Settings, nowMillis: number) => {
 		const applied = row.appliedSettings;
 		if (applied?.revision !== settings.revision) return true;
-		return applied.refreshAtMillis === null || applied.refreshAtMillis <= nowMillis;
+		return applied.refreshAtMillis !== null && applied.refreshAtMillis <= nowMillis;
 	};
 
 	/**
@@ -1479,7 +1487,10 @@ export const make = Effect.gen(function* () {
 								Effect.gen(function* () {
 									const at = computers.forAccess(provider.access);
 									const settings = yield* readSettings(project, at);
-									yield* applySettings(row, intentId, result.computer, at, settings);
+									const nowMillis = yield* Clock.currentTimeMillis;
+									if (settingsNeedRefresh(row, settings, nowMillis)) {
+										yield* applySettings(row, intentId, result.computer, at, settings);
+									}
 									return true;
 								}).pipe(Effect.uninterruptible),
 						).pipe(Effect.catchTag("ClaimLost", () => Effect.succeed({ value: undefined })));

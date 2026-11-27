@@ -152,9 +152,10 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 		holdLabelledLookups: () => released(provider.holdLabelledLookups()),
 		/** Holds every opening of the computer `id` at its provider from now on until released. */
 		holdOpening: (id: Computers.ComputerId) => released(provider.holdOpening(id)),
+		holdNetworkUpdates: () => released(provider.holdNetworkUpdates()),
 		/** What the project's computer is signed in with from now on. */
 		signInAs: (
-			signedIn: ComputerSignIn.SignedIn,
+			signedIn: ComputerSignIn.SignedIn | undefined,
 			inProject = project,
 			revision = inProject.projectId,
 		) => void signedInAs.set(inProject.projectId, { revision, load: Effect.succeed(signedIn) }),
@@ -229,7 +230,9 @@ describe("a project's computer, over an in-memory provider", () => {
 		expect(first.arrival).toBe("made");
 		expect(second.arrival).toBe("running");
 		expect(second.computer.id).toBe(first.computer.id);
-		expect(theOnly(world.provider.computers()).id).toBe(first.computer.id);
+		const held = theOnly(world.provider.computers());
+		expect(held.id).toBe(first.computer.id);
+		expect(held.networks).toHaveLength(1);
 	});
 
 	it("makes the computer from the digest its image's tag names, not from the tag the provider last pulled", async () => {
@@ -806,13 +809,14 @@ describe("a project's computer, over an in-memory provider", () => {
 			const otherProcess = await world.startProcess();
 			const provider = await world.enabledProvider();
 			const original = signedInUntil("Bearer original", "2 hours");
+			const updated = signedInUntil("Bearer updated", "2 hours");
 			world.signInAs(original, project, "original");
 			const opened = await world.open();
 			const check = () =>
 				runOnPostgres(projectComputers.checkSettings(project, provider.id, opened));
 			await check();
 
-			world.signInAs(signedInUntil("Bearer updated", "2 hours"), project, "updated");
+			world.signInAs(updated, project, "updated");
 			await expect(check()).rejects.toBeInstanceOf(ComputerUnavailable);
 			await runOnPostgres(otherProcess.applyNetwork(project));
 			await check();
@@ -822,6 +826,9 @@ describe("a project's computer, over an in-memory provider", () => {
 			world.provider.failNetworkUpdates(1);
 			await runOnPostgres(otherProcess.applyNetwork(project));
 			await expect(check()).rejects.toBeInstanceOf(ComputerUnavailable);
+			world.signInAs(updated, project, "updated");
+			await expect(check()).rejects.toBeInstanceOf(ComputerUnavailable);
+			world.signInAs(original, project, "original");
 			await runOnPostgres(otherProcess.applyNetwork(project));
 			await check();
 		});
@@ -848,6 +855,68 @@ describe("a project's computer, over an in-memory provider", () => {
 					.networks.at(-1)
 					?.credentials.map(({ value }) => Redacted.value(value)),
 			).toEqual(["Bearer updated"]);
+		});
+
+		it("keeps a computer with no sign-in available on renewal without updating its network", async () => {
+			const world = await startWorld();
+			const { project, projectComputers } = world;
+			const provider = await world.enabledProvider();
+			const opened = await world.open();
+			const turnScope = Scope.makeUnsafe();
+			onTestFinished(() => Effect.runPromise(Scope.close(turnScope, Exit.void)));
+			await runOnPostgres(projectComputers.renew(TURN).pipe(Scope.provide(turnScope)));
+			await expect.poll(() => fibersRunningIn(turnScope)).toBe(0);
+
+			await runOnPostgres(projectComputers.checkSettings(project, provider.id, opened));
+			expect(theOnly(world.provider.computers()).networks).toHaveLength(1);
+		});
+
+		it("keeps admitting calls during and after a failed refresh of the same sign-in", async () => {
+			const world = await startWorld();
+			const { project, projectComputers } = world;
+			const provider = await world.enabledProvider();
+			world.signInAs(signedInUntil("Bearer original", "5 minutes"));
+			const opened = await world.open();
+			world.signInAs(signedInUntil("Bearer renewed", "2 hours"));
+			const refreshing = world.holdNetworkUpdates();
+			world.provider.failNetworkUpdates(1);
+
+			const turnScope = Scope.makeUnsafe();
+			onTestFinished(() => Effect.runPromise(Scope.close(turnScope, Exit.void)));
+			await runOnPostgres(projectComputers.renew(TURN).pipe(Scope.provide(turnScope)));
+			await refreshing.started(1);
+			const check = () => projectComputers.checkSettings(project, provider.id, opened);
+			const duringRefresh = await runOnPostgres(Effect.exit(check()));
+			refreshing.release();
+			await expect.poll(() => fibersRunningIn(turnScope)).toBe(0);
+
+			expect(duringRefresh).toEqual(Exit.void);
+			await runOnPostgres(check());
+			world.signInAs(undefined);
+			await world.open();
+			expect(theOnly(world.provider.computers()).networks).toHaveLength(1);
+
+			world.signInAs(signedInUntil("Bearer renewed", "2 hours"));
+			await world.open();
+			expect(
+				theOnly(world.provider.computers())
+					.networks.at(-1)
+					?.credentials.map(({ value }) => Redacted.value(value)),
+			).toEqual(["Bearer renewed"]);
+		});
+
+		it("retries a sign-in when it could not get credentials on first open", async () => {
+			const world = await startWorld();
+			world.signInAs(undefined);
+			await world.open();
+
+			world.signInAs(signedInUntil("Bearer available", "2 hours"));
+			await world.open();
+			expect(
+				theOnly(world.provider.computers()).networks.map(({ credentials }) =>
+					credentials.map(({ value }) => Redacted.value(value)),
+				),
+			).toEqual([[], ["Bearer available"]]);
 		});
 
 		it("signs in again, on a renewal, only the computers whose sign-in is near expiry", async () => {

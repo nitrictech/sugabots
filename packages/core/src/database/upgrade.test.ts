@@ -398,7 +398,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					),
 				);
 
-			expect((await signIn(legacy.pods.family)).credentials).toEqual([
+			expect((await signIn(legacy.pods.family))?.credentials).toEqual([
 				expect.objectContaining({
 					host: "github.com",
 					pathPrefix: "/acme/",

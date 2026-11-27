@@ -27,7 +27,8 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export interface Source {
 	readonly revision: string;
-	readonly load: Effect.Effect<SignedIn>;
+	/** load returns undefined when credentials are temporarily unavailable. */
+	readonly load: Effect.Effect<SignedIn | undefined>;
 }
 
 /** Sign-ins for a project's computer, and when they must be replaced. */

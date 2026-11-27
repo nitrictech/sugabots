@@ -19,7 +19,7 @@ import {
 } from "@sugabots/contracts/errors/connectors";
 import { and, eq } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
-import { ComputerSignIn } from "../../../computers/computer-sign-in.ts";
+import type { ComputerSignIn } from "../../../computers/computer-sign-in.ts";
 import { query, serviceOperations } from "../../../database/database.ts";
 import {
 	type ConnectorRow,
@@ -269,7 +269,7 @@ export const make = Effect.gen(function* () {
 											"Couldn't get a read token for a project's GitHub app",
 											failure,
 										),
-										ComputerSignIn.NOT_SIGNED_IN,
+										undefined,
 									),
 								),
 							),

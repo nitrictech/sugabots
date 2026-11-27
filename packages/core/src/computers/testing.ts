@@ -178,6 +178,7 @@ export function inMemoryComputers(
 	let created = 0;
 	let creationHold: Effect.Effect<void> | undefined;
 	let labelledLookupHold: Effect.Effect<void> | undefined;
+	let networkUpdateHold: Effect.Effect<void> | undefined;
 	const openingHolds = new Map<Computers.ComputerId, Effect.Effect<void>>();
 	let answerCommand = (
 		_computerId: Computers.ComputerId,
@@ -214,6 +215,7 @@ export function inMemoryComputers(
 		endpoint: unsupported("endpoint"),
 		setNetwork: (network) =>
 			Effect.gen(function* () {
+				if (networkUpdateHold) yield* networkUpdateHold;
 				if (networkFailures > 0) {
 					networkFailures -= 1;
 					return yield* new Computers.Unavailable({
@@ -351,6 +353,13 @@ export function inMemoryComputers(
 		},
 		failNetworkUpdates: (count: number) => {
 			networkFailures = count;
+		},
+		holdNetworkUpdates: (): ProviderHold => {
+			const { hold, wait } = holdCalls(() => {
+				if (networkUpdateHold === wait) networkUpdateHold = undefined;
+			});
+			networkUpdateHold = wait;
+			return hold;
 		},
 		/** The provider loses the computer, as when its operator deletes it. */
 		lose: (id: Computers.ComputerId) => {
