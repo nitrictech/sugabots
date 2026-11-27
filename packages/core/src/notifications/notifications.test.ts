@@ -502,7 +502,59 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(sentTo(members.bob.id)).toEqual([]);
 	});
 
-	it("commits one notification across concurrent handlers and frees the database pool before publishing", async () => {
+	it("sends a notification before a removal that comes while it is being sent", async () => {
+		const chat = await projectChat();
+		const order: string[] = [];
+		let removal: Promise<unknown> | undefined;
+		const bus = unimplemented(EventBus.Service, {
+			publish: async (stream) => {
+				if (stream !== memberStream(members.bob.id)) return;
+				removal = runOnPostgres(
+					transaction(
+						Effect.gen(function* () {
+							yield* query((db) =>
+								db
+									.select({ id: workspace.id })
+									.from(workspace)
+									.where(eq(workspace.id, workspaceId))
+									.for("no key update"),
+							);
+							yield* query((db) =>
+								db
+									.delete(projectMember)
+									.where(
+										and(
+											eq(projectMember.projectId, projectId),
+											eq(projectMember.memberId, members.bob.id),
+										),
+									),
+							);
+						}),
+					),
+				).then(() => order.push("removed"));
+				await Promise.race([removal, waitUntilWaitingOnLocks(1)]);
+				order.push("sent");
+			},
+		});
+		const sending = await served(bus);
+		try {
+			const { handler } = await sending.run(Notifications.Service);
+			const handled = joiningWhatItStarts(
+				transaction(
+					handler([memberPosted(chat, members.ada, `@${handleFromName(members.bob.name)} look`)]),
+				),
+			);
+			await sending.run(handled.handled);
+			await handled.allEnded;
+			await removal;
+		} finally {
+			await sending.close();
+		}
+
+		expect(order).toEqual(["sent", "removed"]);
+	});
+
+	it("commits one notification across concurrent handlers, holding only the send's own transaction while publishing", async () => {
 		const chat = await projectChat();
 		const mention = `@${handleFromName(members.bob.name)}`;
 		const event = memberPosted(chat, members.ada, `${mention} look`);
@@ -531,7 +583,9 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 					"objects",
 				),
 			);
-			expect(pool?.held).toBe(0);
+			// The send holds a share of the workspace's lock until it is published;
+			// the handler's transaction that recorded it has committed.
+			expect(pool?.held).toBe(1);
 
 			const concurrent = joiningWhatItStarts(transaction(notifications.handler([event, next])));
 			await service.run(concurrent.handled);

@@ -151,6 +151,29 @@ export const make = Effect.gen(function* () {
 			}),
 		);
 
+	/**
+	 * Sends the unsent deliveries `which` picks for `delivery`'s member if they
+	 * may still be told it, and forgets them if not. The check holds a share of
+	 * the workspace's lock until the transaction commits, so a change to who
+	 * reaches what either commits first, and keeps it from them, or after the
+	 * notification is stored for them.
+	 */
+	const sendIfStillTold = (
+		delivery: Pick<NotificationDeliveryRow, "chatId" | "memberId" | "notification">,
+		which: SQL | undefined,
+	) =>
+		transaction(
+			Effect.gen(function* () {
+				if (yield* mayStillBeTold(delivery)) {
+					yield* markSentAndDeliver(which);
+					return;
+				}
+				yield* query((db) =>
+					db.delete(notificationDelivery).where(and(which, isNull(notificationDelivery.sentAt))),
+				);
+			}),
+		);
+
 	const recordDelivery = (chatId: string, deliveryId: string, addressed: Addressed) =>
 		Effect.gen(function* () {
 			const [recorded] = yield* query((db) =>
@@ -171,7 +194,8 @@ export const make = Effect.gen(function* () {
 			yield* afterCommit(
 				operation(
 					"handler",
-					markSentAndDeliver(
+					sendIfStillTold(
+						{ chatId, ...addressed },
 						and(
 							eq(notificationDelivery.chatId, chatId),
 							eq(notificationDelivery.deliveryId, deliveryId),
@@ -302,22 +326,14 @@ export const make = Effect.gen(function* () {
 	 * they may no longer be told is forgotten.
 	 */
 	const sendAgain = (delivery: NotificationDeliveryRow, claimedUntil: Date) =>
-		transaction(
-			Effect.gen(function* () {
-				const ours = and(
-					eq(notificationDelivery.chatId, delivery.chatId),
-					eq(notificationDelivery.deliveryId, delivery.deliveryId),
-					eq(notificationDelivery.memberId, delivery.memberId),
-					eq(notificationDelivery.claimedUntil, claimedUntil),
-				);
-				if (yield* mayStillBeTold(delivery)) {
-					yield* markSentAndDeliver(ours);
-				} else {
-					yield* query((db) =>
-						db.delete(notificationDelivery).where(and(ours, isNull(notificationDelivery.sentAt))),
-					);
-				}
-			}),
+		sendIfStillTold(
+			delivery,
+			and(
+				eq(notificationDelivery.chatId, delivery.chatId),
+				eq(notificationDelivery.deliveryId, delivery.deliveryId),
+				eq(notificationDelivery.memberId, delivery.memberId),
+				eq(notificationDelivery.claimedUntil, claimedUntil),
+			),
 		);
 
 	const settingsOf = (memberId: string) =>
@@ -720,7 +736,9 @@ const reachesChatUnderLock = (chatId: string, memberId: string) =>
  * computer's project's manager, are still in the workspace of the chat it is
  * about. Read under a share of the workspace's lock, as {@link reachesChatUnderLock}.
  */
-const mayStillBeTold = (delivery: NotificationDeliveryRow) =>
+const mayStillBeTold = (
+	delivery: Pick<NotificationDeliveryRow, "chatId" | "memberId" | "notification">,
+) =>
 	Effect.gen(function* () {
 		const { memberId, notification } = delivery;
 		if (notification.chatId) return yield* reachesChatUnderLock(notification.chatId, memberId);
