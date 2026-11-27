@@ -67,12 +67,13 @@ file backup.
   Assistant. A GitHub app can't be copied, so the pod's other bots'
   automations that GitHub started are **paused**. To start them again, set up
   a GitHub app for each of those bots, point the trigger at it, and resume
-  the automation. A personal pod whose only bot is its Personal Assistant
-  **loses its GitHub app**. The converted shared project's computer keeps
-  read-only Git sign-in to the app's selected repositories. Turning off the
-  bot's GitHub connector in that project removes this sign-in. Turning it
-  back on enables the bot's tools. For a new computer sign-in after that,
-  set up a GitHub app for the project itself.
+  the automation. A shared pod's computer, now its project's, keeps
+  read-only Git sign-in to the repositories its GitHub app selected, through
+  the bot that now has the app. Turning off that bot's GitHub connector in
+  the project removes this sign-in; turning it back on enables the bot's
+  tools but not the sign-in. For a new computer sign-in after that, set up a
+  GitHub app for the project itself. A personal pod whose only bot is its
+  Personal Assistant **loses its GitHub app**.
 - **A personal pod with no bots loses its computer and connectors.** Its
   computer is destroyed at its provider, with everything on it, and its
   connectors are deleted. Its files are kept (see below).
