@@ -625,6 +625,27 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 		});
 	});
 
+	it("uses the same revision for two discoveries of the same tools", async () => {
+		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
+		const target = await connectors.target(workspaceId, projectId, made.id);
+		if (!target) throw new Error("No connector to list");
+		const listing = {
+			tools: [{ name: "lookup", description: null, readOnly: true, destructive: null }],
+			definitions: [{ name: "lookup", inputSchema: { type: "object" as const } }],
+		};
+
+		const revisions = await Promise.all([
+			connectors.recordListing(workspaceId, target, listing),
+			connectors.recordListing(workspaceId, target, listing),
+		]);
+
+		expect(revisions).toEqual([2, 2]);
+		await connectors.update(workspaceId, projectId, made.id, {
+			url: "https://another.example.com/mcp",
+		});
+		expect(await connectors.recordListing(workspaceId, target, listing)).toBeUndefined();
+	});
+
 	it("records what a test found, and forgets it when the connector changes", async () => {
 		const made = await create({
 			name: "Wiki",

@@ -15,4 +15,5 @@ export interface ConnectorTarget {
 	/** So a test result is recorded against the configuration it tested. */
 	configurationUpdatedAt: Date;
 	configurationRevision: number;
+	toolDefinitionsFingerprint: string | null;
 }

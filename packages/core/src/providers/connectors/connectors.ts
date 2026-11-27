@@ -22,6 +22,7 @@ import {
 } from "@sugabots/contracts/errors/connectors";
 import { type ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { UrlNotAllowed } from "@sugabots/contracts/errors/providers";
+import { userText } from "@sugabots/errors";
 import { Clock, Context, Effect, Layer } from "effect";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { type Database, query, serviceOperations } from "../../database/database.ts";
@@ -251,12 +252,12 @@ export const make = Effect.gen(function* () {
 				},
 				target.auth === "oauth" ? egress.oauth : egress.providers.for({ baseUrl: target.url }),
 			);
-			yield* connectors.recordTest(
+			const recorded = yield* connectors.recordTest(
 				at.workspaceId,
 				target,
 				found.ok ? found : { error: found.reason },
 			);
-			return result;
+			return recorded ? result : supersededTest(result.latencyMs);
 		});
 
 	/**
@@ -269,7 +270,8 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const checked = yield* Effect.result(egress.validateProviderUrl(target.url));
 			const error = checked._tag === "Failure" ? checked.failure.userMessage : undefined;
-			yield* connectors.recordTest(at.workspaceId, target, error ? { error } : {});
+			const recorded = yield* connectors.recordTest(at.workspaceId, target, error ? { error } : {});
+			if (!recorded) return supersededTest(0);
 			const result: ConnectorTestResult = {
 				reachable: error === undefined,
 				latencyMs: 0,
@@ -601,3 +603,11 @@ const botProjectsShowingAddresses = <P, J>(
 		}
 		return shown;
 	});
+
+function supersededTest(latencyMs: number): ConnectorTestResult {
+	return {
+		reachable: false,
+		latencyMs,
+		error: userText`The connector changed while the test was running. Test it again.`,
+	};
+}

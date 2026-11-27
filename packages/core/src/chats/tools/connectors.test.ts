@@ -132,6 +132,7 @@ const target = (extra: Partial<ConnectorTarget> = {}): ConnectorTarget => ({
 	headers: { "x-fixture-key": "open-sesame" },
 	toolAccess: { lookup: "allow", wipe: "allow" },
 	configurationUpdatedAt: new Date("2026-09-14T00:00:00.000Z"),
+	toolDefinitionsFingerprint: null,
 	configurationRevision: 1,
 	...extra,
 });

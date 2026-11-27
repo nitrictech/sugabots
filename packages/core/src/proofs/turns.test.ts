@@ -965,6 +965,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 					toolAccess: installed.toolAccess,
 					configurationRevision: installed.configurationRevision,
 					configurationUpdatedAt: installed.updatedAt,
+					toolDefinitionsFingerprint: null,
 				},
 				[],
 				side,

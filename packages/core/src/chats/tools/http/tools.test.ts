@@ -81,6 +81,7 @@ const target = (extra: Partial<ConnectorTarget> = {}): ConnectorTarget => ({
 	headers: { authorization: SECRET },
 	toolAccess: {},
 	configurationUpdatedAt: new Date("2026-10-01T00:00:00.000Z"),
+	toolDefinitionsFingerprint: null,
 	configurationRevision: 1,
 	...extra,
 });

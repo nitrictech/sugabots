@@ -11,7 +11,7 @@ import {
 	UnknownConnectorTool,
 } from "@sugabots/contracts/errors/connectors";
 import type { UserText } from "@sugabots/errors";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Order } from "effect";
 import stringify from "fast-json-stable-stringify";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
@@ -152,7 +152,7 @@ export interface Interface {
 		workspaceId: string,
 		target: ObservationTarget,
 		outcome: TestOutcome,
-	) => Effect.Effect<void>;
+	) => Effect.Effect<boolean>;
 	/**
 	 * Records the tools listed for `target` and returns the revision that owns
 	 * them, or undefined if the connector changed while it was being listed.
@@ -266,6 +266,7 @@ export const make = Effect.gen(function* () {
 			toolAccess: row.toolAccess,
 			configurationUpdatedAt: row.updatedAt,
 			configurationRevision: row.configurationRevision,
+			toolDefinitionsFingerprint: row.toolDefinitionsFingerprint,
 		};
 	};
 
@@ -300,10 +301,22 @@ export const make = Effect.gen(function* () {
 					and(
 						eq(connector.id, target.connectorId),
 						eq(connector.workspaceId, workspaceId),
-						eq(connector.configurationRevision, target.configurationRevision),
-						test
-							? stillConfiguredAs(connector.updatedAt, target.configurationUpdatedAt)
-							: undefined,
+						or(
+							and(
+								eq(connector.configurationRevision, target.configurationRevision),
+								test
+									? stillConfiguredAs(connector.updatedAt, target.configurationUpdatedAt)
+									: undefined,
+							),
+							// One revision with a new fingerprint means another listing won.
+							// An edit would have taken a revision of its own.
+							fingerprint !== undefined && fingerprint !== target.toolDefinitionsFingerprint
+								? and(
+										eq(connector.configurationRevision, target.configurationRevision + 1),
+										eq(connector.toolDefinitionsFingerprint, fingerprint),
+									)
+								: undefined,
+						),
 					),
 				)
 				.returning({ revision: connector.configurationRevision }),
@@ -627,7 +640,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"recordTest",
 				Effect.gen(function* () {
-					yield* recordObservation(
+					const revision = yield* recordObservation(
 						workspaceId,
 						target,
 						"definitions" in outcome ? outcome : undefined,
@@ -636,6 +649,7 @@ export const make = Effect.gen(function* () {
 							error: "error" in outcome ? (outcome.error ?? null) : null,
 						},
 					);
+					return revision !== undefined;
 				}),
 			),
 
