@@ -23,40 +23,45 @@ import { aChatAwaitingReply, openTurn, runningTurns, runOver } from "../turns/te
 
 const UNRELATED_MATCHES = 10_000;
 
-const messagesRead = query((db) =>
-	db.execute<{ read: string }>(
+const searchReads = query((db) =>
+	db.execute<{ relname: string; read: string }>(
 		sql`
-		select seq_tup_read + idx_tup_fetch as read
+		select relname, seq_tup_read + idx_tup_fetch as read
 		from pg_stat_xact_user_tables
-		where schemaname = 'public' and relname = 'message'
+		where schemaname = 'public' and relname in ('message', 'file')
 	`,
 		"objects",
 	),
-).pipe(Effect.map(([row]) => Number(row?.read ?? 0)));
+);
 
-const withBoundedMessageReads: RunEffect<TestInfrastructure> = (effect) =>
+const withBoundedSearchReads: RunEffect<TestInfrastructure> = (effect) =>
 	runOnPostgres(
 		transaction(
 			Effect.gen(function* () {
-				const before = yield* messagesRead;
-				const messageQueries: ReturnType<Statement.Statement<unknown>["compile"]>[] = [];
+				const before = new Map(
+					(yield* searchReads).map(({ relname, read }) => [relname, Number(read)]),
+				);
+				const searchQueries: ReturnType<Statement.Statement<unknown>["compile"]>[] = [];
 				const result = yield* Effect.provideService(
 					effect,
 					Statement.CurrentTransformer,
 					(statement) => {
 						const compiled = statement.compile();
-						if (/\b(?:from|join)\s+"?message"?\b/i.test(compiled[0])) {
-							messageQueries.push(compiled);
+						if (/\b(?:from|join)\s+"?(?:message|file)\b/i.test(compiled[0])) {
+							searchQueries.push(compiled);
 						}
 						return Effect.succeed(statement);
 					},
 				);
-				const reads = (yield* messagesRead) - before;
+				const reads = (yield* searchReads).map(({ relname, read }) => ({
+					table: relname,
+					rows: Number(read) - (before.get(relname) ?? 0),
+				}));
 				const budget = UNRELATED_MATCHES / 10;
-				if (reads >= budget) {
+				if (reads.some(({ rows }) => rows >= budget)) {
 					const client = yield* SqlClient.SqlClient;
 					const plans = yield* Effect.all(
-						messageQueries.map(([queryText, params]) =>
+						searchQueries.map(([queryText, params]) =>
 							client.unsafe<{ "QUERY PLAN": string }>(
 								`explain (analyze, buffers, timing off) ${queryText}`,
 								params,
@@ -64,8 +69,9 @@ const withBoundedMessageReads: RunEffect<TestInfrastructure> = (effect) =>
 						),
 					);
 					const formatted = plans.map((plan) => plan.map((row) => row["QUERY PLAN"]).join("\n"));
+					const counts = reads.map(({ table, rows }) => `${rows} ${table} rows`).join(", ");
 					throw new Error(
-						`Read ${reads} message rows, expected fewer than ${budget}\n${formatted.join("\n\n")}`,
+						`Read ${counts}, expected fewer than ${budget} per table\n${formatted.join("\n\n")}`,
 					);
 				}
 				return result;
@@ -73,7 +79,7 @@ const withBoundedMessageReads: RunEffect<TestInfrastructure> = (effect) =>
 		),
 	);
 
-describe.skipIf(!process.env.DATABASE_URL)("matching messages within the reached workspace", () => {
+describe.skipIf(!process.env.DATABASE_URL)("searching within the reached workspace", () => {
 	let call: CallOperation;
 	let member: MemberSession;
 	let acting: BotPrincipal;
@@ -102,28 +108,37 @@ describe.skipIf(!process.env.DATABASE_URL)("matching messages within the reached
 		await onDatabase((db) =>
 			db.execute(
 				sql`
-			insert into message (chat_id, author_bot_id, status, parts, content, created_at)
-			select ${targetChat}::uuid, ${reached.botId}::uuid, 'complete', '[]'::jsonb,
-				'@sam freight ready', ${now.toISOString()}::timestamptz
-			union all
-			select ${targetChat}::uuid, ${reached.botId}::uuid, 'complete', '[]'::jsonb,
-				'freight needs booking', ${after}::timestamptz - interval '1 second'
-			union all
-			select ${unrelated.chatId}::uuid, ${unrelated.botId}::uuid, 'complete', '[]'::jsonb,
-				'@sam freight scheduled ' || ordinal, ${now.toISOString()}::timestamptz
-			from generate_series(1, ${UNRELATED_MATCHES}::int) as ordinal
+			with sent as (
+				insert into message (chat_id, author_bot_id, status, parts, content, created_at)
+				select ${targetChat}::uuid, ${reached.botId}::uuid, 'complete', '[]'::jsonb,
+					'@sam freight ready', ${now.toISOString()}::timestamptz
+				union all
+				select ${targetChat}::uuid, ${reached.botId}::uuid, 'complete', '[]'::jsonb,
+					'freight needs booking', ${after}::timestamptz - interval '1 second'
+				union all
+				select ${targetChat}::uuid, ${reached.botId}::uuid, 'complete', '[]'::jsonb,
+					'', ${now.toISOString()}::timestamptz
+				union all
+				select ${unrelated.chatId}::uuid, ${unrelated.botId}::uuid, 'complete', '[]'::jsonb,
+					'@sam freight scheduled ' || ordinal, ${now.toISOString()}::timestamptz
+				from generate_series(1, ${UNRELATED_MATCHES}::int) as ordinal
+				returning id, chat_id, content
+			)
+			insert into file (chat_id, message_id, kind, name, content_type, size, position)
+			select chat_id, id, 'bot_attachment', 'freight-manifest.pdf', 'application/pdf', 2048, 0
+			from sent where content = '' or chat_id = ${unrelated.chatId}::uuid
 		`,
 				"objects",
 			),
 		);
-		await onDatabase((db) => db.execute(sql`analyze message`, "objects"));
+		await onDatabase((db) => db.execute(sql`analyze message, file`, "objects"));
 
 		const [run] = await runOnPostgres(runningTurns(reached.chatId));
 		if (!run) throw new Error("The chat has no turn");
 		({ principal: acting } = await runOver(chats)(openTurn(run)));
 		const operations = await operationsForTests({ chats });
 		call = (principal, name, input) =>
-			withBoundedMessageReads(operations[name](principal, input, { kind: "request" }));
+			withBoundedSearchReads(operations[name](principal, input, { kind: "request" }));
 	}, 30_000);
 
 	afterAll(async () => {
@@ -145,7 +160,13 @@ describe.skipIf(!process.env.DATABASE_URL)("matching messages within the reached
 		expect(
 			await call(acting, "chats.searchHistory", { chat: "all", query: "freight", after }),
 		).toEqual({
-			messages: [expect.objectContaining({ chatId: targetChat, text: "@sam freight ready" })],
+			messages: [
+				expect.objectContaining({ chatId: targetChat, text: "@sam freight ready" }),
+				expect.objectContaining({
+					chatId: targetChat,
+					text: expect.stringContaining("[Attached freight-manifest.pdf"),
+				}),
+			],
 			more: false,
 		});
 	});
