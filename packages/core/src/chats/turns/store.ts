@@ -712,6 +712,80 @@ export const make = Effect.gen(function* () {
 	const draftOf = (checkpoint: TurnCheckpoint | undefined): ReplyDraft =>
 		checkpoint?.reply ?? emptyReply;
 
+	const openFirstReply = (request: ReplyTurnRequest) =>
+		Effect.gen(function* (): Effect.fn.Return<OpenedReplyTurn, never, Database | Transaction> {
+			const replyValues = {
+				chatId: request.chatId,
+				authorBotId: request.botId,
+				status: "writing" as const,
+				parts: [],
+				content: "",
+			};
+			// An interview starts with the reply itself, so it has to exist
+			// before the turn can reference it as its trigger.
+			if (request.reason === "interview") {
+				yield* query((db) =>
+					db.insert(message).values({ ...replyValues, id: request.triggerMessageId }),
+				);
+			}
+			const turnId = yield* insertTurn(request);
+			const replyIdentity = { turnId, retryKey: turnId };
+			const created = yield* query((db) =>
+				request.reason === "interview"
+					? db
+							.update(message)
+							.set(replyIdentity)
+							.where(eq(message.id, request.triggerMessageId))
+							.returning()
+					: db
+							.insert(message)
+							.values({ ...replyValues, ...replyIdentity })
+							.returning(),
+			).pipe(Effect.flatMap(writtenRow("message")));
+			const reply = toMessage(created, request.author);
+			yield* announceStart(request, turnId, reply);
+			return { _tag: "Opened", turnId, reply };
+		});
+
+	const resumeReply = (turnId: string, author: ReplyTurnRequest["author"]) =>
+		Effect.gen(function* (): Effect.fn.Return<OpenedReplyTurn, never, Database | Transaction> {
+			const [found] = yield* query((db) =>
+				db.select().from(message).where(eq(message.turnId, turnId)).limit(1),
+			);
+			if (!found)
+				return yield* Effect.die(new Error("A running turn has no reply message"));
+			return {
+				_tag: "Opened",
+				turnId,
+				reply: toMessage(found, author),
+			};
+		});
+
+	const restartReply = (turnId: string, request: ReplyTurnRequest) =>
+		Effect.gen(function* (): Effect.fn.Return<OpenedReplyTurn, never, Database | Transaction> {
+			const [retried] = yield* query((db) =>
+				db
+					.update(message)
+					.set({ status: "writing", parts: [], content: "" })
+					.where(eq(message.turnId, turnId))
+					.returning(),
+			);
+			if (!retried) {
+				return yield* Effect.die(new Error("A turn being run again has no reply message"));
+			}
+			// The reply starts again, so the calls its last run made go with its
+			// parts, and the files it attached with them.
+			yield* toolCalls.forgetReply(retried.id);
+			yield* files.removeReplyAttachments({
+				chatId: retried.chatId,
+				messageId: retried.id,
+			});
+			const reply = toMessage(retried, request.author);
+			yield* announceStart(request, turnId, reply);
+			return { _tag: "Opened", turnId, reply };
+		});
+
+
 	return Service.of({
 		ask: (request) => operation("ask", transaction(ask(request))),
 		openReplyTurn: (request) =>
@@ -746,73 +820,11 @@ export const make = Effect.gen(function* () {
 						yield* lockOpening(request);
 						const existing = yield* lockedTurn(onTrigger(request));
 						if (refused === "automationEnded") return yield* endForEndedAutomation(existing);
-						if (!existing) {
-							const replyValues = {
-								chatId: request.chatId,
-								authorBotId: request.botId,
-								status: "writing" as const,
-								parts: [],
-								content: "",
-							};
-							// An interview starts with the reply itself, so it has to exist
-							// before the turn can reference it as its trigger.
-							if (request.reason === "interview") {
-								yield* query((db) =>
-									db.insert(message).values({ ...replyValues, id: request.triggerMessageId }),
-								);
-							}
-							const turnId = yield* insertTurn(request);
-							const replyIdentity = { turnId, retryKey: turnId };
-							const created = yield* query((db) =>
-								request.reason === "interview"
-									? db
-											.update(message)
-											.set(replyIdentity)
-											.where(eq(message.id, request.triggerMessageId))
-											.returning()
-									: db
-											.insert(message)
-											.values({ ...replyValues, ...replyIdentity })
-											.returning(),
-							).pipe(Effect.flatMap(writtenRow("message")));
-							const reply = toMessage(created, request.author);
-							yield* announceStart(request, turnId, reply);
-							return { _tag: "Opened", turnId, reply };
-						}
+						if (!existing) return yield* openFirstReply(request);
 						const reopened = yield* reopen(existing, request.executionId);
 						if (reopened._tag === "NotRunnable") return reopened;
-						if (reopened.followUp?._tag === "Resume") {
-							const [found] = yield* query((db) =>
-								db.select().from(message).where(eq(message.turnId, existing.id)).limit(1),
-							);
-							if (!found)
-								return yield* Effect.die(new Error("A running turn has no reply message"));
-							return {
-								_tag: "Opened",
-								turnId: existing.id,
-								reply: toMessage(found, request.author),
-							};
-						}
-						const [retried] = yield* query((db) =>
-							db
-								.update(message)
-								.set({ status: "writing", parts: [], content: "" })
-								.where(eq(message.turnId, existing.id))
-								.returning(),
-						);
-						if (!retried) {
-							return yield* Effect.die(new Error("A turn being run again has no reply message"));
-						}
-						// The reply starts again, so the calls its last run made go with its
-						// parts, and the files it attached with them.
-						yield* toolCalls.forgetReply(retried.id);
-						yield* files.removeReplyAttachments({
-							chatId: retried.chatId,
-							messageId: retried.id,
-						});
-						const reply = toMessage(retried, request.author);
-						yield* announceStart(request, existing.id, reply);
-						return { _tag: "Opened", turnId: existing.id, reply };
+						if (reopened.followUp?._tag === "Resume") return yield* resumeReply(existing.id, request.author);
+						return yield* restartReply(existing.id, request);
 					}),
 				),
 			),
