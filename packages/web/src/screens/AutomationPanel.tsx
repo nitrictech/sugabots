@@ -158,12 +158,24 @@ export function AutomationPanel({
 		</MoreMenu>
 	);
 
+	// Why the switch is held, shown in the panel and read with the switch.
+	const toggleHeldReason = mayToggle
+		? undefined
+		: may.pauseAutomations
+			? "Only someone who may change this automation can turn it back on."
+			: "Only someone who may change this automation can turn it on or off.";
+	const toggleHeldReasonId = useId();
 	const stateSwitch = (
-		<Tooltip label={active ? "Pause automation" : "Resume automation"} side="top">
+		<Tooltip
+			label={active ? "Pause automation" : "Resume automation"}
+			side="top"
+			disabled={!mayToggle}
+		>
 			{/* On a wrapper, because a disabled switch receives no pointer events. */}
 			<span className="inline-flex shrink-0">
 				<Switch
 					aria-label="Automation on"
+					aria-describedby={toggleHeldReason && toggleHeldReasonId}
 					checked={active}
 					disabled={!mayToggle || controls.pending}
 					onCheckedChange={(on) => void control(() => controls.setPaused(!on))}
@@ -197,6 +209,11 @@ export function AutomationPanel({
 					{actions.create.error && <Alert>{failureMessage(actions.create.error)}</Alert>}
 					{actions.update.error && <Alert>{failureMessage(actions.update.error)}</Alert>}
 					{controlFailure !== undefined && <Alert>{failureMessage(controlFailure)}</Alert>}
+					{toggleHeldReason && (
+						<p id={toggleHeldReasonId} className="m-0 text-muted-foreground text-xs">
+							{toggleHeldReason}
+						</p>
+					)}
 					{!asPage && (
 						<div className={cn(SETTINGS_CARD, "flex h-12 items-center gap-2.5 px-3.5")}>
 							<span className="flex-1">

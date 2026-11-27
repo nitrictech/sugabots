@@ -66,7 +66,6 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Switch } from "@/ui/switch.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
 import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 import { BotAutomations } from "./AutomationEditing.tsx";
 import { AddMembersMenu, MemberRows } from "./MemberList.tsx";
@@ -663,11 +662,7 @@ function BuiltInTools({
 		>
 			<ToolRow
 				label="Computer"
-				sub={
-					computersOff
-						? `Computers are off for ${workspaceName}`
-						: "Run commands, browse and edit files on a computer of its own"
-				}
+				sub="Run commands, browse and edit files on a computer of its own"
 				on={bot.usesComputer === true && !computersOff}
 				canChange={bot.permissions.resources.manageComputer}
 				offReason={computersOff ? `Computers are off for ${workspaceName}` : undefined}
@@ -685,7 +680,7 @@ function BuiltInTools({
 			)}
 			<ToolRow
 				label="Web search"
-				sub={webOff ? `Web search is off for ${workspaceName}` : "Look things up and cite pages"}
+				sub="Look things up and cite pages"
 				on={isOn(WEB_TOOLS) && !webOff}
 				canChange={canChange}
 				offReason={webOff ? `Web search is off for ${workspaceName}` : undefined}
@@ -709,8 +704,8 @@ function BuiltInTools({
 
 /**
  * A tool the bot may have, with its switch, or whether it is on for someone
- * who can't change it. Given `offReason`, the switch is held off and disabled,
- * and says why when pointed at.
+ * who can't change it. Given `offReason`, the switch is held off and disabled;
+ * the row's line under its name says why, and the switch is described by it.
  */
 function ToolRow({
 	label,
@@ -727,23 +722,20 @@ function ToolRow({
 	offReason?: string;
 	onChange: (on: boolean) => void;
 }) {
+	const subId = useId();
 	return (
 		<SettingsRow
 			label={offReason ? <span className="text-muted-foreground">{label}</span> : label}
-			sub={sub}
+			sub={<span id={subId}>{offReason ?? sub}</span>}
 			trailing={
 				canChange ? (
-					<Tooltip label={offReason} side="top" disabled={offReason === undefined}>
-						{/* On a wrapper, as a disabled switch receives no pointer events. */}
-						<span className="inline-flex shrink-0">
-							<Switch
-								checked={on}
-								disabled={offReason !== undefined}
-								aria-label={`${on ? "Turn off" : "Turn on"} ${label}`}
-								onCheckedChange={onChange}
-							/>
-						</span>
-					</Tooltip>
+					<Switch
+						checked={on}
+						disabled={offReason !== undefined}
+						aria-label={`${on ? "Turn off" : "Turn on"} ${label}`}
+						aria-describedby={subId}
+						onCheckedChange={onChange}
+					/>
 				) : (
 					<SettingsValue>{on ? "On" : "Off"}</SettingsValue>
 				)
