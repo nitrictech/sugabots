@@ -20,6 +20,7 @@ import { ChatEvent } from "../chats/events.ts";
 import { seedChat } from "../chats/seed.test-support.ts";
 import { query, transaction } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
+import { EventOutbox } from "../database/events/outbox.ts";
 import {
 	automation,
 	automationRun,
@@ -73,11 +74,18 @@ function clockTime(minutes: number): string {
 /** What the service published on the bus, for every test in the file. */
 const published: { stream: EventStream; event: StreamEvent }[] = [];
 
+/** A bus that hands each event published on it, stored or not, to `publishOne`. */
+const busPublishing = (publishOne: (stream: EventStream, event: StreamEvent) => Promise<void>) =>
+	unimplemented(EventBus.Service, {
+		publish: publishOne,
+		publishCommitted: async (committed) => {
+			for (const { stream, event } of committed) await publishOne(stream, event);
+		},
+	});
+
 /** A bus that keeps what is published in `published`. */
-const capturingBus = unimplemented(EventBus.Service, {
-	publish: async (stream, event) => {
-		published.push({ stream, event });
-	},
+const capturingBus = busPublishing(async (stream, event) => {
+	published.push({ stream, event });
 });
 
 /**
@@ -136,10 +144,16 @@ interface NotificationsAs {
  * The service over the test database's own pool, publishing to `published`,
  * with `run` to call it and `close` to stop what it is still sending.
  */
-async function served(bus = capturingBus) {
+async function served(
+	bus = capturingBus,
+	outbox: Layer.Layer<EventOutbox.Service, never, EventBus.Service> = EventOutbox.layer,
+) {
 	const scope = Scope.makeUnsafe();
 	const context = await runOnPostgres(
-		Layer.buildWithScope(Notifications.layer.pipe(Layer.provide(bus)), scope),
+		Layer.buildWithScope(
+			Notifications.layer.pipe(Layer.provide(outbox), Layer.provide(bus)),
+			scope,
+		),
 	);
 	return {
 		run: <A, E>(effect: Effect.Effect<A, E, Notifications.Service | TestInfrastructure>) =>
@@ -496,14 +510,12 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		const publishing = Promise.withResolvers<void>();
 		const unblock = Promise.withResolvers<void>();
 		const sent: unknown[] = [];
-		const bus = unimplemented(EventBus.Service, {
-			publish: async (_stream, event) => {
-				sent.push(event.body);
-				if (sent.length === 1) {
-					publishing.resolve();
-					await unblock.promise;
-				}
-			},
+		const bus = busPublishing(async (_stream, event) => {
+			sent.push(event.body);
+			if (sent.length === 1) {
+				publishing.resolve();
+				await unblock.promise;
+			}
 		});
 		const service = await served(bus);
 		try {
@@ -534,14 +546,12 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	it("records a notification sent once it is published, in a Postgres session of its own", async () => {
 		const chat = await projectChat();
 		let other: ReturnType<typeof holdTransaction> | undefined;
-		const bus = unimplemented(EventBus.Service, {
-			publish: async (stream, event) => {
-				published.push({ stream, event });
-				// Another transaction takes the Postgres session the recording one let go
-				// of, and is rolled back.
-				other = holdTransaction(Effect.void, Effect.die("rolled back"));
-				await other.held;
-			},
+		const bus = busPublishing(async (stream, event) => {
+			published.push({ stream, event });
+			// Another transaction takes the Postgres session the recording one let go
+			// of, and is rolled back.
+			other = holdTransaction(Effect.void, Effect.die("rolled back"));
+			await other.held;
 		});
 		const sending = await served(bus);
 		try {
@@ -582,13 +592,12 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			);
 		};
 
-		/** Records `events`' notifications without publishing them, as a process whose bus was down. */
+		/** Records `events`' notifications without sending them, as a process that stopped before sending. */
 		const recordedUnsent = async (...events: ChatEvent[]) => {
 			const failing = await served(
-				unimplemented(EventBus.Service, {
-					publish: async () => {
-						throw new Error("The bus is down");
-					},
+				capturingBus,
+				unimplemented(EventOutbox.Service, {
+					publish: () => Effect.die(new Error("The process stopped")),
 				}),
 			);
 			try {
@@ -601,22 +610,27 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			}
 		};
 
-		it("acknowledges each notification it sends again once it is published, and sends again one it failed to", async () => {
+		it("records each notification it sends again sent, and sends again one it failed to", async () => {
 			const chat = await projectChat();
 			const bob = `@${handleFromName(members.bob.name)}`;
 			const cy = `@${handleFromName(members.cy.name)}`;
 			const mention = `${bob} ${cy} look`;
 			await recordedUnsent(memberPosted(chat, members.ada, mention));
 			await aWhileLater();
-			let publishes = 0;
+			let sends = 0;
 			const failingOnce = await served(
-				unimplemented(EventBus.Service, {
-					publish: async (stream, event) => {
-						publishes += 1;
-						if (publishes === 1) throw new Error("The bus dropped it");
-						published.push({ stream, event });
-					},
-				}),
+				capturingBus,
+				Layer.effect(
+					EventOutbox.Service,
+					Effect.map(EventOutbox.make, (outbox) => ({
+						publish: (pending) => {
+							sends += 1;
+							return sends === 1
+								? Effect.die(new Error("Sending failed"))
+								: outbox.publish(pending);
+						},
+					})),
+				),
 			);
 			try {
 				await failingOnce.run(Effect.flatMap(Notifications.Service, (n) => n.sendLeftBehind));
@@ -660,7 +674,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			expect(sentTo(members.bob.id)).toEqual([]);
 		});
 
-		it("skips notifications another sweep already sent while the first sweep was held up", async () => {
+		it("sends each notification once when another sweep runs while the first is still publishing", async () => {
 			const chat = await projectChat();
 			const bob = `@${handleFromName(members.bob.name)}`;
 			const cy = `@${handleFromName(members.cy.name)}`;
@@ -670,15 +684,13 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			const resume = Promise.withResolvers<void>();
 			let held = false;
 			const first = await served(
-				unimplemented(EventBus.Service, {
-					publish: async (stream, event) => {
-						if (!held) {
-							held = true;
-							publishing.resolve(stream);
-							await resume.promise;
-						}
-						published.push({ stream, event });
-					},
+				busPublishing(async (stream, event) => {
+					if (!held) {
+						held = true;
+						publishing.resolve(stream);
+						await resume.promise;
+					}
+					published.push({ stream, event });
 				}),
 			);
 			const sweeping = first.run(Effect.flatMap(Notifications.Service, (n) => n.sendLeftBehind));
@@ -689,8 +701,11 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				resume.resolve();
 				await sweeping;
 
-				const otherMember =
-					alreadyPublishing === memberStream(members.bob.id) ? members.cy.id : members.bob.id;
+				const [heldMember, otherMember] =
+					alreadyPublishing === memberStream(members.bob.id)
+						? [members.bob.id, members.cy.id]
+						: [members.cy.id, members.bob.id];
+				expect(sentTo(heldMember)).toHaveLength(1);
 				expect(sentTo(otherMember)).toHaveLength(1);
 			} finally {
 				resume.resolve();

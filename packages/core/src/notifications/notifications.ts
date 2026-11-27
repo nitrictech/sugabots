@@ -11,7 +11,7 @@ import {
 	streamEvent,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Duration, Effect, Layer, Schedule } from "effect";
 import { reachesChatFor } from "../authorization/access.ts";
 import type { ChatEvent } from "../chats/events.ts";
@@ -26,6 +26,7 @@ import {
 } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
 import type { DomainEvents } from "../database/events/domain-events.ts";
+import { EventOutbox } from "../database/events/outbox.ts";
 import {
 	member,
 	membership,
@@ -108,6 +109,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Notifications");
 	const bus = yield* EventBus.Service;
+	const outbox = yield* EventOutbox.Service;
 	// Sending outlives the transaction that asked for it, and must not hold up its commit.
 	const sending = yield* Effect.scope;
 	const runInBackground = <E>(work: Effect.Effect<void, E, Database>) =>
@@ -118,13 +120,35 @@ export const make = Effect.gen(function* () {
 		);
 
 	const deliver = (addressed: readonly Addressed[]) =>
-		Effect.forEach(
-			addressed,
-			({ memberId, notification }) =>
-				Effect.promise(() =>
-					bus.publish(memberStream(memberId), streamEvent("notification", notification)),
-				),
-			{ discard: true },
+		outbox.publish(
+			addressed.map(({ memberId, notification }) => ({
+				stream: memberStream(memberId),
+				event: streamEvent("notification", notification),
+			})),
+		);
+
+	/**
+	 * Records the deliveries `which` picks sent, if none is yet, and stores
+	 * their notifications in the same transaction, so whichever process marks
+	 * one sent is the only one to publish it. The outbox publishes them once
+	 * the transaction commits.
+	 */
+	const markSentAndDeliver = (which: SQL | undefined) =>
+		transaction(
+			Effect.gen(function* () {
+				const sentAt = yield* DateTime.nowAsDate;
+				const sent = yield* query((db) =>
+					db
+						.update(notificationDelivery)
+						.set({ sentAt })
+						.where(and(which, isNull(notificationDelivery.sentAt)))
+						.returning({
+							memberId: notificationDelivery.memberId,
+							notification: notificationDelivery.notification,
+						}),
+				);
+				yield* deliver(sent);
+			}),
 		);
 
 	const recordDelivery = (chatId: string, deliveryId: string, addressed: Addressed) =>
@@ -145,33 +169,22 @@ export const make = Effect.gen(function* () {
 			// On the service's own database: the transaction's Postgres session is
 			// another's once it commits.
 			yield* afterCommit(
-				operation("handler", sentAndRecorded(chatId, deliveryId, addressed).pipe(Effect.asVoid)),
-			);
-		});
-
-	/** Sends `addressed`, recording it sent; one that isn't sent now is sent by the sweep. */
-	const sentAndRecorded = (chatId: string, deliveryId: string, addressed: Addressed) =>
-		deliver([addressed]).pipe(
-			Effect.andThen(
-				Effect.flatMap(DateTime.nowAsDate, (sentAt) =>
-					query((db) =>
-						db
-							.update(notificationDelivery)
-							.set({ sentAt })
-							.where(
-								and(
-									eq(notificationDelivery.chatId, chatId),
-									eq(notificationDelivery.deliveryId, deliveryId),
-									eq(notificationDelivery.memberId, addressed.memberId),
-								),
-							),
+				operation(
+					"handler",
+					markSentAndDeliver(
+						and(
+							eq(notificationDelivery.chatId, chatId),
+							eq(notificationDelivery.deliveryId, deliveryId),
+							eq(notificationDelivery.memberId, addressed.memberId),
+						),
+					).pipe(
+						Effect.catchCause((cause) =>
+							Effect.logWarning("Sending a notification failed; the sweep sends it again", cause),
+						),
 					),
 				),
-			),
-			Effect.catchCause((cause) =>
-				Effect.logWarning("Sending a notification failed; the sweep sends it again", cause),
-			),
-		);
+			);
+		});
 
 	const deliverAbout = (chatId: string, deliveryId: string, addressed: readonly Addressed[]) =>
 		Effect.forEach(
@@ -285,40 +298,27 @@ export const make = Effect.gen(function* () {
 
 	/**
 	 * Sends `delivery`, claimed until `claimedUntil`, to its member's tabs, if
-	 * they may still be told it, and records it sent once it is published; one
-	 * they may no longer be told is forgotten. One sent twice shows once, by
-	 * its tag.
+	 * they may still be told it and no other sweep has claimed it since; one
+	 * they may no longer be told is forgotten.
 	 */
 	const sendAgain = (delivery: NotificationDeliveryRow, claimedUntil: Date) =>
-		Effect.gen(function* () {
-			const { chatId, deliveryId, memberId, notification } = delivery;
-			const ours = and(
-				eq(notificationDelivery.chatId, chatId),
-				eq(notificationDelivery.deliveryId, deliveryId),
-				eq(notificationDelivery.memberId, memberId),
-				eq(notificationDelivery.claimedUntil, claimedUntil),
-				isNull(notificationDelivery.sentAt),
-			);
-			if (!(yield* transaction(mayStillBeTold(delivery)))) {
-				yield* query((db) => db.delete(notificationDelivery).where(ours));
-				return;
-			}
-			// Sent only while the claim outlasts the longest a send may take, so
-			// no other sweep sends it meanwhile.
-			const sendEndsBy = DateTime.toDateUtc(
-				DateTime.addDuration(yield* DateTime.now, SEND_TIMEOUT),
-			);
-			const [stillClaimed] = yield* query((db) =>
-				db
-					.select({ deliveryId: notificationDelivery.deliveryId })
-					.from(notificationDelivery)
-					.where(and(ours, gt(notificationDelivery.claimedUntil, sendEndsBy))),
-			);
-			if (!stillClaimed) return;
-			yield* deliver([{ memberId, notification }]).pipe(Effect.timeout(SEND_TIMEOUT));
-			const sentAt = yield* DateTime.nowAsDate;
-			yield* query((db) => db.update(notificationDelivery).set({ sentAt }).where(ours));
-		});
+		transaction(
+			Effect.gen(function* () {
+				const ours = and(
+					eq(notificationDelivery.chatId, delivery.chatId),
+					eq(notificationDelivery.deliveryId, delivery.deliveryId),
+					eq(notificationDelivery.memberId, delivery.memberId),
+					eq(notificationDelivery.claimedUntil, claimedUntil),
+				);
+				if (yield* mayStillBeTold(delivery)) {
+					yield* markSentAndDeliver(ours);
+				} else {
+					yield* query((db) =>
+						db.delete(notificationDelivery).where(and(ours, isNull(notificationDelivery.sentAt))),
+					);
+				}
+			}),
+		);
 
 	const settingsOf = (memberId: string) =>
 		Effect.gen(function* () {
@@ -491,9 +491,6 @@ type NotificationDeliveryRow = typeof notificationDelivery.$inferSelect;
 
 /** How long the process that wrote a notification has to send it before the sweep does. */
 const SEND_GRACE = Duration.seconds(30);
-
-/** The longest sending a notification again may take, well inside the claim `SEND_GRACE` gives it. */
-const SEND_TIMEOUT = Duration.seconds(10);
 
 /** How long a notification is still worth sending; past it, one left unsent is dropped. */
 const NEWS_FOR = Duration.minutes(10);

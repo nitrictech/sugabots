@@ -198,12 +198,13 @@ type KnownEventType = keyof EventPayloadSchemas;
 const RESET_EVENT_TYPE = "reset" satisfies KnownEventType;
 
 /**
- * State changes. Written to the `event` table, and their `seq` is the SSE `id`,
- * so a client that reconnects with `Last-Event-ID` gets every one it missed.
+ * State changes, and notifications. Written to the `event` table, and their
+ * `seq` is the SSE `id`, so a client that reconnects with `Last-Event-ID` gets
+ * every one it missed. A notification is stored in the transaction that
+ * records it sent, so it is published once however many processes try.
  *
- * Every other type (a reply's delta, somebody typing, a notification,
- * presence) only matters while it is happening: it is sent to live
- * subscribers only and carries no `id`, which per the SSE spec does not
+ * Every other type (a reply's delta, somebody typing, presence) only matters
+ * while it is happening: it is sent to live subscribers only and carries no `id`, which per the SSE spec does not
  * advance the client's last-event-id. A delta lost to a disconnect is
  * recovered from the message row a running turn saves every second, not from
  * a replay.
@@ -228,6 +229,7 @@ const durableEventTypeSchema = Schema.Literals([
 	"reach.changed",
 	"member.changed",
 	"session.ended",
+	"notification",
 	"approvals.changed",
 ] satisfies KnownEventType[]);
 
