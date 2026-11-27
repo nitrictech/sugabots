@@ -1480,7 +1480,10 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			const unrelated = memberStream(world.vi);
 			await commit(unrelated, streamEvent("approvals.changed", { toolCallId: randomUUID() }));
 			await onDatabase((db) =>
-				db.update(event).set({ createdAt: new Date(0) }).where(eq(event.stream, unrelated)),
+				db
+					.update(event)
+					.set({ createdAt: new Date(0) })
+					.where(eq(event.stream, unrelated)),
 			);
 			await stored.prune(new Date(1));
 

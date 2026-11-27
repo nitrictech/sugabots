@@ -3,7 +3,7 @@ export * as EventStore from "./store.ts";
 import { createHash } from "node:crypto";
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
 import type { StreamCursor } from "@sugabots/contracts/operations/events";
-import { and, asc, gt, gte, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, gt, gte, inArray, lte, or, type SQL, sql } from "drizzle-orm";
 import { Context, Effect, Layer, Random } from "effect";
 import { processLayer, Tier } from "../../tiers.ts";
 import {
@@ -103,7 +103,7 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 						db.execute<{ stream: EventStream; seq: string | null; position: string }>(
 							sql`select stream,
 								(select max(${event.seq}) from ${event}
-									where ${event.stream} = wanted.stream and ${event.seq} >= (${retentionBoundary})) as seq,
+									where ${event.stream} = wanted.stream and ${event.seq} >= (${retentionBoundary(sql`wanted.stream`)})) as seq,
 								(${sequencePosition}) as position
 							from (select distinct stream from unnest(${wanted}) as stream) as wanted`,
 							"objects",
@@ -136,7 +136,7 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 				"cursor" in page ? { stream: page.stream, since: afterCursor(page.cursor) } : page.feed;
 			if (!Number.isSafeInteger(feed.since)) return undefined;
 
-			const retained = sql`${feed.since} >= (${retentionBoundary}) and ${validReplayPosition(page)}`;
+			const retained = sql`${feed.since} >= (${retentionBoundary(feed.stream)}) and ${validReplayPosition(page)}`;
 			const rows = await run((db) => {
 				const batch = selectFeedRows(db, [feed, ...page.controls], limit);
 				return db.execute<Omit<EventRow, "seq"> & { retained: boolean; seq: string | null }>(
@@ -156,16 +156,14 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 				db.execute<{ removed: number }>(
 					sql`with deleted as (
 						delete from ${event} where ${event.createdAt} < ${before.toISOString()}::timestamptz
-						returning seq
-					), counted as (
-						select count(*)::integer as removed, max(seq) as pruned_through from deleted
+						returning stream, seq
 					), saved as (
-						insert into ${eventRetention} (singleton, pruned_through)
-						select true, pruned_through from counted where pruned_through is not null
-						on conflict (singleton) do update
+						insert into ${eventRetention} (stream, pruned_through)
+						select stream, max(seq) from deleted group by stream order by stream collate "C"
+						on conflict (stream) do update
 						set pruned_through = greatest(${eventRetention}.pruned_through, excluded.pruned_through)
 					)
-					select removed from counted`,
+					select count(*)::integer as removed from deleted`,
 					"objects",
 				),
 			);
@@ -178,8 +176,11 @@ export const layer = processLayer(Layer.effect(Service, make));
 
 const sequencePosition = sql`select case when is_called then last_value else 0 end from event_seq_seq`;
 
-// Pruning records one watermark across streams, so a gap can conservatively reset another stream.
-const retentionBoundary = sql`select coalesce((select pruned_through from ${eventRetention}), 0)`;
+const retentionBoundary = (stream: EventStream | SQL) =>
+	sql`select coalesce((
+		select ${eventRetention.prunedThrough} from ${eventRetention}
+		where ${eventRetention.stream} = ${stream}
+	), 0)`;
 
 function validReplayPosition(page: ReplayPage) {
 	if ("feed" in page) return sql`true`;
@@ -193,7 +194,7 @@ function validReplayPosition(page: ReplayPage) {
 	if (cursor !== buildEmptyCursor(stream, position)) return sql`false`;
 	return sql`${position} <= (${sequencePosition}) and not exists (
 		select 1 from ${event} where ${event.stream} = ${stream}
-		and ${event.seq} between (${retentionBoundary}) and ${position}
+		and ${event.seq} between (${retentionBoundary(stream)}) and ${position}
 	)`;
 }
 

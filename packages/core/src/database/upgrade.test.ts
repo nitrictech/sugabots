@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeFileSystem } from "@effect/platform-node";
 import { PgClient } from "@effect/sql-pg";
-import { botUpdateSchema, filesWrittenBy } from "@sugabots/contracts";
+import { botUpdateSchema, filesWrittenBy, memberStream, streamEvent } from "@sugabots/contracts";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { automationsContracts } from "@sugabots/contracts/operations/automations";
 import { chatReadsContracts } from "@sugabots/contracts/operations/chat-reads";
@@ -288,6 +288,25 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				"computer_lease_holder_idx",
 				"event_control_stream_seq_idx",
 			]);
+		});
+
+		it("records separate prune boundaries for streams after the upgrade", async () => {
+			const streams = [memberStream(legacy.members.sam), memberStream(legacy.members.ana)];
+			const payload = streamEvent("approvals.changed", { toolCallId: WAITING_REPLY });
+			const stored = await upgraded.rows<{ stream: string; seq: string }>(
+				`insert into event (stream, type, payload, created_at)
+				 select unnest($1::text[]), $2, $3::jsonb, 'epoch' returning stream, seq`,
+				[streams, payload.type, JSON.stringify(payload)],
+			);
+			const store = await upgraded.run(EventStore.make);
+			expect(await store.prune(new Date(1))).toBe(stored.length);
+			const boundaries = await upgraded.rows<{ stream: string; seq: string }>(
+				`select stream, pruned_through as seq from event_retention where stream = any($1)`,
+				[streams],
+			);
+			expect(new Map(boundaries.map(({ stream, seq }) => [stream, seq]))).toEqual(
+				new Map(stored.map(({ stream, seq }) => [stream, seq])),
+			);
 		});
 
 		it("keeps every computer at its provider, with its work, where its pod's work went", async () => {

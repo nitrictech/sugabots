@@ -29,7 +29,7 @@ export function inMemoryEventStore({
 }: InMemoryOptions = {}): InMemoryEventStore {
 	const rows: MemoryRow[] = [];
 	let next = 0;
-	let prunedThrough = 0;
+	const prunedThrough = new Map<EventStream, number>();
 
 	const following = (feeds: ReadonlyArray<EventStore.Feed>, limit: number) =>
 		rows
@@ -66,37 +66,39 @@ export function inMemoryEventStore({
 			return new Map(
 				streams.map((stream) => [
 					stream,
-					rows.findLast((row) => row.stream === stream && row.seq >= prunedThrough)?.seq ??
-						EventStore.buildEmptyCursor(stream, next),
+					rows.findLast(
+						(row) => row.stream === stream && row.seq >= (prunedThrough.get(stream) ?? 0),
+					)?.seq ?? EventStore.buildEmptyCursor(stream, next),
 				]),
 			);
 		},
 
 		async replayPage(page, limit) {
 			if ("feed" in page) {
-				return page.feed.since < prunedThrough
+				return page.feed.since < (prunedThrough.get(page.feed.stream) ?? 0)
 					? undefined
 					: following([page.feed, ...page.controls], limit);
 			}
 			const { stream, cursor, controls } = page;
 			const position = EventStore.afterCursor(cursor);
-			if (position < prunedThrough) return undefined;
+			const boundary = prunedThrough.get(stream) ?? 0;
+			if (position < boundary) return undefined;
 			const retained =
 				typeof cursor === "string"
 					? cursor === EventStore.buildEmptyCursor(stream, position) &&
 						position <= next &&
-						!rows.some(
-							(row) => row.stream === stream && row.seq >= prunedThrough && row.seq <= position,
-						)
+						!rows.some((row) => row.stream === stream && row.seq >= boundary && row.seq <= position)
 					: rows.some((row) => row.seq === cursor && row.stream === stream);
 			return retained ? following([{ stream, since: position }, ...controls], limit) : undefined;
 		},
 
 		async prune(before) {
-			const survivors = rows.filter((row) => row.createdAt >= before);
+			const survivors: MemoryRow[] = [];
+			for (const row of rows) {
+				if (row.createdAt >= before) survivors.push(row);
+				else prunedThrough.set(row.stream, Math.max(prunedThrough.get(row.stream) ?? 0, row.seq));
+			}
 			const removed = rows.length - survivors.length;
-			const latestRemoved = rows.findLast((row) => row.createdAt < before);
-			prunedThrough = Math.max(prunedThrough, latestRemoved?.seq ?? 0);
 			rows.splice(0, rows.length, ...survivors);
 			return removed;
 		},

@@ -15490,6 +15490,80 @@
         "n|tbl|public.computer_provider",
         "n|sch|public"
       ]
+    },
+    {
+      "statementType": "drop_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "event_retention"
+      ],
+      "writes": [
+        "s|ck|public.event_retention.event_retention_singleton",
+        "n|ck|public.event_retention.event_retention_singleton",
+        "e|ck|public.event_retention.event_retention_singleton",
+        "n|con|public.event_retention.event_retention_singleton"
+      ],
+      "reads": [
+        "n|tbl|public.event_retention",
+        "n|sch|public",
+        "e|col|public.event_retention.singleton"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "event_retention",
+        "stream"
+      ],
+      "writes": [
+        "s|col|public.event_retention.stream",
+        "n|col|public.event_retention.stream",
+        "e|col|public.event_retention.stream"
+      ],
+      "reads": [
+        "n|tbl|public.event_retention",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "event_retention",
+        "singleton"
+      ],
+      "writes": [
+        "s|col|public.event_retention.singleton",
+        "n|col|public.event_retention.singleton",
+        "e|col|public.event_retention.singleton"
+      ],
+      "reads": [
+        "n|tbl|public.event_retention",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "alter_pk",
+      "statementTarget": [
+        "table",
+        "public",
+        "event_retention"
+      ],
+      "writes": [
+        "s|pk|public.event_retention"
+      ],
+      "reads": [
+        "n|tbl|public.event_retention",
+        "n|sch|public",
+        "n|col|public.event_retention.stream"
+      ],
+      "sharedWrites": [
+        "e|uniqueness|public.event_retention.singleton"
+      ]
     }
   ],
   "deltas": [
@@ -25792,6 +25866,39 @@
         "generated": null,
         "identity": null,
         "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "event_retention",
+        "name": "stream",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"event_retention\",\"singleton\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"public\",\"event_retention\",\"event_retention_singleton\"]"
+    },
+    {
+      "op": "alter",
+      "key": "pks\u0000[\"public\",\"event_retention\",\"event_retention_pkey\"]",
+      "set": {
+        "columns": [
+          "stream"
+        ]
       }
     }
   ]

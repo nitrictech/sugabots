@@ -3400,3 +3400,8 @@ CREATE TABLE "event_retention" (
 ALTER TABLE "computer" ADD COLUMN "applied_settings" jsonb;
 --> statement-breakpoint
 ALTER TABLE "computer_provider" ADD COLUMN "configuration_revision" integer DEFAULT 0 NOT NULL;
+--> statement-breakpoint
+ALTER TABLE "event_retention" DROP CONSTRAINT "event_retention_singleton";--> statement-breakpoint
+ALTER TABLE "event_retention" ADD COLUMN "stream" text;--> statement-breakpoint
+ALTER TABLE "event_retention" DROP COLUMN "singleton";--> statement-breakpoint
+ALTER TABLE "event_retention" ADD PRIMARY KEY ("stream");

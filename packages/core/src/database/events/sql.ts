@@ -1,15 +1,6 @@
 import type { DurableEventType, StreamEvent } from "@sugabots/contracts";
 import { type SQLWrapper, sql } from "drizzle-orm";
-import {
-	bigint,
-	bigserial,
-	boolean,
-	check,
-	index,
-	jsonb,
-	pgTable,
-	text,
-} from "drizzle-orm/pg-core";
+import { bigint, bigserial, index, jsonb, pgTable, text } from "drizzle-orm/pg-core";
 import { stamp } from "../sql.ts";
 
 export const CONTROL_EVENT_TYPES = [
@@ -43,11 +34,7 @@ export const event = pgTable(
 	],
 );
 
-export const eventRetention = pgTable(
-	"event_retention",
-	{
-		singleton: boolean("singleton").primaryKey(),
-		prunedThrough: bigint("pruned_through", { mode: "number" }).notNull(),
-	},
-	(table) => [check("event_retention_singleton", sql`${table.singleton}`)],
-);
+export const eventRetention = pgTable("event_retention", {
+	stream: text("stream").primaryKey(),
+	prunedThrough: bigint("pruned_through", { mode: "number" }).notNull(),
+});
