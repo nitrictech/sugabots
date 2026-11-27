@@ -188,6 +188,24 @@ export const ReviewOnAPhone = meta.story({
 	},
 });
 
+/** Regions with commas still show exactly which names the connector receives. */
+export const ListEntryBoundaries = meta.story({
+	globals: { ...PHONE, theme: "light" },
+	args: {
+		call: asking({
+			tool: "linear__update_issue",
+			input: { current_labels: ["North, West"], next_labels: ["North", "West"] },
+		}),
+		connector: linear,
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
+		const request = await screen.findByRole("dialog", { name: "Update issue" });
+		await expect(request).toHaveTextContent('["North, West"]');
+		await expect(request).toHaveTextContent('["North","West"]');
+	},
+});
+
 /** ReviewOnAPhoneAsAViewer opens the request to read, saying it waits on someone with permission where the buttons would be. */
 export const ReviewOnAPhoneAsAViewer = meta.story({
 	globals: PHONE,

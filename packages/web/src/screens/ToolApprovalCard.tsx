@@ -670,8 +670,11 @@ function SmallRecord({ fields }: { fields: Record<string, unknown> }) {
  */
 function PlainValue({ value }: { value: unknown }) {
 	if (isPlainList(value)) {
-		if (value.length === 0) return <Quiet>None</Quiet>;
-		return <span className="text-sm leading-normal">{value.map(String).join(", ")}</span>;
+		return (
+			<code className="whitespace-pre-wrap wrap-anywhere text-sm leading-normal">
+				{JSON.stringify(value)}
+			</code>
+		);
 	}
 	if (value === null || value === undefined || value === "") return <Quiet>Empty</Quiet>;
 	if (typeof value === "boolean") return <Quiet>{value ? "Yes" : "No"}</Quiet>;
