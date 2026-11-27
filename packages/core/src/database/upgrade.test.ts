@@ -2470,14 +2470,7 @@ it.skipIf(!process.env.DATABASE_URL)(
 					analyze artifact, orphan_file_bot, orphan_file_chat;
 				`);
 				let discardedPairs = 0;
-				for (const update of updates) {
-					const { rows: plan } = await client.query<{ "QUERY PLAN": string }>(
-						`explain (analyze, timing off) ${update}`,
-					);
-					for (const { "QUERY PLAN": line } of plan) {
-						discardedPairs += Number(/Rows Removed by Join Filter: (\d+)/.exec(line)?.[1] ?? 0);
-					}
-				}
+				for (const update of updates) discardedPairs += await countDiscardedPairs(client, update);
 				const { rows } = await client.query(`
 					select count(*)::int as misplaced
 					from artifact where created_in_thread_id is distinct from md5('chat' || (id % 300))::uuid
@@ -2491,6 +2484,39 @@ it.skipIf(!process.env.DATABASE_URL)(
 	},
 	UPGRADE_TIMEOUT_MS,
 );
+
+interface JoinPlan {
+	readonly "Actual Loops": number;
+	readonly "Rows Removed by Join Filter"?: number;
+	readonly Plans?: readonly JoinPlan[];
+}
+
+function countJoinFilterRows(plan: JoinPlan): number {
+	const removed = (plan["Rows Removed by Join Filter"] ?? 0) * plan["Actual Loops"];
+	return (
+		removed + (plan.Plans ?? []).reduce((total, child) => total + countJoinFilterRows(child), 0)
+	);
+}
+
+async function countDiscardedPairs(client: pg.Client, statement: string) {
+	const {
+		rows: [result],
+	} = await client.query<{ "QUERY PLAN": [{ Plan: JoinPlan }] }>(
+		`explain (analyze, timing off, format json) ${statement}`,
+	);
+	if (!result) throw new Error("EXPLAIN returned no plan");
+	return countJoinFilterRows(result["QUERY PLAN"][0].Plan);
+}
+
+it("counts rows discarded by a join filter across every loop of its plan node", () => {
+	expect(
+		countJoinFilterRows({
+			"Actual Loops": 1,
+			"Rows Removed by Join Filter": 1,
+			Plans: [{ "Actual Loops": 12, "Rows Removed by Join Filter": 3 }, { "Actual Loops": 0 }],
+		}),
+	).toBe(37);
+});
 
 it.skipIf(!process.env.DATABASE_URL)(
 	"keeps replies referenced by queued work without comparing every reply to every payload",
