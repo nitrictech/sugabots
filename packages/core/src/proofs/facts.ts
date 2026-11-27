@@ -339,11 +339,11 @@ function botReaches(
 }
 
 /**
- * Whether `actor` is one of the bot's managers: its creator, unless they are
- * now a viewer and it isn't their Personal Assistant, and an admin, for a bot
- * that isn't personal. The grant
- * tables' `bot.update` also lets an admin manage a personal bot; the docs
- * leave an admin only restricting one, which `CanRestrictBot` proves.
+ * Whether `actor` is one of the bot's managers: its creator, while they reach
+ * it, unless they are now a viewer and it isn't their Personal Assistant, and
+ * an admin, for a bot that isn't personal. The grant tables' `bot.update` also
+ * lets an admin manage a personal bot; the docs leave an admin only
+ * restricting one, which `CanRestrictBot` proves.
  */
 export function managesBot(actor: Actor, bot: BotFacts): boolean {
 	const updates = mayOnBot(actor, "bot.update", bot);

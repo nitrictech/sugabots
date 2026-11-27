@@ -205,6 +205,7 @@ export const failureForError = {
 	// What was asked for can't be done as asked.
 	AdministratorInEveryPrivateBot: BadRequest,
 	AdministratorInEveryProject: BadRequest,
+	CreatorInOwnPrivateBot: BadRequest,
 	AssistantHandleFixed: BadRequest,
 	AssistantInstructionsManaged: BadRequest,
 	AutomationRepositoryNotConnected: BadRequest,

@@ -215,7 +215,10 @@ export const botMemberSchema = Schema.Struct({
 	name: Schema.String,
 	email: emailSchema,
 	image: Schema.NullOr(Schema.String),
-	/** Whether they can be taken out of it. Never an administrator, who is in every private bot. */
+	/**
+	 * Whether they can be taken out of it. Never an administrator, who is in
+	 * every private bot, nor its creator, who stays in their own.
+	 */
 	removable: Schema.Boolean,
 });
 

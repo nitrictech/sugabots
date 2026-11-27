@@ -179,6 +179,21 @@ export class AdministratorInEveryPrivateBot
 	}
 }
 
+/** Whoever made a private bot stays one of its members while they are in its workspace. */
+export class CreatorInOwnPrivateBot
+	extends Schema.TaggedError<CreatorInOwnPrivateBot>()("CreatorInOwnPrivateBot", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "A private bot's creator can't be taken out of it";
+	}
+	get userMessage() {
+		return userText`Whoever made a private bot stays one of its members`;
+	}
+}
+
 /** The member to take out of the private bot isn't one of its members. */
 export class NotBotMember
 	extends Schema.TaggedError<NotBotMember>()("NotBotMember", {})

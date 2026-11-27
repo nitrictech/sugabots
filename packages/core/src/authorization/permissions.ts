@@ -298,9 +298,9 @@ const botTalkerGrants = (role: WorkspaceRole) =>
 	role === "viewer" ? BOT_VIEWER_GRANTS : BOT_TALKER_GRANTS;
 
 /**
- * What a bot's creator, or an administrator, may do with it besides use it:
- * change it, and read the configuration they change, whether or not they
- * reach it.
+ * What a bot's creator, while they reach it, or an administrator, whether or
+ * not they reach it, may do with it besides use it: change it, and read the
+ * configuration they change.
  */
 const BOT_MANAGER_GRANTS = new Set<BotPermission>([
 	"bot.settings.read",
@@ -390,8 +390,10 @@ export function reachesBot(actor: Actor, bot: BotFacts): boolean {
 
 /**
  * Whether the caller may take a bot-addressed action. Using a bot takes
- * reach; changing it takes being its creator or an administrator, who may
- * change a personal bot they don't reach.
+ * reach; changing it takes being its creator, while they reach it, or an
+ * administrator, who may change a bot they don't reach. A private bot's
+ * creator who isn't one of its members, as after an upgrade made it private
+ * without them, has no say over it.
  */
 export function mayOnBot(actor: Actor, permission: BotPermission, bot: BotFacts): boolean {
 	const role = roleOnBot(actor, bot);
@@ -400,7 +402,8 @@ export function mayOnBot(actor: Actor, permission: BotPermission, bot: BotFacts)
 	// one, and a personal one is its creator's alone.
 	if (permission === "bot.members.manage" && bot.visibility !== "private") return false;
 	const manages =
-		role !== "viewer" && (managesEveryBot(actor) || bot.createdById === actor.memberId);
+		role !== "viewer" &&
+		(managesEveryBot(actor) || (bot.createdById === actor.memberId && reachesBot(actor, bot)));
 	if (manages && BOT_MANAGER_GRANTS.has(permission)) return true;
 	return reachesBot(actor, bot) && botTalkerGrants(role).has(permission);
 }

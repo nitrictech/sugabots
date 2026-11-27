@@ -88,12 +88,12 @@ export interface Interface {
 		botId: string,
 		memberId: string,
 	) => Effect.Effect<boolean>;
-	/** Refuses an administrator, who belongs to every private bot. */
+	/** Refuses an administrator, who belongs to every private bot, and the bot's creator. */
 	readonly removeMember: (
 		workspaceId: string,
 		botId: string,
 		memberId: string,
-	) => Effect.Effect<"removed" | "not_a_member" | "administrator">;
+	) => Effect.Effect<"removed" | "not_a_member" | "administrator" | "creator">;
 	/** Removes the bot and its default project once the computer is gone. */
 	readonly remove: (workspaceId: string, botId: string) => Effect.Effect<void, SystemBotImmutable>;
 	/**
@@ -327,6 +327,14 @@ export const make = Effect.gen(function* () {
 								.limit(1),
 						);
 						if (administersWorkspace(held?.role)) return "administrator";
+						const [made] = yield* query((db) =>
+							db
+								.select({ id: bot.id })
+								.from(bot)
+								.where(and(eq(bot.id, botId), eq(bot.createdById, memberId)))
+								.limit(1),
+						);
+						if (made) return "creator";
 						const removed = yield* query((db) =>
 							db
 								.delete(botMember)

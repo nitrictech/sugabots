@@ -34,6 +34,7 @@ import type { MayBrief } from "../../proofs/may-brief.ts";
 import type { CanChangeChat, CanTakePart } from "../../proofs/project-permissions.ts";
 import type { Named } from "../../proofs/proof.ts";
 import type { ReachesAutomation } from "../../proofs/reaches-automation.ts";
+import type { ReachesBot } from "../../proofs/reaches-bot.ts";
 import type { ReachesChat } from "../../proofs/reaches-chat.ts";
 import type { ReachesProject } from "../../proofs/reaches-project.ts";
 import { processLayer, Tier } from "../../tiers.ts";
@@ -57,12 +58,13 @@ import { reachedChatOfKind } from "./reached-chat.ts";
 export interface Interface {
 	/**
 	 * Starts the chat in which the bot `canManage` is about interviews the
-	 * member, who made it, to write its own instructions: once, while it still
-	 * has the interview's instructions, a model and no chats. Null when it is
-	 * not due one, as for a manager who didn't make it.
+	 * member, who made it and talks to it, to write its own instructions: once,
+	 * while it still has the interview's instructions, a model and no chats.
+	 * Null when it is not due one, as for a manager who didn't make it.
 	 */
 	readonly startInterview: <P, B>(
 		isMember: IsMember<P>,
+		reach: ReachesBot<P, B>,
 		canManage: CanManageBot<P, B>,
 	) => Effect.Effect<ProjectChat | null>;
 	/**
@@ -254,7 +256,7 @@ export const make = Effect.gen(function* () {
 	});
 
 	return Service.of({
-		startInterview: (isMember, canManage) =>
+		startInterview: (isMember, _reach, canManage) =>
 			operation(
 				"startInterview",
 				transaction(

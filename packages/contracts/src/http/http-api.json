@@ -407,6 +407,7 @@
 			"errors": {
 				"ActionForbidden": 403,
 				"AdministratorInEveryPrivateBot": 400,
+				"CreatorInOwnPrivateBot": 400,
 				"NotBotMember": 404,
 				"ResourceHidden": 404
 			}

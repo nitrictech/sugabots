@@ -20,6 +20,7 @@ import {
 	BotGone,
 	BotHandleReserved,
 	BotNameTaken,
+	CreatorInOwnPrivateBot,
 	EmptyBotUpdate,
 	NotBotMember,
 	PersonalVisibilityFixed,
@@ -217,10 +218,10 @@ export const botsContracts = {
 	}),
 	"bots.removeMember": OperationContract.make("bots.removeMember", {
 		description:
-			"Take a member out of a private bot. The workspace's owner and admins stay in every one.",
+			"Take a member out of a private bot. The workspace's owner and admins stay in every one, and its creator in their own.",
 		input: Schema.Struct({ botId: uuidSchema, memberId: uuidSchema }),
 		output: Schema.Void,
-		errors: [...refusals, AdministratorInEveryPrivateBot, NotBotMember],
+		errors: [...refusals, AdministratorInEveryPrivateBot, CreatorInOwnPrivateBot, NotBotMember],
 		changes: true,
 		http: { kind: "offered", method: "DELETE", path: "/bots/:botId/members/:memberId" },
 		botLoop: changesWhoReaches,

@@ -15,6 +15,7 @@ import {
 	type BotGone,
 	type BotHandleReserved,
 	type BotNameTaken,
+	CreatorInOwnPrivateBot,
 	EmptyBotUpdate,
 	NotBotMember,
 	PersonalVisibilityFixed,
@@ -120,11 +121,18 @@ export interface Interface {
 		canChange: CanChangeBotMembers<P, B>,
 		member: Named<U, string>,
 	) => Effect.Effect<void, NotInWorkspace, Transaction>;
-	/** Takes `member` out of the private bot. Refuses an administrator, who belongs to every one. */
+	/**
+	 * Takes `member` out of the private bot. Refuses an administrator, who
+	 * belongs to every one, and its creator, who stays in their own.
+	 */
 	readonly removeMember: <P, B, U>(
 		canChange: CanChangeBotMembers<P, B>,
 		member: Named<U, string>,
-	) => Effect.Effect<void, AdministratorInEveryPrivateBot | NotBotMember, Transaction>;
+	) => Effect.Effect<
+		void,
+		AdministratorInEveryPrivateBot | CreatorInOwnPrivateBot | NotBotMember,
+		Transaction
+	>;
 	/** Records a deletion after ensuring the bot is free to delete. */
 	readonly beginRemoval: <P, B>(
 		canDelete: CanDeleteBot<P, B>,
@@ -287,6 +295,8 @@ export const make = Effect.gen(function* () {
 							return yield* outbox.publish([botReachNarrowed(workspace)]);
 						case "administrator":
 							return yield* new AdministratorInEveryPrivateBot();
+						case "creator":
+							return yield* new CreatorInOwnPrivateBot();
 						case "not_a_member":
 							return yield* new NotBotMember();
 					}

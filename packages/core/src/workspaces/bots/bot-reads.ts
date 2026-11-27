@@ -64,9 +64,11 @@ export const botMembers = (botId: string) =>
 				name: member.name,
 				email: member.email,
 				image: member.image,
-				removable: sql<boolean>`${not(inArray(membership.role, [...ADMINISTERING_WORKSPACE_ROLES]))}`,
+				removable: sql<boolean>`${not(inArray(membership.role, [...ADMINISTERING_WORKSPACE_ROLES]))}
+					and ${bot.createdById} is distinct from ${botMember.memberId}`,
 			})
 			.from(botMember)
+			.innerJoin(bot, eq(bot.id, botMember.botId))
 			.innerJoin(member, eq(member.id, botMember.memberId))
 			.innerJoin(
 				membership,

@@ -8,11 +8,12 @@ import { meetBot } from "./meet-bot.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
 /**
- * P is one of the bot B's managers: its creator, unless now a viewer and B
- * isn't their Personal Assistant, and an admin, for a bot that isn't personal. It needs no reach: someone who neither manages nor reaches B gets
- * `ResourceHidden`, and someone who reaches it without managing it
- * `ActionForbidden`. A bot acting for its asker gets it only in member bounds,
- * or in its own chats for its own bot; a run never does.
+ * P is one of the bot B's managers: its creator, while they reach B, unless
+ * now a viewer and B isn't their Personal Assistant, and an admin, for a bot
+ * that isn't personal. An admin needs no reach: someone who neither manages
+ * nor reaches B gets `ResourceHidden`, and someone who reaches it without
+ * managing it `ActionForbidden`. A bot acting for its asker gets it only in
+ * member bounds, or in its own chats for its own bot; a run never does.
  */
 export interface CanManageBot<P, B> extends Proof<"CanManageBot", [P, B]> {
 	readonly principal: Named<P, Principal>;

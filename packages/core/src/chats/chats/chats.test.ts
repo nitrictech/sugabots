@@ -973,6 +973,14 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
 		});
 
+		it("starts only for a creator who reaches the bot", async () => {
+			await interviewDue({ visibility: "private" });
+
+			await expect(chats.startInterview(botId)).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+			});
+		});
+
 		it("starts once a missing model is configured", async () => {
 			await interviewDue({ model: null });
 			expect(await chats.startInterview(botId)).toBeNull();

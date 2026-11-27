@@ -20,6 +20,7 @@ import { type Executor, query } from "../database/database.ts";
 import {
 	automationRun,
 	bot,
+	botMember,
 	membership,
 	placedChat,
 	project,
@@ -255,11 +256,17 @@ export const approvalAudience = Effect.fn("Approvers.approvalAudience")(function
 	const role = sql`audience.role`;
 	const administers = sql<boolean>`${role} in ('owner', 'admin')`;
 	// What `managesBot` decides for one bot: a member manages their own Personal
-	// Assistants whatever their role.
+	// Assistants whatever their role, and a private bot they made while they are
+	// one of its members.
+	const createdAndReaches = (bot: SQL) => sql<boolean>`(${bot}.created_by_id = ${member} and
+		(${bot}.visibility <> 'private' or exists (
+			select 1 from ${botMember} as manager_bot_member
+			where manager_bot_member.bot_id = ${bot}.id and manager_bot_member.member_id = ${member}
+		)))`;
 	const managesBot = (
 		bot: SQL,
 	) => sql<boolean>`((${bot}.assistant_of is not null and ${bot}.created_by_id = ${member}) or (${role} <> 'viewer' and
-		(${bot}.created_by_id = ${member} or (${administers} and ${bot}.visibility <> 'personal'))))`;
+		(${createdAndReaches(bot)} or (${administers} and ${bot}.visibility <> 'personal'))))`;
 	const reachesChat = reachesChatFor(APPROVER_CHAT, member);
 	const managesComputer = sql<boolean>`computer_project.id is not null and case
 		when computer_project.default_of_bot_id is not null then ${managesBot(sql`computer_bot`)}

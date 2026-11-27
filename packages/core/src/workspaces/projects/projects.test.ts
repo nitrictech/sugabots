@@ -7,6 +7,7 @@ import {
 } from "@sugabots/contracts";
 import {
 	AdministratorInEveryPrivateBot,
+	CreatorInOwnPrivateBot,
 	NotBotMember,
 	PersonalVisibilityFixed,
 } from "@sugabots/contracts/errors/bots";
@@ -26,6 +27,7 @@ import { recordingFirstComputer } from "../../computers/testing.ts";
 import { query } from "../../database/database.ts";
 import {
 	bot,
+	botMember,
 	computer,
 	computerProvider,
 	membership,
@@ -910,6 +912,51 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await expect(
 				botsAs(editorId).removeMember({ botId: diary.id, memberId: viewerId }),
 			).rejects.toBeInstanceOf(NotBotMember);
+		});
+
+		it("keeps its creator among its members, who can't be taken out", async () => {
+			const diary = await aBot(editorId, "Diary", "private");
+
+			const listed = await botsAs(adminId).members({ botId: diary.id });
+			expect(listed.find(({ memberId }) => memberId === editorId)?.removable).toBe(false);
+			await expect(
+				botsAs(adminId).removeMember({ botId: diary.id, memberId: editorId }),
+			).rejects.toBeInstanceOf(CreatorInOwnPrivateBot);
+			expect(await botMemberIds(adminId, diary.id)).toContain(editorId);
+		});
+
+		it("gives its creator no say over it while they aren't one of its members, as when an upgrade left them out", async () => {
+			const diary = await aBot(editorId, "Diary", "private");
+			await onDatabase((db) =>
+				db
+					.delete(botMember)
+					.where(and(eq(botMember.botId, diary.id), eq(botMember.memberId, editorId))),
+			);
+
+			await expect(
+				botsAs(editorId).update({ botId: diary.id, changes: { name: "Mine" } }),
+			).rejects.toThrow(ResourceHidden);
+		});
+
+		it("puts a promoted member in every private bot, and keeps them there once demoted, until taken out", async () => {
+			const diary = await aBot(editorId, "Diary", "private");
+			const setRole = (role: "admin" | "viewer") =>
+				onDatabase((db) =>
+					db
+						.update(membership)
+						.set({ role })
+						.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, viewerId))),
+				);
+
+			await setRole("admin");
+			expect(await botMemberIds(editorId, diary.id)).toContain(viewerId);
+			await setRole("viewer");
+			const listed = await botsAs(editorId).members({ botId: diary.id });
+			expect(listed.find(({ memberId }) => memberId === viewerId)?.removable).toBe(true);
+			expect(await botsListedTo(viewerId)).toContain(diary.id);
+
+			await botsAs(editorId).removeMember({ botId: diary.id, memberId: viewerId });
+			expect(await botsListedTo(viewerId)).not.toContain(diary.id);
 		});
 
 		it("joins and leads private projects only, where the project's members talk to it", async () => {
