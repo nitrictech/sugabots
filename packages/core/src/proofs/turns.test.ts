@@ -1,8 +1,9 @@
 import type { JsonValue, ToolApprovalStatus } from "@sugabots/contracts";
 import { connectorToolKey, HOST_REQUEST_TOOL } from "@sugabots/contracts";
+import { ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { jsonSchema, tool } from "ai";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { Effect, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -54,6 +55,7 @@ import { approvalAudience } from "./approvers.ts";
 import { proveCanDecide } from "./can-decide.ts";
 import { proveCanUseChatComputer } from "./can-use-computer.ts";
 import { proveCanUseConnector } from "./can-use-connector.ts";
+import { proveConnectorCall } from "./connector-call.ts";
 import { proveEndsTurn } from "./ends-turn.ts";
 import { proveIsMember } from "./is-member.ts";
 import { named } from "./proof.ts";
@@ -754,6 +756,60 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await approved(principal, toolCallOf(allowed), always, input)).toBe("ok");
 			await setRole(a.workspace, approver, "editor");
 			expect(await approved(principal, toolCallOf(allowed), always, input)).toBe("ok");
+		});
+
+		it("lets a turn end while GitHub resolves an approval target", async () => {
+			const { a } = world;
+			const principal = await as.botFor(a.ed, a.pub.id, a.chat);
+			const tool = "open_pull_request";
+			const connectorId = await seedConnector(a.workspace, a.project, {
+				toolAccess: { [tool]: "ask" },
+				github: { appCredentialEncrypted: "unused" },
+			});
+			const input = { connectorId, tool, arguments: { repository: "acme/web" } };
+			const lookupStarted = Promise.withResolvers<void>();
+			const baseBranch = Promise.withResolvers<string>();
+			const approval = runOnPostgres(
+				named(
+					principal,
+					principal.turn,
+					connectorId,
+					{ kind: "approvalCheck" } as Call,
+					input,
+					(acting, turnId, connector, calling, input) =>
+						Effect.gen(function* () {
+							const running = yield* proveRunsTurn(acting, turnId);
+							yield* proveConnectorCall(running, connector, calling, input, {
+								revision: 1,
+								described: { name: tool, readOnly: false, destructive: false },
+								usesComputer: false,
+								resolveApprovalTargets: () =>
+									Effect.tryPromise({
+										try: async () => {
+											lookupStarted.resolve();
+											return { gitHubBaseBranch: await baseBranch.promise };
+										},
+										catch: () => new ApprovalRefused(),
+									}),
+							});
+						}),
+				),
+			);
+			void approval.catch(() => {});
+			try {
+				await Promise.race([lookupStarted.promise, approval]);
+				await onDatabase((db) =>
+					db
+						.update(turn)
+						.set({ status: "done", finishedAt: new Date() })
+						.where(sql`${turn.id} = (select id from ${turn}
+							where ${turn.id} = ${principal.turn} for update nowait)`),
+				);
+			} finally {
+				baseBranch.resolve("main");
+				await approval.catch(() => {});
+			}
+			await expect(approval).rejects.toMatchObject({ _tag: "TurnEnded" });
 		});
 
 		it("binds a connector upload to the approved machine and checks the one actually opened", async () => {

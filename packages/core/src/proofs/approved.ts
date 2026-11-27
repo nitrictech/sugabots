@@ -234,10 +234,10 @@ export const proveConnectorApproved = <P, X, I, T, K, C>(
 	connectorUse: CanUseConnector<NoInfer<P>, K>,
 	{
 		computerUse,
-		resolveTargets,
+		resolvedTargets,
 	}: {
 		computerUse?: CanUseChatComputer<NoInfer<P>, C>;
-		resolveTargets?: Effect.Effect<ResolvedTargets, ApprovalRefused> | undefined;
+		resolvedTargets?: ResolvedTargets | null | undefined;
 	} = {},
 ) =>
 	proveApproval(
@@ -249,14 +249,26 @@ export const proveConnectorApproved = <P, X, I, T, K, C>(
 		{
 			connectorUse,
 			computerUse,
-			resolveTarget: resolveTargets?.pipe(
-				Effect.map((targets) => ({
-					...(computerUse && computerApprovalTarget(computerUse)),
-					...targets,
-				})),
-			),
+			resolveTarget:
+				resolvedTargets === undefined
+					? undefined
+					: resolvedTargets === null
+						? Effect.fail(new ApprovalRefused())
+						: Effect.succeed({
+								...(computerUse && computerApprovalTarget(computerUse)),
+								...resolvedTargets,
+							}),
 		},
 	);
+
+export const needsConnectorApprovalTargets = (turnId: string, call: Call) => {
+	if (call.kind === "approvalCheck") return Effect.succeed(true);
+	if (call.kind !== "toolCall" || !isUuid(call.toolCall)) return Effect.succeed(false);
+	return Effect.map(
+		readRecordedCall(turnId, call.toolCall),
+		(decision) => decision?.status === "allowed",
+	);
+};
 
 const proveApproval = <
 	P,
