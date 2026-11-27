@@ -29,11 +29,16 @@ export const makeControls = Effect.gen(function* () {
 
 					let connectorConflict: ToolApprovalConflict["reason"];
 					if (decision === "allow_once" && checkConnector) {
-						const candidate = yield* requirePendingApproval(
-							query((db) => readCurrentApproval(db, callId, shownApprovalId)),
+						const candidate = yield* Effect.option(
+							requirePendingApproval(
+								query((db) => readCurrentApproval(db, callId, shownApprovalId)),
+							),
 						);
-						if (candidate.call.connectorId) {
-							connectorConflict = yield* checkConnector(candidate.call, candidate.executionNumber);
+						if (candidate._tag === "Some" && candidate.value.call.connectorId) {
+							connectorConflict = yield* checkConnector(
+								candidate.value.call,
+								candidate.value.executionNumber,
+							);
 						}
 					}
 					const conflict = yield* transaction(
