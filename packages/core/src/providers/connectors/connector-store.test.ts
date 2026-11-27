@@ -213,6 +213,9 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
 		await listTools(made.id, [lookup, edit, wipe]);
 
+		const before = await connectors.target(workspaceId, projectId, made.id);
+		if (!before) throw new Error("no target");
+
 		await connectors.update(workspaceId, projectId, made.id, { toolAccess: { edit: "allow" } });
 		await connectors.update(workspaceId, projectId, made.id, { toolAccess: { wipe: "ask" } });
 
@@ -222,7 +225,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 			"ask",
 		]);
 		expect((await connectors.target(workspaceId, projectId, made.id))?.configurationRevision).toBe(
-			1,
+			before.configurationRevision,
 		);
 		await expect(
 			connectors.update(workspaceId, projectId, made.id, { toolAccess: { ghost: "allow" } }),
@@ -622,22 +625,26 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 		if (!target) throw new Error("no target");
 		expect(target.configurationRevision).toBe(1);
 
-		await connectors.recordTest(workspaceId, made.id, target.configurationUpdatedAt, {
-			tools: [
-				{ name: "web_search_exa", description: "Search.", readOnly: true, destructive: null },
-			],
-		});
+		const tools = [
+			{ name: "web_search_exa", description: "Search.", readOnly: true, destructive: null },
+		];
+		await listTools(made.id, tools);
 		expect(await shown(made.id)).toMatchObject({
 			status: "connected",
 			tools: [{ name: "web_search_exa" }],
 		});
 		expect((await connectors.target(workspaceId, projectId, made.id))?.configurationRevision).toBe(
-			1,
+			2,
+		);
+
+		await listTools(made.id, tools);
+		expect((await connectors.target(workspaceId, projectId, made.id))?.configurationRevision).toBe(
+			2,
 		);
 
 		await connectors.update(workspaceId, projectId, made.id, { secret: "exa-key" });
 		expect((await connectors.target(workspaceId, projectId, made.id))?.configurationRevision).toBe(
-			2,
+			3,
 		);
 		expect(await shown(made.id)).toMatchObject({
 			status: "untested",

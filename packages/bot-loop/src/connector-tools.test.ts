@@ -148,6 +148,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			"off in the project",
 			"configuration changed",
 			"tool off",
+			"tool off by default",
 		] as const)("closes the approval and wakes the turn after %s", async (change) => {
 			let sourceChatId = chatId;
 			if (change === "off in the project") {
@@ -180,6 +181,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					"connector disabled": { enabled: false },
 					"configuration changed": { configurationRevision: 2 },
 					"tool off": { toolAccess: { wipe: "off" as const } },
+					"tool off by default": {
+						toolAccess: {},
+						tools: [{ name: "wipe", description: null, readOnly: false, destructive: true }],
+					},
 				};
 				await onDatabase((db) =>
 					db.update(connector).set(changes[change]).where(eq(connector.id, connectorId)),
@@ -349,6 +354,71 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(refused?.error);
 			},
 		);
+
+		it("refuses an offered connector tool after a test finds that it deletes data", async () => {
+			const listed = {
+				name: "lookup",
+				description: "Find a page",
+				readOnly: true,
+				destructive: false,
+			};
+			const [saved] = await onDatabase((db) =>
+				db
+					.update(connector)
+					.set({ handle: "wiki", tools: [listed] })
+					.where(eq(connector.id, connectorId))
+					.returning({ projectId: connector.projectId }),
+			);
+			if (!saved) throw new Error("No connector");
+			const connectors = await runOnPostgres(
+				ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
+			);
+			const target = await runOnPostgres(
+				connectors.target(workspaceId, saved.projectId, connectorId),
+			);
+			if (!target) throw new Error("No connector target");
+			const run = vi.fn(async () => ({ found: true }));
+			const catalog = ConnectorCatalog.from({
+				connectors,
+				httpClients: { for: () => fetch },
+				connect: async () => ({
+					list: async () => ({
+						definitions: { tools: [] },
+						instructions: undefined,
+						tools: [
+							{
+								described: listed,
+								inputSchema: { type: "object" },
+								tool: tool({
+									inputSchema: Schema.Struct({}).pipe(
+										Schema.toStandardSchemaV1,
+										Schema.toStandardJSONSchemaV1,
+									),
+								}),
+							},
+						],
+					}),
+					run,
+					close: async () => {},
+				}),
+			});
+			const { model } = calling(CALL_TOOL, { tool: "wiki__lookup", arguments: {} });
+			const afterTest = Models.fromStream((request) =>
+				(request.step === 0
+					? connectors.recordTest(workspaceId, connectorId, target.configurationUpdatedAt, {
+							tools: [{ ...listed, readOnly: false, destructive: true }],
+						})
+					: Effect.void
+				).pipe(Effect.andThen(model.stream(request))),
+			);
+
+			const ran = await loop.runTurn(chatId, { model: afterTest, connectorTools: catalog });
+
+			expect(run).not.toHaveBeenCalled();
+			expect(await callsOf(ran.turnId)).toMatchObject([
+				{ tool: "wiki__lookup", status: "failed", approvalStatus: null },
+			]);
+		});
 
 		it("parks the same recorded call when its tool switches to Ask before dispatch", async () => {
 			let runningId: string | undefined;

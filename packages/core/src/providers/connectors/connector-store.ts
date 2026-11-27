@@ -575,13 +575,19 @@ export const make = Effect.gen(function* () {
 				"recordTest",
 				Effect.gen(function* () {
 					const now = yield* DateTime.nowAsDate;
+					const tools = "tools" in outcome ? outcome.tools : undefined;
 					yield* query((db) =>
 						db
 							.update(connector)
 							.set({
 								lastTestedAt: now,
 								lastTestError: "error" in outcome ? outcome.error : null,
-								tools: "tools" in outcome ? outcome.tools : undefined,
+								tools,
+								configurationRevision:
+									tools === undefined
+										? undefined
+										: sql`case when ${connector.tools} is distinct from ${JSON.stringify(tools)}::jsonb
+										then ${connector.configurationRevision} + 1 else ${connector.configurationRevision} end`,
 							})
 							.where(
 								and(

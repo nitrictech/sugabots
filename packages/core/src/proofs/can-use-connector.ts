@@ -7,7 +7,14 @@ import { ActionForbidden, BotCannotReach, ResourceHidden } from "@sugabots/contr
 import { and, eq, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { Effect, Result } from "effect";
 import { type Executor, query } from "../database/database.ts";
-import { connector, placedChat, project, projectBotConnector, turn } from "../database/schema.ts";
+import {
+	type ConnectorRow,
+	connector,
+	placedChat,
+	project,
+	projectBotConnector,
+	turn,
+} from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
 import { toolsOf } from "../providers/connectors/connector-store.ts";
@@ -72,6 +79,13 @@ const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, strin
 		return { row, reach, mayWrite };
 	});
 
+const connectorToolSettings = {
+	kind: connector.kind,
+	url: connector.url,
+	tools: connector.tools,
+	toolAccess: connector.toolAccess,
+};
+
 function enabledConnectorRows(db: Executor, acting: Principal, selected: SQL | undefined) {
 	const turn =
 		acting._tag === "BotForAsker" || acting._tag === "AutomationRun" ? acting : undefined;
@@ -82,10 +96,7 @@ function enabledConnectorRows(db: Executor, acting: Principal, selected: SQL | u
 			projectId: connector.projectId,
 			configurationRevision: connector.configurationRevision,
 			handle: connector.handle,
-			kind: connector.kind,
-			url: connector.url,
-			tools: connector.tools,
-			toolAccess: connector.toolAccess,
+			...connectorToolSettings,
 			workingProjectId: sql<string | null>`case
 				when ${placedChat.projectId} = ${connector.projectId} or ${projectBotConnector.connectorId} is not null
 				then ${placedChat.projectId}
@@ -119,7 +130,7 @@ export const checkConnectorCallSettings = (call: {
 		if (connectorRevision === null || remoteToolName === null) return "connectorChanged";
 		const [current] = yield* query((db) =>
 			db
-				.select({ toolAccess: connector.toolAccess })
+				.select(connectorToolSettings)
 				.from(turn)
 				.innerJoin(placedChat, eq(placedChat.id, turn.chatId))
 				.innerJoin(connector, eq(connector.workspaceId, placedChat.workspaceId))
@@ -147,7 +158,7 @@ export const checkConnectorCallSettings = (call: {
 				.limit(1),
 		);
 		if (!current) return "connectorChanged";
-		return current.toolAccess[remoteToolName] === "off" ? "toolOff" : undefined;
+		return readToolSettings(current, remoteToolName).access === "off" ? "toolOff" : undefined;
 	});
 
 export const checkConnectorApprovalPermission = (
@@ -343,15 +354,29 @@ function checkToolUse(
 > {
 	if (listed && (listed.revision !== row.configurationRevision || listed.described.name !== tool))
 		return Result.fail(new ResourceHidden({ resource: "connector" }));
-	const described = (row.kind === "mcp" ? listed?.described : undefined) ??
-		toolsOf(row).find((described) => described.name === tool) ?? {
+	const use = readToolSettings(row, tool, listed?.described);
+	if (use.writeOrDelete && !mayWrite)
+		return Result.fail(new ActionForbidden({ proof: "CanUseConnector" }));
+	return Result.succeed(use);
+}
+
+function readToolSettings(
+	row: Pick<ConnectorRow, keyof typeof connectorToolSettings>,
+	tool: string,
+	listed?: ListedTool["described"],
+) {
+	const saved = toolsOf(row).find((described) => described.name === tool);
+	const described = (row.kind === "mcp" ? listed : undefined) ??
+		saved ?? {
 			name: tool,
-			description: null,
 			readOnly: null,
 			destructive: null,
 		};
-	const writeOrDelete = connectorToolWritesOrDeletes(described);
-	if (writeOrDelete && !mayWrite)
-		return Result.fail(new ActionForbidden({ proof: "CanUseConnector" }));
-	return Result.succeed({ writeOrDelete, access: toolAccessOf(row.toolAccess, described) });
+	return {
+		writeOrDelete: connectorToolWritesOrDeletes(described),
+		access:
+			saved && toolAccessOf(row.toolAccess, saved) === "off"
+				? ("off" as const)
+				: toolAccessOf(row.toolAccess, described),
+	};
 }
