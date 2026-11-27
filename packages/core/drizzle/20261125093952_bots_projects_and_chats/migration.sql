@@ -2973,41 +2973,6 @@ ALTER TABLE "turn" ADD COLUMN "asker_id" uuid;--> statement-breakpoint
 ALTER TABLE "turn" ADD COLUMN "asked_by_automation" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "turn" ADD CONSTRAINT "turn_asker_id_member_id_fkey" FOREIGN KEY ("asker_id") REFERENCES "member"("id") ON DELETE RESTRICT;--> statement-breakpoint
 
--- Who a turn answering `trigger_message` in `chat` acts for, worked out once, when it is asked for and when it is made: the member who wrote the message; when a bot's turn wrote it, that turn's asker, or its run; when its automation's trigger posted it, its run, with no member. A bot's message no turn wrote, such as a brief, or a message not written yet, such as an interview's first reply, acts for the member who started the chat.
-CREATE FUNCTION turn_asker(chat uuid, trigger_message uuid, OUT member_id uuid, OUT automation boolean)
-LANGUAGE sql STABLE AS $$
-	SELECT
-		CASE
-			WHEN answered.author_member_id IS NOT NULL THEN answered.author_member_id
-			WHEN answered.automation_trigger IS NOT NULL THEN NULL
-			WHEN writer.id IS NOT NULL THEN writer.asker_id
-			ELSE started.started_by_id
-		END,
-		coalesce(
-			answered.automation_trigger IS NOT NULL
-				OR (answered.author_member_id IS NULL AND writer.asked_by_automation),
-			false
-		)
-	FROM (SELECT chat AS chat_id) AS asked
-	LEFT JOIN "message" AS answered ON answered.id = trigger_message AND answered.chat_id = asked.chat_id
-	LEFT JOIN "turn" AS writer ON writer.id = answered.turn_id AND answered.author_bot_id IS NOT NULL
-	LEFT JOIN "project_chat" AS started ON started.chat_id = asked.chat_id;
-$$;--> statement-breakpoint
-
--- Stores the asker of every turn as it is made, however it is made.
-CREATE FUNCTION set_turn_asker() RETURNS trigger
-LANGUAGE plpgsql AS $$
-BEGIN
-	SELECT member_id, automation INTO NEW."asker_id", NEW."asked_by_automation"
-	FROM turn_asker(NEW."chat_id", NEW."trigger_message_id");
-	RETURN NEW;
-END;
-$$;--> statement-breakpoint
-
-CREATE TRIGGER turn_asker
-BEFORE INSERT ON "turn"
-FOR EACH ROW EXECUTE FUNCTION set_turn_asker();--> statement-breakpoint
-
 -- Resolve direct askers first, then carry them down to replies by other
 -- turns. A cycle without an asker has no seed.
 CREATE TEMP TABLE "turn_asker_ancestry" ON COMMIT DROP AS
@@ -3099,11 +3064,6 @@ ALTER TABLE "turn" DROP COLUMN "interrupt_requested";--> statement-breakpoint
 ALTER TABLE "turn" ADD CONSTRAINT "turn_end_requested_valid" CHECK ("end_requested" in ('interrupted', 'run_ended', 'lost_reach', 'approval_expired'));
 --> statement-breakpoint
 -- ## Turn askers in code
--- The turn store now writes each turn's asker as it makes the turn, so no trigger does.
-DROP TRIGGER "turn_asker" ON "turn";--> statement-breakpoint
-DROP FUNCTION set_turn_asker();--> statement-breakpoint
-DROP FUNCTION turn_asker(uuid, uuid);--> statement-breakpoint
-
 -- Who the bot `answering_bot`'s turn answering `trigger_message` in `chat` acts for: the member who wrote the message; when a bot's turn wrote it, that turn's asker, or its run; when its automation's trigger posted it, its run. A personal bot's run, in its own chats, acts for its creator. A bot's message no turn wrote, such as a brief, acts for the member who started the chat, and so does an interview's turn, which answers its own first reply.
 CREATE FUNCTION turn_asker(chat uuid, trigger_message uuid, answering_bot uuid, OUT member_id uuid, OUT automation boolean)
 LANGUAGE sql STABLE AS $$

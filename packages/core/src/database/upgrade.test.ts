@@ -2071,6 +2071,19 @@ it.skipIf(!process.env.DATABASE_URL)(
 	},
 );
 
+it("keeps the turn asker function without installing an insert trigger during the upgrade", async () => {
+	const migration = await readFile(
+		join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
+		"utf8",
+	);
+	expect(migration).not.toMatch(/create\s+trigger\s+"?turn_asker"?\s/i);
+	expect(migration).not.toContain("FUNCTION set_turn_asker(");
+	expect(migration).not.toContain("FUNCTION turn_asker(chat uuid, trigger_message uuid, OUT");
+	expect(migration).toContain(
+		"FUNCTION turn_asker(chat uuid, trigger_message uuid, answering_bot uuid,",
+	);
+});
+
 /** Migrates the database at `url` through `last`, as an installation of `main` was. */
 async function migrateTo(url: string, last: string) {
 	const folder = await mkdtemp(join(tmpdir(), "migrations-"));
