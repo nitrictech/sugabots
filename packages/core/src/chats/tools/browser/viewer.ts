@@ -178,7 +178,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"show",
 				Effect.gen(function* () {
-					if (canUse.computer.value !== opened.id) {
+					if (canUse.computer.value !== opened.id || canUse.chat !== opened.chat) {
 						return yield* Effect.die(
 							new Error("A desktop was shown with another computer's proof"),
 						);
