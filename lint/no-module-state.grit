@@ -17,7 +17,7 @@ or {
 		not $state <: within or {
 			JsFunctionBody(),
 			JsStaticInitializationBlockClassMember()
-		},
+		} ,
 		$state <: or {
 			r"^let\s[\s\S]*",
 			contains or {
