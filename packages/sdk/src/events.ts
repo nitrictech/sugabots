@@ -205,7 +205,10 @@ async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<M
 		// and the cap, well above it, only stops a broken stream from buffering
 		// without end.
 		maxBufferSize: 2 * MAX_EVENT_CHARS,
+		// The stream ends at a frame past the limit: what came before it is
+		// delivered, and nothing after it.
 		onEvent: ({ id, data }) => {
+			if (tooLarge) return;
 			if (data.length > MAX_EVENT_CHARS) tooLarge = true;
 			else ready.push({ id, data });
 		},

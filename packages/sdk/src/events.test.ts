@@ -261,6 +261,27 @@ describe("parsing", () => {
 		);
 	});
 
+	it("delivers the events before a frame past the limit and none after it, in one chunk", async () => {
+		const oversized = frame({
+			event: "message.delta",
+			id: 2,
+			data: { pad: "x".repeat(MAX_EVENT_CHARS) },
+		});
+		const { fetch } = scripted([
+			frame({ event: "turn.started", id: 1 }) +
+				oversized +
+				frame({ event: "turn.completed", id: 3 }),
+		]);
+		const delivered: string[] = [];
+
+		const reading = (async () => {
+			for await (const event of events(fetch).chat("c1")) delivered.push(event.type);
+		})();
+
+		await expect(reading).rejects.toMatchObject({ _tag: "InternalServerError" });
+		expect(delivered).toEqual(["turn.started"]);
+	});
+
 	it("ignores the server's keep-alive comments", async () => {
 		const { fetch } = scripted(`: ping\n\n: ping\n\n${frame({ event: "turn.started", id: 1 })}`);
 
