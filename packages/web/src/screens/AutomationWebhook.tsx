@@ -12,6 +12,7 @@ import {
 	type WebhookSource,
 	webhookSecretLongEnough,
 } from "@sugabots/contracts";
+import { isApiFailure } from "@sugabots/sdk";
 import { Eye, EyeOff, Webhook } from "lucide-react";
 import { type ChangeEvent, type KeyboardEvent, type ReactNode, useId, useState } from "react";
 import { client } from "@/api.ts";
@@ -220,7 +221,12 @@ export function WebhookGroups({
 	const { automation, owner } = placed;
 	const canManage = resourcePermissions(owner).manageAutomations;
 	const address = { projectId: automation.projectId, automationId: automation.id, triggerId };
-	const saved = useAutomationSecret({ ...address, canManage }).data;
+	const { data: currentSecret, error } = useAutomationSecret({ ...address, canManage });
+	const restrictedNote =
+		isApiFailure(error) && error.error?._tag === "WebhookSecretRestricted"
+			? error.error.userMessage
+			: undefined;
+	const saved = restrictedNote === undefined ? currentSecret : { kind: "none" as const };
 	const url = webhookAddress(triggerId);
 	return (
 		<>
@@ -244,6 +250,7 @@ export function WebhookGroups({
 					savingDeliveryId={savingDeliveryId}
 					onChangeDeliveryIdHeader={onChangeDeliveryIdHeader}
 					saved={saved}
+					restrictedNote={restrictedNote}
 				/>
 			) : (
 				<SettingsGroup note={authNote(auth)}>
@@ -257,11 +264,13 @@ export function WebhookGroups({
 						onChangeDeliveryIdHeader={onChangeDeliveryIdHeader}
 					/>
 					<SettingsControlRow label={secretLabel(auth)}>
-						{!canManage && (
-							<span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-								Set by members who manage automations
-							</span>
-						)}
+						<span role={canManage ? "status" : undefined} className="text-sm text-muted-foreground">
+							{canManage
+								? error
+									? failureMessage(error)
+									: "Loading…"
+								: "Set by members who manage automations"}
+						</span>
 					</SettingsControlRow>
 				</SettingsGroup>
 			)}
@@ -511,6 +520,7 @@ function SecretGroup({
 	savingDeliveryId,
 	onChangeDeliveryIdHeader,
 	saved,
+	restrictedNote,
 }: {
 	address: TriggerAddress;
 	auth: WebhookAuth;
@@ -519,6 +529,7 @@ function SecretGroup({
 	savingDeliveryId: boolean;
 	onChangeDeliveryIdHeader: (deliveryIdHeader: WebhookDeliveryIdHeaderInput) => Promise<unknown>;
 	saved: AutomationCurrentSecret;
+	restrictedNote?: string;
 }) {
 	const actions = useAutomationActions();
 	const savedSecret = saved.kind === "set" ? saved.secret : "";
@@ -535,11 +546,12 @@ function SecretGroup({
 	return (
 		<SettingsGroup
 			note={
-				saved.kind === "legacy"
+				restrictedNote ??
+				(saved.kind === "legacy"
 					? "Your existing bearer secret still works. Enter a new secret to replace it before changing authentication."
 					: saved.kind === "set"
 						? authNote(auth)
-						: NO_SECRET_NOTE
+						: NO_SECRET_NOTE)
 			}
 		>
 			<AuthRows

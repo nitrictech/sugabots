@@ -475,6 +475,55 @@ export const Webhook = meta.story({
 	},
 });
 
+/** An automation manager can replace a signing secret they can't see after an upgrade. */
+export const RestrictedMigratedWebhook = meta.story({
+	globals: { ...PHONE, theme: "light" },
+	beforeEach({ msw }) {
+		const secretPath = `${API}/projects/:projectId/automations/${incidentIntake.automation.id}/triggers/:triggerId/secret`;
+		const message =
+			"Only the workspace owner and admins can see this webhook secret. Anyone who manages the automation can replace it.";
+		let replacement: string | undefined;
+		msw.use(
+			...automationsAnswer([incidentIntake]),
+			http.get(secretPath, () =>
+				replacement === undefined
+					? HttpResponse.json(
+							{
+								_tag: "Forbidden",
+								message,
+								error: {
+									_tag: "WebhookSecretRestricted",
+									userMessage: message,
+									isRetryable: false,
+								},
+							},
+							{ status: 403 },
+						)
+					: HttpResponse.json({ kind: "set", secret: replacement }),
+			),
+			http.post(secretPath, async ({ request }) => {
+				const { secret } = (await request.json()) as { secret: string };
+				replacement = secret;
+				return HttpResponse.json({ secret });
+			}),
+			...appHandlers({ role: "editor" }),
+		);
+	},
+	render: () => <StoryApp path={feedPath(incidentIntake)} />,
+	play: async ({ canvas, userEvent }) => {
+		const dialog = within(await openFirstTrigger(canvas));
+		const note = await dialog.findByText(/Anyone who manages the automation can replace it/);
+		await waitFor(() => expect(note).toBeVisible());
+		const secret = dialog.getByLabelText("Signing secret");
+		await expect(secret).toHaveValue("");
+		const replacement = "whsec_M2ca9iV54QkY8zG7rC31ALpF";
+		await userEvent.type(secret, replacement);
+		await userEvent.tab();
+		await waitFor(() => expect(note).not.toBeInTheDocument());
+		await expect(dialog.getByLabelText("Signing secret")).toHaveValue(replacement);
+	},
+});
+
 /** A bearer webhook can be given a new secret after an upgrade. */
 export const LegacyBearerWebhook = meta.story({
 	beforeEach({ msw }) {
