@@ -37,6 +37,7 @@ import { Compaction, CompactionRequest } from "../chats/compaction/compaction.wo
 import { DesktopViewer } from "../chats/tools/browser/viewer.ts";
 import { TurnComputers } from "../chats/tools/computer/turn-computers.ts";
 import { TurnRequests } from "../chats/turns/turns.ts";
+import { prepareDiskClearing } from "../computers/computer-disk-clearing.ts";
 import { ComputerNetwork } from "../computers/computer-network.ts";
 import { ComputerProviderStore } from "../computers/computer-provider-store.ts";
 import { ComputerSignIn } from "../computers/computer-sign-in.ts";
@@ -315,6 +316,37 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					applied_settings: null,
 				},
 			]);
+		});
+
+		it("keeps a helper's old computer folder until the asking chat can move it", async () => {
+			const previousChatId = migrationScale.orphanedCollaboration;
+			const previousFolder = `/workspace/threads/${previousChatId}`;
+			const deletedChat = legacy.threads.deleted;
+			const deletedFolder = `/workspace/threads/${deletedChat}`;
+			const computer = {
+				exec: (command: string) =>
+					Effect.succeed({
+						exitCode: 0,
+						stdout: {
+							text: command.includes("find ")
+								? [previousFolder, deletedFolder].join("\n")
+								: [previousFolder, deletedFolder]
+										.filter((path) => command.includes(path))
+										.join("\n"),
+							truncated: false,
+						},
+						stderr: { text: "", truncated: false },
+					}),
+			};
+			const clearing = await upgraded.run(
+				prepareDiskClearing(computer, legacy.workspace, 0).pipe(Effect.flatten),
+			);
+			expect(clearing.cleared).toEqual([{ chatId: deletedChat, reason: "chat_deleted" }]);
+			expect(
+				await upgraded.rows("select to_chat_id from computer_folder_move where from_chat_id = $1", [
+					previousChatId,
+				]),
+			).toEqual([{ to_chat_id: legacy.threads.trip }]);
 		});
 
 		it("keeps the shared GitHub app in the converted project and pauses its old triggers", async () => {

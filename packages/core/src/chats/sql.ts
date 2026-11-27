@@ -185,6 +185,22 @@ export const chat = pgTable(
 	],
 );
 
+export const computerFolderMove = pgTable(
+	"computer_folder_move",
+	{
+		fromChatId: uuid("from_chat_id").primaryKey(),
+		toChatId: uuid("to_chat_id").notNull(),
+	},
+	(table) => [
+		foreignKey({
+			columns: [table.toChatId],
+			foreignColumns: [chat.id],
+			name: "computer_folder_move_to_chat_fkey",
+		}).onDelete("cascade"),
+		index("computer_folder_move_to_chat_idx").on(table.toChatId),
+	],
+);
+
 /** A kind table's `kind`: always its own kind, so its row can only name a chat of that kind. */
 const kindOf = <Kind extends ChatKind>(kind: Kind) =>
 	text("kind")

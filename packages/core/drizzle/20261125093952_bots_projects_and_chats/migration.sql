@@ -402,6 +402,13 @@ WITH RECURSIVE removed_chat AS (
 	) dependent
 )
 SELECT "id" FROM removed_chat;--> statement-breakpoint
+CREATE TEMP TABLE "removed_collaboration_folder" ON COMMIT DROP AS
+SELECT t."id" AS "from_chat_id", parent."id" AS "to_chat_id"
+FROM "thread" t
+JOIN "removed_chat" removed ON removed."id" = t."id"
+JOIN "thread" parent ON parent."id" = t."conversation_id" AND parent."workspace_id" = t."workspace_id"
+WHERE t."type" = 'collaboration'
+	AND parent."id" NOT IN (SELECT "id" FROM "removed_chat");--> statement-breakpoint
 UPDATE "artifact" SET "created_in_thread_id" = NULL
 WHERE "created_in_thread_id" IN (SELECT "id" FROM "removed_chat");--> statement-breakpoint
 -- A file is reached through the thread it was made in. A file whose thread
@@ -2527,6 +2534,19 @@ BEGIN
 		RAISE EXCEPTION 'Collaboration chat ancestry has a cycle: %', array_to_string(affected_chats, ', ');
 	END IF;
 END $$;--> statement-breakpoint
+CREATE TABLE "computer_folder_move" (
+	"from_chat_id" uuid PRIMARY KEY,
+	"to_chat_id" uuid NOT NULL,
+	CONSTRAINT "computer_folder_move_to_chat_fkey" FOREIGN KEY ("to_chat_id") REFERENCES "chat" ("id") ON DELETE CASCADE
+);--> statement-breakpoint
+INSERT INTO "computer_folder_move" ("from_chat_id", "to_chat_id")
+SELECT "chat_id", "target_chat_id" FROM "collaboration_move"
+UNION ALL
+SELECT removed."from_chat_id", coalesce(moved."target_chat_id", removed."to_chat_id")
+FROM "removed_collaboration_folder" removed
+LEFT JOIN "collaboration_move" moved ON moved."chat_id" = removed."to_chat_id"
+WHERE EXISTS (SELECT 1 FROM "chat" WHERE "id" = coalesce(moved."target_chat_id", removed."to_chat_id"));--> statement-breakpoint
+CREATE INDEX "computer_folder_move_to_chat_idx" ON "computer_folder_move" ("to_chat_id");--> statement-breakpoint
 -- Turns and compactions asked for there never start. A turn waiting for
 -- approvals keeps its lane, so that once it is cancelled below the sweep
 -- for lost cancels finds its workflow, still waiting, and tells it to stop.

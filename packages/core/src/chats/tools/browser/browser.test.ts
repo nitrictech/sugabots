@@ -12,18 +12,24 @@ it("moves legacy work before opening a desktop, preserving files already in plac
 	const workspace = await mkdtemp(join(tmpdir(), "desktop-work-"));
 	try {
 		const bot = { botId: "planner", chatId: "trip", color: "green" } as const;
-		const place = placeOf(bot);
+		const place = { ...placeOf(bot), previousChatIds: ["budget"] };
 		const localPath = (path: string) => path.replace("/workspace", workspace);
 		const oldHome = localPath("/workspace/agents/planner");
 		const oldChat = localPath("/workspace/threads/trip");
+		const helperCheckout = localPath(join(Computers.LEGACY_CHATS_DIRECTORY, "budget/checkout"));
+		const otherCheckout = localPath(join(Computers.CHATS_DIRECTORY, "budget/checkout"));
 		for (const folder of [
 			join(oldHome, ".config"),
 			oldChat,
+			helperCheckout,
+			otherCheckout,
 			join(localPath(place.home), ".config"),
 			localPath(place.folder),
 		]) {
 			await mkdir(folder, { recursive: true });
 		}
+		await writeFile(join(helperCheckout, ".git"), "legacy checkout");
+		await writeFile(join(otherCheckout, ".git"), "other checkout");
 		await writeFile(join(oldHome, ".profile"), "legacy profile");
 		await writeFile(join(oldHome, ".config/preferences"), "legacy preferences");
 		await writeFile(join(oldChat, "plan.md"), "legacy plan");
@@ -66,6 +72,17 @@ it("moves legacy work before opening a desktop, preserving files already in plac
 		expect(await readFile(join(workspace, "chats/trip/plan.md"), "utf8")).toBe("current plan");
 		expect(await readFile(join(oldChat, "plan.md"), "utf8")).toBe("legacy plan");
 		await expect(readFile(join(oldChat, "notes.md"))).rejects.toHaveProperty("code", "ENOENT");
+		expect(
+			await readFile(join(workspace, "chats/trip/collaborations/budget/checkout/.git"), "utf8"),
+		).toBe("legacy checkout");
+		expect(
+			await readFile(
+				join(workspace, "chats/trip/collaborations/budget-chats/checkout/.git"),
+				"utf8",
+			),
+		).toBe("other checkout");
+		await expect(readFile(join(helperCheckout, ".git"))).rejects.toHaveProperty("code", "ENOENT");
+		await expect(readFile(join(otherCheckout, ".git"))).rejects.toHaveProperty("code", "ENOENT");
 		await Effect.runPromise(startDesktop(computer, place, bot));
 		expect(await readFile(join(workspace, "chats/trip/plan.md"), "utf8")).toBe("current plan");
 	} finally {

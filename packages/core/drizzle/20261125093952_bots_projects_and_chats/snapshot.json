@@ -15410,6 +15410,68 @@
       "reads": [
         "n|sch|public"
       ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "computer_folder_move"
+      ],
+      "writes": [
+        "s|tbl|public.computer_folder_move",
+        "n|tbl|public.computer_folder_move",
+        "e|tbl|public.computer_folder_move",
+        "n|rel|public.computer_folder_move",
+        "n|type|public.computer_folder_move",
+        "n|rel|public.computer_folder_move_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "computer_folder_move",
+        "computer_folder_move_to_chat_idx"
+      ],
+      "writes": [
+        "s|idx|public.computer_folder_move_to_chat_idx",
+        "n|idx|public.computer_folder_move_to_chat_idx",
+        "e|idx|public.computer_folder_move_to_chat_idx",
+        "n|rel|public.computer_folder_move_to_chat_idx"
+      ],
+      "reads": [
+        "n|tbl|public.computer_folder_move",
+        "n|sch|public",
+        "n|col|public.computer_folder_move.to_chat_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "computer_folder_move"
+      ],
+      "writes": [
+        "s|fk|public.computer_folder_move.computer_folder_move_to_chat_fkey",
+        "n|fk|public.computer_folder_move.computer_folder_move_to_chat_fkey",
+        "e|fk|public.computer_folder_move.computer_folder_move_to_chat_fkey",
+        "n|con|public.computer_folder_move.computer_folder_move_to_chat_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.computer_folder_move",
+        "n|sch|public",
+        "n|tbl|public.chat",
+        "n|sch|public",
+        "n|col|public.computer_folder_move.to_chat_id",
+        "n|col|public.chat.id",
+        "e|uniqueness|public.chat.id"
+      ]
     }
   ],
   "deltas": [
@@ -25598,6 +25660,104 @@
         "name": "event_retention_singleton",
         "value": "\"singleton\"",
         "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "computer_folder_move",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer_folder_move",
+        "name": "from_chat_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer_folder_move",
+        "name": "to_chat_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer_folder_move",
+        "name": "computer_folder_move_to_chat_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "to_chat_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer_folder_move",
+        "name": "computer_folder_move_to_chat_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "to_chat_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "chat",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer_folder_move",
+        "name": "computer_folder_move_pkey",
+        "columns": [
+          "from_chat_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
       }
     }
   ]

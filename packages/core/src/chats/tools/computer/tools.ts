@@ -50,12 +50,14 @@ export interface Place {
 	readonly folder: string;
 	/** The bot's home folder, its `HOME`: kept across all its chats. */
 	readonly home: string;
+	readonly previousChatIds: readonly string[];
 }
 
 export function placeOf(turn: { chatId: string; botId: string }): Place {
 	return {
 		folder: `${Computers.CHATS_DIRECTORY}/${turn.chatId}`,
 		home: `${Computers.BOTS_DIRECTORY}/${turn.botId}`,
+		previousChatIds: [],
 	};
 }
 

@@ -786,7 +786,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 				files: { read: () => Effect.die("Unexpected chat file read") },
 				run: Effect.runPromise,
 				computer: {
-					place: { folder: "/workspace/chat", home: "/workspace/home" },
+					place: { folder: "/workspace/chat", home: "/workspace/home", previousChatIds: [] },
 					run: Effect.runPromise,
 					open: async () => ({
 						record,

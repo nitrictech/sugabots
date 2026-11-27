@@ -31,7 +31,7 @@ import { type Failed, failed } from "../failed.ts";
 import { MAX_IMAGE_BYTES, shownImageType } from "../images.ts";
 import { unreadableFileRefusal } from "../unreadable-file.ts";
 import { type Copy, copyIntoComputer, safeFileName } from "./attachments.ts";
-import { prepareFoldersCommand } from "./folders.ts";
+import { loadComputerPlace, prepareFoldersCommand } from "./folders.ts";
 import {
 	type AttachToReply,
 	arrivalNote,
@@ -43,7 +43,6 @@ import {
 	networkNote,
 	openOncePerTurn,
 	type Place,
-	placeOf,
 	readSharableFile,
 	type StepOpened,
 	type TurnComputer,
@@ -186,7 +185,7 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const { workspaceId, projectId, turnId, chatId, botId, acceptsImages, attach } = turn;
 			const key = keyOf(turnId, principal.executionNumber);
-			const place = placeOf({ chatId, botId });
+			const place = yield* operation("forStep", loadComputerPlace({ chatId, botId }));
 			// Each call proves this again; the note tells a bot that may not use the computer why it has none.
 			const usable = yield* operation("forStep", canAskForComputer(principal));
 			const provider = projectId === null ? undefined : yield* providers.enabled(workspaceId);

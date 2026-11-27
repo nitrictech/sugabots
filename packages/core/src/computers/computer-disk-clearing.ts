@@ -4,7 +4,14 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { type Database, query } from "../database/database.ts";
-import { ACTIVE_TURN_STATUSES, automationRun, bot, placedChat, turn } from "../database/schema.ts";
+import {
+	ACTIVE_TURN_STATUSES,
+	automationRun,
+	bot,
+	computerFolderMove,
+	placedChat,
+	turn,
+} from "../database/schema.ts";
 import { Computers } from "./computers.ts";
 
 /** Caches in each bot's home that clearing may remove. */
@@ -134,8 +141,21 @@ function clearableChats(workspaceId: string, chatIds: readonly string[]) {
 				.orderBy(sql`max(${turn.startedAt}) nulls first`),
 		);
 		const existing = new Set(found.map((row) => row.id));
+		const pendingMoves = yield* query((db) =>
+			db
+				.select({ id: computerFolderMove.fromChatId })
+				.from(computerFolderMove)
+				.innerJoin(placedChat, eq(placedChat.id, computerFolderMove.toChatId))
+				.where(
+					and(
+						eq(placedChat.workspaceId, workspaceId),
+						inArray(computerFolderMove.fromChatId, [...chatIds]),
+					),
+				),
+		);
+		const preserved = new Set(pendingMoves.map(({ id }) => id));
 		const deleted = chatIds
-			.filter((chatId) => !existing.has(chatId))
+			.filter((chatId) => !existing.has(chatId) && !preserved.has(chatId))
 			.map((chatId): Clearable => ({ chatId, reason: "chat_deleted" }));
 		const finished = found
 			.filter((row) => row.activeTurns === 0)

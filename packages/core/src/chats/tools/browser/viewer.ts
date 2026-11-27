@@ -21,7 +21,7 @@ import { botRemovalStarted } from "../../../proofs/facts.ts";
 import type { Named } from "../../../proofs/proof.ts";
 import type { ReachesChat } from "../../../proofs/reaches-chat.ts";
 import { processLayer, Tier } from "../../../tiers.ts";
-import { placeOf } from "../computer/tools.ts";
+import { loadComputerPlace } from "../computer/folders.ts";
 import { startDesktop } from "./browser.ts";
 
 /**
@@ -186,7 +186,8 @@ export const make = Effect.gen(function* () {
 						);
 					}
 					const turn = { chatId: opened.chat, botId: opened.bot.id, color: opened.bot.color };
-					const desktop = yield* startDesktop(opened.computer, placeOf(turn), turn);
+					const place = yield* loadComputerPlace(turn);
+					const desktop = yield* startDesktop(opened.computer, place, turn);
 					// The watch server ignores input, so a viewer's mouse and keys never
 					// reach the desktop, whatever their client sends.
 					const server = canUse.control ? desktop.control : desktop.watch;
