@@ -12,7 +12,7 @@ import {
 	query,
 	transaction,
 } from "../database.ts";
-import { event } from "../schema.ts";
+import { CONTROL_EVENT_TYPES, event, isControlEvent } from "./sql.ts";
 
 /**
  * Where durable events are read back between a disconnect and a reconnect.
@@ -98,11 +98,7 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 					.where(
 						or(
 							...feeds.map(({ stream, since, types }) =>
-								and(
-									eq(event.stream, stream),
-									gt(event.seq, since),
-									types === undefined ? undefined : inArray(event.type, [...types]),
-								),
+								and(eq(event.stream, stream), gt(event.seq, since), typesInFeed(types)),
 							),
 						),
 					)
@@ -199,4 +195,15 @@ export interface Feed {
 	readonly stream: EventStream;
 	readonly since: number;
 	readonly types?: ReadonlyArray<DurableEventType>;
+}
+
+function typesInFeed(types: readonly DurableEventType[] | undefined) {
+	if (types === undefined) return undefined;
+	if (
+		types.length === CONTROL_EVENT_TYPES.length &&
+		CONTROL_EVENT_TYPES.every((type) => types.includes(type))
+	) {
+		return isControlEvent(event.type);
+	}
+	return inArray(event.type, [...types]);
 }

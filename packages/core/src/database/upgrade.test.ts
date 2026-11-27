@@ -123,6 +123,18 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			await rm(root, { recursive: true, force: true });
 		}, UPGRADE_TIMEOUT_MS);
 
+		it("adds the indexes for stream control events and computer leases", async () => {
+			const indexes = await upgraded.rows<{ indexname: string }>(`
+				select indexname from pg_indexes
+				where indexname in ('event_control_stream_seq_idx', 'computer_lease_holder_idx')
+				order by indexname
+			`);
+			expect(indexes.map(({ indexname }) => indexname)).toEqual([
+				"computer_lease_holder_idx",
+				"event_control_stream_seq_idx",
+			]);
+		});
+
 		it("keeps every computer at its provider, with its work, where its pod's work went", async () => {
 			const computers = await upgraded.rows<{
 				id: string;

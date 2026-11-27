@@ -149,6 +149,7 @@ export const computerLease = pgTable(
 	},
 	(table) => [
 		compositePrimaryKey({ columns: [table.computerId, table.holderKind, table.holderId] }),
+		index("computer_lease_holder_idx").on(table.holderKind, table.holderId),
 		check("computer_lease_holder_kind_check", sql`${table.holderKind} in ('turn', 'viewer')`),
 	],
 );

@@ -3326,3 +3326,7 @@ CREATE INDEX "message_author_chat_created_at_idx" ON "message" ("author_member_i
 CREATE INDEX "message_mention_trigram_idx" ON "message" USING gin ("content" gin_trgm_ops) WHERE "content" like '%@%' and "content" <> '' and "status" <> 'writing';
 --> statement-breakpoint
 CREATE INDEX "file_message_name_trigram_idx" ON "file" USING gin ("name" gin_trgm_ops) WHERE "message_id" is not null;
+--> statement-breakpoint
+CREATE INDEX "event_control_stream_seq_idx" ON "event" ("stream","seq") WHERE "type" in ('reach.changed', 'session.ended');
+--> statement-breakpoint
+CREATE INDEX "computer_lease_holder_idx" ON "computer_lease" ("holder_kind","holder_id");
