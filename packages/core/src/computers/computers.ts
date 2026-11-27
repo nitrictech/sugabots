@@ -197,17 +197,25 @@ export const WORK_DIRECTORY = "/workspace";
 /** Where each chat's folder is, named by the chat's id. */
 export const CHATS_DIRECTORY = `${WORK_DIRECTORY}/chats`;
 
+export const RECOVERED_COLLABORATIONS_DIRECTORY = `${WORK_DIRECTORY}/.sugabots-collaborations`;
+
 /** Where each bot's home folder is, named by the bot's id. */
 export const BOTS_DIRECTORY = `${WORK_DIRECTORY}/bots`;
 
 export const LEGACY_CHATS_DIRECTORY = "/workspace/threads";
 export const LEGACY_BOTS_DIRECTORY = "/workspace/agents";
-export const CHAT_DIRECTORIES = [CHATS_DIRECTORY, LEGACY_CHATS_DIRECTORY] as const;
+export const CHAT_DIRECTORIES = [
+	CHATS_DIRECTORY,
+	LEGACY_CHATS_DIRECTORY,
+	RECOVERED_COLLABORATIONS_DIRECTORY,
+] as const;
 export const BOT_DIRECTORIES = [BOTS_DIRECTORY, LEGACY_BOTS_DIRECTORY] as const;
 
 const FOLDER_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
-export const CHAT_FOLDER = new RegExp(`^(?:${CHAT_DIRECTORIES.join("|")})/(${FOLDER_ID})$`);
+export const CHAT_FOLDER = new RegExp(
+	`^(?:${CHAT_DIRECTORIES.map(RegExp.escape).join("|")})/(${FOLDER_ID})$`,
+);
 
 /** A bot's home folder, matched with the bot's id as its first group. */
 export const HOME_FOLDER = new RegExp(`^(?:${BOT_DIRECTORIES.join("|")})/(${FOLDER_ID})$`);

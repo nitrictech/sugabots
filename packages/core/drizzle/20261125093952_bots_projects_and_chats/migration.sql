@@ -460,7 +460,7 @@ FROM "thread" t
 JOIN "removed_chat" removed ON removed."id" = t."id"
 JOIN "thread" parent ON parent."id" = t."conversation_id" AND parent."workspace_id" = t."workspace_id"
 WHERE t."type" = 'collaboration'
-	AND parent."id" NOT IN (SELECT "id" FROM "removed_chat");--> statement-breakpoint
+	AND NOT EXISTS (SELECT 1 FROM "removed_chat" WHERE "id" = parent."id");--> statement-breakpoint
 UPDATE "artifact" SET "created_in_thread_id" = NULL
 WHERE "created_in_thread_id" IN (SELECT "id" FROM "removed_chat");--> statement-breakpoint
 -- A file is reached through the thread it was made in. A file whose thread

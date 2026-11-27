@@ -2193,6 +2193,87 @@ it("keeps the turn asker function without installing an insert trigger during th
 });
 
 it.skipIf(!process.env.DATABASE_URL)(
+	"finds surviving folder and file destinations without repeatedly reading the removal list from disk",
+	async () => {
+		const migration = await readFile(
+			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
+			"utf8",
+		);
+		const statements = migration.split("--> statement-breakpoint").map((sql) => sql.trim());
+		await withClient(process.env.DATABASE_URL ?? "", async (client) => {
+			await client.query("begin");
+			try {
+				await client.query(`
+					set local work_mem = '4MB';
+					create temp table thread (
+						id uuid primary key, workspace_id uuid, conversation_id uuid, type text,
+						pod_id uuid, host_agent_id uuid, updated_at int
+					);
+					create temp table removed_chat (id uuid not null);
+					create temp table pod (id uuid primary key, owner_id uuid);
+					create temp table agent (id uuid primary key, workspace_id uuid, pod_id uuid);
+					create temp table orphan_file_bot (bot_id uuid);
+					insert into pod values (md5('pod')::uuid, md5('owner')::uuid);
+					insert into agent
+					select md5('bot' || n)::uuid, md5('workspace')::uuid, md5('pod')::uuid
+					from generate_series(1, 300) n;
+					insert into orphan_file_bot select id from agent;
+					insert into thread (id, workspace_id, conversation_id, type, host_agent_id, updated_at)
+					select md5(kind || n)::uuid, md5('workspace')::uuid, md5('parent' || n)::uuid,
+						case when kind = 'child' then 'collaboration' else 'conversation' end,
+						md5('bot' || n)::uuid, case when kind = 'latest' then 2 else 1 end
+					from generate_series(1, 301) n cross join (values ('parent'), ('child'), ('latest')) kinds(kind);
+					insert into removed_chat
+					select md5('unrelated' || n)::uuid from generate_series(1, 299398) n
+					union all select md5('child' || n)::uuid from generate_series(1, 301) n
+					union all select md5('latest' || n)::uuid from generate_series(1, 300) n
+					union all select md5('parent301')::uuid;
+					analyze thread, removed_chat, pod, agent, orphan_file_bot;
+				`);
+				for (const sql of statements.filter((sql) =>
+					sql.startsWith('ALTER TABLE "removed_chat"'),
+				)) {
+					await client.query(sql);
+				}
+				for (const table of ["removed_collaboration_folder", "orphan_file_chat"]) {
+					const sql = statements.find((sql) => sql.startsWith(`CREATE TEMP TABLE "${table}"`));
+					const {
+						rows: [result],
+					} = await client.query<{
+						"QUERY PLAN": [{ Plan: { "Temp Read Blocks": number; "Local Hit Blocks": number } }];
+					}>(`explain (analyze, buffers, timing off, format json) ${sql}`);
+					const plan = result?.["QUERY PLAN"][0].Plan;
+					expect.soft(plan?.["Temp Read Blocks"], table).toBeLessThan(10_000);
+					expect.soft(plan?.["Local Hit Blocks"], table).toBeLessThan(100_000);
+				}
+				const {
+					rows: [destinations],
+				} = await client.query(`
+					select
+						(select count(*)::int from removed_collaboration_folder) as folders,
+						(select count(*)::int from orphan_file_chat) as files,
+						(select count(*)::int from generate_series(1, 300) n
+						 join removed_collaboration_folder on from_chat_id = md5('child' || n)::uuid
+							and to_chat_id = md5('parent' || n)::uuid) as correct_folders,
+						(select count(*)::int from generate_series(1, 300) n
+						 join orphan_file_chat on bot_id = md5('bot' || n)::uuid
+							and chat_id = md5('parent' || n)::uuid and not needs_chat) as correct_files
+				`);
+				expect(destinations).toEqual({
+					folders: 300,
+					files: 300,
+					correct_folders: 300,
+					correct_files: 300,
+				});
+			} finally {
+				await client.query("rollback");
+			}
+		});
+	},
+	UPGRADE_TIMEOUT_MS,
+);
+
+it.skipIf(!process.env.DATABASE_URL)(
 	"keeps replies referenced by queued work without comparing every reply to every payload",
 	async () => {
 		const migration = await readFile(

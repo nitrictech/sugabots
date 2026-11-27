@@ -40,6 +40,10 @@ function prepareFoldersCommand(place: Place, previousChatIds: readonly string[])
 	const oldChat = posix.join(Computers.LEGACY_CHATS_DIRECTORY, posix.basename(place.folder));
 	const oldHome = posix.join(Computers.LEGACY_BOTS_DIRECTORY, posix.basename(place.home));
 	const collaborations = posix.join(place.folder, "collaborations");
+	const recoveredCollaborations = posix.join(
+		Computers.RECOVERED_COLLABORATIONS_DIRECTORY,
+		posix.basename(place.folder),
+	);
 	return `
 move_folder_contents() (
 	[ ! -L "$2" ] && mkdir -p -- "$2" || exit 1
@@ -61,13 +65,23 @@ move_folder_contents() (
 )
 move_folder_contents ${shellQuoted(oldChat)} ${shellQuoted(place.folder)} || exit 1
 move_folder_contents ${shellQuoted(oldHome)} ${shellQuoted(place.home)} || exit 1
+collaborations=${shellQuoted(collaborations)}
+folder_path_collides() {
+	[ -L "$1" ] || { [ -e "$1" ] && [ ! -d "$1" ]; }
+}
 move_collaboration_folder() {
 	[ -d "$1" ] && [ ! -L "$1" ] || return 0
-	[ ! -L ${shellQuoted(collaborations)} ] && move_folder_contents "$1" "$2"
+	local destination="$collaborations/$2"
+	if folder_path_collides "$collaborations" || folder_path_collides "$destination"; then
+		[ ! -L ${shellQuoted(Computers.RECOVERED_COLLABORATIONS_DIRECTORY)} ] &&
+			[ ! -L ${shellQuoted(recoveredCollaborations)} ] || return 1
+		destination=${shellQuoted(recoveredCollaborations)}/"$2"
+	fi
+	move_folder_contents "$1" "$destination"
 }
 for chat_id in ${previousChatIds.map(shellQuoted).join(" ")}; do
-	move_collaboration_folder ${shellQuoted(Computers.LEGACY_CHATS_DIRECTORY)}/"$chat_id" ${shellQuoted(collaborations)}/"$chat_id" || exit 1
-	move_collaboration_folder ${shellQuoted(Computers.CHATS_DIRECTORY)}/"$chat_id" ${shellQuoted(collaborations)}/"$chat_id-chats" || exit 1
+	move_collaboration_folder ${shellQuoted(Computers.LEGACY_CHATS_DIRECTORY)}/"$chat_id" "$chat_id" || exit 1
+	move_collaboration_folder ${shellQuoted(Computers.CHATS_DIRECTORY)}/"$chat_id" "$chat_id-chats" || exit 1
 done
 `;
 }
