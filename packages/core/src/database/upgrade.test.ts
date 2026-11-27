@@ -2230,6 +2230,15 @@ it.skipIf(!process.env.DATABASE_URL)(
 	},
 );
 
+it("stages default projects' allowed hosts only for the migration transaction", async () => {
+	const migration = await readFile(
+		join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
+		"utf8",
+	);
+	const permanentTables = migration.match(/create\s+table\s+"[^"]*allowed_host"/gi);
+	expect(permanentTables).toEqual(['CREATE TABLE "project_allowed_host"']);
+});
+
 it("keeps the turn asker function without installing an insert trigger during the upgrade", async () => {
 	const migration = await readFile(
 		join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),

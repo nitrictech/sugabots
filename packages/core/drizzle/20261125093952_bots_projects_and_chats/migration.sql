@@ -42,23 +42,12 @@ TRUNCATE "event" CONTINUE IDENTITY RESTRICT;--> statement-breakpoint
 DROP TABLE "thread_summary";--> statement-breakpoint
 UPDATE "model_request" SET "purpose" = 'compaction' WHERE "purpose" = 'summary';--> statement-breakpoint
 -- ## Bots own resources
-CREATE TABLE "sandbox_agent_allowed_host" (
-	"workspace_id" uuid NOT NULL,
-	"agent_id" uuid,
-	"host" text,
-	"added_by_id" uuid,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "sandbox_agent_allowed_host_pkey" PRIMARY KEY("agent_id","host")
-);
---> statement-breakpoint
 DROP INDEX "connection_name_idx";--> statement-breakpoint
 DROP INDEX "connection_handle_idx";--> statement-breakpoint
 DROP INDEX "connection_id_pod_id_idx";--> statement-breakpoint
 DROP INDEX "connection_github_pod_idx";--> statement-breakpoint
 ALTER TABLE "connection" ADD COLUMN "agent_id" uuid;--> statement-breakpoint
 ALTER TABLE "sandbox" ADD COLUMN "agent_id" uuid;--> statement-breakpoint
-ALTER TABLE "sandbox_agent_allowed_host" ADD CONSTRAINT "sandbox_agent_allowed_host_added_by_id_user_id_fkey" FOREIGN KEY ("added_by_id") REFERENCES "user"("id") ON DELETE SET NULL;--> statement-breakpoint
-ALTER TABLE "sandbox_agent_allowed_host" ADD CONSTRAINT "sandbox_agent_allowed_host_agent_workspace_fkey" FOREIGN KEY ("agent_id","workspace_id") REFERENCES "agent"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
 -- Each connection goes to one bot of its `pod`, which keeps its id, so tool
 -- calls and GitHub triggers still name it: the oldest bot whose automations
 -- trigger on it, or else the `pod`'s oldest bot. Never a Personal Assistant:
@@ -168,8 +157,8 @@ WHERE "connection"."agent_id" IS NULL AND "pod"."id" = "connection"."pod_id"
 	AND "pod"."kind" = 'personal';--> statement-breakpoint
 ALTER TABLE "connection" ALTER COLUMN "pod_id" DROP NOT NULL;--> statement-breakpoint
 UPDATE "connection" SET "pod_id" = NULL WHERE "agent_id" IS NOT NULL;--> statement-breakpoint
-INSERT INTO "sandbox_agent_allowed_host" ("workspace_id", "agent_id", "host", "added_by_id", "created_at")
-SELECT "host"."workspace_id", "agent"."id", "host"."host", "host"."added_by_id", "host"."created_at"
+CREATE TEMP TABLE "default_project_allowed_host" ON COMMIT DROP AS
+SELECT "host"."workspace_id", "agent"."id" AS "bot_id", "host"."host", "host"."added_by_id", "host"."created_at"
 FROM "sandbox_pod_allowed_host" AS "host"
 JOIN "agent" ON "agent"."pod_id" = "host"."pod_id";--> statement-breakpoint
 -- A `pod`'s computer keeps its provider's id and its work, which is named by
@@ -694,7 +683,6 @@ ALTER TABLE "thread" DROP CONSTRAINT "thread_automation_valid", ADD CONSTRAINT "
 ALTER TABLE "notification_settings" DROP CONSTRAINT "notification_settings_automation_runs_valid", ADD CONSTRAINT "notification_settings_automation_runs_valid" CHECK ("automation_runs" in ('failures', 'all', 'none'));
 --> statement-breakpoint
 -- ## Sandboxes become computers
-ALTER TABLE "sandbox_agent_allowed_host" RENAME TO "agent_allowed_host";--> statement-breakpoint
 ALTER TABLE "sandbox_allowed_host" RENAME TO "allowed_host";--> statement-breakpoint
 ALTER TABLE "sandbox_blocked_host" RENAME TO "blocked_host";--> statement-breakpoint
 ALTER TABLE "sandbox" RENAME TO "computer";--> statement-breakpoint
@@ -710,7 +698,6 @@ ALTER TABLE "computer_provider" RENAME CONSTRAINT "sandbox_provider_preset_check
 ALTER INDEX "sandbox_agent_id_idx" RENAME TO "computer_agent_id_idx";--> statement-breakpoint
 ALTER INDEX "sandbox_provider_enabled_idx" RENAME TO "computer_provider_enabled_idx";--> statement-breakpoint
 ALTER INDEX "sandbox_provider_id_workspace_id_idx" RENAME TO "computer_provider_id_workspace_id_idx";--> statement-breakpoint
-ALTER TABLE "agent_allowed_host" RENAME CONSTRAINT "sandbox_agent_allowed_host_agent_workspace_fkey" TO "agent_allowed_host_agent_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "computer" RENAME CONSTRAINT "sandbox_agent_workspace_fkey" TO "computer_agent_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "computer" RENAME CONSTRAINT "sandbox_provider_workspace_fkey" TO "computer_provider_workspace_fkey";--> statement-breakpoint
 -- Constraints Postgres named itself (primary keys, not-null constraints and the
@@ -729,7 +716,7 @@ BEGIN
 			'ALTER TABLE %s RENAME CONSTRAINT %I TO %I',
 			found.on_table,
 			found.name,
-			replace(replace(replace(replace(found.name, 'sandbox_agent_allowed_host', 'agent_allowed_host'), 'sandbox_allowed_host', 'allowed_host'), 'sandbox_blocked_host', 'blocked_host'), 'sandbox', 'computer')
+			replace(replace(replace(found.name, 'sandbox_allowed_host', 'allowed_host'), 'sandbox_blocked_host', 'blocked_host'), 'sandbox', 'computer')
 		);
 	END LOOP;
 END $$;
@@ -994,11 +981,9 @@ AFTER INSERT OR UPDATE OF "role" ON "workspace_member"
 FOR EACH ROW WHEN (NEW."role" IN ('owner', 'admin'))
 EXECUTE FUNCTION add_new_administrator_to_channels();--> statement-breakpoint
 -- ## Agents become bots
-ALTER TABLE "agent_allowed_host" RENAME TO "bot_allowed_host";--> statement-breakpoint
 ALTER TABLE "agent" RENAME TO "bot";--> statement-breakpoint
 ALTER TABLE "pinned_agent" RENAME TO "pinned_bot";--> statement-breakpoint
 ALTER TABLE "model_request" RENAME COLUMN "agent_id" TO "bot_id";--> statement-breakpoint
-ALTER TABLE "bot_allowed_host" RENAME COLUMN "agent_id" TO "bot_id";--> statement-breakpoint
 ALTER TABLE "computer" RENAME COLUMN "agent_id" TO "bot_id";--> statement-breakpoint
 ALTER TABLE "automation" RENAME COLUMN "agent_id" TO "bot_id";--> statement-breakpoint
 ALTER TABLE "automation" RENAME COLUMN "created_by_agent_id" TO "created_by_bot_id";--> statement-breakpoint
@@ -1032,7 +1017,6 @@ ALTER INDEX "agent_system_agent_key_idx" RENAME TO "bot_system_bot_key_idx";--> 
 ALTER INDEX "agent_id_workspace_id_idx" RENAME TO "bot_id_workspace_id_idx";--> statement-breakpoint
 ALTER INDEX "channel_bot_agent_id_idx" RENAME TO "channel_bot_bot_id_idx";--> statement-breakpoint
 ALTER INDEX "pinned_agent_agent_id_idx" RENAME TO "pinned_bot_bot_id_idx";--> statement-breakpoint
-ALTER TABLE "bot_allowed_host" RENAME CONSTRAINT "agent_allowed_host_agent_workspace_fkey" TO "bot_allowed_host_bot_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "computer" RENAME CONSTRAINT "computer_agent_workspace_fkey" TO "computer_bot_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "automation" RENAME CONSTRAINT "automation_agent_workspace_fkey" TO "automation_bot_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "run" RENAME CONSTRAINT "run_agent_workspace_fkey" TO "run_bot_workspace_fkey";--> statement-breakpoint
@@ -1843,7 +1827,7 @@ UPDATE "automation" SET "project_id" = "project"."id"
 FROM "project" WHERE "project"."default_of_bot_id" = "automation"."bot_id";--> statement-breakpoint
 INSERT INTO "project_allowed_host" ("workspace_id", "project_id", "host", "added_by_id", "created_at")
 SELECT "host"."workspace_id", "project"."id", "host"."host", "host"."added_by_id", "host"."created_at"
-FROM "bot_allowed_host" AS "host"
+FROM "default_project_allowed_host" AS "host"
 JOIN "project" ON "project"."default_of_bot_id" = "host"."bot_id";
 --> statement-breakpoint
 -- ## Projects own resources: keys
@@ -1854,7 +1838,6 @@ DROP VIEW "placed_conversation";--> statement-breakpoint
 ALTER TABLE "computer" DROP CONSTRAINT "computer_bot_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "automation" DROP CONSTRAINT "automation_bot_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "connection" DROP CONSTRAINT "connection_bot_workspace_fkey";--> statement-breakpoint
-DROP TABLE "bot_allowed_host";--> statement-breakpoint
 ALTER TABLE "automation" DROP CONSTRAINT "automation_created_by_bot_valid";--> statement-breakpoint
 DROP INDEX "computer_bot_id_idx";--> statement-breakpoint
 DROP INDEX "automation_bot_name_idx";--> statement-breakpoint
