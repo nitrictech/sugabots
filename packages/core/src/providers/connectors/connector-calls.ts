@@ -33,7 +33,14 @@ export interface Interface {
 	readonly described: (
 		principal: BotPrincipal,
 		input: { connectorId: string; tool: string; arguments: Readonly<Record<string, unknown>> },
-	) => { revision: number; described: OfferedTool["described"]; usesComputer: boolean } | undefined;
+	) =>
+		| {
+				revision: number;
+				described: OfferedTool["described"];
+				usesComputer: boolean;
+				resolveApprovalTargets?: OfferedTool["resolveApprovalTargets"];
+		  }
+		| undefined;
 	readonly validateArguments: (
 		principal: BotPrincipal,
 		connectorId: string,
@@ -65,7 +72,7 @@ export const layerNoDeps = processLayer(Layer.effect(Service, make));
 export const layer = layerNoDeps.pipe(Layer.provide(ConnectorCatalog.layer));
 
 type Catalog = Omit<ConnectorCatalog.ConnectorToolSet, "tools" | "close"> & {
-	readonly tools: Readonly<Record<string, Omit<OfferedTool, "tool">>>;
+	readonly tools: Readonly<Record<string, Omit<OfferedTool, "tool" | "resolveApprovalTargets">>>;
 };
 
 interface TurnConnectors {
@@ -137,6 +144,7 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 					revision: tool.connectorRevision,
 					described: tool.described,
 					usesComputer: tool.usesComputer?.(input.arguments) ?? false,
+					resolveApprovalTargets: tool.resolveApprovalTargets,
 				}
 			);
 		},
@@ -193,7 +201,7 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 					return yield* new ApprovalNeeded();
 				}
 				const context = withComputerApproval(
-					withRecordedCall(undefined, call.toolCall),
+					withRecordedCall(undefined, call.toolCall, approved.resolvedTargets),
 					approved.computer,
 				);
 				return yield* Effect.tryPromise({
@@ -239,7 +247,12 @@ function describeCatalog({
 	return {
 		...catalog,
 		tools: Object.fromEntries(
-			Object.entries(tools).map(([key, { tool: _, ...description }]) => [key, description]),
+			Object.entries(tools).map(
+				([key, { tool: _, resolveApprovalTargets: _resolve, ...description }]) => [
+					key,
+					description,
+				],
+			),
 		),
 	};
 }

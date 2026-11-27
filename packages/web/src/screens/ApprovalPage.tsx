@@ -105,6 +105,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 				</header>
 				<ApprovalDestination
 					browserUrl={call.approval?.browserUrl}
+					gitHub={call.approval?.gitHub}
 					connectorUrl={connector?.url}
 					connectorChanged={connector?.changed}
 				/>

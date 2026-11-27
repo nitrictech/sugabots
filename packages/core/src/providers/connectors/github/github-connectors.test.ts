@@ -71,7 +71,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 			: json({
 					node_id: `PR_${pull[1]}`,
 					draft: true,
-					head: { ref, repo: { full_name: fullName } },
+					head: { ref, sha: "1".repeat(40), repo: { full_name: fullName } },
 				});
 	};
 	// Issue #20 and comment 30 are the app's own; #21, pull request #22 and comment 31 are someone's.

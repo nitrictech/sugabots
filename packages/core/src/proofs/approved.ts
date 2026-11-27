@@ -103,6 +103,7 @@ export interface Approved<
 	readonly decidedBy: string | null;
 	readonly computer: ComputerApprovalTarget | undefined;
 	readonly sdkToolCallId: string | null;
+	readonly resolvedTargets: ResolvedTargets | undefined;
 	readonly connectorCall:
 		| {
 				readonly connectorId: string;
@@ -231,7 +232,13 @@ export const proveConnectorApproved = <P, X, I, T, K, C>(
 	input: Named<I, InputOf<"connectors.callTool">>,
 	turn: Named<T, string>,
 	connectorUse: CanUseConnector<NoInfer<P>, K>,
-	computerUse?: CanUseChatComputer<NoInfer<P>, C>,
+	{
+		computerUse,
+		resolveTargets,
+	}: {
+		computerUse?: CanUseChatComputer<NoInfer<P>, C>;
+		resolveTargets?: Effect.Effect<ResolvedTargets, ApprovalRefused> | undefined;
+	} = {},
 ) =>
 	proveApproval(
 		principal,
@@ -242,6 +249,12 @@ export const proveConnectorApproved = <P, X, I, T, K, C>(
 		{
 			connectorUse,
 			computerUse,
+			resolveTarget: resolveTargets?.pipe(
+				Effect.map((targets) => ({
+					...(computerUse && computerApprovalTarget(computerUse)),
+					...targets,
+				})),
+			),
 		},
 	);
 
@@ -302,7 +315,11 @@ const proveApproval = <
 			rule.operation === "computers.useBrowser" && typeof inputTool === "string"
 				? inputTool
 				: rule.tool;
-		const approved = (decidedBy: string | null, sdkToolCallId: string | null = null) => {
+		const approved = (
+			decidedBy: string | null,
+			sdkToolCallId: string | null = null,
+			resolvedTargets?: ResolvedTargets,
+		) => {
 			return ApprovedProof.prove([principal, callNamed, ...targets], {
 				operation: rule.operation,
 				principal,
@@ -311,6 +328,7 @@ const proveApproval = <
 				decidedBy,
 				computer: decidedBy === null ? undefined : computer,
 				sdkToolCallId,
+				resolvedTargets,
 				connectorCall: connectorUse && {
 					connectorId: connectorUse.reach.connector.value,
 					revision: connectorUse.reach.revision,
@@ -367,7 +385,7 @@ const proveApproval = <
 		});
 		if (recorded === "refused") return yield* new ApprovalRefused();
 		if (recorded === "needed") return yield* new ApprovalNeeded();
-		return approved(recorded, decision?.sdkToolCallId);
+		return approved(recorded, decision?.sdkToolCallId, resolvedTargets);
 	});
 
 const readRecordedCall = (turnId: string, callId: string) =>

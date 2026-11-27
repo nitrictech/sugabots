@@ -267,6 +267,37 @@ export const BrowserPage = meta.story({
 	},
 });
 
+export const GitHubDefaultBase = meta.story({
+	globals: PHONE,
+	args: {
+		call: asking({
+			tool: "github__open_pull_request",
+			input: {
+				repository: "acme/web",
+				branch: "sugabots/fix-checkout",
+				title: "Fix checkout",
+				body: "Keep the order after a refresh.",
+			},
+			approval: {
+				id: "approval-1",
+				status: "pending",
+				approvers: "chat",
+				decidedByName: null,
+				decidedAt: null,
+				gitHub: { repositoryId: "101", baseBranch: "release" },
+			},
+		}),
+		connector: { name: "GitHub" },
+	},
+	play: async ({ canvas, userEvent }) => {
+		await waitFor(() => expect(canvas.getByText("Base branch release")).toBeVisible());
+		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
+		const request = await screen.findByRole("dialog");
+		await expect(request).toHaveTextContent("GitHub repository ID 101");
+		await expect(request).toHaveTextContent("Base branch release");
+	},
+});
+
 /** ANetworkRequest is a bot asking for the project's computer to reach a host, which those who manage the computer answer. */
 export const ANetworkRequest = meta.story({
 	args: {

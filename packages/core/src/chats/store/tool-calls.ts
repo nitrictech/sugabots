@@ -41,7 +41,13 @@ export function toToolCallPart(
 	row: ToolCallRow,
 	decidedByName: string | null = null,
 ): ToolCallPart {
-	const browserUrl = row.approvalResolvedTargets?.browserUrl;
+	const {
+		browserUrl,
+		gitHubRepositoryId,
+		gitHubBaseBranch,
+		gitHubReviewCommit,
+		gitHubReplyCommentId,
+	} = row.approvalResolvedTargets ?? {};
 	const approvalConnector =
 		row.connectorId && row.connectorRevision !== null
 			? { id: row.connectorId, revision: row.connectorRevision }
@@ -62,6 +68,14 @@ export function toToolCallPart(
 						decidedByName,
 						decidedAt: row.decidedAt?.toISOString() ?? null,
 						...(browserUrl && { browserUrl }),
+						...(gitHubRepositoryId && {
+							gitHub: {
+								repositoryId: gitHubRepositoryId,
+								...(gitHubBaseBranch && { baseBranch: gitHubBaseBranch }),
+								...(gitHubReviewCommit && { reviewCommit: gitHubReviewCommit }),
+								...(gitHubReplyCommentId && { replyCommentId: gitHubReplyCommentId }),
+							},
+						}),
 						...(approvalConnector && { connector: approvalConnector }),
 					}
 				: null,

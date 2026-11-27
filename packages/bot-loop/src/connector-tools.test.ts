@@ -19,10 +19,19 @@ import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/databas
 import { asMember } from "@sugabots/core/operations/chats/testing";
 import { authenticators, principals } from "@sugabots/core/proofs/world.test-support";
 import { ConnectorStore } from "@sugabots/core/providers/connectors/connector-store";
+import {
+	egressToGitHub,
+	gitHubSetupAt,
+	installedConnector,
+	json,
+	mintsTokens,
+	standInGitHub,
+} from "@sugabots/core/providers/connectors/github/github.test-support";
 import { Models } from "@sugabots/core/providers/models/models";
+import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
 import { tool } from "ai";
 import { eq } from "drizzle-orm";
-import { Context, Effect, Schema } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	botLoopOnPostgres,
@@ -429,6 +438,94 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
 				expect(execute).toHaveBeenCalledOnce();
 				expect(await callsOf(ran.turnId)).toMatchObject([{ id: parked.id, status: "completed" }]);
+			},
+		);
+
+		it.each(["repository", "default base branch"] as const)(
+			"asks again when the GitHub %s changes while an approval waits",
+			async (changed) => {
+				await onDatabase((db) =>
+					db.update(connector).set({ enabled: false }).where(eq(connector.id, connectorId)),
+				);
+				let swappedPaths = false;
+				let defaultBase = "main";
+				const github = standInGitHub(mintsTokens, ({ method, path }) => {
+					if (path === "/installation/repositories") {
+						const repositories = [
+							{ id: 101, full_name: swappedPaths ? "acme/infra" : "acme/web", private: true },
+							{ id: 102, full_name: swappedPaths ? "acme/web" : "acme/infra", private: true },
+						];
+						return json({ total_count: repositories.length, repositories });
+					}
+					if (method === "GET" && path === "/repos/acme/web") {
+						return json({ default_branch: defaultBase });
+					}
+					if (method === "POST" && path === "/repos/acme/web/pulls") {
+						return json({ number: 15, html_url: "https://github.com/acme/web/pull/15" }, 201);
+					}
+					return undefined;
+				});
+				const projectId = await runOnPostgres(defaultProjectOf(botId));
+				const setup = await gitHubSetupAt(github.fetch, "https://sugabots.example.com");
+				const installed = await installedConnector(setup, { projectId, adminId });
+				const admin = await setup.member(adminId);
+				const addRepository = (repository: string) =>
+					setup.call(admin, "gitHubConnectors.addRepository", {
+						projectId,
+						connectorId: installed,
+						repository,
+					});
+				await addRepository("acme/web");
+				await addRepository("acme/infra");
+				const installation = () =>
+					onDatabase((db) => db.select().from(connector).where(eq(connector.id, installed)));
+				const [before] = await installation();
+				if (!before) throw new Error("No GitHub connector");
+				const connectorTools = await runOnPostgres(
+					ConnectorCatalog.Service.pipe(
+						Effect.provide(
+							ConnectorCatalog.layer.pipe(Layer.provide(egressToGitHub(github.fetch))),
+						),
+					),
+				);
+				const { model } = calling(CALL_TOOL, {
+					tool: `${before.handle}__open_pull_request`,
+					arguments: {
+						repository: "acme/web",
+						branch: "sugabots/fix-checkout",
+						title: "Fix checkout",
+						body: "Keep the order after a refresh.",
+					},
+				});
+				const ran = await loop.runTurn(chatId, { model, connectorTools });
+				const [parked] = await callsOf(ran.turnId);
+				if (!parked) throw new Error("No GitHub call parked");
+				await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
+				if (changed === "repository") {
+					swappedPaths = true;
+					await addRepository("acme/web");
+					expect((await installation())[0]?.configurationRevision).toBe(
+						before.configurationRevision,
+					);
+				} else {
+					defaultBase = "release";
+				}
+				const opened = () =>
+					github.asked.filter(
+						({ method, path }) => method === "POST" && path === "/repos/acme/web/pulls",
+					);
+
+				expect(await resumeAt(ran, 1)).toMatchObject({ _tag: "Waiting" });
+				expect(opened()).toEqual([]);
+				const [fresh] = (await chatsAs(adminId).approvals(workspaceId)).waiting;
+				expect(fresh?.call.approval?.id).not.toBe(parked.approvalId);
+				expect(fresh?.call.approval).toMatchObject({
+					gitHub: { repositoryId: swappedPaths ? "102" : "101", baseBranch: defaultBase },
+				});
+				if (!fresh) throw new Error("No renewed GitHub approval");
+				await chatsAs(adminId).decide({ toolCallId: fresh.call.id, decision: "allow_once" });
+				expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
+				expect(opened()).toMatchObject([{ body: { base: defaultBase } }]);
 			},
 		);
 

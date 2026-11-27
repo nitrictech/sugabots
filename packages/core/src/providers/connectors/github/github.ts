@@ -324,6 +324,7 @@ const PullRequestHead = Schema.Struct({
 	draft: Schema.optional(Schema.Boolean),
 	head: Schema.Struct({
 		ref: Schema.String,
+		sha: Schema.String,
 		repo: Schema.NullOr(Schema.Struct({ full_name: Schema.String })),
 	}),
 });
@@ -340,6 +341,7 @@ export const pullRequestHead = (
 			nodeId: pull.node_id,
 			draft: pull.draft ?? false,
 			branch: pull.head.ref,
+			commit: pull.head.sha,
 			branchRepository: pull.head.repo?.full_name,
 		})),
 	);

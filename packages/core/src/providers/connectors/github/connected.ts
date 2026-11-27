@@ -53,7 +53,7 @@ export class Connected {
 	 * GitHub's id for `repository`, as `repository()` gives it. Asking for
 	 * another is a mistake, not a token for every repository the app reaches.
 	 */
-	private idOf(repository: string): number {
+	repositoryId(repository: string): number {
 		const id = this.ids.get(repository);
 		if (id === undefined)
 			throw new Error(`${repository} isn't one of the connector's repositories`);
@@ -110,6 +110,30 @@ export class Connected {
 		return Effect.map(
 			this.tokenFor(repository, { contents: "write" }),
 			(token): GitHub.GitCredential => ({ username: TOKEN_USERNAME, token }),
+		);
+	}
+
+	defaultBranch(repository: string) {
+		return Effect.flatMap(this.tokenFor(repository, { metadata: "read" }), (token) =>
+			GitHub.defaultBranch(this.http, token, repository),
+		);
+	}
+
+	pullRequestCommit(repository: string, number: number) {
+		return Effect.flatMap(this.tokenFor(repository, { pull_requests: "read" }), (token) =>
+			Effect.map(
+				GitHub.pullRequestHead(this.http, token, { repository, number }),
+				({ commit }) => commit,
+			),
+		);
+	}
+
+	firstReviewCommentId(repository: string, commentId: number) {
+		return Effect.flatMap(this.tokenFor(repository, { pull_requests: "read" }), (token) =>
+			Effect.map(
+				GitHub.findComment(this.http, token, { repository, kind: "code_comment", commentId }),
+				({ reviewThreadId }) => reviewThreadId,
+			),
 		);
 	}
 
@@ -203,7 +227,7 @@ export class Connected {
 	private tokenFor(repository: string, permissions: GitHub.Permissions) {
 		return Effect.suspend(() =>
 			GitHub.accessToken(this.http, this.app, {
-				repositoryIds: [this.idOf(repository)],
+				repositoryIds: [this.repositoryId(repository)],
 				permissions,
 			}),
 		).pipe(
@@ -358,16 +382,19 @@ export class Connected {
 		repository: string;
 		number: number;
 		commentId: number;
+		replyCommentId?: number;
 		body: string;
 	}) {
 		const { http } = this;
 		return Effect.flatMap(this.tokenFor(request.repository, { pull_requests: "write" }), (token) =>
 			Effect.gen(function* () {
-				const { reviewThreadId } = yield* GitHub.findComment(http, token, {
-					repository: request.repository,
-					kind: "code_comment",
-					commentId: request.commentId,
-				});
+				const reviewThreadId =
+					request.replyCommentId ??
+					(yield* GitHub.findComment(http, token, {
+						repository: request.repository,
+						kind: "code_comment",
+						commentId: request.commentId,
+					})).reviewThreadId;
 				return yield* GitHub.replyToCodeComment(http, token, {
 					...request,
 					commentId: reviewThreadId,

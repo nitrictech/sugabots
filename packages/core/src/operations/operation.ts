@@ -22,7 +22,7 @@ import type { OperationContract } from "@sugabots/contracts/operations";
 import { Effect, Schema, type Scope, type Stream } from "effect";
 import type { Principal } from "../principal.ts";
 
-/** Runs the operation's proofs up to Approved, before any write or provider call. */
+/** Runs an operation up to its approval proof, including resolving the targets it would act on. */
 export interface ApprovalCheck {
 	readonly kind: "approvalCheck";
 }

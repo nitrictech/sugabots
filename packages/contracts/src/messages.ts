@@ -293,6 +293,14 @@ export const toolCallPartSchema = Schema.Struct({
 			decidedByName: Schema.NullOr(Schema.String),
 			decidedAt: Schema.NullOr(isoTimestampSchema),
 			browserUrl: Schema.optional(Schema.String),
+			gitHub: Schema.optional(
+				Schema.Struct({
+					repositoryId: Schema.String,
+					baseBranch: Schema.optional(Schema.String),
+					reviewCommit: Schema.optional(Schema.String),
+					replyCommentId: Schema.optional(Schema.String),
+				}),
+			),
 			connector: Schema.optional(Schema.Struct({ id: uuidSchema, revision: Schema.Int })),
 		}),
 	),

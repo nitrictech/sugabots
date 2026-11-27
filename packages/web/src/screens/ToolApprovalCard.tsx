@@ -107,6 +107,7 @@ export function ToolApprovalCard({
 				<div className="min-w-0 md:ml-8">
 					<ApprovalDestination
 						browserUrl={call.approval?.browserUrl}
+						gitHub={call.approval?.gitHub}
 						connectorUrl={boundConnector?.url}
 						connectorChanged={boundConnector?.changed}
 					/>
@@ -145,6 +146,7 @@ export function ToolApprovalCard({
 			<ReviewSheet
 				input={call.input}
 				browserUrl={call.approval?.browserUrl}
+				gitHub={call.approval?.gitHub}
 				connectorUrl={boundConnector?.url}
 				connectorChanged={boundConnector?.changed}
 				step={step}
@@ -298,12 +300,16 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 	);
 }
 
+type ApprovalGitHub = NonNullable<ToolCallPart["approval"]>["gitHub"];
+
 export function ApprovalDestination({
 	browserUrl,
+	gitHub,
 	connectorUrl,
 	connectorChanged,
 }: {
 	browserUrl?: string | undefined;
+	gitHub?: ApprovalGitHub | undefined;
 	connectorUrl?: string | null | undefined;
 	connectorChanged?: boolean | undefined;
 }) {
@@ -315,16 +321,28 @@ export function ApprovalDestination({
 		);
 	}
 	const address = browserUrl ?? connectorUrl;
-	if (!address) return null;
+	if (!address && !gitHub) return null;
 	return (
 		<div className="space-y-1 pb-1.5 text-muted-foreground text-xs wrap-anywhere">
-			<p className="m-0">
-				{browserUrl ? "On the page" : "Sends to"} {address}
-			</p>
+			{address && (
+				<p className="m-0">
+					{browserUrl ? "On the page" : "Sends to"} {address}
+				</p>
+			)}
 			{browserUrl && (
 				<p className="m-0">
 					This approval covers the page, which can change while approval is pending.
 				</p>
+			)}
+			{gitHub && (
+				<>
+					<p className="m-0">GitHub repository ID {gitHub.repositoryId}</p>
+					{gitHub.baseBranch && <p className="m-0">Base branch {gitHub.baseBranch}</p>}
+					{gitHub.reviewCommit && <p className="m-0">Review commit {gitHub.reviewCommit}</p>}
+					{gitHub.replyCommentId && (
+						<p className="m-0">Reply to review starting at comment {gitHub.replyCommentId}</p>
+					)}
+				</>
 			)}
 		</div>
 	);
@@ -351,6 +369,7 @@ const FOLDED_CLASSES_ON_PHONE =
 function ReviewSheet({
 	input,
 	browserUrl,
+	gitHub,
 	connectorUrl,
 	connectorChanged,
 	step,
@@ -361,6 +380,7 @@ function ReviewSheet({
 }: {
 	input: ToolCallPart["input"];
 	browserUrl: string | undefined;
+	gitHub: ApprovalGitHub | undefined;
 	connectorUrl: string | null | undefined;
 	connectorChanged: boolean | undefined;
 	step: Step;
@@ -396,6 +416,7 @@ function ReviewSheet({
 						<ReviewHeading step={step} bot={bot} headingId={headingId} />
 						<ApprovalDestination
 							browserUrl={browserUrl}
+							gitHub={gitHub}
 							connectorUrl={connectorUrl}
 							connectorChanged={connectorChanged}
 						/>

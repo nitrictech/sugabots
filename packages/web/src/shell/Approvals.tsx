@@ -178,6 +178,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 			<div className="ml-9 min-w-0 max-md:ml-0">
 				<ApprovalDestination
 					browserUrl={call.approval?.browserUrl}
+					gitHub={call.approval?.gitHub}
 					connectorUrl={connector?.url}
 					connectorChanged={connector?.changed}
 				/>

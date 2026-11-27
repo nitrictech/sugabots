@@ -9,10 +9,12 @@ import {
 	connectorToolKey,
 	connectorToolWritesOrDeletes,
 } from "@sugabots/contracts";
+import type { ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import { asSchema, type JSONSchema7, type Tool } from "ai";
 import { Clock, Context, Duration, Effect, Layer } from "effect";
 import { type Database, effectRunner } from "../../database/database.ts";
 import type { ChatFileStore } from "../../files/chat-file-store.ts";
+import type { ResolvedTargets } from "../../operations/operation.ts";
 import type { Principal } from "../../principal.ts";
 import {
 	discoverConnectorRevisions,
@@ -80,6 +82,9 @@ import type { UploadSide } from "./signed-upload/tool.ts";
 export interface OfferedTool {
 	tool: Tool;
 	usesComputer?: (input: Readonly<Record<string, unknown>>) => boolean;
+	resolveApprovalTargets?: (
+		input: Readonly<Record<string, unknown>>,
+	) => Effect.Effect<ResolvedTargets, ApprovalRefused>;
 	described: Pick<ConnectorTool, "name" | "readOnly" | "destructive"> & {
 		defaultAccess?: ConnectorAccess;
 	};

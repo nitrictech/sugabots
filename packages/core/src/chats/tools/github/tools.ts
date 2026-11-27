@@ -1,5 +1,8 @@
+import { ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import type { Tool } from "ai";
+import { Effect } from "effect";
 import type { Database, RunEffect } from "../../../database/database.ts";
+import type { ResolvedTargets } from "../../../operations/operation.ts";
 import {
 	BOT_BRANCH_PREFIX,
 	type Connected,
@@ -53,11 +56,41 @@ export function gitHubTools({
 	};
 	return Object.fromEntries(
 		GITHUB_CONNECTOR_TOOLS.map((described) => {
-			const offered = offeredTool(offering, described, tools[described.name]);
-			if (computer && described.name === "push_branch") offered[1].usesComputer = () => true;
-			return offered;
+			const [key, offered] = offeredTool(offering, described, tools[described.name]);
+			offered.resolveApprovalTargets = (input) =>
+				resolveGitHubTargets(connected, described.name, input);
+			if (computer && described.name === "push_branch") offered.usesComputer = () => true;
+			return [key, offered];
 		}),
 	);
+}
+
+function resolveGitHubTargets(
+	connected: Connected,
+	toolName: GitHubToolName,
+	input: Readonly<Record<string, unknown>>,
+): Effect.Effect<ResolvedTargets, ApprovalRefused> {
+	return Effect.gen(function* () {
+		const repository =
+			typeof input.repository === "string" && connected.repository(input.repository);
+		if (!repository) return yield* new ApprovalRefused();
+		const targets: Record<string, string> = {
+			gitHubRepositoryId: String(connected.repositoryId(repository)),
+		};
+		if (toolName === "open_pull_request" && input.base === undefined) {
+			targets.gitHubBaseBranch = yield* connected.defaultBranch(repository);
+		} else if (
+			toolName === "review_pull_request" &&
+			input.commit === undefined &&
+			typeof input.number === "number"
+		) {
+			targets.gitHubReviewCommit = yield* connected.pullRequestCommit(repository, input.number);
+		} else if (toolName === "reply_to_code_comment" && typeof input.commentId === "number") {
+			const comment = yield* connected.firstReviewCommentId(repository, input.commentId);
+			targets.gitHubReplyCommentId = String(comment);
+		}
+		return targets;
+	}).pipe(Effect.mapError(() => new ApprovalRefused()));
 }
 
 /** What the model is told of the bot's GitHub connector with the turn. */

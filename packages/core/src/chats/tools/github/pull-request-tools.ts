@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
 import { BOT_BRANCH_PREFIX } from "../../../providers/connectors/github/connected.ts";
+import { resolvedTargetFromContext } from "../recorded-call.ts";
 import {
 	botBranchSchema,
 	commentBodySchema,
@@ -39,13 +40,16 @@ export function pullRequestTools({ connected, repositorySchema, onRepository, si
 					description: "Open it as a draft, for work that isn't ready for review",
 				}),
 			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-			execute: async ({ repository, branch, base, title, body, draft = false }, { toolCallId }) =>
+			execute: async (
+				{ repository, branch, base, title, body, draft = false },
+				{ toolCallId, context },
+			) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
 						const opened = yield* connected.openPullRequest({
 							repository: path,
 							head: branch,
-							base,
+							base: resolvedTargetFromContext(context, "gitHubBaseBranch") ?? base,
 							title,
 							body: yield* sign(toolCallId, "opened this pull request", body),
 							draft,
@@ -197,7 +201,7 @@ export function pullRequestTools({ connected, repositorySchema, onRepository, si
 			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: async (
 				{ repository, number, verdict, body = "", commit, comments = [] },
-				{ toolCallId },
+				{ toolCallId, context },
 			) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
@@ -206,7 +210,7 @@ export function pullRequestTools({ connected, repositorySchema, onRepository, si
 							number,
 							verdict,
 							body: yield* sign(toolCallId, "wrote this review", body),
-							commit,
+							commit: resolvedTargetFromContext(context, "gitHubReviewCommit") ?? commit,
 							comments: comments.map((comment) => ({
 								path: comment.path,
 								line: comment.line,
@@ -228,13 +232,15 @@ export function pullRequestTools({ connected, repositorySchema, onRepository, si
 				commentId: commentIdSchema,
 				body: commentBodySchema,
 			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-			execute: async ({ repository, number, commentId, body }, { toolCallId }) =>
+			execute: async ({ repository, number, commentId, body }, { toolCallId, context }) =>
 				onRepository(repository, (path) =>
 					Effect.gen(function* () {
+						const replyCommentId = resolvedTargetFromContext(context, "gitHubReplyCommentId");
 						const replied = yield* connected.replyToCodeComment({
 							repository: path,
 							number,
 							commentId,
+							...(replyCommentId && { replyCommentId: Number(replyCommentId) }),
 							body: yield* sign(toolCallId, "wrote this reply", body),
 						});
 						return { status: "replied", ...replied };
