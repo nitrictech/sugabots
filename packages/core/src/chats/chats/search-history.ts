@@ -1,20 +1,6 @@
 import type { OutputOf } from "@sugabots/contracts/operations";
 import { HISTORY_SEARCH_MAX_MATCHES } from "@sugabots/contracts/operations/chat-reads";
-import {
-	and,
-	asc,
-	desc,
-	eq,
-	gte,
-	ilike,
-	inArray,
-	isNotNull,
-	lt,
-	ne,
-	or,
-	type SQL,
-	sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, or, type SQL, sql } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { type Database, type Executor, query } from "../../database/database.ts";
 import {
@@ -79,31 +65,54 @@ export const searchHistory = Effect.fn("ChatHistory.searchHistory")(function* <P
 	const historyLimit = or(otherChat, beforeKept);
 	const matching = words ? wordMatch(words) : undefined;
 	const complete = sql`${message.status} = 'complete'`;
-	const conditions: SQL[] = [
+	const eligibleChat =
 		scope.kind === "all"
-			? scope.reach.reachesChat(placedChat)
-			: eq(message.chatId, scope.reach.chat.value),
+			? and(
+					eq(placedChat.workspaceId, scope.reach.workspace.value),
+					scope.reach.reachesChat(placedChat),
+				)
+			: eq(placedChat.id, scope.reach.chat.value);
+	// PostgreSQL can use the actual chat IDs to estimate each match branch's scan.
+	const reachedChats =
+		scope.kind === "all" && matching
+			? yield* query((db) => db.select({ id: placedChat.id }).from(placedChat).where(eligibleChat))
+			: undefined;
+	if (reachedChats?.length === 0) return { messages: [], more: false };
+	const inReachedChat = reachedChats
+		? sql`${message.chatId} = any(${sql.param(reachedChats.map(({ id }) => id))}::uuid[])`
+		: undefined;
+	const eligibleMessage = and(
+		inReachedChat,
 		complete,
-		...(historyLimit ? [historyLimit] : []),
-		...(before ? [lt(message.createdAt, DateTime.toDate(DateTime.makeUnsafe(before)))] : []),
-		...(after ? [gte(message.createdAt, DateTime.toDate(DateTime.makeUnsafe(after)))] : []),
-	];
-	const rows = yield* query((db) =>
-		db
+		historyLimit,
+		before ? lt(message.createdAt, DateTime.toDate(DateTime.makeUnsafe(before))) : undefined,
+		after ? gte(message.createdAt, DateTime.toDate(DateTime.makeUnsafe(after))) : undefined,
+	);
+	const rows = yield* query((db) => {
+		const selection = db
 			.select({ message, ...participantColumns })
 			.from(message)
-			.innerJoin(placedChat, eq(placedChat.id, message.chatId))
 			.leftJoin(member, eq(member.id, message.authorMemberId))
 			.leftJoin(bot, eq(bot.id, message.authorBotId))
-			.where(and(...conditions, matching && matchMessages(db, matching, complete, scope.kind)))
+			.$dynamic();
+		const matchingMessage =
+			matching &&
+			(inReachedChat && matching.fileName
+				? inArray(message.id, matchAcrossChats(db, matching, eligibleMessage))
+				: matchInChat(db, matching));
+		const selected = inReachedChat
+			? selection.where(and(eligibleMessage, matchingMessage))
+			: selection
+					.innerJoin(placedChat, eq(placedChat.id, message.chatId))
+					.where(and(eligibleChat, eligibleMessage, matchingMessage));
+		return selected
 			.orderBy(
 				...(matching
 					? [...matching.best, desc(message.createdAt)]
 					: [asc(message.createdAt), asc(message.id)]),
 			)
-			// One more than is returned, to tell whether there are more.
-			.limit(HISTORY_SEARCH_MAX_MATCHES + 1),
-	);
+			.limit(HISTORY_SEARCH_MAX_MATCHES + 1);
+	});
 	const returned = rows.slice(0, HISTORY_SEARCH_MAX_MATCHES);
 	// Each message lists the files it carried, so a file found this way can be read again.
 	const files = yield* query((db) =>
@@ -183,24 +192,27 @@ function wordMatch(words: string) {
 	};
 }
 
-function matchMessages(
+function matchInChat(db: Executor, match: ReturnType<typeof wordMatch>) {
+	if (!match.fileName) return match.text;
+	const named = db
+		.select({ id: file.id })
+		.from(file)
+		.where(and(eq(file.messageId, message.id), match.fileName));
+	return or(match.text, sql`exists (${named})`);
+}
+
+function matchAcrossChats(
 	db: Executor,
 	match: ReturnType<typeof wordMatch>,
-	complete: SQL,
-	scope: HistoryScope<unknown, unknown>["kind"],
+	eligibleMessage: SQL | undefined,
 ) {
-	if (!match.fileName) return match.text;
-	const files = db.select({ id: sql<string>`${file.messageId}`.as("id") }).from(file);
-	if (scope === "chat") {
-		return or(
-			match.text,
-			sql`exists (${files.where(and(eq(file.messageId, message.id), match.fileName))})`,
-		);
-	}
-
-	const text = db.select({ id: message.id }).from(message).where(and(complete, match.text));
-	const named = files.where(and(isNotNull(file.messageId), match.fileName));
-	return inArray(message.id, text.union(named));
+	const text = db.select({ id: message.id }).from(message).where(and(eligibleMessage, match.text));
+	const named = db
+		.select({ id: message.id })
+		.from(message)
+		.innerJoin(file, eq(file.messageId, message.id))
+		.where(and(eligibleMessage, match.fileName));
+	return text.union(named);
 }
 
 /**
