@@ -84,30 +84,28 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 			headers: digest ? { "docker-content-digest": digest } : {},
 		});
 	}) as typeof fetch;
-	const signedInAs = new Map<string, ComputerSignIn.SignedIn>();
+	const signedInAs = new Map<string, ComputerSignIn.Source>();
 
-	const [projectComputers, providers] = await runOnPostgres(
-		Effect.all([ProjectComputers.Service, ComputerProviderStore.Service]).pipe(
-			Effect.provide(
-				Layer.merge(
-					ProjectComputers.layerNoDeps.pipe(
-						Layer.provide([provider.layer, ComputerProviderStore.layer]),
+	const startProcess = () =>
+		runOnPostgres(
+			Effect.all([ProjectComputers.Service, ComputerProviderStore.Service]).pipe(
+				Effect.provide(
+					Layer.merge(
+						ProjectComputers.layerNoDeps.pipe(
+							Layer.provide([provider.layer, ComputerProviderStore.layer]),
+						),
+						ComputerProviderStore.layer,
 					),
-					ComputerProviderStore.layer,
 				),
+				Effect.provide([
+					Layer.succeed(ComputerSignIn.Service, {
+						forProject: ({ projectId }) => Effect.sync(() => signedInAs.get(projectId)),
+					}),
+					unimplemented(Egress.Service, { providers: { for: () => registryFetch } }),
+				]),
 			),
-			Effect.provide([
-				Layer.succeed(ComputerSignIn.Service, {
-					forProject: ({ projectId }) =>
-						Effect.sync(() => {
-							const signedIn = signedInAs.get(projectId);
-							return signedIn && { revision: projectId, load: Effect.succeed(signedIn) };
-						}),
-				}),
-				unimplemented(Egress.Service, { providers: { for: () => registryFetch } }),
-			]),
-		),
-	);
+		);
+	const [projectComputers, providers] = await startProcess();
 
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const {
@@ -155,8 +153,11 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 		/** Holds every opening of the computer `id` at its provider from now on until released. */
 		holdOpening: (id: Computers.ComputerId) => released(provider.holdOpening(id)),
 		/** What the project's computer is signed in with from now on. */
-		signInAs: (signedIn: ComputerSignIn.SignedIn, inProject = project) =>
-			void signedInAs.set(inProject.projectId, signedIn),
+		signInAs: (
+			signedIn: ComputerSignIn.SignedIn,
+			inProject = project,
+			revision = inProject.projectId,
+		) => void signedInAs.set(inProject.projectId, { revision, load: Effect.succeed(signedIn) }),
 		/** Another project of the workspace, with no computer yet. */
 		addProject: async (slug: string): Promise<ProjectComputers.Project> => {
 			const added = await onDatabase((db) =>
@@ -166,6 +167,7 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 		},
 		project,
 		projectComputers,
+		startProcess: async () => (await startProcess())[0],
 		addProvider,
 		enabledProvider,
 		open: async (holder = TURN, inProject = project) =>
@@ -798,6 +800,56 @@ describe("a project's computer, over an in-memory provider", () => {
 			expiresAt: DateTime.addDuration(DateTime.nowUnsafe(), expiresIn),
 		});
 
+		it("admits the next call after another process applies the current settings", async () => {
+			const world = await startWorld();
+			const { project, projectComputers } = world;
+			const otherProcess = await world.startProcess();
+			const provider = await world.enabledProvider();
+			const original = signedInUntil("Bearer original", "2 hours");
+			world.signInAs(original, project, "original");
+			const opened = await world.open();
+			const check = () =>
+				runOnPostgres(projectComputers.checkSettings(project, provider.id, opened));
+			await check();
+
+			world.signInAs(signedInUntil("Bearer updated", "2 hours"), project, "updated");
+			await expect(check()).rejects.toBeInstanceOf(ComputerUnavailable);
+			await runOnPostgres(otherProcess.applyNetwork(project));
+			await check();
+
+			world.signInAs(original, project, "original");
+			await expect(check()).rejects.toBeInstanceOf(ComputerUnavailable);
+			world.provider.failNetworkUpdates(1);
+			await runOnPostgres(otherProcess.applyNetwork(project));
+			await expect(check()).rejects.toBeInstanceOf(ComputerUnavailable);
+			await runOnPostgres(otherProcess.applyNetwork(project));
+			await check();
+		});
+
+		it("refreshes changed settings on renewal before the old sign-in is due", async () => {
+			const world = await startWorld();
+			const { project, projectComputers } = world;
+			const otherProcess = await world.startProcess();
+			const provider = await world.enabledProvider();
+			world.signInAs(signedInUntil("Bearer original", "2 hours"), project, "original");
+			const opened = await world.open();
+			await runOnPostgres(otherProcess.applyNetwork(project));
+			world.signInAs(signedInUntil("Bearer updated", "2 hours"), project, "updated");
+
+			const turnScope = Scope.makeUnsafe();
+			onTestFinished(() => Effect.runPromise(Scope.close(turnScope, Exit.void)));
+			await runOnPostgres(projectComputers.renew(TURN).pipe(Scope.provide(turnScope)));
+
+			await expect
+				.poll(() => runOnPostgres(otherProcess.checkSettings(project, provider.id, opened)))
+				.toBeUndefined();
+			expect(
+				theOnly(world.provider.computers())
+					.networks.at(-1)
+					?.credentials.map(({ value }) => Redacted.value(value)),
+			).toEqual(["Bearer updated"]);
+		});
+
 		it("signs in again, on a renewal, only the computers whose sign-in is near expiry", async () => {
 			const world = await startWorld();
 			const durable = world.project;
@@ -816,12 +868,10 @@ describe("a project's computer, over an in-memory provider", () => {
 
 			await runOnPostgres(world.projectComputers.renew(TURN).pipe(Scope.provide(turnScope)));
 			await refreshing.started(1);
-			const runningWhileHeld = fibersRunningIn(turnScope);
 			refreshing.release();
 			await refreshed;
+			await expect.poll(() => fibersRunningIn(turnScope)).toBe(0);
 
-			// The expiring computer's refresh, held at its provider, and nothing for the durable one, now or later.
-			expect(runningWhileHeld).toBe(1);
 			const tokensGiven = (id: Computers.ComputerId) =>
 				world.provider
 					.computers()

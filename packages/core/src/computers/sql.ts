@@ -104,6 +104,10 @@ export const computer = pgTable(
 		diskUsage: jsonb("disk_usage").$type<DiskUsage>(),
 		diskMeasuredAt: timestamp("disk_measured_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
+		appliedSettings: jsonb("applied_settings").$type<{
+			readonly revision: string;
+			readonly refreshAtMillis: number | null;
+		}>(),
 	},
 	(table) => [
 		foreignKey({

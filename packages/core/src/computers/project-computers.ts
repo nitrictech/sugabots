@@ -126,8 +126,8 @@ export interface Interface {
 		opened: Opened,
 	) => Effect.Effect<void, Computers.Unavailable>;
 	/**
-	 * Extends `holder`'s leases, and starts signing their computers in afresh when their
-	 * credentials are about to expire. Nothing happens if it has none.
+	 * Extends `holder`'s leases and refreshes their computers when the settings
+	 * change or their credentials are about to expire.
 	 */
 	readonly renew: (holder: Holder) => Effect.Effect<void, never, Scope.Scope>;
 	/** Ends `holder`'s leases, starting the idle time of the computers it held. */
@@ -253,17 +253,6 @@ export const make = Effect.gen(function* () {
 		return semaphore.withPermits(1);
 	};
 
-	// When each project's computer must be signed in again, from when it last was by
-	// this process. Another process's computers are signed in on first renewal.
-	const signInDue = new Map<string, number>();
-	const appliedSettings = new Map<
-		string,
-		{
-			readonly machine: Computers.ComputerId;
-			readonly revision: string;
-		}
-	>();
-
 	// What each image's tag named when its registry was last asked, and until when that is relied on.
 	const tagged = new Map<string, { pinned: string | undefined; until: number }>();
 	/** `image` pinned to the digest its tag names now, if its registry says. */
@@ -319,27 +308,55 @@ export const make = Effect.gen(function* () {
 			return { reach, source, revision };
 		});
 
-	/**
-	 * Sets what the project's computer may reach and what it is signed in with,
-	 * as far as its provider can add credentials.
-	 */
-	const applyNetwork = (project: Project, computer: Computers.Computer, at: Computers.Provider) =>
+	type Settings = Effect.Success<ReturnType<typeof readSettings>>;
+
+	const setAppliedSettings = (
+		row: ComputerRow,
+		intentId: string,
+		appliedSettings: ComputerRow["appliedSettings"],
+	) =>
 		Effect.gen(function* () {
-			const { reach, source, revision } = yield* readSettings(project, at);
+			const now = yield* DateTime.nowAsDate;
+			const [updated] = yield* query((db) =>
+				db
+					.update(computerTable)
+					.set({ appliedSettings })
+					.where(claimedComputer(row, intentId, now))
+					.returning({ id: computerTable.id }),
+			);
+			if (!updated) return yield* new ClaimLost();
+		});
+
+	const applySettings = (
+		row: ComputerRow,
+		intentId: string,
+		computer: Computers.Computer,
+		at: Computers.Provider,
+		{ reach, source, revision }: Settings,
+	) =>
+		Effect.gen(function* () {
 			const signedIn = yield* source?.load ?? Effect.succeed(ComputerSignIn.NOT_SIGNED_IN);
-			appliedSettings.delete(project.projectId);
+			// A provider may change only part of its network before failing, so
+			// neither revision can be relied on until the update succeeds.
+			yield* setAppliedSettings(row, intentId, null);
 			yield* computer.setNetwork({
 				reach,
 				credentials: fittedTo(at.capabilities.credentials, signedIn.credentials),
 			});
-			appliedSettings.set(project.projectId, { machine: computer.id, revision });
-			if (signedIn.expiresAt === undefined) {
-				signInDue.delete(project.projectId);
-				return;
-			}
-			const due = DateTime.subtractDuration(signedIn.expiresAt, CREDENTIAL_REFRESH_MARGIN);
-			signInDue.set(project.projectId, DateTime.toEpochMillis(due));
+			const refreshAtMillis =
+				signedIn.expiresAt === undefined
+					? null
+					: DateTime.toEpochMillis(
+							DateTime.subtractDuration(signedIn.expiresAt, CREDENTIAL_REFRESH_MARGIN),
+						);
+			yield* setAppliedSettings(row, intentId, { revision, refreshAtMillis });
 		});
+
+	const settingsNeedRefresh = (row: ComputerRow, settings: Settings, nowMillis: number) => {
+		const applied = row.appliedSettings;
+		if (applied?.revision !== settings.revision) return true;
+		return applied.refreshAtMillis === null || applied.refreshAtMillis <= nowMillis;
+	};
 
 	/**
 	 * Brings a running computer's network up to date. The intent protects the
@@ -349,13 +366,19 @@ export const make = Effect.gen(function* () {
 		withComputerIntent(
 			sameComputer(row),
 			() => isNull(computerTable.sleptAt),
-			() =>
+			(current, intentId) =>
 				Effect.gen(function* () {
-					const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
+					const configured = yield* providers.access(
+						current.workspaceId,
+						current.computerProviderId,
+					);
 					if (!configured) return;
 					const at = computers.forAccess(configured.access);
-					const { computer } = yield* at.open(row.providerComputerId);
-					yield* applyNetwork(row, computer, at);
+					const settings = yield* readSettings(current, at);
+					const nowMillis = yield* Clock.currentTimeMillis;
+					if (!settingsNeedRefresh(current, settings, nowMillis)) return;
+					const { computer } = yield* at.open(current.providerComputerId);
+					yield* applySettings(current, intentId, computer, at, settings);
 				}).pipe(Effect.uninterruptible),
 		).pipe(
 			Effect.asVoid,
@@ -365,13 +388,10 @@ export const make = Effect.gen(function* () {
 				// Its replacement is made with the network allowed then.
 				ComputerStopped: () => Effect.void,
 				ComputerUnavailable: (failure) =>
-					Effect.gen(function* () {
-						signInDue.delete(row.projectId);
-						yield* Effect.logWarning(
-							"Could not bring a computer's network up to date. The next lease renewal or open will retry.",
-							failure,
-						);
-					}),
+					Effect.logWarning(
+						"Could not bring a computer's network up to date. The next lease renewal or open will retry.",
+						failure,
+					),
 			}),
 		);
 
@@ -383,7 +403,15 @@ export const make = Effect.gen(function* () {
 				refreshingSignIn.add(row.id);
 				return true;
 			}),
-			(started) => (started ? applyNetworkWhileRunning(row) : Effect.void),
+			(started) =>
+				Effect.gen(function* () {
+					if (!started) return;
+					const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
+					if (!configured) return;
+					const settings = yield* readSettings(row, computers.forAccess(configured.access));
+					const nowMillis = yield* Clock.currentTimeMillis;
+					if (settingsNeedRefresh(row, settings, nowMillis)) yield* applyNetworkWhileRunning(row);
+				}),
 			(started) =>
 				Effect.sync(() => {
 					if (started) refreshingSignIn.delete(row.id);
@@ -718,7 +746,11 @@ export const make = Effect.gen(function* () {
 			const [recorded] = yield* query((db) =>
 				db
 					.update(computerTable)
-					.set({ sleptAt: null, lastUsedAt: now })
+					.set({
+						sleptAt: null,
+						lastUsedAt: now,
+						appliedSettings: opened.resumed ? null : undefined,
+					})
 					.where(computerWithIntent(row, intentId))
 					.returning({ id: computerTable.id }),
 			);
@@ -983,6 +1015,7 @@ export const make = Effect.gen(function* () {
 							lastUsedAt: now,
 							diskUsage: null,
 							diskMeasuredAt: null,
+							appliedSettings: null,
 						})
 						.where(claimedComputer(row, intentId, now))
 						.returning({ id: computerTable.id }),
@@ -1135,7 +1168,7 @@ export const make = Effect.gen(function* () {
 							query((db) =>
 								db
 									.update(computerTable)
-									.set({ sleptAt, ...CLEARED_INTENT })
+									.set({ sleptAt, appliedSettings: null, ...CLEARED_INTENT })
 									.where(claimed),
 							),
 						),
@@ -1393,7 +1426,10 @@ export const make = Effect.gen(function* () {
 			yield* at.sleep(row.providerComputerId);
 			const sleptAt = yield* DateTime.nowAsDate;
 			yield* query((db) =>
-				db.update(computerTable).set({ sleptAt }).where(computerWithIntent(row, intentId)),
+				db
+					.update(computerTable)
+					.set({ sleptAt, appliedSettings: null })
+					.where(computerWithIntent(row, intentId)),
 			);
 		}).pipe(
 			Effect.catchTags({
@@ -1439,11 +1475,13 @@ export const make = Effect.gen(function* () {
 								providerComputerId: result.computer.id,
 							}),
 							() => isNull(computerTable.sleptAt),
-							() =>
-								applyNetwork(project, result.computer, computers.forAccess(provider.access)).pipe(
-									Effect.as(true),
-									Effect.uninterruptible,
-								),
+							(row, intentId) =>
+								Effect.gen(function* () {
+									const at = computers.forAccess(provider.access);
+									const settings = yield* readSettings(project, at);
+									yield* applySettings(row, intentId, result.computer, at, settings);
+									return true;
+								}).pipe(Effect.uninterruptible),
 						).pipe(Effect.catchTag("ClaimLost", () => Effect.succeed({ value: undefined })));
 						if (ready) return { ...result, record } satisfies Opened;
 					}
@@ -1457,8 +1495,14 @@ export const make = Effect.gen(function* () {
 					const provider = yield* providers.enabled(project.workspaceId);
 					if (provider?.id === providerId) {
 						const { revision } = yield* readSettings(project, computers.forAccess(provider.access));
-						const applied = appliedSettings.get(project.projectId);
-						if (applied?.machine === opened.computer.id && applied.revision === revision) return;
+						const row = yield* recorded(project);
+						if (
+							row?.id === opened.record &&
+							row.computerProviderId === providerId &&
+							row.providerComputerId === opened.computer.id &&
+							row.appliedSettings?.revision === revision
+						)
+							return;
 					}
 					return yield* new Computers.Unavailable({
 						provider: provider?.access.provider ?? "unconfigured",
@@ -1472,7 +1516,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"renew",
 				Effect.gen(function* () {
-					const { now, rows } = yield* transaction(
+					const rows = yield* transaction(
 						Effect.gen(function* () {
 							const rows = yield* query((db) =>
 								db
@@ -1489,7 +1533,7 @@ export const make = Effect.gen(function* () {
 									expiresAt > DateTime.toDateUtc(now) ||
 									(computer.sleptAt === null && !hasFreshIntent(computer, now)),
 							);
-							if (renewable.length === 0) return { now, rows: [] };
+							if (renewable.length === 0) return [];
 							const renewed = yield* query((db) =>
 								db
 									.update(computerLease)
@@ -1506,18 +1550,12 @@ export const make = Effect.gen(function* () {
 									.returning({ computerId: computerLease.computerId }),
 							);
 							const renewedIds = new Set(renewed.map(({ computerId }) => computerId));
-							return {
-								now,
-								rows: renewable.flatMap(({ computer }) =>
-									renewedIds.has(computer.id) ? [computer] : [],
-								),
-							};
+							return renewable.flatMap(({ computer }) =>
+								renewedIds.has(computer.id) ? [computer] : [],
+							);
 						}),
 					);
-					const nowMillis = DateTime.toEpochMillis(now);
 					for (const row of rows) {
-						const due = signInDue.get(row.projectId);
-						if (due !== undefined && due > nowMillis) continue;
 						yield* Effect.forkScoped(refreshSignIn(row));
 					}
 				}),

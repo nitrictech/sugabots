@@ -3328,3 +3328,5 @@ CREATE TABLE "event_retention" (
 	"pruned_through" bigint NOT NULL,
 	CONSTRAINT "event_retention_singleton" CHECK ("singleton")
 );
+--> statement-breakpoint
+ALTER TABLE "computer" ADD COLUMN "applied_settings" jsonb;

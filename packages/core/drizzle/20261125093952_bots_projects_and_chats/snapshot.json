@@ -24020,6 +24020,22 @@
       "op": "create",
       "row": {
         "schema": "public",
+        "table": "computer",
+        "name": "applied_settings",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
         "table": "computer_lease",
         "name": "provider_computer_id",
         "type": "text",

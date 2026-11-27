@@ -265,8 +265,10 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				provider_computer_id: string;
 				project_id: string;
 				default_of_bot_id: string | null;
+				applied_settings: null;
 			}>(
-				`select computer.id, computer.provider_computer_id, computer.project_id, project.default_of_bot_id
+				`select computer.id, computer.provider_computer_id, computer.project_id, project.default_of_bot_id,
+				 computer.applied_settings
 				 from computer join project on project.id = computer.project_id order by computer.id`,
 			);
 
@@ -277,12 +279,14 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					provider_computer_id: legacy.computers.family.providerId,
 					project_id: legacy.pods.family,
 					default_of_bot_id: null,
+					applied_settings: null,
 				},
 				{
 					id: legacy.computers.notes.id,
 					provider_computer_id: legacy.computers.notes.providerId,
 					project_id: legacy.pods.notes,
 					default_of_bot_id: null,
+					applied_settings: null,
 				},
 				// A personal pod's goes to its bot other than the Personal Assistant.
 				{
@@ -290,6 +294,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					provider_computer_id: legacy.computers.pat.providerId,
 					project_id: expect.any(String),
 					default_of_bot_id: legacy.bots.helper,
+					applied_settings: null,
 				},
 			]);
 		});
