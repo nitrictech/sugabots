@@ -60,25 +60,26 @@ file backup.
 - **Each bot gets its own connectors.** A pod's connectors are copied to each
   of its bots. The upgrade turns on the shared pod's bots' own connectors in
   the project the pod becomes. A shared pod with no bots keeps its connectors
-  in that project. Sign-ins can't be shared between copies, so **every OAuth
-  connector has to sign in again**: once for each bot it was copied to, and
-  once in each project that kept one. Connectors that use an API key or no
-  sign-in keep working.
+  in that project. An OAuth connector that ends up in just one project keeps
+  its completed sign-in. If several bots get a copy, sign in again for each
+  bot. Restart any sign-in that was still under way. Connectors that use an
+  API key or no sign-in keep working.
 - **A shared pod's GitHub app stays with its converted project.** Every bot
   in that project can use its GitHub tools there, and the project's computer
   keeps read-only Git sign-in to the selected repositories. The bots'
-  GitHub-triggered automations move to their own projects and are **paused**.
-  To restart one, set up a GitHub app for its bot, point the trigger at that
-  app, and resume the automation.
+  automations move to their own projects. Their GitHub triggers need a new app.
+  Set up a GitHub app for the bot, then point the trigger at a repository in
+  that app. Routines and other working triggers continue to run.
 - **A personal pod's GitHub app goes to one bot.** It goes to the oldest bot
   with automations started by the app, or otherwise the oldest bot other than
-  the Personal Assistant. The other bots' GitHub-triggered automations are
-  **paused** until they have their own app and the triggers point at it. If
+  the Personal Assistant. The other bots' GitHub triggers need their own app
+  and repository. Their routines and other working triggers keep running. If
   the pod has no other bots, its Personal Assistant keeps the app.
-- **Older bearer webhook secrets still work.** The trigger can check the
-  secret against its stored digest, and the automation and its routines keep
-  their prior state. If you replace the secret, update it wherever the webhook
-  is sent from too.
+- **Existing webhook secrets keep working.** A trigger with only a stored
+  bearer digest can still verify calls. The digest cannot reveal the original
+  secret. The workspace owner and admins can read encrypted webhook secrets
+  from shared pods. Anyone who manages the automation can replace its secret
+  and read the replacement. Update it wherever the webhook is sent from too.
 - **Direct messages between members are deleted**, with their files. Members
   now talk in projects' chats.
 - **Chat summaries are deleted.** Bots no longer summarise chats. What they
@@ -115,8 +116,7 @@ file backup.
   Personal Assistant if it is the only bot. If a personal pod has no bots,
   its files, computer, allowed hosts and connectors go to a new Personal
   Assistant's default project. Only the member it was made for can reach
-  them. They choose its model, can turn on computer use, and sign in again
-  to OAuth connectors. The new server moves files kept on disk to their new
-  folders before serving them.
+  them. They choose its model and can turn on computer use. The new server
+  moves files kept on disk to their new folders before serving them.
 - **Old docs links.** Links to renamed docs pages, such as `/docs/pods`,
   redirect to the page that replaced them.
