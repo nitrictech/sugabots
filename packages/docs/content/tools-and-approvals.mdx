@@ -88,7 +88,22 @@ can change while a request waits.
 - A tool was switched off.
 - The automation was removed.
 
-Ask the bot to try again after the settings are sorted out.
+The closed request says what to do next. If the request itself changed, such
+as the connector or the brief's destination, ask the bot to try again. If a
+setting now stops the call, someone has to change it first: whoever manages
+the bot can turn a tool or computer use back on, and the workspace's owner or
+an admin can enable a computer provider or unblock a host. A removed
+automation can't be edited.
+
+A request also stops waiting without anyone answering when:
+
+- nobody answers within 7 days;
+- a new message reaches the bot, or someone stops it;
+- the automation run it belongs to ends;
+- the bot's reply fails;
+- the chat is no longer available.
+
+The request then says why, and what you can do next.
 
 The first rule that applies decides who can answer:
 

@@ -133,6 +133,21 @@ const unavailable: AnsweredApproval = {
 	},
 	answer: { status: "closed", closedAt },
 };
+const blockedHostRequest = request("09", "failed", {
+	...pending,
+	status: "denied",
+	closedBecause: "hostBlocked",
+});
+const blockedHost: AnsweredApproval = {
+	...blockedHostRequest,
+	call: {
+		...blockedHostRequest.call,
+		tool: "request_host",
+		input: { host: "api.acme.example" },
+		finishedAt: closedAt,
+	},
+	answer: { status: "closed", closedAt },
+};
 const withoutFields = {
 	...outside,
 	call: { ...outside.call, id: "0199a3a0-0000-7000-8000-000000000805", input: null },
@@ -151,7 +166,7 @@ const brief: ApprovalRequest = {
 
 const approvals: WorkspaceApprovals = {
 	waiting: [answerable, outside, withoutFields, brief],
-	answered: [answered, stopped, closedBrief, unavailable],
+	answered: [answered, stopped, closedBrief, unavailable, blockedHost],
 };
 
 const meta = preview.meta({
@@ -317,5 +332,18 @@ export const BriefInBotsOwnChats = meta.story({
 		await expect(
 			await canvas.findByText("Starts a chat with Ada in Ada's own chats"),
 		).toBeVisible();
+	},
+});
+
+/** SettingBlocksRetry names who can change the setting instead of asking the bot to try again. */
+export const SettingBlocksRetry = meta.story({
+	render: at(blockedHost.call.id),
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText(
+				"This approval was closed because the workspace now blocks the requested host. The workspace's owner or an admin can unblock it.",
+			),
+		).toBeVisible();
+		await expect(canvas.queryByText(/try again/)).toBeNull();
 	},
 });

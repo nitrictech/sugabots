@@ -1,5 +1,4 @@
 import { APPROVAL_LIFETIME_DAYS, type ChatDetails, type ToolCallPart } from "@sugabots/contracts";
-import { ToolApprovalConflict } from "@sugabots/contracts/errors/approvals";
 
 /** What a member may decide in a chat, as its details say. */
 export type ApprovalPermissions = NonNullable<ChatDetails["permissions"]>;
@@ -55,12 +54,28 @@ export function closedApprovalMessage(call: ToolCallPart, botName: string): stri
 			return `No longer waiting. This chat is no longer available. If you can still talk to ${botName}, start a new chat.`;
 		case "replyFailed":
 			return `No longer waiting. ${botName} couldn't finish. Check what ${botName} already did before asking again.`;
+		case "briefDestinationChanged":
+			return `This approval was closed because the chat ${botName} wanted to start changed. Ask ${botName} to try again.`;
+		case "automationRoutineChanged":
+			return `This approval was closed because the automation's routine changed. Ask ${botName} to try again.`;
+		case "connectorChanged":
+			return `This approval was closed because the connector or its tool settings changed. Ask ${botName} to try again.`;
+		case "computerTargetChanged":
+			return `This approval was closed because the computer ${botName} wanted to use changed. Ask ${botName} to try again.`;
+		case "automationRemoved":
+			return "This approval was closed because the automation was removed.";
+		case "toolSwitchedOff":
+			return `This approval was closed because the tool is now off. Whoever manages ${botName} can turn it back on in its settings.`;
+		case "computerUseChanged":
+			return `This approval was closed because ${botName} can no longer use the computer. Whoever manages ${botName} can turn computer use back on in its settings.`;
+		case "noComputerProvider":
+			return "This approval was closed because the workspace has no enabled computer provider. The workspace's owner or an admin can turn one on.";
+		case "hostBlocked":
+			return "This approval was closed because the workspace now blocks the requested host. The workspace's owner or an admin can unblock it.";
 		case "withdrawn":
 		case undefined:
 			return "No longer waiting for approval.";
-		default: {
-			const message = new ToolApprovalConflict({ reason }).userMessage;
-			return `${message.replaceAll("the bot", () => botName)} Ask ${botName} to try again.`;
-		}
+		default:
+			return reason satisfies never;
 	}
 }
