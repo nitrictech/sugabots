@@ -180,7 +180,7 @@ const everyAutomation = [
 ];
 
 /** The id of `one`'s feed, where its runs post. */
-const feedOf = (one: BotsAutomation) =>
+const feedId = (one: BotsAutomation) =>
 	`${one.automation.id.slice(0, -4)}f${one.automation.id.slice(-3)}`;
 
 /**
@@ -211,7 +211,7 @@ function automationsAnswer(items: BotsAutomation[]) {
 						bot,
 						chat: {
 							kind: "automation_feed" as const,
-							id: feedOf({ automation, bot }),
+							id: feedId({ automation, bot }),
 							workspaceId: storyWorkspace.id,
 							title: automation.name,
 							createdAt: automation.createdAt,
@@ -225,15 +225,15 @@ function automationsAnswer(items: BotsAutomation[]) {
 			}),
 		),
 		http.get(`${API}/chats/:chatId`, ({ params }) => {
-			const one = items.find((item) => feedOf(item) === params.chatId);
+			const one = items.find((item) => feedId(item) === params.chatId);
 			if (!one) return HttpResponse.json({ message: "No such chat" }, { status: 404 });
 			const details = storyChatDetails(one.bot);
 			return HttpResponse.json({
 				...details,
 				chat: {
 					...details.chat,
-					id: feedOf(one),
-					rootChatId: feedOf(one),
+					id: feedId(one),
+					rootChatId: feedId(one),
 					kind: "automation_feed",
 					title: one.automation.name,
 				},
@@ -253,7 +253,7 @@ function automationsAnswer(items: BotsAutomation[]) {
 }
 
 /** `one`'s feed, beside its bot's automations, where the panel beside it sets the automation up. */
-const pageOf = (one: BotsAutomation) =>
+const feedPath = (one: BotsAutomation) =>
 	`/${storyWorkspace.slug}/bots/${one.bot.handle}/automations/${one.automation.id}`;
 
 type Canvas = ReturnType<typeof within>;
@@ -302,7 +302,7 @@ const meta = preview.meta({
 
 /** An automation with a routine in its panel: on, when it runs, where its result goes, Start a run, and ⋯. */
 export const WithARoutine = meta.story({
-	render: () => <StoryApp path={pageOf(overnight)} />,
+	render: () => <StoryApp path={feedPath(overnight)} />,
 	play: async ({ canvas }) => {
 		const panel = await openPanel(canvas);
 		await expect(
@@ -320,7 +320,7 @@ export const WithARoutine = meta.story({
 
 /** A routine opens in a dialog: when it runs, the note saying so in its time zone, Save and Remove. */
 export const Trigger = meta.story({
-	render: () => <StoryApp path={pageOf(overnight)} />,
+	render: () => <StoryApp path={feedPath(overnight)} />,
 	play: async ({ canvas }) => {
 		const dialog = await openFirstTrigger(canvas);
 		await expect(within(dialog).getByRole("heading", { name: "Routine" })).toBeInTheDocument();
@@ -338,7 +338,7 @@ export const SeveralTriggers = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...automationsAnswer([...everyAutomation, releaseWatch]));
 	},
-	render: () => <StoryApp path={pageOf(releaseWatch)} />,
+	render: () => <StoryApp path={feedPath(releaseWatch)} />,
 	play: async ({ canvas }) => {
 		const routines = await sectionRows(canvas, "Routines");
 		await expect(routines.map((row) => row.textContent)).toEqual([
@@ -360,7 +360,7 @@ export const AddTrigger = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...automationsAnswer([...everyAutomation, pullRequestReviews]), ...projectRepositories);
 	},
-	render: () => <StoryApp path={pageOf(pullRequestReviews)} />,
+	render: () => <StoryApp path={feedPath(pullRequestReviews)} />,
 	play: async ({ canvas, userEvent }) => {
 		const step = await openAddTrigger(canvas, true);
 		await waitFor(() =>
@@ -377,7 +377,7 @@ export const AddTrigger = meta.story({
 
 /** Several times on some days of the week: a row per time, each with a way to remove it, and room for more. */
 export const SeveralTimes = meta.story({
-	render: () => <StoryApp path={pageOf(standups)} />,
+	render: () => <StoryApp path={feedPath(standups)} />,
 	play: async ({ canvas }) => {
 		const dialog = within(await openFirstTrigger(canvas));
 		await expect(await dialog.findByRole("radio", { name: "Weekly" })).toBeChecked();
@@ -392,7 +392,7 @@ export const SeveralTimes = meta.story({
 
 /** A time's picker open: a short list below the chip that scrolls, with the times other chips hold unpickable. */
 export const PickingATime = meta.story({
-	render: () => <StoryApp path={pageOf(standups)} />,
+	render: () => <StoryApp path={feedPath(standups)} />,
 	play: async ({ canvas }) => {
 		const dialog = within(await openFirstTrigger(canvas));
 		await userEvent.click(dialog.getByRole("combobox", { name: "Time 1" }));
@@ -411,7 +411,7 @@ export const PickingATime = meta.story({
 
 /** Every third month on its last day: Every and On the step through their values. */
 export const Monthly = meta.story({
-	render: () => <StoryApp path={pageOf(quarterClose)} />,
+	render: () => <StoryApp path={feedPath(quarterClose)} />,
 	play: async ({ canvas }) => {
 		const dialog = within(await openFirstTrigger(canvas));
 		await expect(await dialog.findByRole("status", { name: "Every" })).toHaveTextContent(
@@ -426,7 +426,7 @@ export const Monthly = meta.story({
 
 /** ⋯ beside Start a run holds what else can be done: Duplicate, and Delete automation. */
 export const MoreMenu = meta.story({
-	render: () => <StoryApp path={pageOf(overnight)} />,
+	render: () => <StoryApp path={feedPath(overnight)} />,
 	play: async ({ canvas, userEvent }) => {
 		const panel = await openPanel(canvas);
 		await userEvent.click(
@@ -443,7 +443,7 @@ export const MoreMenu = meta.story({
 
 /** Paused: its switch is off, and Start a run still works. */
 export const Paused = meta.story({
-	render: () => <StoryApp path={pageOf(churnReport)} />,
+	render: () => <StoryApp path={feedPath(churnReport)} />,
 	play: async ({ canvas }) => {
 		const panel = await openPanel(canvas);
 		await expect(await panel.findByRole("switch", { name: "Automation on" })).not.toBeChecked();
@@ -453,7 +453,7 @@ export const Paused = meta.story({
 
 /** A webhook: its address, its auth, and its saved secret, hidden until Show, edited in place. */
 export const Webhook = meta.story({
-	render: () => <StoryApp path={pageOf(incidentIntake)} />,
+	render: () => <StoryApp path={feedPath(incidentIntake)} />,
 	play: async ({ canvas }) => {
 		const dialog = within(await openFirstTrigger(canvas));
 		await expect(
@@ -501,7 +501,7 @@ export const DeliveryIdHeader = meta.story({
 			),
 		);
 	},
-	render: () => <StoryApp path={pageOf(incidentIntake)} />,
+	render: () => <StoryApp path={feedPath(incidentIntake)} />,
 	play: async ({ canvas, userEvent }) => {
 		const dialog = within(await openFirstTrigger(canvas));
 		await dialog.findByLabelText("Signing secret");
@@ -534,7 +534,7 @@ export const DeliveryIdHeaderOnAPhone = meta.story({
 
 /** From Slack, only its signing secret is asked for; Escape puts the saved one back over one pasted in. */
 export const SlackWebhook = meta.story({
-	render: () => <StoryApp path={pageOf(slackMentions)} />,
+	render: () => <StoryApp path={feedPath(slackMentions)} />,
 	play: async ({ canvas, userEvent }) => {
 		const dialog = within(await openFirstTrigger(canvas));
 		await expect(await dialog.findByRole("button", { name: "Source: Slack" })).toBeInTheDocument();
@@ -548,7 +548,7 @@ export const SlackWebhook = meta.story({
 
 /** The source menu: Generic, then the webhook sources, whose signing is known, each with its logo; picking one closes it. */
 export const SourceMenu = meta.story({
-	render: () => <StoryApp path={pageOf(incidentIntake)} />,
+	render: () => <StoryApp path={feedPath(incidentIntake)} />,
 	play: async ({ canvas, userEvent }) => {
 		const dialog = within(await openFirstTrigger(canvas));
 		await userEvent.click(await dialog.findByRole("button", { name: "Source: Generic" }));
@@ -563,7 +563,7 @@ export const SourceMenu = meta.story({
 
 /** Basic auth: a username to set, and a password. */
 export const BasicWebhook = meta.story({
-	render: () => <StoryApp path={pageOf(signups)} />,
+	render: () => <StoryApp path={feedPath(signups)} />,
 	play: async ({ canvas }) => {
 		const dialog = within(await openFirstTrigger(canvas));
 		await expect(await dialog.findByLabelText("Username")).toHaveValue("sugabots");
@@ -593,7 +593,7 @@ export const RepositoryTrigger = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...automationsAnswer([...everyAutomation, pullRequestReviews]), ...projectRepositories);
 	},
-	render: () => <StoryApp path={pageOf(pullRequestReviews)} />,
+	render: () => <StoryApp path={feedPath(pullRequestReviews)} />,
 	play: async ({ canvas }) => {
 		const panel = await openPanel(canvas);
 		await expect(await panel.findByRole("button", { name: /^On acme\/web/ })).toBeInTheDocument();
@@ -676,7 +676,7 @@ export const AsAnEditor = meta.story({
 			...appHandlers({ role: "editor", bots: asEditor }),
 		);
 	},
-	render: () => <StoryApp path={pageOf(overnight)} />,
+	render: () => <StoryApp path={feedPath(overnight)} />,
 	play: async ({ canvas }) => {
 		const panel = await openPanel(canvas);
 		await expect(
