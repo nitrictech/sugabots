@@ -160,45 +160,11 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			await migrateTo(url, LAST_MAIN_MIGRATION);
 			await withClient(url, async (client) => {
 				await client.query(legacyRows);
-				const converted = await github.fetch(
-					`https://api.github.com/app-manifests/${MANIFEST_CODE}/conversions`,
-				);
-				const app = (await converted.json()) as { id: number; slug: string; pem: string };
-				const credential = encryptAppCredential(
-					Secrets.fromKey(Buffer.alloc(32).toString("base64")),
-					{
-						privateKey: app.pem,
-						webhookSecret: WEBHOOK_SECRET,
-					},
-				);
-				await client.query(
-					`insert into connection (id, workspace_id, pod_id, name, handle, kind, url, settings,
-						app_credential_encrypted, created_by_id)
-						values ($1, $2, $3, 'GitHub', 'github', 'github', 'https://api.github.com', $4, $5, $6)`,
-					[
-						legacy.familyGitHubConnector,
-						legacy.workspace,
-						legacy.pods.family,
-						{
-							kind: "github",
-							appId: app.id,
-							slug: app.slug,
-							owner: { type: "Organization", login: "acme" },
-							installationId: INSTALLATION_ID,
-							account: "acme",
-							repositories: [
-								{
-									id: 101,
-									path: "acme/web",
-									addedById: legacy.members.sam,
-									addedAt: "2026-10-02T09:01:00Z",
-								},
-							],
-						},
-						credential,
-						legacy.members.sam,
-					],
-				);
+				await seedGitHubApp(client, github.fetch, {
+					connectorId: legacy.familyGitHubConnector,
+					podId: legacy.pods.family,
+					memberId: legacy.members.sam,
+				});
 				await client.query(legacyMigrationScaleRows);
 				await client.query(legacyNotificationOverrides);
 				await client.query(legacyRecordedToolCalls);
@@ -518,20 +484,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 		});
 
 		it("keeps the converted project's computer signed in to the shared GitHub repositories", async () => {
-			const signIn = (projectId: string) =>
-				upgraded.run(
-					ComputerSignIn.Service.use((signIns) =>
-						signIns
-							.forProject({ workspaceId: legacy.workspace, projectId })
-							.pipe(
-								Effect.flatMap(
-									(signIn) => signIn?.load ?? Effect.succeed(ComputerSignIn.NOT_SIGNED_IN),
-								),
-							),
-					).pipe(
-						Effect.provide(GitHubSignIn.layer.pipe(Layer.provide(egressToGitHub(github.fetch)))),
-					),
-				);
+			const signIn = (projectId: string) => readComputerSignIn(upgraded, projectId, github.fetch);
 
 			expect((await signIn(legacy.pods.family))?.credentials).toEqual([
 				expect.objectContaining({
@@ -1998,6 +1951,93 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 	},
 );
 
+it.skipIf(!process.env.DATABASE_URL)(
+	"keeps the existing computer signed in when a younger personal bot has the GitHub trigger",
+	async () => {
+		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", "personal_github");
+		const github = standInGitHub(mintsTokens);
+		const youngerBotId = crypto.randomUUID();
+		const connectorId = crypto.randomUUID();
+		let upgraded: Upgraded | undefined;
+		await recreateDatabase(url);
+		try {
+			await migrateTo(url, LAST_MAIN_MIGRATION);
+			await withClient(url, async (client) => {
+				await client.query(legacyRows);
+				await client.query(legacySessions);
+				await client.query(
+					`insert into agent (id, workspace_id, pod_id, name, handle, color, face, created_by_id, created_at)
+					 values ($1, $2, $3, 'Reviewer', 'reviewer', 'sky', 'dot', $4, '2026-10-03 09:03')`,
+					[youngerBotId, legacy.workspace, legacy.pods.pat, legacy.members.pat],
+				);
+				await seedGitHubApp(client, github.fetch, {
+					connectorId,
+					podId: legacy.pods.pat,
+					memberId: legacy.members.pat,
+				});
+				await client.query(
+					`with added as (
+						insert into routine (workspace_id, agent_id, name, instructions, state)
+						values ($1, $2, 'Review issues', 'Review new issues', 'enabled')
+						returning id, workspace_id
+					)
+					insert into routine_trigger (workspace_id, routine_id, settings)
+					select workspace_id, id, $3 from added`,
+					[
+						legacy.workspace,
+						youngerBotId,
+						{
+							kind: "github",
+							connectionId: connectorId,
+							repository: "acme/web",
+							events: ["issue_opened"],
+						},
+					],
+				);
+			});
+			await Effect.runPromise(applyMigrations.pipe(Effect.provide(poolAt(url))));
+			upgraded = startServer(url, "postgres", "");
+			const [computer] = await upgraded.rows<{ project_id: string; default_of_bot_id: string }>(
+				`select project_id, default_of_bot_id from computer
+				 join project on project.id = computer.project_id where computer.id = $1`,
+				[legacy.computers.pat.id],
+			);
+			if (!computer) throw new Error("The upgraded computer is missing");
+			expect(computer.default_of_bot_id).toBe(legacy.bots.helper);
+			expect(
+				(await readComputerSignIn(upgraded, computer.project_id, github.fetch))?.credentials,
+			).toEqual([
+				expect.objectContaining({
+					host: "github.com",
+					pathPrefix: "/acme/",
+					header: "Authorization",
+				}),
+			]);
+			expect(github.asked.filter(({ path }) => path.endsWith("/access_tokens"))).toEqual([
+				expect.objectContaining({
+					path: `/app/installations/${INSTALLATION_ID}/access_tokens`,
+					body: { repository_ids: [101], permissions: { contents: "read", metadata: "read" } },
+				}),
+			]);
+
+			const call = await servedOperations({ runOn: upgraded.run });
+			const input = { projectId: computer.project_id, connectorId };
+			await expect(
+				call(await upgraded.signIn(legacy.members.pat), "connectors.get", input),
+			).resolves.toMatchObject({ id: connectorId });
+			for (const outsider of [legacy.members.sam, legacy.members.ana]) {
+				await expect(
+					call(await upgraded.signIn(outsider), "connectors.get", input),
+				).rejects.toBeInstanceOf(ResourceHidden);
+			}
+		} finally {
+			await upgraded?.dispose();
+			await dropDatabase(url);
+		}
+	},
+	UPGRADE_TIMEOUT_MS,
+);
+
 it.skipIf(!process.env.DATABASE_URL).each([
 	{ existingAssistant: true, suffix: "existing" },
 	{ existingAssistant: false, suffix: "new" },
@@ -2337,6 +2377,61 @@ interface Upgraded {
 	/** `memberId`, signed in with the session main gave them in {@link legacySessions}. */
 	signIn: (memberId: string) => Promise<Principal>;
 	dispose: () => Promise<void>;
+}
+
+async function seedGitHubApp(
+	client: pg.Client,
+	github: typeof fetch,
+	{ connectorId, podId, memberId }: { connectorId: string; podId: string; memberId: string },
+) {
+	const converted = await github(
+		`https://api.github.com/app-manifests/${MANIFEST_CODE}/conversions`,
+	);
+	const app = (await converted.json()) as { id: number; slug: string; pem: string };
+	const credential = encryptAppCredential(Secrets.fromKey(Buffer.alloc(32).toString("base64")), {
+		privateKey: app.pem,
+		webhookSecret: WEBHOOK_SECRET,
+	});
+	await client.query(
+		`insert into connection (id, workspace_id, pod_id, name, handle, kind, url, settings,
+			app_credential_encrypted, created_by_id)
+			values ($1, $2, $3, 'GitHub', 'github', 'github', 'https://api.github.com', $4, $5, $6)`,
+		[
+			connectorId,
+			legacy.workspace,
+			podId,
+			{
+				kind: "github",
+				appId: app.id,
+				slug: app.slug,
+				owner: { type: "Organization", login: "acme" },
+				installationId: INSTALLATION_ID,
+				account: "acme",
+				repositories: [
+					{
+						id: 101,
+						path: "acme/web",
+						addedById: memberId,
+						addedAt: "2026-10-02T09:01:00Z",
+					},
+				],
+			},
+			credential,
+			memberId,
+		],
+	);
+}
+
+function readComputerSignIn(upgraded: Upgraded, projectId: string, github: typeof fetch) {
+	return upgraded.run(
+		ComputerSignIn.Service.use((signIns) =>
+			signIns
+				.forProject({ workspaceId: legacy.workspace, projectId })
+				.pipe(
+					Effect.flatMap((signIn) => signIn?.load ?? Effect.succeed(ComputerSignIn.NOT_SIGNED_IN)),
+				),
+		).pipe(Effect.provide(GitHubSignIn.layer.pipe(Layer.provide(egressToGitHub(github))))),
+	);
 }
 
 /** The server's database and blob store on the upgraded database, started as the server starts them. */
@@ -3026,7 +3121,8 @@ function upgradeDatabaseUrl(
 		| "project_leads"
 		| "assistant_existing"
 		| "assistant_new"
-		| "collaboration",
+		| "collaboration"
+		| "personal_github",
 ): string {
 	if (!workerUrl) return "";
 	const parsed = new URL(workerUrl);

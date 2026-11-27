@@ -69,18 +69,31 @@ DROP INDEX "connection_id_pod_id_idx";--> statement-breakpoint
 DROP INDEX "connection_github_pod_idx";--> statement-breakpoint
 ALTER TABLE "connection" ADD COLUMN "agent_id" uuid;--> statement-breakpoint
 ALTER TABLE "sandbox" ADD COLUMN "agent_id" uuid;--> statement-breakpoint
--- Each connection goes to one bot of its `pod`, which keeps its id so tool
--- calls and GitHub triggers still name it. Prefer bots other than the Personal
--- Assistant, then the oldest bot whose automations trigger on the connection,
--- then the oldest bot. A shared pod keeps its GitHub app as a project.
+-- A computer keeps its provider's id and its work. A shared pod's computer
+-- stays with the project it becomes. A personal pod's computer goes to its
+-- oldest bot other than its Personal Assistant, or to the assistant when alone.
+ALTER TABLE "sandbox" ALTER COLUMN "pod_id" DROP NOT NULL;--> statement-breakpoint
+UPDATE "sandbox" SET "agent_id" = (
+	SELECT "agent"."id" FROM "agent"
+	WHERE "agent"."pod_id" = "sandbox"."pod_id"
+	ORDER BY "agent"."provisioned_key" IS NOT NULL, "agent"."created_at", "agent"."id"
+	LIMIT 1
+), "pod_id" = NULL
+FROM "pod" WHERE "pod"."id" = "sandbox"."pod_id" AND "pod"."kind" = 'personal';--> statement-breakpoint
+-- A shared pod's project keeps its GitHub app. A personal pod's app goes with
+-- its computer so Git can still read the selected repositories. Otherwise,
+-- prefer a bot other than the Personal Assistant, then a bot whose automations
+-- use the connection, then the oldest bot.
 WITH "keeper" AS (
 	SELECT DISTINCT ON ("connection"."id") "connection"."id" AS "connection_id", "agent"."id" AS "agent_id"
 	FROM "connection"
 	JOIN "agent" ON "agent"."pod_id" = "connection"."pod_id"
 	JOIN "pod" ON "pod"."id" = "connection"."pod_id"
+	LEFT JOIN "sandbox" ON "connection"."kind" = 'github' AND "sandbox"."agent_id" = "agent"."id"
 	WHERE "pod"."kind" = 'personal'
 		OR ("connection"."kind" <> 'github' AND "agent"."provisioned_key" IS DISTINCT FROM 'personal-assistant')
 	ORDER BY "connection"."id",
+		("sandbox"."id" IS NOT NULL) DESC,
 		("agent"."provisioned_key" IS NOT DISTINCT FROM 'personal-assistant'),
 		EXISTS (
 			SELECT 1 FROM "routine"
@@ -162,20 +175,6 @@ FOR EACH STATEMENT EXECUTE FUNCTION queue_deleted_github_installations();
 --> statement-breakpoint
 ALTER TABLE "connection" ALTER COLUMN "pod_id" DROP NOT NULL;--> statement-breakpoint
 UPDATE "connection" SET "pod_id" = NULL WHERE "agent_id" IS NOT NULL;--> statement-breakpoint
--- A `pod`'s computer keeps its provider's id and its work, which is named by
--- the computer's id. A `shared` one's stays with its `pod`, which becomes a
--- project under the same id and takes it over (see "Projects own resources"
--- below). A `personal` one's goes to the
--- bot its threads were with: the oldest bot of the `pod` other than its
--- Personal Assistant, or the assistant when it is the only one.
-ALTER TABLE "sandbox" ALTER COLUMN "pod_id" DROP NOT NULL;--> statement-breakpoint
-UPDATE "sandbox" SET "agent_id" = (
-	SELECT "agent"."id" FROM "agent"
-	WHERE "agent"."pod_id" = "sandbox"."pod_id"
-	ORDER BY "agent"."provisioned_key" IS NOT NULL, "agent"."created_at", "agent"."id"
-	LIMIT 1
-), "pod_id" = NULL
-FROM "pod" WHERE "pod"."id" = "sandbox"."pod_id" AND "pod"."kind" = 'personal';--> statement-breakpoint
 -- ## Bots own resources: keys
 ALTER TABLE "connection" DROP CONSTRAINT "connection_pod_workspace_fkey";--> statement-breakpoint
 ALTER TABLE "sandbox" DROP CONSTRAINT "sandbox_pod_workspace_fkey";--> statement-breakpoint
