@@ -76,9 +76,9 @@ const call = (
 });
 
 /**
- * BuiltInTools: each of the product's own tools by an icon for what it does,
- * a file for writing a file and a terminal for a command, and the wrench only
- * for one it has none for.
+ * BuiltInTools: each of the product's own tools by its family's icon, a file
+ * for the file tools and a terminal for a command, and the wrench only for one
+ * in no family.
  */
 export const BuiltInTools = meta.story({
 	args: {
@@ -111,8 +111,8 @@ export const BuiltInTools = meta.story({
 		const lineOf = async (text: RegExp) =>
 			(await canvas.findByRole("button", { name: text })).closest("[data-slot]") ?? canvasElement;
 		await expect((await lineOf(/^Ran/)).querySelector(".lucide-square-terminal")).not.toBeNull();
-		await expect((await lineOf(/^Created/)).querySelector(".lucide-file-plus")).not.toBeNull();
-		await expect((await lineOf(/^Edited/)).querySelector(".lucide-file-pen")).not.toBeNull();
+		await expect((await lineOf(/^Created/)).querySelector(".lucide-file-text")).not.toBeNull();
+		await expect((await lineOf(/^Edited/)).querySelector(".lucide-file-text")).not.toBeNull();
 		await expect(
 			(await lineOf(/^A tool with no icon/)).querySelector(".lucide-wrench"),
 		).not.toBeNull();

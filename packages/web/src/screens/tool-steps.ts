@@ -2,24 +2,13 @@ import { type MessagePart, messagePreview, type ToolCallPart } from "@sugabots/c
 import {
 	AppWindow,
 	BookOpen,
-	CircleCheck,
-	FileInput,
-	FileOutput,
-	FilePen,
-	FilePlus,
-	Files,
+	Building2,
 	FileText,
-	FolderPlus,
 	Globe,
-	History,
 	type LucideIcon,
-	MessageSquarePlus,
-	PackageSearch,
-	ScrollText,
-	Search,
+	MessageSquare,
+	NotebookPen,
 	SquareTerminal,
-	StickyNote,
-	UserRound,
 	Wrench,
 	Zap,
 } from "lucide-react";
@@ -158,45 +147,31 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 }
 
 /**
- * The icon a call to one of the product's own tools shows by its line, for
- * what the tool does: a file for the file tools, a terminal for a command, a
- * globe for a page or a host. A tool not listed has the wrench.
+ * The icon a call to one of the product's own tools shows by its line: its
+ * family's, for what its tools work on, such as files, commands or chats. A
+ * tool in no family has the wrench.
  */
 export function stepIcon(call: ToolCallPart): LucideIcon {
 	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return AppWindow;
-	if (call.tool === "file_write") {
-		return asRecord(call.input).fileId === undefined ? FilePlus : FilePen;
-	}
-	return BUILT_IN_TOOL_ICONS[call.tool] ?? Wrench;
+	if (call.tool.startsWith(FILE_TOOL_PREFIX)) return FileText;
+	return TOOL_FAMILIES.find((family) => family.tools.includes(call.tool))?.icon ?? Wrench;
 }
 
-const BUILT_IN_TOOL_ICONS: Readonly<Record<string, LucideIcon>> = {
-	run_command: SquareTerminal,
-	read_file: FileText,
-	write_file: FilePen,
-	copy_file_to_computer: FileInput,
-	share_file: FileOutput,
-	read_chat_file: FileText,
-	file_list: Files,
-	file_read: FileText,
-	file_edit: FilePen,
-	web_search: Search,
-	web_fetch: Globe,
-	request_host: Globe,
-	tool_search: PackageSearch,
-	search_history: History,
-	read_docs: BookOpen,
-	workspace_guide: BookOpen,
-	list_automations: Zap,
-	create_automation: Zap,
-	update_automation: Zap,
-	mark_resolved: CircleCheck,
-	start_chat: MessageSquarePlus,
-	create_project: FolderPlus,
-	save_instructions: ScrollText,
-	list_notes: StickyNote,
-	workspace_role: UserRound,
-};
+/** The product's own tools by family, beyond those whose names give theirs (the browser's and the file tools). */
+const TOOL_FAMILIES: readonly { icon: LucideIcon; tools: readonly string[] }[] = [
+	// The computer's files, and the chat's, are files too.
+	{
+		icon: FileText,
+		tools: ["read_file", "write_file", "copy_file_to_computer", "share_file", "read_chat_file"],
+	},
+	{ icon: SquareTerminal, tools: ["run_command"] },
+	{ icon: Globe, tools: ["web_search", "web_fetch", "request_host"] },
+	{ icon: MessageSquare, tools: ["start_chat", "mark_resolved", "search_history"] },
+	{ icon: Zap, tools: ["list_automations", "create_automation", "update_automation"] },
+	{ icon: BookOpen, tools: ["read_docs", "workspace_guide"] },
+	{ icon: Building2, tools: ["create_project", "workspace_role"] },
+	{ icon: NotebookPen, tools: ["save_instructions", "list_notes"] },
+];
 
 /**
  * A call's input and output as its row shows them opened. Each is text when
