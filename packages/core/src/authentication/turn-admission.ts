@@ -1,8 +1,13 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../database/database.ts";
 import { turn } from "../database/schema.ts";
-import { authenticated, type Principal, type TurnAdmission } from "../principal.ts";
+import {
+	authenticated,
+	type Principal,
+	type StoredTurnAdmission,
+	type TurnAdmission,
+} from "../principal.ts";
 
 /** Loads grants written by this execution before its next operation starts. */
 export const refreshTurnAdmission = (principal: Principal) =>
@@ -15,20 +20,28 @@ export const refreshTurnAdmission = (principal: Principal) =>
 			return principal;
 		const [stored] = yield* query((db) =>
 			db
-				.select({ admission: turn.admission })
+				.select({
+					grants: sql<
+						StoredTurnAdmission["projectGrants"] | null
+					>`${turn.admission} -> 'projectGrants'`,
+				})
 				.from(turn)
 				.where(
 					and(eq(turn.id, principal.turn), eq(turn.executionNumber, principal.executionNumber)),
 				),
 		);
-		return stored?.admission
-			? authenticated.botForAsker({ ...principal, admission: freezeAdmission(stored.admission) })
-			: principal;
+		if (!stored?.grants) return principal;
+		return authenticated.botForAsker({
+			...principal,
+			admission: freezeAdmission({ ...principal.admission, projectGrants: stored.grants }),
+		});
 	});
 
-export function freezeAdmission(admission: TurnAdmission | null): TurnAdmission | null {
+export function freezeAdmission(admission: StoredTurnAdmission | null): TurnAdmission | null {
 	if (!admission) return null;
-	for (const place of Object.values(admission.projects)) {
+	const { projectGrants, ...captured } = admission;
+	const projects = projectGrants ? { ...captured.projects, ...projectGrants } : captured.projects;
+	for (const place of Object.values(projects)) {
 		const bot = place.project.defaultOf;
 		if (bot) {
 			if ("memberIds" in bot) Object.freeze(bot.memberIds);
@@ -37,7 +50,7 @@ export function freezeAdmission(admission: TurnAdmission | null): TurnAdmission 
 		Object.freeze(place.project);
 		Object.freeze(place);
 	}
-	Object.freeze(admission.projects);
-	Object.freeze(admission.chatProjectBotIds);
-	return Object.freeze(admission);
+	Object.freeze(projects);
+	Object.freeze(captured.chatProjectBotIds);
+	return Object.freeze({ ...captured, projects });
 }

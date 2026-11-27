@@ -1,7 +1,7 @@
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { asksBeforeAllTools, type TurnFacts, turnFacts } from "../authentication/turn-facts.ts";
+import { asksBeforeAllTools, canWriteBrief, turnFacts } from "../authentication/turn-facts.ts";
 import { query } from "../database/database.ts";
 import { type BriefTurnRule, bot } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
@@ -116,7 +116,8 @@ const resolveBrief = (acting: BotForAsker, record: BotRecord) =>
 		const role = acting.admission
 			? (acting.admission.role ?? undefined)
 			: yield* query((db) => roleIn(db, record.workspace, acting.asker));
-		if (!memberReachesBot(actorOf(acting.asker, role), botAtAdmission(acting, record)))
+		const admitted = botAtAdmission(acting, record);
+		if (!admitted || !memberReachesBot(actorOf(acting.asker, role), admitted))
 			return yield* Effect.fail(hidden);
 		const destination = (yield* query((db) => projectHasBot(db, project, record.id)))
 			? project
@@ -132,7 +133,3 @@ const resolveBrief = (acting: BotForAsker, record: BotRecord) =>
 		}
 		return { record, turn, destination };
 	});
-
-export function canWriteBrief(reason: TurnFacts["reason"]): boolean {
-	return reason !== "collaboration" && reason !== "brief";
-}

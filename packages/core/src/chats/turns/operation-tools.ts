@@ -8,12 +8,11 @@ import {
 import { type DomainError, UserText } from "@sugabots/errors";
 import { type FlexibleSchema, jsonSchema, type Tool, tool } from "ai";
 import { Effect, Schema } from "effect";
-import { turnFacts } from "../../authentication/turn-facts.ts";
+import { canWriteBrief, turnFacts } from "../../authentication/turn-facts.ts";
 import { query } from "../../database/database.ts";
 import type { Operations } from "../../operations/registry.ts";
 import type { BotPrincipal } from "../../principal.ts";
 import { type ApprovalRule, approvalNeed, approvalRule } from "../../proofs/approved.ts";
-import { canWriteBrief } from "../../proofs/may-brief.ts";
 import { docsPageList } from "../chats/read-docs.ts";
 import { offeredBrowserTools } from "../tools/browser/browser.ts";
 import { ToolCallError } from "../tools/failed.ts";

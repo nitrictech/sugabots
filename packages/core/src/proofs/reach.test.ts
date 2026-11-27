@@ -8,7 +8,7 @@ import {
 	seedProject,
 	seedProjectChat,
 } from "../authentication/seed.test-support.ts";
-import { projectBot, projectMember } from "../database/schema.ts";
+import { bot, projectBot, projectMember } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { Principal } from "../principal.ts";
 import { workspaceOfProject } from "../workspaces/workspace-reference.ts";
@@ -198,6 +198,22 @@ describe("reach and what it permits", () => {
 				expect(await reachesProject(personalBot, erinsProject), name).toBe("ResourceHidden");
 				expect(await reachesProject(personalBot, b.project), name).toBe("ResourceHidden");
 			}
+		});
+
+		it("keeps a bot it could not reach at admission hidden when that bot becomes public", async () => {
+			const { a } = world;
+			const privateBot = await seedBot(a.workspace, { visibility: "private", createdById: a.erin });
+			const admitted = await as.botFor(a.ed, a.assistant.id, a.assistantChat);
+			expect(await reachesBot(admitted, privateBot.id)).toBe("ResourceHidden");
+
+			await onDatabase((db) =>
+				db.update(bot).set({ visibility: "public" }).where(eq(bot.id, privateBot.id)),
+			);
+
+			expect(await reachesBot(admitted, privateBot.id)).toBe("ResourceHidden");
+			expect(
+				await reachesBot(await as.botFor(a.ed, a.assistant.id, a.assistantChat), privateBot.id),
+			).toBe("ok");
 		});
 
 		it("lets runs reach their project while webhooks and scheduled work use target-specific proofs", async () => {

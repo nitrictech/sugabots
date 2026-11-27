@@ -284,7 +284,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			it("makes a project only once its member approves, under the workspace's lock", async () => {
 				const { chat } = await assistantChat();
 				const input = { workspace: workspaceId, name: "Launch", leadBotId: botId };
-				const { model, requests } = calling("create_project", input);
+				const { model, requests } = scriptedSteps(
+					{ calls: [{ toolCallId: "create", toolName: "create_project", input }] },
+					{ calls: [{ toolCallId: "guide", toolName: "workspace_guide", input: {} }] },
+					{ text: ["Done."] },
+				);
 
 				const ran = await loop.runTurn(chat, { model });
 
@@ -307,7 +311,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
 				delivered.length = 0;
 				await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
-				expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
+				const resumed = await ran.authentication.authenticate(ran.turnId);
+				expect(
+					await ran.steps.step(ran.run.request, resumed, {
+						turnId: ran.turnId,
+						attempt: 0,
+						step: 1,
+					}),
+				).toEqual({ _tag: "Continue" });
 
 				const [made] = await projectsNamed("Launch");
 				expect(made).toMatchObject({ leadBotId: botId });
@@ -332,12 +343,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					retryKey: crypto.randomUUID(),
 					message: "Launch is ready for dispatch.",
 				});
-				const resumed = await ran.authentication.authenticate(ran.turnId);
 				await expect(
 					loop.call(resumed, "chats.searchHistory", { chat: "all", query: "dispatch" }),
 				).resolves.toMatchObject({
 					messages: [expect.objectContaining({ text: "Launch is ready for dispatch." })],
 				});
+				expect(await resumeAt(ran, 2)).toEqual({ _tag: "Finished" });
 			});
 
 			it("joins a public project and adds a bot to one for its member, each once approved", async () => {

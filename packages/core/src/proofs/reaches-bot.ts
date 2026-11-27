@@ -34,10 +34,10 @@ export const proveReachesBot = <P, B>(principal: Named<P, Principal>, botId: Nam
 		const record = yield* query((db) => botRecord(db, botId.value, whoActs(principal.value)));
 		if (!record || record.systemBot || record.deleting) return yield* Effect.fail(hidden);
 		const met = yield* meetBot(principal.value, record);
+		const admitted = botAtAdmission(principal.value, record);
 		const reaches =
 			met.kind === "run" ||
-			(met.kind === "member" &&
-				memberReachesBot(met.actor, botAtAdmission(principal.value, record)));
+			(met.kind === "member" && admitted && memberReachesBot(met.actor, admitted));
 		if (!reaches) return yield* Effect.fail(hidden);
 		const proof: ReachesBot<P, B> = ReachesBotProof.prove([principal, botId], {
 			principal,

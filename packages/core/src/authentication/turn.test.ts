@@ -73,6 +73,50 @@ describe("TurnAuthentication", () => {
 		return principal;
 	};
 
+	it("stores only the chat project and relevant bot facts for a chat-bounded turn", async () => {
+		const unrelated = await seedBot(workspaceId);
+		const otherProject = await seedProject(workspaceId, {
+			leadBotId: unrelated.id,
+			members: [samId],
+		});
+		const turnId = await seedTurnAnswering(
+			chatId,
+			lead.id,
+			{ member: samId },
+			{
+				reason: "collaboration",
+			},
+		);
+		const principal = await asBotForAsker(turnId);
+
+		expect(principal.admission?.projects[projectId]).toBeDefined();
+		expect(principal.admission?.projects[helper.defaultProject]).toBeDefined();
+		expect(principal.admission?.projects[unrelated.defaultProject]).toBeUndefined();
+		expect(principal.admission?.projects[otherProject]).toBeUndefined();
+	});
+
+	it("stores only reached projects for a personal bot acting in member bounds", async () => {
+		const personal = await seedBot(workspaceId, { createdById: samId, visibility: "personal" });
+		const ownChat = await seedProjectChat(workspaceId, personal.defaultProject, samId);
+		const unreachable = await seedProject(workspaceId, { leadBotId: lead.id, members: [] });
+		const turnId = await seedTurnAnswering(ownChat, personal.id, { member: samId });
+		const principal = await asBotForAsker(turnId);
+
+		expect(principal.admission?.projects[projectId]).toBeDefined();
+		expect(principal.admission?.projects[unreachable]).toBeUndefined();
+	});
+
+	it("stores only its project and placed bot ids for an automation run", async () => {
+		const automationId = await seedAutomation(workspaceId, projectId);
+		const run = await seedRun(workspaceId, automationId, lead.id, "routine");
+		const turnId = await seedTurn(run.chat, lead.id, run.triggerMessage, { reason: "automation" });
+		const principal = await authenticate(turnId);
+
+		expect(principal._tag).toBe("AutomationRun");
+		expect(Object.keys(principal.admission?.projects ?? {})).toEqual([projectId]);
+		expect(principal.admission?.chatProjectBotIds).toContain(helper.id);
+	});
+
 	describe("a bot acting for its asker", () => {
 		it("acts for the member whose message it answers, in chat bounds", async () => {
 			const turnId = await seedTurnAnswering(chatId, lead.id, { member: samId });

@@ -83,6 +83,20 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			),
 		);
 
+	it.each(["answered", "failed", "cancelled"] as const)(
+		"clears admission for an ended turn (%s)",
+		async (kind) => {
+			expect((await storedTurn())?.admission).not.toBeNull();
+			await run(
+				endTurn(
+					opened,
+					kind === "failed" ? { kind, userMessage: providerDown, mayRunAgain: false } : { kind },
+				),
+			);
+			expect((await storedTurn())?.admission).toBeNull();
+		},
+	);
+
 	it("runs a failed turn again, starting its reply over, while no change stands in the way", async () => {
 		const blobsInChat = () => blobKeysUnder(BlobStore.key("chats", chatId));
 		const shared = await turns.attachFile(
@@ -101,6 +115,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			await run(endTurn(opened, { kind: "failed", userMessage: providerDown, mayRunAgain: true })),
 		).toEqual({ willRetry: true, steered: false });
 
+		expect((await storedTurn())?.admission).toEqual(opened.principal.admission);
 		const second = await run(openTurn(opened.run));
 
 		expect(second.turnId).toBe(opened.turnId);

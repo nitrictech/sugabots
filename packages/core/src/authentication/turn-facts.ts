@@ -39,6 +39,7 @@ export interface TurnFacts {
 	readonly workspace: string;
 	readonly bot: string;
 	readonly status: TurnStatus;
+	readonly retrying: boolean;
 	readonly admission: TurnAdmission | null;
 	readonly reason: TurnReason | null;
 	/** The project the turn's chat is in; none for a chat in no project, such as a system chat. */
@@ -85,6 +86,7 @@ export const turnFacts = (db: Executor, turnId: string) =>
 				chat: turn.chatId,
 				bot: turn.botId,
 				status: turn.status,
+				retrying: turn.retrying,
 				admission: turn.admission,
 				reason: turn.reason,
 				workspace: placedChat.workspaceId,
@@ -115,6 +117,7 @@ export const turnFacts = (db: Executor, turnId: string) =>
 			workspace: row.workspace,
 			bot: row.bot,
 			status: row.status,
+			retrying: row.retrying,
 			admission: row.admission,
 			reason: row.reason,
 			project: row.project,
@@ -151,6 +154,10 @@ export function hasMemberBounds(facts: TurnFacts, asker = askerOf(facts)) {
 		(facts.reason !== "brief" || facts.briefTurnRule === "memberBounds") &&
 		!startedFromOutside(facts)
 	);
+}
+
+export function canWriteBrief(reason: TurnFacts["reason"]): boolean {
+	return reason !== "collaboration" && reason !== "brief";
 }
 
 export function asksBeforeAllTools(facts: TurnFacts) {

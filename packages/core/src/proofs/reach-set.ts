@@ -102,11 +102,12 @@ function admittedPredicates(
 	const reachedProjects = Object.keys(admission.projects).filter(
 		(projectId) => admittedProjectReach(principal, projectId) === "reaches",
 	);
-	const reachedBots = projects.flatMap(({ project, memberReaches }) =>
-		project.defaultOf && (memberReaches || principal._tag === "AutomationRun")
-			? [project.defaultOf.id]
-			: [],
-	);
+	const reachedBots =
+		principal._tag === "AutomationRun"
+			? admission.chatProjectBotIds
+			: projects.flatMap(({ project, memberReaches }) =>
+					project.defaultOf && memberReaches ? [project.defaultOf.id] : [],
+				);
 	const projectIsActive = (projectId: SQLWrapper) => sql<boolean>`exists (
 		select 1 from ${project} as admitted_project
 		where admitted_project.id = ${outerColumn(projectId)} and not admitted_project.deleting

@@ -18,8 +18,12 @@ export interface TurnAdmission {
 	readonly projects: Readonly<Record<string, AdmittedProject>>;
 }
 
+export interface StoredTurnAdmission extends TurnAdmission {
+	readonly projectGrants?: TurnAdmission["projects"];
+}
+
 export interface AdmittedProject {
-	readonly project: ProjectFacts;
+	readonly project: Pick<ProjectFacts, "defaultOf">;
 	readonly inProject: boolean;
 	readonly memberReaches: boolean;
 	readonly botReaches: boolean;

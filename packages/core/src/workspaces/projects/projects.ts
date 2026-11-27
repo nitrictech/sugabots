@@ -217,7 +217,7 @@ export const make = Effect.gen(function* () {
 						creatorId: canCreate.actor.memberId,
 						leadBotId: lead.bot.value,
 					});
-					yield* recordTurnProjectGrant(lock.principal.value, row);
+					yield* recordTurnProjectGrant(lock.principal.value, row.id);
 					yield* outbox.publish([
 						reachChanged(workspaceId, { kind: "project", projectId: row.id }),
 					]);
@@ -317,7 +317,7 @@ export const make = Effect.gen(function* () {
 						member.actor.memberId,
 					);
 					if (!joined) return yield* new ResourceHidden({ resource: "project" });
-					yield* recordTurnProjectGrant(lock.principal.value, joined);
+					yield* recordTurnProjectGrant(lock.principal.value, joined.id);
 					yield* outbox.publish([
 						reachChanged(canJoin.workspace, {
 							kind: "project",

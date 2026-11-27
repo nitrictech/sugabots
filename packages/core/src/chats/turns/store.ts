@@ -26,7 +26,6 @@ import {
 	chat,
 	message,
 	messageReaction,
-	type ProjectRow,
 	type StoredMessagePart,
 	type TurnEndRequest,
 	type TurnReason,
@@ -360,6 +359,7 @@ export const make = Effect.gen(function* () {
 						retrying: false,
 						retryAt: null,
 						...(active ? {} : { checkpoint: null }),
+						...(!active && !recorded.retrying && { admission: null }),
 						...recorded,
 					})
 					.where(eq(turn.id, turnId)),
@@ -2033,8 +2033,8 @@ function replyParts(reply: ReplyDraft): StoredMessagePart[] {
 	];
 }
 
-/** Records a project membership granted by the turn, inside the transaction that grants it. */
-export const recordTurnProjectGrant = (principal: Principal, project: ProjectRow) =>
+/** recordTurnProjectGrant saves newly gained reach in the transaction that grants it. */
+export const recordTurnProjectGrant = (principal: Principal, projectId: string) =>
 	Effect.gen(function* () {
 		if (
 			principal._tag !== "BotForAsker" ||
@@ -2044,13 +2044,7 @@ export const recordTurnProjectGrant = (principal: Principal, project: ProjectRow
 			return;
 		yield* Transaction;
 		const admitted: AdmittedProject = {
-			project: {
-				id: project.id,
-				workspace: project.workspaceId,
-				leadBot: project.leadBotId,
-				visibility: project.visibility,
-				defaultOf: null,
-			},
+			project: { defaultOf: null },
 			inProject: true,
 			memberReaches: true,
 			botReaches: true,
@@ -2059,8 +2053,9 @@ export const recordTurnProjectGrant = (principal: Principal, project: ProjectRow
 			db
 				.update(turn)
 				.set({
-					admission: sql`jsonb_set(${turn.admission}, array['projects', ${project.id}]::text[],
-						${JSON.stringify(admitted)}::jsonb)`,
+					admission: sql`jsonb_set(${turn.admission}, '{projectGrants}',
+						coalesce(${turn.admission} -> 'projectGrants', '{}'::jsonb)
+						|| jsonb_build_object(${projectId}::text, ${JSON.stringify(admitted)}::jsonb))`,
 				})
 				.where(fenced(executionFence(principal.turn, principal.executionNumber))),
 		);

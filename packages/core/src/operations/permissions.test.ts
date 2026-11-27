@@ -816,6 +816,7 @@ const rows: {
 		outcomes: changesWhoIsInJ,
 	},
 	"projects.addBot": {
+		admitAfterInput: true,
 		input: async ({ a }) => ({
 			projectId: a.project,
 			botId: (await seedBot(a.workspace, { createdById: a.erin })).id,
@@ -1002,6 +1003,7 @@ const rows: {
 		),
 	},
 	"bots.remove": {
+		admitAfterInput: true,
 		input: async ({ a }) => ({ botId: (await seedBot(a.workspace, { createdById: a.ed })).id }),
 		// A bot Ed made, which no turn's bounds take in.
 		outcomes: allowing(
@@ -1021,10 +1023,12 @@ const rows: {
 		]),
 	},
 	"bots.listMembers": {
+		admitAfterInput: true,
 		input: async (fixture) => ({ botId: (await fresh.privateBot(fixture)).id }),
 		outcomes: reachesPrivateBot,
 	},
 	"bots.addMember": {
+		admitAfterInput: true,
 		input: async (fixture) => ({
 			botId: (await fresh.privateBot(fixture)).id,
 			memberId: await seedMember(fixture.a.workspace, "editor"),
@@ -1032,6 +1036,7 @@ const rows: {
 		outcomes: changesWhoIsInPrivateBot,
 	},
 	"bots.removeMember": {
+		admitAfterInput: true,
 		input: async (fixture) => {
 			const memberId = await seedMember(fixture.a.workspace, "editor");
 			const privateBot = await seedBot(fixture.a.workspace, {

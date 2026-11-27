@@ -1,10 +1,10 @@
 export * as TurnAuthentication from "./turn.ts";
 
 import { type DomainError, userText } from "@sugabots/errors";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { Context, Effect, ErrorReporter, Layer, Schema } from "effect";
 import { query, serviceOperations } from "../database/database.ts";
-import { turn } from "../database/schema.ts";
+import { ACTIVE_TURN_STATUSES, turn } from "../database/schema.ts";
 import {
 	type AutomationRun,
 	authenticated,
@@ -61,8 +61,11 @@ export const make = Effect.gen(function* () {
 					if (project === null) {
 						return yield* new TurnUnavailable({ turn: turnId, reason: "inNoProject" });
 					}
-					const admission =
-						facts.admission ?? (yield* query((db) => captureTurnAdmission(db, facts)));
+					const mayResume =
+						(ACTIVE_TURN_STATUSES as readonly string[]).includes(facts.status) || facts.retrying;
+					const admission = mayResume
+						? (facts.admission ?? (yield* query((db) => captureTurnAdmission(db, facts))))
+						: null;
 					const execution = admission
 						? yield* newExecution(facts.turn, admission)
 						: { executionNumber: 0, admission: null };
@@ -112,13 +115,18 @@ const newExecution = (turnId: string, admission: TurnAdmission) =>
 					executionNumber: sql`${turn.executionNumber} + 1`,
 					admission: sql`coalesce(${turn.admission}, ${JSON.stringify(admission)}::jsonb)`,
 				})
-				.where(eq(turn.id, turnId))
+				.where(
+					and(
+						eq(turn.id, turnId),
+						or(inArray(turn.status, [...ACTIVE_TURN_STATUSES]), eq(turn.retrying, true)),
+					),
+				)
 				.returning({ executionNumber: turn.executionNumber, admission: turn.admission }),
 		),
 		([raised]) =>
 			raised
 				? Effect.succeed({ ...raised, admission: freezeAdmission(raised.admission) })
-				: Effect.die(new Error("A turn is gone")),
+				: Effect.succeed({ executionNumber: 0, admission: null }),
 	);
 
 export const layer = layerNoDeps;

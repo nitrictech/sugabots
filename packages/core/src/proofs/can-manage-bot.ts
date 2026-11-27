@@ -47,9 +47,13 @@ export const proveCanManageBot = <P, B>(principal: Named<P, Principal>, botId: N
 		const met = yield* meetBot(principal.value, record);
 		const admitted = botAtAdmission(principal.value, record);
 		const visible =
-			met.kind === "run" || (met.kind === "member" && memberReachesBot(met.actor, admitted));
+			met.kind === "run" ||
+			(met.kind === "member" && admitted && memberReachesBot(met.actor, admitted));
 		const manages =
-			met.kind === "member" && met.mayManage !== "never" && managesBot(met.actor, admitted);
+			met.kind === "member" &&
+			admitted &&
+			met.mayManage !== "never" &&
+			managesBot(met.actor, admitted);
 		if (met.kind !== "member" || !manages) {
 			return yield* Effect.fail(
 				visible

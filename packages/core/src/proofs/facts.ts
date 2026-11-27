@@ -11,11 +11,27 @@
  */
 
 import type { ProjectVisibility, WorkspaceRole } from "@sugabots/contracts";
-import { and, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import {
+	and,
+	eq,
+	inArray,
+	isNotNull,
+	isNull,
+	ne,
+	or,
+	type SQL,
+	type SQLWrapper,
+	sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
-import { askerOf, type TurnFacts } from "../authentication/turn-facts.ts";
-import { botMemberIds, isBotMember } from "../authorization/access.ts";
+import {
+	askerOf,
+	canWriteBrief,
+	hasMemberBounds,
+	type TurnFacts,
+} from "../authentication/turn-facts.ts";
+import { botMemberIds, isBotMember, reachesProjectFor } from "../authorization/access.ts";
 import {
 	type Actor,
 	type BotFacts,
@@ -509,12 +525,16 @@ export function useTurnAdmission(principal: Principal, facts: ReachFacts): Reach
 	};
 }
 
-export function botAtAdmission(principal: Principal, record: BotRecord): BotRecord {
-	if (principal._tag !== "BotForAsker" || principal.workspace !== record.workspace) return record;
+export function botAtAdmission(principal: Principal, record: BotRecord): BotRecord | undefined {
+	if (
+		principal._tag !== "BotForAsker" ||
+		!principal.admission ||
+		principal.workspace !== record.workspace
+	)
+		return record;
 	const saved =
-		record.defaultProject &&
-		principal.admission?.projects[record.defaultProject]?.project.defaultOf;
-	return saved ? { ...record, ...saved } : record;
+		record.defaultProject && principal.admission.projects[record.defaultProject]?.project.defaultOf;
+	return saved ? { ...record, ...saved } : undefined;
 }
 
 function decideTurnProjectReach(
@@ -549,27 +569,56 @@ export const captureTurnAdmission = (db: Executor, facts: TurnFacts) =>
 			(asker === undefined && (facts.askedBy.kind !== "automation" || !facts.run))
 		)
 			return null;
-		const places = yield* reachFactsIn(db, facts.workspace, {
-			...(asker && { member: asker }),
-			bot: facts.bot,
-		});
-		const home = places.find(({ project }) => project.id === facts.project);
+		const who = { member: asker, bot: facts.bot };
+		const home = yield* reachFacts(db, facts.project, who);
 		if (!home || !botReaches(home.bot, home.project, home.member)) return null;
 		if (asker !== undefined && !memberReaches(home.member, home.project)) return null;
-		const placedBots = yield* db
-			.select({ id: projectBot.botId })
-			.from(projectBot)
-			.where(eq(projectBot.projectId, facts.project));
+
+		const memberBounds = hasMemberBounds(facts, asker);
+		const mayBrief = facts.askedBy.kind === "member" && canWriteBrief(facts.reason);
+		const placedBots = memberBounds
+			? []
+			: yield* db
+					.select({ id: projectBot.botId })
+					.from(projectBot)
+					.where(eq(projectBot.projectId, facts.project));
+		const chatProjectBotIds = memberBounds
+			? []
+			: [...new Set([facts.bot, home.project.leadBot, ...placedBots.map(({ id }) => id)])];
+
+		// A brief may go to a bot's default project outside the turn's chat bounds.
+		const projectScope = memberBounds
+			? undefined
+			: mayBrief
+				? isNotNull(project.defaultOfBotId)
+				: inArray(project.defaultOfBotId, chatProjectBotIds);
+		const places =
+			asker === undefined
+				? []
+				: yield* reachFactsWhere(
+						db,
+						and(
+							eq(project.workspaceId, facts.workspace),
+							eq(project.deleting, false),
+							ne(project.id, facts.project),
+							or(
+								and(reachesProjectFor(project.id, asker), projectScope),
+								// A member in these bounds can manage a bot they cannot talk to.
+								memberBounds && home.member && administers(home.member.actor)
+									? and(ne(defaultOfBot.visibility, "personal"), isNull(defaultOfBot.systemBotKey))
+									: undefined,
+							),
+						),
+						who,
+					);
 		const admission: TurnAdmission = {
 			role: home.member?.actor.workspaceRole ?? null,
-			chatProjectBotIds: [
-				...new Set([facts.bot, home.project.leadBot, ...placedBots.map(({ id }) => id)]),
-			],
+			chatProjectBotIds,
 			projects: Object.fromEntries(
-				places.map(({ project, member, bot }) => [
+				[home, ...places].map(({ project, member, bot }) => [
 					project.id,
 					{
-						project,
+						project: { defaultOf: project.defaultOf },
 						inProject: member?.inProject ?? false,
 						memberReaches: memberReaches(member, project),
 						botReaches: botReaches(bot, project, member),
