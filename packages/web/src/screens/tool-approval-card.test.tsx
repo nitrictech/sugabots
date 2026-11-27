@@ -175,7 +175,7 @@ describe("an approval request", () => {
 			expect(screen.queryByText(`Sends to ${url}`) !== null).toBe(showsDestination);
 			expect(
 				screen.queryByText(
-					"This connector was changed after the request, so allowing it won't run it.",
+					"This connector changed after the bot asked, so allowing this won't run it. Deny it and ask the bot to try again.",
 				) !== null,
 			).toBe(status === "pending" && revision !== 2);
 		},

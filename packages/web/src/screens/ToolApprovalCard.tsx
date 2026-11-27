@@ -150,6 +150,7 @@ export function ToolApprovalCard({
 				gitHub={call.approval?.gitHub}
 				connectorUrl={boundConnector?.url}
 				connectorChanged={boundConnector?.changed}
+				waiting={call.approval?.status === "pending"}
 				step={step}
 				open={reviewing}
 				onOpenChange={setReviewing}
@@ -320,7 +321,8 @@ export function ApprovalDestination({
 	if (connectorChanged) {
 		return (
 			<p className="m-0 pb-1.5 text-muted-foreground text-xs">
-				This connector was changed after the request, so allowing it won't run it.
+				This connector changed after the bot asked, so allowing this won't run it. Deny it and ask
+				the bot to try again.
 			</p>
 		);
 	}
@@ -371,6 +373,7 @@ function ReviewSheet({
 	gitHub,
 	connectorUrl,
 	connectorChanged,
+	waiting,
 	step,
 	open,
 	onOpenChange,
@@ -382,6 +385,7 @@ function ReviewSheet({
 	gitHub: ApprovalGitHub | undefined;
 	connectorUrl: string | null | undefined;
 	connectorChanged: boolean | undefined;
+	waiting: boolean;
 	step: Step;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -418,7 +422,7 @@ function ReviewSheet({
 							gitHub={gitHub}
 							connectorUrl={connectorUrl}
 							connectorChanged={connectorChanged}
-							waiting
+							waiting={waiting}
 						/>
 						<ExactRequest input={input} />
 					</div>

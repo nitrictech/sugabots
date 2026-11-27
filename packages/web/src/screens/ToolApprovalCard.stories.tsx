@@ -267,6 +267,56 @@ export const BrowserPage = meta.story({
 	},
 });
 
+/** AnsweredBrowserPage is a browser request already answered: its full view no longer says the page may change before you decide. */
+export const AnsweredBrowserPage = meta.story({
+	globals: PHONE,
+	args: {
+		call: asking({
+			tool: "browser_click",
+			input: { target: "Submit order" },
+			status: "completed",
+			approval: {
+				id: "approval-1",
+				status: "allowed",
+				approvers: "chat",
+				decidedByName: "Rowan",
+				decidedAt: "2026-11-10T09:02:00.000Z",
+				browserUrl: "https://travel.example.com/checkout",
+			},
+		}),
+		connector: undefined,
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: "See request" }));
+		const request = await screen.findByRole("dialog");
+		await expect(request).toHaveTextContent("On the page https://travel.example.com/checkout");
+		await expect(request).not.toHaveTextContent("may change before you decide");
+	},
+});
+
+/** GitHubReviewCommit is a review the bot didn't pin to a commit: the card shows the commit it will review. */
+export const GitHubReviewCommit = meta.story({
+	globals: PHONE,
+	args: {
+		call: asking({
+			tool: "github__review_pull_request",
+			input: { repository: "acme/web", pullRequest: 42, verdict: "approve", body: "Looks good." },
+			approval: {
+				id: "approval-1",
+				status: "pending",
+				approvers: "chat",
+				decidedByName: null,
+				decidedAt: null,
+				gitHub: { repositoryId: "101", reviewCommit: "3f2c9a1b7e4d" },
+			},
+		}),
+		connector: { name: "GitHub" },
+	},
+	play: async ({ canvas }) => {
+		await waitFor(() => expect(canvas.getByText("Reviews commit 3f2c9a1")).toBeVisible());
+	},
+});
+
 /** GitHubDefaultBase is a pull request the bot didn't name a base for: the card shows the branch it will use. */
 export const GitHubDefaultBase = meta.story({
 	globals: PHONE,
