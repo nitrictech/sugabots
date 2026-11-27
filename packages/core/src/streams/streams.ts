@@ -63,7 +63,9 @@ import { processLayer, Tier } from "../tiers.ts";
  *   with the stored changes of reach and session ends, each from where it
  *   last read: the bus only wakes it, and brings what isn't stored, such as a
  *   reply's text as it is written. So an event stored after a change of reach
- *   is decided by the proof made on that change, whichever arrived first.
+ *   is decided by the proof made on that change, whichever arrived first, and
+ *   one that isn't stored is decided only once what was stored before it
+ *   arrived has been read.
  */
 export interface Interface {
 	/**
@@ -574,6 +576,10 @@ export const make = Effect.gen(function* () {
 						const next = yield* Queue.take(woken);
 						if (next.kind === "unstored") {
 							unstoredHeld -= 1;
+							// A change of reach can be stored before its delivery reaches this
+							// process, so what is stored is read first: someone taken out of a
+							// chat gets none of its reply text from then on.
+							if (!(yield* readStored)) return;
 							if (!(yield* send(yield* decide(next.delivery)))) return;
 							continue;
 						}

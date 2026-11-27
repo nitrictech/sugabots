@@ -8,6 +8,7 @@ import {
 	streamEvent,
 	workspaceStream,
 } from "@sugabots/contracts";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { Delivery } from "@sugabots/contracts/operations/events";
 import { and, eq, sql } from "drizzle-orm";
 import { Clock, Duration, Effect, Exit, Fiber, Layer, Queue, Scope, Stream } from "effect";
@@ -460,11 +461,14 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 	});
 
 	describe("losing what it follows", () => {
-		const followWorkspaceWith = async (
+		const followWith = async (
 			world: Awaited<ReturnType<typeof staffed>>,
-			prove: Effect.Effect<Streams.Hearing>,
+			prove: Effect.Effect<Streams.Hearing, ResourceHidden>,
 			catchUp: Duration.Input,
-			clockOverride?: Clock.Clock,
+			{
+				clockOverride,
+				followed = workspaceStream(world.workspace),
+			}: { readonly clockOverride?: Clock.Clock; readonly followed?: EventStream } = {},
 		) => {
 			const principal = await signedIn.member(world.ed);
 			const scope = Scope.makeUnsafe();
@@ -473,7 +477,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				Effect.flatMap(Streams.Service, (streams) =>
 					streams.follow({
 						principal,
-						stream: workspaceStream(world.workspace),
+						stream: followed,
 						since: undefined,
 						workspace: world.workspace,
 						prove,
@@ -515,7 +519,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				bots: { reached: new Set(), unreached: new Set() },
 			});
 			let proofs = 0;
-			const running = await followWorkspaceWith(
+			const running = await followWith(
 				world,
 				Effect.promise(async () => {
 					proofs += 1;
@@ -561,6 +565,65 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			}
 		});
 
+		it("sends no reply text after a stored change of reach until it has proved again", async () => {
+			const world = await staffed();
+			const provingAgain = Promise.withResolvers<void>();
+			const refuse = Promise.withResolvers<void>();
+			let proofs = 0;
+			const running = await followWith(
+				world,
+				Effect.flatMap(
+					Effect.promise(async () => {
+						proofs += 1;
+						if (proofs === 1) return true;
+						provingAgain.resolve();
+						await refuse.promise;
+						return false;
+					}),
+					(reached) =>
+						reached
+							? Effect.succeed<Streams.Hearing>({
+									kind: "chat",
+									workspace: world.workspace,
+									chat: world.chat,
+								})
+							: Effect.fail(new ResourceHidden({ resource: "chat" })),
+				),
+				"10 seconds",
+				{ followed: chatStream(world.chat) },
+			);
+			const reader = Stream.toReadableStream(running.stream).getReader();
+			onTestFinished(() => reader.cancel());
+			await commit(chatStream(world.chat), streamEvent("chat.changed", { chatId: world.chat }));
+			expect((await reader.read()).value?.event.type).toBe("chat.changed");
+
+			// Ed is taken out of J, as another process records it: stored, but not yet delivered here.
+			await takeEdOut(world);
+			await commitUnheard(workspaceStream(world.workspace), jChanged(world));
+			await bus.publish(
+				chatStream(world.chat),
+				streamEvent("message.delta", {
+					chatId: world.chat,
+					messageId: randomUUID(),
+					offset: 0,
+					text: "secret",
+					execution: 1,
+				}),
+			);
+			const read = reader.read();
+			try {
+				expect(
+					await Promise.race([
+						provingAgain.promise.then(() => "proving again"),
+						read.then((next) => next.value?.event.type),
+					]),
+				).toBe("proving again");
+			} finally {
+				refuse.resolve();
+			}
+			expect((await read).done).toBe(true);
+		});
+
 		it("ends the operation by its deadline when a session read is stalled", async () => {
 			const world = await staffed();
 			const interval = "400 millis";
@@ -568,7 +631,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
 			const sessionClock = await Effect.runPromise(Scope.provide(TestClock.make(), scope));
 			const sleeps = await observeWatcherSleeps(sessionClock);
-			const running = await followWorkspaceWith(
+			const running = await followWith(
 				world,
 				Effect.succeed({
 					kind: "workspace",
@@ -577,7 +640,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 					bots: { reached: new Set(), unreached: new Set() },
 				}),
 				interval,
-				sleeps.clock,
+				{ clockOverride: sleeps.clock },
 			);
 			const stalled = holdTransaction(
 				query((db) => db.execute(sql`lock table session in access exclusive mode`)),
