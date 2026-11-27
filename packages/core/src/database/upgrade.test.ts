@@ -265,9 +265,11 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				]);
 				await client.query(
 					`insert into connection (id, workspace_id, pod_id, name, handle, kind, url, auth_kind,
-						secret_header, secret_encrypted, oauth_encrypted, created_by_id) values
-						($1, $3, $4, 'Calendar', 'calendar', 'http', 'https://calendar.example.com', 'header', 'X-API-Key', $6, null, $5),
-						($2, $3, $4, 'Notes', 'notes', 'mcp', 'https://notes.example.com', 'oauth', null, null, $7, $5)`,
+						secret_header, secret_encrypted, oauth_encrypted, oauth_state, created_by_id) values
+						($1, $3, $4, 'Calendar', 'calendar', 'http', 'https://calendar.example.com', 'header', 'X-API-Key', $6, null, null, $5),
+						($2, $3, $4, 'Notes', 'notes', 'mcp', 'https://notes.example.com', 'oauth', null, null, $7, null, $5),
+						(uuidv7(), $3, $4, 'Tasks', 'tasks', 'mcp', 'https://tasks.example.com', 'oauth', null, null, $8, 'tasks-pending', $5),
+						(uuidv7(), $3, $9, 'Shared notes', 'shared-notes', 'mcp', 'https://shared.example.com', 'oauth', null, null, $7, null, $5)`,
 					[
 						legacy.anaKeyConnector,
 						legacy.anaOAuthConnector,
@@ -275,7 +277,13 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 						legacy.pods.ana,
 						legacy.members.ana,
 						cipher.encrypt("calendar-key"),
-						cipher.encrypt("notes-oauth"),
+						cipher.encrypt(
+							JSON.stringify({ tokens: { access_token: "notes-access", token_type: "Bearer" } }),
+						),
+						cipher.encrypt(
+							JSON.stringify({ state: "tasks-pending", codeVerifier: "tasks-verifier" }),
+						),
+						legacy.pods.family,
 					],
 				);
 				await client.query(
@@ -558,7 +566,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			).toEqual([{ host, added_by_id: owner, assistant_of: owner }]);
 		});
 
-		it("keeps connectors from a personal pod with no bots reachable only by its owner", async () => {
+		it("keeps a single OAuth sign-in reachable only by the personal bot's creator", async () => {
 			const [project] = await upgraded.rows<{ id: string }>(
 				`select project.id from project join bot on bot.id = project.default_of_bot_id
 				 where bot.assistant_of = $1`,
@@ -570,15 +578,15 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			const outsiders = await Promise.all(
 				[legacy.members.sam, legacy.members.pat].map(upgraded.signIn),
 			);
-			for (const [connectorId, signedIn] of [
+			for (const [connectorId, hasSecret] of [
 				[legacy.anaKeyConnector, true],
 				[legacy.anaOAuthConnector, false],
 			] as const) {
 				const input = { projectId: project.id, connectorId };
 				await expect(call(owner, "connectors.get", input)).resolves.toMatchObject({
 					id: connectorId,
-					signedIn,
-					hasSecret: signedIn,
+					signedIn: true,
+					hasSecret,
 				});
 				for (const outsider of outsiders) {
 					await expect(call(outsider, "connectors.get", input)).rejects.toBeInstanceOf(
@@ -586,6 +594,20 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					);
 				}
 			}
+		});
+
+		it("discards pending sign-ins and leaves every copy of a shared OAuth connector signed out", async () => {
+			expect(
+				await upgraded.rows(
+					`select url, oauth_encrypted, oauth_state from connector
+					 where url in ('https://shared.example.com', 'https://tasks.example.com') order by url`,
+				),
+			).toEqual([
+				{ url: "https://shared.example.com", oauth_encrypted: null, oauth_state: null },
+				{ url: "https://shared.example.com", oauth_encrypted: null, oauth_state: null },
+				{ url: "https://shared.example.com", oauth_encrypted: null, oauth_state: null },
+				{ url: "https://tasks.example.com", oauth_encrypted: null, oauth_state: null },
+			]);
 		});
 
 		it("queues no computers for destruction in the upgrade", async () => {

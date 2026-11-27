@@ -95,6 +95,16 @@ UPDATE "connection" SET "agent_id" = "keeper"."agent_id"
 FROM "keeper" WHERE "connection"."id" = "keeper"."connection_id";--> statement-breakpoint
 -- A GitHub trigger can run only from its automation's own project's app.
 -- Keep its settings so a member can reconnect it if the app goes elsewhere.
+-- Only a connector that stays in one place keeps its OAuth sign-in.
+-- A sign-in under way has to start again.
+UPDATE "connection" SET "oauth_encrypted" = NULL, "oauth_state" = NULL
+WHERE "auth_kind" = 'oauth' AND (
+	"oauth_state" IS NOT NULL OR EXISTS (
+		SELECT 1 FROM "agent"
+		WHERE "agent"."pod_id" = "connection"."pod_id"
+			AND "agent"."id" IS DISTINCT FROM "connection"."agent_id"
+	)
+);--> statement-breakpoint
 -- The `pod`'s other bots get copies of its MCP and HTTP connections. A GitHub
 -- connection is its own GitHub App, which can't be copied: they set up their own.
 INSERT INTO "connection" (
@@ -113,9 +123,6 @@ SELECT
 FROM "connection"
 JOIN "agent" ON "agent"."pod_id" = "connection"."pod_id" AND "agent"."id" IS DISTINCT FROM "connection"."agent_id"
 WHERE "connection"."kind" <> 'github';--> statement-breakpoint
--- Copied OAuth tokens would refresh each other away, so every OAuth connection
--- signs in again, the kept one too.
-UPDATE "connection" SET "oauth_encrypted" = NULL, "oauth_state" = NULL WHERE "auth_kind" = 'oauth';--> statement-breakpoint
 CREATE TABLE "github_uninstall" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
 	"workspace_id" uuid NOT NULL,
