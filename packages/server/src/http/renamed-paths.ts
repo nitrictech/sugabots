@@ -37,9 +37,16 @@ export function serveRenamedPaths<E, R>(
 	E,
 	R | HttpServerRequest.HttpServerRequest
 > {
+	// Built once for each router configuration requests are served with, not once a request.
+	const routers = new WeakMap<Partial<FindMyWay.RouterConfig>, FindMyWay.Router<string>>();
+	const routerFor = (config: Partial<FindMyWay.RouterConfig>) => {
+		const built = routers.get(config) ?? renamedPaths(config);
+		routers.set(config, built);
+		return built;
+	};
 	return Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
-		const renamed = renamedPaths(yield* HttpRouter.RouterConfig).find(request.method, request.url);
+		const renamed = routerFor(yield* HttpRouter.RouterConfig).find(request.method, request.url);
 		if (!renamed) return yield* effect;
 		const rest = renamed.params["*"];
 		const query = request.url.includes("?") ? request.url.slice(request.url.indexOf("?")) : "";
