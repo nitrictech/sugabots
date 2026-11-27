@@ -858,7 +858,7 @@ function BotMembers({ bot }: { bot: Bot }) {
 	return (
 		<MemberRows
 			label="Members"
-			description="Who can see it and talk to it, and read its chats and files. Admins are always members."
+			description="Who can see it and talk to it, and read its chats and files. Its creator and admins are always members."
 			action={
 				may && (
 					<AddMembersMenu

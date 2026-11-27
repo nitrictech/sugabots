@@ -206,7 +206,10 @@ export const projectMemberSchema = Schema.Struct({
 	name: Schema.String,
 	email: emailSchema,
 	image: Schema.NullOr(Schema.String),
-	/** Whether they can be taken out of this project. Never an administrator, who is in every one. */
+	/**
+	 * Whether they can be taken out of this project. Never the owner or an
+	 * admin, who are members of every project members made.
+	 */
 	removable: Schema.Boolean,
 });
 

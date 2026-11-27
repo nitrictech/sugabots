@@ -26,7 +26,8 @@ import {
  * The members of a project or a private bot, as their settings list them,
  * and the menu that adds more. Neither has roles of its own, so the label
  * after a name is their standing in the workspace. Who can be taken out is
- * the API's answer: administrators are in every one.
+ * the API's answer: the owner and admins are in every one, and a private
+ * bot's creator in theirs.
  */
 
 /** A member as a project's or a private bot's members list gives them. */
