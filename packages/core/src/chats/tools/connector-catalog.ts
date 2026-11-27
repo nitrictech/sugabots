@@ -314,24 +314,27 @@ export function from({
 				const isFree = (connector: { handle: string }) => !taken.has(connector.handle);
 				const owned = <Connector>(connector: Connector) => ({ ...connector, projectId });
 				const candidates = found.targets.filter(isFree);
+				const expiredCandidates = found.signInExpired.filter(isFree);
 				const revisions = yield* discoverConnectorRevisions(
 					principal,
 					workspaceId,
 					projectId,
-					candidates.map(({ connectorId }) => connectorId),
+					[...candidates, ...expiredCandidates].map(({ connectorId }) => connectorId),
 				);
-				const allowed = candidates.filter(
-					(candidate) => revisions.get(candidate.connectorId) === candidate.configurationRevision,
-				);
+				const isAllowed = (
+					candidate: Pick<ConnectorTarget, "connectorId" | "configurationRevision">,
+				) => revisions.get(candidate.connectorId) === candidate.configurationRevision;
+				const allowed = candidates.filter(isAllowed);
+				const allowedExpired = expiredCandidates.filter(isAllowed);
 				reached.push(...allowed.map(owned));
-				expired.push(...found.signInExpired.filter(isFree).map(owned));
+				expired.push(...allowedExpired.map(({ handle }) => ({ handle, projectId })));
 				installedUrls.push(...found.installedUrls);
 				if (connected && isFree(connected.connector)) {
 					gitHub.push({ connected, projectId });
 				}
 				for (const handle of [
-					...found.targets.map(({ handle }) => handle),
-					...found.signInExpired.map(({ handle }) => handle),
+					...allowed.map(({ handle }) => handle),
+					...allowedExpired.map(({ handle }) => handle),
 					...(connected ? [connected.connector.handle] : []),
 				]) {
 					taken.add(handle);

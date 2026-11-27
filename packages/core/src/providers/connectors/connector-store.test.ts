@@ -177,7 +177,13 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 					toolAccess: { edit: "off" },
 				}),
 			],
-			signInExpired: [{ handle: "notion" }],
+			signInExpired: [
+				{
+					connectorId: notion.id,
+					handle: "notion",
+					configurationRevision: notion.configurationRevision,
+				},
+			],
 			installedUrls: [wiki.url, tracker.url, "https://mcp.linear.app/mcp", notion.url],
 		});
 		expect(await shown(notion.id)).toMatchObject({ signedIn: false, signInExpired: true });

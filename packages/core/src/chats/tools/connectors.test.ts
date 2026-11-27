@@ -294,7 +294,7 @@ describe("a turn's connector tools", () => {
 				targetsForProject: () =>
 					Effect.succeed({
 						targets: [linear, target({ handle: "locked", headers: { "x-fixture-key": "nope" } })],
-						signInExpired: [{ handle: "notion" }],
+						signInExpired: [target({ handle: "notion", connectorId: lockedId })],
 						installedUrls: [linear.url, url, "https://mcp.notion.com/mcp"],
 					}),
 			},
@@ -359,9 +359,12 @@ describe("a turn's connector tools", () => {
 	});
 
 	it("names each connector whose sign-in expired with the project it is signed in again from", async () => {
-		const expired: Record<string, { handle: string }[]> = {
-			[reach.project]: [{ handle: "notion" }],
-			[reach.otherProject]: [{ handle: "notion" }, { handle: "linear" }],
+		const expired: Record<string, ConnectorTarget[]> = {
+			[reach.project]: [target({ handle: "notion" })],
+			[reach.otherProject]: [
+				target({ handle: "notion", connectorId: otherWikiId }),
+				target({ handle: "linear", connectorId: notesId }),
+			],
 		};
 		const offered = ConnectorCatalog.from({
 			connectors: {

@@ -635,7 +635,11 @@ export const make = Effect.gen(function* () {
 							targets: used.filter((row) => isSignedIn(row, cipher)).map(toTarget),
 							signInExpired: used
 								.filter((row) => signInExpired(row, cipher))
-								.map((row) => ({ handle: row.handle })),
+								.map(({ id, handle, configurationRevision }) => ({
+									connectorId: id,
+									handle,
+									configurationRevision,
+								})),
 							installedUrls: rows.map(({ url }) => url),
 						};
 					}),
@@ -895,7 +899,7 @@ export interface ForgottenInstallation {
 interface ProjectTargets {
 	targets: ConnectorTarget[];
 	/** Connectors that offer nothing until someone signs in again. */
-	signInExpired: Pick<ConnectorTarget, "handle">[];
+	signInExpired: Pick<ConnectorTarget, "connectorId" | "handle" | "configurationRevision">[];
 	/** Addresses of all of the project's MCP and HTTP connectors, including those switched off. */
 	installedUrls: string[];
 }

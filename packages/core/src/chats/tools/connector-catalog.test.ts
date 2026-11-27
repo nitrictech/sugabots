@@ -170,6 +170,60 @@ it("offers a bot's own connector in another project only once it is turned on th
 	expect(await offered()).toContain(own.id);
 });
 
+it("only shows an expired sign-in for a bot's own connector when it is turned on in the project", async () => {
+	const workspaceId = await seedWorkspace();
+	const admin = await seedMember(workspaceId, "admin");
+	const editor = await seedMember(workspaceId, "editor");
+	const bot = await seedBot(workspaceId, { createdById: admin, visibility: "private" });
+	const projectId = await seedProject(workspaceId, { leadBotId: bot.id, members: [editor] });
+	const chatId = await seedProjectChat(workspaceId, projectId, editor);
+	const principal = await principals(await authenticators()).botFor(editor, bot.id, chatId);
+	const store = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
+	const catalog = await runOnPostgres(
+		Effect.provide(
+			ConnectorCatalog.Service,
+			ConnectorCatalog.layer.pipe(Layer.provide(unimplemented(Egress.Service))),
+		),
+	);
+	const own = await store.create(workspaceId, bot.defaultProject, admin, {
+		name: "Tracker",
+		url: "https://tracker.example.com/mcp",
+		auth: "oauth",
+	});
+	await store.saveOauthRecord(
+		workspaceId,
+		own.id,
+		{ clientInformation: { client_id: "client-1" }, signInRejectedAt: "2026-10-05T21:00:08.000Z" },
+		{ kind: "since", version: null },
+	);
+	const notices = async () => {
+		const offer = await runOnPostgres(
+			catalog.forTurn(
+				workspaceId,
+				{ projectId, ownProjectId: bot.defaultProject },
+				{ ...NO_TURN, principal },
+			),
+		);
+		try {
+			return offer.signInExpired;
+		} finally {
+			await offer.close();
+		}
+	};
+	expect(await notices()).toEqual([]);
+
+	await store.setOnInProject({
+		workspaceId,
+		projectId,
+		botId: bot.id,
+		connectorId: own.id,
+		on: true,
+		addressRevision: own.addressRevision,
+	});
+
+	expect(await notices()).toEqual([{ handle: own.handle, projectId: bot.defaultProject }]);
+});
+
 it("turns a bot's own connector on from several managers at once", async () => {
 	const workspaceId = await seedWorkspace();
 	const admin = await seedMember(workspaceId, "admin");
