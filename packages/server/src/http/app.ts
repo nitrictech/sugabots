@@ -32,6 +32,7 @@ import { contentPageRoutes, onlyPagesOnContentHost } from "./content-pages.ts";
 import { desktopViewerRoutes } from "./desktop-viewer.ts";
 import { failureResponse } from "./errors.ts";
 import { operationRoutes } from "./operation-routes.ts";
+import { serveRenamedPaths } from "./renamed-paths.ts";
 import type { HttpServices } from "./services.ts";
 import { limitJsonBody, validateRequestLayer } from "./validation.ts";
 
@@ -156,7 +157,11 @@ function everyRequest(
 	const contentHostOnlyPages = onlyPagesOnContentHost(contentOrigin);
 	return (effect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
 		contentHostOnlyPages(
-			cors(serverTiming(defectsAsInternal(ids, unknownRouteAsNotFound(cookieOrigin(effect))))),
+			cors(
+				serverTiming(
+					defectsAsInternal(ids, unknownRouteAsNotFound(serveRenamedPaths(cookieOrigin(effect)))),
+				),
+			),
 		);
 }
 

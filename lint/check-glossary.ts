@@ -533,6 +533,12 @@ const SKIPPED_PATHS: readonly RegExp[] = [
 	/^packages\/core\/drizzle\//,
 	/^patches\/e2b@[^/]+\.patch$/,
 	/^packages\/core\/src\/database\/upgrade\.test(-support)?\.ts$/,
+	// The addresses and docs pages from before projects, which other systems
+	// and links still use, and the upgrade notes, which name what an upgraded
+	// installation had.
+	/^packages\/server\/src\/http\/renamed-paths(\.test)?\.ts$/,
+	/^packages\/website\/src\/renamed-docs\.ts$/,
+	/^packages\/docs\/content\/upgrading-to-projects\.mdx$/,
 	/^packages\/emoji\/src\/emoji\.json$/,
 	/(^|\/)bun\.lock$/,
 	/\.(svg|png|jpe?g|gif|webp|ico|woff2?|ttf|otf|pdf|mp4|webm)$/,
