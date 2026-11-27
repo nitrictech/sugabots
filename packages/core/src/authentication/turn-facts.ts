@@ -13,7 +13,7 @@
  */
 
 import type { RunTriggerKind } from "@sugabots/contracts";
-import { eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { personalBotCreator } from "../authorization/permissions.ts";
@@ -29,7 +29,6 @@ import {
 	type TurnStatus,
 	turn,
 } from "../database/schema.ts";
-import { outerColumn } from "../database/sql.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { TurnAdmission } from "../principal.ts";
 
@@ -56,7 +55,7 @@ export interface TurnFacts {
 		readonly bot: string;
 		readonly startedBy: RunTriggerKind;
 	} | null;
-	/** What the message the turn answers comes back to, followed back through the turns that wrote it. */
+	/** Who the turn was recorded as acting for when it was made. */
 	readonly askedBy: AskedBy;
 	/** Whether a personal bot wrote the brief this turn answers. */
 	readonly briefedByPersonalBot: boolean;
@@ -89,6 +88,8 @@ export const turnFacts = (db: Executor, turnId: string) =>
 				retrying: turn.retrying,
 				admission: turn.admission,
 				reason: turn.reason,
+				askerId: turn.askerId,
+				askedByAutomation: turn.askedByAutomation,
 				workspace: placedChat.workspaceId,
 				project: placedChat.projectId,
 				defaultOfBot: project.defaultOfBotId,
@@ -135,7 +136,11 @@ export const turnFacts = (db: Executor, turnId: string) =>
 							startedBy: row.runStartedBy,
 						}
 					: null,
-			askedBy: yield* askedByOf(db, turnId),
+			askedBy: row.askedByAutomation
+				? { kind: "automation", member: row.askerId }
+				: row.askerId
+					? { kind: "member", member: row.askerId }
+					: { kind: "nobody" },
 			briefedByPersonalBot: row.reason === "brief" && row.triggerAuthorVisibility === "personal",
 			briefTurnRule: row.reason === "brief" ? row.briefTurnRule : null,
 		};
@@ -170,32 +175,6 @@ export function asksBeforeAllTools(facts: TurnFacts) {
 /** The member a turn acts for: whoever asked it, or for a personal bot's run, its creator. */
 export function askerOf(facts: TurnFacts): string | undefined {
 	return facts.askedBy.kind === "nobody" ? undefined : (facts.askedBy.member ?? undefined);
-}
-
-/** Follows the message `turnId` answers back through the turns that wrote it. */
-const askedByOf = (db: Executor, turnId: string) =>
-	Effect.gen(function* () {
-		const [end] = yield* db.execute<{ member_id: string | null; automation: boolean }>(
-			askedBy(sql`${turnId}::uuid`),
-			"objects",
-		);
-		if (end?.automation) return { kind: "automation", member: end.member_id } as const;
-		if (end?.member_id) return { kind: "member", member: end.member_id } as const;
-		return { kind: "nobody" } as const;
-	});
-
-/**
- * SQL selecting who the turn `turnId` acts for, as it was stored when the turn
- * was made (see `askerColumns`): one row of `member_id`, the member it acts
- * for if any, and `automation`, whether its automation's trigger posted the
- * message it answers; no row for a turn there is none of. Its asker reads it
- * for one turn, and the approver rule for each turn whose calls wait. `turnId`
- * may be a column of an outer query.
- */
-export function askedBy(turnId: SQLWrapper): SQL {
-	return sql`select asked.asker_id as member_id, asked.asked_by_automation as automation
-		from ${turn} as asked
-		where asked.id = ${outerColumn(turnId)}`;
 }
 
 /**
