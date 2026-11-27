@@ -44,17 +44,23 @@ export const makeDecide = <R, ConnectorRequirements>(
 					canDecide,
 					input.approvalId,
 					input.decision,
-					(approver, call, executionNumber) =>
-						approver.rule === "computerRequest"
-							? network.grantHostRequest(isMember, approver).pipe(
-									Effect.as(undefined),
-									Effect.catchTags({
-										NoComputerProvider: () => Effect.succeed("noComputerProvider" as const),
-										ApprovalRefused: () => Effect.succeed("computerUseChanged" as const),
-										ComputerHostBlocked: () => Effect.succeed("hostBlocked" as const),
-									}),
-								)
-							: checkApprovalPermission(isMember.member, call, executionNumber),
+					(approver, call, executionNumber) => {
+						if (approver.rule === "computerRequest") {
+							if (input.decision === "deny") return Effect.undefined;
+							return network.grantHostRequest(isMember, approver).pipe(
+								Effect.as(undefined),
+								Effect.catchTags({
+									NoComputerProvider: () => Effect.succeed("noComputerProvider" as const),
+									ApprovalRefused: () => Effect.succeed("computerUseChanged" as const),
+									ComputerHostBlocked: () => Effect.succeed("hostBlocked" as const),
+								}),
+							);
+						}
+						const checked = checkApprovalPermission(isMember.member, call, executionNumber);
+						return input.decision === "deny"
+							? checked.pipe(Effect.catchTag("ActionForbidden", () => Effect.undefined))
+							: checked;
+					},
 					(call, executionNumber) => checkConnector(isMember.member, call, executionNumber),
 				);
 			}),

@@ -252,13 +252,11 @@ export interface ControlsInterface {
 	/**
 	 * Decides the approval `approvalId` of the tool call `canDecide` is about,
 	 * for the member `isMember` names, its approver. In one transaction, once
-	 * the call's turn is locked, it checks the pending approval. On Allow,
-	 * `allow` checks the approver's permission for the recorded call and makes
-	 * any change the approval itself grants before the decision is recorded
-	 * and signalled. If `allow` returns an invalidation reason, the approval
-	 * is closed and the turn wakes before the conflict is returned. An
-	 * approval that is no longer current is not found.
-	 * checkConnector checks the connector's server before the decision's transaction starts.
+	 * the call's turn is locked, it checks the pending approval and runs
+	 * `prepareDecision`. If either check returns a reason to close the approval,
+	 * it closes the request and wakes the turn before returning the conflict.
+	 * On Allow, `checkConnector` checks the connector's server before the
+	 * transaction starts. An approval that is no longer current is not found.
 	 * An approval that already has a decision is a conflict.
 	 */
 	readonly decide: <P, X, R, ConnectorRequirements = never>(
@@ -266,7 +264,7 @@ export interface ControlsInterface {
 		canDecide: CanDecide<P, X>,
 		approvalId: string,
 		decision: ToolApprovalDecision["decision"],
-		allow: (
+		prepareDecision: (
 			canDecide: CanDecide<P, X>,
 			call: ApprovalCall,
 			executionNumber: number,

@@ -144,14 +144,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		});
 
 		it.each([
-			"connector deleted",
-			"connector disabled",
-			"off in the project",
-			"address changed in the project",
-			"configuration changed",
-			"tool off",
-			"tool off by default",
-		] as const)("closes the approval and wakes the turn after %s", async (change) => {
+			["connector deleted", "allow_once"],
+			["connector disabled", "allow_once"],
+			["connector disabled", "deny"],
+			["off in the project", "allow_once"],
+			["address changed in the project", "allow_once"],
+			["configuration changed", "allow_once"],
+			["tool off", "allow_once"],
+			["tool off by default", "allow_once"],
+		] as const)("closes after %s on %s", async (change, decision) => {
 			let sourceChatId = chatId;
 			if (change === "off in the project" || change === "address changed in the project") {
 				const projectId = await seedProject(workspaceId, { leadBotId: botId });
@@ -201,7 +202,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				? "This approval was closed because the connector or its tool is now off."
 				: "This approval was closed because the connector or its tool settings changed.";
 			await expect(
-				chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
+				chatsAs(adminId).decide({ toolCallId: parked.id, decision }),
 			).rejects.toMatchObject({
 				reason: switchedOff ? "connectorOff" : "connectorChanged",
 				userMessage: error,
