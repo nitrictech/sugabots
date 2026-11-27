@@ -193,13 +193,7 @@ export const computersContracts = {
 			"Watch a bot's desktop in this chat, or take it over where the member may change things. It stays open while they still may.",
 		input: Schema.Struct({ chatId: uuidOrStringSchema, botId: uuidOrStringSchema }),
 		output: openDesktopSchema,
-		errors: [
-			ResourceHidden,
-			BotCannotReach,
-			ActionForbidden,
-			DesktopUnavailable,
-			ComputerUnavailable,
-		],
+		errors: [ResourceHidden, ActionForbidden, DesktopUnavailable, ComputerUnavailable],
 		http: {
 			kind: "heldBack",
 			reason: "The desktop viewer's WebSocket opens it, and relays the desktop to the member.",

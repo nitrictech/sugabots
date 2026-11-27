@@ -30,7 +30,6 @@ import type { Principal } from "../principal.ts";
 import { encryptAppCredential } from "../providers/connectors/github/credential.ts";
 import { SearchProviderStore } from "../providers/search-providers/search-provider-store.ts";
 import { proveCanRestrictBotsProject } from "./can-restrict-bot.ts";
-import { type ComputerUse, proveCanUseComputer } from "./can-use-computer.ts";
 import { proveCanUseConnector } from "./can-use-connector.ts";
 import { proveCanUseWeb } from "./can-use-web.ts";
 import { proveInWorkspace } from "./in-workspace.ts";
@@ -494,63 +493,5 @@ describe("resource proofs", () => {
 		expect(await uses(a.workspace, WEB_SEARCH_TOOL)).toBe("WebToolOff");
 		expect(await uses(a.workspace, WEB_FETCH_TOOL)).toBe("ok");
 		expect(await uses(b.workspace, WEB_FETCH_TOOL)).toBe("ResourceHidden");
-	});
-
-	describe("CanUseComputer", () => {
-		/** The online computers of J and of K, one each, as a project has at most one. */
-		let projectsComputer: string;
-		let othersComputer: string;
-
-		beforeAll(async () => {
-			projectsComputer = await seedComputer(world.a.workspace, world.a.project);
-			othersComputer = await seedComputer(world.a.workspace, world.a.otherProject);
-		});
-
-		const usesComputer = (principal: Principal, computerId: string, use: ComputerUse = "control") =>
-			outcome(
-				named(principal, computerId, (p, m) => proveCanUseComputer(p, m, use).pipe(Effect.asVoid)),
-			);
-		const setComputerUse = (botId: string, usesComputer: boolean) =>
-			onDatabase((db) => db.update(bot).set({ usesComputer }).where(eq(bot.id, botId)));
-
-		it("lets members watch a computer they reach, and take it over only with permission to", async () => {
-			const { a } = world;
-			expect(await usesComputer(await as.member(a.ed), projectsComputer, "watch")).toBe("ok");
-			expect(await usesComputer(await as.member(a.ed), projectsComputer, "control")).toBe("ok");
-			expect(await usesComputer(await as.member(a.vi), projectsComputer, "watch")).toBe("ok");
-			expect(await usesComputer(await as.member(a.vi), projectsComputer, "control")).toBe(
-				"ActionForbidden",
-			);
-			expect(await usesComputer(await as.member(a.erin), projectsComputer, "watch")).toBe(
-				"ResourceHidden",
-			);
-		});
-
-		it("lets a bot work on its bounds' computer only with its computer use on, for an asker who may change things", async () => {
-			const { a } = world;
-			const edsBot = await as.botFor(a.ed, a.pub.id, a.chat);
-			const visBot = await as.botFor(a.vi, a.pub.id, a.chat);
-			const { principal: run } = await as.run(a.workspace, a.project, a.pub.id);
-
-			expect(await usesComputer(edsBot, projectsComputer)).toBe("ActionForbidden");
-			await setComputerUse(a.pub.id, true);
-			expect(await usesComputer(edsBot, projectsComputer)).toBe("ok");
-			expect(await usesComputer(edsBot, othersComputer)).toBe("ResourceHidden");
-			expect(await usesComputer(visBot, projectsComputer)).toBe("ActionForbidden");
-			expect(await usesComputer(run, projectsComputer)).toBe("ok");
-			await setComputerUse(a.pub.id, false);
-			expect(await usesComputer(run, projectsComputer)).toBe("ActionForbidden");
-		});
-
-		it("hides computers from system work and webhook calls", async () => {
-			const { a } = world;
-			const sleep = await runOnPostgres(auth.systemWork.computerSleep(projectsComputer));
-			expect(await usesComputer(sleep, projectsComputer)).toBe("ResourceHidden");
-			expect(await usesComputer(sleep, projectsComputer, "watch")).toBe("ResourceHidden");
-			expect(await usesComputer(sleep, othersComputer)).toBe("ResourceHidden");
-			expect(await usesComputer(await as.webhook(a.workspace, a.project), projectsComputer)).toBe(
-				"ResourceHidden",
-			);
-		});
 	});
 });

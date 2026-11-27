@@ -1,10 +1,10 @@
-import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { computersContracts } from "@sugabots/contracts/operations/computers";
 import { Effect, Stream } from "effect";
 import { DesktopViewer } from "../../chats/tools/browser/viewer.ts";
-import type { Principal } from "../../principal.ts";
 import { type ComputerUse, proveCanUseComputer } from "../../proofs/can-use-computer.ts";
-import { type Named, named } from "../../proofs/proof.ts";
+import { proveIsMember } from "../../proofs/is-member.ts";
+import { named } from "../../proofs/proof.ts";
 import { proveReachesChat } from "../../proofs/reaches-chat.ts";
 import { Streams } from "../../streams/streams.ts";
 import { followerOf } from "../events/following.ts";
@@ -28,43 +28,44 @@ export const viewDesktop = defineLongRunningOperation(
 			if (found === undefined) return yield* new ResourceHidden({ resource: "chat" });
 			const opened = yield* named(principal, found.id, input.botId, (principal, chat, bot) =>
 				Effect.gen(function* () {
-					const computer = yield* viewer.openComputer(
-						yield* proveReachesChat(principal, chat),
-						bot,
+					yield* proveIsMember(principal);
+					const reach = yield* proveReachesChat(principal, chat).pipe(
+						Effect.catchTag("BotCannotReach", () =>
+							Effect.fail(new ResourceHidden({ resource: "chat" })),
+						),
 					);
+					const computer = yield* viewer.openComputer(reach, bot);
 					return yield* named(computer.id, (computerId) =>
-						Effect.flatMap(mostUse(principal, computerId), (canUse) =>
-							viewer.show(computer, canUse),
+						Effect.flatMap(proveCanUseComputer(reach, computerId), (canUse) =>
+							Effect.map(viewer.show(computer, canUse), (desktop) => ({
+								desktop,
+								computerId: computer.id,
+							})),
 						),
 					);
 				}),
 			);
-			const use: ComputerUse = opened.control ? "control" : "watch";
+			const use: ComputerUse = opened.desktop.control ? "control" : "watch";
 			// Refused as it starts listening, the desktop opened is never handed on.
 			const ended = yield* streams.keep({
 				principal: follower,
 				workspace: found.workspace,
 				prove: named(principal, found.id, input.botId, (principal, chat, bot) =>
 					Effect.gen(function* () {
-						const computer = yield* viewer.stillShown(
-							yield* proveReachesChat(principal, chat),
-							bot,
+						const reach = yield* proveReachesChat(principal, chat).pipe(
+							Effect.catchTag("BotCannotReach", () =>
+								Effect.fail(new ResourceHidden({ resource: "chat" })),
+							),
 						);
+						const computer = yield* viewer.stillShown(reach, bot);
+						if (computer !== opened.computerId)
+							return yield* new ResourceHidden({ resource: "computer" });
 						yield* named(computer, (computerId) =>
-							Effect.asVoid(proveCanUseComputer(principal, computerId, use)),
+							Effect.asVoid(proveCanUseComputer(reach, computerId, use)),
 						);
 					}),
 				),
 			});
-			return { stream: Stream.make(opened), ended };
+			return { stream: Stream.make(opened.desktop), ended };
 		}),
 );
-
-/** Taking the computer over where the principal may, else watching it. */
-const mostUse = <P, M>(principal: Named<P, Principal>, computer: Named<M, string>) =>
-	proveCanUseComputer(principal, computer, "control").pipe(
-		Effect.catchIf(
-			(refusal): refusal is ActionForbidden => refusal instanceof ActionForbidden,
-			() => proveCanUseComputer(principal, computer, "watch"),
-		),
-	);

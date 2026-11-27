@@ -18,6 +18,7 @@ import {
 	whoActs,
 } from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
+import type { ReachesChat } from "./reaches-chat.ts";
 
 /**
  * How a member uses a computer's desktop: watching it, or taking it over to
@@ -26,17 +27,11 @@ import { defineProof, type Named, type Proof } from "./proof.ts";
 export type ComputerUse = "watch" | "control";
 
 /**
- * P may use the online computer M. A bot: the computer of the project within
- * its bounds, with its computer use on and, acting for its asker, an asker who
- * may change things there. A member: watching needs reach, and taking over
- * needs `computer.desktop.use` there.
+ * P may view the desktop on computer M. Taking over needs
+ * `computer.desktop.use` in its project.
  */
 export interface CanUseComputer<P, M> extends Proof<"CanUseComputer", [P, M]> {
-	readonly principal: Named<P, Principal>;
 	readonly computer: Named<M, string>;
-	/** M's workspace and project, which services take from here. */
-	readonly workspace: string;
-	readonly project: string;
 	readonly control: boolean;
 }
 
@@ -50,53 +45,23 @@ export function takesOverDesktop(place: MemberPlace, project: ProjectFacts): boo
 	return mayInProjectAs(place, project, "computer.desktop.use");
 }
 
-export const proveCanUseComputer = <P, M>(
-	principal: Named<P, Principal>,
+export const proveCanUseComputer = <P, C, M>(
+	reach: ReachesChat<P, C>,
 	computerId: Named<M, string>,
-	use: ComputerUse,
-) =>
-	Effect.gen(function* () {
-		const hidden = new ResourceHidden({ resource: "computer" });
-		const forbidden = new ActionForbidden({ proof: "CanUseComputer" });
-		const acting = principal.value;
-		const id = computerId.value;
-		const [row] = isUuid(id)
-			? yield* query((db) =>
-					db
-						.select({ workspace: computer.workspaceId, project: computer.projectId })
-						.from(computer)
-						.where(eq(computer.id, id))
-						.limit(1),
-				)
-			: [];
-		if (!row) return yield* Effect.fail(hidden);
-		const proof = (control: boolean) => {
-			const made: CanUseComputer<P, M> = CanUseComputerProof.prove([principal, computerId], {
-				principal,
-				computer: computerId,
-				workspace: row.workspace,
-				project: row.project,
-				control,
-			});
-			return made;
-		};
-
-		const facts = yield* query((db) => reachFacts(db, row.project, whoActs(acting)));
-		if (!facts) return yield* Effect.fail(hidden);
-		const decision = decideReach(acting, facts, undefined);
-		if (decision.kind === "hidden") return yield* Effect.fail(hidden);
-		if (decision.kind === "botCannotReach") {
-			return yield* Effect.fail(new BotCannotReach({ resource: "computer" }));
-		}
-		const { as } = decision;
-		if (as.kind === "member") {
-			if (use === "control" && !takesOverDesktop(as.place, facts.project)) {
-				return yield* Effect.fail(forbidden);
-			}
-			return proof(use === "control");
-		}
-		return botUsesComputer(as, facts) ? proof(true) : yield* Effect.fail(forbidden);
+	use?: ComputerUse,
+): Effect.Effect<CanUseComputer<P, M>, ActionForbidden> => {
+	if (reach.as.kind !== "member")
+		return Effect.fail(new ActionForbidden({ proof: "CanUseComputer" }));
+	const mayControl = takesOverDesktop(reach.as.place, reach.project);
+	if (use === "control" && !mayControl) {
+		return Effect.fail(new ActionForbidden({ proof: "CanUseComputer" }));
+	}
+	const proof: CanUseComputer<P, M> = CanUseComputerProof.prove([reach.principal, computerId], {
+		computer: computerId,
+		control: use !== "watch" && mayControl,
 	});
+	return Effect.succeed(proof);
+};
 
 /**
  * P, a bot in a turn in the chat C, may work on the computer of C's project:

@@ -163,11 +163,9 @@ export const make = Effect.gen(function* () {
 					if (!provider) return yield* new DesktopUnavailable({ reason: COMPUTERS_OFF });
 					const holder: ProjectComputers.Holder = { kind: "viewer", id: yield* ids.random };
 					yield* Effect.addFinalizer(() => projectComputers.release(holder));
-					const { computer } = yield* projectComputers.open(place, provider, holder);
-					const id = yield* computerOf(place.projectId, provider.id);
-					if (id === undefined) return yield* new DesktopUnavailable({ reason: NO_COMPUTER });
+					const { computer, record } = yield* projectComputers.open(place, provider, holder);
 					return {
-						id,
+						id: record,
 						computer,
 						holder,
 						chat: chat.chat.value,
