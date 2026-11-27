@@ -1036,9 +1036,14 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			{
 				clockOverride,
 				followed = workspaceStream(world.workspace),
-			}: { readonly clockOverride?: Clock.Clock; readonly followed?: EventStream } = {},
+				principal: signedInPrincipal,
+			}: {
+				readonly clockOverride?: Clock.Clock;
+				readonly followed?: EventStream;
+				readonly principal?: MemberSession;
+			} = {},
 		) => {
-			const principal = await signedIn.member(world.ed);
+			const principal = signedInPrincipal ?? (await signedIn.member(world.ed));
 			const scope = Scope.makeUnsafe();
 			onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
 			const start = Scope.provide(scope)(
@@ -1219,13 +1224,23 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			expect((await read).done).toBe(true);
 		});
 
-		it("ends the operation by its deadline when a session read is stalled", async () => {
+		it("ends the stream at session expiry when a session read is stalled", async () => {
 			const world = await staffed();
 			const interval = "400 millis";
 			const scope = Scope.makeUnsafe();
 			onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
 			const sessionClock = await Effect.runPromise(Scope.provide(TestClock.make(), scope));
 			const sleeps = await observeWatcherSleeps(sessionClock, interval);
+			const principal = await signedIn.member(world.ed);
+			const checkDelay = Duration.toMillis(interval) / 2;
+			const now = await Effect.runPromise(sessionClock.currentTimeMillis);
+			const expiresAt = now + checkDelay + checkDelay / 2;
+			await onDatabase((db) =>
+				db
+					.update(session)
+					.set({ expiresAt: new Date(expiresAt) })
+					.where(eq(session.id, principal.session)),
+			);
 			const running = await followWith(
 				world,
 				Effect.succeed({
@@ -1235,19 +1250,21 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 					bots: { reached: new Set(), unreached: new Set() },
 				}),
 				interval,
-				{ clockOverride: sleeps.clock },
+				{ clockOverride: sleeps.clock, principal },
 			);
+			const ended = Effect.runFork(Stream.runDrain(running.stream));
 			const stalled = holdTransaction(
 				query((db) => db.execute(sql`lock table session in access exclusive mode`)),
 			);
 			await stalled.held;
-			const checkDelay = Duration.toMillis(interval) / 2;
 			await sleeps.waitForInitialSleeps();
 			await Effect.runPromise(sessionClock.adjust(checkDelay));
 			await stalled.waitForWaiters(1);
-			await Effect.runPromise(sessionClock.adjust(checkDelay));
+			await Effect.runPromise(sessionClock.setTime(expiresAt - 1));
+			expect(ended.pollUnsafe()).toBeUndefined();
 
-			await Effect.runPromise(running.ended);
+			await Effect.runPromise(sessionClock.setTime(expiresAt));
+			await Effect.runPromise(Fiber.join(ended).pipe(Effect.timeout("2 seconds")));
 			await stalled.release();
 		});
 
