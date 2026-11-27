@@ -1,7 +1,7 @@
 export * as EventStore from "./store.ts";
 
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
-import { and, asc, count, eq, gt, inArray, lt, lte, max, notExists, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, lt, lte, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Effect, Layer } from "effect";
 import { processLayer, Tier } from "../../tiers.ts";
