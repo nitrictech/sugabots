@@ -328,32 +328,48 @@ describe.skipIf(!process.env.DATABASE_URL)("connecting a project, against Postgr
 		expect(await shown(made.id)).toMatchObject({ status: "error", lastTestError: said.reason });
 	});
 
-	it("reports when connector settings change during a Test", async () => {
-		const made = await managing((service, { canManage }) =>
-			service.create(canManage, { name: "Wiki", url: `${serverUrl}/open` }),
-		);
-		const listed = Promise.withResolvers<void>();
-		const respond = Promise.withResolvers<void>();
-		const egressFetch: typeof fetch = async (...args) => {
-			const response = await fetch(...args);
-			listed.resolve();
-			await respond.promise;
-			return response;
-		};
-		const test = testing(made.id, { egressFetch });
-		try {
-			await Promise.race([listed.promise, test]);
-			await connectors.update(workspaceId, projectId, made.id, { url: `${serverUrl}/mcp` });
-		} finally {
-			respond.resolve();
-		}
+	it.each(["another listing", "an address edit"] as const)(
+		"reports when %s supersedes a connector Test",
+		async (change) => {
+			const made = await managing((service, { canManage }) =>
+				service.create(canManage, { name: "Wiki", url: `${serverUrl}/open` }),
+			);
+			const listed = Promise.withResolvers<void>();
+			const respond = Promise.withResolvers<void>();
+			const egressFetch: typeof fetch = async (...args) => {
+				const response = await fetch(...args);
+				listed.resolve();
+				await respond.promise;
+				return response;
+			};
+			const test = testing(made.id, { egressFetch });
+			try {
+				await Promise.race([listed.promise, test]);
+				if (change === "an address edit") {
+					await connectors.update(workspaceId, projectId, made.id, { url: `${serverUrl}/mcp` });
+				} else {
+					const target = await connectors.target(workspaceId, projectId, made.id);
+					if (!target) throw new Error("No connector to list");
+					await connectors.recordListing(workspaceId, target, {
+						tools: [{ name: "search", description: null, readOnly: true, destructive: null }],
+						definitions: [{ name: "search", inputSchema: { type: "object" } }],
+					});
+				}
+			} finally {
+				respond.resolve();
+			}
 
-		expect(await test).toMatchObject({
-			reachable: false,
-			error: "The connector changed while the test was running. Test it again.",
-		});
-		expect(await shown(made.id)).toMatchObject({ status: "untested" });
-	});
+			expect(await test).toMatchObject({
+				reachable: false,
+				error: "The connector changed while the test was running. Test it again.",
+			});
+			expect(await shown(made.id)).toMatchObject(
+				change === "an address edit"
+					? { status: "untested" }
+					: { status: "connected", tools: [{ name: "search" }] },
+			);
+		},
+	);
 
 	it("adds an HTTP endpoint without sending it a request", async () => {
 		const before = requestsReceived;

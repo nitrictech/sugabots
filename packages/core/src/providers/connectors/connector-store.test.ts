@@ -640,6 +640,8 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 		]);
 
 		expect(revisions).toEqual([2, 2]);
+		expect(await connectors.recordTest(workspaceId, target, listing)).toBe(true);
+		expect(await shown(made.id)).toMatchObject({ status: "connected" });
 		await connectors.update(workspaceId, projectId, made.id, {
 			url: "https://another.example.com/mcp",
 		});
