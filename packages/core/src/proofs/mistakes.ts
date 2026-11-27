@@ -681,10 +681,10 @@ export const projectAutomationsServiceMistakes = named(
 			// @ts-expect-error TS2739 [from type 'CanManageProject<NameA, unknown>'] Reaching the project does not authorize creating an automation.
 			yield* automationsService.create(reach, member, settings);
 
-			// @ts-expect-error TS2739 [from type 'Approved<NameA, unknown, [NameB], "automations.createWithRoutine">'] Creating an automation with a routine requires approval for that call.
+			// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameB], "automations.createWithRoutine">'] Creating an automation with a routine requires approval for that call.
 			yield* automationsService.createWithRoutine(canManage, member, settings, routine);
 
-			// @ts-expect-error TS2739 [from type 'Approved<NameA, unknown, [NameB, NameC], "automations.updateInChat">'] Changing an automation from a chat requires approval for that call.
+			// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameB, NameC], "automations.updateInChat">'] Changing an automation from a chat requires approval for that call.
 			yield* automationsService.updateInChat(canManage, automation, target, member, {}, routine);
 
 			yield* automationsService.create(canManage, member, settings);
@@ -907,12 +907,12 @@ export const chatServicesMistakes = named(
 				yield* filesService.create(canTakePart, approved, newFile);
 				// @ts-expect-error TS2554 [Expected 2 arguments, but got 1.] Listing written files requires approval.
 				yield* filesService.listWritten(reach);
-				// @ts-expect-error TS2554 [Expected 4 arguments, but got 3.] Resolving a chat requires approval.
-				yield* chatsService.setResolved(reach, true, canChange);
+				// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] Resolving a chat requires approval.
+				yield* chatsService.setResolved(reach, canChange);
 
 				// `CanChangeChat` proven for another chat, handed over with the reach of this one.
 				// @ts-expect-error TS2345 [Argument of type 'CanChangeChat<NameA, NameD>' is not assignable to parameter of type 'CanChangeChat<NameA, NameC>']
-				yield* chatsService.setResolved(reach, true, changesOther, approved);
+				yield* chatsService.setResolved(reach, changesOther, approved);
 
 				// A message posted as another principal's member, in a chat this one takes part in.
 				// @ts-expect-error TS2345 [Argument of type 'CanTakePart<NameA, NameC>' is not assignable to parameter of type 'CanTakePart<NameB, NameC>']
@@ -937,7 +937,7 @@ export const chatServicesMistakes = named(
 					otherChat,
 				);
 				// @ts-expect-error TS2345 [Argument of type 'ReachesChat<NameA, NameC>' is not assignable to parameter of type 'ReachesChat<NameA, NameD>'] The approval targets a different chat.
-				yield* chatsService.setResolved(reach, true, canChange, approvedElsewhere);
+				yield* chatsService.setResolved(reach, canChange, approvedElsewhere);
 				yield* named({}, (unrelated) => {
 					// @ts-expect-error TS2345 [parameter of type 'Named<NameA, { readonly chatId: string; readonly resolved: boolean;] The named input must match the operation's input.
 					return proveNamedApproval(principal, call, resolveApproval, unrelated, chat);
@@ -950,8 +950,8 @@ export const chatServicesMistakes = named(
 					chat,
 				);
 				// @ts-expect-error TS2345 [parameter of type 'Approved<NameA, NameA, [NameC], "chats.setResolved">] Approval to list files cannot authorize resolving a chat.
-				yield* chatsService.setResolved(reach, true, canChange, approvedList);
-				yield* chatsService.setResolved(reach, true, canChange, approved);
+				yield* chatsService.setResolved(reach, canChange, approvedList);
+				yield* chatsService.setResolved(reach, canChange, approved);
 				yield* chatsService.post(yield* proveIsMember(principal), canTakePart, posted);
 				yield* chatsService.renameChat(reach, "Renamed", yield* proveCanManageChats(reach));
 				yield* chatViewService.messages(reach, firstPage);
@@ -1085,22 +1085,21 @@ export const computerUseMistakes = named(
 
 					// A command run on the computer another principal may use, with this one's approval.
 					// @ts-expect-error TS2345 [Argument of type 'CanUseChatComputer<NameB, NameC>' is not assignable to parameter of type 'CanUseChatComputer<NameA, NameC>']
-					yield* turnComputers.runCommand(otherUses, approved, command);
+					yield* turnComputers.runCommand(otherUses, approved);
 
 					// A command run with no proof that the call may run.
-					// @ts-expect-error TS2739 [from type 'Approved<NameA, unknown, [NameC], "computers.runCommand">']
-					yield* turnComputers.runCommand(canUse, canUse, command);
+					// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameC], "computers.runCommand">']
+					yield* turnComputers.runCommand(canUse, canUse);
 
 					// A host request read back with the reach of the chat, not the proof the bot may use its computer.
 					const reach = yield* proveRealReachesChat(principal, chat);
 					// @ts-expect-error TS2739 [from type 'CanUseChatComputer<NameA, NameC>'] Chat reach does not prove permission to read a computer request.
-					yield* computerNetwork.requestedHost(reach, approved, "example.com");
+					yield* computerNetwork.requestedHost(reach, approved);
 
-					yield* turnComputers.runCommand(canUse, approved, command);
+					yield* turnComputers.runCommand(canUse, approved);
 					yield* computerNetwork.requestedHost(
 						canUse,
 						yield* proveComputerRequestApproved(principal, call, host, canUse),
-						"example.com",
 					);
 				}),
 		),
@@ -1134,13 +1133,12 @@ export const chatFileReadProofMistakes = named(
 			const input = { file: file.value };
 			const rule = approvalRule("chats.readChatFile");
 			const approvedForOther = yield* proveRealApproved(other, call, rule, input, file);
-			// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] Reading a chat file in a turn requires approval.
-			yield* chatFilesService.readForTurn(reach, {});
+			// @ts-expect-error TS2554 [Expected 2 arguments, but got 1.] Reading a chat file in a turn requires approval.
+			yield* chatFilesService.readForTurn(reach);
 			// @ts-expect-error TS2345 [Argument of type 'ReachesFile<NameA, NameC>' is not assignable to parameter of type 'ReachesFile<NameB, NameC>'] The approval belongs to another principal.
-			yield* chatFilesService.readForTurn(reach, {}, approvedForOther);
+			yield* chatFilesService.readForTurn(reach, approvedForOther);
 			yield* chatFilesService.readForTurn(
 				reach,
-				{},
 				yield* proveRealApproved(principal, call, rule, input, file),
 			);
 		}),
@@ -1242,14 +1240,14 @@ export const webProofMistakes = named(
 				workspace,
 			);
 
-			// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] Fetching a page requires approval.
-			yield* webService.fetch(canFetch, input);
+			// @ts-expect-error TS2554 [Expected 2 arguments, but got 1.] Fetching a page requires approval.
+			yield* webService.fetch(canFetch);
 			// @ts-expect-error TS2345 [Argument of type 'CanUseWeb<NameA, NameC, "web_search">' is not assignable to parameter of type 'CanUseWeb<NameA, NameC, "web_fetch">'] Search permission does not grant fetch permission.
-			yield* webService.fetch(canSearch, input, approved);
+			yield* webService.fetch(canSearch, approved);
 			// @ts-expect-error TS2345 [Argument of type 'CanUseWeb<NameA, NameC, "web_fetch">' is not assignable to parameter of type 'CanUseWeb<NameB, NameC, "web_fetch">'] Approval from a different principal cannot authorize the fetch.
-			yield* webService.fetch(canFetch, input, otherApproved);
+			yield* webService.fetch(canFetch, otherApproved);
 
-			yield* webService.fetch(canFetch, input, approved);
+			yield* webService.fetch(canFetch, approved);
 		}),
 );
 
@@ -1306,11 +1304,11 @@ declare const otherSearchApproval: RecordedApproval<
 >;
 
 export const connectorSearchMistakes = Effect.gen(function* () {
-	// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] Connector tool search requires approval.
-	yield* connectorCalls.searchTools(connectorTurn, "issues");
+	// @ts-expect-error TS2554 [Expected 2 arguments, but got 1.] Connector tool search requires approval.
+	yield* connectorCalls.searchTools(connectorTurn);
 	// @ts-expect-error TS2345 [parameter of type 'Approved<"principal", "other call", ["turn"], "connectors.searchToo] The recorded approval belongs to a different turn principal.
-	yield* connectorCalls.searchTools(connectorTurn, otherSearchApproval, "issues");
-	yield* connectorCalls.searchTools(connectorTurn, searchApproval, "issues");
+	yield* connectorCalls.searchTools(connectorTurn, otherSearchApproval);
+	yield* connectorCalls.searchTools(connectorTurn, searchApproval);
 });
 
 export const computerAvailabilityMistake = Effect.gen(function* () {

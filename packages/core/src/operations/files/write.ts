@@ -82,7 +82,7 @@ export const edit = defineOperation(filesContracts["files.edit"], (principal, in
 						approvedInput,
 						file,
 					);
-					return yield* files.edit(canChange, approved, input);
+					return yield* files.edit(canChange, approved);
 				}),
 		);
 	}),

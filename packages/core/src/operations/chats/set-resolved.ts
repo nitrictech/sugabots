@@ -28,7 +28,7 @@ export const setResolved = defineOperation(
 							approvedInput,
 							chat,
 						);
-						return yield* chats.setResolved(reach, input.resolved, canChange, approved);
+						return yield* chats.setResolved(reach, canChange, approved);
 					}),
 			);
 		}),

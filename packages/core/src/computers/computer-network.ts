@@ -120,7 +120,6 @@ export interface Interface {
 	readonly requestedHost: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.requestHost">,
-		host: string,
 	) => Effect.Effect<OutputOf<"computers.requestHost">, ComputerHostBlocked>;
 }
 
@@ -389,7 +388,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		requestedHost: (canUse, _approved, host) =>
+		requestedHost: (canUse, { input: { host } }) =>
 			operation(
 				"requestedHost",
 				Effect.gen(function* () {

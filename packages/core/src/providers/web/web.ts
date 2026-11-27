@@ -2,7 +2,7 @@ export * as Web from "./web.ts";
 
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { WebToolOff } from "@sugabots/contracts/errors/web";
-import type { InputOf, OutputOf } from "@sugabots/contracts/operations";
+import type { OutputOf } from "@sugabots/contracts/operations";
 import type { WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "@sugabots/contracts/operations/web";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
@@ -21,12 +21,10 @@ import { pageFetcher, WEB_FETCH_LIMITS } from "./fetch-page.ts";
 export interface Interface {
 	readonly fetch: <P, W, X>(
 		canFetch: CanUseWeb<P, W, typeof WEB_FETCH_TOOL>,
-		input: InputOf<"web.fetch">,
 		approved: Approved<P, X, [W], "web.fetch">,
 	) => Effect.Effect<OutputOf<"web.fetch">, WebToolOff>;
 	readonly search: <P, W, X>(
 		canSearch: CanUseWeb<P, W, typeof WEB_SEARCH_TOOL>,
-		input: InputOf<"web.search">,
 		approved: Approved<P, X, [W], "web.search">,
 	) => Effect.Effect<OutputOf<"web.search">, WebToolOff | ResourceHidden>;
 }
@@ -48,7 +46,7 @@ export const make = Effect.gen(function* () {
 			() => new WebToolOff(),
 		);
 	return Service.of({
-		fetch: (canFetch, { url }) =>
+		fetch: (canFetch, { input: { url } }) =>
 			operation(
 				"fetch",
 				Effect.gen(function* () {
@@ -58,7 +56,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		search: (canSearch, input) =>
+		search: (canSearch, { input }) =>
 			operation(
 				"search",
 				Effect.gen(function* () {

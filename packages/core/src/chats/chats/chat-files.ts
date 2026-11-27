@@ -8,7 +8,7 @@ import type {
 	UploadInterrupted,
 } from "@sugabots/contracts/errors/chats";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import type { InputOf, OutputOf } from "@sugabots/contracts/operations";
+import type { OutputOf } from "@sugabots/contracts/operations";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, type Stream } from "effect";
 import { contentType as mediaTypeForName } from "mime-types";
@@ -69,7 +69,6 @@ export interface Interface {
 	) => Effect.Effect<ChatFileStore.StoredFile, ChatFileNotFound>;
 	readonly readForTurn: <P, F, X>(
 		reach: ReachesFile<P, F>,
-		input: Omit<InputOf<"chats.readChatFile">, "file" | "chat">,
 		approved: Approved<P, X, [F], "chats.readChatFile">,
 	) => Effect.Effect<OutputOf<"chats.readChatFile">, ResourceHidden>;
 }
@@ -117,12 +116,12 @@ export const make = Effect.gen(function* () {
 					.pipe(Effect.catchTags(storeOutagesAsDefects)),
 			),
 
-		readForTurn: (reach, input, approved) =>
+		readForTurn: (reach, approved) =>
 			operation(
 				"readForTurn",
 				readChatFileContent(
 					files.read({ chatId: reach.chat, fileId: reach.file.value }),
-					input,
+					approved.input,
 					Effect.gen(function* () {
 						const principal = approved.principal.value;
 						if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun")

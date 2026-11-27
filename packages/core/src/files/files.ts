@@ -138,7 +138,6 @@ export interface Interface {
 	readonly edit: <P, F, X>(
 		canChange: CanChangeFile<P, F>,
 		approved: Approved<P, X, [F], "files.edit">,
-		input: EditWrittenFile,
 	) => Effect.Effect<
 		FileWritten,
 		| ActionForbidden
@@ -293,11 +292,12 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		edit: ({ reach }, approved, input) =>
+		edit: ({ reach }, approved) =>
 			operation(
 				"edit",
 				Effect.gen(function* () {
 					const writer = yield* fileWriter(approved, reach.project.id);
+					const { input } = approved;
 					const found = yield* writtenFileIn(reach);
 					const replay = yield* replayFileWrite(writer);
 					if (replay) return replay;
@@ -330,12 +330,6 @@ interface ReplaceWrittenFile {
 	readonly content: string;
 	readonly title?: string;
 	readonly kind?: WrittenFileKind;
-}
-
-interface EditWrittenFile {
-	readonly baseVersion: number;
-	readonly oldText: string;
-	readonly newText: string;
 }
 
 interface FileWriter {

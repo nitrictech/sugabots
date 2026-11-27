@@ -42,7 +42,6 @@ export interface Interface {
 	readonly searchTools: <P, T, X>(
 		turn: RunsTurn<P, T>,
 		approved: Approved<NoInfer<P>, X, [T], "connectors.searchTools">,
-		query: string,
 	) => Effect.Effect<unknown, ResourceHidden>;
 	readonly callTool: <P, T, K, X>(
 		turn: RunsTurn<P, T>,
@@ -149,13 +148,15 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 					? { arguments: checked.value as Record<string, unknown> }
 					: { invalid: checked.error.message };
 			}),
-		searchTools: (running, _approved, query) =>
+		searchTools: (running, approved) =>
 			Effect.suspend(() => {
 				const turn = turns.get(running.turn.value);
 				if (!turn || turn.executionNumber !== running.execution) {
 					return Effect.fail(new ResourceHidden({ resource: "connector" }));
 				}
-				return Effect.succeed(searchOfferedTools(buildCatalog(turn.tools, {}), query));
+				return Effect.succeed(
+					searchOfferedTools(buildCatalog(turn.tools, {}), approved.input.query),
+				);
 			}),
 		callTool: (turn, use, approved) =>
 			Effect.gen(function* () {

@@ -34,7 +34,7 @@ export const startBriefedChat = defineOperation(
 							{ bot: mayBrief.bot.value, project: mayBrief.project },
 							bot,
 						);
-						return { chat: yield* chats.startBriefedChat(mayBrief, input, approved) };
+						return { chat: yield* chats.startBriefedChat(mayBrief, approved) };
 					}),
 			);
 		}),

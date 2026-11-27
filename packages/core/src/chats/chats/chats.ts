@@ -125,13 +125,11 @@ export interface Interface {
 	 */
 	readonly setResolved: <P, C, X>(
 		reach: ReachesChat<P, C>,
-		resolved: boolean,
 		canChange: CanChangeChat<P, C>,
 		approved: Approved<P, X, [C], "chats.setResolved">,
 	) => Effect.Effect<void, ResourceHidden | ToolWriteRefusal>;
 	readonly startBriefedChat: <P, B, X>(
 		mayBrief: MayBrief<P, B>,
-		input: { title: string; brief: string },
 		approved: Approved<P, X, [B], "chats.startBriefedChat">,
 	) => Effect.Effect<
 		BotStartedChat,
@@ -337,7 +335,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		startBriefedChat: (mayBrief, input, approved) =>
+		startBriefedChat: (mayBrief, approved) =>
 			operation(
 				"startBriefedChat",
 				transaction(
@@ -362,8 +360,10 @@ export const make = Effect.gen(function* () {
 						);
 						if (!recipient) return yield* new ResourceHidden({ resource: "bot" });
 						if (recipient.model === null) return yield* new BotHasNoModel();
+						const { title, brief } = approved.input;
 						const started = yield* chats.startBriefedChat({
-							...input,
+							title,
+							brief,
 							workspaceId: mayBrief.workspace,
 							projectId: mayBrief.project,
 							recipientBotId: botId,
@@ -381,7 +381,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		setResolved: (reach, resolved, _canChange, approved) =>
+		setResolved: (reach, _canChange, approved) =>
 			operation(
 				"setResolved",
 				transaction(
@@ -392,7 +392,7 @@ export const make = Effect.gen(function* () {
 							permission: "project.change",
 						});
 						const chat = yield* reachedChatOfKind(reach, ["project_chat"]);
-						yield* chats.setResolved(chat, resolved);
+						yield* chats.setResolved(chat, approved.input.resolved);
 					}),
 				),
 			),

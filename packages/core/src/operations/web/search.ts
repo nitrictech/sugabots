@@ -27,7 +27,7 @@ export const search = defineOperation(webContracts["web.search"], (principal, in
 					approvedInput,
 					workspace,
 				);
-				return yield* web.search(canUseWeb, input, approved);
+				return yield* web.search(canUseWeb, approved);
 			}),
 	);
 });

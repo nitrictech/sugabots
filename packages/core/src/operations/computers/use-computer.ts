@@ -77,7 +77,7 @@ export const runCommand = defineOperation(
 				call,
 				approvalRule("computers.runCommand"),
 				input,
-				(canUse, approved) => computers.runCommand(canUse, approved, input),
+				(canUse, approved) => computers.runCommand(canUse, approved),
 			),
 		),
 );
@@ -91,7 +91,7 @@ export const readFile = defineOperation(
 				call,
 				approvalRule("computers.readFile"),
 				input,
-				(canUse, approved) => computers.readFile(canUse, approved, input),
+				(canUse, approved) => computers.readFile(canUse, approved),
 			),
 		),
 );
@@ -105,7 +105,7 @@ export const writeFile = defineOperation(
 				call,
 				approvalRule("computers.writeFile"),
 				input,
-				(canUse, approved) => computers.writeFile(canUse, approved, input),
+				(canUse, approved) => computers.writeFile(canUse, approved),
 			),
 		),
 );
@@ -119,7 +119,7 @@ export const copyChatFile = defineOperation(
 				call,
 				approvalRule("computers.copyChatFile"),
 				input,
-				(canUse, approved) => computers.copyChatFile(canUse, approved, input),
+				(canUse, approved) => computers.copyChatFile(canUse, approved),
 			),
 		),
 );
@@ -133,7 +133,7 @@ export const shareFile = defineOperation(
 				call,
 				approvalRule("computers.shareFile"),
 				input,
-				(canUse, approved) => computers.shareFile(canUse, approved, input),
+				(canUse, approved) => computers.shareFile(canUse, approved),
 			),
 		),
 );
@@ -152,7 +152,7 @@ export const useBrowser = defineOperation(
 				call,
 				approvalRule("computers.useBrowser"),
 				input,
-				(canUse, approved) => computers.useBrowser(canUse, approved, input),
+				(canUse, approved) => computers.useBrowser(canUse, approved),
 			),
 		),
 );

@@ -84,6 +84,11 @@ export interface Approved<
 	readonly operation: Operation;
 	readonly principal: Named<P, Principal>;
 	readonly call: Named<X, Call>;
+	/**
+	 * The input this was proved for, which the approval covers: a service
+	 * takes the values it acts on from here, so it never acts on others.
+	 */
+	readonly input: InputOf<Operation>;
 	/** The member who allowed it; none when it needed no one. */
 	readonly decidedBy: string | null;
 	readonly sdkToolCallId: string | null;
@@ -190,7 +195,7 @@ const proveApproval = <
 	principal: Named<P, Principal>,
 	callNamed: Named<X, Call>,
 	rule: ApprovalRule<Approval, N>,
-	inputNamed: Named<I, unknown>,
+	inputNamed: Named<I, InputOf<N>>,
 	targets: NamedTargets<Targets>,
 	{
 		connectorUse,
@@ -203,7 +208,7 @@ const proveApproval = <
 	} = {},
 ) =>
 	Effect.gen(function* () {
-		const input = inputNamed.value;
+		const input: InputOf<N> = inputNamed.value;
 		if (typeof input !== "object" || input === null) return yield* new ApprovalRefused();
 		const acting = principal.value;
 		if (
@@ -229,6 +234,7 @@ const proveApproval = <
 				operation: rule.operation,
 				principal,
 				call: callNamed,
+				input,
 				decidedBy,
 				sdkToolCallId,
 				connectorCall: connectorUse && {

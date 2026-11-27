@@ -37,7 +37,7 @@ export const saveInstructions = defineOperation(
 							approvedInput,
 							bot,
 						);
-						return yield* bots.saveInstructions(canManage, input, approved);
+						return yield* bots.saveInstructions(canManage, approved);
 					}),
 			);
 			const workspaceSlug = yield* workspaceSlugOf(principal.workspace);

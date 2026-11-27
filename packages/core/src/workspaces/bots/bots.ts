@@ -108,7 +108,6 @@ export interface Interface {
 	 */
 	readonly saveInstructions: <P, B, X>(
 		canManage: CanManageBot<P, B>,
-		written: { readonly instructions: string; readonly description: string },
 		approved: Approved<P, X, [B], "bots.saveInstructions">,
 	) => Effect.Effect<
 		Bot,
@@ -321,7 +320,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		saveInstructions: (canManage, written, approved) =>
+		saveInstructions: (canManage, approved) =>
 			operation(
 				"saveInstructions",
 				Effect.gen(function* () {
@@ -331,8 +330,8 @@ export const make = Effect.gen(function* () {
 						Effect.gen(function* () {
 							yield* holdTurnOf(approved.principal.value);
 							return yield* store.update(workspace, facts.id, {
-								instructions: written.instructions,
-								description: written.description,
+								instructions: approved.input.instructions,
+								description: approved.input.description,
 							});
 						}),
 					).pipe(

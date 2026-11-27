@@ -3,7 +3,7 @@ export * as TurnComputers from "./turn-computers.ts";
 import { posix } from "node:path";
 import type { BotColor } from "@sugabots/contracts";
 import { NoComputerProvider } from "@sugabots/contracts/errors/computers";
-import type { InputOf, OutputOf } from "@sugabots/contracts/operations";
+import type { OutputOf } from "@sugabots/contracts/operations";
 import { MAX_SHARED_FILE_MEGABYTES } from "@sugabots/contracts/operations/computers";
 import { UserText, userText } from "@sugabots/errors";
 import { Context, Effect, Layer, type Scope, Semaphore, Stream } from "effect";
@@ -69,17 +69,14 @@ export interface Interface {
 	readonly runCommand: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.runCommand">,
-		input: InputOf<"computers.runCommand">,
 	) => Effect.Effect<OutputOf<"computers.runCommand">, NoComputerProvider>;
 	readonly readFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.readFile">,
-		input: InputOf<"computers.readFile">,
 	) => Effect.Effect<OutputOf<"computers.readFile">, NoComputerProvider>;
 	readonly writeFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.writeFile">,
-		input: InputOf<"computers.writeFile">,
 	) => Effect.Effect<OutputOf<"computers.writeFile">, NoComputerProvider>;
 	/**
 	 * Copies a file in the chat into the chat's folder in the computer. The
@@ -89,7 +86,6 @@ export interface Interface {
 	readonly copyChatFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.copyChatFile">,
-		input: InputOf<"computers.copyChatFile">,
 	) => Effect.Effect<OutputOf<"computers.copyChatFile">, NoComputerProvider>;
 	/**
 	 * Attaches a file from the computer to the turn's reply, where members see
@@ -99,13 +95,11 @@ export interface Interface {
 	readonly shareFile: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.shareFile">,
-		input: InputOf<"computers.shareFile">,
 	) => Effect.Effect<OutputOf<"computers.shareFile">, NoComputerProvider>;
 	/** Calls one of the browser tools in the bot's browser in the chat. */
 	readonly useBrowser: <P, C, X>(
 		canUse: CanUseChatComputer<P, C>,
 		approved: Approved<P, X, [C], "computers.useBrowser">,
-		input: InputOf<"computers.useBrowser">,
 	) => Effect.Effect<OutputOf<"computers.useBrowser">, NoComputerProvider>;
 }
 
@@ -255,7 +249,7 @@ export const make = Effect.gen(function* () {
 		forStep,
 		requireComputer: (canUse) => Effect.asVoid(stepOf(canUse)),
 
-		runCommand: (canUse, _approved, { command, timeout_seconds }) =>
+		runCommand: (canUse, { input: { command, timeout_seconds } }) =>
 			Effect.flatMap(stepOf(canUse), ({ computer, place }) =>
 				inComputer(computer, (opened) =>
 					opened
@@ -277,7 +271,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		readFile: (canUse, _approved, { path }) =>
+		readFile: (canUse, { input: { path } }) =>
 			Effect.flatMap(stepOf(canUse), ({ computer, place, acceptsImages }) => {
 				const asImage =
 					acceptsImages && IMAGE_EXTENSIONS.has(posix.extname(path).slice(1).toLowerCase());
@@ -293,7 +287,7 @@ export const make = Effect.gen(function* () {
 				);
 			}),
 
-		writeFile: (canUse, _approved, { path, content }) =>
+		writeFile: (canUse, { input: { path, content } }) =>
 			Effect.flatMap(stepOf(canUse), ({ computer, place }) =>
 				inComputer(computer, (opened) =>
 					opened
@@ -302,7 +296,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		copyChatFile: (canUse, _approved, { file }) =>
+		copyChatFile: (canUse, { input: { file } }) =>
 			Effect.flatMap(stepOf(canUse), ({ computer, place }) =>
 				files.read({ chatId: canUse.chat.value, fileId: file }).pipe(
 					Effect.flatMap((found) =>
@@ -316,7 +310,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		shareFile: (canUse, _approved, { path, name }) =>
+		shareFile: (canUse, { input: { path, name } }) =>
 			Effect.flatMap(stepOf(canUse), ({ computer, place, attach, sharing }) => {
 				if (!attach) {
 					return Effect.succeed(failed(userText`Files can be shared only in a project's chats.`));
@@ -326,7 +320,7 @@ export const make = Effect.gen(function* () {
 				);
 			}),
 
-		useBrowser: (canUse, _approved, { tool, arguments: input }) =>
+		useBrowser: (canUse, { input: { tool, arguments: input } }) =>
 			Effect.flatMap(stepOf(canUse), ({ browser, acceptsImages }) => {
 				if (!browser || !isBrowserTool(tool, acceptsImages)) {
 					return Effect.succeed(failed(userText`There is no browser tool by that name.`));

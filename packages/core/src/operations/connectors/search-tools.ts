@@ -31,7 +31,7 @@ export const searchTools = defineOperation(
 							approvedInput,
 							turn,
 						);
-						return yield* calls.searchTools(running, approved, input.query);
+						return yield* calls.searchTools(running, approved);
 					}),
 			);
 		}),

@@ -282,7 +282,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 							// The change commits after the call was proved, before it writes.
 							yield* Effect.promise(loseStanding);
 							const chats = yield* Chats.Service;
-							return yield* chats.setResolved(reach, true, canChange, approved);
+							return yield* chats.setResolved(reach, canChange, approved);
 						}),
 					).pipe(Effect.provide(Chats.layer)),
 				),

@@ -27,7 +27,7 @@ export const fetch = defineOperation(webContracts["web.fetch"], (principal, inpu
 					approvedInput,
 					workspace,
 				);
-				return yield* web.fetch(canUseWeb, input, approved);
+				return yield* web.fetch(canUseWeb, approved);
 			}),
 	);
 });

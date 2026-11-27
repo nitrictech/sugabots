@@ -37,7 +37,7 @@ export const requestHost = defineOperation(
 							approvedInput,
 							canUse,
 						);
-						return yield* network.requestedHost(canUse, approved, input.host);
+						return yield* network.requestedHost(canUse, approved);
 					}),
 			);
 		}),
