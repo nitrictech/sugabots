@@ -91,7 +91,12 @@ export const legacy = {
 		automation: "00000008-0000-4000-8000-000000000002",
 		trigger: "00000010-0000-4000-8000-000000000001",
 	},
-	automaticWebhookTrigger: "00000010-0000-4000-8000-000000000002",
+	automaticWebhookTrigger: "00000010-0000-4000-8000-000000000020",
+	automaticGitHubWebhook: {
+		trigger: "00000010-0000-4000-8000-000000000021",
+		run: "00000009-0000-4000-8000-000000000040",
+		secret: "github-webhook-test-secret",
+	},
 	familyGitHubConnector: "00000011-0000-4000-8000-000000000002",
 	/** The Notes pod's connection, which no bot had. */
 	notesConnection: "00000011-0000-4000-8000-000000000003",
@@ -428,9 +433,16 @@ INSERT INTO "routine" ("id", "workspace_id", "agent_id", "name", "instructions")
 INSERT INTO "routine_trigger" ("id", "workspace_id", "routine_id", "settings", "secret_digest") VALUES
  ('00000010-0000-4000-8000-000000000001', '0000000a-0000-4000-8000-000000000001', '00000008-0000-4000-8000-000000000002', '{"kind":"webhook","auth":{"kind":"bearer"},"deliveryIdHeader":null}', 'a2f1c0ffee5a2f1c0ffee5a2f1c0ffee5a2f1c0ffee5a2f1c0ffee5a2f1c0ff');
 INSERT INTO "routine" ("id", "workspace_id", "agent_id", "name", "instructions", "state") VALUES
- ('00000008-0000-4000-8000-000000000003', '0000000a-0000-4000-8000-000000000001', '0000000c-0000-4000-8000-000000000001', 'New orders', 'Review the order', 'enabled');
+ ('00000008-0000-4000-8000-000000000020', '0000000a-0000-4000-8000-000000000001', '0000000c-0000-4000-8000-000000000001', 'New orders', 'Review the order', 'enabled');
 INSERT INTO "routine_trigger" ("id", "workspace_id", "routine_id", "settings") VALUES
- ('${legacy.automaticWebhookTrigger}', '0000000a-0000-4000-8000-000000000001', '00000008-0000-4000-8000-000000000003', '{"kind":"webhook","auth":{"kind":"bearer"}}');
+ ('${legacy.automaticWebhookTrigger}', '0000000a-0000-4000-8000-000000000001', '00000008-0000-4000-8000-000000000020', '{"kind":"webhook","auth":{"kind":"bearer"}}'),
+ ('${legacy.automaticGitHubWebhook.trigger}', '${legacy.workspace}', '00000008-0000-4000-8000-000000000020', '{"kind":"webhook","auth":{"kind":"github"}}');
+INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "conversation_id") VALUES
+ ('0000000f-0000-4000-8000-000000000040', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.planner}', 'routine', 'New orders', '0000000f-0000-4000-8000-000000000040');
+INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "conversation_id", "routine_id") VALUES
+ ('0000000f-0000-4000-8000-000000000041', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.planner}', 'routine_feed', 'New orders', '0000000f-0000-4000-8000-000000000041', '00000008-0000-4000-8000-000000000020');
+INSERT INTO "routine_execution" ("id", "routine_id", "workspace_id", "agent_id", "thread_id", "trigger_kind", "trigger_id", "trigger_identity", "trigger", "routine_name", "instructions", "state", "started_at", "finished_at") VALUES
+ ('${legacy.automaticGitHubWebhook.run}', '00000008-0000-4000-8000-000000000020', '${legacy.workspace}', '${legacy.bots.planner}', '0000000f-0000-4000-8000-000000000040', 'webhook', '${legacy.automaticGitHubWebhook.trigger}', 'order-42', '{"kind":"webhook","idempotencyKey":"order-42","payload":{"order":42},"receivedAt":"2026-10-09T09:00:00.000Z"}', 'New orders', 'Review the order', 'completed', '2026-10-09 09:00Z', '2026-10-09 09:01Z');
 -- Direct messages: Sam and Pat's, where Sam sent a file Pat has read, and a
 -- group of three.
 INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "initiator_user_id", "conversation_id", "direct_key", "created_at") VALUES

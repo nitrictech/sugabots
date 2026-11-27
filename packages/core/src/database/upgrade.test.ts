@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -248,6 +249,10 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				);
 				await client.query(legacySessions);
 				const cipher = Secrets.fromKey(Buffer.alloc(32).toString("base64"));
+				await client.query("update routine_trigger set secret_encrypted = $1 where id = $2", [
+					cipher.encrypt(legacy.automaticGitHubWebhook.secret),
+					legacy.automaticGitHubWebhook.trigger,
+				]);
 				await client.query(
 					`insert into connection (id, workspace_id, pod_id, name, handle, kind, url, auth_kind,
 						secret_header, secret_encrypted, oauth_encrypted, created_by_id) values
@@ -1551,8 +1556,11 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			const webhooks = await upgraded.run(
 				Effect.provide(WebhookAuthentication.Service, WebhookAuthentication.layer),
 			);
-			const triggerId = legacy.automaticWebhookTrigger;
-			const deliver = async (headers: Record<string, string>, payload: Schema.Json) => {
+			const deliver = async (
+				triggerId: string,
+				headers: Record<string, string>,
+				payload: Schema.Json,
+			) => {
 				const delivery = {
 					headers,
 					payload,
@@ -1566,10 +1574,31 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				{ headers: { "svix-id": "delivery-1" }, payload: { order: 42 } },
 				{ headers: {}, payload: { event_id: "delivery-2" } },
 			]) {
-				const accepted = await deliver(headers, payload);
+				const triggerId = legacy.automaticWebhookTrigger;
+				const accepted = await deliver(triggerId, headers, payload);
 				expect(accepted).toEqual({ runId: expect.any(String), duplicate: false });
-				expect(await deliver(headers, payload)).toEqual({ ...accepted, duplicate: true });
+				expect(await deliver(triggerId, headers, payload)).toEqual({
+					...accepted,
+					duplicate: true,
+				});
 			}
+
+			const github = legacy.automaticGitHubWebhook;
+			const payload = { order: 42 };
+			const signature = createHmac("sha256", github.secret)
+				.update(JSON.stringify(payload))
+				.digest("hex");
+			await expect(
+				deliver(
+					github.trigger,
+					{
+						"idempotency-key": "order-42",
+						"x-github-delivery": "github-delivery-42",
+						"x-hub-signature-256": `sha256=${signature}`,
+					},
+					payload,
+				),
+			).resolves.toEqual({ runId: github.run, duplicate: true });
 		});
 
 		it("deletes direct messages, with what was in them, and queues their folders for deletion", async () => {

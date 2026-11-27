@@ -121,16 +121,25 @@ const AUTOMATIC_DELIVERY_ID_HEADERS = [
 ];
 
 /**
- * deliveryIdOf returns the ID a retry repeats, or null when the delivery has
- * none. Known sources use their own delivery IDs. For a generic webhook, an
- * undefined `deliveryIdHeader` enables automatic detection and null disables
- * deduplication.
+ * Automatic detection checks the headers and body in the same order for every
+ * webhook source, so a retry can find a run started before the upgrade.
  */
 export function deliveryIdOf(
 	auth: WebhookAuth,
 	deliveryIdHeader: string | null | undefined,
 	{ headers, payload }: Pick<Delivery, "headers" | "payload">,
 ): string | null {
+	if (deliveryIdHeader === undefined) {
+		for (const header of AUTOMATIC_DELIVERY_ID_HEADERS) {
+			if (auth.kind === "api_key" && header === auth.header.toLowerCase()) continue;
+			const value = headerValue(headers, header);
+			if (value) return value;
+		}
+		return (
+			bodyString(payload, "event_id") ??
+			(bodyString(payload, "object") === "event" ? bodyString(payload, "id") : null)
+		);
+	}
 	switch (auth.kind) {
 		case "github":
 			return headerValue(headers, "x-github-delivery");
@@ -144,19 +153,8 @@ export function deliveryIdOf(
 		case "api_key":
 		case "bearer":
 		case "basic":
-			break;
+			return deliveryIdHeader === null ? null : headerValue(headers, deliveryIdHeader);
 	}
-	if (deliveryIdHeader === null) return null;
-	if (deliveryIdHeader !== undefined) return headerValue(headers, deliveryIdHeader);
-	for (const header of AUTOMATIC_DELIVERY_ID_HEADERS) {
-		if (auth.kind === "api_key" && header === auth.header.toLowerCase()) continue;
-		const value = headerValue(headers, header);
-		if (value) return value;
-	}
-	return (
-		bodyString(payload, "event_id") ??
-		(bodyString(payload, "object") === "event" ? bodyString(payload, "id") : null)
-	);
 }
 
 /**
