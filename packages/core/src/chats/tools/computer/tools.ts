@@ -9,6 +9,7 @@ import { ApprovalNeeded } from "@sugabots/contracts/errors/proofs";
 import { MAX_SHARED_FILE_BYTES } from "@sugabots/contracts/operations/computers";
 import { type DomainError, UserText, userText } from "@sugabots/errors";
 import { Effect, ErrorReporter, Schema } from "effect";
+import type { ComputerProviderStore } from "../../../computers/computer-provider-store.ts";
 import { Computers } from "../../../computers/computers.ts";
 import type { ProjectComputers } from "../../../computers/project-computers.ts";
 import type { RunEffect } from "../../../database/database.ts";
@@ -93,22 +94,26 @@ export interface ComputerAtPlace extends TurnComputer {
  * the next call tries again.
  */
 export function openOncePerTurn(
-	providerId: string,
-	open: () => Promise<ProjectComputers.Opened>,
-): OpenComputer {
-	let opening: Promise<ProjectComputers.Opened> | undefined;
+	open: (provider: ComputerProviderStore.Configured) => Promise<ProjectComputers.Opened>,
+) {
+	let opening: Promise<StepOpened> | undefined;
 	let told = false;
-	return async () => {
-		opening ??= open().catch((cause: unknown) => {
-			opening = undefined;
-			throw cause;
-		});
+	return async (provider: ComputerProviderStore.Configured): Promise<StepOpened> => {
+		opening ??= open(provider)
+			.then((opened) => ({
+				...opened,
+				madeInStep: opened.arrival === "made",
+				providerId: provider.id,
+			}))
+			.catch((cause: unknown) => {
+				opening = undefined;
+				throw cause;
+			});
 		const opened = await opening;
-		const madeInStep = opened.arrival === "made";
 		// What happened to the computer is news only to the first call that sees it.
-		if (told) return { ...opened, arrival: "running", madeInStep, providerId };
+		if (told) return { ...opened, arrival: "running" };
 		told = true;
-		return { ...opened, madeInStep, providerId };
+		return opened;
 	};
 }
 

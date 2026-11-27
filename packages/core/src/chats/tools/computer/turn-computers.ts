@@ -7,7 +7,7 @@ import { ApprovalNeeded, ApprovalRefused } from "@sugabots/contracts/errors/proo
 import type { InputOf, OutputOf } from "@sugabots/contracts/operations";
 import { MAX_SHARED_FILE_MEGABYTES } from "@sugabots/contracts/operations/computers";
 import { UserText, userText } from "@sugabots/errors";
-import { Cache, Context, Effect, Layer, type Scope, Semaphore, Stream } from "effect";
+import { Cache, Context, Effect, Equal, Layer, type Scope, Semaphore, Stream } from "effect";
 import { contentType as mediaTypeForName } from "mime-types";
 import { BlobStore } from "../../../blob-store/blob-store.ts";
 import { reachOf } from "../../../computers/allowed-hosts.ts";
@@ -122,13 +122,17 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 /** A step's computer, as the operations find it. */
 interface StepComputer {
-	readonly providerId?: string;
 	/** The project the computer is, which the operation's proof must name. */
 	readonly projectId: string | null;
 	readonly place: Place;
 	readonly acceptsImages: boolean;
 	/** The computer, opened on first use; none when the workspace has no computer provider. */
-	readonly computer: TurnComputer | undefined;
+	readonly computer:
+		| {
+				readonly provider: ComputerProviderStore.Configured;
+				readonly bind: (provider: ComputerProviderStore.Configured) => TurnComputer;
+		  }
+		| undefined;
 	readonly browser: BrowserSession | undefined;
 	readonly attach: AttachToReply | undefined;
 	/** Lets one file at a time be shared. */
@@ -137,7 +141,7 @@ interface StepComputer {
 
 const checkedStep: unique symbol = Symbol("CheckedStep");
 
-export interface CheckedStep<P, C> extends StepComputer {
+export interface CheckedStep<P, C> extends Omit<StepComputer, "computer"> {
 	readonly [checkedStep]: true;
 	readonly canUse: CanUseChatComputer<P, C>;
 	readonly computer: TurnComputer;
@@ -182,14 +186,17 @@ export const make = Effect.gen(function* () {
 			if (!step.computer) return yield* new NoComputerProvider();
 			const currentProvider = yield* providers.enabled(canUse.workspace);
 			if (!currentProvider) return yield* new NoComputerProvider();
-			if (currentProvider.id !== step.providerId || currentProvider.id !== canUse.provider) {
+			if (
+				currentProvider.id !== canUse.provider ||
+				!sameProviderConfiguration(step.computer.provider, currentProvider)
+			) {
 				return yield* new ApprovalRefused();
 			}
 			const checked: CheckedStep<P, C> = {
 				...step,
 				[checkedStep]: true,
 				canUse,
-				computer: step.computer,
+				computer: step.computer.bind(currentProvider),
 			};
 			return checked;
 		});
@@ -247,20 +254,26 @@ export const make = Effect.gen(function* () {
 			// Opening the computer serves every call in the step, so it stops when
 			// the step ends rather than with the call that started it.
 			const stepEnded = yield* Effect.abortSignal;
-			const prepared = projectComputers
-				.open(project, provider, holder)
-				.pipe(
-					Effect.tap(({ computer }) => prepareFolders(computer, place, provider.access.provider)),
-				);
-			const opening = openOncePerTurn(provider.id, () => run(prepared, { signal: stepEnded }));
-			const computer: TurnComputer = {
+			const opening = openOncePerTurn((checkedProvider) =>
+				run(
+					projectComputers
+						.open(project, checkedProvider, holder)
+						.pipe(
+							Effect.tap(({ computer }) =>
+								prepareFolders(computer, place, checkedProvider.access.provider),
+							),
+						),
+					{ signal: stepEnded },
+				),
+			);
+			const bindComputer = (checkedProvider: ComputerProviderStore.Configured): TurnComputer => ({
 				run,
 				open: async () => {
-					const opened = await opening();
-					await run(projectComputers.checkSettings(project, provider.id, opened));
+					const opened = await opening(checkedProvider);
+					await run(projectComputers.checkSettings(project, checkedProvider.id, opened));
 					return opened;
 				},
-			};
+			});
 			const browser = browserSession(run, place, turn, provider.id, browserSessions);
 			yield* Effect.addFinalizer(() =>
 				Effect.tryPromise(() => browser.close()).pipe(
@@ -268,11 +281,10 @@ export const make = Effect.gen(function* () {
 				),
 			);
 			yield* register({
-				providerId: provider.id,
 				projectId,
 				place,
 				acceptsImages,
-				computer,
+				computer: { provider, bind: bindComputer },
 				browser,
 				attach,
 				sharing,
@@ -290,21 +302,23 @@ export const make = Effect.gen(function* () {
 					.filter((line) => line !== undefined)
 					.join("\n\n"),
 				atPlace: {
-					...computer,
+					run,
 					place,
 					open: async () => {
-						const usable = await run(
+						const checkedProvider = await run(
 							operation(
 								"forStep",
 								Effect.gen(function* () {
-									if (!(yield* canAskForComputer(principal))) return false;
+									if (!(yield* canAskForComputer(principal))) return undefined;
 									const current = yield* providers.enabled(workspaceId);
-									return current?.id === provider.id;
+									return current && sameProviderConfiguration(provider, current)
+										? current
+										: undefined;
 								}),
 							),
 						);
-						if (!usable) throw new ComputerUseEnded();
-						return computer.open();
+						if (!checkedProvider) throw new ComputerUseEnded();
+						return bindComputer(checkedProvider).open();
 					},
 				},
 				signsIn: at.capabilities.credentials !== "none",
@@ -464,6 +478,17 @@ export interface Turn {
 	 * shows a reply's files.
 	 */
 	readonly attach?: AttachToReply;
+}
+
+function sameProviderConfiguration(
+	offered: ComputerProviderStore.Configured,
+	current: ComputerProviderStore.Configured,
+): boolean {
+	return (
+		offered.id === current.id &&
+		offered.configurationUpdatedAt.getTime() === current.configurationUpdatedAt.getTime() &&
+		Equal.equals(offered.access, current.access)
+	);
 }
 
 /** Whether the turn's bot may use its chat's computer now, as `CanUseChatComputer` decides. */

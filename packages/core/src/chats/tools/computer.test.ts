@@ -251,6 +251,65 @@ describe.skipIf(!process.env.DATABASE_URL)("computer tool step lifetimes", () =>
 			}
 		},
 	);
+
+	it("refuses work from a step offered before the enabled provider was reconfigured", async () => {
+		const workspaceId = await seedWorkspace();
+		const memberId = await seedMember(workspaceId, "editor");
+		const bot = await seedBot(workspaceId, { usesComputer: true, createdById: memberId });
+		const chatId = await seedProjectChat(workspaceId, bot.defaultProject, memberId);
+		const principal = await principals(await authenticators()).botFor(memberId, bot.id, chatId);
+		const providers = await runOnPostgres(
+			Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer),
+		);
+		const settings = {
+			builtIn: "opensandbox",
+			serverUrl: "https://computers.example.com",
+			image: "sugabots-computer:dev",
+			networkMode: "allowed-hosts-only",
+		} as const;
+		const configured = await runOnPostgres(
+			providers.create(workspaceId, {
+				createdById: memberId,
+				provider: { settings, enabled: true, apiKey: "never-used" },
+			}),
+		);
+		const computers = await runOnPostgres(
+			Effect.provide(TurnComputers.Service, TurnComputers.layer).pipe(Effect.provide(noComputers)),
+		);
+		const scope = Effect.runSync(Scope.make());
+		try {
+			const { call, step } = await stepOnComputer(
+				computers,
+				principal,
+				{
+					workspaceId,
+					projectId: bot.defaultProject,
+					turnId: principal.turn,
+					chatId,
+					botId: bot.id,
+					color: "orange",
+					naturalBrowsing: false,
+					acceptsImages: false,
+				},
+				scope,
+			);
+			const opening = step.atPlace;
+			if (!opening) throw new Error("The step has no computer");
+
+			await runOnPostgres(
+				providers.update(workspaceId, configured.id, {
+					settings: { ...settings, image: "sugabots-computer:next" },
+				}),
+			);
+
+			await expect(
+				call("computers.runCommand", { command: "pwd", timeout_seconds: 30 }),
+			).rejects.toMatchObject({ _tag: "ApprovalRefused" });
+			await expect(opening.open()).rejects.toBeInstanceOf(ComputerUseEnded);
+		} finally {
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+		}
+	});
 });
 
 /**
