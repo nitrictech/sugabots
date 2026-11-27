@@ -75,8 +75,10 @@ export function MemberRows({
 }) {
 	const memberships = useMemberships(workspaceId);
 	const session = useSession();
+	// The member asked about, kept while the confirmation closes so its words stay put.
 	const [removing, setRemoving] = useState<ListedMember>();
-	const roleOf = (memberId: string) =>
+	const [asking, setAsking] = useState(false);
+	const workspaceRole = (memberId: string) =>
 		memberships.data?.find((membership) => membership.member.id === memberId)?.role;
 	const asked = removing && confirmation(removing);
 
@@ -86,7 +88,7 @@ export function MemberRows({
 		} catch {
 			return;
 		}
-		setRemoving(undefined);
+		setAsking(false);
 	}
 
 	let rows: ReactNode;
@@ -106,14 +108,17 @@ export function MemberRows({
 							{member.memberId === session.member?.id
 								? "You"
 								: // Said once the workspace roster has answered, not guessed before it.
-									memberships.data && workspaceRoleLabel(roleOf(member.memberId))}
+									memberships.data && workspaceRoleLabel(workspaceRole(member.memberId))}
 						</SettingsValue>
 						{mayRemove(member) && (
 							<IconButton
 								variant="destructive"
 								label={removeLabel(member)}
 								disabled={pending}
-								onClick={() => setRemoving(member)}
+								onClick={() => {
+									setRemoving(member);
+									setAsking(true);
+								}}
 							>
 								<Minus size={13} strokeWidth={2.6} />
 							</IconButton>
@@ -128,10 +133,8 @@ export function MemberRows({
 		<SettingsGroup label={label} description={description} action={action}>
 			{rows}
 			<DeleteDialog
-				open={removing !== undefined}
-				onOpenChange={(open) => {
-					if (!open) setRemoving(undefined);
-				}}
+				open={asking}
+				onOpenChange={setAsking}
 				title={asked?.title ?? ""}
 				description={asked?.description ?? ""}
 				confirmLabel={asked?.confirmLabel}
