@@ -80,13 +80,13 @@ export interface Interface {
 	 * Changes the bot. A Personal Assistant's member changes all but its
 	 * instructions, handle and visibility; a bot managing itself in its own chats, only its instructions and
 	 * description, which its interview writes. Changes to visibility and
-	 * computer use require `canChangeReach`, proved under its workspace's lock.
-	 * Made private, it leaves every public project, refused while it leads one.
+	 * computer use require `authority` to be a `CanChangeBotReach`, proved under
+	 * its workspace's lock. Made private, it leaves every public project,
+	 * refused while it leads one.
 	 */
 	readonly update: <P, B>(
-		canManage: CanManageBot<P, B>,
+		authority: CanManageBot<P, B> | CanChangeBotReach<P, B>,
 		changes: BotUpdate,
-		canChangeReach?: CanChangeBotReach<P, B>,
 	) => Effect.Effect<
 		Bot,
 		| ActionForbidden
@@ -215,16 +215,17 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		update: (canManage, changes, canChangeReach) =>
+		update: (authority, changes) =>
 			operation(
 				"update",
 				Effect.gen(function* () {
+					const canManage = authority.kind === "CanChangeBotReach" ? authority.manage : authority;
 					const { workspace, facts, actor } = canManage;
 					const changed = changedFields(changes);
 					if (changed.length === 0) return yield* new EmptyBotUpdate();
 					const changesReach =
 						changes.visibility !== undefined || changes.usesComputer !== undefined;
-					if (changesReach && canChangeReach === undefined) {
+					if (changesReach && authority.kind !== "CanChangeBotReach") {
 						return yield* Effect.die(new Error("Bot reach changes require the workspace lock"));
 					}
 					if (

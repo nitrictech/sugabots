@@ -33,7 +33,7 @@ export const update = defineOperation(botsContracts["bots.update"], (principal, 
 					const canManage = yield* proveCanManageBot(lock.principal, bot);
 					const canChangeReach = yield* proveCanChangeBotReach(lock, canManage);
 					return yield* bots
-						.update(canManage, input.changes, canChangeReach)
+						.update(canChangeReach, input.changes)
 						.pipe(
 							Effect.tap(() =>
 								input.changes.visibility === undefined
