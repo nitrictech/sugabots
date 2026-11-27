@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "@sugabots/contracts/operations/web";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -357,11 +357,14 @@ describe("resource proofs", () => {
 			expect(await uses(inProject, pubsOwn, "list_issues")).toBe("ok");
 			expect(await uses(run, pubsOwn, "list_issues")).toBe("ok");
 
-			// Sending its data somewhere else turns it off again.
+			// Sending its data somewhere else, which raises its address revision, turns it off again.
 			await onDatabase((db) =>
 				db
 					.update(connector)
-					.set({ url: "https://elsewhere.example.com/mcp" })
+					.set({
+						url: "https://elsewhere.example.com/mcp",
+						addressRevision: sql`${connector.addressRevision} + 1`,
+					})
 					.where(eq(connector.id, pubsOwn)),
 			);
 			expect(await uses(inProject, pubsOwn, "list_issues")).toBe("ResourceHidden");
