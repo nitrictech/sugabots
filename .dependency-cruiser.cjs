@@ -7,6 +7,13 @@
  * the contracts and the packages that draw. Core starts turns without knowing
  * the bot loop: it declares the services that start and signal turns, and the
  * server provides them from `@sugabots/bot-loop`.
+ *
+ * The check only sees imports. It misses two kinds of edge between packages,
+ * both allowed today, so check them by hand when changing these rules:
+ * - Vite's `import.meta.glob`, as the website reads `packages/docs`'s pages with
+ *   in `packages/website/src/docs/pages.ts`.
+ * - A `declare module` that adds to another package's types, as
+ *   `packages/server/src/auth/middleware.ts` does to the contracts' middleware.
  */
 
 /** Packages the web app, the website and other front ends may share with anything. */
