@@ -684,10 +684,10 @@ export const projectAutomationsServiceMistakes = named(
 			yield* automationsService.create(reach, member, settings);
 
 			// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameB], "automations.createWithRoutine">'] Creating an automation with a routine requires approval for that call.
-			yield* automationsService.createWithRoutine(canManage, member, settings, routine);
+			yield* automationsService.createWithRoutine(canManage, member, routine.timezone);
 
 			// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameB, NameC], "automations.updateInChat">'] Changing an automation from a chat requires approval for that call.
-			yield* automationsService.updateInChat(canManage, automation, target, member, {}, routine);
+			yield* automationsService.updateInChat(canManage, automation, target, member, routine.timezone);
 
 			yield* automationsService.create(canManage, member, settings);
 
@@ -902,11 +902,10 @@ export const chatServicesMistakes = named(
 					chat,
 				);
 				const canChange = yield* proveRealCanChangeChat(reach);
-				const newFile = { kind: "markdown", title: "Notes", content: "# Notes" } as const;
-				// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] Writing a file requires approval.
-				yield* filesService.create(canChange, newFile);
+				// @ts-expect-error TS2554 [Expected 2 arguments, but got 1.] Writing a file requires approval.
+				yield* filesService.create(canChange);
 				// @ts-expect-error TS2345 [Argument of type 'CanTakePart<NameA, NameC>' is not assignable to parameter of type 'CanChangeChat<NameA, NameC>'] Taking part does not authorize writing a file.
-				yield* filesService.create(canTakePart, approved, newFile);
+				yield* filesService.create(canTakePart, approved);
 				// @ts-expect-error TS2554 [Expected 2 arguments, but got 1.] Listing written files requires approval.
 				yield* filesService.listWritten(reach);
 				// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] Resolving a chat requires approval.

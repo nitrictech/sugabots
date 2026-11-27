@@ -20,7 +20,7 @@ export const create = defineOperation(
 	(principal, input, call) =>
 		Effect.gen(function* () {
 			const projects = yield* Projects.Service;
-			const { workspace: reference, leadBotId, ...details } = input;
+			const { workspace: reference, leadBotId } = input;
 			const workspaceId = yield* workspaceIdOf(reference);
 			return yield* underWorkspaceLock(principal, workspaceId, (lock) =>
 				named(leadBotId, call, input, (leadBot, call, approvedInput) =>
@@ -38,7 +38,7 @@ export const create = defineOperation(
 							lock.workspace,
 							leadBot,
 						);
-						return yield* projects.create(lock, canCreate, lead, details, approved);
+						return yield* projects.create(lock, canCreate, lead, approved);
 					}),
 				),
 			);

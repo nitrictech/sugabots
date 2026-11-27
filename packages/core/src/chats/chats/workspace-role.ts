@@ -22,10 +22,10 @@ export const lookUpWorkspaceRole = Effect.fn("ChatMembership.lookUpWorkspaceRole
 	X,
 >(
 	reach: ReachesChat<P, C>,
-	handle: string,
-	_approved: Approved<P, X, [C], "chats.workspaceRole">,
+	approved: Approved<P, X, [C], "chats.workspaceRole">,
 ): Effect.fn.Return<WorkspaceRoleResult, never, Database> {
 	const { chat, workspace } = reach;
+	const handle = approved.input.member;
 	const members = yield* query((db) =>
 		db
 			.select({ name: member.name, role: membership.role })

@@ -16,12 +16,14 @@ import {
 	FileEditTextUnmatched,
 	FileKindFixed,
 	FileStale,
+	InvalidFileWrite,
 } from "@sugabots/contracts/errors/files";
 import {
 	ActionForbidden,
 	ApprovalRefused,
 	ResourceHidden,
 } from "@sugabots/contracts/errors/proofs";
+import type { InputOf } from "@sugabots/contracts/operations";
 import { and, desc, eq, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Effect, Layer, Stream } from "effect";
@@ -113,21 +115,22 @@ export interface Interface {
 		reach: ReachesFile<P, F>,
 		approved: Approved<P, X, [F], "files.readWritten">,
 	) => Effect.Effect<WrittenFile, ResourceHidden>;
+	/** Writes the new file `approved.input` describes. */
 	readonly create: <P, C, X>(
 		canChange: CanChangeChat<P, C>,
 		approved: Approved<P, X, [C], "files.write">,
-		input: NewWrittenFile,
 	) => Effect.Effect<
 		FileWritten,
-		ActionForbidden | ApprovalRefused | FileContentTooLarge | ToolWriteRefusal
+		ActionForbidden | ApprovalRefused | FileContentTooLarge | InvalidFileWrite | ToolWriteRefusal
 	>;
+	/** Writes the file's next version, as `approved.input` gives it. */
 	readonly replace: <P, F, X>(
 		canChange: CanChangeFile<P, F>,
 		approved: Approved<P, X, [F], "files.write">,
-		input: ReplaceWrittenFile,
 	) => Effect.Effect<
 		FileWritten,
 		| ActionForbidden
+		| InvalidFileWrite
 		| ApprovalRefused
 		| ResourceHidden
 		| FileStale
@@ -256,10 +259,11 @@ export const make = Effect.gen(function* () {
 
 		readWritten: (reach, _approved) => operation("readWritten", atCurrentVersion(reach)),
 
-		create: (canChange, approved, input) =>
+		create: (canChange, approved) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
+					const input = yield* newWrittenFile(approved.input);
 					const writer = yield* fileWriter(approved, canChange.reach.project.id);
 					const chatId = canChange.reach.chat.value;
 					if (writer.principal.chat !== chatId)
@@ -276,10 +280,11 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		replace: ({ reach }, approved, input) =>
+		replace: ({ reach }, approved) =>
 			operation(
 				"replace",
 				Effect.gen(function* () {
+					const input = yield* writtenFileReplacement(approved.input);
 					const writer = yield* fileWriter(approved, reach.project.id);
 					const found = yield* writtenFileIn(reach);
 					const replay = yield* replayFileWrite(writer);
@@ -318,6 +323,27 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
 export const layer = layerNoDeps;
+
+/** The new file a `files.write` call without a file id describes, or what it lacks. */
+export const newWrittenFile = (
+	input: InputOf<"files.write">,
+): Effect.Effect<NewWrittenFile, InvalidFileWrite> =>
+	input.kind === undefined || input.title === undefined
+		? Effect.fail(new InvalidFileWrite({ missing: "kindAndTitle" }))
+		: Effect.succeed({ kind: input.kind, title: input.title, content: input.content });
+
+/** The next version a `files.write` call with a file id describes, or what it lacks. */
+export const writtenFileReplacement = (
+	input: InputOf<"files.write">,
+): Effect.Effect<ReplaceWrittenFile, InvalidFileWrite> =>
+	input.baseVersion === undefined
+		? Effect.fail(new InvalidFileWrite({ missing: "baseVersion" }))
+		: Effect.succeed({
+				baseVersion: input.baseVersion,
+				content: input.content,
+				...(input.title !== undefined && { title: input.title }),
+				...(input.kind !== undefined && { kind: input.kind }),
+			});
 
 interface NewWrittenFile {
 	readonly kind: WrittenFileKind;

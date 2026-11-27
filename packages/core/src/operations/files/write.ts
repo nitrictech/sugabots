@@ -1,8 +1,7 @@
-import { InvalidFileWrite } from "@sugabots/contracts/errors/files";
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { filesContracts } from "@sugabots/contracts/operations/files";
 import { Effect } from "effect";
-import { Files } from "../../files/files.ts";
+import { Files, newWrittenFile, writtenFileReplacement } from "../../files/files.ts";
 import { approvalRule, proveApproved } from "../../proofs/approved.ts";
 import { proveCanChangeFile } from "../../proofs/can-change-file.ts";
 import { proveCanChangeChat } from "../../proofs/project-permissions.ts";
@@ -17,11 +16,10 @@ export const write = defineOperation(filesContracts["files.write"], (principal, 
 			return yield* writingForbidden();
 		const files = yield* Files.Service;
 		const rule = approvalRule("files.write");
-		const { fileId, kind, title, baseVersion, content } = input;
+		const { fileId } = input;
 		if (!fileId) {
-			if (kind === undefined || title === undefined) {
-				return yield* new InvalidFileWrite({ missing: "kindAndTitle" });
-			}
+			// Refused before an approval is asked for a call that can't run.
+			yield* newWrittenFile(input);
 			return yield* named(
 				principal,
 				principal.chat,
@@ -31,11 +29,11 @@ export const write = defineOperation(filesContracts["files.write"], (principal, 
 					Effect.gen(function* () {
 						const canChange = yield* proveCanChangeChat(yield* proveReachesChat(principal, chat));
 						const approved = yield* proveApproved(principal, call, rule, approvedInput, chat);
-						return yield* files.create(canChange, approved, { kind, title, content });
+						return yield* files.create(canChange, approved);
 					}),
 			);
 		}
-		if (baseVersion === undefined) return yield* new InvalidFileWrite({ missing: "baseVersion" });
+		yield* writtenFileReplacement(input);
 		return yield* named(
 			principal,
 			principal.chat,
@@ -48,12 +46,7 @@ export const write = defineOperation(filesContracts["files.write"], (principal, 
 					const reach = yield* proveReachesWrittenFile(principal, file);
 					const canChange = yield* proveCanChangeFile(working, reach);
 					const approved = yield* proveApproved(principal, call, rule, approvedInput, file);
-					return yield* files.replace(canChange, approved, {
-						baseVersion,
-						content,
-						...(title !== undefined && { title }),
-						...(kind !== undefined && { kind }),
-					});
+					return yield* files.replace(canChange, approved);
 				}),
 		);
 	}),

@@ -23,7 +23,7 @@ export const workspaceRole = defineOperation(
 					approvedInput,
 					chat,
 				);
-				return yield* lookUpWorkspaceRole(reach, input.member, approved);
+				return yield* lookUpWorkspaceRole(reach, approved);
 			}),
 		);
 	},

@@ -98,11 +98,14 @@ export interface Interface {
 		| WebhookDeliveryIdHeaderRejected
 		| AutomationRepositoryNotConnected
 	>;
+	/**
+	 * Makes the automation `approved.input` describes, with its routine on the
+	 * project's time zone, `timeZone`, which the server reads, not the caller.
+	 */
 	readonly createWithRoutine: <P, J, X>(
 		canManage: CanManageProject<P, J>,
 		approved: Approved<P, X, [J], "automations.createWithRoutine">,
-		input: Pick<NewAutomation, "name" | "instructions">,
-		routine: RoutineInput,
+		timeZone: string,
 	) => Effect.Effect<Automation, AutomationNameTaken | InvalidRoutineSchedule | ToolWriteRefusal>;
 	/**
 	 * Changes an automation's own settings. Pausing it stops its routines;
@@ -115,13 +118,16 @@ export interface Interface {
 		member: IsMember<P>,
 		input: AutomationUpdate,
 	) => Effect.Effect<Defined, AutomationNotFound | AutomationNameTaken | InvalidRoutineSchedule>;
+	/**
+	 * Changes the automation as `approved.input` says, a new routine on the
+	 * project's time zone, `timeZone`, which the server reads, not the caller.
+	 */
 	readonly updateInChat: <P, J, A, X>(
 		canManage: CanManageProject<P, J>,
 		automation: Named<A, string>,
 		target: ReachesProjectAutomation<P, J, A>,
 		approved: Approved<P, X, [J, A], "automations.updateInChat">,
-		input: AutomationUpdate,
-		routine: RoutineInput | undefined,
+		timeZone: string,
 	) => Effect.Effect<
 		Automation,
 		| AutomationNotFound
@@ -284,8 +290,9 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		createWithRoutine: (canManage, approved, input, routine) =>
-			operation(
+		createWithRoutine: (canManage, approved, timeZone) => {
+			const { name, instructions, routineExpression } = approved.input;
+			return operation(
 				"createWithRoutine",
 				writes.createWithRoutine(
 					projectOf(canManage.reach),
@@ -293,16 +300,25 @@ export const make = Effect.gen(function* () {
 						createdById: canManage.member.actor.memberId,
 						createdByBotId: canManage.reach.as.kind === "asker" ? canManage.reach.as.bot : null,
 					},
-					input,
-					routine,
+					{ name, instructions },
+					cronRoutine(routineExpression, timeZone),
 					holdApprovedTurn(canManage, approved),
 				),
-			),
+			);
+		},
 
 		update: (_canManage, automation, target, _member, input) =>
 			operation("update", writes.update(scopeOf(target, automation.value), input, Effect.void)),
 
-		updateInChat: (canManage, automation, target, approved, input, routine) => {
+		updateInChat: (canManage, automation, target, approved, timeZone) => {
+			const { name, instructions, paused, routineExpression } = approved.input;
+			const input: AutomationUpdate = {
+				name,
+				instructions,
+				state: paused === undefined ? undefined : paused ? "paused" : "enabled",
+			};
+			const routine =
+				routineExpression === undefined ? undefined : cronRoutine(routineExpression, timeZone);
 			const scope = scopeOf(target, automation.value);
 			const fence = holdApprovedTurn(canManage, approved);
 			const update = routine
@@ -402,4 +418,9 @@ function holdApprovedTurn<P, J, X, Targets extends readonly unknown[]>(
 		project: canManage.reach.project.value,
 		permission: "automation.manage",
 	});
+}
+
+/** A routine on the cron `expression`, in the time zone `timezone`. */
+function cronRoutine(expression: string, timezone: string): RoutineInput {
+	return { kind: "routine", schedule: { repeat: "cron", expression }, timezone };
 }

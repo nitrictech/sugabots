@@ -15,7 +15,7 @@ export const searchHistory = defineOperation(
 		if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun") {
 			return new ResourceHidden({ resource: "chat" });
 		}
-		const { chat, ...search } = input;
+		const { chat } = input;
 		const targetChat = chat === "all" ? principal.chat : (chat ?? principal.chat);
 		return named(
 			principal,
@@ -30,10 +30,10 @@ export const searchHistory = defineOperation(
 					if (chat === "all") {
 						const reach = proveReachSet(yield* proveInWorkspace(principal, workspace));
 						const approval = yield* proveApproved(principal, call, rule, approvedInput, workspace);
-						return yield* searchMessages({ kind: "all", reach }, search, approval);
+						return yield* searchMessages({ kind: "all", reach }, approval);
 					}
 					const approval = yield* proveApproved(principal, call, rule, approvedInput, target);
-					return yield* searchMessages({ kind: "chat", reach: chatReach }, search, approval);
+					return yield* searchMessages({ kind: "chat", reach: chatReach }, approval);
 				}),
 		);
 	},

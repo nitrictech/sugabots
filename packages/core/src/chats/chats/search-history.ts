@@ -1,4 +1,4 @@
-import type { InputOf, OutputOf } from "@sugabots/contracts/operations";
+import type { OutputOf } from "@sugabots/contracts/operations";
 import { HISTORY_SEARCH_MAX_MATCHES } from "@sugabots/contracts/operations/chat-reads";
 import { and, asc, desc, eq, gte, ilike, lt, ne, or, type SQL, sql } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
@@ -24,7 +24,6 @@ const MATCH_CHARACTERS = 1_500;
 
 export const EMPTY_HISTORY_SEARCH = "Give words to look for, a time range, or both.";
 
-type HistorySearchInput = Omit<InputOf<"chats.searchHistory">, "chat">;
 type HistorySearchResult = OutputOf<"chats.searchHistory">;
 type HistoryMatch = Extract<HistorySearchResult, { messages: unknown }>["messages"][number];
 
@@ -34,9 +33,9 @@ type HistoryScope<P, Location> =
 
 export const searchHistory = Effect.fn("ChatHistory.searchHistory")(function* <P, Location, X>(
 	scope: HistoryScope<P, Location>,
-	{ query: words, after, before }: HistorySearchInput,
 	approved: Approved<P, X, [Location], "chats.searchHistory">,
 ): Effect.fn.Return<HistorySearchResult, never, Database> {
+	const { query: words, after, before } = approved.input;
 	if (!words && !after && !before) {
 		return { refused: EMPTY_HISTORY_SEARCH };
 	}

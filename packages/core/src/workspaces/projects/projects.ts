@@ -3,7 +3,6 @@ export * as Projects from "./projects.ts";
 import type {
 	Bot,
 	MemberParticipant,
-	NewProject,
 	Project,
 	ProjectMember,
 	ProjectUpdate,
@@ -72,11 +71,11 @@ export interface Interface {
 	 * project, at the address `details.slug`, or one derived from its name when
 	 * that is left out.
 	 */
+	/** Makes the project `approved.input` describes, in the workspace locked, led by `lead`. */
 	readonly create: <P, W, B, X>(
 		lock: HoldsWorkspaceLock<P, W>,
 		canCreate: CanCreateProjects<P, W>,
 		lead: ReachesBot<P, B>,
-		details: Omit<NewProject, "leadBotId">,
 		approved: Approved<P, X, [W, B], "projects.create">,
 	) => Effect.Effect<
 		Project,
@@ -198,12 +197,14 @@ export const make = Effect.gen(function* () {
 				projectsListedTo(canRead.inWorkspace.workspace.value, canRead.actor.memberId),
 			),
 
-		create: (lock, canCreate, lead, input, _approved) =>
+		create: (lock, canCreate, lead, approved) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
 					yield* Transaction;
 					yield* holdTurnUnderWorkspaceLock(lock);
+					// The project's workspace and lead are the proved ones, not the input's.
+					const { workspace: _workspace, leadBotId: _leadBotId, ...input } = approved.input;
 					const workspaceId = lock.workspace.value;
 					const slug = yield* newProjectSlug(input);
 					// Its creator, the workspace's owner and admins and its lead are in it from the start.

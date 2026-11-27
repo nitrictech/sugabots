@@ -1,7 +1,6 @@
 import type { Automation, AutomationTrigger } from "@sugabots/contracts";
 import { automationsContracts } from "@sugabots/contracts/operations/automations";
 import { Effect } from "effect";
-import type { RoutineInput } from "../../chats/automations/automation.ts";
 import { ProjectAutomations } from "../../chats/automations/project-automations.ts";
 import { approvalRule, proveApproved } from "../../proofs/approved.ts";
 import { automationProject } from "../../proofs/automation-in-turn.ts";
@@ -66,12 +65,10 @@ export const createWithRoutine = defineOperation(
 							approvedInput,
 							project,
 						);
-						const { name, instructions, routineExpression } = input;
 						const created = yield* automations.createWithRoutine(
 							canManage,
 							approved,
-							{ name, instructions },
-							cronRoutine(routineExpression, place.timeZone),
+							place.timeZone,
 						);
 						return { automation: showAutomation(created) };
 					}),
@@ -108,20 +105,12 @@ export const updateInChat = defineOperation(
 							project,
 							automation,
 						);
-						const { name, instructions, paused, routineExpression } = input;
 						const updated = yield* automations.updateInChat(
 							canManage,
 							automation,
 							target,
 							approved,
-							{
-								name,
-								instructions,
-								state: paused === undefined ? undefined : paused ? "paused" : "enabled",
-							},
-							routineExpression === undefined
-								? undefined
-								: cronRoutine(routineExpression, place.timeZone),
+							place.timeZone,
 						);
 						return { automation: showAutomation(updated) };
 					}),
@@ -148,10 +137,6 @@ const showAutomationAt = (place: {
 			settingsUrl: `${webAppUrl}${automationsPagePath(settingsPage, automation.id)}`,
 		});
 	});
-
-function cronRoutine(expression: string, timezone: string): RoutineInput {
-	return { kind: "routine", schedule: { repeat: "cron", expression }, timezone };
-}
 
 function triggerSummary(trigger: AutomationTrigger) {
 	switch (trigger.kind) {
