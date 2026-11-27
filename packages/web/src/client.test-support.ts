@@ -1,4 +1,6 @@
 import type { StreamEvent } from "@sugabots/contracts";
+import { Api } from "@sugabots/contracts/http";
+import { HttpApiClient } from "effect/unstable/httpapi";
 import { vi } from "vitest";
 
 /**
@@ -12,12 +14,13 @@ import { vi } from "vitest";
  *
  * The shape mirrors the SDK's generated client: one function per endpoint,
  * grouped as the API definition groups them, each answering with an
- * `Effect`. A case says what an endpoint answers with
- * `mockReturnValue(Effect.succeed(…))`, or `Effect.fail(new NotFound(…))`
- * for a refusal.
+ * `Effect`, and the endpoints' real URLs at the fake address. A case says
+ * what an endpoint answers with `mockReturnValue(Effect.succeed(…))`, or
+ * `Effect.fail(new NotFound(…))` for a refusal.
  */
 export const client = {
 	baseUrl: "https://api.test",
+	urls: HttpApiClient.urlBuilder(Api, { baseUrl: "https://api.test" }),
 	api: {
 		health: vi.fn(),
 		me: vi.fn(),

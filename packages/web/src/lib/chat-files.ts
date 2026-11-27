@@ -1,5 +1,6 @@
 import { type UploadedAttachment, uploadedAttachmentSchema } from "@sugabots/contracts";
-import { failureFromResponse } from "@sugabots/sdk";
+import { userText } from "@sugabots/errors";
+import { failureForStatus, failureFromResponse } from "@sugabots/sdk";
 import { Effect, Schema } from "effect";
 import { client } from "@/api.ts";
 
@@ -33,11 +34,25 @@ export function uploadChatFile({
 	signal: AbortSignal;
 }): Promise<UploadedAttachment> {
 	return new Promise((resolve, reject) => {
-		const query = new URLSearchParams({ name: file.name });
-		// Left out when the browser has no type for it, so the API takes one from the name.
-		if (file.type) query.set("type", file.type);
+		let url: string;
+		try {
+			url = client.urls.chatFiles.uploadFile({
+				params: { chatId },
+				// The type is left out when the browser has none, so the API takes one from the name.
+				query: file.type ? { name: file.name, type: file.type } : { name: file.name },
+			});
+		} catch {
+			// The URL is checked against the API's rules for a file's name and type as it is built.
+			reject(
+				failureForStatus(
+					400,
+					userText`This file's name is too long or has characters that can't be uploaded. Rename it and try again`,
+				),
+			);
+			return;
+		}
 		const request = new XMLHttpRequest();
-		request.open("POST", `${client.baseUrl}/chats/${encodeURIComponent(chatId)}/files?${query}`);
+		request.open("POST", url);
 		request.withCredentials = true;
 		request.responseType = "json";
 		request.upload.addEventListener("progress", (event) => {
@@ -67,7 +82,7 @@ export function uploadChatFile({
 
 /** Where a file attached to a message in the chat is served, shown in place or downloaded. */
 export function chatFileUrl(chatId: string, fileId: string): string {
-	return `${client.baseUrl}/chats/${encodeURIComponent(chatId)}/files/${encodeURIComponent(fileId)}`;
+	return client.urls.chatFiles.file({ params: { chatId, fileId } });
 }
 
 /**

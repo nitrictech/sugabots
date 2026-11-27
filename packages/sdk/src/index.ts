@@ -28,6 +28,9 @@ export type { EventStream, EventsApi } from "./events.ts";
 
 export type Api = HttpApiClient.ForApi<typeof ApiDefinition>;
 
+/** Each endpoint's full URL, built from its params and query, for requests made without `api`. */
+export type ApiUrls = HttpApiClient.UrlBuilder<typeof ApiDefinition>;
+
 interface ClientOptions {
 	/** Where the API is, path included, e.g. `https://example.com/api`. */
 	baseUrl: string;
@@ -39,6 +42,11 @@ export interface Client {
 	readonly baseUrl: string;
 	/** The routes, typed from the API. */
 	readonly api: Api;
+	/**
+	 * The routes' URLs, typed from the API, for what the browser fetches itself,
+	 * such as a file it shows or downloads, or an upload it reports progress on.
+	 */
+	readonly urls: ApiUrls;
 	/** Signing up, in and out. Workspaces and invitations are routes in `api`. */
 	readonly auth: AuthApi;
 	/** Live updates: one stream per open chat, one per workspace. */
@@ -51,6 +59,7 @@ export function createClient({ baseUrl, fetch }: ClientOptions): Client {
 	return {
 		baseUrl: root,
 		api,
+		urls: HttpApiClient.urlBuilder(ApiDefinition, { baseUrl: root }),
 		auth: createAuthApi({ baseUrl: root, fetch, api }),
 		events: createEventsApi({ baseUrl: root, fetch }),
 	};

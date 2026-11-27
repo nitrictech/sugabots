@@ -1,7 +1,9 @@
 import type RFB from "@novnc/novnc";
 import type { Bot } from "@sugabots/contracts";
+import { DesktopViewerApi } from "@sugabots/contracts/http";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
+import { HttpApiClient } from "effect/unstable/httpapi";
 import { Keyboard, Monitor } from "lucide-react";
 import { type FormEvent, type Ref, type RefObject, useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
@@ -594,8 +596,10 @@ const STANDING_TEXT: Record<Exclude<Standing, "connected">, string> = {
 	idle: `Disconnected after ${IDLE_TIMEOUT_MINUTES} minutes unused, so the computer can pause.`,
 };
 
+const desktopViewerUrls = HttpApiClient.urlBuilder(DesktopViewerApi, { baseUrl: apiBaseUrl });
+
 function desktopUrl(chatId: string, botId: string) {
-	const url = new URL(`${apiBaseUrl}/chats/${chatId}/bots/${botId}/desktop`);
+	const url = new URL(desktopViewerUrls.desktopViewer.open({ params: { chatId, botId } }));
 	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
 	return url.href;
 }

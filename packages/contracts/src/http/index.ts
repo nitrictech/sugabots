@@ -4,6 +4,7 @@
 
 export { API_BASE_PATH, Api } from "./api.ts";
 export * from "./errors.ts";
+export { DesktopViewerApi, desktopViewerEndpoint } from "./groups/desktop-viewer.ts";
 export * from "./middleware.ts";
 export { type OperationGroup, operationGroups } from "./operation-groups.ts";
 export * from "./served.ts";

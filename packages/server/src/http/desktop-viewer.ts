@@ -1,4 +1,4 @@
-import { API_BASE_PATH } from "@sugabots/contracts/http";
+import { API_BASE_PATH, desktopViewerEndpoint } from "@sugabots/contracts/http";
 import { computersContracts } from "@sugabots/contracts/operations/computers";
 import { SessionAuthentication } from "@sugabots/core/authentication/session";
 import {
@@ -46,7 +46,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 
 		yield* router.add(
 			"GET",
-			`${API_BASE_PATH}/chats/:chatId/bots/:botId/desktop`,
+			`${API_BASE_PATH}${desktopViewerEndpoint.path}`,
 			Effect.gen(function* () {
 				const request = yield* HttpServerRequest.HttpServerRequest;
 				// Any page the browser visits can open a WebSocket here with the

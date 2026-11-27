@@ -11,7 +11,7 @@ import {
 } from "@sugabots/contracts";
 import { Eye, EyeOff, Webhook } from "lucide-react";
 import { type ChangeEvent, type KeyboardEvent, type ReactNode, useId, useState } from "react";
-import { apiBaseUrl } from "@/lib/api-url.ts";
+import { client } from "@/api.ts";
 import {
 	WEBHOOK_ALGORITHM_OPTIONS,
 	WEBHOOK_AUTH_OPTIONS,
@@ -259,7 +259,7 @@ export function WebhookGroups({
 }
 
 function webhookAddress(triggerId: string): string {
-	return `${apiBaseUrl}/webhooks/triggers/${triggerId}`;
+	return client.urls.webhooks.trigger({ params: { triggerId } });
 }
 
 /**
